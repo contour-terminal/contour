@@ -32,13 +32,6 @@ namespace
     constexpr auto ShowProperties =
         std::array { std::string_view { "LoadState" }, std::string_view { "ActiveState" } };
 
-    [[nodiscard]] std::string loadStateOf(std::string_view showOutput)
-    {
-        auto const properties = parseSystemctlShow(showOutput);
-        auto const found = properties.find("LoadState");
-        return found != properties.end() ? found->second : std::string {};
-    }
-
     [[nodiscard]] std::string trimTrailingNewline(std::string_view text)
     {
         while (text.ends_with('\n') || text.ends_with('\r'))
@@ -163,19 +156,18 @@ std::expected<void, ServiceError> SystemdUserBackend::uninstall()
         return std::unexpected(ServiceError { .code = ServiceErrorCode::Backend,
                                               .systemCode = shown.error().value(),
                                               .context = "systemctl not found" });
-    auto const loaded = shown->exitCode == 0 && loadStateOf(shown->standardOutput) != "not-found";
-    if (!fileExists && !loaded)
+    // Only the user's own unit file is a registration: a vendor unit systemd has loaded is not ours to
+    // disable, and removing nothing of ours is "not installed".
+    if (!fileExists)
         return std::unexpected(ServiceError { .code = ServiceErrorCode::NotInstalled });
 
     // Whether the unit was enabled or running is of no interest to a removal: the file goes either way.
     std::ignore = systemctl({ "disable", "--now", _config.unitName });
-    if (fileExists)
-        if (auto const removed = _fileSystem.remove(_config.unitPath); !removed)
-            return std::unexpected(ServiceError {
-                .code = ServiceErrorCode::Backend,
-                .systemCode = 0,
-                .context =
-                    std::format("removing {}: {}", core::pathToUtf8(_config.unitPath), removed.error()) });
+    if (auto const removed = _fileSystem.remove(_config.unitPath); !removed)
+        return std::unexpected(ServiceError {
+            .code = ServiceErrorCode::Backend,
+            .systemCode = 0,
+            .context = std::format("removing {}: {}", core::pathToUtf8(_config.unitPath), removed.error()) });
     return systemctl({ "daemon-reload" }).transform([](auto const&) {});
 }
 
@@ -225,15 +217,18 @@ std::expected<ServiceStatus, ServiceError> SystemdUserBackend::status() const
         };
 
         auto status = ServiceStatus { .mode = ServiceStartMode::Logon };
-        if (value("LoadState") == "not-found")
+        // A vendor unit systemd has loaded does not make this a user registration: without the user's own
+        // unit file the service is not installed, whatever systemd says about it.
+        auto const userUnit = _fileSystem.readFile(_config.unitPath);
+        if (!userUnit || value("LoadState") == "not-found")
             status.state = ServiceRunState::NotInstalled;
         else if (value("ActiveState") == "active")
             status.state = ServiceRunState::Running;
         else
             status.state = ServiceRunState::Stopped;
 
-        if (auto const unit = _fileSystem.readFile(_config.unitPath))
-            for (auto const line: std::views::split(*unit, '\n'))
+        if (userUnit)
+            for (auto const line: std::views::split(*userUnit, '\n'))
                 if (auto const text = std::string_view { line.begin(), line.end() };
                     text.starts_with(ExecStartKey))
                     status.commandLine = text.substr(ExecStartKey.size());

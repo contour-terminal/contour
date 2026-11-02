@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/ServiceControl_systemd.hpp>
 #include <vthost/testing/FakeCommandRunner.hpp>
 
@@ -176,8 +177,30 @@ TEST_CASE("status maps systemctl show onto run states", "[vthost][service][syste
 
     SECTION("a failed unit is stopped")
     {
+        REQUIRE(fixture.files.writeFile(UnitPath, vthost::renderSystemdUnit(Fixture::request())));
         answer("LoadState=loaded\nActiveState=failed\n");
         CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::Stopped);
+    }
+
+    SECTION("a loaded vendor unit without the user's unit file is not installed")
+    {
+        answer("LoadState=loaded\nActiveState=inactive\n");
+        CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::NotInstalled);
+    }
+
+    SECTION("a running vendor unit without the user's unit file is still not installed")
+    {
+        answer("LoadState=loaded\nActiveState=active\n");
+        CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::NotInstalled);
+    }
+
+    SECTION("with the user's unit file, ActiveState decides between stopped and running")
+    {
+        REQUIRE(fixture.files.writeFile(UnitPath, vthost::renderSystemdUnit(Fixture::request())));
+        answer("LoadState=loaded\nActiveState=inactive\n");
+        CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::Stopped);
+        answer("LoadState=loaded\nActiveState=active\n");
+        CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::Running);
     }
 
     SECTION("a non-zero exit is a Backend error naming systemctl show")
@@ -248,4 +271,73 @@ TEST_CASE("uninstall with a missing systemctl reports that, not NotInstalled", "
     REQUIRE_FALSE(result);
     CHECK(result.error().code == vthost::ServiceErrorCode::Backend);
     CHECK(result.error().toString().contains("systemctl"));
+}
+
+TEST_CASE("systemd status: vendor unit loaded, no user unit file -> NotInstalled",
+          "[vthost][service][systemd]")
+{
+    auto fixture = Fixture {};
+    fixture.commands.answerAll(
+        { .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=inactive\n" });
+    auto const status = fixture.backend.status();
+    REQUIRE(status);
+    REQUIRE(status->state == vthost::ServiceRunState::NotInstalled);
+}
+
+TEST_CASE("systemd status: user unit file present -> Stopped/Running per ActiveState",
+          "[vthost][service][systemd]")
+{
+    auto fixture = Fixture {};
+    REQUIRE(fixture.files.writeFile(UnitPath, vthost::renderSystemdUnit(Fixture::request())));
+    auto const [activeState, expected] = GENERATE(std::pair { "inactive"s, vthost::ServiceRunState::Stopped },
+                                                  std::pair { "failed"s, vthost::ServiceRunState::Stopped },
+                                                  std::pair { "active"s, vthost::ServiceRunState::Running });
+    fixture.commands.answerAll(
+        { .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=" + activeState + "\n" });
+    auto const status = fixture.backend.status();
+    REQUIRE(status);
+    CHECK(status->state == expected);
+}
+
+TEST_CASE("systemd uninstall on a vendor-only machine disables nothing and is NotInstalled",
+          "[vthost][service][systemd]")
+{
+    auto fixture = Fixture {};
+    fixture.commands.answerAll({ .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=active\n" });
+    auto const result = fixture.backend.uninstall();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == vthost::ServiceErrorCode::NotInstalled);
+    CHECK_FALSE(std::ranges::any_of(
+        fixture.commands.calls, [](auto const& argv) { return std::ranges::contains(argv, "disable"s); }));
+}
+
+TEST_CASE("systemd status after install then uninstall is NotInstalled", "[vthost][service][systemd]")
+{
+    auto fixture = Fixture {};
+    fixture.commands.answerAll(
+        { .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=inactive\n" });
+    REQUIRE(fixture.backend.install(Fixture::request()));
+    REQUIRE(fixture.backend.status().value().state == vthost::ServiceRunState::Stopped);
+    REQUIRE(fixture.backend.uninstall());
+    // A vendor unit of the same name stays loaded; it is not the user's registration.
+    CHECK(fixture.backend.status().value().state == vthost::ServiceRunState::NotInstalled);
+}
+
+TEST_CASE("a vendor-only machine has no registration, so the client spawns the daemon itself",
+          "[vthost][service][systemd][starter]")
+{
+    auto fixture = Fixture {};
+    fixture.commands.answerAll(
+        { .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=inactive\n" });
+    auto const factory = vthost::ServiceBackendFactory { [&](vthost::ServiceStartMode, std::string_view name)
+                                                             -> std::unique_ptr<vthost::ServiceBackend> {
+        return std::make_unique<vthost::SystemdUserBackend>(
+            vthost::SystemdUnitConfig { .unitName = std::string { name } + ".service", .unitPath = UnitPath },
+            vthost::ServiceBackendServices { fixture.files, fixture.commands, fixture.environment });
+    } };
+    // No registration means chooseDaemonStarter(std::nullopt, ...) hands out the on-demand spawner and the
+    // vendor unit is never `start`ed.
+    CHECK_FALSE(vthost::findRegisteredService("default", factory).has_value());
+    CHECK_FALSE(std::ranges::any_of(fixture.commands.calls,
+                                    [](auto const& argv) { return std::ranges::contains(argv, "start"s); }));
 }
