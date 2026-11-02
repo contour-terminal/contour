@@ -936,6 +936,7 @@ if(CONTOUR_FRONTEND_GUI)
             input/NativeKeyEvent_test.cpp
             input/KeyboardPlatform_test.cpp
             input/KeyRouter_test.cpp
+            input/KeyPipeline_bench_test.cpp
             input/MacKeyboardPlatform_test.cpp
             input/Win32KeyboardPlatform_test.cpp
             input/XkbLayout_test.cpp

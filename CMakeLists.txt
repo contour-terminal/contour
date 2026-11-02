@@ -281,6 +281,12 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
         contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
 
+        # No platform test below the keyboard normalizer: the router, the default-binding table and the
+        # session's key path are platform-neutral, so a platform macro or BuildKeyboardPlatformKind there
+        # fails this gate. The self-test keeps the scanner itself honest.
+        contour_add_lint_gate(check_input_platform_neutral check-input-platform-neutral.py)
+        contour_add_lint_gate(check_input_platform_neutral_selftest check-input-platform-neutral.py --self-test)
+
         # The chrome QML takes every colour from the palette or from chromeStyle. This gate fails on a hex
         # literal or an all-numeric Qt.rgba( in src/contour/qml and src/contour/styles, so a hardcoded
         # colour cannot return; the self-test keeps the scanner itself honest.

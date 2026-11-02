@@ -84,11 +84,4 @@ struct DefaultBindingRow
     bool (*enabled)(Config const&) noexcept = alwaysEnabled; ///< Whether the row takes part in matching.
 };
 
-/// The modifiers a click follows a hyperlink with in the Native2026 defaults of @p kind: read from the
-/// table's own FollowHyperlink row, so there is one statement of it. Command (Super) on macOS, where Qt's
-/// Control/Meta swap is off, else Control. The Classic edition's is Control everywhere.
-/// @param kind The keyboard platform.
-/// @return The modifiers; none when the table has no such row.
-[[nodiscard]] vtbackend::Modifiers followHyperlinkModifier(KeyboardPlatformKind kind);
-
 } // namespace contour::config

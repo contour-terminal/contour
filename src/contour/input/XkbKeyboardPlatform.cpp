@@ -21,7 +21,7 @@ namespace
                 return detail::inputMethodCommitOf(event, xcbLockKeysOf(event.nativeModifiers));
 
             auto const modifiers = vtbackend::KeyboardModifiers {
-                chordOf(Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers))),
+                chordOf(qtModifiersOf(event.qtModifiers)),
                 xcbLockKeysOf(event.nativeModifiers),
             };
             return detail::translateEvent(event, modifiers, _layout, xcbGroupOf(event.nativeModifiers));

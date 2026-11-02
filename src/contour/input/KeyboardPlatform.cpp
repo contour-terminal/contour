@@ -120,7 +120,7 @@ namespace
     {
         using vtbackend::Key;
 
-        auto const qtModifiers = Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers));
+        auto const qtModifiers = qtModifiersOf(event.qtModifiers);
         if (!qtModifiers.testFlag(Qt::KeypadModifier))
             return std::nullopt;
 

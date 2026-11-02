@@ -46,6 +46,38 @@ lets a new binding still reach you, while anything you bind explicitly keeps win
     so a terminal application that wants it (via the Kitty keyboard protocol) will not receive it.
     Bind it in your own `input_mapping` to give it back to the application.
 
+## macOS defaults
+
+On macOS the application's chords are Command chords, as in any Mac application, and the default
+bindings follow that:
+
+* The Ctrl+Shift defaults answer to `⌘` instead (`⌘C`, `⌘V`, `⌘T`, `⌘W`, `⌘N`, `⌘K`, `⌘,`, `⇧⌘P`, …), and
+  `Ctrl+Shift+letter` reaches the program in the terminal. A `⌘` chord nothing is bound to is consumed rather
+  than typed as its letter.
+* Font size is on `⌘0`, `⌘-` and `⌘+` only; `Ctrl+0` reaches the program.
+* `⌘X` and `⌘S` are deliberately unbound (a terminal cannot cut, and there is nothing to save), so
+  `ClosePane` and `SpeakSelection` have no macOS default; bind them if you want them.
+* The defaults that hung on `Alt` plus a character are not installed on macOS, because Option composes
+  characters there (see below). Tabs stay on `⌘1` to `⌘9`.
+* `⌥←` / `⌥→` move by word (`ESC b` / `ESC f`) outside the alternate screen, and `⌘←` / `⌘→` / `⌘⌫` edit the
+  line, so these shell conventions work out of the box. Inside the alternate screen `⌥←` reaches the program as the Alt+Left it is (`CSI 1;3D`).
+
+### Option as Alt
+
+Option has two jobs on a Mac: composing characters (`⌥E` then `E` gives é) and acting as Alt. The profile
+setting `option_as_alt` chooses which Option keys are Alt: `off`, `left`, `right` or `both` (`true` and
+`false` are still read as `both` and `off`). One rule applies everywhere:
+
+* An Option key that `option_as_alt` names is Alt, for every key: `⌥B` sends `ESC b`, and an `Alt+B`
+  binding fires.
+* An Option key it does not name composes on any key that has a composed character (`⌥E`, `⌥1` gives ¡) and
+  is Alt only on keys that type nothing (arrows, Return, Backspace, the function keys), so `⌥←` and
+  `Option+Enter` keep working with `option_as_alt: off`.
+
+Because of the second half, a binding of `Alt` plus a character cannot fire on an Option key that composes.
+Contour says so when it loads such a binding with `option_as_alt` set to `off` or to one side; bind the
+chord to `Primary` or `Control` instead, or name that side in `option_as_alt`.
+
 ## Writing bindings
 
 Each element in the `input_mapping` represents one key binding, whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as the `key` or `mouse` - in order to activate the corresponding action. 
@@ -78,6 +110,13 @@ same modifier):
     Windows/Command key `Meta` since before a separate `Meta` modifier existed. There is currently
     no configuration spelling for the distinct `Meta` modifier that the extended CSI u keyboard
     protocol reports.
+
+* `Primary` — the chord an application's own commands hang on: Command (`Super`) on macOS,
+  `Control` + `Shift` everywhere else. One row `mods: [Primary], key: C, action: CopySelection` is
+  therefore `Ctrl+Shift+C` on Linux and Windows and `⌘C` on macOS, and Contour's built-in defaults are
+  written that way. `Primary` can be combined with further modifiers (`[Primary, Shift]`), and the
+  generated `contour.yml` spells it `Primary` wherever a default row uses it, so one file works on every
+  machine you share it between.
 
 An entry naming a modifier that is not in this list is rejected as a whole — the binding is dropped
 rather than bound with a partial chord — and the reason is reported on startup.

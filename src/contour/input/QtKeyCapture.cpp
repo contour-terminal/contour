@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/input/KeyMapping.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/QtKeyCapture.hpp>
 
@@ -54,7 +55,7 @@ QKeyEvent toQKeyEvent(NativeKeyEvent const& event)
         event.type == vtbackend::KeyboardEventType::Release ? QEvent::KeyRelease : QEvent::KeyPress;
     return { qtType,
              event.qtKey,
-             Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers)),
+             qtModifiersOf(event.qtModifiers),
              event.nativeScanCode,
              event.nativeVirtualKey,
              event.nativeModifiers,

@@ -31,7 +31,7 @@ namespace
             if (event.origin == KeyEventOrigin::InputMethodCommit)
                 return detail::inputMethodCommitOf(event, win32LockKeysOf(event.nativeModifiers));
 
-            auto chord = chordOf(Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers)));
+            auto chord = chordOf(qtModifiersOf(event.qtModifiers));
             if (ctrlAltRoleOf(event.qtModifiers, event.text) == CtrlAltRole::AltGr)
                 chord = chord.without(AltGrEquivalent);
 

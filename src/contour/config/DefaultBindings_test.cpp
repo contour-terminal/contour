@@ -224,30 +224,33 @@ TEST_CASE("no macOS default relies on Alt for a character key", "[config][defaul
     }
 }
 
-TEST_CASE("the Native2026 follow-hyperlink row is the platform's followHyperlinkModifier",
+TEST_CASE("the Native2026 follow-hyperlink row follows with Command on macOS, else Control",
           "[config][defaults]")
 {
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    auto const followRow = [](auto const& mappings) {
+        return std::ranges::find_if(mappings.mouseMappings, [](auto const& have) {
+            return !have.binding.empty()
+                   && std::holds_alternative<contour::actions::FollowHyperlink>(have.binding.front());
+        });
+    };
     for (auto const kind:
          { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac })
     {
         auto const mappings = makeDefaultInputMappings(DefaultsEdition::Native2026, kind);
-        auto const row = std::ranges::find_if(mappings.mouseMappings, [](auto const& have) {
-            return !have.binding.empty()
-                   && std::holds_alternative<contour::actions::FollowHyperlink>(have.binding.front());
-        });
+        auto const row = followRow(mappings);
         REQUIRE(row != mappings.mouseMappings.end());
-        CHECK(row->modifiers == followHyperlinkModifier(kind));
+        CHECK(row->modifiers
+              == Modifiers { kind == KeyboardPlatformKind::Mac ? Modifier::Super : Modifier::Control });
     }
     // The Classic edition follows with Control everywhere.
     for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Mac })
     {
         auto const mappings = makeDefaultInputMappings(DefaultsEdition::Classic, kind);
-        auto const row = std::ranges::find_if(mappings.mouseMappings, [](auto const& have) {
-            return !have.binding.empty()
-                   && std::holds_alternative<contour::actions::FollowHyperlink>(have.binding.front());
-        });
+        auto const row = followRow(mappings);
         REQUIRE(row != mappings.mouseMappings.end());
-        CHECK(row->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Control });
+        CHECK(row->modifiers == Modifiers { Modifier::Control });
     }
 }
 
