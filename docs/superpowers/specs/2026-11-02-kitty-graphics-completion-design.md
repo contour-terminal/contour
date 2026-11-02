@@ -13,15 +13,48 @@ feature probing.
 
 ## Scope
 
-One branch, one pull request, one commit per feature. The PR closes #2126 and #2108.
+Four pull requests, stacked in this order, one commit per feature inside each. (Decided with the
+maintainer after the second review: one PR was not realistic for this much surface. The first
+version of this document said one PR.)
 
-1. **Self-running playback** (#2126): `a=a` with `s=2` / `s=3`.
-2. **Compression**: `o=z` (zlib) for transmissions and for frames.
-3. **Local media**: `t=f` (file), `t=t` (temp file), `t=s` (POSIX shared memory).
-4. **Remaining delete targets**: `d=n p c q r x y z` and their upper-case forms.
-5. **Frame composition**: `a=c`, with the blend modes `X=` selects.
-6. **Unicode placeholders**: `U=1`, the U+10EEEE placeholder cells.
-7. **Relative placements**: `P=`, `Q=`, `H=`, `V=`.
+- **PR A** — playback, `o=z` compression, `a=c` composition, daemon ticking.
+  Closes #2126 and #2108.
+- **PR B** — placement table, fragment model, image numbers (`I=`), remaining delete targets.
+- **PR C** — local media (`t=f`/`t=t`/`t=s`) and the consent policy.
+- **PR D** — Unicode placeholders and relative placements.
+
+The seven features, with their PR:
+
+1. **Self-running playback** (#2126, A): `a=a` with `s=2` / `s=3`.
+2. **Compression** (A): `o=z` (zlib) for transmissions and for frames.
+3. **Local media** (C): `t=f` (file), `t=t` (temp file), `t=s` (POSIX shared memory).
+4. **Remaining delete targets** (B): `d=n p c q r x y z` and their upper-case forms.
+5. **Frame composition** (A): `a=c`, with `C=1` selecting overwrite instead of alpha blend.
+6. **Unicode placeholders** (D): `U=1`, the U+10EEEE placeholder cells.
+7. **Relative placements** (D): `P=`, `Q=`, `H=`, `V=`.
+
+### Open decisions (not yet made by the maintainer)
+
+Each blocks the PR named. Until decided, the builder must not pick a side.
+
+- **Blocks A — #2108 acceptance.** The "notcurses must show the frame-delta path" criterion is not
+  attainable here: notcurses picks its animated path by detecting kitty's version, so re-running the
+  demo gives the same byte count. Recommended: replace it with a byte-counting test in
+  `vtbackend_test` that drives `a=f` deltas, plus an upstream notcurses request. Closing #2108 on
+  that basis needs the maintainer's yes.
+- **Blocks A — daemon playback cost.** Every advanced frame is a full image on the wire (~25 MB/s
+  per client for a 1 MB GIF at 40 ms). Recommended: throttle on the daemon path. Alternative: send
+  the first frame only and defer client-side animation.
+- **Blocks B — fragment model.** One image fragment per cell means a relative child overlapping its
+  parent destroys the parent's cells, and `d=z`/`d=q` can only remove what is on top. Recommended:
+  lift the limit first (per-cell vector ordered by z; wire carries N). Alternative: keep it and
+  restrict relative placements to non-overlapping children.
+- **Blocks C — file access seam.** `core::platform::FileSystem` lives in `vendor/core-cpp` and cannot
+  be edited here, and lacks descriptor access, temp-dir lookup and `shm_open`. Recommended: a small
+  vtbackend-local media-source seam (native implementation plus an in-memory fake).
+- **Blocks C — parking rules.** Stale resolution (page scrolled, screen switched, reset while
+  parked): recommended answer `EPERM` and place nothing. `a=q,t=f`: recommended to answer from the
+  policy without a dialog. Late replies: recommended an auto-deny deadline on the ask.
 
 ### Non-goals
 
@@ -61,7 +94,13 @@ One branch, one pull request, one commit per feature. The PR closes #2126 and #2
   `v=`: 0 unspecified, 1 forever, n means n-1 loops. `z<0` is a gapless frame and is skipped.
   `a=a,c=N` (application-selected frame) keeps working while playing or stopped.
 - **Pausing** (builder's call, per the issue's "probably"): an animation with no placement on the
-  page, or a terminal that is not visible, holds no deadline.
+  page holds no deadline. "Terminal not visible" is defined as "no `tick()` arrives": `Terminal` has
+  no visibility flag, and the display stops calling `tick()` when it does not paint, so this pauses
+  for free. Only the active screen's animations hold a deadline (`_kittyImages` is per `Screen`).
+  `tick()` is `noexcept` today but advancing allocates, so the advance either catches `bad_alloc`
+  or `tick()` drops `noexcept`; a tick that advances must also fire `screenUpdated()`.
+  A virtual (`U=1`) placement has no fragments for `showKittyFrame()` to find, so PR D resolves the
+  image's current frame at render-buffer build time instead.
 - **Where it lives (builder's call, from review):** the deadline is checked in `Terminal::tick()`
   under the terminal's own state lock, as the glide animation already is, and published through
   `nextRender()`, so the display wakes at it. Time comes from `TerminalClocks::steady` (which
@@ -106,7 +145,8 @@ Three layers, decided with the maintainer:
    real filesystem.
 
 Config follows the existing config-enum pattern (`PermissionsConfig`); `vtbackend` gets its own
-Qt-free policy enum, because `contour::session::Permission` is a Qt meta-enum. `vtbackend` itself
+Qt-free policy enum, because `vtbackend` must not depend on the config layer above it (the config
+enum is `config::Permission`). `vtbackend` itself
 never prompts: it asks the injected policy, and the GUI layer implements `Ask`.
 
 **Ask is asynchronous, the protocol is not (decided with the maintainer: park the command).** The
@@ -131,8 +171,11 @@ rest of `/dev`, `/proc`, `/sys` are refused. File access extends the existing
 
 ### 4. Remaining delete targets
 
-Add `n` (by image number), `p`/`P` (placements at the cursor), `c`/`C` (cursor cell), `q`/`Q`
-(cell + z-index), `r`/`R` (id range), `x`/`X` (column), `y`/`Y` (row), `z`/`Z` (z-index). Upper-case
+Add, per the spec: `n`/`N` (by image number, from `I=`), `c`/`C` (placements intersecting the
+cursor), `p`/`P` (placements intersecting the cell named by `x=`,`y=`), `q`/`Q` (that cell plus
+`z=`), `r`/`R` (image id range from `x=`..`y=`), `x`/`X` (column), `y`/`Y` (row), `z`/`Z`
+(z-index). As with `a=c`, `x`/`y` mean something different here than under other actions, so the
+parser needs action-aware decoding for `a=d` too. Upper-case
 also frees image data once no placement refers to it, matching the existing `a`/`A`, `i`/`I`
 behaviour. Implemented as a table from target letter to a placement predicate, so a further target
 is one row (data-driven design). The default-case `ENOTSUP` goes away.
