@@ -4,6 +4,7 @@
 // vocabulary, history limits, the gutter and session resolution.
 
 #include <contour/config/Actions.hpp>
+#include <contour/config/BindingCollisions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/ConfigReader.hpp>
 #include <contour/config/ConfigTestSupport.hpp>
@@ -404,7 +405,8 @@ TEST_CASE("config.parseMouseButton accepts the horizontal wheel", "[config]")
 
 TEST_CASE("config.builtinFallbackMouseMappings", "[config]")
 {
-    auto const& fallbacks = contour::config::builtinFallbackMouseMappings();
+    auto const& fallbacks =
+        contour::config::builtinFallbackMouseMappings(contour::config::BuildKeyboardPlatformKind);
 
     auto const rowFor = [&fallbacks](vtbackend::MouseButton button) {
         auto const it = std::ranges::find_if(
@@ -2442,4 +2444,266 @@ profiles:
         contour::config::resolvedSessionConfig(config, *profile, "main", vtbackend::ColorPreference::Dark, {})
             .settings.gutter.blockColumnForm
         == vtbackend::BlockColumnForm::Glyphs);
+}
+
+// ---- Primary -----------------------------------------------------------------------------------
+
+namespace
+{
+using contour::config::KeyboardPlatformKind;
+using vtbackend::Modifier;
+using vtbackend::Modifiers;
+
+constexpr auto PlatformKinds =
+    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+
+/// The `input_mapping:` section a document with one row stating @p mods and nothing else.
+[[nodiscard]] std::string oneRowConfig(std::string_view mods)
+{
+    return std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [{}], key: 'T', action: CreateNewTab }}
+)",
+                       mods);
+}
+} // namespace
+
+TEST_CASE("Primary resolves per platform", "[config][primary]")
+{
+    using contour::config::primaryModifiers;
+    CHECK(primaryModifiers(KeyboardPlatformKind::Mac) == Modifiers { Modifier::Super });
+    CHECK(primaryModifiers(KeyboardPlatformKind::Xkb) == Modifiers { Modifier::Control, Modifier::Shift });
+    CHECK(primaryModifiers(KeyboardPlatformKind::Win32) == Modifiers { Modifier::Control, Modifier::Shift });
+}
+
+TEST_CASE("mods: [Primary, Alt] parses to Primary's set plus Alt", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    for (auto const kind: PlatformKinds)
+    {
+        CAPTURE(static_cast<int>(kind));
+        auto const config = loadFromYaml(dir, oneRowConfig("Primary, Alt"), kind);
+        REQUIRE(config.keyboardPlatformKind == kind);
+        REQUIRE(config.inputMappings.value().charMappings.size() == 1);
+        CHECK(config.inputMappings.value().charMappings.front().modifiers
+              == contour::config::primaryModifiers(kind).with(Modifier::Alt));
+    }
+
+    SECTION("the spelling is case-insensitive, like every other")
+    {
+        auto const config = loadFromYaml(dir, oneRowConfig("primary"), KeyboardPlatformKind::Mac);
+        REQUIRE(config.inputMappings.value().charMappings.size() == 1);
+        CHECK(config.inputMappings.value().charMappings.front().modifiers == Modifiers { Modifier::Super });
+    }
+}
+
+TEST_CASE("the writer spells a row containing the Primary set as Primary", "[config][primary]")
+{
+    using contour::config::canonicalModifierSpellings;
+    using Spellings = std::vector<std::string_view>;
+
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Shift },
+                                     KeyboardPlatformKind::Xkb)
+          == Spellings { "Primary" });
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control }, KeyboardPlatformKind::Xkb)
+          == Spellings { "Control" });
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt },
+                                     KeyboardPlatformKind::Win32)
+          == Spellings { "Primary", "Alt" });
+    CHECK(
+        canonicalModifierSpellings(Modifiers { Modifier::Super, Modifier::Shift }, KeyboardPlatformKind::Mac)
+        == Spellings { "Primary", "Shift" });
+    // The same chord is not Primary on the other platform: Super is just Super on the desktop.
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Super }, KeyboardPlatformKind::Xkb)
+          == Spellings { "Super" });
+    CHECK(canonicalModifierSpellings(Modifiers {}, KeyboardPlatformKind::Mac).empty());
+
+    SECTION("a written configuration says Primary where the host's set is")
+    {
+        auto config = contour::config::Config { .keyboardPlatformKind = KeyboardPlatformKind::Xkb };
+        config.inputMappings.value() = {};
+        config.inputMappings.value().charMappings.push_back(
+            contour::config::CharInputMapping { .modes = {},
+                                                .modifiers = Modifiers { Modifier::Control, Modifier::Shift },
+                                                .input = U'T',
+                                                .binding = { contour::actions::CreateNewTab {} } });
+        CHECK(contour::config::createString<contour::config::YAMLConfigWriter>(config).contains(
+            "mods: [Primary]"));
+    }
+}
+
+TEST_CASE("a written config round-trips on its own platform", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    for (auto const kind: PlatformKinds)
+    {
+        CAPTURE(static_cast<int>(kind));
+        auto original = contour::config::Config { .keyboardPlatformKind = kind };
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(original);
+        auto const reloaded = loadFromYaml(dir, written, kind);
+
+        // The chords are what is compared: a row's action list is written as its first action only.
+        auto const chords = [](auto const& rows) {
+            return rows | std::views::transform([](auto const& row) {
+                       return std::tuple { row.input, row.modifiers.value(), row.modes, row.clickCount };
+                   })
+                   | std::ranges::to<std::vector>();
+        };
+        CHECK(chords(reloaded.inputMappings.value().keyMappings)
+              == chords(original.inputMappings.value().keyMappings));
+        CHECK(chords(reloaded.inputMappings.value().charMappings)
+              == chords(original.inputMappings.value().charMappings));
+        CHECK(chords(reloaded.inputMappings.value().mouseMappings)
+              == chords(original.inputMappings.value().mouseMappings));
+    }
+}
+
+TEST_CASE("Primary+Shift and Primary collide on the desktop", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // Two rows for one chord: the loader folds them into ONE binding that runs both actions (it always has,
+    // for any two rows spelling the same chord), so a collision shows as a merged row rather than as two
+    // rows findBindingCollisions() could pair up.
+    constexpr auto Document = R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Primary, Shift], key: 'P', action: CreateNewTab }
+    - { mods: [Primary], key: 'P', action: OpenCommandPalette }
+)"sv;
+
+    SECTION("on the desktop both spell Ctrl+Shift")
+    {
+        auto const xkb = loadFromYaml(dir, Document, KeyboardPlatformKind::Xkb);
+        REQUIRE(xkb.inputMappings.value().charMappings.size() == 1);
+        CHECK(xkb.inputMappings.value().charMappings.front().binding.size() == 2);
+        CHECK(contour::config::findBindingCollisions(xkb.inputMappings.value()).empty());
+    }
+
+    SECTION("on macOS they are two chords, Command+Shift and Command")
+    {
+        auto const mac = loadFromYaml(dir, Document, KeyboardPlatformKind::Mac);
+        REQUIRE(mac.inputMappings.value().charMappings.size() == 2);
+        CHECK(mac.inputMappings.value().charMappings[0].modifiers
+              == Modifiers { Modifier::Super, Modifier::Shift });
+        CHECK(mac.inputMappings.value().charMappings[1].modifiers == Modifiers { Modifier::Super });
+        CHECK(contour::config::findBindingCollisions(mac.inputMappings.value()).empty());
+    }
+}
+
+TEST_CASE("rows written differently that resolve to one chord warn when they fold", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    auto const document = [](std::string_view first, std::string_view second) {
+        return std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [{}], key: 'P', action: CreateNewTab }}
+    - {{ mods: [{}], key: 'P', action: OpenCommandPalette }}
+)",
+                           first,
+                           second);
+    };
+
+    SECTION("on the desktop Primary+Shift and Primary are one chord: the pair is named")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("Primary, Shift", "Primary"), KeyboardPlatformKind::Xkb);
+        CHECK(capture.text().contains("resolve to the same chord"));
+        CHECK(capture.text().contains("CreateNewTab"));
+        CHECK(capture.text().contains("OpenCommandPalette"));
+    }
+
+    SECTION("on macOS they are distinct chords: no warning")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("Primary, Shift", "Primary"), KeyboardPlatformKind::Mac);
+        CHECK_FALSE(capture.text().contains("resolve to the same chord"));
+    }
+
+    SECTION("rows written identically keep the quiet merge")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config = loadFromYaml(dir, document("Primary", "Primary"), KeyboardPlatformKind::Xkb);
+        CHECK_FALSE(capture.text().contains("resolve to the same chord"));
+        REQUIRE(config.inputMappings.value().charMappings.size() == 1);
+        CHECK(config.inputMappings.value().charMappings.front().binding.size() == 2);
+    }
+
+    SECTION("synonym spellings of one modifier are not a difference")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("Ctrl", "Control"), KeyboardPlatformKind::Xkb);
+        CHECK_FALSE(capture.text().contains("resolve to the same chord"));
+    }
+}
+
+TEST_CASE("an Alt character binding warns on macOS when Option always composes", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    auto const document = [](std::string_view optionAsAlt) {
+        return std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        option_as_alt: {}
+input_mapping:
+    - {{ mods: [Alt], key: 'E', action: CreateNewTab }}
+    - {{ mods: [Alt], key: Left, action: SwitchToTabLeft }}
+)",
+                           optionAsAlt);
+    };
+
+    SECTION("Option composes on every profile: the character binding is named, the key binding is not")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("off"), KeyboardPlatformKind::Mac);
+        CHECK(capture.text().contains("Alt+E cannot fire on macOS while option_as_alt is off"));
+        CHECK_FALSE(capture.text().contains("Alt+Left"));
+        CHECK_FALSE(capture.text().contains("Alt+L"));
+    }
+
+    SECTION("a profile that turns Option into Alt keeps the binding firing, so no warning")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("left"), KeyboardPlatformKind::Mac);
+        CHECK_FALSE(capture.text().contains("cannot fire"));
+    }
+
+    SECTION("other platforms have no Option key to compose with")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        (void) loadFromYaml(dir, document("off"), KeyboardPlatformKind::Xkb);
+        CHECK_FALSE(capture.text().contains("cannot fire"));
+    }
+}
+
+TEST_CASE("the \"expected one of\" diagnostic lists Primary", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+    auto capture = core::log::ScopedCapture { "error" };
+
+    (void) loadFromYaml(dir, oneRowConfig("Bogus"));
+    CHECK(capture.text().contains("Primary"));
 }

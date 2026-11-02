@@ -28,6 +28,10 @@ using vtbackend::Modifiers;
 
 namespace
 {
+/// Every keyboard platform kind.
+constexpr auto AllKinds =
+    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+
 MatchModes modesOf(std::initializer_list<MatchModes::Flag> on,
                    std::initializer_list<MatchModes::Flag> off = {})
 {
@@ -106,13 +110,14 @@ TEST_CASE("findBindingCollisions finds a crafted pair, and only that", "[binding
 TEST_CASE("no default chord fires twice", "[bindings]")
 {
     for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
-    {
-        INFO("edition " << token);
-        auto const& mappings = defaultInputMappings(edition);
-        CHECK(findBindingCollisions(mappings).empty());
-        if (!findBindingCollisions(mappings).empty())
-            FAIL_CHECK(describe(mappings));
-    }
+        for (auto const kind: AllKinds)
+        {
+            INFO("edition " << token << ", platform " << std::to_underlying(kind));
+            auto const& mappings = defaultInputMappings(edition, kind);
+            CHECK(findBindingCollisions(mappings).empty());
+            if (!findBindingCollisions(mappings).empty())
+                FAIL_CHECK(describe(mappings));
+        }
 }
 
 TEST_CASE("a bare F6 is bound in no edition", "[bindings]")
@@ -158,13 +163,16 @@ TEST_CASE("Native2026 binds the chrome focus chords and Classic none of them", "
     CHECK(binds<actions::FocusNextArea>(native, vtbackend::Key::F6, Modifiers { Modifier::Control }));
     CHECK(binds<actions::FocusPreviousArea>(
         native, vtbackend::Key::F6, Modifiers { Modifier::Control, Modifier::Shift }));
-#ifdef __APPLE__
-    CHECK(binds<actions::FocusToolbar>(native, vtbackend::Key::F5, Modifiers { Modifier::Control }));
-#else
-    CHECK(std::ranges::none_of(native.keyMappings, [](auto const& mapping) {
-        return std::holds_alternative<actions::FocusToolbar>(mapping.binding.front());
-    }));
-#endif
+    // The toolbar chord is macOS's alone.
+    CHECK(binds<actions::FocusToolbar>(
+        defaultInputMappings(DefaultsEdition::Native2026, KeyboardPlatformKind::Mac),
+        vtbackend::Key::F5,
+        Modifiers { Modifier::Control }));
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+        CHECK(std::ranges::none_of(
+            defaultInputMappings(DefaultsEdition::Native2026, kind).keyMappings, [](auto const& mapping) {
+                return std::holds_alternative<actions::FocusToolbar>(mapping.binding.front());
+            }));
 
     auto const& classic = defaultInputMappings(DefaultsEdition::Classic);
     CHECK(std::ranges::none_of(classic.keyMappings, [](auto const& mapping) {
@@ -177,91 +185,86 @@ TEST_CASE("Native2026 binds the chrome focus chords and Classic none of them", "
 
 namespace
 {
-/// Whether @p row is one of @p rows' chords.
-template <typename Row, typename Rows>
-bool carriesChord(Rows const& rows, Row const& row)
+/// The pane-managing actions: what moves between panes, splits one, zooms one, or moves the active tab.
+bool isPaneAction(actions::Action const& action)
 {
-    return std::ranges::any_of(rows, [&](auto const& have) {
-        return have.input == row.mapping.input && have.modifiers == row.mapping.modifiers;
-    });
+    return std::holds_alternative<actions::FocusPaneLeft>(action)
+           || std::holds_alternative<actions::FocusPaneRight>(action)
+           || std::holds_alternative<actions::FocusPaneUp>(action)
+           || std::holds_alternative<actions::FocusPaneDown>(action)
+           || std::holds_alternative<actions::SplitVertical>(action)
+           || std::holds_alternative<actions::SplitHorizontal>(action)
+           || std::holds_alternative<actions::MoveTabToLeft>(action)
+           || std::holds_alternative<actions::MoveTabToRight>(action)
+           || std::holds_alternative<actions::NewWindowTo>(action);
 }
 
-/// The defaults of @p edition with the pane chords of @p host in place of the build host's own.
-InputMappings defaultsOnHost(DefaultsEdition edition, PaneChordHost host)
+/// The pane rows of a fallback table.
+template <typename Mapping>
+std::vector<Mapping> paneRows(std::vector<Mapping> const& table)
 {
-    auto mappings = defaultInputMappings(edition);
-    for (auto const& row: paneKeyChords(BuildPaneChordHost))
-        std::erase_if(mappings.keyMappings, [&](auto const& have) {
-            return have.input == row.mapping.input && have.modifiers == row.mapping.modifiers;
-        });
-    for (auto const& row: paneCharChords(BuildPaneChordHost))
-        std::erase_if(mappings.charMappings, [&](auto const& have) {
-            return have.input == row.mapping.input && have.modifiers == row.mapping.modifiers;
-        });
-    for (auto const& row: paneKeyChords(host))
-        mappings.keyMappings.push_back(row.mapping);
-    for (auto const& row: paneCharChords(host))
-        mappings.charMappings.push_back(row.mapping);
-    return mappings;
+    auto result = std::vector<Mapping> {};
+    std::ranges::copy_if(table, std::back_inserter(result), [](auto const& row) {
+        return row.mapping.binding.size() == 1 && isPaneAction(row.mapping.binding.front());
+    });
+    return result;
+}
+
+/// Whether @p mappings binds exactly @p modifiers and @p input to a pane action.
+template <typename Mapping, typename Input>
+bool bindsPaneActionAt(std::vector<Mapping> const& mappings, Modifiers modifiers, Input input)
+{
+    return std::ranges::count_if(
+               mappings, [&](auto const& have) { return have.input == input && have.modifiers == modifiers; })
+           == 1;
 }
 } // namespace
 
-TEST_CASE("the pane chords of every host collide with no other default", "[bindings][panes]")
+TEST_CASE("every platform can focus all four neighbours and split both ways", "[bindings][panes]")
 {
-    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
-        for (auto const hostIndex: std::views::iota(uint8_t { 0 }, std::to_underlying(PaneChordHost::Count)))
-        {
-            auto const mappings = defaultsOnHost(edition, static_cast<PaneChordHost>(hostIndex));
-            INFO("edition " << token << ", host " << hostIndex);
-            CHECK(findBindingCollisions(mappings).empty());
-            if (!findBindingCollisions(mappings).empty())
-                FAIL_CHECK(describe(mappings));
-        }
-}
-
-TEST_CASE("every host can focus all four neighbours and split both ways", "[bindings][panes]")
-{
-    for (auto const hostIndex: std::views::iota(uint8_t { 0 }, std::to_underlying(PaneChordHost::Count)))
+    for (auto const kind: AllKinds)
     {
-        auto const host = static_cast<PaneChordHost>(hostIndex);
-        INFO("host " << hostIndex);
-        auto const keyActions =
-            paneKeyChords(host) | std::views::transform([](auto const& row) { return row.mapping.binding; });
-        auto const charActions =
-            paneCharChords(host) | std::views::transform([](auto const& row) { return row.mapping.binding; });
-        auto const has = [](auto const& range, auto const& wanted) {
-            return std::ranges::any_of(range, [&](auto const& list) {
-                return list.size() == 1
-                       && std::holds_alternative<std::remove_cvref_t<decltype(wanted)>>(list[0]);
+        INFO("platform " << std::to_underlying(kind));
+        auto const has = [&](auto const& table, auto const& wanted) {
+            return std::ranges::any_of(table, [&](auto const& row) {
+                return row.mapping.binding.size() == 1
+                       && std::holds_alternative<std::remove_cvref_t<decltype(wanted)>>(
+                           row.mapping.binding.front());
             });
         };
-        CHECK(has(keyActions, actions::FocusPaneLeft {}));
-        CHECK(has(keyActions, actions::FocusPaneRight {}));
-        CHECK(has(keyActions, actions::FocusPaneUp {}));
-        CHECK(has(keyActions, actions::FocusPaneDown {}));
-        CHECK(has(charActions, actions::SplitVertical {}));
-        CHECK(has(charActions, actions::SplitHorizontal {}));
+        auto const& keys = builtinFallbackKeyMappings(kind);
+        auto const& chars = builtinFallbackCharMappings(kind);
+        CHECK(has(keys, actions::FocusPaneLeft {}));
+        CHECK(has(keys, actions::FocusPaneRight {}));
+        CHECK(has(keys, actions::FocusPaneUp {}));
+        CHECK(has(keys, actions::FocusPaneDown {}));
+        CHECK(has(chars, actions::SplitVertical {}));
+        CHECK(has(chars, actions::SplitHorizontal {}));
     }
 }
 
-TEST_CASE("every host moves the active tab with the browsers' chords", "[bindings][panes]")
+TEST_CASE("every platform moves the active tab with the browsers' chords", "[bindings][panes]")
 {
     struct Row
     {
-        PaneChordHost host;
+        KeyboardPlatformKind kind;
         Modifiers modifiers;
     };
     auto const rows = std::array {
-        Row { .host = PaneChordHost::Desktop, .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
-        Row { .host = PaneChordHost::Mac, .modifiers = Modifiers { Modifier::Super } },
+        Row { .kind = KeyboardPlatformKind::Xkb,
+              .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
+        Row { .kind = KeyboardPlatformKind::Win32,
+              .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
+        Row { .kind = KeyboardPlatformKind::Mac, .modifiers = Modifiers { Modifier::Super } },
     };
-    for (auto const& [host, modifiers]: rows)
+    for (auto const& [kind, modifiers]: rows)
     {
-        INFO("host " << std::to_underlying(host));
+        INFO("platform " << std::to_underlying(kind));
         auto const actionOf = [&](vtbackend::Key key) {
-            auto const keys = paneKeyChords(host);
+            auto const& keys = builtinFallbackKeyMappings(kind);
             auto const found = std::ranges::find_if(keys, [&](auto const& row) {
-                return row.mapping.input == key && row.mapping.modifiers == modifiers;
+                return row.mapping.input == key && row.mapping.modifiers == modifiers
+                       && isPaneAction(row.mapping.binding.front());
             });
             REQUIRE(found != keys.end());
             return found->mapping.binding.front();
@@ -276,7 +279,7 @@ TEST_CASE("the macOS pane chords are the Command chords", "[bindings][panes]")
     auto const superOnly = Modifiers { Modifier::Super };
     auto const superShift = Modifiers { Modifier::Super, Modifier::Shift };
     auto const split = [&](Modifiers modifiers) {
-        auto const chars = paneCharChords(PaneChordHost::Mac);
+        auto const& chars = builtinFallbackCharMappings(KeyboardPlatformKind::Mac);
         auto const found = std::ranges::find_if(chars, [&](auto const& row) {
             return row.mapping.input == U'D' && row.mapping.modifiers == modifiers;
         });
@@ -287,40 +290,43 @@ TEST_CASE("the macOS pane chords are the Command chords", "[bindings][panes]")
     CHECK(std::holds_alternative<actions::SplitHorizontal>(split(superShift)));
 }
 
-TEST_CASE("the build host's pane chords are in the defaults and in the fallbacks", "[bindings][panes]")
+TEST_CASE("a platform's pane chords are in its defaults and in its fallbacks", "[bindings][panes]")
 {
-    auto const& defaults = defaultInputMappings();
-    for (auto const& row: paneKeyChords(BuildPaneChordHost))
-    {
-        CHECK(carriesChord(defaults.keyMappings, row));
-        CHECK(std::ranges::any_of(builtinFallbackKeyMappings(), [&](auto const& have) {
-            return have.mapping.input == row.mapping.input && have.mapping.modifiers == row.mapping.modifiers;
-        }));
-    }
-    for (auto const& row: paneCharChords(BuildPaneChordHost))
-    {
-        CHECK(carriesChord(defaults.charMappings, row));
-        CHECK(std::ranges::any_of(builtinFallbackCharMappings(), [&](auto const& have) {
-            return have.mapping.input == row.mapping.input && have.mapping.modifiers == row.mapping.modifiers;
-        }));
-    }
+    for (auto const kind: AllKinds)
+        for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        {
+            INFO("platform " << std::to_underlying(kind) << ", edition " << token);
+            auto const& defaults = defaultInputMappings(edition, kind);
+            auto const keyRows = paneRows(builtinFallbackKeyMappings(kind));
+            auto const charRows = paneRows(builtinFallbackCharMappings(kind));
+            CHECK(!keyRows.empty());
+            CHECK(!charRows.empty());
+            for (auto const& row: keyRows)
+                CHECK(bindsPaneActionAt(defaults.keyMappings, row.mapping.modifiers, row.mapping.input));
+            for (auto const& row: charRows)
+                CHECK(bindsPaneActionAt(defaults.charMappings, row.mapping.modifiers, row.mapping.input));
+        }
 }
 
-TEST_CASE("every host opens the Connect picker with its New Window to… chord", "[bindings][connect]")
+TEST_CASE("every platform opens the Connect picker with its New Window to… chord", "[bindings][connect]")
 {
     struct Row
     {
-        PaneChordHost host;
+        KeyboardPlatformKind kind;
         Modifiers modifiers;
     };
     auto const rows = std::array {
-        Row { .host = PaneChordHost::Desktop, .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
-        Row { .host = PaneChordHost::Mac, .modifiers = Modifiers { Modifier::Super, Modifier::Shift } },
+        Row { .kind = KeyboardPlatformKind::Xkb,
+              .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
+        Row { .kind = KeyboardPlatformKind::Win32,
+              .modifiers = Modifiers { Modifier::Control, Modifier::Shift } },
+        Row { .kind = KeyboardPlatformKind::Mac,
+              .modifiers = Modifiers { Modifier::Super, Modifier::Shift } },
     };
-    for (auto const& [host, modifiers]: rows)
+    for (auto const& [kind, modifiers]: rows)
     {
-        INFO("host " << std::to_underlying(host));
-        auto const chars = paneCharChords(host);
+        INFO("platform " << std::to_underlying(kind));
+        auto const& chars = builtinFallbackCharMappings(kind);
         auto const found = std::ranges::find_if(chars, [&](auto const& row) {
             return row.mapping.input == U'K' && row.mapping.modifiers == modifiers;
         });
@@ -329,7 +335,7 @@ TEST_CASE("every host opens the Connect picker with its New Window to… chord",
         // No edition's defaults bind the chord to anything else.
         for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
         {
-            auto const mappings = defaultsOnHost(edition, host);
+            auto const& mappings = defaultInputMappings(edition, kind);
             auto const claimed = std::ranges::count_if(mappings.charMappings, [&](auto const& have) {
                 return have.input == U'K' && have.modifiers == modifiers;
             });

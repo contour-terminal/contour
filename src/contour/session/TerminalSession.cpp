@@ -4716,8 +4716,10 @@ void TerminalSession::refreshLinkTarget(QString text)
     auto const reveal = linkTargetRevealOf(_config.hyperlinkHoverTooltip.value());
     auto next = LinkTarget {
         .text = std::move(text),
-        .hint = QString::fromStdString(command::linkOpenHint(
-            config::followHyperlinkModifiers(_config), state.bypass, command::platformShortcutStyle())),
+        .hint = QString::fromStdString(
+            command::linkOpenHint(config::followHyperlinkModifiers(_config),
+                                  state.bypass,
+                                  command::shortcutStyleFor(_config.keyboardPlatformKind))),
         .visibility = LinkPillVisibility::Hidden,
     };
     next.visibility = linkPillVisibility(reveal, state.pointer, state.held, next.text.toStdString());

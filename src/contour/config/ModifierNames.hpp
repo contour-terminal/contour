@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/KeyboardPlatformKind.hpp>
+
 #include <vtbackend/input/InputGenerator.hpp>
 
 #include <crispy/ASCII.hpp>
@@ -9,6 +11,7 @@
 #include <array>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace contour::config
 {
@@ -74,6 +77,57 @@ namespace detail
         if (detail::sameSpelling(name, row.name))
             return row.modifier;
     return std::nullopt;
+}
+
+/// The spelling of the platform-neutral primary modifier in a `mods:` entry.
+inline constexpr std::string_view PrimaryModifierName = "Primary";
+
+/// The modifiers the `Primary` spelling stands for on @p kind: the key an application's own chords hang on.
+/// Command on macOS, where that is Super (Qt's Control/Meta swap is off); Control+Shift elsewhere, where a
+/// bare Control is the terminal application's.
+/// @param kind The keyboard platform the configuration is loaded for.
+/// @return The concrete modifiers.
+[[nodiscard]] constexpr vtbackend::Modifiers primaryModifiers(KeyboardPlatformKind kind) noexcept
+{
+    if (kind == KeyboardPlatformKind::Mac)
+        return vtbackend::Modifiers { vtbackend::Modifier::Super };
+    return vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+}
+
+/// Parses one `mods:` entry, `Primary` included, case-insensitively.
+///
+/// @param name The spelling as written in the config.
+/// @param kind The keyboard platform `Primary` resolves against.
+/// @return The modifiers @p name denotes, or nullopt when it is not an accepted spelling.
+[[nodiscard]] constexpr std::optional<vtbackend::Modifiers> parseModifierSpelling(
+    std::string_view name, KeyboardPlatformKind kind) noexcept
+{
+    if (detail::sameSpelling(name, PrimaryModifierName))
+        return primaryModifiers(kind);
+    if (auto const modifier = parseModifierName(name))
+        return vtbackend::Modifiers { *modifier };
+    return std::nullopt;
+}
+
+/// The spellings a writer emits for @p modifiers on @p kind: "Primary" first when they contain the Primary
+/// set, then each remaining modifier by its canonical name. So a row means the same on every platform it is
+/// carried to, and a config written on one OS works on another.
+/// @param modifiers The chord's modifiers.
+/// @param kind The keyboard platform the configuration is written for.
+/// @return The spellings, in the order they are written.
+[[nodiscard]] inline std::vector<std::string_view> canonicalModifierSpellings(vtbackend::Modifiers modifiers,
+                                                                              KeyboardPlatformKind kind)
+{
+    auto result = std::vector<std::string_view> {};
+    auto const primary = primaryModifiers(kind);
+    auto const hasPrimary = modifiers.contains(primary);
+    if (hasPrimary)
+        result.push_back(PrimaryModifierName);
+    auto const rest = hasPrimary ? modifiers.without(primary) : modifiers;
+    for (auto const& row: vtbackend::ChordModifierTable)
+        if (rest.contains(row.modifier))
+            result.push_back(row.name);
+    return result;
 }
 
 static_assert(std::ranges::all_of(vtbackend::ChordModifierTable,

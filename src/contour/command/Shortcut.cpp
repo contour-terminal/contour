@@ -157,9 +157,22 @@ ChordIndex chordIndex(config::Config const& config, ChordPreference preference)
 {
     auto const& mappings = config.inputMappings.value();
     auto result = chordIndex(mappings, preference);
-    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, preference, result);
-    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, preference, result);
+    indexFallbacks(config::builtinFallbackKeyMappings(config.keyboardPlatformKind),
+                   mappings.keyMappings,
+                   config,
+                   preference,
+                   result);
+    indexFallbacks(config::builtinFallbackCharMappings(config.keyboardPlatformKind),
+                   mappings.charMappings,
+                   config,
+                   preference,
+                   result);
     return result;
+}
+
+ChordIndex chordIndex(config::Config const& config)
+{
+    return chordIndex(config, chordPreferenceFor(config.keyboardPlatformKind));
 }
 
 namespace
