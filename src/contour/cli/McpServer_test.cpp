@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <expected>
 #include <map>
 #include <ranges>
@@ -511,4 +512,39 @@ TEST_CASE("tab_create is refused by scope under OwnTab and allowed under AllTabs
 
     auto all = Fixture { { .scope = TabScope::AllTabs, .callerPane = A1 } };
     CHECK(all.call("tab_create").contains(R"("isError":false)"));
+}
+
+TEST_CASE("input-capable composites refuse a pane in another tab under OwnTab", "[mcp-server]")
+{
+    struct Tool
+    {
+        std::string_view name;
+        std::string_view extra;
+    };
+    constexpr auto Tools = std::array {
+        Tool { "pane_type", R"("text":"x")" },
+        Tool { "pane_run", R"("command":"x")" },
+        Tool { "pane_split", R"("direction":"right")" },
+    };
+    for (auto const& tool: Tools)
+    {
+        for (auto const* target: { B1, "other", "b001" })
+        {
+            auto f = Fixture {};
+            scriptRun(f);
+            auto const out = f.call(tool.name, std::format(R"({{"pane":"{}",{}}})", target, tool.extra));
+            INFO(tool.name << " -> " << target);
+            CHECK(out.contains(R"("isError":true)"));
+            CHECK(methodsOf(f).empty());
+        }
+        for (auto const* target: { A2, "tests", "a002" })
+        {
+            auto f = Fixture {};
+            scriptRun(f);
+            auto const out = f.call(tool.name, std::format(R"({{"pane":"{}",{}}})", target, tool.extra));
+            INFO(tool.name << " -> " << target);
+            CHECK(out.contains(R"("isError":false)"));
+            CHECK_FALSE(methodsOf(f).empty());
+        }
+    }
 }
