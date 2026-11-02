@@ -219,6 +219,7 @@ install_deps_popos() {
         libqt5x11extras5-dev
         libssh2-1-dev
         libssl-dev
+        zlib1g-dev
         libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
@@ -263,6 +264,7 @@ install_deps_ubuntu() {
         libharfbuzz-dev
         libssh2-1-dev
         libssl-dev
+        zlib1g-dev
         libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
@@ -461,6 +463,7 @@ install_deps_arch() {
         microsoft-gsl \
         ninja \
         openssl \
+        zlib \
         pkg-config \
         systemd-libs \
         libutempter \
@@ -511,6 +514,7 @@ install_deps_suse() {
         libxkbcommon-devel
         libxkbcommon-x11-devel
         libopenssl-devel
+        zlib-devel
         libssh2-devel
         ncurses-devel
         systemd-devel
@@ -571,6 +575,7 @@ install_deps_fedora() {
         libxkbcommon-x11-devel
         ninja-build
         openssl-devel
+        zlib-devel
         pkgconf
         rust-std-static-wasm32-wasip1
         systemd-devel
@@ -652,6 +657,7 @@ install_deps_darwin() {
         libssh2 \
         libtool \
         openssl \
+        zlib \
         pkg-config \
         yaml-cpp \
         $qt_formula

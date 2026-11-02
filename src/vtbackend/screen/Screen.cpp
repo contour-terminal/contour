@@ -5,6 +5,7 @@
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/RowMove.hpp>
+#include <vtbackend/graphics/KittyInflate.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/graphics/regis/ReGISContext.hpp>
@@ -56,6 +57,7 @@
 #include <cassert>
 #include <charconv>
 #include <cstring>
+#include <expected>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -345,6 +347,28 @@ namespace // {{{ helper
                 message.header("u") != nullptr ? ImageCursorPolicy::BelowImage : ImageCursorPolicy::Stay,
             .requestStatus = message.header("s") != nullptr,
         };
+    }
+
+    /// Base64-decodes a kitty graphics payload and, for `o=z`, inflates it.
+    ///
+    /// @param command The command carrying the payload.
+    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
+    ///        refused before it is materialised.
+    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
+    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> decodeKittyPayload(
+        kitty_graphics::Command const& command, size_t maxInflatedBytes, std::string_view tooLargeReply)
+    {
+        auto const decoded = core::base64::decode(command.payload);
+        auto bytes = Image::Data(decoded.begin(), decoded.end());
+        if (command.compression == kitty_graphics::Compression::None)
+            return bytes;
+
+        return kitty_graphics::inflateZlib(bytes, maxInflatedBytes)
+            .transform_error([&](kitty_graphics::InflateError error) -> std::string_view {
+                return error == kitty_graphics::InflateError::TooLarge ? tooLargeReply
+                                                                       : "EINVAL:corrupt compressed payload";
+            });
     }
 
 } // namespace
@@ -5749,9 +5773,6 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
         // terminal at any file the user can read. Not implemented deliberately.
         return "ENOTSUP:only direct transmission is supported";
 
-    if (command.compression != Compression::None)
-        return "ENOTSUP:compressed payloads are not supported";
-
     return std::nullopt;
 }
 
@@ -5994,24 +6015,37 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto const decoded = core::base64::decode(command.payload);
-    auto pixmap = Image::Data(decoded.begin(), decoded.end());
-
     auto const format = toImageFormat(command.transmissionFormat());
     auto const pixelSize =
         ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
 
-    if (format != ImageFormat::PNG)
+    // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
+    // match the declared size is a read past the end waiting to happen. That size is also the
+    // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
+    // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
+    // bounded by what the quota still has room for instead.
+    auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
+                          * bytesPerPixel(command.transmissionFormat());
+    auto const quotaRemainder = [&] {
+        auto const stored = storedKittyBytes() - storedKittyBytesOf(command.imageId);
+        return stored < _settings->kittyImageStorageQuota ? _settings->kittyImageStorageQuota - stored
+                                                          : size_t { 0 };
+    };
+    auto payload =
+        format == ImageFormat::PNG
+            ? decodeKittyPayload(command, quotaRemainder(), "ENOSPC:image storage quota exceeded")
+            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
+    if (!payload)
     {
-        // The renderer reads width*height*bytesPerPixel from this buffer, so a payload that does not
-        // match the declared size is a read past the end waiting to happen.
-        auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
-                              * bytesPerPixel(command.transmissionFormat());
-        if (pixmap.size() != expected)
-        {
-            replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
-            return;
-        }
+        replyKittyGraphics(command, payload.error());
+        return;
+    }
+    auto pixmap = std::move(*payload);
+
+    if (format != ImageFormat::PNG && pixmap.size() != expected)
+    {
+        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+        return;
     }
 
     auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
@@ -6215,20 +6249,13 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     using namespace kitty_graphics;
 
     // A frame carries a payload exactly as a transmission does, so it owes the same honest answers
-    // about how that payload arrives: without this, `a=f,o=z` is refused for the size its compressed
-    // payload happens to have rather than for being compressed, and one that happened to match the
-    // expected byte count would be composited as raw pixels.
+    // about how that payload arrives: a medium we do not read is refused as such, and a compressed
+    // payload is inflated before its size is checked, never composited as if it were raw pixels.
     if (command.medium != Medium::Direct)
     {
         replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
         return;
     }
-    if (command.compression != Compression::None)
-    {
-        replyKittyGraphics(command, "ENOTSUP:compressed payloads are not supported");
-        return;
-    }
-
     auto const stored = _kittyImages.find(command.imageId);
     if (stored == _kittyImages.end())
     {
@@ -6246,7 +6273,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
 
     // `f=` is not merely unused here, it is a claim about the payload's layout. Silently reading
     // 3-byte pixels as 4-byte ones (or a PNG file's header as pixels) is exactly the reinterpretation
-    // the medium and compression checks above exist to prevent.
+    // the medium check above and the inflate below exist to prevent.
     if (command.format && toImageFormat(*command.format) != base.format())
     {
         replyKittyGraphics(command, "EINVAL:frame format does not match the image");
@@ -6273,9 +6300,16 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
     // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and the
     // blend arithmetic below into nonsense.
-    auto const decoded = core::base64::decode(command.payload);
-    auto const pixmap = Image::Data { decoded.begin(), decoded.end() };
-    if (pixmap.size() != rectWidth * rectHeight * bpp)
+    auto const expectedBytes = rectWidth * rectHeight * bpp;
+    auto const payload =
+        decodeKittyPayload(command, expectedBytes, "EINVAL:payload size does not match dimensions");
+    if (!payload)
+    {
+        replyKittyGraphics(command, payload.error());
+        return;
+    }
+    auto const& pixmap = *payload;
+    if (pixmap.size() != expectedBytes)
     {
         replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
         return;

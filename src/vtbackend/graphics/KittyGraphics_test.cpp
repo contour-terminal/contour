@@ -10,12 +10,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cstdint>
+#include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <zlib.h>
+
+using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace vtbackend;
 using namespace vtbackend::kitty_graphics;
@@ -151,10 +156,10 @@ TEST_CASE("KittyGraphics.query_validates_what_a_transmission_would_reject", "[ki
         CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
     }
 
-    SECTION("compressed payload")
+    SECTION("compressed payload is supported")
     {
         mock.writeToScreen("\033_Gi=32,s=1,v=1,a=q,t=d,o=z,f=24;AAAA\033\\"sv);
-        CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+        CHECK(mock.terminal.peekInput() == "\033_Gi=32;OK\033\\");
     }
 
     SECTION("missing dimensions on a raw pixel format")
@@ -862,19 +867,6 @@ TEST_CASE("KittyGraphics.animation.a_frame_may_omit_its_dimensions", "[kitty]")
     CHECK(mock.terminal.peekInput().contains("OK"));
 }
 
-TEST_CASE("KittyGraphics.animation.a_compressed_frame_is_refused_as_unsupported", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
-    mock.terminal.flushInput();
-
-    // Not EINVAL for whatever size the compressed bytes happen to have: a client cannot tell "wrong
-    // byte count" from "I do not implement this", and a payload that happened to match would be
-    // composited as raw pixels.
-    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,o=z,x=0,y=0,s=1,v=1;eJw=\033\\"sv);
-    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
-}
-
 TEST_CASE("KittyGraphics.animation.a_faint_source_does_not_wrap_the_blend", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
@@ -1251,3 +1243,72 @@ TEST_CASE("KittyGraphics.storage.freeing_an_image_frees_its_frames", "[kitty]")
     CHECK(replyTo(mock, "\033_Ga=t,f=24,i=3,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
 }
 // }}}
+
+namespace
+{
+/// Deflates @p input into a zlib stream and base64-encodes it, as an application sending `o=z` would.
+[[nodiscard]] std::string zlibBase64(std::string_view input)
+{
+    auto out = std::string(compressBound(static_cast<uLong>(input.size())), '\0');
+    auto outSize = static_cast<uLongf>(out.size());
+    auto const status = compress2(std::bit_cast<Bytef*>(out.data()),
+                                  &outSize,
+                                  std::bit_cast<Bytef const*>(input.data()),
+                                  static_cast<uLong>(input.size()),
+                                  Z_BEST_COMPRESSION);
+    REQUIRE(status == Z_OK);
+    out.resize(outSize);
+    return core::base64::encode(out);
+}
+} // namespace
+
+TEST_CASE("KittyGraphics.compression.transmit_with_o_z_displays_the_image", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // A 2x2 RGBA image.
+    auto const pixels = "\xFF\x00\x00\xFF\x00\xFF\x00\xFF\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF"s;
+    CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=2,v=2,i=3,o=z;{}\033\\", zlibBase64(pixels)))
+          == "\033_Gi=3;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { pixels.begin(), pixels.end() });
+}
+
+TEST_CASE("KittyGraphics.compression.frame_with_o_z_is_composited", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Frame 2: the second pixel replaced by blue.
+    auto const blue = "\x00\x00\xFF"s;
+    CHECK(
+        replyTo(mock, std::format("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1,o=z;{}\033\\", zlibBase64(blue)))
+            .contains("OK"));
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compression.raw_bomb_answers_EINVAL", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // Declares 1x1 RGBA (4 bytes) but inflates to 4 MiB: refused at the declared size, not inflated.
+    auto const zeros = std::string(size_t { 4 } << 20, '\0');
+    CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=1,v=1,i=3,o=z;{}\033\\", zlibBase64(zeros)))
+          == "\033_Gi=3;EINVAL:payload size does not match dimensions\033\\");
+}
+
+TEST_CASE("KittyGraphics.compression.png_bomb_answers_ENOSPC", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.settings().kittyImageStorageQuota = 4096;
+    auto const zeros = std::string(size_t { 4 } << 20, '\0');
+    CHECK(replyTo(mock, std::format("\033_Ga=T,f=100,i=3,o=z;{}\033\\", zlibBase64(zeros)))
+          == "\033_Gi=3;ENOSPC:image storage quota exceeded\033\\");
+}
+
+TEST_CASE("KittyGraphics.compression.corrupt_answers_EINVAL", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // Valid base64, but not a zlib stream.
+    CHECK(replyTo(mock, "\033_Ga=T,f=32,s=1,v=1,i=3,o=z;AAAAAAAAAA==\033\\"sv)
+          == "\033_Gi=3;EINVAL:corrupt compressed payload\033\\");
+}

@@ -71,6 +71,7 @@ set(vtbackend_HEADERS
     input/vi/JumpHistory.hpp
     vt/KittyClipboard.hpp
     graphics/KittyGraphics.hpp
+    graphics/KittyInflate.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
@@ -206,6 +207,7 @@ set(vtbackend_SOURCES
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
     graphics/KittyGraphics.cpp
+    graphics/KittyInflate.cpp
     vt/TextSizing.cpp
     screen/LinkDetector.cpp
     links/LinkIndex.cpp
@@ -279,6 +281,7 @@ target_link_libraries(vtbackend PUBLIC
     unicode::unicode
     vtparser
     vtpty
+    ZLIB::ZLIB
 )
 
 if(LIBTERMINAL_LOG_TRACE)
@@ -381,6 +384,7 @@ if(LIBTERMINAL_TESTING)
         vt/MacroDefinition_test.cpp
         vt/PointerShape_test.cpp
         graphics/KittyGraphics_test.cpp
+        graphics/KittyInflate_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp
@@ -432,7 +436,7 @@ if(LIBTERMINAL_TESTING)
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace)
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 

@@ -13,6 +13,7 @@
             "name": "ms-gsl"
         },
         "openssl",
+        "zlib",
         {
             "name": "yaml-cpp"
         },
