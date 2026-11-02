@@ -993,7 +993,9 @@ TEST_CASE("Config: Ctrl+Shift+G opens the last command's output by default", "[c
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
 
-    auto const config = contour::config::Config {};
+    // The desktop's chord: the macOS defaults leave Ctrl+Shift+G to the shell and use Command+G to find.
+    auto const config =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
     auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
 
     auto const* bound = contour::config::applyBuiltinFallback(config, U'G', ctrlShift, uint8_t { 0 });
@@ -1947,13 +1949,12 @@ TEST_CASE("Config: sessionSettings hands the terminal the profile's compiled lin
 TEST_CASE("Config: the follow gesture's modifiers come from the mouse bindings", "[config][links]")
 {
     auto const defaults = contour::config::Config {};
-#ifdef __APPLE__
-    CHECK(contour::config::followHyperlinkModifiers(defaults)
-          == vtbackend::Modifiers { vtbackend::Modifier::Super }); // Command, under the Native2026 defaults
-#else
-    CHECK(contour::config::followHyperlinkModifiers(defaults)
-          == vtbackend::Modifiers { vtbackend::Modifier::Control });
-#endif
+    // Command on a Mac under the Native2026 defaults, Control on the desktop.
+    auto const expected =
+        contour::config::BuildKeyboardPlatformKind == contour::config::KeyboardPlatformKind::Mac
+            ? vtbackend::Modifier::Super
+            : vtbackend::Modifier::Control;
+    CHECK(contour::config::followHyperlinkModifiers(defaults) == vtbackend::Modifiers { expected });
     auto const classic =
         contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
     CHECK(contour::config::followHyperlinkModifiers(classic)

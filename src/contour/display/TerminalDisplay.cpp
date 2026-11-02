@@ -1527,9 +1527,10 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
     if (!event->commitString().isEmpty())
     {
         assert(event->preeditString().isEmpty());
-        std::ignore = _session->sendKeyboardEvent(
-            _session->keyboardPlatform().normalize(input::captureInputMethodCommit(event->commitString())),
-            std::chrono::steady_clock::now());
+        auto const captured = input::captureInputMethodCommit(event->commitString());
+        input::logRecorded(captured);
+        std::ignore = _session->sendKeyboardEvent(_session->keyboardPlatform().normalize(captured),
+                                                  std::chrono::steady_clock::now());
     }
 
     event->accept();

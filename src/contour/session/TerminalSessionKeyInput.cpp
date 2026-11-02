@@ -17,6 +17,7 @@
 #include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
+#include <core/Overloaded.hpp>
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
@@ -87,6 +88,29 @@ namespace
             return BindingOutcome::Claimed;
         return runBinding(route.fallback, eventType, execute);
     }
+
+    /// Sends what the route planned for an event no binding claimed.
+    /// @param terminal The terminal receiving the event.
+    /// @param outcome The route's `otherwise`.
+    /// @param eventType Press, Repeat or Release.
+    /// @param now The event's time.
+    void sendOutcome(vtbackend::Terminal& terminal,
+                     input::TerminalOutcome const& outcome,
+                     KeyboardEventType eventType,
+                     vtbackend::Terminal::Timestamp now)
+    {
+        std::visit(core::Overloaded {
+                       [&](input::SendKey const& send) {
+                           terminal.sendKeyEvent(send.key, send.modifiers, eventType, now);
+                       },
+                       [&](input::SendChar const& send) {
+                           terminal.sendCharEvent(
+                               send.codepoint, send.identity, send.modifiers, eventType, now);
+                       },
+                       [](input::ConsumeInput const&) {},
+                   },
+                   outcome);
+    }
 } // namespace
 
 input::RouteContext TerminalSession::keyRouteContext() const
@@ -96,8 +120,8 @@ input::RouteContext TerminalSession::keyRouteContext() const
     return input::RouteContext {
         .config = _config,
         .modes = _terminal.bindingModes(),
-        .superEncoding = _terminal.isKeyboardProtocolNonLegacy() ? input::SuperEncoding::Representable
-                                                                 : input::SuperEncoding::Unrepresentable,
+        .superEncoding = _terminal.keyboardProtocolEncodesModifiers() ? input::SuperEncoding::Representable
+                                                                      : input::SuperEncoding::Unrepresentable,
     };
 }
 
@@ -156,6 +180,7 @@ void TerminalSession::deliverKey(Key key,
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     // A release is not routed: it runs no binding, and goes to the terminal as it came.
+    auto outcome = input::TerminalOutcome { input::SendKey { .key = key, .modifiers = modifiers } };
     if (eventType != KeyboardEventType::Release)
     {
         auto const route = input::routeKey(key, modifiers, appModifier, keyRouteContext());
@@ -166,6 +191,7 @@ void TerminalSession::deliverKey(Key key,
             return;
         if (std::holds_alternative<input::ConsumeInput>(route.otherwise))
             return;
+        outcome = route.otherwise;
     }
     if (ended)
     {
@@ -189,7 +215,7 @@ void TerminalSession::deliverKey(Key key,
     if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
         && modifiers.chord.none())
         noteCommandEntered();
-    terminal().sendKeyEvent(key, modifiers, eventType, now);
+    sendOutcome(terminal(), outcome, eventType, now);
     // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
     // noticed at the next key, once the key's bytes have reached the PTY.
     refreshInputEcho();
@@ -213,6 +239,8 @@ void TerminalSession::deliverChar(char32_t value,
     if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
+    auto outcome = input::TerminalOutcome { input::SendChar {
+        .codepoint = value, .identity = keyIdentity, .modifiers = modifiers } };
     if (eventType != KeyboardEventType::Release)
     {
         auto const route = input::routeChar(value, keyIdentity, modifiers, appModifier, keyRouteContext());
@@ -224,6 +252,7 @@ void TerminalSession::deliverChar(char32_t value,
         // A character the terminal cannot represent, which no binding wanted: nothing is written.
         if (std::holds_alternative<input::ConsumeInput>(route.otherwise))
             return;
+        outcome = route.otherwise;
     }
     if (ended)
         return;
@@ -231,7 +260,7 @@ void TerminalSession::deliverChar(char32_t value,
     noteInputActivity();
     if (eventType != KeyboardEventType::Release)
         dropBlockFocusOnInput();
-    terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
+    sendOutcome(terminal(), outcome, eventType, now);
     refreshInputEcho(); // as in deliverKey
 }
 

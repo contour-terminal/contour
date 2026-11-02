@@ -659,12 +659,13 @@ TEST_CASE("shortcutText spells a command's configured chord as the host does", "
     TestApp app;
     ScopedController const window { app.manager() };
 
-    // ClosePane's Classic default, Ctrl+Shift+X, in this platform's spelling.
+    // CreateNewTab's default, the host's Primary chord and T, in this platform's spelling.
     auto const expected =
-        contour::command::platformShortcutStyle() == contour::command::ShortcutStyle::MacGlyphs
-            ? QStringLiteral("⌃⇧X")
-            : QStringLiteral("Ctrl+Shift+X");
-    CHECK(window->shortcutText(QStringLiteral("ClosePane")) == expected);
+        QString::fromStdString(contour::command::shortcutText(contour::test::hostPrimary(),
+                                                              contour::command::ShortcutInput { U'T' },
+                                                              contour::command::platformShortcutStyle()));
+    CHECK_FALSE(expected.isEmpty());
+    CHECK(window->shortcutText(QStringLiteral("CreateNewTab")) == expected);
     CHECK(window->shortcutText(QStringLiteral("NoSuchCommand")).isEmpty());
 }
 

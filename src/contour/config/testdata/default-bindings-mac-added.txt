@@ -2,7 +2,6 @@
 [defaults classic] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
-[defaults classic] char modes=[Any] mods=[Super] input=U+0051 clicks=- -> Quit declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
@@ -10,7 +9,6 @@
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
-[defaults native2026] char modes=[Any] mods=[Super] input=U+0051 clicks=- -> Quit declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Super] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
@@ -21,8 +19,7 @@
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=Backspace clicks=- -> SendChars("\u{15}") declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
-[fallbacks] char modes=[Any] mods=[Super] input=U+004B clicks=- -> ClearHistoryAndReset declined=pass gated=no
-[fallbacks] char modes=[Any] mods=[Super] input=U+002C clicks=- -> OpenConfiguration declined=pass gated=no
+[fallbacks] char modes=[~AltScreen] mods=[Super] input=U+004B clicks=- -> ClearToPrompt declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no

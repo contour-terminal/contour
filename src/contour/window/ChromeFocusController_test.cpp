@@ -536,7 +536,8 @@ TEST_CASE("an application binding works while the chrome has focus", "[windowcon
 
     SECTION("Ctrl+Shift+P opens the command palette, and the chrome keeps its focus")
     {
-        CHECK(f.chromeKey(Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier));
+        // Ctrl+Shift+P on the desktop, Command+Shift+P on a Mac.
+        CHECK(f.chromeKey(Qt::Key_P, contour::test::hostPrimaryQt(Qt::ShiftModifier)));
         CHECK(palette.count() == 1);
         CHECK(f.area() == ChromeArea::Tabs);
     }

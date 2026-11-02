@@ -327,7 +327,8 @@ namespace
                     { actions::PasteClipboard { .strip = false }, actions::CancelSelection {} }),
             written(All, CtrlShift, U' ', InsertOnly, { actions::ViNormalMode {} }),
             written(All, CtrlShift, U',', Any, { actions::OpenConfiguration {} }),
-            written(All, Primary, U'Q', Any, { actions::Quit {} }),
+            // macOS: the menu bar owns Quit (⌘Q), so no default binding takes it.
+            written(DesktopOnly, Primary, U'Q', Any, { actions::Quit {} }),
             written(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
             written(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             written(DesktopOnly, CtrlAlt, U'O', Any, { actions::OpenFileManager {} }),
@@ -385,8 +386,14 @@ namespace
                      { actions::CopySelection {}, actions::CancelSelection {} },
                      DeclinedInput::Consume),
             fallback(MacOnly, Super, U'V', Any, { actions::PasteClipboard { .strip = false } }),
-            fallback(MacOnly, Super, U'K', Any, { actions::ClearHistoryAndReset {} }),
-            fallback(MacOnly, Super, U',', Any, { actions::OpenConfiguration {} }),
+            // Command+K clears to the prompt (a hard reset would destroy a running vim or tmux), on the
+            // primary screen only; consumed when it declines, so it never types a 'k'.
+            fallback(MacOnly,
+                     Super,
+                     U'K',
+                     PrimaryScreenOnly,
+                     { actions::ClearToPrompt {} },
+                     DeclinedInput::Consume),
             fallback(MacOnly, Super, U'N', Any, { actions::NewTerminal {} }),
             fallback(MacOnly, Super, U'+', Any, { actions::IncreaseFontSize {} }),
             fallback(MacOnly, Super, U'=', Any, { actions::IncreaseFontSize {} }),

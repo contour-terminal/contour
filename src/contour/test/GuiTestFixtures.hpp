@@ -86,6 +86,26 @@ class ContourGuiApp;
 namespace contour::test
 {
 
+/// The Qt modifier flags of the host's Primary chord, plus @p extra: Control and Shift on the desktop, and
+/// Meta -- the Command key, as Qt reports it with its Control/Meta swap off -- on a Mac. So a test that
+/// presses the chord that opens a tab or the palette presses the one the host binds.
+/// @param extra Further flags the chord holds.
+/// @return The flags.
+[[nodiscard]] inline Qt::KeyboardModifiers hostPrimaryQt(Qt::KeyboardModifiers extra = {})
+{
+    auto flags = extra;
+    auto const primary = hostPrimary();
+    if (primary.contains(vtbackend::Modifier::Control))
+        flags |= Qt::ControlModifier;
+    if (primary.contains(vtbackend::Modifier::Shift))
+        flags |= Qt::ShiftModifier;
+    if (primary.contains(vtbackend::Modifier::Alt))
+        flags |= Qt::AltModifier;
+    if (primary.contains(vtbackend::Modifier::Super))
+        flags |= Qt::MetaModifier;
+    return flags;
+}
+
 /// The notifier every session a test makes raises through, unless the test wants another.
 ///
 /// It raises nothing. The platform's own on Linux is a FreeDesktopNotifier over the machine's session

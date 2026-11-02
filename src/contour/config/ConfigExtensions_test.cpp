@@ -193,11 +193,11 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .darkColorScheme = "contour-dark",
     .lightColorScheme = "contour-light",
     .tabBarVisibility = contour::config::TabBarVisibility::Always,
-#ifdef __APPLE__
-    .followHyperlinkModifier = vtbackend::Modifier::Super, // Command: Qt's Control/Meta swap is off
-#else
-    .followHyperlinkModifier = vtbackend::Modifier::Control,
-#endif
+    // Command on a Mac, where Qt's Control/Meta swap is off; Control elsewhere.
+    .followHyperlinkModifier =
+        contour::config::BuildKeyboardPlatformKind == contour::config::KeyboardPlatformKind::Mac
+            ? vtbackend::Modifier::Super
+            : vtbackend::Modifier::Control,
     .theme = contour::config::GuiTheme::Terminal,
     .hyperlinkHoverTooltip = false,
     .scrollBarMode = contour::config::ScrollBarModePreference::System,

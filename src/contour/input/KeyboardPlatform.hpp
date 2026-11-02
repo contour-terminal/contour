@@ -47,13 +47,15 @@ inline constexpr uint32_t MacRightOptionBit = 0x00000040;
     return static_cast<config::OptionKeySide>(bits);
 }
 
-/// The bit `captureKeyEvent` sets in NativeKeyEvent::nativeModifiers while CapsLock is toggled on, on
-/// Windows, where Qt's native modifier mask omits the lock toggles and the capture boundary samples them
-/// instead.
-inline constexpr uint32_t Win32CapsLockBit = 0x0001;
+/// The bit `captureKeyEvent` ORs into NativeKeyEvent::nativeModifiers while CapsLock is toggled on, on
+/// Windows. The capture boundary samples the toggles itself rather than trusting Qt's mask, and keeps Qt's
+/// own bits intact. Qt's Windows key mapper uses the low bits (left/right Shift, Control, Alt, Meta), 0x100
+/// to 0x400 (lock keys) and 0x01000000 (ExtendedKey), so the top two bits never collide with them.
+inline constexpr uint32_t Win32CapsLockBit = 0x40000000;
 
-/// The bit `captureKeyEvent` sets in NativeKeyEvent::nativeModifiers while NumLock is toggled on, on Windows.
-inline constexpr uint32_t Win32NumLockBit = 0x0002;
+/// The bit `captureKeyEvent` ORs into NativeKeyEvent::nativeModifiers while NumLock is toggled on, on
+/// Windows.
+inline constexpr uint32_t Win32NumLockBit = 0x80000000;
 
 /// The lock keys a Windows key event says are toggled on.
 /// @param nativeModifiers The value of NativeKeyEvent::nativeModifiers, after the capture boundary sampled
@@ -123,7 +125,9 @@ class KeyboardPlatform
 /// @param qtKey The Qt::Key.
 /// @param qtModifiers The Qt::KeyboardModifiers bits.
 /// @param text The text the press produced.
-/// @return The chord; empty where the platform means the press as no key.
+/// @return The chord the platform keeps for the press, which is empty only when it holds no modifier the
+///         platform counts (a composing Option key or AltGr leaves none); a text-typing press keeps its
+///         modifiers.
 [[nodiscard]] vtbackend::Modifiers chordOfKeyPress(KeyboardPlatform const& platform,
                                                    int qtKey,
                                                    uint32_t qtModifiers,

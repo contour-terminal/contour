@@ -1522,6 +1522,7 @@ TEST_CASE("TerminalSession: Ctrl+Shift+G opens the last output in the pager",
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     TestApp app { std::move(factoryOwned) };
+    contour::test::useDesktopBindings(app.app().config()); // Ctrl+Shift+G: a Mac's Command+G finds
     contour::test::ScopedController const win { app.manager() };
 
     auto* acting = app.manager().createSession(win.id);

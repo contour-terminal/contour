@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/input/Logging.hpp>
 #include <contour/input/NativeKeyEvent.hpp>
 
 #include <QtCore/QString>
@@ -153,7 +154,10 @@ std::optional<NativeKeyEvent> parseRecorded(std::string_view line)
 
     if (!line.starts_with("text="))
         return std::nullopt;
-    auto const utf8 = unescapeText(line.substr(5));
+    auto const text = line.substr(5);
+    if (text.contains(' '))
+        return std::nullopt;
+    auto const utf8 = unescapeText(text);
     if (!utf8)
         return std::nullopt;
 
@@ -166,6 +170,13 @@ std::optional<NativeKeyEvent> parseRecorded(std::string_view line)
     event.origin = *origin;
     event.text = QString::fromUtf8(utf8->data(), static_cast<qsizetype>(utf8->size())).toStdU32String();
     return event;
+}
+
+void logRecorded(NativeKeyEvent const& event)
+{
+    if (!inputLog.isEnabled())
+        return;
+    inputLog()("Captured {}", formatRecorded(event));
 }
 
 } // namespace contour::input

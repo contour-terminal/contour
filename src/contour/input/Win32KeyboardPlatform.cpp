@@ -16,9 +16,9 @@ namespace
     /// such codepoint in a UTF-32 text, and a graphical one: nothing there is a control character.
     constexpr char32_t FirstSupplementaryCodepoint = 0x10000;
 
-    /// Windows: the lock toggles are sampled by the capture boundary into the Win32 lock bits, and the
-    /// AltGr key arrives as Ctrl+Alt -- a layout level, which must not reach the encoders as modifiers, or
-    /// they would Ctrl-map an AltGr '[' into ESC.
+    /// Windows: the lock toggles are sampled by the capture boundary into the Win32 lock bits (ORed into Qt's
+    /// mask), and the AltGr key arrives as Ctrl+Alt -- a layout level, which must not reach the encoders as
+    /// modifiers, or they would Ctrl-map an AltGr '[' into ESC.
     ///
     /// Nothing in here allocates: it runs on every keystroke.
     class Win32KeyboardPlatform final: public KeyboardPlatform

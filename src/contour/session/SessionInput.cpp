@@ -381,6 +381,7 @@ bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, Term
     // Capture, normalize, route: what the platform means by the event is the session's platform's to say,
     // and where it goes is the router's. Nothing here knows which platform this is.
     auto const captured = input::captureKeyEvent(*event, eventType);
+    input::logRecorded(captured);
     if (session.sendKeyboardEvent(session.keyboardPlatform().normalize(captured), steady_clock::now())
         == KeyDelivery::Handled)
     {

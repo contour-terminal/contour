@@ -3110,6 +3110,7 @@ TEST_CASE("TerminalSessionManager: a pane restarted mid-command starts with no b
 TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][paneend]")
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::useDesktopBindings(app.app().config()); // ClosePane is the desktop's chord: a Mac has none
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
 

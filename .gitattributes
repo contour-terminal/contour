@@ -13,3 +13,7 @@ src/contour/cli/shell-integration/shell-integration.* text eol=lf
 # The control package's world.wit is rendered from the method catalog and its README is read for the verbs'
 # permissions, and vtcontrol_test compares both byte for byte. A CRLF checkout fails every comparison.
 wit/** text eol=lf
+
+# The default-bindings goldens are compared line by line against generated text; keep them LF in every
+# working tree so a Windows checkout does not read each line with a trailing CR.
+src/contour/config/testdata/*.txt text eol=lf

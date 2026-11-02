@@ -27,7 +27,9 @@ using vtbackend::Modifier;
 using vtbackend::Modifiers;
 
 /// A configuration whose input mappings are exactly @p mappings (the built-in fallback rows still apply).
-[[nodiscard]] contour::config::Config configWith(std::string_view mappings)
+[[nodiscard]] contour::config::Config configWith(
+    std::string_view mappings,
+    contour::config::KeyboardPlatformKind kind = contour::config::BuildKeyboardPlatformKind)
 {
     return contour::test::loadConfigFromYaml(std::format(R"(
 default_profile: main
@@ -37,7 +39,8 @@ profiles:
 input_mapping:
 {}
 )",
-                                                         mappings));
+                                                         mappings),
+                                             kind);
 }
 
 /// @return The name of the first action of @p actions, or empty when there are none.
@@ -85,9 +88,11 @@ TEST_CASE("routeKey finds the user row before the fallback row", "[input][router
 
     SECTION("the fallback row's decline policy travels with it")
     {
+        // Ctrl+Shift+G is the desktop's chord: a Mac's defaults give Command+G to the find bar.
         auto const userBound = configWith(R"(
     - { mods: [Control, Shift], key: G, action: ToggleFullscreen }
-)");
+)",
+                                          contour::config::KeyboardPlatformKind::Xkb);
         auto const route = contour::input::routeChar(U'G',
                                                      {},
                                                      Modifiers { Modifier::Control, Modifier::Shift },
@@ -132,26 +137,40 @@ TEST_CASE("an unbound app-modifier character is consumed only where Super cannot
 {
     auto const config = configWith("    - { mods: [], key: F3, action: ToggleFullscreen }");
     auto const super = KeyboardModifiers { Modifier::Super };
-    auto const identity = vtbackend::KeyIdentity { .unshiftedKey = U'c' };
+    // 'y': no platform's defaults bind Super+Y, where a Mac's give Command+C to copy.
+    auto const identity = vtbackend::KeyIdentity { .unshiftedKey = U'y' };
 
     auto const unrepresentable = contour::input::routeChar(
-        U'c', identity, super, AppModifier::Held, contextOf(config, SuperEncoding::Unrepresentable));
+        U'y', identity, super, AppModifier::Held, contextOf(config, SuperEncoding::Unrepresentable));
     CHECK(unrepresentable.user.actions == nullptr);
     CHECK(unrepresentable.fallback.actions == nullptr);
     CHECK(std::holds_alternative<ConsumeInput>(unrepresentable.otherwise));
 
     auto const representable = contour::input::routeChar(
-        U'c', identity, super, AppModifier::Held, contextOf(config, SuperEncoding::Representable));
+        U'y', identity, super, AppModifier::Held, contextOf(config, SuperEncoding::Representable));
     REQUIRE(std::holds_alternative<SendChar>(representable.otherwise));
     auto const sent = std::get<SendChar>(representable.otherwise);
-    CHECK(sent.codepoint == U'c');
-    CHECK(sent.identity.unshiftedKey == U'c');
+    CHECK(sent.codepoint == U'y');
+    CHECK(sent.identity.unshiftedKey == U'y');
     CHECK(sent.modifiers.chord == Modifiers { Modifier::Super });
 
     // Super that is no application modifier -- Linux, Windows -- reaches the application as ever.
     auto const absent = contour::input::routeChar(
-        U'c', identity, super, AppModifier::Absent, contextOf(config, SuperEncoding::Unrepresentable));
+        U'y', identity, super, AppModifier::Absent, contextOf(config, SuperEncoding::Unrepresentable));
     CHECK(std::holds_alternative<SendChar>(absent.otherwise));
+}
+
+TEST_CASE("an unbound app-modifier character is consumed under the event-type flag alone", "[input][router]")
+{
+    // Kitty flag 2 leaves a press legacy-encoded, so the session reports the encoding as unrepresentable: an
+    // unbound Command+J is consumed rather than typed as 'j'.
+    auto const config = configWith("    - { mods: [], key: F3, action: ToggleFullscreen }");
+    auto const route = contour::input::routeChar(U'j',
+                                                 vtbackend::KeyIdentity { .unshiftedKey = U'j' },
+                                                 KeyboardModifiers { Modifier::Super },
+                                                 AppModifier::Held,
+                                                 contextOf(config, SuperEncoding::Unrepresentable));
+    CHECK(std::holds_alternative<ConsumeInput>(route.otherwise));
 }
 
 TEST_CASE("an unbound app-modifier named key is sent", "[input][router]")

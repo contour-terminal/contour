@@ -268,6 +268,9 @@ KeyboardPolicy keyboardPolicyOf(config::TerminalProfile const& profile)
     return KeyboardPolicy { .optionAsAlt = profile.optionAsAlt.value() };
 }
 
+// Known limitation: the press is rebuilt from the QML KeyEvent, which exposes no nativeModifiers, so they
+// are zero here. A chrome lookup on macOS therefore cannot tell which Option key is held and treats it as
+// the platform treats an unnamed side under option_as_alt left or right.
 vtbackend::Modifiers chordOfKeyPress(KeyboardPlatform const& platform,
                                      int qtKey,
                                      uint32_t qtModifiers,

@@ -77,7 +77,8 @@ TEST_CASE("shortcutIndex advertises the built-in chords the user's bindings leav
     auto const openOutput = commandId(actions::OpenCommandOutput {});
 
     // Ctrl+Shift+G is in no default binding, so only the fallback table can name it.
-    auto const defaults = config::Config {};
+    auto defaults = config::Config {};
+    defaults.keyboardPlatformKind = config::KeyboardPlatformKind::Xkb;
     auto const index = shortcutIndex(defaults, ShortcutStyle::Text);
     REQUIRE(index.contains(openOutput));
     CHECK(index.at(openOutput) == "Ctrl+Shift+G");
@@ -90,14 +91,28 @@ TEST_CASE("shortcutIndex advertises the built-in chords the user's bindings leav
                                    .input = U'G',
                                    .binding = { actions::ScrollToTop {} } });
     auto shadowing = config::Config {};
+    shadowing.keyboardPlatformKind = config::KeyboardPlatformKind::Xkb;
     shadowing.inputMappings = std::move(mappings);
     auto const shadowed = shortcutIndex(shadowing, ShortcutStyle::Text);
     CHECK_FALSE(shadowed.contains(openOutput));
 }
 
+TEST_CASE("shortcutIndex names the macOS defaults by Command", "[contour][palette]")
+{
+    auto const& defaults =
+        config::defaultInputMappings(config::DefaultsEdition::Native2026, config::KeyboardPlatformKind::Mac);
+    auto const index = shortcutIndex(defaults, ShortcutStyle::Text);
+
+    REQUIRE(index.contains("CreateNewTab"));
+    CHECK(index.at("CreateNewTab") == "Super+T");
+    REQUIRE(index.contains("OpenCommandPalette"));
+    CHECK(index.at("OpenCommandPalette") == "Shift+Super+P");
+}
+
 TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][palette]")
 {
-    auto const& defaults = config::defaultInputMappings();
+    auto const& defaults =
+        config::defaultInputMappings(config::DefaultsEdition::Native2026, config::KeyboardPlatformKind::Xkb);
     auto const index = shortcutIndex(defaults, ShortcutStyle::Text);
 
     SECTION("the default bindings are found under their command id")
@@ -106,7 +121,9 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
         CHECK(index.at("CreateNewTab") == "Ctrl+Shift+T");
 
         REQUIRE(index.contains("SplitVertical"));
-        CHECK(index.at("SplitVertical") == contour::test::paneChordText(actions::SplitVertical {}));
+        CHECK(index.at("SplitVertical")
+              == contour::test::paneChordText(
+                  actions::SplitVertical {}, ShortcutStyle::Text, config::KeyboardPlatformKind::Xkb));
 
         // Every pane action the palette and the menus list shows the chord that runs it.
         for (auto const* id:

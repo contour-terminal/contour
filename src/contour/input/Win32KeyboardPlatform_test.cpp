@@ -150,9 +150,15 @@ TEST_CASE("the Win32 platform decodes the lock toggles the capture sampled", "[i
     other.nativeModifiers = XcbNumLock;
     CHECK(platform->normalize(other).modifiers.locks.none());
 
-    STATIC_CHECK(contour::input::win32LockKeysOf(0x3).contains(LockKey::CapsLock));
-    STATIC_CHECK(contour::input::win32LockKeysOf(0x3).contains(LockKey::NumLock));
+    STATIC_CHECK(
+        contour::input::win32LockKeysOf(contour::input::Win32CapsLockBit | contour::input::Win32NumLockBit)
+            .contains(LockKey::CapsLock));
+    STATIC_CHECK(
+        contour::input::win32LockKeysOf(contour::input::Win32CapsLockBit | contour::input::Win32NumLockBit)
+            .contains(LockKey::NumLock));
     STATIC_CHECK(contour::input::win32LockKeysOf(0).none());
+    // Qt's own Windows bits (CapsLock 0x100, NumLock 0x200, ExtendedKey 0x01000000) are not the sampled ones.
+    STATIC_CHECK(contour::input::win32LockKeysOf(0x01000700).none());
 }
 
 TEST_CASE("every keystroke reaches the Win32 input method", "[input][platform][win32]")

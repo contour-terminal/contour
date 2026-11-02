@@ -279,7 +279,8 @@ TEST_CASE("TerminalSession: Ctrl+Shift+P opens the palette instead of reaching t
     auto session = makeDisplaylessSession(testApp.app());
     auto const now = std::chrono::steady_clock::now();
 
-    auto const ctrlShift = Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+    // Ctrl+Shift+P on the desktop, Command+Shift+P on a Mac.
+    auto const ctrlShift = contour::test::hostPrimary(vtbackend::Modifiers { vtbackend::Modifier::Shift });
 
     // Ctrl+printable arrives as a CHARACTER (Qt::Key_P is not in helper.cpp's KeyMappings table), which
     // is why the default binding is a CharInputMapping on 'P' rather than a KeyInputMapping.

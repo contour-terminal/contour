@@ -2026,7 +2026,7 @@ else()
 
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
         set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
         set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

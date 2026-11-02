@@ -33,10 +33,11 @@ per-platform tests drive the normalizers with recorded events.
 | Decision | Home |
 |----------|------|
 | What the Qt event holds, and the Windows lock-key sample (`GetKeyState`) | `input/QtKeyCapture.cpp` |
-| The active native key layout (Carbon / Windows `MapVirtualKey` / the live XKB keymap) | `input/KeyboardLayout.cpp`, `input/XkbLiveKeymap.cpp` |
+| The active native key layout (Carbon / Windows `ToUnicodeEx` / the live XKB keymap) | `input/KeyboardLayout.cpp`, `input/XkbLiveKeymap.cpp` |
 | Which kind this build is | `config/KeyboardPlatformKind.hpp`, read once by the composition root |
 | Option sides, ⌘ as the application modifier, the Option rule, input-method bypass (macOS) | `input/MacKeyboardPlatform.cpp` |
-| AltGr versus Ctrl+Alt, lock keys, layout-resolved OEM keys (Windows) | `input/Win32KeyboardPlatform.cpp` |
+| AltGr versus Ctrl+Alt, lock keys (Windows) | `input/Win32KeyboardPlatform.cpp` |
+| Layout-resolved OEM keys (Windows): a virtual key named through `ToUnicodeEx`, the US table behind it | `input/KeyboardLayout.cpp` |
 | Keysym to codepoint, the unshifted key from the keymap (X11, Wayland) | `input/XkbKeyboardPlatform.cpp`, `input/KeysymTable.hpp`, `input/XkbKeymap.hpp` |
 | Which chords are default bindings on which platform, and `Primary` | `config/DefaultBindings.cpp` (one table, with a platform column), `config/ModifierNames.hpp` |
 | How a shortcut is drawn (`⇧⌘P` or `Ctrl+Shift+P`) | `command/Shortcut.*` |
@@ -62,7 +63,25 @@ single-codepoint key press allocates nothing. `input/KeyPipeline_bench_test.cpp`
 (`contour_gui_test "[bench]"`; set `CONTOUR_BENCH_ENFORCE=1` to make the budget a failure), and
 `bench-headless keypress` is the end-to-end comparison against `master`.
 
+### Recording what a platform delivers
+
+Every key press and every input-method commit is captured as plain data (`NativeKeyEvent`) before anything
+decides what it means. While the `gui.input` log category is enabled, each one is also logged in the
+form `formatRecorded()` writes and `parseRecorded()` reads back:
+
+    Captured key=0x41 mods=0x0 native=0x0 vk=0x0 scan=0x0 type=press origin=keyboard text=a
+
+Nothing is formatted or allocated while the category is off. A tester who sees a wrong key enables it
+(`contour --debug gui.input`), reproduces the key and sends
+back the `Captured ...` lines with their platform, keyboard layout and the bytes the program received.
+`parseRecorded()` turns such a line into a row for the characterization table. The text field is escaped
+(`\x20` for a space, never a raw one), and a line holding a raw space in it is rejected.
+
 ### Known limitations
+
+* **A chrome shortcut lookup on macOS cannot tell the Option sides apart.** `chordOfKeyPress()` rebuilds
+  the press from a QML `KeyEvent`, which exposes no `nativeModifiers`, so with `option_as_alt` set to `left`
+  or `right` the Option key reads as the side the setting does not name. Terminal input is unaffected.
 
 * **Wayland has no live keymap.** Qt does not expose the compositor's keymap, so the unshifted key is read
   through the keysym table (below).
@@ -128,6 +147,14 @@ where the shifted and unshifted characters coincide. This is a known gap, not a 
 
 `makeLiveXkbKeymap()` returns `nullptr` under any Qt platform that is not xcb, and under no Qt
 application at all, so offscreen runs and Wayland take the same fallback path.
+
+### Deliberate Windows behaviour: the layout's letter is the key
+
+On Windows the key a press reports as its unshifted key (the kitty protocol's key code) is what the
+active layout types for the virtual key, through `ToUnicodeEx`. On a Russian layout the `A` key therefore
+reports `ф` (1092), where the US table gave `a`. This is intended -- the protocol names a key by what it
+types -- and the characterization row "win32: Cyrillic letter on a Russian layout under kitty report-all" pins it
+with a fixed Russian layout, since the live call exists on Windows only.
 
 ### Rejected alternatives
 

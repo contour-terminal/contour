@@ -1821,7 +1821,11 @@ TEST_CASE("SettingsController: the bindings viewer lists the built-in bindings n
         builtIn(QStringLiteral("Control+Left x3"), QStringLiteral("SelectCommandBlock"));
         builtIn(QStringLiteral("Right"), QStringLiteral("OpenContextMenu"));
         builtIn(QStringLiteral("WheelLeft"), QStringLiteral("SwitchToTabLeft"));
-        builtIn(QStringLiteral("Shift+Control+G"), QStringLiteral("OpenCommandOutput"));
+        // A built-in fallback row: the desktop's Ctrl+Shift+G, which a Mac replaces with Command+G to find.
+        if (config::BuildKeyboardPlatformKind == config::KeyboardPlatformKind::Mac)
+            builtIn(QStringLiteral("Super+G"), QStringLiteral("FocusNextSearchMatch"));
+        else
+            builtIn(QStringLiteral("Shift+Control+G"), QStringLiteral("OpenCommandOutput"));
 
         // The defaults list Ctrl+Tab as well, so its built-in twin is shadowed and the chord is listed once.
         auto const tab = rowsFor(*fx.controller, QStringLiteral("Control+Tab"));

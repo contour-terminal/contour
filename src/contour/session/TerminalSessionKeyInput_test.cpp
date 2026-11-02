@@ -27,6 +27,16 @@ using contour::input::NativeKeyEvent;
 using contour::session::KeyDelivery;
 using namespace contour::test::keybits;
 
+/// The chord that opens a tab on this host, as the display delivers it: Ctrl+Shift+T on the desktop,
+/// Command+T on a Mac.
+NativeKeyEvent newTabChord()
+{
+    auto const usesControl = contour::test::hostPrimary().contains(vtbackend::Modifier::Control);
+    return NativeKeyEvent { .qtKey = 'T',
+                            .text = usesControl ? U"\x14" : U"t",
+                            .qtModifiers = static_cast<uint32_t>(contour::test::hostPrimaryQt().toInt()) };
+}
+
 /// Delivers @p event to @p session the way the display does: through the session's platform, then routed.
 KeyDelivery deliver(contour::session::TerminalSession& session, NativeKeyEvent const& event)
 {
@@ -46,7 +56,7 @@ TEST_CASE("a repeat of a bound non-repeatable chord sends nothing", "[session][i
     REQUIRE(session != nullptr);
     auto& pty = contour::test::mockPtyOf(*session);
 
-    auto const newTab = NativeKeyEvent { .qtKey = 'T', .text = U"\x14", .qtModifiers = Ctrl | Shift };
+    auto const newTab = newTabChord();
     auto repeat = newTab;
     repeat.type = vtbackend::KeyboardEventType::Repeat;
 
@@ -83,10 +93,9 @@ TEST_CASE("an ended pane runs bindings and restarts on bare Return only", "[sess
     auto const ptysBefore = factory->createdPtys.size();
     pty.stdinBuffer().clear();
 
-    // The bindings still run: Ctrl+Shift+T opens a tab -- a new session, while the ended one stays put.
+    // The bindings still run: the new-tab chord opens a tab -- a new session, while the ended one stays put.
     // Shift+Return is a chord the user may bind, not a request to restart.
-    CHECK(deliver(*ended, { .qtKey = 'T', .text = U"\x14", .qtModifiers = Ctrl | Shift })
-          == KeyDelivery::Handled);
+    CHECK(deliver(*ended, newTabChord()) == KeyDelivery::Handled);
     CHECK(factory->createdPtys.size() == ptysBefore + 1);
     CHECK(deliver(*ended, { .qtKey = KeyReturn, .text = U"\r", .qtModifiers = Shift })
           == KeyDelivery::Handled);

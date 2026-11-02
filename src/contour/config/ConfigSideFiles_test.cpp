@@ -166,8 +166,10 @@ TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[c
 
     REQUIRE(bound != mappings.charMappings.end());
     CHECK(bound->input == U'P');
+    // Primary+Shift: Ctrl+Shift on the desktop, Command+Shift on a Mac.
     CHECK(bound->modifiers
-          == vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift });
+          == contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
+                 .with(vtbackend::Modifier::Shift));
 }
 
 TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
@@ -1493,8 +1495,8 @@ TEST_CASE("Config: an input_mapping section replaces the built-in defaults", "[c
         return std::ranges::any_of(charMappings, [](auto const& mapping) {
             return mapping.input == U'P'
                    && mapping.modifiers
-                          == vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                    vtbackend::Modifier::Shift };
+                          == contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
+                                 .with(vtbackend::Modifier::Shift);
         });
     };
 
@@ -2589,10 +2591,10 @@ TEST_CASE("a written config round-trips on its own platform", "[config][primary]
 
         // The chords are what is compared: a row's action list is written as its first action only.
         auto const chords = [](auto const& rows) {
-            return rows | std::views::transform([](auto const& row) {
-                       return std::tuple { row.input, row.modifiers.value(), row.modes, row.clickCount };
-                   })
-                   | std::ranges::to<std::vector>();
+            return std::ranges::to<std::vector>(
+                rows | std::views::transform([](auto const& row) {
+                    return std::tuple { row.input, row.modifiers.value(), row.modes, row.clickCount };
+                }));
         };
         CHECK(chords(reloaded.inputMappings.value().keyMappings)
               == chords(original.inputMappings.value().keyMappings));
@@ -2707,6 +2709,9 @@ profiles:
 input_mapping:
     - {{ mods: [Alt], key: 'E', action: CreateNewTab }}
     - {{ mods: [Alt], key: Left, action: SwitchToTabLeft }}
+    - {{ mods: [Alt], key: 'F', action: CreateNewTab }}
+    - {{ mods: [Alt, Control], key: 'G', action: CreateNewTab }}
+    - {{ mods: [Alt, Super], key: 'H', action: CreateNewTab }}
 )",
                            optionAsAlt);
     };
@@ -2715,9 +2720,16 @@ input_mapping:
     {
         auto capture = core::log::ScopedCapture { "error" };
         (void) loadFromYaml(dir, document("off"), KeyboardPlatformKind::Mac);
-        CHECK(capture.text().contains("Alt+E cannot fire on macOS while option_as_alt is off"));
+        CHECK(capture.text().contains("Alt+E, Alt+F cannot fire on macOS while option_as_alt is off"));
         CHECK_FALSE(capture.text().contains("Alt+Left"));
         CHECK_FALSE(capture.text().contains("Alt+L"));
+        // Control and Super keep the chord firing: they are not listed.
+        CHECK_FALSE(capture.text().contains("Alt+G"));
+        CHECK_FALSE(capture.text().contains("Alt+H"));
+        // One summary line, not one error per binding.
+        auto const& text = capture.text();
+        CHECK(text.contains("cannot fire"));
+        CHECK(text.find("cannot fire", text.find("cannot fire") + 1) == std::string::npos);
     }
 
     SECTION("a profile that turns Option into Alt keeps the binding firing, so no warning")

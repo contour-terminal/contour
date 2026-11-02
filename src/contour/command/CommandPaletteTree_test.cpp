@@ -353,7 +353,8 @@ TEST_CASE("paletteTree.idFallbackHighlightsNothing", "[palettetree]")
 {
     // "clipboard:strip" is not in the title "Paste Clipboard (strip whitespace)" (no colon), only in the
     // id "PasteClipboard:strip", a default binding's command.
-    auto const bound = BoundCommandSource { config::defaultInputMappings() };
+    auto const bound = BoundCommandSource { config::defaultInputMappings(config::DefaultsEdition::Native2026,
+                                                                         config::KeyboardPlatformKind::Xkb) };
     auto const sources = std::array<CommandSource const*, 1> { &bound };
     auto const tree = buildPaletteTree(collectCommands(sources));
 

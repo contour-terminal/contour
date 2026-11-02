@@ -219,6 +219,13 @@ namespace
     return contour::test::makeTestSession(&app.sessionsManager(), std::move(pty), app);
 }
 
+/// A display-less session decoding keys as the desktop (X11/Wayland) does, whatever the host: for a test of
+/// a chord only the desktop delivers, whose keys a Mac's platform would decode differently.
+/// @param app The test application whose configuration the session reads.
+/// @return The session; its PTY is a MockPty.
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeDesktopSession(
+    contour::ContourGuiApp& app);
+
 /// The layout for every test that is not about layouts: with no keymap it reads the native key identifier
 /// as a keysym, which for the events built here (nativeVirtualKey 0) means "unknown".
 [[nodiscard]] contour::input::KeyboardLayout const& xkbLayout()
@@ -236,6 +243,15 @@ namespace
 }
 
 using contour::test::mockPtyOf;
+
+std::unique_ptr<contour::session::TerminalSession> makeDesktopSession(contour::ContourGuiApp& app)
+{
+    return contour::test::makeTestSession(
+        &app.sessionsManager(),
+        std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }),
+        app,
+        contour::input::makeKeyboardPlatformFactory(contour::config::KeyboardPlatformKind::Xkb, xkbLayout()));
+}
 
 #ifdef _WIN32
 /// Presses a key with Ctrl+Alt held, as Qt's Windows plugin reports both a genuine Ctrl+Alt chord
@@ -550,10 +566,10 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     CHECK(reachedThePty(Qt::Key_PageDown, Qt::NoModifier));
 }
 
-#ifndef __APPLE__
 TEST_CASE("the pane chords are claimed before the terminal encodes them", "[session][input][panes]")
 {
     contour::test::TestApp app;
+    contour::test::useDesktopBindings(app.app().config());
 
     // The tab-switch test above explains why the table is emptied for the second pass: a user whose
     // contour.yml enumerates the defaults of an older release has none of the rows added since, and only
@@ -565,7 +581,7 @@ TEST_CASE("the pane chords are claimed before the terminal encodes them", "[sess
         app.app().config().inputMappings.value().charMappings.clear();
     }
 
-    auto session = makeSession(app.app());
+    auto session = makeDesktopSession(app.app());
     auto& pty = mockPtyOf(*session);
 
     auto const reachedThePty = [&](Qt::Key key, Qt::KeyboardModifiers modifiers, QString const& text) {
@@ -595,11 +611,11 @@ TEST_CASE("the pane chords are claimed before the terminal encodes them", "[sess
             reachedThePty(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("\x0f")));
     }
 }
-#endif
 
 TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][input][semanticblocks]")
 {
     contour::test::TestApp app;
+    contour::test::useDesktopBindings(app.app().config()); // a Mac's Command+G finds instead
     auto session = makeSession(app.app());
     auto& pty = mockPtyOf(*session);
 
@@ -848,11 +864,13 @@ TEST_CASE("a bound letter chord fires whichever route delivered it", "[session][
     // parses cleanly and then never fires. Written uppercase instead, the text route would be the
     // one to miss. Either way the routes must agree, which is what the fold buys.
     contour::test::TestApp app;
+    contour::test::useDesktopBindings(app.app().config()); // the text route's Alt is a desktop one
 
     // Two bindings, deliberately chosen to reach different routes. Alt+P is the interesting one: with
     // Control held, the Ctrl branch claims the event before event->text() is ever consulted, so a
     // Ctrl chord can NOT exercise the text route no matter what text is attached to it.
-    app.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
+    app.app().config().inputMappings =
+        contour::test::loadConfigFromYaml(R"(
 default_profile: main
 profiles:
     main:
@@ -860,10 +878,11 @@ profiles:
 input_mapping:
     - { mods: [Control, Shift], key: 'p', action: OpenCommandPalette }
     - { mods: [Alt],            key: 'p', action: OpenCommandPalette }
-)")
-                                           .inputMappings;
+)",
+                                          contour::config::KeyboardPlatformKind::Xkb)
+            .inputMappings;
 
-    auto session = makeSession(app.app());
+    auto session = makeDesktopSession(app.app());
     auto& pty = mockPtyOf(*session);
 
     auto const ctrlShift = Qt::ControlModifier | Qt::ShiftModifier;
@@ -890,21 +909,10 @@ input_mapping:
         // An Alt chord (no Control) is what actually reaches event->text(); a Ctrl chord is claimed
         // by the Ctrl branch first, no matter what text is attached to it. An unshifted letter
         // arrives here in LOWERCASE.
-#ifdef __APPLE__
-        // Issue #2016. This section cannot pass on macOS, and the reason is a real defect rather
-        // than a quirk of the test: with `option_as_alt` off (the default), helper.cpp's text route
-        // strips Alt before dispatching -- `modifiers.without(Modifier::Alt)` -- because macOS does
-        // not deliver Alt to terminal applications. But it strips it ahead of the BINDING lookup
-        // too, so no `input_mapping` with `mods: [Alt]` can ever fire on macOS unless the profile
-        // opts into option-as-Alt. Alt bindings are a documented feature, so that is a bug, not a
-        // platform limit -- it predates the daemon work (the line is from 2021) and is out of scope
-        // to change here.
-        //
-        // Skipped rather than asserted: pinning today's behaviour would turn the defect into the
-        // contract, and this is the only route of the four that macOS diverges on. When #2016 is
-        // fixed this guard comes out, and the section becomes the regression test for it.
-        SKIP("macOS strips Alt before the binding lookup unless option_as_alt is set (#2016)");
-#endif
+        // Issue #2016. The session is a desktop one (pinned above), where Alt is Alt: the binding fires.
+        // On a Mac the same chord fires as well wherever the Option rule makes Option an Alt -- an
+        // Option key option_as_alt names, or a key whose Option layer composes nothing -- while Option+p
+        // with option_as_alt off composes and is rightly not Alt (see the Option+Left tests below).
         QKeyEvent ev(QEvent::KeyPress, Qt::Key_P, Qt::AltModifier, QStringLiteral("p"));
         pty.stdinBuffer().clear();
         contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session);
@@ -1031,8 +1039,7 @@ TEST_CASE("macOS chords reach their actions as Qt delivers them", "[session][inp
     auto const rows = std::vector<Row> {
         { "Command+C", Qt::Key_C, Command, 0x08, "c", 0, "CopySelection", "" },
         { "Command+V", Qt::Key_V, Command, 0x09, "v", 0, "PasteClipboard", "" },
-        { "Command+K", Qt::Key_K, Command, 0x28, "k", 0, "ClearHistoryAndReset", "" },
-        { "Command+comma", Qt::Key_Comma, Command, 0x2B, ",", 0, "OpenConfiguration", "" },
+        { "Command+K", Qt::Key_K, Command, 0x28, "k", 0, "ClearToPrompt", "" },
         { "Command+N", Qt::Key_N, Command, 0x2D, "n", 0, "NewTerminal", "" },
         { "Command+equal", Qt::Key_Equal, Command, 0x18, "=", 0, "IncreaseFontSize", "" },
         // The plus sign is Shift+equal on a US layout: it arrives as '+' with Shift, retried under '='.
@@ -1124,6 +1131,30 @@ TEST_CASE("Command+X and Command+S are bound to nothing on macOS and are consume
     }
 }
 
+TEST_CASE("Command+K clears to the prompt on the primary screen only, and never resets",
+          "[session][input][macos]")
+{
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+    auto event = cocoaPress(Qt::Key_K, Qt::MetaModifier, 0x28, "k");
+
+    SECTION("on the primary screen it is ClearToPrompt")
+    {
+        CHECK(resolvedAction(*session, event) == std::optional { std::string { "ClearToPrompt" } });
+    }
+
+    SECTION("on the alternate screen nothing is bound, and the chord is consumed")
+    {
+        session->terminal().writeToScreen("\033[?1049h");
+        CHECK_FALSE(resolvedAction(*session, event).has_value());
+        pty.stdinBuffer().clear();
+        std::ignore = contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session);
+        CHECK(pty.stdinBuffer().empty());
+        CHECK(session->terminal().isAlternateScreen());
+    }
+}
+
 TEST_CASE("Command+Backspace on the alternate screen is the application's", "[session][input][macos]")
 {
     contour::test::TestApp app;
@@ -1135,5 +1166,6 @@ TEST_CASE("Command+Backspace on the alternate screen is the application's", "[se
     CHECK_FALSE(resolvedAction(*session, event).has_value());
     pty.stdinBuffer().clear();
     std::ignore = contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session);
-    CHECK(pty.stdinBuffer() != "\025");
+    // Super is dropped by the legacy encoding of a named key: the application gets a plain Backspace (DEL).
+    CHECK(pty.stdinBuffer() == "\177");
 }

@@ -18,6 +18,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -26,6 +27,50 @@ using namespace contour::config;
 namespace
 {
 
+/// Overload set of the actions whose arguments describeAction() spells out; every other action
+/// goes through formatAction(). Named non-template functions, so no std::format call sits inside a
+/// generic visitor lambda.
+[[nodiscard]] std::string describeArguments(contour::actions::PasteClipboard const& a)
+{
+    return std::format("PasteClipboard(strip={})", a.strip ? "yes" : "no");
+}
+
+/// @p text in double quotes with the control characters spelled out, as the golden files have them.
+/// Written out by hand: the `{:?}` debug presentation needs libstdc++ 15.
+[[nodiscard]] std::string quotedText(std::string_view text)
+{
+    auto result = std::string { "\"" };
+    for (auto const ch: text)
+    {
+        switch (ch)
+        {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7F)
+                    result +=
+                        std::format("\\u{{{:x}}}", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+                else
+                    result += ch;
+        }
+    }
+    result += '"';
+    return result;
+}
+
+[[nodiscard]] std::string describeArguments(contour::actions::SendChars const& a)
+{
+    return "SendChars(" + quotedText(a.chars) + ")";
+}
+
+[[nodiscard]] std::string describeArguments(contour::actions::HintMode const& a)
+{
+    return std::format("HintMode({}, {})", a.patterns, std::to_underlying(a.hintAction));
+}
+
 /// An action with the arguments that identify it, which formatAction() leaves out where the config
 /// writer has no use for them (a paste's strip flag, the characters a SendChars sends).
 [[nodiscard]] std::string describeAction(contour::actions::Action const& action)
@@ -33,13 +78,8 @@ namespace
     using namespace contour::actions;
     return std::visit(
         [&](auto const& a) -> std::string {
-            using T = std::decay_t<decltype(a)>;
-            if constexpr (std::is_same_v<T, PasteClipboard>)
-                return std::format("PasteClipboard(strip={})", a.strip ? "yes" : "no");
-            else if constexpr (std::is_same_v<T, SendChars>)
-                return std::format("SendChars({:?})", a.chars);
-            else if constexpr (std::is_same_v<T, HintMode>)
-                return std::format("HintMode({}, {})", a.patterns, std::to_underlying(a.hintAction));
+            if constexpr (requires { describeArguments(a); })
+                return describeArguments(a);
             else
                 return formatAction(action);
         },
@@ -119,7 +159,10 @@ void appendFallbacks(std::string& out, char const* table, std::vector<FallbackMa
 {
     auto in = std::ifstream(testdata(name), std::ios::binary);
     REQUIRE(in.good());
-    return std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+    auto text = std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+    // A checkout that converted the golden to CRLF must not make every line differ by its CR.
+    std::erase(text, '\r');
+    return text;
 }
 
 /// The tables of @p kind as the golden files spell them: both editions' defaults, then the fallbacks.
@@ -278,6 +321,38 @@ TEST_CASE("macOS leaves Cut, Save and the font-size Control chords to the applic
         auto const desktop = makeDefaultInputMappings(edition, KeyboardPlatformKind::Xkb);
         CHECK(std::ranges::any_of(desktop.charMappings, [](auto const& row) {
             return row.modifiers == Modifiers { Modifier::Control } && row.input == U'0';
+        }));
+    }
+}
+
+TEST_CASE("no macOS default takes a chord the menu bar owns", "[config][defaults]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    // The cocoa menu bar owns Quit (Command+Q), Settings (Command+,), Hide (Command+H, Option+Command+H)
+    // and Minimize (Command+M); they run the same actions, so no default may bind them.
+    auto const owned = std::vector<std::pair<Modifiers, char32_t>> {
+        { Modifiers { Modifier::Super }, U'Q' }, { Modifiers { Modifier::Super }, U',' },
+        { Modifiers { Modifier::Super }, U'H' }, { Modifiers { Modifier::Super, Modifier::Alt }, U'H' },
+        { Modifiers { Modifier::Super }, U'M' },
+    };
+    for (auto const edition: { DefaultsEdition::Classic, DefaultsEdition::Native2026 })
+    {
+        auto const mappings = makeDefaultInputMappings(edition, KeyboardPlatformKind::Mac);
+        for (auto const& [modifiers, input]: owned)
+        {
+            CHECK_FALSE(std::ranges::any_of(mappings.charMappings, [&](auto const& row) {
+                return row.modifiers == modifiers && row.input == input;
+            }));
+            CHECK_FALSE(std::ranges::any_of(
+                builtinFallbackCharMappings(KeyboardPlatformKind::Mac), [&](auto const& row) {
+                    return row.mapping.modifiers == modifiers && row.mapping.input == input;
+                }));
+        }
+        // ...while the desktop keeps Ctrl+Shift+Q.
+        auto const desktop = makeDefaultInputMappings(edition, KeyboardPlatformKind::Xkb);
+        CHECK(std::ranges::any_of(desktop.charMappings, [](auto const& row) {
+            return row.input == U'Q' && row.modifiers == Modifiers { Modifier::Control, Modifier::Shift };
         }));
     }
 }
