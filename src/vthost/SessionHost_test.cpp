@@ -18,6 +18,7 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Base64.hpp>
 #include <core/async/Task.hpp>
 #include <core/async/testing/ManualExecutor.hpp>
 #include <core/log/LogSink.hpp>
@@ -935,6 +936,7 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
                                            {},
                                            {},
                                            {},
+                                           {},
                                            {} };
     session.start();
     // Lines, which the slave's line discipline keeps for a reader: a megabyte of them parks the pump.
@@ -974,6 +976,7 @@ TEST_CASE("a hosted session's process exit drops its working program status befo
                                           vtbackend::HostIdentity {},
                                           vtbackend::TerminalClocks::system(),
                                           core::platform::NativeFileSystem::instance(),
+                                          {},
                                           {},
                                           {},
                                           {},
@@ -1035,6 +1038,7 @@ TEST_CASE("a hosted session refuses a buffer capture rather than dropping it", "
                                           vtbackend::HostIdentity {},
                                           vtbackend::TerminalClocks::system(),
                                           core::platform::NativeFileSystem::instance(),
+                                          {},
                                           {},
                                           {},
                                           {},
@@ -3308,4 +3312,234 @@ TEST_CASE("a window made empty for a move is claimed by its creator and given ba
     CHECK(h.host.model().window(id) == nullptr);
     CHECK_FALSE(h.host.objects().uuidOf(id).has_value());
     CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Unclaimed);
+}
+
+// ---------------------------------------------------------------------------
+// Kitty animation playback. The daemon renders no frame, so nothing would tick a hosted terminal: the host
+// arms a frame timer from the terminal's kitty deadline alone, and throttles it, as every advanced frame is a
+// whole image on the wire to every client.
+
+namespace
+{
+
+/// A host whose loop and terminals read ONE manual clock, so a case steps kitty playback through time, and a
+/// mirror counting the screen updates a client would be sent.
+struct PlaybackHarness
+{
+    struct Mirror final: vthost::SessionStreamEvents
+    {
+        int updates = 0;
+        void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
+    };
+
+    PlaybackHarness()
+    {
+        auto const* tab = host.createTab();
+        REQUIRE(tab != nullptr);
+        session = tab->rootPane()->session();
+        terminal = host.terminal(session);
+        REQUIRE(terminal != nullptr);
+        host.subscribeStream(&mirror);
+    }
+
+    ~PlaybackHarness() { host.unsubscribeStream(&mirror); }
+
+    PlaybackHarness(PlaybackHarness const&) = delete;
+    PlaybackHarness(PlaybackHarness&&) = delete;
+    PlaybackHarness& operator=(PlaybackHarness const&) = delete;
+    PlaybackHarness& operator=(PlaybackHarness&&) = delete;
+
+    /// Turns the loop a few times without blocking: a posted deadline is armed, a due timer fires, and the
+    /// screen update it raised reaches the mirror.
+    void turn()
+    {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    }
+
+    /// Moves the clock on by @p duration in @p step steps, turning the loop after each.
+    void play(std::chrono::milliseconds duration, std::chrono::milliseconds step)
+    {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, static_cast<int>(duration / step)))
+        {
+            clock.advance(step);
+            turn();
+        }
+    }
+
+    /// Places a one-pixel image under id 7 at the top left, with @p count frames each shown for @p gap and
+    /// telling itself apart by its red channel (@see shownFrame), and starts it looping.
+    void placeLoopingFrames(int count, std::chrono::milliseconds gap)
+    {
+        auto const pixel = [](int frame) {
+            auto const rgb = std::string { static_cast<char>(frame * 20), '\0', '\0' };
+            return core::base64::encode(rgb);
+        };
+        terminal->writeToScreen(std::format("\033_Ga=T,f=24,i=7,s=1,v=1;{}\033\\", pixel(0)));
+        terminal->writeToScreen(std::format("\033_Ga=a,i=7,r=1,z={}\033\\", gap.count()));
+        for (auto const frame: std::views::iota(1, count))
+            terminal->writeToScreen(
+                std::format("\033_Ga=f,i=7,X=1,s=1,v=1,z={};{}\033\\", gap.count(), pixel(frame)));
+        terminal->writeToScreen("\033_Ga=a,i=7,s=3\033\\");
+        turn();
+        mirror.updates = 0;
+    }
+
+    /// @return The frame the placed image shows, by the red channel placeLoopingFrames() gave it; nullopt
+    ///         for none placed.
+    [[nodiscard]] std::optional<int> shownFrame() const
+    {
+        auto const _ = std::lock_guard { *terminal };
+        auto const fragment = terminal->primaryScreen()
+                                  .at(vtbackend::LineOffset(0), vtbackend::ColumnOffset(0))
+                                  .imageFragment();
+        if (!fragment)
+            return std::nullopt;
+        auto const& data = fragment->rasterizedImage().image().data();
+        if (data.empty())
+            return std::nullopt;
+        return data.front() / 20;
+    }
+
+    core::platform::ManualClock clock {};
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source, clock };
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .clocks = vtbackend::TerminalClocks {
+                                                       .steady = clock,
+                                                       .wall = core::platform::defaultSystemWallClock(),
+                                                       .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
+    vtworkspace::SessionId session {};
+    vtbackend::Terminal* terminal = nullptr;
+    Mirror mirror;
+};
+
+/// The most screen updates a session's playback may raise over @p duration: one per minimum frame interval,
+/// and the first, which is not throttled.
+[[nodiscard]] constexpr int mostFramesIn(std::chrono::milliseconds duration)
+{
+    return static_cast<int>(duration / vthost::DaemonMinimumFrameInterval) + 1;
+}
+
+} // namespace
+
+TEST_CASE("daemon.playback_advances_frames_for_a_hosted_session", "[vthost][host][kitty]")
+{
+    auto h = PlaybackHarness {};
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 200 });
+    CHECK(h.host.ticksKittyAnimations(h.session));
+    REQUIRE(h.shownFrame() == 0);
+
+    h.clock.advance(std::chrono::milliseconds { 200 });
+    h.turn();
+
+    // The second frame is on the session's screen, and the clients were told.
+    CHECK(h.shownFrame() == 1);
+    CHECK(h.mirror.updates > 0);
+    // Still playing: the timer is armed for the third.
+    CHECK(h.host.ticksKittyAnimations(h.session));
+
+    h.clock.advance(std::chrono::milliseconds { 200 });
+    h.turn();
+    CHECK(h.shownFrame() == 2);
+}
+
+TEST_CASE("daemon.playback_is_throttled_to_the_minimum_interval", "[vthost][host][kitty]")
+{
+    // Twelve frames 10 ms apart: a loop of 120 ms, longer than the throttle, so a throttled tick catches up
+    // within one loop and lands on the frame its time shows.
+    auto h = PlaybackHarness {};
+    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+
+    auto constexpr Duration = std::chrono::milliseconds { 1000 };
+    h.play(Duration, std::chrono::milliseconds { 10 });
+
+    auto constexpr Most = mostFramesIn(Duration);
+    CHECK(h.mirror.updates > 0);
+    CHECK(h.mirror.updates <= Most);
+    // The first frame is due at 10 ms, every later tick a minimum interval after the one before: the last
+    // within the second is at 910 ms, which is 70 ms into the 120 ms loop -- the eighth frame. Skipped, not
+    // queued: a hundred frames were due meanwhile.
+    CHECK(h.shownFrame() == (910 % 120) / 10);
+}
+
+TEST_CASE("daemon.two_clients_do_not_double_the_rate", "[vthost][host][kitty]")
+{
+    // The throttle is the session's: a frame advanced once is sent to every client, so a second client
+    // attached costs the session no second tick.
+    auto h = PlaybackHarness {};
+    auto second = PlaybackHarness::Mirror {};
+    h.host.subscribeStream(&second);
+    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+    second.updates = 0;
+
+    auto constexpr Duration = std::chrono::milliseconds { 1000 };
+    h.play(Duration, std::chrono::milliseconds { 10 });
+
+    auto constexpr Most = mostFramesIn(Duration);
+    CHECK(h.mirror.updates > 0);
+    CHECK(h.mirror.updates <= Most);
+    CHECK(second.updates == h.mirror.updates);
+    h.host.unsubscribeStream(&second);
+}
+
+TEST_CASE("daemon.idle_session_with_blinking_text_arms_no_animation_timer", "[vthost][host][kitty]")
+{
+    // Blinking text has the display tick the terminal (nextRender()), but the daemon draws no blink: it arms
+    // from the kitty deadline alone, so a session showing blinking text stays idle.
+    auto h = PlaybackHarness {};
+    h.terminal->writeToScreen("\033[5mblinking\033[m");
+    h.turn();
+    h.mirror.updates = 0;
+
+    CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
+    h.play(std::chrono::milliseconds { 1000 }, std::chrono::milliseconds { 10 });
+    CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
+    CHECK(h.mirror.updates == 0);
+}
+
+TEST_CASE("daemon.closing_a_session_drops_its_animation_timer", "[vthost][host][kitty]")
+{
+    auto h = PlaybackHarness {};
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 200 });
+    REQUIRE(h.host.ticksKittyAnimations(h.session));
+
+    h.host.closeSession(h.session);
+    CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
+    // Its deadline passes with the terminal gone: nothing is ticked.
+    h.play(std::chrono::milliseconds { 1000 }, std::chrono::milliseconds { 100 });
+    CHECK(h.mirror.updates == 0);
+}
+
+TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost][host][kitty][threading]")
+{
+    // The loop thread ticks the terminal while another thread parses into it, as a hosted session's pump
+    // does: the tick takes the terminal's lock itself, and a deadline a parse moves reaches the loop through
+    // a post, read nowhere but there.
+    auto h = PlaybackHarness {};
+    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+
+    auto writer = std::thread { [&] {
+        for (auto const line: std::views::iota(0, 200))
+        {
+            // Beside the image, with the cursor put back: the placement stays where it is.
+            h.terminal->writeToScreen(std::format("\0337line {}\0338", line));
+            // Restarting playback publishes the deadline from this thread.
+            if (line % 20 == 0)
+                h.terminal->writeToScreen("\033_Ga=a,i=7,s=3\033\\");
+        }
+    } };
+    h.play(std::chrono::milliseconds { 1000 }, std::chrono::milliseconds { 10 });
+    writer.join();
+    h.turn();
+
+    CHECK(h.mirror.updates > 0);
+    CHECK(h.shownFrame().has_value());
+    CHECK(h.host.ticksKittyAnimations(h.session));
 }
