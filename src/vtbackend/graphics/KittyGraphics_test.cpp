@@ -810,6 +810,142 @@ TEST_CASE("KittyGraphics.animation.alpha_blends_over_the_base_frame", "[kitty]")
     CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
 }
 
+namespace
+{
+/// A 2x1 RGBA image under id 7 whose frame 1 is opaque red, opaque green and whose frame 2 is
+/// 50%-alpha blue (0,0,255,128), fully transparent (0,0,0,0). Frame 1 is the one on display.
+void seedComposableFrames(MockTerm<vtpty::MockPty>& mock)
+{
+    mock.writeToScreen("\033_Ga=T,f=32,i=7,s=2,v=1;/wAA/wD/AP8=\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,f=32,s=2,v=1;AAD/gAAAAAA=\033\\"sv);
+    mock.discardPendingReplies();
+}
+} // namespace
+
+// The expected pixels below follow the source-over arithmetic of the graphics-protocol text
+// (https://sw.kovidgoyal.net/kitty/graphics-protocol/#composing-animation-frames) and are the same
+// numbers the a=f tests above pin down. They could not be measured against kitty 0.49.2 itself: that
+// needs a GUI session, and this environment has none to drive it.
+TEST_CASE("KittyGraphics.compose.alpha_blends_a_rectangle", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // Frame 2's first pixel (0,0,255,128) over frame 1's second pixel, opaque green (0,255,0,255):
+    //   alpha = 128 + 255*(255-128)/255 = 255
+    //   G = (0*128 + 255*255*127/255) / 255 = 127,  B = (255*128 + 0) / 255 = 128
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    // Frame 1 is the one on display, so the composition shows at once.
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.matches_the_blend_a_f_uses", "[kitty]")
+{
+    // The same source pixel over the same destination pixel, once through a=c and once as an a=f
+    // payload: one blend implementation, so the bytes must agree.
+    auto viaCompose = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(viaCompose);
+    viaCompose.writeToScreen("\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1\033\\"sv);
+
+    auto viaFrame = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    viaFrame.writeToScreen("\033_Ga=T,f=32,i=7,s=2,v=1;/wAA/wD/AP8=\033\\"sv);
+    viaFrame.writeToScreen("\033_Ga=f,i=7,r=1,c=1,x=1,y=0,s=1,v=1;AAD/gA==\033\\"sv);
+
+    REQUIRE(placedPixels(viaFrame) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
+    CHECK(placedPixels(viaCompose) == placedPixels(viaFrame));
+}
+
+TEST_CASE("KittyGraphics.compose.C1_overwrites", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // C=1 copies the source pixel verbatim, alpha included: (0,0,255,128).
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1,C=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 0, 255, 128 });
+}
+
+TEST_CASE("KittyGraphics.compose.defaults_to_the_whole_image", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // No w=/h=: both pixels. Blue 50% over red: alpha 255, R = 255*255*127/255/255 = 127, B = 128.
+    // The transparent second source pixel leaves green as it was.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 127, 0, 128, 255, 0, 255, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.missing_image_or_frame_is_ENOENT", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    CHECK(replyTo(mock, "\033_Ga=c,i=99,r=2,c=1\033\\"sv).contains("ENOENT"));
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=5,c=1\033\\"sv).contains("ENOENT"));
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=5\033\\"sv).contains("ENOENT"));
+    // Frames are 1-based: an absent r=/c= names none.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,c=1\033\\"sv).contains("ENOENT"));
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2\033\\"sv).contains("ENOENT"));
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 255, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.out_of_bounds_is_EINVAL", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // Destination runs past the right edge.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,x=1,w=2,h=1\033\\"sv).contains("EINVAL"));
+    // Source runs past the right edge.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,X=1,w=2,h=1\033\\"sv).contains("EINVAL"));
+    // Taller than the image.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,w=1,h=2\033\\"sv).contains("EINVAL"));
+    // 32-bit origins that would wrap a 32-bit sum.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,x=4294967295,w=2,h=1\033\\"sv).contains("EINVAL"));
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 255, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.same_frame_overlap_is_EINVAL", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // The very same pixel, and the whole image onto itself.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=1,c=1,w=1,h=1\033\\"sv).contains("EINVAL"));
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=1,c=1\033\\"sv).contains("EINVAL"));
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 255, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.same_frame_disjoint_is_allowed", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // Opaque red over the green pixel of the same frame: the rectangles do not touch.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=1,c=1,X=0,x=1,w=1,h=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 255, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.compose.current_frame_refreshes_the_placement", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    seedComposableFrames(mock);
+
+    // Frame 2 is not on display: composing onto it changes nothing on screen ...
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=1,c=2,X=0,x=0,w=1,h=1,C=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 255, 0, 255 });
+
+    // ... until it becomes the current frame, which then shows the composition (opaque red, then the
+    // untouched transparent pixel).
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 0, 0, 0 });
+
+    // Composing onto the frame that IS on display updates it in place.
+    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=1,c=2,X=1,x=1,w=1,h=1,C=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 255, 0, 255 });
+}
+
 TEST_CASE("KittyGraphics.animation.self_running_playback_is_accepted", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };

@@ -347,6 +347,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// of the base frame the command names.
     void transmitKittyFrame(kitty_graphics::Command const& command);
 
+    /// Composes a rectangle of one frame onto another frame of the same image (`a=c`), blending or
+    /// overwriting per the command's composition mode.
+    void composeKittyFrames(kitty_graphics::Command const& command);
+
     /// Applies animation control (`a=a`): play state, loop count, gap, and which frame is current.
     void controlKittyAnimation(kitty_graphics::Command const& command);
 

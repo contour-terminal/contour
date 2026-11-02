@@ -6035,11 +6035,7 @@ void Screen::processKittyGraphics(std::string_view body)
         case Action::TransmitAndDisplay: break;
         case Action::Frame: transmitKittyFrame(command); return;
         case Action::Animate: controlKittyAnimation(command); return;
-        case Action::Compose:
-            // Composing one frame onto another is a separate operation from building a frame, and
-            // nothing observed in the wild uses it. Say so rather than silently accepting it.
-            replyKittyGraphics(command, "ENOTSUP:frame composition not supported");
-            return;
+        case Action::Compose: composeKittyFrames(command); return;
     }
 
     if (auto const rejection = validateKittyTransmission(command))
@@ -6597,6 +6593,110 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     if (animation->isPlaying() && animation->nextFrameDue == std::chrono::steady_clock::time_point::max()
         && animation->successor())
         animation->nextFrameDue = _terminal->steadyTimeNow();
+
+    replyKittyGraphics(command, "OK");
+}
+
+void Screen::composeKittyFrames(kitty_graphics::Command const& command)
+{
+    using namespace kitty_graphics;
+
+    if (!_kittyImages.contains(command.imageId))
+    {
+        replyKittyGraphics(command, "ENOENT:no such image");
+        return;
+    }
+    // Frame numbers are 1-based, so an absent `r=`/`c=` names no frame.
+    auto const source = kittyFrameImage(command.imageId, command.composeSourceFrame);
+    auto const destination = kittyFrameImage(command.imageId, command.composeDestinationFrame);
+    if (!source || !destination)
+    {
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+
+    auto const bpp = static_cast<size_t>(bytesPerPixel(source->format()));
+    if (bpp == 0)
+    {
+        replyKittyGraphics(command, "ENOTSUP:only raw pixel frames are supported");
+        return;
+    }
+
+    // All frames of an image share its geometry, which the a=f path checks before storing one.
+    auto const imageWidth = static_cast<size_t>(unbox<unsigned>(source->size().width));
+    auto const imageHeight = static_cast<size_t>(unbox<unsigned>(source->size().height));
+    auto const rectWidth = command.sourceWidth != 0 ? static_cast<size_t>(command.sourceWidth) : imageWidth;
+    auto const rectHeight =
+        command.sourceHeight != 0 ? static_cast<size_t>(command.sourceHeight) : imageHeight;
+
+    // Origins and sizes are 32-bit off the wire and summed in size_t, so the sums cannot wrap.
+    auto const sourceX = static_cast<size_t>(command.composeSourceX);
+    auto const sourceY = static_cast<size_t>(command.composeSourceY);
+    auto const destinationX = static_cast<size_t>(command.composeDestinationX);
+    auto const destinationY = static_cast<size_t>(command.composeDestinationY);
+    if (sourceX + rectWidth > imageWidth || sourceY + rectHeight > imageHeight
+        || destinationX + rectWidth > imageWidth || destinationY + rectHeight > imageHeight)
+    {
+        replyKittyGraphics(command, "EINVAL:rectangle does not fit the image");
+        return;
+    }
+    // Within one frame the two rectangles must not share a pixel: the result of blending a region
+    // onto itself depends on the order the pixels are visited in.
+    auto const overlaps = [](size_t a, size_t b, size_t length) {
+        return a < b + length && b < a + length;
+    };
+    if (command.composeSourceFrame == command.composeDestinationFrame
+        && overlaps(sourceX, destinationX, rectWidth) && overlaps(sourceY, destinationY, rectHeight))
+    {
+        replyKittyGraphics(command, "EINVAL:source and destination rectangles overlap");
+        return;
+    }
+    if (source->data().size() != imageWidth * imageHeight * bpp
+        || destination->data().size() != imageWidth * imageHeight * bpp)
+    {
+        replyKittyGraphics(command, "EINVAL:frame does not match the image geometry");
+        return;
+    }
+
+    // The rectangle is lifted out of the source as a tightly packed pixmap, which is the shape
+    // compositeKittyRectangle() takes an a=f payload in.
+    auto pixmap = Image::Data {};
+    pixmap.reserve(rectWidth * rectHeight * bpp);
+    for (auto const row: std::views::iota(size_t { 0 }, rectHeight))
+    {
+        auto const offset = (((sourceY + row) * imageWidth) + sourceX) * bpp;
+        std::ranges::copy(std::views::counted(source->data().begin() + static_cast<ptrdiff_t>(offset),
+                                              static_cast<ptrdiff_t>(rectWidth * bpp)),
+                          std::back_inserter(pixmap));
+    }
+
+    auto data = destination->data();
+    compositeKittyRectangle(data,
+                            pixmap,
+                            KittyRectangle { .imageWidth = imageWidth,
+                                             .x = command.composeDestinationX,
+                                             .y = command.composeDestinationY,
+                                             .width = rectWidth,
+                                             .height = rectHeight,
+                                             .bytesPerPixel = bpp },
+                            command.compositionMode);
+
+    // Frames are immutable and shared, so the destination is replaced rather than edited. Its size
+    // is unchanged, which is why this needs no quota check (unlike a=f, which can grow the total).
+    auto frame = _terminal->imagePool().create(destination->format(), destination->size(), std::move(data));
+
+    auto* animation = kittyAnimationFor(command.imageId);
+    Require(animation != nullptr); // The image was found above.
+    auto const target = command.composeDestinationFrame;
+    animation->frames[target - 1].image = std::move(frame);
+
+    // As for a=f: the root frame is also the stored image, which must move along with it.
+    if (target == 1)
+        _kittyImages[command.imageId] = animation->frames[0].image;
+
+    // The frame on display changed, so its placements must show the new pixels.
+    if (target == animation->currentFrame)
+        std::ignore = showKittyFrame(destination, animation->frames[target - 1].image);
 
     replyKittyGraphics(command, "OK");
 }
