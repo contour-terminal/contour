@@ -10,6 +10,8 @@ add_library(contour_input STATIC
     KeyboardLayout.cpp KeyboardLayout.hpp
     Logging.hpp
     MouseMapping.cpp MouseMapping.hpp
+    NativeKeyEvent.cpp NativeKeyEvent.hpp
+    QtKeyCapture.cpp QtKeyCapture.hpp
 )
 
 target_link_libraries(contour_input PUBLIC

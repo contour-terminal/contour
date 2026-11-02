@@ -31,6 +31,7 @@ add_library(contour_config STATIC
     HostSideFile.cpp HostSideFile.hpp
     HostUrl.cpp HostUrl.hpp
     HotkeyChord.hpp
+    KeyboardPlatformKind.hpp
     LaunchTarget.cpp LaunchTarget.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp

@@ -932,6 +932,8 @@ if(CONTOUR_FRONTEND_GUI)
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
+            input/NativeKeyEvent_test.cpp
+            session/KeyCharacterization_test.cpp
             display/ImeQueryRect_test.cpp
             display/ShortcutOverride_test.cpp
             display/ViewportTextIndex_test.cpp
