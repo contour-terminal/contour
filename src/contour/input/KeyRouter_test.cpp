@@ -132,6 +132,22 @@ TEST_CASE("routeChar retries a Shift chord under its unshifted base", "[input][r
     CHECK(unshifted.user.actions == nullptr);
 }
 
+TEST_CASE("the generated Ctrl+Shift+Comma binding matches the '<' a US layout delivers", "[input][router]")
+{
+    // A US layout turns Shift+Comma into '<' before the router sees it (#1588). The generated configuration
+    // writes the row against ',', so it is found through the unshifted-base retry.
+    auto const config = contour::test::loadConfigFromYaml(contour::config::defaultConfigString(),
+                                                          contour::config::KeyboardPlatformKind::Xkb);
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    for (auto const codepoint: { U',', U'<' })
+    {
+        auto const route =
+            contour::input::routeChar(codepoint, {}, ctrlShift, AppModifier::Absent, contextOf(config));
+        CAPTURE(static_cast<uint32_t>(codepoint));
+        CHECK(firstActionOf(route.user.actions).starts_with("OpenConfiguration"));
+    }
+}
+
 TEST_CASE("an unbound app-modifier character is consumed only where Super cannot be encoded",
           "[input][router]")
 {

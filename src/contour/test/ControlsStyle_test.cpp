@@ -22,15 +22,6 @@
 
 #include <QtQuickControls2/QQuickStyle>
 
-TEST_CASE("controlsStyleQmldirs names a style of Qt's own, then a module of the style's name",
-          "[contour][gui]")
-{
-    CHECK(contour::test::controlsStyleQmldirs("FluentWinUI3")
-          == std::array<std::string, 2> { "QtQuick/Controls/FluentWinUI3/qmldir", "FluentWinUI3/qmldir" });
-    CHECK(contour::test::controlsStyleQmldirs("ContourTui")
-          == std::array<std::string, 2> { "QtQuick/Controls/ContourTui/qmldir", "ContourTui/qmldir" });
-}
-
 TEST_CASE("a run draws its controls under the style its variant names", "[contour][gui][qml]")
 {
     // A control resolves the style: until one is created, QQuickStyle only reports what was asked for. A

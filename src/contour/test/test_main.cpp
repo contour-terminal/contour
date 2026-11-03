@@ -4,6 +4,7 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
+#include <contour/platform/ControlsStyleProbe.hpp>
 #include <contour/session/Permission.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -19,6 +20,7 @@
 #include <QtCore/QLibraryInfo>
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
+#include <QtQml/QQmlEngine>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
@@ -109,29 +111,6 @@ class SessionBusWitness final: public Catch::EventListenerBase
     }
 };
 
-/// Whether this machine's Qt has controls style @p style: its qmldir lies beneath one of the import paths a
-/// QQmlEngine searches by default, as QQuickStyle resolves the name. Files are looked for, not imported: a
-/// style imported before QQuickStyle::setStyle() would be loaded ahead of the one the run asks for.
-/// @param style The style's name.
-/// @return Whether a qmldir of it exists.
-[[nodiscard]] bool controlsStyleInstalled(QString const& style)
-{
-    // The engine's defaults: the modules compiled into this binary (ContourTui, ContourLinux), Qt's own
-    // (Fusion, FluentWinUI3), and what the environment adds.
-    auto importPaths =
-        QStringList { QStringLiteral(":/qt/qml"), QLibraryInfo::path(QLibraryInfo::QmlImportsPath) };
-    for (auto const* const variable: { "QML_IMPORT_PATH", "QML2_IMPORT_PATH" })
-        if (auto const added = core::LiveEnvironment {}.get(variable))
-            importPaths << QString::fromStdString(*added).split(QDir::listSeparator(), Qt::SkipEmptyParts);
-
-    auto const qmldirs = contour::test::controlsStyleQmldirs(style.toStdString());
-    return std::ranges::any_of(importPaths, [&](QString const& importPath) {
-        return std::ranges::any_of(qmldirs, [&](std::string const& qmldir) {
-            return QFileInfo::exists(importPath + u'/' + QString::fromStdString(qmldir));
-        });
-    });
-}
-
 } // namespace
 
 CATCH_REGISTER_LISTENER(DeferredDeletionDrain)
@@ -192,7 +171,8 @@ int main(int argc, char* argv[])
     // failing every QML case on a module that is not installed.
     auto const controlsStyle =
         QString::fromStdString(contour::test::controlsStyleFor(core::LiveEnvironment {}));
-    if (!controlsStyleInstalled(controlsStyle))
+    if (!contour::platform::isControlsStyleInstalled(controlsStyle.toStdString(),
+                                                     QQmlEngine {}.importPathList()))
     {
         std::cerr << "SKIPPED: the Qt Quick Controls style " << controlsStyle.toStdString()
                   << " is not installed here; nothing ran under it.\n";
