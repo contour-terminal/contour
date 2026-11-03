@@ -497,17 +497,15 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 
     // The live prompt is left for the shell to redraw at the new width, rather than reflowed under it.
     auto const prompt = columnsChanged ? unreflowedPrompt() : std::nullopt;
-    auto const reflows = [&](Cursor const& cursor) {
-        return _grid.reflowOnResize() && !(prompt && cursor.position.line >= prompt->firstLine);
-    };
 
-    // A pending wrap outlives the resize unless the column count changes and the cursor moves to where
-    // the wrap was going: a reflow takes it there, as does a widening, which has the room. A narrowing
-    // without reflow moves the cursor onto the new last column, where the wrap stays pending.
-    auto const wrapTaken = [&](Cursor const& cursor) {
-        return columnsChanged
-               && (reflows(cursor)
-                   || cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns));
+    // A pending wrap outlives a column change unless the cursor stays in its column (held to the page):
+    // the grid moves it one column on to where the wrap was going (a widening has the room, a reflow
+    // wraps the row) and puts it back when the row is cut instead, as without reflow, on the alternate
+    // screen or with a row that cannot wrap. The cursor left in its column keeps its wrap, for it is still
+    // on the character the wrap follows. Margins do not enter: a resize resets them.
+    auto const wrapTaken = [&](Cursor const& cursor, CellLocation const& after) {
+        auto const lastColumn = boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1;
+        return columnsChanged && after.column != std::min(cursor.position.column, lastColumn);
     };
 
     // Ensure correct screen buffer size for the buffer we've just switched to. The cursor DECSC saved
@@ -526,7 +524,7 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
                                     cursors[0].line - _cursor.position.line,
                                     WidthChange { .from = widthBefore, .to = mainDisplayPageSize.columns });
     auto const cursorPosition = clampCoordinate(cursors[0]);
-    if (wrapTaken(_savedCursor))
+    if (wrapTaken(_savedCursor, cursors[1]))
         _savedCursor.wrapPending = false;
     _savedCursor.position = cursors[1]; // restoreCursor() holds it to the page
 
@@ -539,7 +537,7 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
         };
     }
 
-    if (wrapTaken(_cursor))
+    if (wrapTaken(_cursor, cursors[0]))
         _cursor.wrapPending = false;
 
     // update (last-)cursor position
