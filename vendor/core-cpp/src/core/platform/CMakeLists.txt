@@ -4,9 +4,10 @@
 # testing/. Its row says PLATFORMS wasm-subset: under single-threaded Emscripten only the files in
 # the SOURCES_EMSCRIPTEN lists below build (Part I §1), which is why the subset's sources appear in
 # both lists.
-set(_coreCppPlatformSubset FileUri.cpp GlobMatch.cpp PathUtils.cpp)
+set(_coreCppPlatformSubset CpuCounters.cpp FileUri.cpp GlobMatch.cpp PathUtils.cpp)
 set(_coreCppPlatformSubsetTests
     Clock_test.cpp
+    CpuCounters_test.cpp
     FileInfoProvider_test.cpp
     FileUri_test.cpp
     GlobMatch_test.cpp
@@ -27,6 +28,19 @@ set(_coreCppPlatformPosixProviders
     posix/PosixFileInfoProvider.hpp
     posix/PosixWorkingDirectory.cpp)
 
+# Exactly one makeDefaultCpuCounterSource() is compiled, and the platform is asked once, here, rather
+# than by an `#ifdef` in logic (Ruling R40, as in src/core/net/CMakeLists.txt). A platform without a
+# backend names the "unavailable" source.
+if(APPLE)
+    set(_coreCppPlatformCpuCounterSource darwin/DarwinCpuCounters.cpp)
+elseif(LINUX)
+    set(_coreCppPlatformCpuCounterSource linux/LinuxCpuCounters.cpp)
+elseif(WIN32)
+    set(_coreCppPlatformCpuCounterSource windows/WindowsCpuCounters.cpp)
+else()
+    set(_coreCppPlatformCpuCounterSource UnavailableCpuCounters.cpp)
+endif()
+
 # Sockets back SystemPipe on Windows: a loopback pair mapped to a waitable event.
 set(_coreCppPlatformLibs "")
 if(WIN32)
@@ -36,6 +50,7 @@ endif()
 core_cpp_add_module(platform KIND STATIC
     HEADERS
         Clock.hpp
+        CpuCounters.hpp
         FileInfoProvider.hpp
         FileSystem.hpp
         FileUri.hpp
@@ -55,15 +70,21 @@ core_cpp_add_module(platform KIND STATIC
         Wakeup.hpp
         WinsockInit.hpp
         WorkingDirectory.hpp
+        detail/CpuCounterProbe.hpp
+        detail/LinuxPerfPlan.hpp
+        detail/UnavailableCpuCounterSource.hpp
+        testing/FakeCpuCounterSource.hpp
         testing/InMemoryFileSystem.hpp
         testing/MockFileInfoProvider.hpp
         testing/TestProcessEnvironment.hpp
         testing/TestWorkingDirectory.hpp
     SOURCES
         ${_coreCppPlatformSubset}
+        ${_coreCppPlatformCpuCounterSource}
         MachineId.cpp
         NativeFileSystem.cpp
         detail/DurableFiles.hpp
+        detail/LinuxPerfPlan.cpp
         SignalHandler.cpp
         SystemInfo.cpp
         SystemPipe.cpp
@@ -90,13 +111,16 @@ core_cpp_add_module(platform KIND STATIC
     SOURCES_EMSCRIPTEN
         ${_coreCppPlatformSubset}
         ${_coreCppPlatformPosixProviders}
+        ${_coreCppPlatformCpuCounterSource}
     PUBLIC_LIBS core::base
     PRIVATE_LIBS ${_coreCppPlatformLibs})
 
 core_cpp_add_test(platform
     SOURCES
         ${_coreCppPlatformSubsetTests}
+        CpuCountersNative_test.cpp
         FileSystem_test.cpp
+        LinuxPerfPlan_test.cpp
         MachineId_test.cpp
         MessageQueue_test.cpp
         SignalHandler_test.cpp
@@ -106,6 +130,7 @@ core_cpp_add_test(platform
         Wakeup_test.cpp
     # The Windows half of a POSIX guarantee: FD_CLOEXEC there, no inheritable handle here.
     SOURCES_WINDOWS
+        windows/CpuCounters_test.cpp
         windows/DnsHostName_test.cpp
         windows/SystemPipeInheritance_test.cpp
         windows/WideEnvironment_test.cpp
