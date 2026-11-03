@@ -156,9 +156,22 @@ class [[nodiscard]] Process: public Pty
     /// spawned). It is started already, and exit detection is as for a spawned child.
     /// @param child The child, from releaseChild() or a handover image.
     /// @param pty The PTY it runs on, usually from UnixPty::adopt().
-    /// @return The process; or AdoptError::NoSuchChild where @p child.pid is no child of this process.
+    /// @return The process; or AdoptError::NoSuchChild where @p child.pid is no child of this process, @p pty
+    ///         then destroyed with the call (@see canAdopt(), which asks first).
     [[nodiscard]] static std::expected<std::unique_ptr<Process>, AdoptError> adopt(AdoptedChild const& child,
                                                                                    std::unique_ptr<Pty> pty);
+
+    /// Asks whether adopt() would take @p child, without taking anything: for an adopter that keeps the PTY
+    /// whichever way it goes.
+    /// @param child The child, from releaseChild() or a handover image.
+    /// @return Nothing; or AdoptError::NoSuchChild where @p child.pid is no child of this process (dead and
+    ///         reaped, or foreign). A child that exited but is not reaped yet is still one.
+    [[nodiscard]] static std::expected<void, AdoptError> canAdopt(AdoptedChild const& child);
+
+    /// The child as releaseChild() gives it up, while this Process keeps it: for a capture that may yet roll
+    /// back, which must not have to undo anything.
+    /// @return The child, or nullopt where there is none running.
+    [[nodiscard]] std::optional<AdoptedChild> handoverChild() const;
 
     /// Gives up the child without signalling or reaping it, leaving this Process without one, so that
     /// destroying it neither kills nor waits for it; for an adopter in the same process.

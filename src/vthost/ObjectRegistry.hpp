@@ -8,6 +8,7 @@
 /// restart with every daemon. An API pane is one hosted session, so a pane's UUID is keyed by its
 /// `SessionId`: it follows the shell, not the `PaneId` tree node, which changes under swaps.
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -15,6 +16,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include <vtcontrol/ObjectRef.hpp>
 #include <vtcontrol/Uuid.hpp>
@@ -32,6 +34,53 @@ struct PresetObjectIds
     std::string paneLabel {};                 ///< The pane's label; empty for none.
     std::string tabLabel {};                  ///< The tab's label; empty for none.
     std::string windowLabel {};               ///< The window's label; empty for none.
+};
+
+/// One window, tab or pane of the object registry, with the UUID it is known by.
+struct BoundObject
+{
+    uint64_t id = 0;         ///< The model's id (WindowId, TabId or SessionId, by the list it sits in).
+    vtcontrol::Uuid uuid {}; ///< Its UUID.
+
+    /// Lists the fields for the handover codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.id);
+        visitor(2, self.uuid);
+    }
+};
+
+/// A label an object carries.
+struct LabeledObject
+{
+    vtcontrol::ObjectRef ref {}; ///< The object.
+    std::string label;           ///< Its label.
+
+    /// Lists the fields for the handover codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.ref);
+        visitor(2, self.label);
+    }
+};
+
+/// The UUIDs and labels of the daemon's windows, tabs and panes, as plain data: what crosses a live upgrade,
+/// so that a client holding a reference from before it still finds its object afterwards.
+struct ObjectRegistrySnapshot
+{
+    std::vector<BoundObject> windows;  ///< Windows by WindowId, ascending.
+    std::vector<BoundObject> tabs;     ///< Tabs by TabId, ascending.
+    std::vector<BoundObject> panes;    ///< Panes by SessionId, ascending.
+    std::vector<LabeledObject> labels; ///< Every label, ordered by object.
+
+    /// Lists the fields for the handover codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.windows);
+        visitor(2, self.tabs);
+        visitor(3, self.panes);
+        visitor(4, self.labels);
+    }
 };
 
 /// Maps the model's ids to UUIDs and back, and keeps the labels. Loop thread only.
@@ -87,6 +136,15 @@ class ObjectRegistry
     /// @param ref The object.
     /// @return Its label, or an empty view for none. Valid until the next change of that label.
     [[nodiscard]] std::string_view labelOf(vtcontrol::ObjectRef const& ref) const;
+
+    /// @return Every bound object and every label, for a live upgrade to carry across.
+    [[nodiscard]] ObjectRegistrySnapshot snapshot() const;
+
+    /// Replaces everything bound and labelled with what @p snapshot holds: the other half of snapshot(), in
+    /// the image a live upgrade started. A label of an object the snapshot does not bind is dropped, as
+    /// setLabel() drops it.
+    /// @param snapshot What snapshot() returned.
+    void restore(ObjectRegistrySnapshot const& snapshot);
 
   private:
     /// One kind of object, in both directions.

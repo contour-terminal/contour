@@ -91,6 +91,7 @@
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/handover/HandoverRestore.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -1083,6 +1084,41 @@ namespace
                                           fileSystem.weaklyCanonical(vthost::labelSocketPath(label, env)));
     }
 
+    /// Takes over what the previous image of this daemon handed over as it exec'd this one in place (a live
+    /// upgrade): reads and decodes the image, closes its descriptor, then every descriptor it does not name.
+    ///
+    /// An image that cannot be read loses nothing it can keep: the daemon starts afresh, closing only the
+    /// listening sockets it inherited -- which its own would otherwise find taken -- and keeping every other
+    /// descriptor open, so that no program the previous image hosted is hung up on. Those programs run on
+    /// unreachable until they end: they have no session here to be shown in.
+    /// @param fd The descriptor `--handover-fd` names; negative for none, a daemon that starts afresh.
+    /// @return The image; nullopt for none, or where it could not be read.
+    [[nodiscard]] std::optional<vthost::handover::HandoverImage> takeHandover(int fd)
+    {
+        if (fd < 0)
+            return std::nullopt;
+        auto image = vthost::handover::readHandover(*vthost::handover::makeNativeHandoverMemory(), fd);
+        if (!image)
+        {
+            auto const closed = vthost::handover::closeListeningSockets();
+            errorLog()("cannot read the image the previous daemon handed over (error {}); starting afresh. "
+                       "{} inherited listener(s) closed; the programs it hosted keep running, unreachable",
+                       std::to_underlying(image.error()),
+                       closed);
+            return std::nullopt;
+        }
+        vthost::handover::closeDescriptorsExcept(vthost::handover::descriptorsToKeep(*image));
+        return *std::move(image);
+    }
+
+    /// @param handover What a live upgrade handed over; nullopt for a daemon that starts afresh.
+    /// @return The run of the daemon this is: the one a live upgrade carries on, else a new one, so that a
+    ///         client that reconnects can tell it from the one it lost.
+    [[nodiscard]] uint64_t daemonInstanceOf(std::optional<vthost::handover::HandoverImage> const& handover)
+    {
+        return handover ? handover->daemonInstance : vthost::drawDaemonInstance();
+    }
+
     /// @return Whether `--in-place` refuses a move onto a staged image.
     [[nodiscard]] vthost::RelocationRequest relocationRequestOf(bool inPlace) noexcept
     {
@@ -1144,14 +1180,17 @@ int ContourApp::daemonAction()
     // Loaded once, and first: its `daemon:` section names the socket when --socket does not, and the
     // same configuration resolves the daemon's own profile below and, as the host's profile catalog,
     // every profile a client names later.
+    // First of all, before this process opens a descriptor of its own: what is open now and the image does
+    // not name was leaked across the exec, and is closed.
+    auto handover = takeHandover(parameters().get<int>("contour.daemon.handover-fd"));
+
     auto hostConfig = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
     if (!hostConfig)
         return refuse(hostConfig.error());
     auto const daemonSettings = hostConfig->daemon.value();
 
     auto config = vthost::DaemonConfig {};
-    // A new run of the daemon: a client that reconnects to it can tell it from the one it lost.
-    config.instance = vthost::drawDaemonInstance();
+    config.instance = daemonInstanceOf(handover);
     config.socketPath = vthost::muxSocketPath(
         vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")),
         resolveSocketOption(parameters().get<string>("contour.daemon.socket"), daemonSettings.socket));
@@ -1374,8 +1413,11 @@ int ContourApp::daemonAction()
         processEnvironment(), core::platform::NativeFileSystem::instance(), CONTOUR_VERSION_STRING);
     if (images)
     {
+        // A live upgrade exec'd the very image it chose: moving again would re-exec without the handover.
         runningLease = settleDaemonImage(
-            **images, relocationRequestOf(parameters().get<bool>("contour.daemon.in-place")), commandLine());
+            **images,
+            relocationRequestOf(parameters().get<bool>("contour.daemon.in-place") || handover.has_value()),
+            commandLine());
         config.executablePath = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
                                     .value_or(vthost::launchedImage((*images)->inputs()));
     }
@@ -1386,6 +1428,7 @@ int ContourApp::daemonAction()
             core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
     }
 
+    config.handover = std::move(handover);
     return vthost::runDaemon(config);
 }
 
@@ -2093,6 +2136,12 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   CLI::Value { false },
                                   "Runs from the installed binary instead of a per-version copy; a "
                                   "package upgrade may then replace it under the running daemon." },
+                    CLI::Option { "handover-fd",
+                                  CLI::Value { -1 },
+                                  "Internal: what a live upgrade execs the new daemon with. Takes over "
+                                  "the sessions, listeners and instance the previous image of this "
+                                  "daemon handed over in the memory object at descriptor FD.",
+                                  "FD" },
                     CLI::Option {
                         "lifecycle",
                         CLI::Value { std::string { vthost::nameOf(vthost::DaemonLifecycle::Persistent) } },

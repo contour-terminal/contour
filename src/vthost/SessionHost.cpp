@@ -480,10 +480,16 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
                }
                return SessionId { _nextSessionId++ };
            }),
-    _window(_model.createWindow()->id())
+    // A handover brings its windows back with the ids they had, into a model that holds none yet.
+    _window(config.handover ? vtworkspace::WindowId {} : _model.createWindow()->id())
 {
     // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
     Require(config.firstSessionId != 0);
+    if (config.handover)
+    {
+        _handoverOutcome = restoreHandover(*std::move(config.handover));
+        return;
+    }
     // The first window is named before anything is spawned into it: its UUID is part of every pane's
     // environment.
     _objects.bind(_window, _objects.mint());
@@ -610,12 +616,6 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         return std::nullopt;
     }
 
-    // The control-mode byte tap: fires on the session's PUMP thread with a view
-    // into the read buffer, so the bytes are copied before crossing to the loop.
-    auto tapped = std::make_unique<TappingPty>(std::move(pty), [this, id](std::string_view data) {
-        postStreamEvent(id, &SessionStreamEvents::sessionOutput, std::string { data });
-    });
-
     // A request's settings are re-normalized rather than taken as given: they can have travelled in
     // from a client, and this is the one funnel every session passes through.
     auto settings = requestedSettings ? hostedSessionSettings(*requestedSettings) : _settings;
@@ -638,67 +638,13 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
                      id.value,
                      settings.terminalId);
 
-    auto session = std::make_unique<HostedSession>(
-        id,
-        _environment,
-        std::move(tapped),
-        std::move(settings),
-        _identity,
-        _clocks,
-        _fileSystem,
-        /*onScreenUpdated=*/
-        [this, id] {
-            // Pump thread -> loop thread; the host may already be gone at
-            // drain time only if the loop is too, so `this` stays valid.
-            _loop.post([this, id] { onSessionScreenUpdated(id); });
-        },
-        /*onKittyAnimationDeadlineMoved=*/
-        [this, id] {
-            // Any thread, possibly under the terminal lock: only handed to the loop, which reads the
-            // deadline.
-            _loop.post([this, id] { armAnimationTick(id); });
-        },
-        /*onBell=*/
-        [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
-        /*onNotify=*/
-        [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
-            postStreamEvent(
-                id, &SessionStreamEvents::sessionNotify, std::move(title), std::move(body), occasion);
-        },
-        /*onCopyToClipboard=*/
-        [this, id](std::string data) {
-            postStreamEvent(id, &SessionStreamEvents::sessionCopyToClipboard, std::move(data));
-        },
-        /*onClosed=*/
-        [this, id] {
-            _loop.post([this, id] {
-                // The pump has ended by the time this runs, so what it saw is final.
-                if (auto const it = _sessions.find(id.value); it != _sessions.end())
-                    endSession(id, it->second->endCause());
-            });
-        },
-        /*onSignal=*/
-        [this, id](SessionSignal signal) {
-            postStreamEvent(id, &SessionStreamEvents::sessionSignal, std::move(signal));
-        },
-        makeSessionExtensions(id),
-        std::move(profileName),
-        spawn.settingsOrigin,
-        _git.services());
+    auto session = makeHostedSession(
+        id, std::move(pty), std::move(settings), std::move(profileName), spawn.settingsOrigin);
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
         seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredDivider);
-    if (_pumping == SessionPumping::Threaded)
-        session->start();
-    if (session->indicatorRowIsHostDrawn())
-    {
-        // The row a client attaching now mirrors: the daemon renders no frame that would paint it. Nothing is
-        // polled yet: what the extensions follow is known once their build lands (extensionsReplaced).
-        refreshStatusLine(*session);
-    }
-
-    _sessions.emplace(id.value, std::move(session));
+    installSession(std::move(session));
     _objects.bind(id, ids.pane);
     if (incoming.presetIds)
         _objects.setLabel(ObjectRef { ObjectKind::Pane, ids.pane }, incoming.presetIds->paneLabel);
@@ -725,6 +671,81 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
                  unbox(_pageSize.lines),
                  _sessions.size());
     return id;
+}
+
+std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
+                                                              std::unique_ptr<vtpty::Pty> device,
+                                                              vtbackend::Settings settings,
+                                                              std::string profileName,
+                                                              SettingsOrigin origin)
+{
+    // The control-mode byte tap: fires on the session's PUMP thread with a view
+    // into the read buffer, so the bytes are copied before crossing to the loop.
+    auto tapped = std::make_unique<TappingPty>(std::move(device), [this, id](std::string_view data) {
+        postStreamEvent(id, &SessionStreamEvents::sessionOutput, std::string { data });
+    });
+
+    return std::make_unique<HostedSession>(
+        id,
+        _environment,
+        std::move(tapped),
+        std::move(settings),
+        _identity,
+        _clocks,
+        _fileSystem,
+        /*onScreenUpdated=*/
+        [this, id] {
+            // Pump thread -> loop thread; the host may already be gone at
+            // drain time only if the loop is too, so `this` stays valid.
+            postFromPump([this, id] { onSessionScreenUpdated(id); });
+        },
+        /*onKittyAnimationDeadlineMoved=*/
+        [this, id] {
+            // Any thread, possibly under the terminal lock: only handed to the loop, which reads the
+            // deadline.
+            _loop.post([this, id] { armAnimationTick(id); });
+        },
+        /*onBell=*/
+        [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
+        /*onNotify=*/
+        [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
+            postStreamEvent(
+                id, &SessionStreamEvents::sessionNotify, std::move(title), std::move(body), occasion);
+        },
+        /*onCopyToClipboard=*/
+        [this, id](std::string data) {
+            postStreamEvent(id, &SessionStreamEvents::sessionCopyToClipboard, std::move(data));
+        },
+        /*onClosed=*/
+        [this, id] {
+            postFromPump([this, id] {
+                // The pump has ended by the time this runs, so what it saw is final.
+                if (auto const it = _sessions.find(id.value); it != _sessions.end())
+                    endSession(id, it->second->endCause());
+            });
+        },
+        /*onSignal=*/
+        [this, id](SessionSignal signal) {
+            postStreamEvent(id, &SessionStreamEvents::sessionSignal, std::move(signal));
+        },
+        makeSessionExtensions(id),
+        std::move(profileName),
+        origin,
+        _git.services());
+}
+
+void SessionHost::installSession(std::unique_ptr<HostedSession> session)
+{
+    if (_pumping == SessionPumping::Threaded)
+        session->start();
+    if (session->indicatorRowIsHostDrawn())
+    {
+        // The row a client attaching now mirrors: the daemon renders no frame that would paint it. Nothing is
+        // polled yet: what the extensions follow is known once their build lands (extensionsReplaced).
+        refreshStatusLine(*session);
+    }
+    auto const id = session->id();
+    _sessions.emplace(id.value, std::move(session));
 }
 
 void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout)
@@ -981,6 +1002,20 @@ std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
         counts.tabs += entry.tabs;
     }
     return counts.windows > 0 ? std::optional { counts } : std::nullopt;
+}
+
+std::vector<SessionId> SessionHost::takeUnrestoredScreens(std::function<bool(SessionId)> const& follows)
+{
+    auto taken = std::vector<SessionId> {};
+    std::erase_if(_unrestoredScreens, [&](SessionId session) {
+        if (!_sessions.contains(session.value))
+            return true; // Ended before any client was told: nobody is left to tell.
+        if (!follows(session))
+            return false;
+        taken.push_back(session);
+        return true;
+    });
+    return taken;
 }
 
 void SessionHost::holdInitialInput(SessionId session, std::string input)
@@ -1600,6 +1635,62 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
         resolveAuthoritativeArea();
         std::ignore = reprojectLayouts();
     }
+}
+
+std::vector<SessionId> SessionHost::sessionIds() const
+{
+    auto ids = std::ranges::to<std::vector>(
+        _sessions | std::views::keys | std::views::transform([](uint64_t id) { return SessionId { id }; }));
+    std::ranges::sort(ids, {}, &SessionId::value);
+    return ids;
+}
+
+std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
+{
+    // Every session runs on as before, the ones quiesced before this call included.
+    auto const refuse = [this](HostQuiesceError reason) {
+        resumeAll();
+        return std::unexpected(reason);
+    };
+    // Input held for a prompt is the host's, not the session's: a capture would not carry it.
+    if (!_initialInputs.empty())
+    {
+        sessionLog()("quiesce: {} session(s) still hold their initial input", _initialInputs.size());
+        return refuse(HostQuiesceError::SessionStarting);
+    }
+    auto sessions = std::vector<QuiescedHostSession> {};
+    for (auto const id: sessionIds())
+    {
+        auto& hosted = *_sessions.at(id.value);
+        auto quiesced = hosted.quiesce();
+        if (quiesced)
+        {
+            sessions.push_back(QuiescedHostSession { .id = id, .state = *std::move(quiesced) });
+            continue;
+        }
+        sessionLog()(
+            "quiesce: session {} did not quiesce ({})", id.value, std::to_underlying(quiesced.error()));
+        switch (quiesced.error())
+        {
+            case QuiesceError::SpawnInProgress: return refuse(HostQuiesceError::SessionStarting);
+            case QuiesceError::InFlightTailOverflowed:
+                return refuse(HostQuiesceError::InFlightTailOverflowed);
+            case QuiesceError::Ended:
+                // Its pump is gone, so its cause is final; the close the pump posted finds it ended already.
+                endSession(id, hosted.endCause());
+                break;
+        }
+    }
+    return QuiescedHost { .tree = _model.captureTree(),
+                          .modelIds = _model.idState(),
+                          .nextSessionId = SessionId { _nextSessionId },
+                          .sessions = std::move(sessions) };
+}
+
+void SessionHost::resumeAll()
+{
+    for (auto const& session: _sessions | std::views::values)
+        session->resume();
 }
 
 void SessionHost::handleSessionExit(SessionId session)

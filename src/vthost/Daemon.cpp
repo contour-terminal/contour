@@ -32,6 +32,7 @@
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/SystemInfo.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
@@ -253,6 +254,74 @@ namespace
         daemonLog()("bound {}", path);
         return std::move(*listener);
     }
+
+#ifndef _WIN32
+    /// The listening sockets a handover image hands this process, each taken at most once, by name; what is
+    /// not taken is closed (closeUnclaimed(), or at the latest with this), so that no endpoint the new
+    /// configuration dropped stays bound unserved.
+    class InheritedListeners
+    {
+      public:
+        /// @param image The handover image; nullopt for a daemon that starts afresh, which inherits none.
+        explicit InheritedListeners(std::optional<handover::HandoverImage> const& image):
+            _pending { image ? image->listeners : std::vector<handover::InheritedListener> {} }
+        {
+        }
+        InheritedListeners(InheritedListeners const&) = delete;
+        InheritedListeners& operator=(InheritedListeners const&) = delete;
+        InheritedListeners(InheritedListeners&&) = delete;
+        InheritedListeners& operator=(InheritedListeners&&) = delete;
+        ~InheritedListeners() { closeUnclaimed(); }
+
+        /// Adopts the listener inherited as @p name.
+        /// @return It; or nullopt when none was, or when it could not be adopted, which closes it.
+        [[nodiscard]] std::optional<std::unique_ptr<core::net::IListener>> take(core::net::EventLoop& loop,
+                                                                                std::string_view name)
+        {
+            auto const found = std::ranges::find(_pending, name, &handover::InheritedListener::name);
+            if (found == _pending.end())
+                return std::nullopt;
+            auto const fd = found->fd;
+            _pending.erase(found);
+            auto adopted = core::net::adoptListener(loop, fd);
+            if (!adopted)
+            {
+                errorLog()("cannot serve the inherited {} listener: {}", name, adopted.error().toString());
+                ::close(fd);
+                return std::nullopt;
+            }
+            daemonLog()("serving the inherited {} listener", name);
+            return std::move(*adopted);
+        }
+
+        /// Closes every listener not taken.
+        void closeUnclaimed()
+        {
+            for (auto const& listener: std::exchange(_pending, {}))
+            {
+                daemonLog()("closing the inherited {} listener, which this configuration does not serve",
+                            listener.name);
+                ::close(listener.fd);
+            }
+        }
+
+      private:
+        std::vector<handover::InheritedListener> _pending;
+    };
+
+    /// Serves @p path on the listener inherited as @p name, else binds it.
+    /// @return The listener, or the exit code a bind failure ends the daemon with.
+    [[nodiscard]] std::expected<std::unique_ptr<core::net::IListener>, int> adoptOrBindEndpoint(
+        core::net::EventLoop& loop,
+        InheritedListeners& inherited,
+        std::string_view name,
+        std::string const& path)
+    {
+        if (auto adopted = inherited.take(loop, name))
+            return std::move(*adopted);
+        return bindDaemonEndpoint(loop, path);
+    }
+#endif
 
     /// The watcher a daemon's lifecycle calls for, if any. Holds at most one, because a lifecycle is one
     /// rule; the watchers hold non-movable subscriptions, so they are emplaced rather than returned.
@@ -803,15 +872,20 @@ int runDaemon(DaemonConfig const& config)
     auto const signals = config.shutdownSignals->watch(
         [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); }, sequence.lastWrite());
 
+    // What a previous image of this daemon handed over: its listening sockets are served on rather than bound
+    // again, which a client reconnecting finds without a gap.
+    auto inherited = InheritedListeners { config.handover };
+
     // The control socket is bound before the snapshot is touched: a second daemon on the same label fails
     // here, rather than after moving aside the file the serving one keeps writing.
-    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
+    auto listener = adoptOrBindEndpoint(loop, inherited, "control", core::pathToUtf8(config.socketPath));
     if (!listener)
         return listener.error();
 
     // Read before the host, which realizes it in its constructor; the store outlives the persistence below.
     auto const store = snapshotStoreOf(config.persistence);
-    auto restore = restoreOf(store, config.persistence, wallClock);
+    // A handover carries the workspace itself: the snapshot stays where it is, for a restart after this run.
+    auto restore = config.handover ? std::nullopt : restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
 
@@ -830,9 +904,13 @@ int runDaemon(DaemonConfig const& config)
                                 config.profiles
                                     ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
                                     : ProfilePtyFactory {},
-                            .instance = config.instance,
-                            .restore = std::move(restore) }
+                            // The same run of the daemon goes on across a live upgrade.
+                            .instance = config.handover ? config.handover->daemonInstance : config.instance,
+                            .restore = std::move(restore),
+                            .handover = config.handover }
     };
+    if (auto const outcome = host.handoverOutcome(); !outcome)
+        errorLog()("the handover was taken over in part (error {})", std::to_underlying(outcome.error()));
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
     // the funnel.
@@ -851,7 +929,13 @@ int runDaemon(DaemonConfig const& config)
     // After the host, so its timer is disarmed before the host it hands catalogs to goes.
     auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
     if (config.configReload)
+    {
+        // A handover carries only part of each session's settings: the configuration is read again once,
+        // now, before any client sees a session, as the new image may read it otherwise than the old did.
+        if (config.handover && config.configReload->poll)
+            host.replaceProfiles(config.configReload->poll());
         reloadWatcher.emplace(loop, host, *config.configReload);
+    }
     // After the host, which it watches and must go first, and before the drain, which may still run the
     // shutdown it finalizes in; before any listener serves, so no client changes what it has not seen.
     auto persistence = std::optional<BoundPersistence> {};
@@ -869,7 +953,7 @@ int runDaemon(DaemonConfig const& config)
     // The native cells+deltas protocol listens beside the control-mode socket. Its connections count
     // themselves, as only an Attach connection is a client.
     auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
-    auto nativeListener = bindDaemonEndpoint(loop, nativePath);
+    auto nativeListener = adoptOrBindEndpoint(loop, inherited, "native", nativePath);
     if (!nativeListener)
         return nativeListener.error();
     auto nativeServer = ConnectionAcceptor {
@@ -882,7 +966,7 @@ int runDaemon(DaemonConfig const& config)
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
     auto const imsgPath = core::pathToUtf8(tmuxSocketPath(config.socketPath));
-    auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
+    auto imsgListener = adoptOrBindEndpoint(loop, inherited, "imsg", imsgPath);
     if (!imsgListener)
         return imsgListener.error();
     auto imsgServer = ConnectionAcceptor {
@@ -899,7 +983,7 @@ int runDaemon(DaemonConfig const& config)
     if (config.tmuxCompatLabel)
     {
         auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
-        auto compatListener = bindDaemonEndpoint(loop, compatPath);
+        auto compatListener = adoptOrBindEndpoint(loop, inherited, "tmux-compat", compatPath);
         if (!compatListener)
             return compatListener.error();
         compatServer.emplace(loop,
@@ -916,7 +1000,12 @@ int runDaemon(DaemonConfig const& config)
     auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
     if (config.nativeTcp)
     {
-        auto tcpListener = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        auto tcpListener =
+            [&]() -> std::expected<std::unique_ptr<core::net::IListener>, core::net::NetError> {
+            if (auto adopted = inherited.take(loop, "native-tcp"))
+                return std::move(*adopted);
+            return core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        }();
         if (!tcpListener)
         {
             errorLog()("cannot listen on {}:{}: {}",
@@ -941,6 +1030,8 @@ int runDaemon(DaemonConfig const& config)
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }
+
+    inherited.closeUnclaimed();
 
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);

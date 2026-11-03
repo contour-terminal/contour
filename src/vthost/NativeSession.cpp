@@ -51,6 +51,7 @@
 #include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
+#include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -2245,6 +2246,15 @@ void NativeSession::attachClient(uint64_t serial,
     // The window/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.
     pushLayout();
+
+    // A live upgrade that could not bring a session's screen back says so to the first client that shows the
+    // session: what it sees is a fresh screen, the program behind it untouched.
+    for (auto const session:
+         _host.takeUnrestoredScreens([this](vtworkspace::SessionId id) { return followsSession(id); }))
+        emitSessionEvent(proto::SessionNotify { .session = session.value,
+                                                .title = std::string { handover::UnrestoredScreenTitle },
+                                                .body = std::string { handover::UnrestoredScreenNotice },
+                                                .occasion = proto::NotifyOccasion::Always });
 
     // The sessions that already existed take the stated preference before their snapshot is built; a change
     // only, so what a program set on one survives.

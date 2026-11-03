@@ -256,6 +256,16 @@ struct Process::Private
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool waitForExit) const;
 
+    /// @return The child as an adopter takes it on, or nullopt where there is none. Under exitStatusMutex.
+    [[nodiscard]] std::optional<AdoptedChild> adoptedChildLocked() const
+    {
+        if (pid == NoChild)
+            return nullopt;
+        return AdoptedChild {
+            .pid = pid, .executable = path, .args = args, .cwd = cwd, .hangupGrace = hangupGrace
+        };
+    }
+
     /// @return The child's id, or NoChild when there is none to ask about, wait for or signal.
     [[nodiscard]] pid_t child() const
     {
@@ -535,16 +545,24 @@ StartResult Process::start()
     return {};
 }
 
-std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild const& child,
-                                                                   std::unique_ptr<Pty> pty)
+std::expected<void, AdoptError> Process::canAdopt(AdoptedChild const& child)
 {
-    Require(pty != nullptr);
     auto const pid = static_cast<pid_t>(child.pid);
     // Only a child of ours can be waited for; this also rejects a recycled or foreign id.
     auto info = siginfo_t {};
     if (pid <= 0 || child.pid != static_cast<std::int64_t>(pid)
         || waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) < 0)
         return std::unexpected(AdoptError::NoSuchChild);
+    return {};
+}
+
+std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild const& child,
+                                                                   std::unique_ptr<Pty> pty)
+{
+    Require(pty != nullptr);
+    if (auto const adoptable = canAdopt(child); !adoptable)
+        return std::unexpected(adoptable.error());
+    auto const pid = static_cast<pid_t>(child.pid);
 
     auto process = std::make_unique<Process>(child.executable,
                                              child.args,
@@ -560,16 +578,16 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
     return process;
 }
 
+std::optional<AdoptedChild> Process::handoverChild() const
+{
+    auto const _ = lock_guard { _d->exitStatusMutex };
+    return _d->adoptedChildLocked();
+}
+
 std::optional<AdoptedChild> Process::releaseChild()
 {
     auto const _ = lock_guard { _d->exitStatusMutex };
-    if (_d->pid == NoChild)
-        return nullopt;
-    auto child = AdoptedChild { .pid = _d->pid,
-                                .executable = _d->path,
-                                .args = _d->args,
-                                .cwd = _d->cwd,
-                                .hangupGrace = _d->hangupGrace };
+    auto child = _d->adoptedChildLocked();
     _d->pid = NoChild;
     return child;
 }

@@ -311,6 +311,8 @@ the `*Wire.hpp` encoders that turn `vtbackend` state into PDU payloads. Beneath 
   *contents* — consumers feed `%output` bytes into their own terminals.
 - `client/` — the native-protocol client engine, which runs **no parser**: it mirrors each remote
   session's screen from the server's Delta stream into a `RemoteScreen` any frontend can render.
+- `handover/` (`vthost::handover`) — the live-upgrade handover: what crosses an exec, how it is encoded, and the
+  orchestrator.
 - `testing/` — `GridParity`, which checks a mirrored screen against the grid it came from.
 
 `vthost` links no Qt, and that is the point: the whole serving path never touches the GUI stack, so

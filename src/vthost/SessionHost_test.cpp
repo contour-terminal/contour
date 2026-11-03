@@ -3662,24 +3662,6 @@ template <typename T>
 }
 
 #ifndef _WIN32
-/// Holds every child it is handed parked, between fork() and exec(), until the test lets it go.
-class HoldingPlacement final: public vtpty::ProcessPlacement
-{
-  public:
-    void placeThenRelease(vtpty::ParkedChild child) noexcept override { _parked.push_back(std::move(child)); }
-    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override { return std::nullopt; }
-
-    /// Lets every child held go on to exec().
-    void releaseAll()
-    {
-        for (auto& child: _parked)
-            child.release();
-    }
-
-  private:
-    std::vector<vtpty::ParkedChild> _parked;
-};
-
 /// @return A hosted session running `/bin/sh -c @p script` on a PTY of its own, not yet started.
 /// @param onClosed Invoked on the pump thread once the session's close is announced.
 /// @param placement Where its child is placed.
@@ -3861,7 +3843,7 @@ TEST_CASE("quiesce of a session whose child is blocked on output returns promptl
 
 TEST_CASE("quiesce refuses a session whose child is still spawning", "[vthost][host][upgrade][threading]")
 {
-    auto placement = std::make_shared<HoldingPlacement>();
+    auto placement = std::make_shared<vtpty::testing::HoldingPlacement>();
     auto session = liveSession("printf ready; exec cat", {}, placement);
     session->start();
 

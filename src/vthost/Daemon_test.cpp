@@ -58,11 +58,15 @@
 #include <vthost/WorkspacePersistence.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
+#include <vthost/testing/HandoverTesting.hpp>
 #include <vthost/testing/RecordingDurableFiles.hpp>
 #include <vthost/testing/RecordingFilePrivacy.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 
 #ifndef _WIN32
+    #include <sys/socket.h>
+    #include <sys/un.h>
+
     #include <csignal>
 
     #include <pthread.h>
@@ -958,5 +962,187 @@ TEST_CASE("a daemon without persistence offers no restore", "[vthost][daemon][af
     auto const* const hello = std::get_if<vthost::proto::ServerHello>(&received.front().pdu);
     REQUIRE(hello != nullptr);
     CHECK_FALSE(hello->capabilities.contains(vthost::proto::Capability::WorkspaceRestore));
+}
+#endif
+
+#ifndef _WIN32
+namespace
+{
+
+/// An Attach client's conversation up to its first layout: sends @p request and collects every frame until a
+/// LayoutState arrives, the daemon hangs up, or ten seconds pass without a byte.
+core::async::Task<void> attachUntilLayout(core::net::EventLoop* loop,
+                                          std::string socketPath,
+                                          std::vector<std::byte> request,
+                                          std::vector<vthost::proto::DecodedFrame>* received)
+{
+    auto connected = co_await core::net::connectUnix(loop, socketPath);
+    REQUIRE(connected.has_value());
+    auto const socket = std::move(*connected);
+    socket->setReceiveDeadline(std::chrono::seconds { 10 });
+    auto const written = co_await socket->write(request);
+    REQUIRE(written.has_value());
+
+    auto pending = std::vector<std::byte> {};
+    auto buffer = std::vector<std::byte>(4096);
+    while (true)
+    {
+        auto const read = co_await socket->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+        pending.insert(pending.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(*read));
+        while (auto frame = vthost::proto::decodePdu(pending))
+        {
+            pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(frame->consumed));
+            auto const isLayout = std::holds_alternative<vthost::proto::LayoutState>(frame->pdu);
+            received->push_back(*std::move(frame));
+            if (isLayout)
+                co_return;
+        }
+    }
+}
+
+/// @return A listening socket at @p path, as the previous image of a daemon left it bound: a descriptor and
+///         nothing else.
+[[nodiscard]] int rawListener(std::string const& path)
+{
+    auto const fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    REQUIRE(fd >= 0);
+    auto address = sockaddr_un {};
+    address.sun_family = AF_UNIX;
+    REQUIRE(path.size() < sizeof(address.sun_path));
+    std::ranges::copy(path, std::begin(address.sun_path));
+    REQUIRE(::bind(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
+    REQUIRE(::listen(fd, 8) == 0);
+    return fd;
+}
+
+/// The instance the image a test hands over names.
+constexpr auto HandedOverInstance = uint64_t { 0xFEEDFACE };
+
+/// A daemon about to start from a handover image: a host with two sessions in one tab, captured with a native
+/// listener of its own, the host gone as the exec would leave it.
+struct HandedOverDaemon
+{
+    TempDir tmp;
+    vthost::DaemonConfig config;
+    std::string nativePath;
+    std::vector<vtworkspace::SessionId> sessions;
+    std::vector<std::optional<vtcontrol::Uuid>> uuids;
+    std::shared_ptr<std::atomic<int>> polls = std::make_shared<std::atomic<int>>(0);
+    std::shared_ptr<ManualShutdownSignals> signals = std::make_shared<ManualShutdownSignals>();
+
+    HandedOverDaemon()
+    {
+        config.socketPath = tmp.path / "control";
+        nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+        fs::create_directories(tmp.path);
+        fs::permissions(tmp.path, fs::perms::owner_all, fs::perm_options::replace);
+        config.shutdownSignals = signals;
+        // Counted, and never due again while the test runs: only the reload after the restore polls.
+        config.configReload = vthost::ConfigReloadHook {
+            .poll = [polls = polls]() -> std::shared_ptr<vthost::ProfileCatalog const> {
+                ++*polls;
+                return nullptr;
+            },
+            .interval = std::chrono::hours { 1 },
+        };
+
+        auto old = std::make_unique<vthost::testing::LiveHost>(
+            [](vtpty::PageSize size) { return vthost::testing::shellProcess(size); });
+        old->spawnTwo();
+        sessions = old->host.sessionIds();
+        REQUIRE(old->eventually([&] {
+            return std::ranges::all_of(
+                sessions, [&](vtworkspace::SessionId id) { return old->pageText(id).contains("ready"); });
+        }));
+        for (auto const id: sessions)
+            uuids.push_back(old->host.objects().uuidOf(id));
+        old->settle();
+        auto image =
+            old->capture({ { .name = "native", .fd = rawListener(nativePath) } }, -1, HandedOverInstance);
+        REQUIRE(image.has_value());
+        vthost::testing::releaseForAdoption(old->host);
+        old.reset();
+        config.handover = *std::move(image);
+    }
+};
+
+/// @return Every leaf session @p pane carries, in tree order.
+void collectSessions(vthost::proto::WirePane const& pane, std::vector<uint64_t>& sessions)
+{
+    if (!pane.isSplit())
+        sessions.push_back(pane.session);
+    for (auto const& child: pane.children)
+        collectSessions(child, sessions);
+}
+
+} // namespace
+
+TEST_CASE("runDaemon from a handover image keeps instance, ids and sessions",
+          "[vthost][daemon][handover][afunix][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    // The inherited listener serves at once: no bind, no gap.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Attach });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        attachUntilLayout(&loop, d.nativePath, { request.view().begin(), request.view().end() }, &received));
+
+    // The same run of the daemon, by the instance a reconnecting client tells it by.
+    REQUIRE_FALSE(received.empty());
+    auto const* const hello = std::get_if<vthost::proto::ServerHello>(&received.front().pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->daemonInstance == HandedOverInstance);
+
+    // The same panes, under the same session ids.
+    auto const* const layout = std::get_if<vthost::proto::LayoutState>(&received.back().pdu);
+    REQUIRE(layout != nullptr);
+    REQUIRE(layout->tabs.size() == 1);
+    auto shown = std::vector<uint64_t> {};
+    collectSessions(layout->tabs.front().root, shown);
+    std::ranges::sort(shown);
+    CHECK(shown
+          == std::ranges::to<std::vector>(
+              d.sessions | std::views::transform([](vtworkspace::SessionId id) { return id.value; })));
+    // Stopped as it would be any day: the adopted sessions and listeners end cleanly.
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("config reload runs once after restore", "[vthost][daemon][handover][afunix][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    // Accepted by the kernel on the inherited socket before the daemon even serves it: only an answer says
+    // the daemon is up.
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Attach });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        attachUntilLayout(&loop, d.nativePath, { request.view().begin(), request.view().end() }, &received));
+    REQUIRE_FALSE(received.empty());
+
+    // Polled before any listener served, and not again until its interval is up.
+    CHECK(d.polls->load() == 1);
+    // Stopped as it would be any day: the adopted sessions and listeners end cleanly.
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
 }
 #endif

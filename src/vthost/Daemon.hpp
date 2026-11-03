@@ -32,6 +32,7 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
+#include <vthost/handover/HandoverImage.hpp>
 
 namespace vthost
 {
@@ -140,6 +141,13 @@ struct DaemonConfig
     /// bare `DaemonConfig{}`) keeps nothing and offers no Capability::WorkspaceRestore; `contour daemon`
     /// sets it from `daemon.restore`.
     WorkspacePersistenceConfig persistence {};
+    /// What the previous image of this daemon handed over as it exec'd this one in place (a live upgrade);
+    /// nullopt for a daemon that starts afresh. When set, the daemon is the same run going on: it states the
+    /// image's instance in place of @ref instance, serves on the listening sockets the image names instead of
+    /// binding new ones (binding only those it names none for), takes every session over
+    /// (SessionHostConfig::handover) in place of restoring @ref persistence's snapshot or realizing
+    /// @ref startupLayout, then reloads its configuration once (@ref configReload).
+    std::optional<handover::HandoverImage> handover {};
 };
 
 /// Creates the directory @p socketPath lives in owner-only, or checks that it is safe, as the

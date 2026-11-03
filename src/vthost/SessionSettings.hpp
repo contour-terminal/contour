@@ -14,10 +14,20 @@
 
 #include <vtbackend/screen/Settings.hpp>
 
+#include <cstdint>
+
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
 {
+
+/// Where a hosted session's emulation settings came from, which decides whether a profile reload reaches it.
+enum class SettingsOrigin : uint8_t
+{
+    Profile =
+        0, ///< The host's own: a profile it resolved, or its factory settings. A reload re-resolves them.
+    Client = 1, ///< Stated by a client that named no profile: a reload leaves them as the client stated.
+};
 
 /// The scrollback a hosted session keeps when nothing configured it. THE canonical statement of why
 /// a session host needs one; elsewhere just points here.

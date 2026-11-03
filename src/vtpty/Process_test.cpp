@@ -781,6 +781,25 @@ TEST_CASE("Process.adopt.reportsTheExitStatusOfItsChild", "[process][handover]")
     CHECK_FALSE((*adopted)->alive());
 }
 
+TEST_CASE("Process.handoverChild.readsTheChildAndKeepsIt", "[process][handover]")
+{
+    auto process = vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "exit 5" }), PageSize);
+    CHECK_FALSE(process.handoverChild().has_value()); // none spawned yet
+    REQUIRE(process.start().has_value());
+
+    // What releaseChild() would give up, read while the process keeps it: it still reaps its child.
+    auto const child = process.handoverChild();
+    REQUIRE(child.has_value());
+    CHECK(child->pid > 0);
+    CHECK(child->executable == "/bin/sh");
+    auto const status = process.wait();
+    REQUIRE(status.has_value());
+    auto const* const normal = std::get_if<vtpty::Process::NormalExit>(&*status);
+    REQUIRE(normal != nullptr);
+    CHECK(normal->exitCode == 5);
+    CHECK_FALSE(process.handoverChild().has_value()); // reaped
+}
+
 TEST_CASE("Process.adopt.refusesAProcessThatIsNotOurChild", "[process][handover]")
 {
     auto pty = std::make_unique<vtpty::MockPty>(PageSize);
@@ -790,5 +809,23 @@ TEST_CASE("Process.adopt.refusesAProcessThatIsNotOurChild", "[process][handover]
         std::move(pty));
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == vtpty::AdoptError::NoSuchChild);
+}
+
+TEST_CASE("Process.canAdopt.asksWithoutTakingAnything", "[process][handover]")
+{
+    auto const foreign = vtpty::AdoptedChild {
+        .pid = ::getppid(), .executable = "x", .args = {}, .cwd = {}, .hangupGrace = {}
+    };
+    REQUIRE_FALSE(vtpty::Process::canAdopt(foreign).has_value());
+    CHECK(vtpty::Process::canAdopt(foreign).error() == vtpty::AdoptError::NoSuchChild);
+
+    // A child of ours can be adopted until it is reaped, and not after.
+    auto process = vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "exit 3" }), PageSize);
+    REQUIRE(process.start().has_value());
+    auto const child = process.handoverChild();
+    REQUIRE(child.has_value());
+    CHECK(vtpty::Process::canAdopt(*child).has_value());
+    REQUIRE(process.wait().has_value());
+    CHECK_FALSE(vtpty::Process::canAdopt(*child).has_value());
 }
 #endif

@@ -5,6 +5,7 @@ add_library(vthost STATIC
     AttachPlan.hpp
     ByteStream.cpp
     ByteStream.hpp
+    CarriedDelivery.hpp
     ClientCensus.hpp
     ClientSizePolicy.hpp
     ConfigReload.cpp
@@ -54,6 +55,7 @@ add_library(vthost STATIC
     RerunPolicy.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
+    ListeningSocket.hpp
     NativeSession.cpp
     NodeMove.cpp
     NodeMove.hpp
@@ -164,6 +166,16 @@ add_library(vthost STATIC
     client/ViewportOrigin.hpp
     GridWire.cpp
     GridWire.hpp
+    handover/HandoverCapture.cpp
+    handover/HandoverCapture.hpp
+    handover/HandoverCodec.cpp
+    handover/HandoverCodec.hpp
+    handover/HandoverImage.hpp
+    handover/HandoverMemory.hpp
+    handover/HandoverMemory_posix.cpp
+    handover/HandoverMemory_win32.cpp
+    handover/HandoverRestore.cpp
+    handover/HandoverRestore.hpp
     proto/Negotiation.cpp
     proto/Negotiation.hpp
     proto/Pdu.cpp
@@ -307,6 +319,7 @@ if(VTHOST_TESTING)
         testing/FakeProfileCatalog.hpp
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
+        testing/HandoverTesting.hpp
         testing/MemoryByteStream.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
@@ -326,6 +339,10 @@ if(VTHOST_TESTING)
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
         client/ViewportOrigin_test.cpp
+        handover/HandoverCapture_test.cpp
+        handover/HandoverCodec_test.cpp
+        handover/HandoverMemory_test.cpp
+        handover/HandoverRestore_test.cpp
         imsg/ImsgCodec_test.cpp
         latency/EchoProtocol_test.cpp
         latency/Gate_test.cpp
