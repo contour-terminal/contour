@@ -498,6 +498,15 @@ class NativeClient final
     /// Closes the connection; run() finishes.
     void detach();
 
+    /// The system is about to sleep: no liveness verdict until it wakes. Ignored unless the connection is
+    /// live, negotiated and shares Capability::Heartbeat. Reactor thread only.
+    void noteSystemSleep();
+
+    /// The system woke: the daemon is probed now and must answer within LivenessPolicy::wakeDeadline.
+    /// Ignored unless the connection is live, negotiated and shares Capability::Heartbeat. Reactor thread
+    /// only.
+    void noteSystemWake();
+
     /// @return All mirrored screens, keyed by session id.
     [[nodiscard]] std::map<uint64_t, RemoteScreen> const& screens() const noexcept { return _screens; }
 
@@ -579,6 +588,24 @@ class NativeClient final
     /// Arms the next liveness tick, a second from now on the loop's clock.
     void armLivenessTick();
 
+    /// What a liveness decision leaves of the connection.
+    enum class LivenessOutcome : uint8_t
+    {
+        Continue = 0, ///< Still open: the tick re-arms.
+        Closed = 1,   ///< Declared lost and the read cancelled: the tick must not re-arm.
+    };
+
+    /// @return Whether the liveness tick is armed for this connection: open, negotiated, Heartbeat shared.
+    [[nodiscard]] bool livenessIsLive() const noexcept
+    {
+        return !_closing && !_detached && shares(proto::Capability::Heartbeat);
+    }
+
+    /// Acts on what _liveness decides at @p now: probes, gives up, or does nothing.
+    /// @param now The loop's clock.
+    /// @return Closed when the daemon was declared lost.
+    [[nodiscard]] LivenessOutcome applyLivenessDecision(core::platform::SteadyTimePoint now);
+
     /// One liveness tick: probes a silent daemon, or gives up on one silent for too long.
     /// @param self The NativeClient.
     static void livenessTick(void* self);
@@ -653,6 +680,7 @@ class NativeClient final
     /// The once-a-second liveness tick; armed while both ends share Capability::Heartbeat and the
     /// connection is open, disarmed as run() closes it.
     std::optional<core::net::DeadlineTimer> _livenessTimer;
+    core::platform::SteadyTimePoint _livenessTickDue {}; ///< When the armed tick was due, to spot a late one.
     /// LivenessPolicy::handshakeDeadline from the ClientHello; armed as run() sends it, disarmed by the
     /// daemon's answer and as run() closes the connection.
     std::optional<core::net::DeadlineTimer> _handshakeTimer;

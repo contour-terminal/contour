@@ -2914,7 +2914,9 @@ Task<void> daemonToEnd(Task<void> daemon, bool* ended)
         NativeClient::PermissionHandler {},
         vthost::client::LivenessPolicy { .idleBeforeProbe = 5s,
                                          .deadAfter = 15s,
-                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline });
+                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline,
+                                         .awakeGap = 5s,
+                                         .wakeDeadline = 5s });
 }
 
 /// A loop on a manual clock, a client on it, and a scripted daemon answering it with @p answer — driven by
@@ -2966,6 +2968,19 @@ struct ManualClockAttach
         { std::nullopt, acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } });
 }
 
+/// @return A script answering the hello with one that shares Heartbeat, then echoing every Heartbeat.
+[[nodiscard]] ScriptFor echoingAfterHello()
+{
+    return [](proto::DecodedFrame const& frame) -> Script {
+        if (carries<proto::ClientHello>(frame))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
+        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+            return Script { { std::nullopt, *heartbeat } };
+        return Script {};
+    };
+}
+
 } // namespace
 
 TEST_CASE("a client whose daemon stops answering ends with a loss reason", "[vthost][attach][liveness]")
@@ -3014,6 +3029,49 @@ TEST_CASE("a client whose daemon echoes stays connected", "[vthost][attach][live
     CHECK_FALSE(h.clientEnded);
     CHECK_FALSE(h.client->lossReason().has_value());
     CHECK(std::ranges::count_if(h.seen, carries<proto::Heartbeat>) >= 2);
+    h.settle();
+}
+
+TEST_CASE("a client frozen past the deadline probes its daemon instead of dropping it",
+          "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { echoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    auto const seenBefore = h.seen.size();
+    h.clock.advance(1000s); // the whole machine slept: one late tick, no second of it observed
+    h.letTimePass(10);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK(std::ranges::any_of(h.seen | std::views::drop(seenBefore), carries<proto::Heartbeat>));
+    h.settle();
+}
+
+TEST_CASE("a daemon gone during a sleep is given up on within the wake deadline",
+          "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { silentAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.clock.advance(1000s);
+    h.letTimePass(6);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK(h.client->lossReason() == "no answer from the daemon for 5 s");
+    h.settle();
+}
+
+TEST_CASE("an announced sleep and wake keep the connection", "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { echoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    auto const seenBefore = h.seen.size();
+    h.client->noteSystemSleep();
+    h.clock.advance(1000s);
+    std::ignore = turnUntil(h.loop, [] { return false; }, 20);
+    h.client->noteSystemWake();
+    h.letTimePass(10);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK(std::ranges::any_of(h.seen | std::views::drop(seenBefore), carries<proto::Heartbeat>));
     h.settle();
 }
 

@@ -414,8 +414,24 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
 void NativeClient::armLivenessTick()
 {
     _livenessTimer.reset();
-    _livenessTimer.emplace(
-        _loop, _loop.clock().now() + std::chrono::seconds { 1 }, &NativeClient::livenessTick, this);
+    _livenessTickDue = _loop.clock().now() + std::chrono::seconds { 1 };
+    _livenessTimer.emplace(_loop, _livenessTickDue, &NativeClient::livenessTick, this);
+}
+
+void NativeClient::noteSystemSleep()
+{
+    if (!livenessIsLive())
+        return;
+    _liveness.noteSleep(_loop.clock().now());
+}
+
+void NativeClient::noteSystemWake()
+{
+    if (!livenessIsLive())
+        return;
+    auto const now = _loop.clock().now();
+    _liveness.noteWake(now);
+    std::ignore = applyLivenessDecision(now);
 }
 
 void NativeClient::handshakeExpired(void* self)
@@ -432,30 +448,37 @@ void NativeClient::handshakeExpired(void* self)
     client._connection->cancelRead();
 }
 
+NativeClient::LivenessOutcome NativeClient::applyLivenessDecision(core::platform::SteadyTimePoint now)
+{
+    switch (_liveness.decide(now))
+    {
+        case LivenessAction::None: break;
+        case LivenessAction::SendHeartbeat:
+            send(proto::DecodedPdu { proto::Heartbeat { .nonce = _nextHeartbeatNonce++ } });
+            _liveness.noteProbeSent(now);
+            break;
+        case LivenessAction::DeclareLost:
+            _lossReason = std::format(
+                "no answer from the daemon for {} s",
+                std::chrono::duration_cast<std::chrono::seconds>(_liveness.silenceLimit()).count());
+            errorLog()("attach: {}; closing the connection", *_lossReason);
+            // As detach() does: the parked read is retired and run() closes the connection in order. Nothing
+            // comes after it, for the read's resumption can end the flow that owns this object.
+            _connection->cancelRead();
+            return LivenessOutcome::Closed;
+    }
+    return LivenessOutcome::Continue;
+}
+
 void NativeClient::livenessTick(void* self)
 {
     auto& client = *static_cast<NativeClient*>(self);
     if (client._closing || client._detached)
         return;
     auto const now = client._loop.clock().now();
-    switch (client._liveness.decide(now))
-    {
-        case LivenessAction::None: break;
-        case LivenessAction::SendHeartbeat:
-            client.send(proto::DecodedPdu { proto::Heartbeat { .nonce = client._nextHeartbeatNonce++ } });
-            client._liveness.noteProbeSent(now);
-            break;
-        case LivenessAction::DeclareLost:
-            client._lossReason = std::format(
-                "no answer from the daemon for {} s",
-                std::chrono::duration_cast<std::chrono::seconds>(client._liveness.policy().deadAfter)
-                    .count());
-            errorLog()("attach: {}; closing the connection", *client._lossReason);
-            // As detach() does: the parked read is retired and run() closes the connection in order. Nothing
-            // comes after it, for the read's resumption can end the flow that owns this object.
-            client._connection->cancelRead();
-            return;
-    }
+    client._liveness.noteTick(client._livenessTickDue, now);
+    if (client.applyLivenessDecision(now) == LivenessOutcome::Closed)
+        return;
     // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
     client.armLivenessTick();
 }
