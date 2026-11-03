@@ -292,6 +292,15 @@ if(CONTOUR_EXTENSIONS)
             EXCLUDE_FROM_ALL YES
             SYSTEM YES
         )
+        # WAMR ships a .clang-tidy with a key today's clang-tidy no longer knows (AnalyzeTemporaryDtors). clang-tidy
+        # reads it whenever a first-party file it lints includes a WAMR header, and fails on the parse error rather
+        # than on anything in our code. Third-party code is not ours to lint, so its configuration is replaced by
+        # one that enables nothing.
+        if(wamr_ADDED)
+            file(WRITE "${wamr_SOURCE_DIR}/.clang-tidy"
+                 "# Written by Contour's build (cmake/ContourThirdParties.cmake): third-party code is not linted.\n"
+                 "Checks: '-*'\n")
+        endif()
         if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
             # The fast interpreter reads its pre-decoded operands unaligned on purpose, on CPUs that
             # allow it (WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS); UBSan would report every one.
