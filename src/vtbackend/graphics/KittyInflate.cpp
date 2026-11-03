@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/KittyInflate.hpp>
 
-#include <gsl/util>
-
 #include <algorithm>
 #include <limits>
 
@@ -21,6 +19,25 @@ namespace
     /// How many times its compressed size an output is reserved for up front. Only a hint: the cap
     /// may be a quota remainder far larger than the image, so it is never reserved outright.
     constexpr auto ReserveRatio = size_t { 4 };
+
+    /// Ends an initialised zlib inflate stream when it goes out of scope.
+    ///
+    /// Deliberately not gsl::finally: the tree pins Microsoft GSL 3.1.0, which spells that header
+    /// `gsl/gsl_util`, while GSL 4.x (what Homebrew ships) spells it `gsl/util`, so no single include
+    /// builds everywhere. The stream is only referenced, never moved: zlib's state points back at it.
+    class InflateStreamGuard
+    {
+      public:
+        explicit InflateStreamGuard(z_stream& stream) noexcept: _stream { stream } {}
+        InflateStreamGuard(InflateStreamGuard const&) = delete;
+        InflateStreamGuard(InflateStreamGuard&&) = delete;
+        InflateStreamGuard& operator=(InflateStreamGuard const&) = delete;
+        InflateStreamGuard& operator=(InflateStreamGuard&&) = delete;
+        ~InflateStreamGuard() { inflateEnd(&_stream); }
+
+      private:
+        z_stream& _stream;
+    };
 } // namespace
 
 std::expected<std::vector<uint8_t>, InflateError> inflateZlib(std::span<uint8_t const> compressed,
@@ -35,7 +52,7 @@ std::expected<std::vector<uint8_t>, InflateError> inflateZlib(std::span<uint8_t 
     auto stream = z_stream {};
     if (inflateInit(&stream) != Z_OK)
         return std::unexpected { InflateError::Corrupt };
-    auto const release = gsl::finally([&stream] { inflateEnd(&stream); });
+    auto const release = InflateStreamGuard { stream };
 
     stream.next_in = compressed.data();
     stream.avail_in = static_cast<uInt>(compressed.size());
