@@ -2,9 +2,11 @@
 #include <vtbackend/state/ImageState.hpp>
 
 #include <vtbackend/screen/Screen.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/state/StateValues.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <ranges>
 #include <set>
 
@@ -137,13 +139,19 @@ KittyScreenState Screen::captureKittyState(ImageTableBuilder& images) const
     for (auto const& [kittyId, image]: _kittyImages)
         state.images.emplace_back(kittyId, images.addImage(image));
     std::ranges::sort(state.images);
+    auto const now = _terminal->steadyTimeNow();
     for (auto const& [kittyId, animation]: _kittyAnimations)
     {
         auto captured = KittyAnimationState { .id = kittyId,
                                               .frames = {},
                                               .currentFrame = animation.currentFrame,
                                               .state = animation.state,
-                                              .loopCount = animation.loopCount };
+                                              .loopCount = animation.loopCount,
+                                              .loopsDone = animation.loopsDone,
+                                              .nextFrameDueIn = {} };
+        if (!animation.isHeld())
+            captured.nextFrameDueIn =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(animation.nextFrameDue - now);
         for (auto const& frame: animation.frames)
             captured.frames.push_back(
                 { .image = images.addImage(frame.image), .gapMilliseconds = frame.gapMilliseconds });
@@ -161,6 +169,12 @@ std::expected<void, StateDecodeError> Screen::validateKittyState(KittyScreenStat
     auto const isKnown = [&](ImageId id) {
         return resolver.image(id) != nullptr;
     };
+    // A deadline is rebased onto the restoring clock: one no clock could reach would overflow it.
+    auto const isRebasable = [](std::optional<std::chrono::nanoseconds> dueIn) {
+        constexpr auto Reach =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::years { 100 });
+        return !dueIn || (*dueIn >= -Reach && *dueIn <= Reach);
+    };
     // Each id once: the tables are maps, and a second entry would be dropped silently.
     auto const isUnique = [](auto&& ids) {
         auto seen = std::set<uint32_t> {};
@@ -169,9 +183,12 @@ std::expected<void, StateDecodeError> Screen::validateKittyState(KittyScreenStat
     if (!isUnique(state.images | std::views::keys)
         || !isUnique(state.animations | std::views::transform(&KittyAnimationState::id))
         || !std::ranges::all_of(state.images | std::views::values, isKnown)
-        || !std::ranges::all_of(state.animations, [&](KittyAnimationState const& animation) {
-               return std::ranges::all_of(animation.frames, isKnown, &KittyFrameState::image);
-           }))
+        || !std::ranges::all_of(state.animations,
+                                [&](KittyAnimationState const& animation) {
+                                    return std::ranges::all_of(
+                                        animation.frames, isKnown, &KittyFrameState::image);
+                                })
+        || !std::ranges::all_of(state.animations, isRebasable, &KittyAnimationState::nextFrameDueIn))
         return StateFailure { StateDecodeError::InvalidValue };
     return {};
 }
@@ -185,12 +202,19 @@ std::expected<void, StateDecodeError> Screen::restoreKittyState(KittyScreenState
     for (auto const& [kittyId, id]: state.images)
         _kittyImages.insert_or_assign(kittyId, resolver.image(id));
     _kittyAnimations.clear();
+    auto const now = _terminal->steadyTimeNow();
     for (auto const& captured: state.animations)
     {
         auto animation = KittyAnimation { .frames = {},
                                           .currentFrame = captured.currentFrame,
                                           .state = captured.state,
-                                          .loopCount = captured.loopCount };
+                                          .loopCount = captured.loopCount,
+                                          .loopsDone = captured.loopsDone,
+                                          .nextFrameDue = KittyAnimation::Held };
+        if (captured.nextFrameDueIn)
+            animation.nextFrameDue =
+                now
+                + std::chrono::duration_cast<std::chrono::steady_clock::duration>(*captured.nextFrameDueIn);
         for (auto const& frame: captured.frames)
             animation.frames.push_back(
                 { .image = resolver.image(frame.image), .gapMilliseconds = frame.gapMilliseconds });

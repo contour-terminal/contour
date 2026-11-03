@@ -10,6 +10,7 @@
 #include <vtbackend/state/ImageRefs.hpp>
 #include <vtbackend/state/StateCodec.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -163,6 +164,11 @@ struct KittyAnimationState
     uint32_t currentFrame = 1;           ///< Which frame a placement displays.
     kitty_graphics::AnimationState state = kitty_graphics::AnimationState::Unset; ///< Playback state.
     uint32_t loopCount = 0; ///< 0 unspecified, 1 forever, n>1 loop n-1 times.
+    uint32_t loopsDone = 0; ///< Loops played since playback started or `v=` was last given.
+
+    /// How long until playback moves on from the current frame, negative when that is overdue; none while it
+    /// holds. A steady-clock deadline, so it crosses as a span and is rebased onto the restoring clock.
+    std::optional<std::chrono::nanoseconds> nextFrameDueIn {};
 
     bool operator==(KittyAnimationState const&) const = default;
 
@@ -174,6 +180,8 @@ struct KittyAnimationState
         visitor(3, self.currentFrame);
         visitor(4, self.state);
         visitor(5, self.loopCount);
+        visitor(6, self.loopsDone);
+        visitor(7, self.nextFrameDueIn);
     }
 };
 
@@ -316,6 +324,13 @@ namespace detail
         visitor(28, command.frameBackground);
         visitor(29, command.compositionMode);
         visitor(30, command.payload);
+        visitor(31, command.rawX);
+        visitor(32, command.composeSourceFrame);
+        visitor(33, command.composeDestinationFrame);
+        visitor(34, command.composeSourceX);
+        visitor(35, command.composeSourceY);
+        visitor(36, command.composeDestinationX);
+        visitor(37, command.composeDestinationY);
     }
 } // namespace detail
 

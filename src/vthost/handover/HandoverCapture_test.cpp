@@ -37,6 +37,7 @@
 #include <vthost/handover/HandoverCapture.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 
 using namespace vthost;
 using namespace vthost::handover;
@@ -229,13 +230,13 @@ TEST_CASE("rollback after capture resumes all sessions with no lost input", "[vt
 TEST_CASE("a capture refuses a session that runs on no child process, and every session runs on",
           "[vthost][handover][threading]")
 {
-    // The second session's device is a PTY with no process of ours behind it, as an SSH or channel session's
-    // is: nothing could adopt it after the exec.
+    // The second session's device is no PTY of this process, as an SSH or channel session's is: nothing could
+    // adopt it after the exec.
     auto spawned = 0;
     auto h = CaptureHarness { [&spawned](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
         if (spawned++ == 0)
             return catProcess(size);
-        return vtpty::createPty(size, std::nullopt);
+        return std::make_unique<vthost::testing::StallingPty>(size);
     } };
     h.spawnTwo();
     auto const ids = h.host.sessionIds();
@@ -353,7 +354,8 @@ TEST_CASE("a captured terminal state decodes to the screen the session shows",
         INFO("session " << captured.id.value);
         auto const state = vtbackend::decodeTerminalState(captured.terminalState);
         REQUIRE(state.has_value());
-        auto settings = vtbackend::settingsFor(*state, captured.settings);
+        auto settings = vtbackend::settingsFor(
+            *state, fromWireSessionSettings(captured.statedSettings, defaultSessionSettings()));
         REQUIRE(settings.has_value());
         // A terminal built as the new image builds it, restored from what crossed.
         auto restored = HostedSession { captured.id,

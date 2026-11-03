@@ -1411,6 +1411,11 @@ Config loadConfig();
 /// @return "~" quoted for the home directory, else the directory in UTF-8, as the file is written.
 [[nodiscard]] std::string spelledWorkingDirectory(std::filesystem::path const& workingDirectory);
 
+/// The configuration file a command line names, or the default one when it names none.
+/// @param configPath The file, UTF-8 as the command line is read; empty for the default one.
+/// @return The file to load.
+[[nodiscard]] std::filesystem::path configFileNamed(std::string_view configPath);
+
 /// Loads the configuration file a command line names, or the default one.
 /// @param configPath The file, UTF-8 as the command line is read on every platform; empty for the
 ///                   default one (@see loadConfig).

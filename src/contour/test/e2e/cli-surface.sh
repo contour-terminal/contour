@@ -45,6 +45,14 @@ trap 'rm -rf "$OUT"' EXIT
 # exactly the way the two above are: it reports failure when nothing is registered, and there is no
 # service backend on this platform at all. Swept for the code path, not held to an outcome.
 "$CONTOUR" daemon-service status > /dev/null 2>&1 || true
+# What a daemon asks of a new release before it upgrades onto it live: one line of strict JSON, answered in an
+# empty environment, as the readiness probe runs it.
+env -i PATH=/usr/bin:/bin "$CONTOUR" daemon handover-info > "$OUT/handover-info.txt"
+grep -Eqx '\{"release":"[^"]+","handoverFormats":\[[0-9]+,[0-9]+\],"terminalStateFormats":\[[0-9]+,[0-9]+\]\}' \
+    "$OUT/handover-info.txt" \
+    || { echo "error: 'daemon handover-info' printed: $(cat "$OUT/handover-info.txt")" >&2; exit 1; }
+[ "$(wc -l < "$OUT/handover-info.txt")" -eq 1 ] \
+    || { echo "error: 'daemon handover-info' printed more than one line" >&2; exit 1; }
 "$CONTOUR" documentation vt > "$OUT/doc-vt.txt"
 "$CONTOUR" documentation keys > "$OUT/doc-keys.txt"
 "$CONTOUR" documentation configuration global > "$OUT/doc-config-global.txt"

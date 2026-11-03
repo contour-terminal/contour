@@ -11,16 +11,23 @@
     #include <core/net/Sockets.hpp>
     #include <core/net/testing/CoroTestSupport.hpp>
     #include <core/net/testing/FailingListener.hpp>
+    #include <core/net/testing/InMemorySocket.hpp>
     #include <core/testing/ScopedTempDir.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 
+    #include <sys/socket.h>
+    #include <sys/un.h>
+
     #include <algorithm>
+    #include <array>
     #include <cerrno>
     #include <chrono>
     #include <cstddef>
     #include <cstdint>
+    #include <cstring>
     #include <filesystem>
+    #include <functional>
     #include <memory>
     #include <span>
     #include <string>
@@ -30,6 +37,7 @@
     #include <unistd.h>
 
     #include <vthost/ConnectionAcceptor.hpp>
+    #include <vthost/ListeningSocket.hpp>
 
 using core::async::Task;
 using core::net::EventLoop;
@@ -241,6 +249,227 @@ TEST_CASE("closing the server ends the accept loop", "[vthost][server]")
     loop.blockOn(server.serve());
 
     CHECK(server.acceptedCount() == 0);
+}
+
+namespace
+{
+/// @return A connected descriptor to the unix socket at @p path, from a plain blocking connect: the kernel
+///         completes it into the listener's backlog whether or not anything accepts.
+[[nodiscard]] int connectRaw(std::string const& path)
+{
+    auto const fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    REQUIRE(fd >= 0);
+    auto address = sockaddr_un {};
+    address.sun_family = AF_UNIX;
+    REQUIRE(path.size() < sizeof(address.sun_path));
+    std::memcpy(address.sun_path, path.data(), path.size());
+    REQUIRE(::connect(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
+    return fd;
+}
+
+/// Turns @p loop for about @p duration.
+void turnFor(EventLoop& loop, std::chrono::milliseconds duration)
+{
+    loop.blockOn(core::net::testing::sleepFor(&loop, duration));
+}
+} // namespace
+
+TEST_CASE("a held acceptor leaves connections in the backlog, and takes them once resumed",
+          "[vthost][acceptor][upgrade]")
+{
+    auto const tmp = core::testing::ScopedTempDir { "contour-muxsrv" };
+    auto const socketPath = (tmp.path() / "sockets" / "default").string();
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto listener = core::net::listenUnix(loop, socketPath);
+    REQUIRE(listener.has_value());
+    auto server =
+        ConnectionAcceptor { loop,
+                             "test",
+                             std::move(*listener),
+                             [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
+                                 return drainConnection(std::move(conn));
+                             } };
+    loop.spawn(server.serve());
+    turnFor(loop, std::chrono::milliseconds { 10 }); // parked in its accept
+
+    server.holdAccepting();
+    CHECK(server.admission() == vthost::Admission::Holding);
+    auto const waiting = connectRaw(socketPath);
+    turnFor(loop, std::chrono::milliseconds { 50 });
+    CHECK(server.acceptedCount() == 0); // still bound: the connect went into the backlog
+
+    server.resumeAccepting();
+    CHECK(server.admission() == vthost::Admission::Accepting);
+    turnFor(loop, std::chrono::milliseconds { 50 });
+    CHECK(server.acceptedCount() == 1);
+
+    // Held and resumed again: the accept loop is the same one.
+    server.holdAccepting();
+    turnFor(loop, std::chrono::milliseconds { 10 });
+    server.resumeAccepting();
+    auto const second = connectRaw(socketPath);
+    turnFor(loop, std::chrono::milliseconds { 50 });
+    CHECK(server.acceptedCount() == 2);
+
+    ::close(waiting);
+    ::close(second);
+    server.close();
+    turnFor(loop, std::chrono::milliseconds { 10 });
+}
+
+namespace
+{
+/// A listener whose one connection is accepted in the same turn the acceptor is held: the race a hold loses.
+struct HoldingRaceListener final: core::net::IListener
+{
+    std::function<void()> onAccept;              ///< Runs as the connection is taken: the hold.
+    std::unique_ptr<core::net::ISocket> pending; ///< The connection the next accept hands out.
+
+    explicit HoldingRaceListener(std::unique_ptr<core::net::ISocket> connection):
+        pending { std::move(connection) }
+    {
+    }
+
+    core::async::Task<core::net::AcceptResult> accept() override
+    {
+        if (!pending)
+            co_return std::unexpected(core::net::NetError {
+                .code = core::net::NetErrorCode::Cancelled, .systemCode = 0, .context = "accept" });
+        if (onAccept)
+            onAccept();
+        co_return std::move(pending);
+    }
+
+    [[nodiscard]] std::uint16_t boundPort() const noexcept override { return 0; }
+
+  protected:
+    void doClose() noexcept override {}
+};
+} // namespace
+
+TEST_CASE("a connection accepted as the acceptor is held is closed, not served",
+          "[vthost][acceptor][upgrade]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto* const client = pair.client.get();
+    auto owned = std::make_unique<HoldingRaceListener>(std::move(pair.server));
+    auto* const listener = owned.get();
+    auto served = 0;
+    auto server = ConnectionAcceptor { loop,
+                                       "test",
+                                       std::move(owned),
+                                       [&served](vthost::ConnectionId const&,
+                                                 std::unique_ptr<core::net::ISocket> conn) {
+                                           ++served;
+                                           return drainConnection(std::move(conn));
+                                       } };
+    listener->onAccept = [&server] {
+        server.holdAccepting();
+    };
+    loop.spawn(server.serve());
+    turnFor(loop, std::chrono::milliseconds { 20 });
+
+    CHECK(server.admission() == vthost::Admission::Holding);
+    CHECK(served == 0);
+    CHECK(server.acceptedCount() == 0);
+    // The client reads the end of a connection nothing serves.
+    auto const ended = loop.blockOn([](core::net::ISocket* socket) -> Task<bool> {
+        auto buffer = std::array<std::byte, 16> {};
+        auto const read = co_await socket->read(buffer);
+        co_return !read.has_value() || *read == 0;
+    }(client));
+    CHECK(ended);
+
+    server.close();
+    turnFor(loop, std::chrono::milliseconds { 10 });
+}
+
+TEST_CASE("a held acceptor that is closed ends its accept loop", "[vthost][acceptor][upgrade]")
+{
+    auto const tmp = core::testing::ScopedTempDir { "contour-muxsrv" };
+    auto const socketPath = (tmp.path() / "sockets" / "default").string();
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto listener = core::net::listenUnix(loop, socketPath);
+    REQUIRE(listener.has_value());
+    auto server =
+        ConnectionAcceptor { loop,
+                             "test",
+                             std::move(*listener),
+                             [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
+                                 return drainConnection(std::move(conn));
+                             } };
+    server.holdAccepting();
+    auto const serveAndClose = [](EventLoop* lp, ConnectionAcceptor* acceptor) -> Task<void> {
+        co_await core::async::whenAll(
+            acceptor->serve(), [](EventLoop* l, ConnectionAcceptor* a) -> Task<void> {
+                co_await core::net::testing::sleepFor(l, std::chrono::milliseconds { 10 });
+                a->close();
+            }(lp, acceptor));
+    };
+    loop.blockOn(serveAndClose(&loop, &server)); // returns only once serve() ended
+    CHECK(server.acceptedCount() == 0);
+}
+
+TEST_CASE("an acceptor names the descriptor its unix listener listens on", "[vthost][acceptor][upgrade]")
+{
+    auto const tmp = core::testing::ScopedTempDir { "contour-muxsrv" };
+    auto const socketPath = (tmp.path() / "sockets" / "default").string();
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto listener = core::net::listenUnix(loop, socketPath);
+    REQUIRE(listener.has_value());
+    auto server =
+        ConnectionAcceptor { loop,
+                             "control",
+                             std::move(*listener),
+                             [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
+                                 return drainConnection(std::move(conn));
+                             } };
+    CHECK(server.name() == "control");
+    auto const fd = server.listeningDescriptor();
+    REQUIRE(fd.has_value());
+    auto address = sockaddr_un {};
+    auto length = static_cast<socklen_t>(sizeof(address));
+    REQUIRE(::getsockname(*fd, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+    CHECK(std::string { address.sun_path } == socketPath);
+    server.close();
+}
+
+TEST_CASE("a listening socket is told apart from every other descriptor, with and without SO_ACCEPTCONN",
+          "[vthost][acceptor][upgrade]")
+{
+    // isListeningSocket asks SO_ACCEPTCONN where the system has it; detail::listensByAddress is what macOS,
+    // which has not, falls back to. Both must agree on every kind of descriptor a daemon holds.
+    auto const listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    REQUIRE(listener >= 0);
+    REQUIRE(::listen(listener, 1) == 0);
+    auto pair = std::array<int, 2> {};
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair.data()) == 0);
+    auto pipe = std::array<int, 2> {};
+    REQUIRE(::pipe(pipe.data()) == 0);
+    auto const unbound = ::socket(AF_INET, SOCK_STREAM, 0);
+    REQUIRE(unbound >= 0);
+
+    CHECK(vthost::isListeningSocket(listener));
+    CHECK(vthost::detail::listensByAddress(listener));
+    for (auto const other: { pair[0], pipe[0], pipe[1], unbound })
+    {
+        INFO(other);
+        CHECK_FALSE(vthost::isListeningSocket(other));
+        CHECK_FALSE(vthost::detail::listensByAddress(other));
+    }
+    ::close(unbound);
+    ::close(pipe[0]);
+    ::close(pipe[1]);
+    ::close(pair[0]);
+    ::close(pair[1]);
+    ::close(listener);
+    CHECK_FALSE(vthost::isListeningSocket(listener));
+    CHECK_FALSE(vthost::detail::listensByAddress(listener));
 }
 
 TEST_CASE("the accepting endpoint is named in the connection log", "[vthost][acceptor]")

@@ -41,6 +41,12 @@ inline constexpr std::string_view UnrestoredScreenNotice =
 /// @return How many were closed.
 std::size_t closeListeningSockets();
 
+/// @param image A handover image.
+/// @return Every descriptor @p image names -- every session's PTY master and fast-pipe ends, every listener,
+/// the
+///         image lease -- ascending, each once: what the old image keeps open across its exec.
+[[nodiscard]] std::vector<int> descriptorsNamedBy(HandoverImage const& image);
+
 /// @param image A decoded handover image.
 /// @return Every descriptor the new image keeps: standard input, output and error, and each one @p image
 ///         names -- every session's PTY master and fast-pipe ends, every listener, the image lease --

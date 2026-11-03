@@ -134,10 +134,26 @@ HostedSession::HostedSession(SessionId id,
         _extensions->start();
 }
 
+namespace
+{
+    /// @return @p device, or what it taps.
+    [[nodiscard]] vtpty::Pty const* untapped(vtpty::Pty const* device) noexcept
+    {
+        auto const* const tapped = dynamic_cast<TappingPty const*>(device);
+        return tapped != nullptr ? &tapped->inner() : device;
+    }
+} // namespace
+
 vtpty::Process const* HostedSession::process() const noexcept
 {
-    auto const* const tapped = dynamic_cast<TappingPty const*>(&_terminal.device());
-    return dynamic_cast<vtpty::Process const*>(tapped != nullptr ? &tapped->inner() : &_terminal.device());
+    return dynamic_cast<vtpty::Process const*>(untapped(&_terminal.device()));
+}
+
+vtpty::Pty const& HostedSession::pty() const noexcept
+{
+    auto const* const device = untapped(&_terminal.device());
+    auto const* const process = dynamic_cast<vtpty::Process const*>(device);
+    return process != nullptr ? process->pty() : *device;
 }
 
 void HostedSession::pollForegroundProcess()
@@ -225,20 +241,24 @@ void HostedSession::pumpLoop()
     // via its own `_terminating` flag; deriving the condition from the device instead keeps
     // one source of truth, since the device is what terminate() actually mutates.
     //
-    // Before the first read, what waits already goes out: the terminal's queued replies, then what clients
-    // handed over -- carried over from a previous process (replayCarried()), or queued while quiesced.
-    // Named first, so that the flush below writes rather than wakes the reader it would name otherwise.
+    // Before the first read, what waits already goes out: the rest of a write a capture interrupted, the
+    // terminal's queued replies, then what clients handed over -- carried over from a previous process
+    // (replayCarried()), or queued while quiesced. The rest first, so that no reply queued while it waited
+    // lands in the middle of it. Named first, so that the flush below writes rather than wakes the reader it
+    // would name otherwise.
     //
     // A capture stops it between any two of these steps: after a batch, after a delivery (what a write it
     // interrupted did not get to the PTY is queued again), after a flush (what that did not write stays the
     // terminal's). What clients handed over stays queued, and the PTY open.
     _terminal.setReaderThread(std::this_thread::get_id());
+    if (deliverPending(PendingScope::InterruptedRest) == DeliveryOutcome::Stopped)
+        return;
     _terminal.flushInput();
-    if (quiesceRequested() || deliverPending() == DeliveryOutcome::Stopped)
+    if (quiesceRequested() || deliverPending(PendingScope::All) == DeliveryOutcome::Stopped)
         return;
     while (!_terminal.device().isClosed() && _terminal.processInputOnce())
     {
-        if (quiesceRequested() || deliverPending() == DeliveryOutcome::Stopped)
+        if (quiesceRequested() || deliverPending(PendingScope::All) == DeliveryOutcome::Stopped)
             return;
         _terminal.flushInput();
         if (quiesceRequested())
@@ -280,7 +300,9 @@ void HostedSession::deliverOnPump(DeliveryKind kind, std::string_view bytes)
 {
     {
         auto const _ = std::scoped_lock { _pendingMutex };
-        if (!_pending.empty() && _pending.back().kind == kind)
+        // Never into an interrupted write's rest, which goes ahead of the terminal's replies.
+        if (!_pending.empty() && _pending.back().kind == kind
+            && _pending.back().progress == DeliveryProgress::Whole)
             _pending.back().bytes.append(bytes);
         else
             _pending.push_back(CarriedDelivery { .kind = kind, .bytes = std::string { bytes } });
@@ -291,7 +313,7 @@ void HostedSession::deliverOnPump(DeliveryKind kind, std::string_view bytes)
     if (!_pumpThread)
     {
         _terminal.flushInput();
-        std::ignore = deliverPending();
+        std::ignore = deliverPending(PendingScope::All);
         return;
     }
     // Its read returns, and it delivers what was queued before it reads again. A quiesced pump reads nothing
@@ -321,12 +343,21 @@ void HostedSession::writeInput(std::string_view bytes)
     deliverOnPump(DeliveryKind::Pty, bytes);
 }
 
-HostedSession::DeliveryOutcome HostedSession::deliverPending()
+HostedSession::DeliveryOutcome HostedSession::deliverPending(PendingScope scope)
 {
     auto pending = std::vector<CarriedDelivery> {};
     {
         auto const _ = std::scoped_lock { _pendingMutex };
-        pending = std::exchange(_pending, {});
+        switch (scope)
+        {
+            case PendingScope::All: pending = std::exchange(_pending, {}); break;
+            case PendingScope::InterruptedRest:
+                if (_pending.empty() || _pending.front().progress != DeliveryProgress::InterruptedRest)
+                    return DeliveryOutcome::Delivered;
+                pending.push_back(std::move(_pending.front()));
+                _pending.erase(_pending.begin());
+                break;
+        }
     }
     // What a capture stopped this before, from @p first on, goes back to the front: ahead of what was handed
     // over since.
@@ -346,8 +377,10 @@ HostedSession::DeliveryOutcome HostedSession::deliverPending()
         if (delivered < delivery.bytes.size() && quiesceRequested())
         {
             // A write the capture interrupted: its rest goes ahead of everything after it -- and of the
-            // terminal's queued replies, which this does not flush, so that none lands in the middle of it.
+            // terminal's queued replies, which this does not flush, so that none lands in the middle of it --
+            // here, and in the pump that delivers it, which sends it before its first flush.
             delivery.bytes.erase(0, delivered);
+            delivery.progress = DeliveryProgress::InterruptedRest;
             core::locked(_pendingMutex, [&] { _pendingBytes -= delivered; });
             return stopAt(index);
         }
@@ -360,6 +393,22 @@ HostedSession::DeliveryOutcome HostedSession::deliverPending()
 }
 
 std::expected<QuiescedSession, QuiesceError> HostedSession::quiesce()
+{
+    return stopForCapture().transform([this] { return captureStopped(); });
+}
+
+QuiescedSession HostedSession::captureStopped()
+{
+    auto state = [this] {
+        auto const _ = std::lock_guard { _terminal };
+        return _terminal.captureState();
+    }();
+    // A copy: the live session keeps its queue, for resume() to deliver should the upgrade roll back.
+    auto carried = core::locked(_pendingMutex, [this] { return _pending; });
+    return QuiescedSession { .terminal = std::move(state), .carried = std::move(carried) };
+}
+
+std::expected<void, QuiesceError> HostedSession::stopForCapture()
 {
     // Refused before anything stops: a child that has not flushed its terminal yet would lose what is
     // written to it in between, which a capture taken now would claim to carry.
@@ -374,20 +423,18 @@ std::expected<QuiescedSession, QuiesceError> HostedSession::quiesce()
     if (_terminal.device().isClosed() || (_pumpThread && !quiesceRequested()))
         return std::unexpected(QuiesceError::Ended);
 
-    auto state = [this] {
+    // With the pump stopped nothing parses: what is in flight now is what a capture would take.
+    auto const tail = [this] {
         auto const _ = std::lock_guard { _terminal };
-        return _terminal.captureState();
+        return _terminal.inFlightTailCompleteness();
     }();
-    if (state.inFlightTailOverflowed == vtbackend::TailCompleteness::Overflowed)
+    if (tail == vtbackend::TailCompleteness::Overflowed)
     {
         if (pumpWasRunning)
             resume();
         return std::unexpected(QuiesceError::InFlightTailOverflowed);
     }
-
-    // A copy: the live session keeps its queue, for resume() to deliver should the upgrade roll back.
-    auto carried = core::locked(_pendingMutex, [this] { return _pending; });
-    return QuiescedSession { .terminal = std::move(state), .carried = std::move(carried) };
+    return {};
 }
 
 void HostedSession::stopPump()
@@ -1018,6 +1065,12 @@ std::vector<SessionId> SessionHost::takeUnrestoredScreens(std::function<bool(Ses
     return taken;
 }
 
+void SessionHost::announceDegradation(std::string notice)
+{
+    errorLog()("{}", notice);
+    _degradations.push_back(std::move(notice));
+}
+
 void SessionHost::holdInitialInput(SessionId session, std::string input)
 {
     auto pending = std::make_unique<PendingInitialInput>(this, session, std::move(input));
@@ -1062,6 +1115,13 @@ std::string SessionHost::interruptedCommandOf(SessionId session) const
 {
     auto const it = _interruptions.find(session.value);
     return it != _interruptions.end() ? it->second.commandLine : std::string {};
+}
+
+std::optional<CommandInterruption> SessionHost::interruptionOf(SessionId session) const
+{
+    if (auto const it = _interruptions.find(session.value); it != _interruptions.end())
+        return it->second;
+    return std::nullopt;
 }
 
 void SessionHost::clearInterruptionOnNextCommand(SessionId session)
@@ -1583,6 +1643,13 @@ void SessionHost::applyColorPreference(SessionId session, vtbackend::ColorPrefer
     fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
 }
 
+std::optional<vtbackend::ColorPreference> SessionHost::colorPreferenceOf(SessionId session) const
+{
+    if (auto const it = _colorPreferences.find(session.value); it != _colorPreferences.end())
+        return it->second;
+    return std::nullopt;
+}
+
 void SessionHost::subscribe(vtworkspace::ModelEvents* observer)
 {
     _subscribers.push_back(observer);
@@ -1645,9 +1712,19 @@ std::vector<SessionId> SessionHost::sessionIds() const
     return ids;
 }
 
-std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
+bool SessionHost::isAnySessionStarting() const
 {
-    // Every session runs on as before, the ones quiesced before this call included.
+    return !_initialInputs.empty()
+           || std::ranges::any_of(_sessions | std::views::values, [](auto const& session) {
+                  auto const* const child = session->process();
+                  return child != nullptr
+                         && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress;
+              });
+}
+
+std::expected<void, HostQuiesceError> SessionHost::stopAllPumps()
+{
+    // Every session runs on as before, the ones stopped before this call included.
     auto const refuse = [this](HostQuiesceError reason) {
         resumeAll();
         return std::unexpected(reason);
@@ -1658,19 +1735,15 @@ std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
         sessionLog()("quiesce: {} session(s) still hold their initial input", _initialInputs.size());
         return refuse(HostQuiesceError::SessionStarting);
     }
-    auto sessions = std::vector<QuiescedHostSession> {};
     for (auto const id: sessionIds())
     {
         auto& hosted = *_sessions.at(id.value);
-        auto quiesced = hosted.quiesce();
-        if (quiesced)
-        {
-            sessions.push_back(QuiescedHostSession { .id = id, .state = *std::move(quiesced) });
+        auto const stopped = hosted.stopForCapture();
+        if (stopped)
             continue;
-        }
         sessionLog()(
-            "quiesce: session {} did not quiesce ({})", id.value, std::to_underlying(quiesced.error()));
-        switch (quiesced.error())
+            "quiesce: session {} did not quiesce ({})", id.value, std::to_underlying(stopped.error()));
+        switch (stopped.error())
         {
             case QuiesceError::SpawnInProgress: return refuse(HostQuiesceError::SessionStarting);
             case QuiesceError::InFlightTailOverflowed:
@@ -1681,10 +1754,23 @@ std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
                 break;
         }
     }
-    return QuiescedHost { .tree = _model.captureTree(),
-                          .modelIds = _model.idState(),
-                          .nextSessionId = SessionId { _nextSessionId },
-                          .sessions = std::move(sessions) };
+    return {};
+}
+
+std::expected<QuiescedHost, HostQuiesceError> SessionHost::quiesceAll()
+{
+    // Every pump stopped first, so that a refusal captured nothing; then each session still running,
+    // captured.
+    return stopAllPumps().transform([this] {
+        auto sessions = std::ranges::to<std::vector>(
+            sessionIds() | std::views::transform([this](SessionId id) {
+                return QuiescedHostSession { .id = id, .state = _sessions.at(id.value)->captureStopped() };
+            }));
+        return QuiescedHost { .tree = _model.captureTree(),
+                              .modelIds = _model.idState(),
+                              .nextSessionId = SessionId { _nextSessionId },
+                              .sessions = std::move(sessions) };
+    });
 }
 
 void SessionHost::resumeAll()

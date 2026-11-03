@@ -31,11 +31,38 @@ struct StateEnumWire<vthost::SettingsOrigin>
 };
 
 template <>
+struct StateEnumWire<vthost::handover::SessionDevice>
+{
+    static constexpr auto Values = std::array {
+        vthost::handover::SessionDevice::ChildOnPty,
+        vthost::handover::SessionDevice::PtyOnly,
+    };
+};
+
+template <>
 struct StateEnumWire<vthost::DeliveryKind>
 {
     static constexpr auto Values = std::array {
         vthost::DeliveryKind::Pty,
         vthost::DeliveryKind::Screen,
+    };
+};
+
+template <>
+struct StateEnumWire<vthost::DeliveryProgress>
+{
+    static constexpr auto Values = std::array {
+        vthost::DeliveryProgress::Whole,
+        vthost::DeliveryProgress::InterruptedRest,
+    };
+};
+
+template <>
+struct StateEnumWire<vtbackend::ColorPreference>
+{
+    static constexpr auto Values = std::array {
+        vtbackend::ColorPreference::Dark,
+        vtbackend::ColorPreference::Light,
     };
 };
 
@@ -154,6 +181,7 @@ static void visitStateFields(Visitor& visitor, T& delivery)
 {
     visitor(1, delivery.kind);
     visitor(2, delivery.bytes);
+    visitor(3, delivery.progress);
 }
 
 template <typename Visitor, typename T>
@@ -176,24 +204,6 @@ static void visitStateFields(Visitor& visitor, T& wire)
     visitor(6, wire.sixelScrolling);
     visitor(7, wire.wordDelimiters);
     visitor(8, wire.frozenModes);
-}
-
-template <typename Visitor, typename T>
-    requires std::same_as<std::remove_const_t<T>, vtbackend::Settings>
-static void visitStateFields(Visitor& visitor, T& settings)
-{
-    // Only the emulation-relevant subset crosses; the rest is the configuration's.
-    if constexpr (std::is_same_v<Visitor, FieldDecoder>)
-    {
-        auto wire = vthost::proto::WireSessionSettings {};
-        visitor(1, wire);
-        settings = vthost::fromWireSessionSettings(wire, vthost::defaultSessionSettings());
-    }
-    else
-    {
-        auto const wire = vthost::toWireSessionSettings(settings);
-        visitor(1, wire);
-    }
 }
 
 template <typename Visitor, typename T>
@@ -320,6 +330,20 @@ namespace
         }
         return HandoverError::Malformed;
     }
+
+    /// Gives every session whose PTY the image names no page size for -- a corrupt image; none is ever
+    /// captured so -- FallbackPageSize, and refuses its terminal state: the program is adopted all the same,
+    /// on a fresh terminal of that size, and no size anyone divides by is empty.
+    void refuseEmptyPageSizes(HandoverImage& image)
+    {
+        for (auto& session: image.sessions)
+        {
+            if (session.pty.pageSize.lines.value > 0 && session.pty.pageSize.columns.value > 0)
+                continue;
+            session.pty.pageSize = FallbackPageSize;
+            session.terminalState.clear();
+        }
+    }
 } // namespace
 
 std::vector<uint8_t> encodeHandover(HandoverImage const& image)
@@ -355,6 +379,7 @@ std::expected<HandoverImage, HandoverError> decodeHandover(std::span<uint8_t con
         auto image = HandoverImage {};
         if (auto const decoded = vtbackend::detail::decodeFields(*payload, image); !decoded)
             return std::unexpected { toHandoverError(decoded.error()) };
+        refuseEmptyPageSizes(image);
         return image;
     }
     catch (std::bad_alloc const&)

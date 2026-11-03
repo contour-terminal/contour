@@ -557,10 +557,6 @@ struct TerminalState
     }
 };
 
-/// The most lines a restored terminal's page or scrollback may have: a ceiling against a stream that asks a
-/// terminal to allocate without bound, far above any configured value.
-inline constexpr auto MaxStateHistoryLines = 16 * 1024 * 1024;
-
 /// The settings a terminal restoring @p state is to be constructed with: @p base, with every construction
 /// setting the restore depends on (ConstructionState) taken from @p state.
 /// @param state A captured terminal.

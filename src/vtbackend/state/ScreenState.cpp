@@ -26,6 +26,17 @@ namespace
                && location.column >= ColumnOffset(0)
                && location.column < boxed_cast<ColumnOffset>(size.columns);
     }
+
+    /// @return Whether @p location is a cell of @p grid, its history included: where a resize may leave the
+    ///         cursor DECSC saved, as it follows its row into the history (DECRC holds it to the page).
+    [[nodiscard]] bool isOnGrid(CellLocation location, GridState const& grid) noexcept
+    {
+        auto const history = unbox<int64_t>(grid.linesUsed) - unbox<int64_t>(grid.pageSize.lines);
+        return unbox<int64_t>(location.line) >= -history
+               && location.line < boxed_cast<LineOffset>(grid.pageSize.lines)
+               && location.column >= ColumnOffset(0)
+               && location.column < boxed_cast<ColumnOffset>(grid.pageSize.columns);
+    }
 } // namespace
 
 // {{{ CharsetMapping
@@ -89,7 +100,8 @@ ScreenState Screen::captureState(ImageTableBuilder& images) const
                                .isoProtectionActive = _isoProtectionActive,
                                .enableLocalFunctions = _enableLocalFunctions,
                                .localFunctionKeyControl = _localFunctionKeyControl,
-                               .modifierKeyReporting = _modifierKeyReporting };
+                               .modifierKeyReporting = _modifierKeyReporting,
+                               .cellSizeDropLog = _cellSizeDropLog };
     if (_regisContext && _regisCanvas)
         state.regis = regis::ReGISState::capture(*_regisContext, *_regisCanvas);
     return state;
@@ -99,8 +111,7 @@ std::expected<StagedScreen, StateDecodeError> Screen::stageRestore(
     ScreenState const& state, ImageFragmentResolver const& resolver) const
 {
     if (!isOnPage(state.cursor.position, state.grid.pageSize)
-        || !isOnPage(state.savedCursor.position, state.grid.pageSize)
-        || (state.regis && !state.regis->isConsistent()))
+        || !isOnGrid(state.savedCursor.position, state.grid) || (state.regis && !state.regis->isConsistent()))
         return StateFailure { StateDecodeError::InvalidValue };
     auto staged =
         StagedScreen { .state = &state, .resolver = &resolver, .grid = {}, .cursor = {}, .savedCursor = {} };
@@ -141,6 +152,7 @@ void Screen::commitRestore(StagedScreen staged)
     _enableLocalFunctions = state.enableLocalFunctions;
     _localFunctionKeyControl = state.localFunctionKeyControl;
     _modifierKeyReporting = state.modifierKeyReporting;
+    _cellSizeDropLog = state.cellSizeDropLog;
 
     if (state.regis)
     {

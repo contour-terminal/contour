@@ -7,8 +7,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <format>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -355,4 +358,183 @@ TEST_CASE("XTPOPCOLORS of a slot the stack does not hold is ignored", "[Handover
     mock->writeToScreen("\033[5#Q"sv); // XTPOPCOLORS of slot 5, which was never pushed
     CHECK(mock->terminal.colorPalette().palette == changed);
     CHECK(changed != before);
+}
+
+// {{{ held scrollback
+namespace
+{
+/// The page scenarioSettings() builds, and a shorter one a resize makes of it.
+constexpr auto FullPage = PageSize { LineCount(8), ColumnCount(30) };
+constexpr auto ShortPage = PageSize { LineCount(4), ColumnCount(30) };
+
+/// @return A terminal of scenarioSettings() that printed @p rows numbered rows.
+std::unique_ptr<MockTerm<>> printedRows(int rows)
+{
+    auto mock = std::make_unique<MockTerm<>>(scenarioSettings());
+    for (auto const row: std::views::iota(0, rows))
+        mock->writeToScreen(std::format("row {:02}\r\n", row));
+    return mock;
+}
+
+/// Checks that @p target holds every row @p source does, history included.
+void requireSameRows(MockTerm<>& source, MockTerm<>& target)
+{
+    auto const& expected = source.terminal.primaryScreen().grid();
+    auto const& actual = target.terminal.primaryScreen().grid();
+    REQUIRE(actual.historyLineCount() == expected.historyLineCount());
+    CHECK(actual.renderAllText() == expected.renderAllText());
+    CHECK(test::differingAreas(target.terminal.captureState(), source.terminal.captureState()).empty());
+}
+} // namespace
+
+TEST_CASE("scrollback a resize holds above the capacity hands over and is given back alike", "[Handover]")
+{
+    // A full scrollback, then a shorter page: the rows pushed out of it stay held above the capacity.
+    auto source = printedRows(40);
+    source->terminal.resizeScreen(ShortPage);
+    REQUIRE(source->terminal.primaryScreen().grid().historyLineCount() > LineCount(20));
+
+    auto target = handOver(*source);
+    requireSameRows(*source, *target);
+
+    SECTION("the resize undone gives every held row back")
+    {
+        source->terminal.resizeScreen(FullPage);
+        target->terminal.resizeScreen(FullPage);
+        requireSameRows(*source, *target);
+    }
+    SECTION("the next output settles the hold alike")
+    {
+        requireSameAfter(*source, *target, "settled\r\n"sv);
+        CHECK(target->terminal.primaryScreen().grid().historyLineCount() == LineCount(20));
+        requireSameRows(*source, *target);
+    }
+}
+
+TEST_CASE("a restore refuses scrollback above the capacity that no held ring accounts for", "[Handover]")
+{
+    auto source = printedRows(40);
+    source->terminal.resizeScreen(ShortPage);
+    auto state = source->terminal.captureState();
+    state.pages.front().grid.ringSlots.reset();
+
+    auto const settings = settingsFor(state, scenarioSettings());
+    REQUIRE(settings.has_value());
+    auto const target = std::make_unique<MockTerm<>>(*settings);
+    CHECK_FALSE(target->terminal.restoreState(state).has_value());
+}
+// }}}
+
+// {{{ kitty playback
+namespace
+{
+using namespace std::chrono_literals;
+
+/// How far the restoring process's clock is from the capturing one's: the deadlines must be rebased.
+constexpr auto ClockSkew = std::chrono::hours { 5 };
+
+/// Places a one-pixel image under id 7 at the top left with three frames -- red, green, blue -- shown for
+/// 10, 20 and 30 ms, and starts it looping @p loops times (`v=`, 1 forever).
+void playThreeFrames(MockTerm<>& mock, int loops)
+{
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1;/wAA\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,r=1,z=10\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=20;AP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=30;AAD/\033\\"sv);
+    mock.writeToScreen(std::format("\033_Ga=a,i=7,s=3,v={}\033\\", loops));
+    mock.discardPendingReplies();
+}
+
+/// @return The first pixel the top left cell shows, as its red, green and blue; empty for no image.
+std::vector<uint8_t> shownPixel(MockTerm<>& mock)
+{
+    auto const _ = std::lock_guard { mock.terminal };
+    auto const fragment = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    if (!fragment)
+        return {};
+    auto const& data = fragment->rasterizedImage().image().data();
+    return { data.begin(), data.begin() + std::min<std::ptrdiff_t>(3, std::ssize(data)) };
+}
+
+/// The playback deadline @p mock published, relative to its own clock.
+std::optional<std::chrono::steady_clock::duration> dueIn(MockTerm<>& mock)
+{
+    auto const due = mock.terminal.kittyAnimationDue();
+    if (!due)
+        return std::nullopt;
+    return *due - mock.steadyClock.now();
+}
+
+/// Hands @p source over into a terminal whose clock reads ClockSkew later.
+std::unique_ptr<MockTerm<>> handOverSkewed(MockTerm<> const& source)
+{
+    return handOver<MockTerm<>>(source, [](Settings settings) {
+        auto target = std::make_unique<MockTerm<>>(std::move(settings));
+        target->steadyClock.advance(ClockSkew);
+        return target;
+    });
+}
+
+/// Ticks both terminals @p steps times, @p step apart, checking after each that they show the same frame
+/// and are due to move on at the same time.
+void requireSamePlayback(MockTerm<>& source, MockTerm<>& target, int steps, std::chrono::milliseconds step)
+{
+    for (auto const index: std::views::iota(0, steps))
+    {
+        INFO(std::format("after {} ms", (index + 1) * step.count()));
+        for (auto* const mock: { &source, &target })
+        {
+            mock->steadyClock.advance(step);
+            mock->terminal.tick(mock->steadyClock.now());
+        }
+        REQUIRE(shownPixel(target) == shownPixel(source));
+        REQUIRE(dueIn(target) == dueIn(source));
+    }
+}
+} // namespace
+
+TEST_CASE("a kitty animation handed over mid-frame plays on from where it was", "[Handover][kitty]")
+{
+    auto source = std::make_unique<MockTerm<>>(scenarioSettings());
+    playThreeFrames(*source, 1);
+    source->steadyClock.advance(15ms); // into the second frame, 15 ms before the third
+    source->terminal.tick(source->steadyClock.now());
+    REQUIRE(dueIn(*source) == std::chrono::steady_clock::duration { 15ms });
+
+    auto target = handOverSkewed(*source);
+
+    // Due at once, without a tick or a kitty command to re-arm it: the daemon's frame timer hears of it.
+    CHECK(dueIn(*target) == dueIn(*source));
+    CHECK(shownPixel(*target) == shownPixel(*source));
+    requireSamePlayback(*source, *target, 40, 5ms);
+}
+
+TEST_CASE("a kitty animation handed over mid-loop stops after the loops v= allows", "[Handover][kitty]")
+{
+    // Two loops of 60 ms; the handover falls into the second.
+    auto source = std::make_unique<MockTerm<>>(scenarioSettings());
+    playThreeFrames(*source, 3);
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 14))
+    {
+        source->steadyClock.advance(5ms);
+        source->terminal.tick(source->steadyClock.now());
+    }
+
+    auto target = handOverSkewed(*source);
+
+    requireSamePlayback(*source, *target, 30, 5ms);
+    CHECK_FALSE(dueIn(*source).has_value());
+}
+// }}}
+
+TEST_CASE("a screen that logged an image dropped for want of a cell size does not log it again", "[Handover]")
+{
+    auto source = std::make_unique<MockTerm<>>(scenarioSettings());
+    source->writeToScreen("\033Pq#0;2;100;0;0#0!6~-\033\\"sv); // a sixel, and no cell size to place it by
+    REQUIRE(source->terminal.captureState().pages.front().cellSizeDropLog == CellSizeDropLog::Logged);
+
+    auto target = handOver(*source);
+
+    CHECK(target->terminal.captureState().pages.front().cellSizeDropLog == CellSizeDropLog::Logged);
 }

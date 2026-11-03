@@ -24,6 +24,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -295,6 +296,7 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
 
 NativeSession::~NativeSession()
 {
+    _upgradeLink->session = nullptr;
     _host.noteClientDetached(this);
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
@@ -1949,6 +1951,30 @@ NativeSession::DaemonRequest NativeSession::serveDaemonRequest(proto::DecodedFra
             refuse(frame);
         return DaemonRequest::Served;
     }
+    if (auto const* upgrade = std::get_if<proto::UpgradeDaemon>(&frame.pdu))
+    {
+        // A PDU this daemon does not serve to a peer that did not negotiate it.
+        if (!_negotiated->shared.contains(proto::Capability::LiveUpgrade))
+        {
+            refuse(frame);
+            return DaemonRequest::Served;
+        }
+        if (requireGrant(vtcontrol::Permission::Write, frame) == GrantCheck::Refused)
+            return DaemonRequest::Served;
+        // Only a peer on this machine may replace the daemon's binary: a network peer's token is not that.
+        if (!isLocal(_id))
+        {
+            errorLog()("{}: refusing an UpgradeDaemon: live upgrade is local only", _id);
+            send(frame.serial,
+                 proto::DecodedPdu {
+                     upgradeFailureReply(handover::UpgradeError { handover::UpgradeRefusal::LocalOnly }) });
+            return DaemonRequest::Served;
+        }
+        connectionLog()("{}: the client asked the daemon to upgrade to '{}'", _id, upgrade->imageId);
+        _loop.spawn(serveUpgradeRequest(
+            &daemon, _upgradeLink, frame.serial, handover::UpgradeTarget { .imageId = upgrade->imageId }));
+        return DaemonRequest::Served;
+    }
     if (auto const* stop = std::get_if<proto::StopDaemon>(&frame.pdu))
     {
         if (requireGrant(vtcontrol::Permission::Write, frame) == GrantCheck::Refused)
@@ -1967,6 +1993,71 @@ NativeSession::DaemonRequest NativeSession::serveDaemonRequest(proto::DecodedFra
         return DaemonRequest::Served;
     }
     return DaemonRequest::None;
+}
+
+void NativeSession::replyThroughLink(UpgradeLink const& link,
+                                     uint64_t serial,
+                                     proto::UpgradeDaemonReply reply)
+{
+    if (link.session != nullptr)
+        link.session->send(serial, proto::DecodedPdu { std::move(reply) });
+}
+
+core::async::Task<void> NativeSession::serveUpgradeRequest(DaemonControl* daemon,
+                                                           std::shared_ptr<UpgradeLink> link,
+                                                           uint64_t serial,
+                                                           handover::UpgradeTarget target)
+{
+    // The answer to "started" is sent by the daemon from inside its announcement, ahead of DaemonUpgrading
+    // and of the closing of this very connection; the callback holds the link, never the connection.
+    auto result = std::expected<void, handover::UpgradeError> {};
+    try
+    {
+        result = co_await daemon->requestUpgrade(
+            std::move(target), [link, serial] { replyThroughLink(*link, serial, upgradeStartedReply()); });
+    }
+    catch (std::exception const& failure)
+    {
+        // Rolled back as it unwound; this flow is a root, which would swallow it, and the requester waits.
+        errorLog()("live upgrade failed: {}", failure.what());
+        result = std::unexpected(handover::UpgradeError {
+            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
+    }
+    catch (...)
+    {
+        errorLog()("live upgrade failed: unknown exception");
+        result = std::unexpected(handover::UpgradeError {
+            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
+    }
+    if (!result)
+        replyThroughLink(*link, serial, upgradeFailureReply(result.error()));
+}
+
+void NativeSession::announceUpgrade(std::string_view toRelease)
+{
+    if (_closed || !_negotiated || !_negotiated->shared.contains(proto::Capability::LiveUpgrade))
+        return;
+    send(0, proto::DecodedPdu { proto::DaemonUpgrading { .toRelease = std::string { toRelease } } });
+}
+
+void NativeSession::abortForUpgrade()
+{
+    connectionLog()("{}: closing the connection at once for the daemon's upgrade", _id);
+    // Whatever stage the end is in -- the pump still running, or the flush of what is queued waiting on a
+    // peer that reads nothing -- a parked read or write ends cancelled, and run() unwinds.
+    _upgradeEnd = UpgradeEnd::Ending;
+    _connection->close();
+}
+
+void NativeSession::closeForUpgrade()
+{
+    if (_closed)
+        return;
+    connectionLog()("{}: ending the connection for the daemon's upgrade", _id);
+    _upgradeEnd = UpgradeEnd::Ending;
+    // Retires the read the pump is parked on; the pump then sees it must read no more, and run() flushes the
+    // queue before it closes.
+    _connection->cancelRead();
 }
 
 namespace
@@ -2256,6 +2347,19 @@ void NativeSession::attachClient(uint64_t serial,
                                                 .body = std::string { handover::UnrestoredScreenNotice },
                                                 .occasion = proto::NotifyOccasion::Always });
 
+    // What the daemon could not start as configured after an upgrade, told on the first session this client
+    // shows -- the notice is the daemon's, a session only where a client shows it -- and kept for a client
+    // that shows one when this one shows none.
+    auto const sessions = _host.sessionIds();
+    if (auto const shown =
+            std::ranges::find_if(sessions, [this](vtworkspace::SessionId id) { return followsSession(id); });
+        shown != sessions.end())
+        for (auto& notice: _host.takeDegradations())
+            emitSessionEvent(proto::SessionNotify { .session = shown->value,
+                                                    .title = std::string { handover::UnrestoredScreenTitle },
+                                                    .body = std::move(notice),
+                                                    .occasion = proto::NotifyOccasion::Always });
+
     // The sessions that already existed take the stated preference before their snapshot is built; a change
     // only, so what a program set on one survives.
     if (colorPreference)
@@ -2333,6 +2437,9 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
 
 void NativeSession::reportPumpOutcome(PumpResult const& outcome) const
 {
+    // The read the upgrade retired fails as cancelled: that is the way this connection ends, not a failure.
+    if (_upgradeEnd == UpgradeEnd::Ending)
+        return;
     if (auto const reason = describe(outcome))
     {
         if (isFailure(outcome.stop))
@@ -2396,6 +2503,7 @@ struct NativeSession::SpawnedFlowsEnded
 
 core::async::Task<void> NativeSession::run()
 {
+    _upgradeSubscription.emplace(_services.daemon.get(), *this);
     // Whatever ends the pump ends it here, so that the barrier below runs on every way out. Every exception,
     // not just a stopped loop's OperationCancelled: any of them leaves this frame, and serveNativeClient
     // frees `this` the moment it does -- under every flow still holding it, which is the use-after-free the
@@ -2421,7 +2529,7 @@ core::async::Task<void> NativeSession::run()
                 handlePdu(frame);
                 return true;
             },
-            {},
+            [this] { return _upgradeEnd == UpgradeEnd::Ending; },
             [this] { return awaitInputRoom(); });
         reportPumpOutcome(outcome);
     }
@@ -2431,6 +2539,8 @@ core::async::Task<void> NativeSession::run()
     }
 
     _closed = true;
+    // Before the barrier below: an upgrade's flow must find no connection that is going.
+    _upgradeLink->session = nullptr;
     // Before the barrier below: a wait completing later must find no sink of a connection that is going.
     _services.control.get().sinkClosed(_controlEvents);
     // Lifetime constraint: serveNativeClient destroys this session the moment
@@ -2451,8 +2561,14 @@ core::async::Task<void> NativeSession::run()
     // bounded drain would report the flow still alive.
     co_await SpawnedFlowsEnded { this };
     if (failure)
+    {
+        _upgradeSubscription.reset();
         std::rethrow_exception(failure);
+    }
     co_await closeGracefully(&_loop, &_writer, _connection.get());
+    // Subscribed until here, so that an upgrade's abortForUpgrade() reaches a connection whose orderly end a
+    // peer that reads nothing holds up; closeForUpgrade() and announceUpgrade() see `_closed` meanwhile.
+    _upgradeSubscription.reset();
 }
 
 bool NativeSession::spawnedFlowsEnded() const noexcept

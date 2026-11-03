@@ -21,11 +21,21 @@ enum class DeliveryKind : uint8_t
     Screen,
 };
 
+/// How much of a delivery is still to go.
+enum class DeliveryProgress : uint8_t
+{
+    Whole = 0, ///< None of it went yet.
+    /// The rest of a PTY write a capture interrupted: delivered before the terminal's queued replies, so that
+    /// none lands in the middle of what the program was already reading (a paste).
+    InterruptedRest,
+};
+
 /// What a client handed a session and the pump has not delivered yet, as a capture carries it.
 struct CarriedDelivery
 {
-    DeliveryKind kind = DeliveryKind::Pty; ///< What the pump does with @ref bytes.
-    std::string bytes;                     ///< What it does it with.
+    DeliveryKind kind = DeliveryKind::Pty;               ///< What the pump does with @ref bytes.
+    std::string bytes;                                   ///< What it does it with.
+    DeliveryProgress progress = DeliveryProgress::Whole; ///< Whether it is the rest of an interrupted write.
 
     bool operator==(CarriedDelivery const&) const = default;
 };

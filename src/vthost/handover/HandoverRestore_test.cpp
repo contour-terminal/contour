@@ -11,10 +11,20 @@
     #include <sys/socket.h>
     #include <sys/wait.h>
 
+    #include <cerrno>
     #include <csignal>
 
     #include <fcntl.h>
+    #include <spawn.h>
     #include <unistd.h>
+
+    #ifdef __APPLE__
+        #include <util.h>
+    #elifdef __FreeBSD__
+        #include <libutil.h>
+    #else
+        #include <pty.h>
+    #endif
 #endif
 
 #include <algorithm>
@@ -35,6 +45,7 @@
 #include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 
 using namespace vthost;
 using namespace vthost::handover;
@@ -59,6 +70,7 @@ namespace
 {
 
 using vthost::testing::LiveHost;
+using vthost::testing::occurrences;
 using vthost::testing::releaseForAdoption;
 using vthost::testing::shellProcess;
 
@@ -83,16 +95,6 @@ constexpr auto SixelImage = std::string_view { "\033Pq\"1;1;4;6#1;2;100;0;0#1~~~
             if (screen.at(vtbackend::LineOffset(line), vtbackend::ColumnOffset(column)).imageFragment())
                 return true;
     return false;
-}
-
-/// @return How often @p needle occurs in @p text.
-[[nodiscard]] std::size_t occurrences(std::string_view text, std::string_view needle)
-{
-    auto count = std::size_t { 0 };
-    for (auto at = text.find(needle); at != std::string_view::npos;
-         at = text.find(needle, at + needle.size()))
-        ++count;
-    return count;
 }
 
 /// @return Every session's child, as the image names it.
@@ -130,10 +132,13 @@ constexpr auto SixelImage = std::string_view { "\033Pq\"1;1;4;6#1;2;100;0;0#1~~~
 
 /// @return A host started from @p image.
 /// @param config How it is set up besides.
-[[nodiscard]] std::unique_ptr<LiveHost> takeOver(HandoverImage image, SessionHostConfig config = {})
+/// @param settings The host's own session settings.
+[[nodiscard]] std::unique_ptr<LiveHost> takeOver(HandoverImage image,
+                                                 SessionHostConfig config = {},
+                                                 vtbackend::Settings settings = {})
 {
     config.handover = std::move(image);
-    return std::make_unique<LiveHost>(catDevice, std::move(config));
+    return std::make_unique<LiveHost>(catDevice, std::move(config), std::move(settings));
 }
 
 /// @return A host with one echoing session, ready.
@@ -374,6 +379,33 @@ TEST_CASE("a restored session runs on the settings its profile makes up in the n
     CHECK(terminal.primaryScreen().renderMainPageText().contains("ready"));
 }
 
+TEST_CASE("a restored session takes the scrollback limit of the configuration the new image loaded",
+          "[vthost][handover][threading]")
+{
+    // Built with a limit the new configuration no longer names; the terminal state carries it across.
+    auto oldSettings = vtbackend::Settings {};
+    oldSettings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(1000));
+    auto old = std::make_unique<LiveHost>(catDevice, LiveHost::sequentialIds(), oldSettings);
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const id = old->host.sessionIds().front();
+    REQUIRE(old->eventually([&] { return old->pageText(id).contains("ready"); }));
+    auto const image = handOver(std::move(old));
+
+    auto const configured = vtbackend::HistoryLimits::plain(vtbackend::LineCount(4321));
+    auto const live = takeOver(
+        image,
+        SessionHostConfig {
+            .profiles = std::make_shared<vthost::testing::FakeProfileCatalog>(
+                std::map<std::string, ResolvedProfile> {
+                    { "default", vthost::testing::fakeProfile("/bin/sh", vtbackend::LineCount(4321)) } },
+                "default") });
+    auto& terminal = live->host.hostedSession(id)->terminal();
+    auto const _ = std::lock_guard { terminal };
+    CHECK(terminal.settings().historyLimits == configured);
+    // The screen is the captured one all the same.
+    CHECK(terminal.primaryScreen().renderMainPageText().contains("ready"));
+}
+
 TEST_CASE("a refused workspace tree still adopts every session, each in a tab of its own",
           "[vthost][handover][threading]")
 {
@@ -404,6 +436,33 @@ TEST_CASE("a refused workspace tree still adopts every session, each in a tab of
 #endif
 
 #ifndef _WIN32
+TEST_CASE("a kitty animation playing as it is handed over keeps the daemon's frame timer armed",
+          "[vthost][handover][threading]")
+{
+    auto old = oneSession();
+    auto const id = old->host.sessionIds().front();
+    auto const image = handOver(std::move(old), [&](LiveHost& live) {
+        auto& terminal = live.host.hostedSession(id)->terminal();
+        {
+            auto const _ = std::lock_guard { terminal };
+            terminal.setCellPixelSize(vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+        }
+        // Two one-pixel frames a minute each, looping: due long after the takeover.
+        terminal.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1,q=2;/wAA\033\\"
+                               "\033_Ga=a,i=7,r=1,z=60000,q=2\033\\"
+                               "\033_Ga=f,i=7,X=1,s=1,v=1,z=60000,q=2;AP8A\033\\"
+                               "\033_Ga=a,i=7,s=3,q=2\033\\");
+        // What the parse posted for the loop is handled before the capture, as settle() leaves it.
+        REQUIRE(live.eventually([&] { return live.host.pumpEventsInFlight() == 0; }));
+        REQUIRE(terminal.kittyAnimationDue().has_value());
+    });
+
+    auto const live = takeOver(image);
+
+    // Armed by the restore alone: nothing the program sends from now re-arms it.
+    CHECK(live->eventually([&] { return live->host.ticksKittyAnimations(id); }));
+}
+
 TEST_CASE("a restored terminal lays an image out at the cell size its PTY's pixels give",
           "[vthost][handover][threading]")
 {
@@ -425,5 +484,185 @@ TEST_CASE("a restored terminal lays an image out at the cell size its PTY's pixe
     // A program drawing an image before any client attached again.
     live->host.writeInput(id, SixelImage);
     CHECK(live->eventually([&] { return showsImage(*live, id); }));
+}
+
+TEST_CASE("a client's session is rebuilt over the new image's host settings, as its connection built it",
+          "[vthost][handover][threading]")
+{
+    // A host setting no part of the wire subset, nor of the terminal's state, carries.
+    auto hostSettings = vtbackend::Settings {};
+    hostSettings.maxImageSize = vtbackend::ImageSize { vtbackend::Width(1234), vtbackend::Height(987) };
+    REQUIRE(hostSettings.maxImageSize != vtbackend::Settings {}.maxImageSize);
+
+    auto old = std::make_unique<LiveHost>(catDevice, LiveHost::sequentialIds(), hostSettings);
+    auto stated = toWireSessionSettings(hostSettings);
+    stated.terminalId = std::to_underlying(vtbackend::VTType::VT420);
+    // As NativeSession::adoptClientSessionSettings() builds what a client stated.
+    REQUIRE(old->host.createTab(
+                SessionSpawnRequest { .settings = fromWireSessionSettings(stated, old->host.settings()) })
+            != nullptr);
+    auto const id = old->host.sessionIds().front();
+    REQUIRE(old->host.hostedSession(id)->settingsOrigin() == SettingsOrigin::Client);
+    REQUIRE(old->eventually([&] { return old->pageText(id).contains("ready"); }));
+
+    auto const live = takeOver(handOver(std::move(old)), {}, hostSettings);
+    auto& terminal = live->host.hostedSession(id)->terminal();
+    auto const _ = std::lock_guard { terminal };
+    CHECK(terminal.settings().maxImageSize == hostSettings.maxImageSize);
+    CHECK(terminal.settings().terminalId == vtbackend::VTType::VT420);
+}
+
+TEST_CASE("a session's colour preference crosses, so a client stating it again keeps what a program set",
+          "[vthost][handover][threading]")
+{
+    auto const catalog = std::make_shared<vthost::testing::FakeDualPaletteCatalog>();
+    auto config = LiveHost::sequentialIds();
+    config.profiles = catalog;
+    auto old = std::make_unique<LiveHost>(catDevice, std::move(config));
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const id = old->host.sessionIds().front();
+    REQUIRE(old->eventually([&] { return old->pageText(id).contains("ready"); }));
+
+    // A dark-mode client attached, then a program set the background of its own (OSC 11).
+    constexpr auto ProgramBackground = vtbackend::RGBColor { 0x123456 };
+    old->host.applyColorPreference(id, vtbackend::ColorPreference::Dark);
+    old->host.writeInput(id, "\033]11;rgb:12/34/56\033\\");
+    auto const background = [](LiveHost& live, SessionId session) {
+        auto& terminal = live.host.hostedSession(session)->terminal();
+        auto const _ = std::lock_guard { terminal };
+        return terminal.colorPalette().defaultBackground;
+    };
+    REQUIRE(old->eventually([&] { return background(*old, id) == ProgramBackground; }));
+
+    auto const image = handOver(std::move(old));
+    CHECK(image.defaultColorPreference == vtbackend::ColorPreference::Dark);
+    CHECK(image.sessions.front().colorPreference == vtbackend::ColorPreference::Dark);
+    auto const live = takeOver(image, SessionHostConfig { .profiles = catalog });
+    CHECK(live->host.defaultColorPreference() == vtbackend::ColorPreference::Dark);
+    CHECK(live->host.colorPreferenceOf(id) == vtbackend::ColorPreference::Dark);
+
+    // The same client reattaches, stating the same preference: no change, nothing re-seeded.
+    live->host.applyColorPreference(id, vtbackend::ColorPreference::Dark);
+    CHECK(background(*live, id) == ProgramBackground);
+}
+
+TEST_CASE("a session's interrupted command crosses", "[vthost][handover][threading]")
+{
+    auto old = std::make_unique<LiveHost>(catDevice);
+    REQUIRE(old->host.createTab(SessionSpawnRequest { .interruptedCommand = "make -j8" }) != nullptr);
+    auto const id = old->host.sessionIds().front();
+    REQUIRE(old->eventually([&] { return old->pageText(id).contains("ready"); }));
+    auto const interruption = old->host.interruptionOf(id);
+    REQUIRE(interruption.has_value());
+
+    auto const live = takeOver(handOver(std::move(old)));
+    CHECK(live->host.interruptionOf(id) == interruption);
+    CHECK(live->host.interruptedCommandOf(id) == interruption->commandLine);
+}
+
+TEST_CASE("a PTY that cannot be adopted is closed, its fast pipe too", "[vthost][handover]")
+{
+    // No terminal: a descriptor the image names as a PTY master that is none, beside an open fast pipe.
+    auto master = std::array<int, 2> {};
+    auto fastPipe = std::array<int, 2> {};
+    REQUIRE(::pipe(master.data()) == 0);
+    REQUIRE(::pipe(fastPipe.data()) == 0);
+    auto image = HandoverImage {};
+    auto session = HandoverSession {};
+    session.id = SessionId { 1 };
+    session.pty.masterFd = master[0];
+    session.pty.stdoutFastPipe = std::pair { fastPipe[0], fastPipe[1] };
+    session.pty.pageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+    image.sessions.push_back(std::move(session));
+
+    auto const live = takeOver(std::move(image));
+    CHECK(live->host.sessionCount() == 0);
+    CHECK_FALSE(isOpen(master[0]));
+    CHECK_FALSE(isOpen(fastPipe[0]));
+    CHECK_FALSE(isOpen(fastPipe[1]));
+    // What the image did not name stays open.
+    CHECK(isOpen(master[1]));
+    ::close(master[1]);
+}
+
+TEST_CASE("a session whose PTY cannot be adopted leaves neither a zombie nor its pane's UUID behind",
+          "[vthost][handover][threading]")
+{
+    auto master = std::array<int, 2> {};
+    REQUIRE(::pipe(master.data()) == 0);
+    // Its child, which the hangup of its PTY ends: here it ends by itself.
+    auto child = pid_t { -1 };
+    auto program = std::string { "sh" };
+    auto option = std::string { "-c" };
+    auto script = std::string { "exit 0" };
+    auto argv = std::array<char*, 4> { program.data(), option.data(), script.data(), nullptr };
+    auto envp = std::array<char*, 1> { nullptr };
+    REQUIRE(::posix_spawn(&child, "/bin/sh", nullptr, nullptr, argv.data(), envp.data()) == 0);
+
+    auto image = HandoverImage {};
+    auto session = HandoverSession {};
+    session.id = SessionId { 1 };
+    session.uuid.bytes.fill(0xA5);
+    session.pty.masterFd = master[0];
+    session.pty.pageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+    session.child.pid = child;
+    image.objects.panes = { BoundObject { .id = 1, .uuid = session.uuid } };
+    image.sessions.push_back(std::move(session));
+
+    auto const live = takeOver(std::move(image));
+    CHECK(live->host.sessionCount() == 0);
+    CHECK_FALSE(live->host.objects().uuidOf(SessionId { 1 }).has_value());
+    // Reaped by the host, which no longer has it as a child.
+    CHECK(live->eventually([&] {
+        auto exited = siginfo_t {};
+        return ::waitid(P_PID, static_cast<id_t>(child), &exited, WEXITED | WNOHANG | WNOWAIT) < 0
+               && errno == ECHILD;
+    }));
+    ::close(master[1]);
+}
+
+TEST_CASE("a session served on its PTY alone crosses every later handover so, and refuses no upgrade",
+          "[vthost][handover][threading]")
+{
+    // A PTY no child of the host runs on, as a handover leaves one whose child it could not adopt; the test
+    // holds its other end, as the program on it would.
+    auto slave = -1;
+    auto old = std::make_unique<LiveHost>([&slave](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+        auto master = -1;
+        REQUIRE(::openpty(&master, &slave, nullptr, nullptr, nullptr) == 0);
+        auto pty = vtpty::UnixPty::adopt(vtpty::InheritedPty {
+            .masterFd = master, .stdoutFastPipe = std::nullopt, .pageSize = size, .pixels = std::nullopt });
+        REQUIRE(pty.has_value());
+        return *std::move(pty);
+    });
+    REQUIRE(old->host.createTab() != nullptr);
+    auto const id = old->host.sessionIds().front();
+    REQUIRE(old->host.hostedSession(id)->process() == nullptr);
+    REQUIRE(slave >= 0);
+    REQUIRE(::write(slave, "ready", 5) == 5);
+    REQUIRE(old->eventually([&] { return old->pageText(id).contains("ready"); }));
+    REQUIRE(checkCapturable(old->host).has_value());
+
+    auto image = handOver(std::move(old));
+    REQUIRE(image.sessions.size() == 1);
+    CHECK(image.sessions.front().device == SessionDevice::PtyOnly);
+    CHECK(image.sessions.front().child.pid == -1);
+
+    // Served on its PTY alone, its screen as it was.
+    auto live = takeOver(std::move(image));
+    REQUIRE(live->host.sessionIds() == std::vector { id });
+    CHECK(live->host.hostedSession(id)->process() == nullptr);
+    CHECK(live->pageText(id).contains("ready"));
+
+    // A later upgrade takes it as it is, and the next image serves it again.
+    CHECK(checkCapturable(live->host).has_value());
+    auto again = handOver(std::move(live));
+    REQUIRE(again.sessions.size() == 1);
+    CHECK(again.sessions.front().device == SessionDevice::PtyOnly);
+    auto const next = takeOver(std::move(again));
+    REQUIRE(next->host.sessionIds() == std::vector { id });
+    REQUIRE(::write(slave, "-again", 6) == 6);
+    CHECK(next->eventually([&] { return next->pageText(id).contains("ready-again"); }));
+    ::close(slave);
 }
 #endif

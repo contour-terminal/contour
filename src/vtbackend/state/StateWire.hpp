@@ -475,6 +475,15 @@ struct StateEnumWire<vtbackend::NotificationUrgency>
 };
 
 template <>
+struct StateEnumWire<vtbackend::CellSizeDropLog>
+{
+    static constexpr auto Values = std::array {
+        vtbackend::CellSizeDropLog::NotYetLogged,
+        vtbackend::CellSizeDropLog::Logged,
+    };
+};
+
+template <>
 struct StateEnumWire<vtbackend::OutputStartMarking>
 {
     static constexpr auto Values = std::array {

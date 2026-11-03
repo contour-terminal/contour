@@ -726,3 +726,45 @@ TEST_CASE("an image is staged, reused and pruned on the real file system", "[vth
     CHECK_FALSE(fs::exists(older.leaseFileOf(image)));
 }
 #endif
+
+TEST_CASE("an image is found by its name, and nothing else is", "[vthost][image][upgrade]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    auto const staged = store.stage();
+    REQUIRE(staged.has_value());
+    auto const name = appImageName("0.8.1");
+
+    CHECK(store.executableOfImage(name) == staged->executable);
+    // Never a path, a partial copy, a lease file or an image that is not there.
+    for (auto const* const refused:
+         { "", ".", "..", "../bin", "/state/bin", "0.8.1-00000000", "a/b", "a\\b" })
+    {
+        INFO(refused);
+        CHECK_FALSE(store.executableOfImage(refused).has_value());
+    }
+    CHECK_FALSE(store.executableOfImage(name + ".lease").has_value());
+    CHECK_FALSE(store.executableOfImage(name + ".partial-42").has_value());
+    std::ignore = files.createDirectories(fs::path { "/state/bin" } / (name + ".partial-42"));
+    std::ignore = files.writeFile(fs::path { "/state/bin" } / (name + ".partial-42") / ".complete", "");
+    CHECK_FALSE(store.executableOfImage(name + ".partial-42").has_value());
+    // An incomplete image is no image.
+    std::ignore = files.createDirectories("/state/bin/0.9.0-12345678");
+    CHECK_FALSE(store.executableOfImage("0.9.0-12345678").has_value());
+}
+
+TEST_CASE("a store that stages nothing finds no image", "[vthost][image][upgrade]")
+{
+    auto files = StagingFileSystem {};
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { linuxPackageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    std::ignore = files.createDirectories("/state/bin/0.9.0-12345678");
+    std::ignore = files.writeFile("/state/bin/0.9.0-12345678/.complete", "");
+    CHECK_FALSE(store.executableOfImage("0.9.0-12345678").has_value());
+}

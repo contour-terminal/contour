@@ -1874,6 +1874,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
+    /// Not captured: a cost counter tests read, which counts this process's walks only.
     uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()
 
     // NOTE: the `OSC 5522` write transmission lives on Terminal, not here: an application may switch
@@ -1902,13 +1903,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Creates the ReGIS context, canvas and event callbacks if no ReGIS string has hooked yet.
     void ensureReGIS();
 
-    /// Whether the drop of an image for want of a cell size has been logged yet: a stream of images (a sixel
-    /// video) would otherwise write a line for every frame.
-    enum class CellSizeDropLog : uint8_t
-    {
-        NotYetLogged,
-        Logged,
-    };
+    /// Whether the drop of an image for want of a cell size has been logged yet.
     CellSizeDropLog _cellSizeDropLog = CellSizeDropLog::NotYetLogged;
 
 #ifdef LIBTERMINAL_LOG_TRACE

@@ -176,6 +176,14 @@ enum class ImageAlignment : uint8_t
     BottomEnd
 };
 
+/// Whether a screen has logged dropping an image for want of a cell size in pixels: a stream of images (a
+/// sixel video) would otherwise write a line for every frame.
+enum class CellSizeDropLog : uint8_t
+{
+    NotYetLogged, ///< No image was dropped yet, or none was logged.
+    Logged,       ///< The drop was logged, and later ones are not.
+};
+
 /// Where one grid cell's image content lies, expressed as geometry.
 ///
 /// The alignment and resize policies can letterbox an image inside its cell span, so a cell may be

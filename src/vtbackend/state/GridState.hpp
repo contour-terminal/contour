@@ -13,6 +13,7 @@
 #include <expected>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -37,6 +38,11 @@ struct detail::StateEnumWire<ReflowOnResize>
 /// 16 bits wide, so no line a terminal holds is wider.
 inline constexpr auto MaxStateLineColumns = static_cast<int>(std::numeric_limits<uint16_t>::max());
 
+/// The most lines a restored terminal's page or scrollback may have, and the most free slots its ring may
+/// hold beyond them: a ceiling against a stream that asks a terminal to allocate without bound, far above
+/// any configured value.
+inline constexpr auto MaxStateHistoryLines = 16 * 1024 * 1024;
+
 /// Everything a Grid holds, as plain data.
 ///
 /// The lines are kept in their compact wire encoding (@see Line::encodeState) rather than as one more copy of
@@ -47,6 +53,11 @@ struct GridState
     ReflowOnResize reflow = ReflowOnResize::No; ///< Whether a width change reflows.
     HistoryLimits limits {};                    ///< The scrollback's bounds.
     LineCount linesUsed {};                     ///< History plus page rows.
+
+    /// How many slots the ring has: more than the page and a finite capacity while a resize holds scrollback
+    /// for the next scroll to settle (@see Grid::settleHeldHistory), and then the history may exceed the
+    /// capacity too. Absent from a stream that predates it, which restores a ring of page plus capacity.
+    std::optional<uint64_t> ringSlots {};
 
     uint64_t generation = 0;              ///< @see Grid::generation
     uint64_t stableIdGeneration = 0;      ///< @see Grid::stableIdGeneration
@@ -86,6 +97,7 @@ struct GridState
         visitor(14, self.stableBaseAtLastFinalize);
         visitor(15, self.renditions);
         visitor(16, self.lines);
+        visitor(17, self.ringSlots);
     }
 };
 

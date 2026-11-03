@@ -687,6 +687,7 @@ GridState Grid::captureState(ImageFragmentNamer& images) const
     state.reflow = _reflowOnResize ? ReflowOnResize::Yes : ReflowOnResize::No;
     state.limits = _historyLimits;
     state.linesUsed = _linesUsed;
+    state.ringSlots = _lines.size();
     state.generation = _generation;
     state.stableIdGeneration = _stableIdGeneration;
     state.stableBase = _stableBase;
@@ -722,13 +723,20 @@ std::expected<StagedGrid, StateDecodeError> Grid::stageRestore(GridState const& 
     auto const pageLines = unbox<size_t>(state.pageSize.lines);
     auto const linesUsed = unbox<size_t>(state.linesUsed);
     auto const historyLines = linesUsed - pageLines;
-    auto slotCount = linesUsed;
+    // The fewest slots the ring may have: every row, and with a finite capacity the page and the capacity.
+    auto leastSlots = linesUsed;
     if (auto const* capacity = std::get_if<LineCount>(&state.limits.capacity))
     {
-        if (*capacity < LineCount(0) || historyLines > unbox<size_t>(*capacity))
+        if (*capacity < LineCount(0))
             return StateFailure { StateDecodeError::InvalidValue };
-        slotCount = pageLines + unbox<size_t>(*capacity);
+        leastSlots = std::max(linesUsed, pageLines + unbox<size_t>(*capacity));
+        // Rows beyond the capacity are scrollback a resize holds, which only a ring that says so has.
+        if (!state.ringSlots && historyLines > unbox<size_t>(*capacity))
+            return StateFailure { StateDecodeError::InvalidValue };
     }
+    auto const slotCount = state.ringSlots.value_or(leastSlots);
+    if (slotCount < leastSlots || slotCount - leastSlots > static_cast<size_t>(MaxStateHistoryLines))
+        return StateFailure { StateDecodeError::InvalidValue };
     if (state.stableFloor != state.stableBase - static_cast<int64_t>(historyLines))
         return StateFailure { StateDecodeError::InvalidValue };
 

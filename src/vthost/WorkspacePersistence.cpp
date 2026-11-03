@@ -184,6 +184,14 @@ void WorkspacePersistence::finalize(ShutdownWorkspace disposition)
     _writer.flush();
 }
 
+void WorkspacePersistence::writeNow()
+{
+    if (_phase == Phase::Sealed)
+        return;
+    writeSnapshot();
+    _writer.flush();
+}
+
 void WorkspacePersistence::sessionScreenUpdated(vtworkspace::SessionId /*session*/)
 {
     // Picked up by the next periodic write: output is too frequent to schedule a write of its own.

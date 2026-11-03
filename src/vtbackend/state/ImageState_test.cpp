@@ -326,6 +326,13 @@ TEST_CASE("kitty command fields all survive the codec", "[ImageState]")
     command.loopCount = 17;
     command.frameBackground = 0xAABBCCDD;
     command.compositionMode = kitty_graphics::CompositionMode::Replace;
+    command.rawX = 18;
+    command.composeSourceFrame = 19;
+    command.composeDestinationFrame = 20;
+    command.composeSourceX = 21;
+    command.composeSourceY = 22;
+    command.composeDestinationX = 23;
+    command.composeDestinationY = 24;
     command.payload = "payload";
     state.chunked = KittyChunkState { .payload = "so far", .command = command };
 
@@ -347,4 +354,5 @@ TEST_CASE("kitty command fields all survive the codec", "[ImageState]")
     CHECK(copy.payload == "payload");
     CHECK(copy.loopCount == 17);
     CHECK(copy.animationState == command.animationState);
+    CHECK(copy == command);
 }

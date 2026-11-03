@@ -2,15 +2,35 @@
 #include <vthost/ConnectionAcceptor.hpp>
 
 #include <core/async/Cancellation.hpp>
+#include <core/async/StopToken.hpp>
+#include <core/async/WhenAny.hpp>
 #include <core/net/AcceptPolicy.hpp>
+#include <core/net/InterruptibleSleep.hpp>
+
+#ifndef _WIN32
+    #include <core/net/posix/PosixListener.hpp>
+    #include <core/net/posix/UnixListener.hpp>
+
+    #include <sys/resource.h>
+    #include <sys/socket.h>
+    #include <sys/un.h>
+
+    #include <cstring>
+    #include <ranges>
+    #include <string_view>
+#endif
 
 #include <chrono>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 
+#include <vthost/ListeningSocket.hpp>
 #include <vthost/Logging.hpp>
 
 namespace vthost
@@ -62,6 +82,54 @@ namespace
             errorLog()("{}: connection flow aborted with a non-standard exception", identity);
         }
     }
+
+    /// Accepts one connection into @p result: one side of the race ConnectionAcceptor::serve() runs against a
+    /// hold.
+    core::async::Task<void> acceptInto(core::net::IListener* listener,
+                                       std::optional<core::net::AcceptResult>* result)
+    {
+        *result = co_await listener->accept();
+    }
+
+    /// Parks until @p token is stopped. The deadline only bounds one park, and is renewed.
+    core::async::Task<void> untilStopped(core::net::EventLoop* loop, core::async::StopToken token)
+    {
+        while (co_await core::net::interruptibleSleepUntil(
+                   loop, token, loop->clock().now() + std::chrono::hours { 1 })
+               == core::net::WakeReason::Deadline)
+        {
+        }
+    }
+
+#ifndef _WIN32
+    /// @return The listening AF_UNIX socket of this process bound to @p path, by its descriptor; nullopt for
+    ///         none. Asked of the descriptors in turn, because core::net::UnixListener does not tell its own.
+    [[nodiscard]] std::optional<int> listeningSocketAt(std::filesystem::path const& path)
+    {
+        constexpr auto MaxScannedDescriptor = 1 << 16;
+        auto limit = rlimit {};
+        auto const highest = ::getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY
+                                     && limit.rlim_cur < static_cast<rlim_t>(MaxScannedDescriptor)
+                                 ? static_cast<int>(limit.rlim_cur)
+                                 : MaxScannedDescriptor;
+        auto const& wanted = path.native();
+        for (auto const fd: std::views::iota(0, highest))
+        {
+            if (!isListeningSocket(fd))
+                continue;
+            auto address = sockaddr_un {};
+            auto addressLength = static_cast<socklen_t>(sizeof(address));
+            if (::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &addressLength) != 0
+                || address.sun_family != AF_UNIX)
+                continue;
+            auto const bound =
+                std::string_view { address.sun_path, ::strnlen(address.sun_path, sizeof(address.sun_path)) };
+            if (bound == wanted)
+                return fd;
+        }
+        return std::nullopt;
+    }
+#endif
 } // namespace
 
 bool AcceptFailureThrottle::shouldLog(core::net::NetError const& error) noexcept
@@ -105,10 +173,41 @@ core::async::Task<void> ConnectionAcceptor::serve()
     // a use-after-free — which is why the cancellation path below reports `name`, and why it
     // does not report _acceptedCount at all.
     auto const name = _name;
+    // Shared state, safe to ask after the listener is gone: stopped once it is closed or destroyed, so a race
+    // that ends because the acceptor went never reads a member of it.
+    auto const closed = _listener->closeToken();
+    // The flow's own cancellation (the loop's teardown) ends the loop too, rather than racing again at once.
+    auto const cancelled = co_await core::async::thisCoroStopToken();
 
     while (true)
     {
-        auto accepted = co_await _listener->accept();
+        if (_admission == Admission::Holding)
+        {
+            // The listener stays bound; what connects waits in its backlog.
+            co_await untilStopped(&_loop, _release.get_token());
+            if (closed.stop_requested())
+            {
+                daemonLog()("{}: listener closed", name);
+                co_return;
+            }
+            continue;
+        }
+
+        // Raced against a hold, which withdraws the parked accept without taking a connection: the withdrawn
+        // accept answers Cancelled, as one the listener's close ends does, so the close token tells them
+        // apart.
+        auto const held = _hold.get_token();
+        auto acceptedOrHeld = std::optional<core::net::AcceptResult> {};
+        std::ignore = co_await core::async::whenAny(acceptInto(_listener.get(), &acceptedOrHeld),
+                                                    untilStopped(&_loop, held));
+        if (closed.stop_requested() || cancelled.stop_requested())
+        {
+            daemonLog()("{}: listener closed", name);
+            co_return;
+        }
+        if (!acceptedOrHeld || (held.stop_requested() && !acceptedOrHeld->has_value()))
+            continue; // held; a connection the race took anyway is closed below
+        auto accepted = *std::move(acceptedOrHeld);
         if (!accepted.has_value())
         {
             // Only a closed or a dead listener ends the loop; any other failure may pass, and is backed
@@ -145,6 +244,14 @@ core::async::Task<void> ConnectionAcceptor::serve()
             continue;
         }
 
+        if (_admission == Admission::Holding)
+        {
+            // Taken by the race against a hold. An upgrade holds every listener, then closes every client:
+            // served, this one would come in behind that close, and live on through the exec.
+            daemonLog()("{}: closing a connection accepted as the listener was held", name);
+            continue; // the socket closes as `accepted` goes
+        }
+
         ++_acceptedCount;
         auto id =
             ConnectionId { .endpoint = name, .index = _acceptedCount, .peer = (*accepted)->peerAddress() };
@@ -155,6 +262,44 @@ core::async::Task<void> ConnectionAcceptor::serve()
         // escaping the flow is reported rather than reaped in silence.
         _loop.spawn(superviseConnection(_handler, std::move(id), std::move(*accepted)));
     }
+}
+
+void ConnectionAcceptor::close() noexcept
+{
+    _listener->close();
+    // A held accept loop is parked on this: released, it finds the listener closed and ends.
+    _release.request_stop();
+}
+
+void ConnectionAcceptor::holdAccepting()
+{
+    if (_admission == Admission::Holding)
+        return;
+    _admission = Admission::Holding;
+    _release = core::async::StopSource {};
+    _hold.request_stop();
+}
+
+void ConnectionAcceptor::resumeAccepting()
+{
+    if (_admission == Admission::Accepting)
+        return;
+    _admission = Admission::Accepting;
+    _hold = core::async::StopSource {};
+    _release.request_stop();
+}
+
+std::optional<int> ConnectionAcceptor::listeningDescriptor() const
+{
+#ifdef _WIN32
+    return std::nullopt;
+#else
+    if (auto const* const tcp = dynamic_cast<core::net::PosixListener const*>(_listener.get()))
+        return tcp->native() >= 0 ? std::optional { tcp->native() } : std::nullopt;
+    if (auto const* const local = dynamic_cast<core::net::UnixListener const*>(_listener.get()))
+        return listeningSocketAt(local->path());
+    return std::nullopt;
+#endif
 }
 
 } // namespace vthost

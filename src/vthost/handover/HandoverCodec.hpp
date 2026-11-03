@@ -31,6 +31,10 @@ enum class HandoverError : uint8_t
     InFlightTailOverflowed,
 };
 
+/// The page size a session is decoded with whose image names an empty one: its terminal state is refused,
+/// and the program runs on a fresh terminal of this size until a client states its own.
+inline constexpr auto FallbackPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+
 /// The four bytes a handover stream starts with.
 inline constexpr std::array<uint8_t, 4> HandoverMagic { 'C', 'H', 'O', 'V' };
 
@@ -43,7 +47,8 @@ inline constexpr std::array<uint8_t, 4> HandoverMagic { 'C', 'H', 'O', 'V' };
 
 /// Decodes a stream encodeHandover() wrote, of any format from OldestReadableHandoverFormat up to
 /// HandoverFormatVersion. A field the stream lacks is left at its default, one it carries that this build
-/// does not know is skipped. Every count is bounded by what the stream holds.
+/// does not know is skipped. Every count is bounded by what the stream holds. A session whose PTY's page size
+/// is empty is decoded at FallbackPageSize, without its terminal state.
 /// @param stream The whole stream.
 /// @return The image, or why the stream was refused.
 [[nodiscard]] std::expected<HandoverImage, HandoverError> decodeHandover(std::span<uint8_t const> stream);

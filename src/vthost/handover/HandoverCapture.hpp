@@ -20,6 +20,22 @@ class SessionHost;
 namespace vthost::handover
 {
 
+/// Whether this platform execs a new image in place, which is what a capture, and a live upgrade, is for.
+#ifdef _WIN32
+inline constexpr auto HasInPlaceExec = false;
+#else
+inline constexpr auto HasInPlaceExec = true;
+#endif
+
+/// Asks, without stopping anything, whether a capture of @p host would be refused as things stand: what a
+/// live upgrade checks before it announces itself, so that a refusal costs no client its connection. A
+/// capture asks again, since a session may change in between. Loop thread.
+/// @param host The host to ask about.
+/// @return Nothing; or SessionStarting for a session still starting (SessionHost::isAnySessionStarting()),
+///         UnsupportedSession for one no new image could adopt, InFlightTailOverflowed for one whose escape
+///         sequence in flight outgrew what a capture keeps.
+[[nodiscard]] std::expected<void, HandoverError> checkCapturable(SessionHost& host);
+
 /// Captures everything that crosses the exec: every session quiesced (SessionHost::quiesceAll()), with its
 /// PTY's descriptors, its child and its encoded terminal; the model with its ids; the object registry; and
 /// what the caller names. Ownership of every descriptor and child stays with the host -- releasing them is

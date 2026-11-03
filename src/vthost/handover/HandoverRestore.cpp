@@ -8,10 +8,13 @@
 
 #ifndef _WIN32
     #include <vtpty/UnixPty.hpp>
+    #include <vtpty/UnixUtils.hpp>
 
     #include <sys/resource.h>
     #include <sys/socket.h>
-    #include <sys/syscall.h>
+    #include <sys/wait.h>
+
+    #include <cerrno>
 
     #include <unistd.h>
 #endif
@@ -19,9 +22,10 @@
 #include <core/Assert.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <functional>
-#include <limits>
+#include <iterator>
 #include <mutex>
 #include <ranges>
 #include <utility>
@@ -56,12 +60,27 @@ namespace
                 visit(tab.root);
         return sessions;
     }
+
+#ifndef _WIN32
+    /// Closes every descriptor of @p pty that is open: what a PTY that could not be adopted leaves, which
+    /// would otherwise stay open, unused, and be inherited by every program this daemon spawns -- while the
+    /// program on it, never seeing a hangup, waited for input forever. The standard streams are never a PTY's
+    /// (descriptorsToKeep() keeps them whatever a corrupt image says), and are left alone.
+    void closeUnadoptedPty(vtpty::InheritedPty const& pty)
+    {
+        for (auto const fd: pty.descriptors())
+            if (fd > 2)
+                ::close(fd);
+    }
+#endif
 } // namespace
 
 std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage image)
 {
     // The registry first: it names every object the model brings back, and every session adopted below.
     _objects.restore(image.objects);
+    // Sessions spawned from now on are built under the preference the latest client stated, as they were.
+    _defaultColorPreference = image.defaultColorPreference;
 
     auto outcome = std::expected<void, HandoverError> {};
     if (auto const restored = _model.restore(image.tree, image.modelIds); !restored)
@@ -98,6 +117,10 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
             if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
                 _model.closePane(window->id(), tab->id(), leaf->id());
 
+    // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
+    // the configuration this image loaded applies to it now, before any client sees it, as a reload would.
+    replaceProfiles(_profiles);
+
     daemonLog()("took over {} of {} session(s) from release {}",
                 _sessions.size(),
                 image.sessions.size(),
@@ -111,13 +134,26 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     // No image is ever captured here (HandoverError::NotSupported): there is nothing a session could be.
     errorLog()("handover: session {} cannot be adopted on this platform", session.id.value);
 #else
+    // A session that is not adopted leaves nothing behind: its child, which only this process can wait for,
+    // is reaped once it exits, and its pane's UUID names nothing -- unless another session of the image is
+    // adopted under the same id, whose it then is.
+    auto const abandon = [&] {
+        if (session.device == handover::SessionDevice::ChildOnPty)
+            reapWhenExited(session.child.pid);
+        if (!_sessions.contains(session.id.value))
+            _objects.forget(session.id);
+    };
+
     auto pty = vtpty::UnixPty::adopt(session.pty);
     if (!pty)
     {
         errorLog()(
-            "handover: session {}: its PTY could not be adopted (error {}); its program cannot be reached",
+            "handover: session {}: its PTY could not be adopted (error {}); closed, so that its program "
+            "sees a hangup",
             session.id.value,
             std::to_underlying(pty.error()));
+        closeUnadoptedPty(session.pty);
+        abandon();
         return;
     }
 
@@ -133,8 +169,14 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     }
 
     // A child that is gone already leaves its PTY to whatever still holds the other end: served until it
-    // closes, as the pump ends a session at its PTY's end.
+    // closes, as the pump ends a session at its PTY's end -- and crosses a later upgrade so again.
     auto device = [&]() -> std::unique_ptr<vtpty::Pty> {
+        if (session.device == handover::SessionDevice::PtyOnly)
+        {
+            sessionLog()("handover: session {}: serving its PTY, on which no child of this one runs",
+                         id.value);
+            return std::move(*pty);
+        }
         if (!vtpty::Process::canAdopt(session.child))
         {
             sessionLog()("handover: session {}: process {} is no child of this one any more; serving its PTY "
@@ -152,7 +194,10 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
         return std::move(*process);
     }();
     if (!device)
+    {
+        abandon();
         return;
+    }
 
     // Built on settings this image's configuration makes up afresh, the terminal's construction settings
     // taken from the captured state, so that the state restores into a terminal of its own shape. A state
@@ -192,12 +237,20 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     {
         auto& terminal = hosted->terminal();
         auto const _ = std::lock_guard { terminal };
-        terminal.setCellPixelSize(*session.pty.pixels / terminal.totalPageSize());
+        if (auto const page = terminal.totalPageSize(); page.lines.value > 0 && page.columns.value > 0)
+            terminal.setCellPixelSize(*session.pty.pixels / page);
     }
 
     // Delivered after the replies the restored terminal queued, before anything a client hands it from now.
     hosted->replayCarried(std::move(session.carried));
     installSession(std::move(hosted));
+    // What the host knows of the session beside its terminal: the preference its palette was seeded under,
+    // so that a client stating the same one again does not wipe what a program set (applyColorPreference()),
+    // and the command a restart stopped in it.
+    if (session.colorPreference)
+        _colorPreferences.insert_or_assign(id.value, *session.colorPreference);
+    if (session.interruption)
+        _interruptions.insert_or_assign(id.value, *std::move(session.interruption));
 
     if (!_objects.uuidOf(id))
     {
@@ -223,13 +276,51 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
 
 vtbackend::Settings SessionHost::handoverBaseSettings(HandoverSession const& session) const
 {
-    // Only a subset of the settings crosses the exec (toWireSessionSettings): the profile, resolved in the
-    // configuration this image loaded, makes up the rest -- unless a client stated them, whose own they stay.
+    // The profile, resolved in the configuration this image loaded, makes up a session's settings -- unless a
+    // client stated them: then what it stated, over this host's settings, exactly as its connection built
+    // them (NativeSession::adoptClientSessionSettings()).
     if (session.origin == SettingsOrigin::Client)
-        return hostedSessionSettings(session.settings);
+        return hostedSessionSettings(fromWireSessionSettings(session.statedSettings, _settings));
     if (!_profiles)
         return _settings;
     return hostedSessionSettings(_profiles->resolve(session.profileName).settings);
+}
+
+namespace
+{
+    /// How often the children of sessions a handover could not adopt are looked at, until each was reaped.
+    constexpr auto OrphanReapInterval = std::chrono::milliseconds { 250 };
+} // namespace
+
+void SessionHost::reapWhenExited(int64_t pid)
+{
+    _orphans.push_back(pid);
+    armOrphanReap();
+}
+
+void SessionHost::armOrphanReap()
+{
+    if (_orphans.empty() || (_orphanReap && !_orphanReap->settled()))
+        return;
+    _orphanReap.reset();
+    _orphanReap.emplace(_loop, _loop.clock().now() + OrphanReapInterval, &reapOrphans, this);
+}
+
+void SessionHost::reapOrphans(void* host)
+{
+    auto& self = *static_cast<SessionHost*>(host);
+#ifndef _WIN32
+    std::erase_if(self._orphans, [](int64_t pid) {
+        // Reaped now; or no child of this process (any more): either way, nothing is left to wait for.
+        auto const reaped = ::waitpid(static_cast<pid_t>(pid), nullptr, WNOHANG);
+        return reaped > 0 || (reaped < 0 && errno != EINTR);
+    });
+#else
+    self._orphans.clear();
+#endif
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    self._orphanReap.reset();
+    self.armOrphanReap();
 }
 
 } // namespace vthost
@@ -237,29 +328,35 @@ vtbackend::Settings SessionHost::handoverBaseSettings(HandoverSession const& ses
 namespace vthost::handover
 {
 
+namespace
+{
+    /// @return @p descriptors without the negative ones (none), sorted, each once.
+    [[nodiscard]] std::vector<int> sortedUnique(std::vector<int> descriptors)
+    {
+        std::erase_if(descriptors, [](int fd) { return fd < 0; });
+        std::ranges::sort(descriptors);
+        auto const repeated = std::ranges::unique(descriptors);
+        descriptors.erase(repeated.begin(), repeated.end());
+        return descriptors;
+    }
+} // namespace
+
+std::vector<int> descriptorsNamedBy(HandoverImage const& image)
+{
+    auto named = std::vector<int> {};
+    for (auto const& session: image.sessions)
+        std::ranges::copy(session.pty.descriptors(), std::back_inserter(named));
+    for (auto const& listener: image.listeners)
+        named.push_back(listener.fd);
+    named.push_back(image.leaseFd);
+    return sortedUnique(std::move(named));
+}
+
 std::vector<int> descriptorsToKeep(HandoverImage const& image)
 {
-    auto kept = std::vector<int> { 0, 1, 2 };
-    auto const keep = [&](int fd) {
-        if (fd >= 0)
-            kept.push_back(fd);
-    };
-    for (auto const& session: image.sessions)
-    {
-        keep(session.pty.masterFd);
-        if (session.pty.stdoutFastPipe)
-        {
-            keep(session.pty.stdoutFastPipe->first);
-            keep(session.pty.stdoutFastPipe->second);
-        }
-    }
-    for (auto const& listener: image.listeners)
-        keep(listener.fd);
-    keep(image.leaseFd);
-    std::ranges::sort(kept);
-    auto const repeated = std::ranges::unique(kept);
-    kept.erase(repeated.begin(), repeated.end());
-    return kept;
+    auto kept = descriptorsNamedBy(image);
+    kept.insert(kept.end(), { 0, 1, 2 });
+    return sortedUnique(std::move(kept));
 }
 
 #ifndef _WIN32
@@ -284,24 +381,6 @@ namespace
             || limit.rlim_cur > static_cast<rlim_t>(MaxSweptDescriptor))
             return MaxSweptDescriptor;
         return static_cast<int>(limit.rlim_cur) - 1;
-    }
-
-    /// Closes every descriptor from @p first on.
-    void closeFrom(int first) noexcept
-    {
-    #if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
-        ::closefrom(first);
-    #else
-        #if defined(__linux__) && defined(SYS_close_range)
-        // The syscall rather than glibc's wrapper, which older C libraries lack; a kernel that predates it
-        // (5.9) answers ENOSYS, and the loop below does it.
-        if (::syscall(SYS_close_range, static_cast<unsigned>(first), std::numeric_limits<unsigned>::max(), 0U)
-            == 0)
-            return;
-        #endif
-        // No descriptor lies above the limit it was opened under.
-        closeEach(first, highestDescriptor());
-    #endif
     }
 } // namespace
 #endif
@@ -347,7 +426,8 @@ void closeDescriptorsExcept(std::span<int const> keep)
         closeEach(next, fd - 1);
         next = fd + 1;
     }
-    closeFrom(next);
+    // Above the last: as a spawned child's are (close_range(), else /proc/self/fd, else every number).
+    vtpty::util::closeDescriptorsAbove(next - 1, vtpty::util::openDescriptorLimit());
 #endif
 }
 

@@ -1456,6 +1456,7 @@ if(CONTOUR_TESTING)
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentSkill_test.cpp
+        cli/BackgroundExecutor_test.cpp
         cli/McpCommand_test.cpp
         cli/McpScope_test.cpp
         cli/McpServer_test.cpp
@@ -1463,6 +1464,7 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
         cli/ControlVerbs_test.cpp
+        cli/DaemonStart_test.cpp
         cli/DaemonVerbs_test.cpp
         cli/ConnectList_test.cpp
         cli/ConnectProbe_test.cpp

@@ -90,3 +90,11 @@ TEST_CASE("the layout-batch capability keeps its ident and name", "[vthost][nego
     REQUIRE(row != CapabilityTable.end());
     CHECK(row->name == "layout-batch");
 }
+
+TEST_CASE("the live-upgrade capability keeps its ident and name", "[vthost][negotiation][upgrade]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::LiveUpgrade) == 18);
+    auto const row = std::ranges::find(CapabilityTable, Capability::LiveUpgrade, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "live-upgrade");
+}

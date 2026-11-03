@@ -30,6 +30,7 @@
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/testing/FakeImageLeases.hpp>
+#include <vthost/testing/FakeProcessImageReplacer.hpp>
 #include <vthost/testing/StagingFileSystem.hpp>
 
 #ifndef _WIN32
@@ -48,6 +49,7 @@ namespace fs = std::filesystem;
 using vthost::DaemonPresence;
 using vthost::testing::appImageStoreConfig;
 using vthost::testing::FakeImageLeases;
+using vthost::testing::FakeProcessImageReplacer;
 using vthost::testing::FakeSymbolicLinks;
 using vthost::testing::linuxPackageStoreConfig;
 using vthost::testing::StagingFileSystem;
@@ -97,25 +99,6 @@ class FakeSpawner final: public vthost::DaemonSpawner
 
     std::vector<std::vector<std::string>> spawned;
     std::size_t probes = 0;
-};
-
-/// A ProcessImageReplacer that records what it was asked to run, and fails as an execv would.
-class FakeReplacer final: public vthost::ProcessImageReplacer
-{
-  public:
-    [[nodiscard]] std::error_code replaceWith(fs::path const& image,
-                                              std::span<std::string const> argv) override
-    {
-        replacements.emplace_back(image, std::vector<std::string>(argv.begin(), argv.end()));
-        if (onReplace)
-            onReplace();
-        return std::make_error_code(std::errc::no_such_file_or_directory);
-    }
-
-    /// Runs inside replaceWith(), where the exec would happen.
-    std::function<void()> onReplace;
-
-    std::vector<std::pair<fs::path, std::vector<std::string>>> replacements;
 };
 
 /// A unix endpoint nothing listens on.
@@ -309,7 +292,7 @@ TEST_CASE("a daemon re-executes from its staged image, keeping the lease across 
     auto const links = FakeSymbolicLinks {};
     auto store =
         vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
-    auto replacer = FakeReplacer {};
+    auto replacer = FakeProcessImageReplacer {};
     auto handOversAtExec = std::optional<std::size_t> {};
     auto holdsAtExec = std::optional<std::size_t> {};
     replacer.onReplace = [&] {
@@ -337,7 +320,7 @@ TEST_CASE("a daemon whose image cannot be staged is not re-executed", "[vthost][
     auto const links = FakeSymbolicLinks {};
     auto store =
         vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
-    auto replacer = FakeReplacer {};
+    auto replacer = FakeProcessImageReplacer {};
     auto const failure = vthost::execFromStagedImage(
         store, leases, replacer, std::vector<std::string> { AppImagePath, "daemon" });
     CHECK(replacer.replacements.empty());
@@ -357,7 +340,7 @@ TEST_CASE("a daemon already re-executed from its image is not re-executed again"
     auto const image =
         fs::path { "/state/bin" } / vthost::imageDirectoryName("0.8.1", 3, StagingFileSystem::FixedWriteTime);
     leases.inherit(store.leaseFileOf(image));
-    auto replacer = FakeReplacer {};
+    auto replacer = FakeProcessImageReplacer {};
 
     auto const failure = vthost::execFromStagedImage(
         store, leases, replacer, std::vector<std::string> { AppImagePath, "daemon" });

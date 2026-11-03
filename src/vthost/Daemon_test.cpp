@@ -15,6 +15,7 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/Tls.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
@@ -31,6 +32,7 @@
 #include <format>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -47,6 +49,7 @@
 
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/FilePrivacy.hpp>
@@ -58,9 +61,14 @@
 #include <vthost/WorkspacePersistence.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
+#include <vthost/testing/FakeHandoverMemory.hpp>
+#include <vthost/testing/FakeImageLeases.hpp>
+#include <vthost/testing/FakeProcessImageReplacer.hpp>
+#include <vthost/testing/FakeReadinessProbe.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
 #include <vthost/testing/RecordingDurableFiles.hpp>
 #include <vthost/testing/RecordingFilePrivacy.hpp>
+#include <vthost/testing/StagingFileSystem.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 
 #ifndef _WIN32
@@ -69,8 +77,12 @@
 
     #include <csignal>
 
+    #include <fcntl.h>
     #include <pthread.h>
     #include <unistd.h>
+
+    #include <arpa/inet.h>
+    #include <netinet/in.h>
 #endif
 
 #ifdef _WIN32
@@ -969,12 +981,13 @@ TEST_CASE("a daemon without persistence offers no restore", "[vthost][daemon][af
 namespace
 {
 
-/// An Attach client's conversation up to its first layout: sends @p request and collects every frame until a
-/// LayoutState arrives, the daemon hangs up, or ten seconds pass without a byte.
-core::async::Task<void> attachUntilLayout(core::net::EventLoop* loop,
-                                          std::string socketPath,
-                                          std::vector<std::byte> request,
-                                          std::vector<vthost::proto::DecodedFrame>* received)
+/// An Attach client's conversation: sends @p request and collects every frame until one @p done accepts
+/// arrives, the daemon hangs up, or ten seconds pass without a byte.
+core::async::Task<void> attachUntil(core::net::EventLoop* loop,
+                                    std::string socketPath,
+                                    std::vector<std::byte> request,
+                                    std::vector<vthost::proto::DecodedFrame>* received,
+                                    std::function<bool(vthost::proto::DecodedPdu const&)> done)
 {
     auto connected = co_await core::net::connectUnix(loop, socketPath);
     REQUIRE(connected.has_value());
@@ -994,20 +1007,90 @@ core::async::Task<void> attachUntilLayout(core::net::EventLoop* loop,
         while (auto frame = vthost::proto::decodePdu(pending))
         {
             pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(frame->consumed));
-            auto const isLayout = std::holds_alternative<vthost::proto::LayoutState>(frame->pdu);
+            auto const isLast = done(frame->pdu);
             received->push_back(*std::move(frame));
-            if (isLayout)
+            if (isLast)
                 co_return;
         }
     }
+}
+
+/// An Attach client's conversation up to its first layout (@see attachUntil).
+core::async::Task<void> attachUntilLayout(core::net::EventLoop* loop,
+                                          std::string socketPath,
+                                          std::vector<std::byte> request,
+                                          std::vector<vthost::proto::DecodedFrame>* received)
+{
+    co_await attachUntil(
+        loop, std::move(socketPath), std::move(request), received, [](vthost::proto::DecodedPdu const& pdu) {
+            return std::holds_alternative<vthost::proto::LayoutState>(pdu);
+        });
+}
+
+/// A TLS client's handshake with a daemon's native TCP listener, trusting @p clientTls alone: sends an Attach
+/// hello with @p token and reports whether the daemon answered it.
+core::async::Task<void> helloOverTls(core::net::EventLoop* loop,
+                                     std::uint16_t port,
+                                     std::shared_ptr<core::net::ITlsContext> clientTls,
+                                     std::string token,
+                                     bool* answered)
+{
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
+    REQUIRE(connected.has_value());
+    auto const socket = clientTls->wrap(std::move(*connected), *loop);
+    socket->setReceiveDeadline(std::chrono::seconds { 10 });
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(request,
+                             1,
+                             vthost::proto::ClientHello { .token = std::move(token),
+                                                          .role = vthost::proto::ConnectionRole::Attach });
+    auto const bytes = std::vector<std::byte> { request.view().begin(), request.view().end() };
+    if (!(co_await socket->write(bytes)).has_value())
+        co_return;
+    auto pending = std::vector<std::byte> {};
+    auto buffer = std::vector<std::byte>(4096);
+    while (true)
+    {
+        auto const read = co_await socket->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+        pending.insert(pending.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(*read));
+        if (auto frame = vthost::proto::decodePdu(pending))
+        {
+            *answered = std::holds_alternative<vthost::proto::ServerHello>(frame->pdu);
+            co_return;
+        }
+    }
+}
+
+/// @return A TCP listening socket on loopback, on a port the system picks, as the previous image of a daemon
+///         left it bound: a descriptor and nothing else.
+/// @param port Set to the port it is bound to.
+[[nodiscard]] int rawTcpListener(std::uint16_t& port)
+{
+    // Close-on-exec set after the fact: macOS has no SOCK_CLOEXEC.
+    auto const fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    REQUIRE(fd >= 0);
+    REQUIRE(::fcntl(fd, F_SETFD, FD_CLOEXEC) == 0);
+    auto address = sockaddr_in {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    REQUIRE(::bind(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
+    REQUIRE(::listen(fd, 8) == 0);
+    auto length = static_cast<socklen_t>(sizeof(address));
+    REQUIRE(::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+    port = ntohs(address.sin_port);
+    return fd;
 }
 
 /// @return A listening socket at @p path, as the previous image of a daemon left it bound: a descriptor and
 ///         nothing else.
 [[nodiscard]] int rawListener(std::string const& path)
 {
-    auto const fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    // Close-on-exec set after the fact: macOS has no SOCK_CLOEXEC.
+    auto const fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
     REQUIRE(fd >= 0);
+    REQUIRE(::fcntl(fd, F_SETFD, FD_CLOEXEC) == 0);
     auto address = sockaddr_un {};
     address.sun_family = AF_UNIX;
     REQUIRE(path.size() < sizeof(address.sun_path));
@@ -1026,10 +1109,12 @@ struct HandedOverDaemon
 {
     TempDir tmp;
     vthost::DaemonConfig config;
+    /// What the previous image handed over; each test hands runDaemon() a copy, and asks it about the
+    /// children.
+    vthost::handover::HandoverImage image;
     std::string nativePath;
     std::vector<vtworkspace::SessionId> sessions;
     std::vector<std::optional<vtcontrol::Uuid>> uuids;
-    std::shared_ptr<std::atomic<int>> polls = std::make_shared<std::atomic<int>>(0);
     std::shared_ptr<ManualShutdownSignals> signals = std::make_shared<ManualShutdownSignals>();
 
     HandedOverDaemon()
@@ -1039,14 +1124,6 @@ struct HandedOverDaemon
         fs::create_directories(tmp.path);
         fs::permissions(tmp.path, fs::perms::owner_all, fs::perm_options::replace);
         config.shutdownSignals = signals;
-        // Counted, and never due again while the test runs: only the reload after the restore polls.
-        config.configReload = vthost::ConfigReloadHook {
-            .poll = [polls = polls]() -> std::shared_ptr<vthost::ProfileCatalog const> {
-                ++*polls;
-                return nullptr;
-            },
-            .interval = std::chrono::hours { 1 },
-        };
 
         auto old = std::make_unique<vthost::testing::LiveHost>(
             [](vtpty::PageSize size) { return vthost::testing::shellProcess(size); });
@@ -1064,7 +1141,7 @@ struct HandedOverDaemon
         REQUIRE(image.has_value());
         vthost::testing::releaseForAdoption(old->host);
         old.reset();
-        config.handover = *std::move(image);
+        this->image = *std::move(image);
     }
 };
 
@@ -1083,7 +1160,7 @@ TEST_CASE("runDaemon from a handover image keeps instance, ids and sessions",
           "[vthost][daemon][handover][afunix][threading]")
 {
     auto d = HandedOverDaemon {};
-    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
     auto const stopOnExit = StopOnExit { *d.signals };
 
     // The inherited listener serves at once: no bind, no gap.
@@ -1119,30 +1196,429 @@ TEST_CASE("runDaemon from a handover image keeps instance, ids and sessions",
     REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
     CHECK(daemon.get() == EXIT_SUCCESS);
 }
-
-TEST_CASE("config reload runs once after restore", "[vthost][daemon][handover][afunix][threading]")
+TEST_CASE("a daemon taken over from a handover serves its programs on whatever endpoints it can",
+          "[vthost][daemon][handover][afunix][threading]")
 {
     auto d = HandedOverDaemon {};
-    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    // Taken by something else, so that neither can be bound; the image hands over neither.
+    auto const controlTaken = rawListener(core::pathToUtf8(d.config.socketPath));
+    auto const imsgTaken = rawListener(core::pathToUtf8(vthost::tmuxSocketPath(d.config.socketPath)));
+    // A TCP listener whose certificate is gone: its TLS cannot be built.
+    d.config.nativeTcp = vthost::NativeTcpListenerConfig {
+        .token = "tok",
+        .tlsCertPath = core::pathToUtf8(d.tmp.path / "gone-cert.pem"),
+        .tlsKeyPath = core::pathToUtf8(d.tmp.path / "gone-key.pem"),
+    };
+    // What the composition root could not load.
+    d.config.degradations = { "the configuration did not load" };
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
     auto const stopOnExit = StopOnExit { *d.signals };
+
+    // Serving on the inherited native listener, every program alive.
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
-    // Accepted by the kernel on the inherited socket before the daemon even serves it: only an answer says
-    // the daemon is up.
     REQUIRE(awaitAccepting(loop, d.nativePath));
     auto request = vthost::proto::Writer {};
     vthost::proto::encodePdu(
         request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Attach });
     auto received = std::vector<vthost::proto::DecodedFrame> {};
-    loop.blockOn(
-        attachUntilLayout(&loop, d.nativePath, { request.view().begin(), request.view().end() }, &received));
+    auto notices = std::vector<std::string> {};
+    loop.blockOn(attachUntil(&loop,
+                             d.nativePath,
+                             { request.view().begin(), request.view().end() },
+                             &received,
+                             [&notices](vthost::proto::DecodedPdu const& pdu) {
+                                 if (auto const* notify = std::get_if<vthost::proto::SessionNotify>(&pdu))
+                                     notices.push_back(notify->body);
+                                 return notices.size() == 4;
+                             }));
     REQUIRE_FALSE(received.empty());
+    CHECK(std::holds_alternative<vthost::proto::ServerHello>(received.front().pdu));
+    for (auto const& session: d.image.sessions)
+        CHECK(::kill(static_cast<pid_t>(session.child.pid), 0) == 0);
 
-    // Polled before any listener served, and not again until its interval is up.
-    CHECK(d.polls->load() == 1);
-    // Stopped as it would be any day: the adopted sessions and listeners end cleanly.
+    // Each thing it serves on without is told to the client, once.
+    REQUIRE(notices.size() == 4);
+    CHECK(notices[0] == "the configuration did not load");
+    CHECK(std::ranges::count_if(notices, [](std::string const& notice) { return notice.contains("control"); })
+          == 1);
+    CHECK(std::ranges::count_if(notices, [](std::string const& notice) { return notice.contains("imsg"); })
+          == 1);
+    CHECK(std::ranges::count_if(notices,
+                                [](std::string const& notice) { return notice.contains("native-tcp"); })
+          == 1);
+
     d.signals->fire();
     REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
     CHECK(daemon.get() == EXIT_SUCCESS);
+    ::close(controlTaken);
+    ::close(imsgTaken);
+}
+
+TEST_CASE("a daemon taken over from a handover that can serve no endpoint at all keeps its programs alive",
+          "[vthost][daemon][handover][afunix][threading]")
+{
+    auto d = HandedOverDaemon {};
+    // The image hands over no listener, and every path is taken: the native one by the listener it named.
+    auto const nativeTaken = d.image.listeners.front().fd;
+    d.image.listeners.clear();
+    auto const controlTaken = rawListener(core::pathToUtf8(d.config.socketPath));
+    auto const imsgTaken = rawListener(core::pathToUtf8(vthost::tmuxSocketPath(d.config.socketPath)));
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    // It runs on, unreachable, rather than hanging its programs up.
+    CHECK(daemon.wait_for(std::chrono::seconds { 1 }) == std::future_status::timeout);
+    for (auto const& session: d.image.sessions)
+        CHECK(::kill(static_cast<pid_t>(session.child.pid), 0) == 0);
+
+    // Until it is asked to end.
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+    ::close(nativeTaken);
+    ::close(controlTaken);
+    ::close(imsgTaken);
+}
+
+TEST_CASE("a daemon that starts afresh still refuses an endpoint it cannot bind", "[vthost][daemon][afunix]")
+{
+    auto const tmp = TempDir {};
+    fs::create_directories(tmp.path);
+    fs::permissions(tmp.path, fs::perms::owner_all, fs::perm_options::replace);
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    config.shutdownSignals = std::make_shared<ManualShutdownSignals>();
+    auto const imsgTaken = rawListener(core::pathToUtf8(vthost::tmuxSocketPath(config.socketPath)));
+    CHECK(vthost::runDaemon(config) == EXIT_FAILURE);
+    ::close(imsgTaken);
+}
+
+TEST_CASE("a daemon taken over from a handover presents the TLS certificate it made up before",
+          "[vthost][daemon][handover][threading]")
+{
+    auto d = HandedOverDaemon {};
+    auto const identity = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
+    REQUIRE(identity.has_value());
+    auto port = std::uint16_t { 0 };
+    d.image.listeners.push_back(vthost::handover::InheritedListener {
+        .name = "native-tcp",
+        .fd = rawTcpListener(port),
+        .tlsIdentity =
+            vthost::handover::TlsIdentity { .certPem = identity->certPem, .keyPem = identity->keyPem },
+    });
+    d.config.nativeTcp = vthost::NativeTcpListenerConfig {};
+    d.config.nativeTcp->port = port;
+    d.config.nativeTcp->token = "tok";
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config, d.image); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    // A client that pinned the certificate it trusted on first use: only that very one passes.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+    auto const pinned = core::net::makeTlsClientContext(identity->certPem);
+    REQUIRE(pinned.has_value());
+    auto answered = false;
+    loop.blockOn(helloOverTls(&loop, port, *pinned, "tok", &answered));
+    CHECK(answered);
+
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a daemon that ends with its last session ends when a handover leaves it none",
+          "[vthost][daemon][handover][afunix]")
+{
+    auto const tmp = TempDir {};
+    fs::create_directories(tmp.path);
+    fs::permissions(tmp.path, fs::perms::owner_all, fs::perm_options::replace);
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    auto const signals = std::make_shared<ManualShutdownSignals>();
+    config.shutdownSignals = signals;
+    config.lifecycle = vthost::DaemonLifecycle::ExitWhenEmpty;
+    auto image = vthost::handover::HandoverImage {};
+    image.listeners.push_back(vthost::handover::InheritedListener {
+        .name = "native",
+        .fd = rawListener(core::pathToUtf8(vthost::nativeSocketPath(config.socketPath))),
+        .tlsIdentity = std::nullopt,
+    });
+    auto daemon = std::async(std::launch::async,
+                             [&config, &image] { return vthost::runDaemon(config, std::move(image)); });
+    auto const stopOnExit = StopOnExit { *signals };
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+#endif
+
+#ifndef _WIN32
+namespace
+{
+
+/// A daemon that upgrades itself in place, over fakes for everything that would leave the process: a packaged
+/// install (`/usr/bin/contour`, running in place), a target that reads every format, an exec that fails as it
+/// is asked, so that the daemon serves on, and memory that keeps the image in this process.
+struct UpgradableDaemon
+{
+    /// @return The command line the daemon was started with, which the exec repeats.
+    [[nodiscard]] static std::vector<std::string> commandLine()
+    {
+        return { "/usr/bin/contour", "daemon", "--label", "upgrade-test" };
+    }
+
+    TempDir tmp;
+    vthost::testing::StagingFileSystem files;
+    vthost::testing::FakeImageLeases leases;
+    vthost::testing::FakeSymbolicLinks links;
+    vthost::DaemonImageStore store {
+        vthost::testing::linuxPackageStoreConfig("/state/bin", "0.9.1"), files, leases, links
+    };
+    vthost::testing::FakeProcessImageReplacer replacer;
+    vthost::testing::FakeHandoverMemory memory;
+    vthost::testing::FakeReadinessProbe probe { "0.9.1" };
+    /// The command line the exec was asked to run, fulfilled where the exec would replace the process.
+    std::promise<std::vector<std::string>> replaced;
+    std::shared_ptr<ManualShutdownSignals> signals = std::make_shared<ManualShutdownSignals>();
+    vthost::DaemonConfig config;
+    std::string nativePath;
+
+    UpgradableDaemon()
+    {
+        config.socketPath = tmp.path / "control";
+        config.shutdownSignals = signals;
+        config.releaseVersion = "0.9.0";
+        config.liveUpgrade.emplace(vthost::LiveUpgradeServices {
+            .store = store,
+            .leases = leases,
+            .replacer = replacer,
+            .memory = memory,
+            .probe = probe,
+            .argv = commandLine(),
+            .installedExecutable = "/usr/bin/contour",
+            .sandbox = vtpty::SandboxState::Host,
+        });
+        nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+        // On the daemon's loop thread, where the exec would happen; the exec then fails as told.
+        replacer.onReplace = [this] {
+            replaced.set_value(replacer.replacements.back().second);
+        };
+    }
+};
+
+/// @return A Control client's hello that negotiates the live upgrade.
+[[nodiscard]] vthost::proto::ClientHello upgradingControlHello()
+{
+    return vthost::proto::ClientHello {
+        .capabilities = vthost::proto::CapabilitySet::of({ vthost::proto::Capability::LiveUpgrade }),
+        .role = vthost::proto::ConnectionRole::Control,
+    };
+}
+
+/// @return The bytes of @p pdus, numbered from 1.
+[[nodiscard]] std::vector<std::byte> requestOf(std::vector<vthost::proto::DecodedPdu> const& pdus)
+{
+    auto request = vthost::proto::Writer {};
+    auto serial = uint64_t { 0 };
+    for (auto const& pdu: pdus)
+        vthost::proto::encodePdu(request, ++serial, pdu);
+    return { request.view().begin(), request.view().end() };
+}
+
+/// @return The frames of @p received that carry a @p Pdu, in order.
+template <typename Pdu>
+[[nodiscard]] std::vector<Pdu> framesOf(std::vector<vthost::proto::DecodedFrame> const& received)
+{
+    auto found = std::vector<Pdu> {};
+    for (auto const& frame: received)
+        if (auto const* const pdu = std::get_if<Pdu>(&frame.pdu))
+            found.push_back(*pdu);
+    return found;
+}
+
+/// How a tmux control-mode connection ended.
+enum class TmuxEnd : uint8_t
+{
+    StillOpen = 0, ///< Nothing ended it before its receive deadline.
+    Closed,        ///< The daemon closed it.
+};
+
+/// A tmux control-mode client that is served, then sees its connection go: connects to @p socketPath, waits
+/// for the answer to a command, then, still connected, has a Control client converse with the daemon's native
+/// endpoint (converseAsControl), and reads until the daemon closes the connection or ten seconds pass.
+/// @param loop The client's loop.
+/// @param socketPath The daemon's tmux control-mode socket.
+/// @param nativePath The daemon's native socket.
+/// @param request What the Control client sends.
+/// @param received What the Control client receives.
+/// @param end How the tmux connection ended.
+core::async::Task<void> tmuxClientAcross(core::net::EventLoop* loop,
+                                         std::string socketPath,
+                                         std::string nativePath,
+                                         std::vector<std::byte> request,
+                                         std::vector<vthost::proto::DecodedFrame>* received,
+                                         TmuxEnd* end)
+{
+    auto connected = co_await core::net::connectUnix(loop, socketPath);
+    REQUIRE(connected.has_value());
+    auto const socket = std::move(*connected);
+    socket->setReceiveDeadline(std::chrono::seconds { 10 });
+    auto const command = std::string_view { "list-sessions\n" };
+    auto const written = co_await socket->write(std::as_bytes(std::span { command }));
+    REQUIRE(written.has_value());
+
+    // Served: the command's guard closes, so the daemon tracks the connection by now.
+    auto text = std::string {};
+    auto buffer = std::vector<std::byte>(4096);
+    while (!text.contains("%end") && !text.contains("%error"))
+    {
+        auto const read = co_await socket->read(buffer);
+        REQUIRE(read.has_value());
+        REQUIRE(*read != 0);
+        std::ranges::transform(buffer | std::views::take(*read), std::back_inserter(text), [](std::byte b) {
+            return static_cast<char>(b);
+        });
+    }
+
+    co_await converseAsControl(loop, std::move(nativePath), std::move(request), received);
+
+    while (true)
+    {
+        auto const read = co_await socket->read(buffer);
+        if (!read.has_value())
+        {
+            *end =
+                read.error().code == core::net::NetErrorCode::Timeout ? TmuxEnd::StillOpen : TmuxEnd::Closed;
+            co_return;
+        }
+        if (*read == 0)
+        {
+            *end = TmuxEnd::Closed;
+            co_return;
+        }
+    }
+}
+
+} // namespace
+
+TEST_CASE("a daemon upgrades itself in place when a local client asks",
+          "[vthost][daemon][upgrade][afunix][threading]")
+{
+    auto d = UpgradableDaemon {};
+    auto replaced = d.replaced.get_future();
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+
+    // The requester is answered, told, and let go, as every client is.
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(converseAsControl(&loop,
+                                   d.nativePath,
+                                   requestOf({ upgradingControlHello(), vthost::proto::UpgradeDaemon {} }),
+                                   &received));
+    auto const hellos = framesOf<vthost::proto::ServerHello>(received);
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().capabilities.contains(vthost::proto::Capability::LiveUpgrade));
+    // Started; and, should the connection still be flushing when the (fake) exec fails, why it did.
+    auto const replies = framesOf<vthost::proto::UpgradeDaemonReply>(received);
+    REQUIRE_FALSE(replies.empty());
+    REQUIRE(replies.size() <= 2);
+    CHECK(replies.front().result == 0);
+    CHECK(replies.back().result
+          == (replies.size() == 1 ? 0 : vthost::proto::UpgradeDaemonReply::ExecFailedResult));
+    auto const announced = framesOf<vthost::proto::DaemonUpgrading>(received);
+    REQUIRE(announced.size() == 1);
+    CHECK(announced.front().toRelease == "0.9.1");
+    // Answered first, then told: the reply precedes the announcement on the wire.
+    CHECK(std::holds_alternative<vthost::proto::UpgradeDaemonReply>(received.at(1).pdu));
+    CHECK(std::holds_alternative<vthost::proto::DaemonUpgrading>(received.at(2).pdu));
+
+    // The exec runs the same command line, the installed executable's, naming the handover.
+    REQUIRE(replaced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    auto const argv = replaced.get();
+    auto const commandLine = UpgradableDaemon::commandLine();
+    REQUIRE(argv.size() == commandLine.size() + 1);
+    CHECK(std::ranges::equal(argv | std::views::take(commandLine.size()), commandLine));
+    CHECK(argv.back().starts_with("--handover-fd="));
+
+    // The exec failed: the daemon rolled back and serves on, and still stops as it would any day.
+    auto after = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(converseAsControl(&loop,
+                                   d.nativePath,
+                                   requestOf({ upgradingControlHello(),
+                                               vthost::proto::DaemonStatusRequest {},
+                                               vthost::proto::StopDaemon { .reason = 0 } }),
+                                   &after));
+    CHECK(framesOf<vthost::proto::DaemonStatusReply>(after).size() == 1);
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+    REQUIRE(d.replacer.replacements.size() == 1);
+    CHECK(d.replacer.replacements.front().first == "/usr/bin/contour");
+    CHECK(d.probe.asked == std::vector<fs::path> { "/usr/bin/contour" });
+}
+
+TEST_CASE("a live upgrade closes a tmux control-mode connection",
+          "[vthost][daemon][upgrade][afunix][threading]")
+{
+    auto d = UpgradableDaemon {};
+    auto replaced = d.replaced.get_future();
+    auto daemon = std::async(std::launch::async, [&d] { return vthost::runDaemon(d.config); });
+    auto const stopOnExit = StopOnExit { *d.signals };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, d.nativePath));
+
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    auto end = TmuxEnd::StillOpen;
+    loop.blockOn(tmuxClientAcross(&loop,
+                                  core::pathToUtf8(d.config.socketPath),
+                                  d.nativePath,
+                                  requestOf({ upgradingControlHello(), vthost::proto::UpgradeDaemon {} }),
+                                  &received,
+                                  &end));
+    CHECK(end == TmuxEnd::Closed);
+    CHECK(framesOf<vthost::proto::DaemonUpgrading>(received).size() == 1);
+    REQUIRE(replaced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    // The exec failed: the daemon serves on until it is stopped.
+    d.signals->fire();
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+}
+
+TEST_CASE("a daemon given nothing to upgrade with offers no live upgrade and refuses one",
+          "[vthost][daemon][upgrade][afunix]")
+{
+    auto const tmp = TempDir {};
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    auto const signals = std::make_shared<ManualShutdownSignals>();
+    config.shutdownSignals = signals;
+    auto daemon = std::async(std::launch::async, [&config] { return vthost::runDaemon(config); });
+    auto const stopOnExit = StopOnExit { *signals };
+
+    auto const nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, nativePath));
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(converseAsControl(&loop,
+                                   nativePath,
+                                   requestOf({ upgradingControlHello(),
+                                               vthost::proto::UpgradeDaemon {},
+                                               vthost::proto::StopDaemon { .reason = 0 } }),
+                                   &received));
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+
+    auto const hellos = framesOf<vthost::proto::ServerHello>(received);
+    REQUIRE(hellos.size() == 1);
+    CHECK_FALSE(hellos.front().capabilities.contains(vthost::proto::Capability::LiveUpgrade));
+    CHECK(framesOf<vthost::proto::UpgradeDaemonReply>(received).empty());
+    CHECK(framesOf<vthost::proto::DaemonUpgrading>(received).empty());
 }
 #endif

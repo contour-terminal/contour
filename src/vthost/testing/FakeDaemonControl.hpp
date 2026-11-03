@@ -4,9 +4,13 @@
 /// @file
 /// A DaemonControl that serves every request and records what it was asked: a test's daemon.
 
+#include <core/async/Task.hpp>
+
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <expected>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,11 +52,60 @@ class FakeDaemonControl final: public DaemonControl, public CensusEvents
 
     [[nodiscard]] ClientCensus::Ticket admitClient() override { return census.admit(); }
 
+    /// Records the request; completes with @ref upgradeOutcome, after announcing the upgrade to the observers
+    /// when @ref upgradeAnnounces says it proceeds.
+    [[nodiscard]] core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
+        handover::UpgradeTarget target, std::function<void()> onStarted) override
+    {
+        upgrades.push_back(target.imageId);
+        if (upgradeThrows)
+            std::rethrow_exception(upgradeThrows);
+        if (upgradeOutcome)
+        {
+            if (onStarted)
+                onStarted();
+            announceUpgrade("9.9.10");
+            closeObservers();
+        }
+        co_return upgradeOutcome;
+    }
+
+    void subscribeUpgrade(UpgradeObserver& observer) override { observers.push_back(&observer); }
+    void unsubscribeUpgrade(UpgradeObserver& observer) override { std::erase(observers, &observer); }
+
+    /// Tells every observer the daemon is upgrading to @p toRelease.
+    void announceUpgrade(std::string_view toRelease) const
+    {
+        for (auto* const observer: std::vector<UpgradeObserver*>(observers))
+            observer->announceUpgrade(toRelease);
+    }
+
+    /// Ends every observer's connection.
+    void closeObservers() const
+    {
+        for (auto* const observer: std::vector<UpgradeObserver*>(observers))
+            observer->closeForUpgrade();
+    }
+
+    /// Closes every observer's connection at once.
+    void abortObservers() const
+    {
+        for (auto* const observer: std::vector<UpgradeObserver*>(observers))
+            observer->abortForUpgrade();
+    }
+
     void clientCountChanged(std::size_t count) override { peakClients = std::max(peakClients, count); }
 
-    ClientCensus census;                  ///< Counts the clients it admitted.
-    std::vector<proto::StopReason> stops; ///< Every stop asked for, in order.
-    std::size_t peakClients = 0;          ///< The most clients @ref census counted at once.
+    /// What every requestUpgrade() completes with; a value means the upgrade proceeds (and announces).
+    std::expected<void, handover::UpgradeError> upgradeOutcome =
+        std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::NotSupported });
+    /// What every requestUpgrade() throws instead, when set: an upgrade that failed by an exception.
+    std::exception_ptr upgradeThrows;
+    std::vector<std::string> upgrades;       ///< The image id of every upgrade asked for, in order.
+    std::vector<UpgradeObserver*> observers; ///< Who is told of an upgrade.
+    ClientCensus census;                     ///< Counts the clients it admitted.
+    std::vector<proto::StopReason> stops;    ///< Every stop asked for, in order.
+    std::size_t peakClients = 0;             ///< The most clients @ref census counted at once.
 };
 
 } // namespace vthost::testing

@@ -176,6 +176,13 @@ namespace vthost::testing
         { proto::PduType::LayoutBatchEnd, proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = 6 } } },
         { proto::PduType::SetSplitOrientation,
           proto::DecodedPdu { proto::SetSplitOrientation { .anchorSession = 9, .state = 1 } } },
+        { proto::PduType::UpgradeDaemon,
+          proto::DecodedPdu { proto::UpgradeDaemon { .imageId = "0.9.0-0123abcd" } } },
+        { proto::PduType::UpgradeDaemonReply,
+          proto::DecodedPdu {
+              proto::UpgradeDaemonReply { .result = 6, .detail = "a session is starting" } } },
+        { proto::PduType::DaemonUpgrading,
+          proto::DecodedPdu { proto::DaemonUpgrading { .toRelease = "0.9.0" } } },
     };
 }
 

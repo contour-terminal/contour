@@ -82,6 +82,9 @@ enum class Capability : uint8_t
     /// LayoutBatchEnd, and a client decides what the push dropped only then. Without it a client cannot tell
     /// the last window's layout of a push from one still in flight, and decides at the end of each read.
     LayoutBatch = 17,
+    /// The peer serves UpgradeDaemon and announces DaemonUpgrading: a daemon replaces itself in place, and a
+    /// client that negotiated this waits for the same daemon to come back instead of starting a new one.
+    LiveUpgrade = 18,
 };
 
 /// One row of the table naming a Capability.
@@ -110,6 +113,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ColorPreference, .name = "color-preference" },
     CapabilityRow { .capability = Capability::MoveNode, .name = "move-node" },
     CapabilityRow { .capability = Capability::LayoutBatch, .name = "layout-batch" },
+    CapabilityRow { .capability = Capability::LiveUpgrade, .name = "live-upgrade" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

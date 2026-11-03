@@ -10,12 +10,16 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Assert.hpp>
+
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -230,6 +234,18 @@ constexpr auto PromptedAt = int64_t { 1'700'000'000'000'000'000 };
     block.exitCode = exitCode;
     block.duration = 2'000'000'000;
     return block;
+}
+
+/// @param text Where to count.
+/// @param needle What to count; never empty.
+/// @return How often @p needle occurs in @p text, the occurrences not overlapping.
+[[nodiscard]] inline std::size_t occurrences(std::string_view text, std::string_view needle)
+{
+    Require(!needle.empty());
+    // Split at each occurrence: one piece more than there are occurrences -- and none of an empty text.
+    if (text.empty())
+        return 0;
+    return static_cast<std::size_t>(std::ranges::distance(text | std::views::split(needle))) - 1;
 }
 
 } // namespace vthost::testing

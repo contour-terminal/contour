@@ -2,6 +2,7 @@
 #include <vtbackend/state/StateFields.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -40,9 +41,10 @@ namespace
     session.label = "shell";
     session.profileName = "default";
     session.origin = SettingsOrigin::Client;
-    session.settings = defaultSessionSettings();
-    session.settings.maxImageRegisterCount = 1024;
-    session.settings.wordDelimiters = U" /\\()";
+    auto settings = defaultSessionSettings();
+    settings.maxImageRegisterCount = 1024;
+    settings.wordDelimiters = U" /\\()";
+    session.statedSettings = toWireSessionSettings(settings);
     session.pty.masterFd = 11;
     session.pty.stdoutFastPipe = std::pair { 12, -1 };
     session.pty.pageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
@@ -53,8 +55,17 @@ namespace
     session.child.cwd = "/home/user";
     session.child.hangupGrace.duration = std::chrono::milliseconds { 350 };
     session.terminalState = { 1, 2, 3, 4, 5 };
-    session.carried = { CarriedDelivery { .kind = DeliveryKind::Pty, .bytes = "ls\r" },
+    session.carried = { CarriedDelivery { .kind = DeliveryKind::Pty,
+                                          .bytes = "ls\r",
+                                          .progress = DeliveryProgress::InterruptedRest },
                         CarriedDelivery { .kind = DeliveryKind::Screen, .bytes = "\033[2J" } };
+    if (id % 2 == 0)
+    {
+        session.colorPreference = vtbackend::ColorPreference::Dark;
+        session.interruption =
+            CommandInterruption { .commandLine = "make -j8", .after = vtbackend::CommandBlockId(41) };
+        session.device = SessionDevice::PtyOnly;
+    }
     return session;
 }
 
@@ -91,13 +102,17 @@ namespace
                                              .label = "work" } };
     image.sessions = { sessionOf(1), sessionOf(2) };
     image.listeners = { InheritedListener { .name = "control", .fd = 20 },
-                        InheritedListener { .name = "native", .fd = 21 } };
+                        InheritedListener { .name = "native-tcp",
+                                            .fd = 21,
+                                            .tlsIdentity =
+                                                TlsIdentity { .certPem = "-----BEGIN CERTIFICATE-----",
+                                                              .keyPem = "-----BEGIN PRIVATE KEY-----" } } };
     image.leaseFd = 30;
+    image.defaultColorPreference = vtbackend::ColorPreference::Dark;
     return image;
 }
 
-/// Compares what the codec promises to carry. Settings cross as their emulation subset, so they are
-/// compared in wire form.
+/// Compares what the codec promises to carry.
 void requireSame(HandoverImage const& actual, HandoverImage const& expected)
 {
     CHECK(actual.daemonInstance == expected.daemonInstance);
@@ -128,9 +143,14 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.objects.panes.at(1).uuid == uuidOf(0xA4));
     CHECK(actual.objects.labels.at(0).label == "work");
     CHECK(actual.objects.labels.at(0).ref == expected.objects.labels.at(0).ref);
+    CHECK(actual.defaultColorPreference == expected.defaultColorPreference);
     CHECK(actual.listeners.size() == 2);
-    CHECK(actual.listeners.at(1).name == "native");
+    CHECK(actual.listeners.at(1).name == "native-tcp");
     CHECK(actual.listeners.at(1).fd == 21);
+    CHECK_FALSE(actual.listeners.at(0).tlsIdentity.has_value());
+    REQUIRE(actual.listeners.at(1).tlsIdentity.has_value());
+    CHECK(actual.listeners.at(1).tlsIdentity->certPem == expected.listeners.at(1).tlsIdentity->certPem);
+    CHECK(actual.listeners.at(1).tlsIdentity->keyPem == expected.listeners.at(1).tlsIdentity->keyPem);
     REQUIRE(actual.sessions.size() == expected.sessions.size());
     for (auto const index: std::views::iota(size_t { 0 }, expected.sessions.size()))
     {
@@ -141,7 +161,7 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
         CHECK(got.label == want.label);
         CHECK(got.profileName == want.profileName);
         CHECK(got.origin == want.origin);
-        CHECK(toWireSessionSettings(got.settings) == toWireSessionSettings(want.settings));
+        CHECK(got.statedSettings == want.statedSettings);
         CHECK(got.pty.masterFd == want.pty.masterFd);
         CHECK(got.pty.stdoutFastPipe == want.pty.stdoutFastPipe);
         CHECK(got.pty.pageSize.lines == want.pty.pageSize.lines);
@@ -154,6 +174,8 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
         CHECK(got.child.hangupGrace.duration == want.child.hangupGrace.duration);
         CHECK(got.terminalState == want.terminalState);
         CHECK(got.carried == want.carried);
+        CHECK(got.colorPreference == want.colorPreference);
+        CHECK(got.interruption == want.interruption);
     }
 }
 
@@ -194,6 +216,28 @@ TEST_CASE("a handover image round-trips", "[handover]")
     auto const decoded = decodeHandover(encodeHandover(image));
     REQUIRE(decoded.has_value());
     requireSame(*decoded, image);
+}
+
+TEST_CASE("a session whose PTY has an empty page size is decoded without its state, at a usable size",
+          "[handover]")
+{
+    auto image = sampleImage();
+    auto const empty = GENERATE(vtpty::PageSize { vtpty::LineCount(0), vtpty::ColumnCount(0) },
+                                vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(0) },
+                                vtpty::PageSize { vtpty::LineCount(0), vtpty::ColumnCount(80) });
+    image.sessions.front().pty.pageSize = empty;
+
+    // The image is not refused: the program is still adopted, on a fresh terminal.
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->sessions.size() == 2);
+    auto const& refused = decoded->sessions.front();
+    CHECK(refused.pty.pageSize.lines == FallbackPageSize.lines);
+    CHECK(refused.pty.pageSize.columns == FallbackPageSize.columns);
+    CHECK(refused.terminalState.empty());
+    CHECK(refused.pty.masterFd == image.sessions.front().pty.masterFd);
+    // The other session keeps everything.
+    CHECK(decoded->sessions.back().terminalState == image.sessions.back().terminalState);
 }
 
 TEST_CASE("equal images encode to equal bytes", "[handover]")

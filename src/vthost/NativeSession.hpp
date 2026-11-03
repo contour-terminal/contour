@@ -122,7 +122,7 @@ struct NativeSessionServices
 };
 
 /// One connected native-protocol client.
-class NativeSession final: public SessionStreamEvents
+class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 {
   public:
     /// The default send-queue bound (see the constructor).
@@ -208,6 +208,13 @@ class NativeSession final: public SessionStreamEvents
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
     [[nodiscard]] core::async::Task<void> run();
+
+    /// Tells the peer the daemon is upgrading (DaemonUpgrading), when it negotiated Capability::LiveUpgrade.
+    void announceUpgrade(std::string_view toRelease) override;
+
+    /// Ends the connection in an orderly way: what is queued (DaemonUpgrading among it) is flushed first.
+    void closeForUpgrade() override;
+    void abortForUpgrade() override;
 
     /// Marks @p session changed and schedules its delta flush, at once or coalesced (an Attach
     /// connection subscribes itself to the host's stream fan-out as its hello is accepted).
@@ -479,6 +486,37 @@ class NativeSession final: public SessionStreamEvents
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a request.
     [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// The link between a connection and the upgrade request it spawned. The request's flow outlives neither
+    /// the daemon's upgrade nor, as a claim on the connection would make it, the connection's own end: the
+    /// requester's connection is among those the upgrade closes, and run() would wait for the very flow
+    /// that waits for the connection to go. So the flow holds this instead, and finds the connection gone
+    /// when @ref session is null.
+    struct UpgradeLink
+    {
+        NativeSession* session = nullptr; ///< The requesting connection; null once it is closed.
+    };
+
+    /// Answers @p serial with @p reply through @p link's connection, if it is still there.
+    static void replyThroughLink(UpgradeLink const& link, uint64_t serial, proto::UpgradeDaemonReply reply);
+
+    /// Asks @p daemon to upgrade to @p target and answers @p serial through @p link: started just before the
+    /// announcement, otherwise why not. A free-standing flow, since it outlives no connection.
+    /// @param daemon The daemon (not owned; outlives every connection).
+    /// @param link The requesting connection.
+    /// @param serial The UpgradeDaemon's serial.
+    /// @param target What to upgrade to.
+    [[nodiscard]] static core::async::Task<void> serveUpgradeRequest(DaemonControl* daemon,
+                                                                     std::shared_ptr<UpgradeLink> link,
+                                                                     uint64_t serial,
+                                                                     handover::UpgradeTarget target);
+
+    /// Whether the connection is being ended for a live upgrade.
+    enum class UpgradeEnd : uint8_t
+    {
+        Open = 0, ///< It is not.
+        Ending,   ///< closeForUpgrade() ran: the pump reads no more.
+    };
 
     /// Whether a frame was a verb that changes how a tab is presented or where its panes are.
     enum class TabVerb : uint8_t
@@ -1090,6 +1128,10 @@ class NativeSession final: public SessionStreamEvents
     /// the last members, so they are released before anything they deliver to.
     std::optional<ScopedStreamSubscription> _streamSubscription;
     std::optional<ScopedModelSubscription> _layoutSubscription;
+    UpgradeEnd _upgradeEnd = UpgradeEnd::Open;
+    std::shared_ptr<UpgradeLink> _upgradeLink = std::make_shared<UpgradeLink>(UpgradeLink { this });
+    /// Told of the daemon's upgrade from run() on. Last, so it is released before anything it delivers to.
+    std::optional<UpgradeSubscription> _upgradeSubscription;
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.

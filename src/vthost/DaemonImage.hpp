@@ -153,6 +153,10 @@ class ImageLease
     {
         return std::make_error_code(std::errc::not_supported);
     }
+
+    /// @return The descriptor the lease is held through, which a live upgrade names in its handover image so
+    ///         that the new image keeps it open; -1 for a lease that is no descriptor (Windows, a fake).
+    [[nodiscard]] virtual int descriptor() const noexcept { return -1; }
 };
 
 /// Takes and inspects image leases.
@@ -297,6 +301,13 @@ class DaemonImageStore
     /// @param executable An executable under the images root.
     /// @return The image directory holding it, or empty when it lies elsewhere.
     [[nodiscard]] std::filesystem::path imageDirectoryOf(std::filesystem::path const& executable) const;
+
+    /// Finds a complete image of the store by its name, as a live upgrade's request names it: never a path,
+    /// so nothing outside the images root can be named.
+    /// @param imageId The image directory's name, `<release>-<fingerprint>` (imageDirectoryName()).
+    /// @return The executable in it; nullopt when @p imageId is no plain image name (a separator, `.`, `..`,
+    ///         a partial copy's), names no complete image, or this layout stages nothing (InPlace).
+    [[nodiscard]] std::optional<std::filesystem::path> executableOfImage(std::string_view imageId) const;
 
     /// @param imageDir An image directory.
     /// @return Its lease file, `<imageDir>.lease`.

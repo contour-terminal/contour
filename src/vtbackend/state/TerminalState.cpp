@@ -811,7 +811,7 @@ void Terminal::announceRestoredState()
     // One row per fact a listener keeps a copy of. A restore replaces them all without going through the
     // setters that announce each, so it announces them here, together, once the terminal is whole.
     using Announce = void (*)(Terminal&);
-    static constexpr auto Announcements = std::array<Announce, 10> {
+    static constexpr auto Announcements = std::array<Announce, 11> {
         [](Terminal& terminal) { terminal._eventListener.setWindowTitle(terminal._windowTitle); },
         [](Terminal& terminal) { terminal._eventListener.setIconTitle(terminal._iconTitle); },
         [](Terminal& terminal) {
@@ -825,6 +825,10 @@ void Terminal::announceRestoredState()
         [](Terminal& terminal) { terminal._eventListener.contextChanged(terminal._contexts.activeId()); },
         [](Terminal& terminal) { terminal._eventListener.inputModeChanged(terminal._inputHandler.mode()); },
         [](Terminal& terminal) { terminal._eventListener.screenUpdated(); },
+        // The kitty animations playing on the page on display: what arms the daemon's frame timer.
+        [](Terminal& terminal) {
+            terminal.publishKittyAnimationDeadline(terminal.displayedPage().nextKittyFrameDue());
+        },
     };
     for (auto const announce: Announcements)
         announce(*this);

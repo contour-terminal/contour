@@ -8,6 +8,7 @@ add_library(vthost STATIC
     CarriedDelivery.hpp
     ClientCensus.hpp
     ClientSizePolicy.hpp
+    CommandInterruption.hpp
     ConfigReload.cpp
     ConfigReload.hpp
     FlushPolicy.hpp
@@ -23,7 +24,11 @@ add_library(vthost STATIC
     DaemonImageLeases_posix.cpp
     DaemonImageLeases_win32.cpp
     DaemonLifecycle.hpp
+    ConnectionRegistry.cpp
+    ConnectionRegistry.hpp
     DaemonRuntime.cpp
+    DaemonUpgradeHooks.cpp
+    DaemonUpgradeHooks.hpp
     DaemonStarter.cpp
     DaemonStarter.hpp
     DaemonRuntime.hpp
@@ -97,6 +102,7 @@ add_library(vthost STATIC
     ShutdownFunnel.hpp
     ShutdownSignals.cpp
     ShutdownSignals.hpp
+    StartContinuity.hpp
     SocketPath.hpp
     SshTransport.cpp
     SshTransport.hpp
@@ -176,6 +182,12 @@ add_library(vthost STATIC
     handover/HandoverMemory_win32.cpp
     handover/HandoverRestore.cpp
     handover/HandoverRestore.hpp
+    handover/LiveUpgrade.cpp
+    handover/LiveUpgrade.hpp
+    handover/Readiness.cpp
+    handover/Readiness.hpp
+    handover/UpgradeError.hpp
+    handover/UpgradeTarget.hpp
     proto/Negotiation.cpp
     proto/Negotiation.hpp
     proto/Pdu.cpp
@@ -276,6 +288,8 @@ if(VTHOST_TESTING)
         CommandRunner_test.cpp
         DaemonControl_test.cpp
         DaemonRuntime_test.cpp
+        ConnectionRegistry_test.cpp
+        DaemonUpgradeHooks_test.cpp
         DaemonControlWire_test.cpp
         DaemonBinary_test.cpp
         DaemonImage_test.cpp
@@ -315,7 +329,10 @@ if(VTHOST_TESTING)
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp
+        testing/FakeHandoverMemory.hpp
         testing/FakeImageLeases.hpp
+        testing/FakeProcessImageReplacer.hpp
+        testing/FakeReadinessProbe.hpp
         testing/FakeProfileCatalog.hpp
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
@@ -343,6 +360,8 @@ if(VTHOST_TESTING)
         handover/HandoverCodec_test.cpp
         handover/HandoverMemory_test.cpp
         handover/HandoverRestore_test.cpp
+        handover/LiveUpgrade_test.cpp
+        handover/Readiness_test.cpp
         imsg/ImsgCodec_test.cpp
         latency/EchoProtocol_test.cpp
         latency/Gate_test.cpp

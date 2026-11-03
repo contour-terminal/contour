@@ -26,10 +26,22 @@ namespace
         {
             return std::unexpected { HandoverError::NotSupported };
         }
+
+        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(int /*fd*/) override
+        {
+            return std::unexpected { HandoverError::NotSupported };
+        }
+
+        void discard(int /*fd*/) override {}
     };
 } // namespace
 
 std::unique_ptr<HandoverMemory> makeNativeHandoverMemory()
+{
+    return std::make_unique<UnsupportedHandoverMemory>();
+}
+
+std::unique_ptr<HandoverMemory> makeHandoverMemory(HandoverMemoryKind /*kind*/)
 {
     return std::make_unique<UnsupportedHandoverMemory>();
 }

@@ -4,9 +4,12 @@
 /// @file
 /// How one accepted connection identifies itself in the daemon's diagnostics.
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <format>
 #include <string>
+#include <string_view>
 
 namespace vthost
 {
@@ -34,6 +37,17 @@ struct ConnectionId
     /// no address — the filesystem permissions are the identity there.
     std::string peer {};
 };
+
+/// The endpoints whose listener is a local (Unix-socket) one: a connection accepted there came from this
+/// machine, and its socket's permissions are its identity.
+inline constexpr std::array<std::string_view, 2> LocalEndpoints { "control", "native" };
+
+/// @param id A connection.
+/// @return Whether it was accepted on a local (Unix-socket) listener, as opposed to a network one.
+[[nodiscard]] inline bool isLocal(ConnectionId const& id) noexcept
+{
+    return std::ranges::contains(LocalEndpoints, std::string_view { id.endpoint });
+}
 
 } // namespace vthost
 

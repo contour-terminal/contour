@@ -8,6 +8,7 @@
 #include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/SandboxInfo.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -31,11 +32,50 @@
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/ShutdownSignals.hpp>
+#include <vthost/StartContinuity.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/handover/HandoverImage.hpp>
+#include <vthost/handover/Readiness.hpp>
 
 namespace vthost
 {
+
+class DaemonImageStore;
+class ImageLeases;
+class ProcessImageReplacer;
+
+namespace handover
+{
+    class HandoverMemory;
+} // namespace handover
+
+/// What a daemon upgrades itself in place with (a live upgrade, handover::LiveUpgrade): the collaborators
+/// that reach out of the process -- the image store, the exec, the memory the image crosses in, the probe
+/// that runs the target -- made and owned by the composition root, and what of the process the exec repeats.
+///
+/// Every reference is borrowed, and must outlive runDaemon().
+struct LiveUpgradeServices
+{
+    DaemonImageStore& store;          ///< The daemon's image store, where an upgrade's target lies.
+    ImageLeases& leases;              ///< The leases that guard the store's images.
+    ProcessImageReplacer& replacer;   ///< What execs the target in this process.
+    handover::HandoverMemory& memory; ///< Where the handover image is written for the target to read.
+    handover::ReadinessProbe& probe;  ///< What asks the target whether it can take over.
+    /// This process's command line, which the exec runs again with the target's program and the handover
+    /// argument (`--handover-fd=N`) in place of any it carried.
+    std::vector<std::string> argv;
+    /// What an upgrade naming no image runs: the daemon's own installed executable, which a package upgrade
+    /// replaced; empty for none.
+    std::filesystem::path installedExecutable {};
+    vtpty::SandboxState sandbox = vtpty::SandboxState::Host; ///< The sandbox the daemon runs in.
+    /// The configuration file the daemon runs on, which a target must load before an upgrade stops anything;
+    /// empty for none.
+    std::filesystem::path configFile {};
+    /// The profile the daemon's sessions run, which a target must resolve; empty for the default one.
+    std::string profile {};
+    /// Whether the daemon loaded its configuration file; a target that cannot is refused only then.
+    handover::RunningConfig runningConfig = handover::RunningConfig::LoadedFromFile;
+};
 
 /// Opt-in TCP listener for the native cells+deltas protocol. Absent unless the
 /// user configures it; when present it binds @c host (loopback by default) and
@@ -141,13 +181,17 @@ struct DaemonConfig
     /// bare `DaemonConfig{}`) keeps nothing and offers no Capability::WorkspaceRestore; `contour daemon`
     /// sets it from `daemon.restore`.
     WorkspacePersistenceConfig persistence {};
-    /// What the previous image of this daemon handed over as it exec'd this one in place (a live upgrade);
-    /// nullopt for a daemon that starts afresh. When set, the daemon is the same run going on: it states the
-    /// image's instance in place of @ref instance, serves on the listening sockets the image names instead of
-    /// binding new ones (binding only those it names none for), takes every session over
-    /// (SessionHostConfig::handover) in place of restoring @ref persistence's snapshot or realizing
-    /// @ref startupLayout, then reloads its configuration once (@ref configReload).
-    std::optional<handover::HandoverImage> handover {};
+    /// What the composition root could not start as configured once it had taken a handover over -- a
+    /// configuration file that no longer loads, a profile it no longer names, a credential gone -- and serves
+    /// on without rather than ending, which would hang up every program the handover carried. Each is logged
+    /// and told to the first client that attaches. Empty for none, and always for a daemon that starts
+    /// afresh, which refuses to start instead.
+    std::vector<std::string> degradations {};
+    /// What the daemon upgrades itself in place with when a client asks (UpgradeDaemon); nullopt for a daemon
+    /// that cannot, which refuses every upgrade NotSupported and offers no Capability::LiveUpgrade. The
+    /// upgrade states this daemon's own release and instance. POSIX only: a Windows daemon ignores it, as its
+    /// in-place upgrade does not exist yet.
+    std::optional<LiveUpgradeServices> liveUpgrade {};
 };
 
 /// Creates the directory @p socketPath lives in owner-only, or checks that it is safe, as the
@@ -164,9 +208,22 @@ struct DaemonConfig
 
 /// Runs the daemon: binds the hardened control socket, serves connections until a shutdown is asked
 /// for (see ShutdownCause), then shuts down cleanly. Blocks the calling thread.
+///
+/// A daemon that takes over from a handover (@p image) never ends for what it cannot start as configured:
+/// an endpoint it can neither inherit nor bind, a TCP listener whose TLS cannot be built, are skipped, logged
+/// and told to the first client, and the adopted programs are served on whatever remains.
 /// @param config The daemon configuration.
+/// @param image What the previous image of this daemon handed over as it exec'd this one in place (a live
+///        upgrade); nullopt for a daemon that starts afresh. When set, the daemon is the same run going on:
+///        it states the image's instance in place of DaemonConfig::instance, serves on the listening sockets
+///        the image names instead of binding new ones (binding only those it names none for), takes every
+///        session over (SessionHostConfig::handover) in place of restoring DaemonConfig::persistence's
+///        snapshot or realizing DaemonConfig::startupLayout, applying DaemonConfig::profiles to them as a
+///        configuration reload would. Consumed: each part goes to what takes it over -- the listeners, the
+///        host, a listener's TLS -- and none is kept beside it, the TLS private keys it carries included.
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
-[[nodiscard]] int runDaemon(DaemonConfig const& config);
+[[nodiscard]] int runDaemon(DaemonConfig const& config,
+                            std::optional<handover::HandoverImage> image = std::nullopt);
 
 /// Starts @p commandLine as a detached daemon and blocks until it is serving.
 ///

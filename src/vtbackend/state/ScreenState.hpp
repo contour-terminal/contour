@@ -51,6 +51,7 @@ struct ScreenState
     int enableLocalFunctions = 0;         ///< DECELF
     int localFunctionKeyControl = 0;      ///< DECLFKC
     int modifierKeyReporting = 0;         ///< DECSMKR
+    CellSizeDropLog cellSizeDropLog = CellSizeDropLog::NotYetLogged; ///< @see Screen::_cellSizeDropLog
 
     /// Lists the fields for the state codec.
     void visitFields(this auto& self, auto& visitor)
@@ -74,6 +75,7 @@ struct ScreenState
         visitor(17, self.enableLocalFunctions);
         visitor(18, self.localFunctionKeyControl);
         visitor(19, self.modifierKeyReporting);
+        visitor(20, self.cellSizeDropLog);
     }
 };
 

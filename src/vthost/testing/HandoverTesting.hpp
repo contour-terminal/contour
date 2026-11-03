@@ -63,16 +63,19 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
 /// Lets go of every session's PTY and child without closing or signalling either, as the exec does: the
 /// in-process stand-in for it, after which destroying @p host closes no descriptor and ends no program, and
 /// a second host adopts them from the image a capture took.
-/// @param host A host every session of which runs a child process on a PTY of its own.
+/// @param host A host every session of which runs on a PTY of its own, a child process on it or none.
 inline void releaseForAdoption(SessionHost& host)
 {
     for (auto const id: host.sessionIds())
     {
         auto& device = host.hostedSession(id)->terminal().device();
         auto* const tapped = dynamic_cast<TappingPty*>(&device);
-        auto& process = dynamic_cast<vtpty::Process&>(tapped != nullptr ? tapped->inner() : device);
-        std::ignore = dynamic_cast<vtpty::UnixPty&>(process.pty()).releaseDescriptors();
-        std::ignore = process.releaseChild();
+        auto& inner = tapped != nullptr ? tapped->inner() : device;
+        auto* const process = dynamic_cast<vtpty::Process*>(&inner);
+        std::ignore =
+            dynamic_cast<vtpty::UnixPty&>(process != nullptr ? process->pty() : inner).releaseDescriptors();
+        if (process != nullptr)
+            std::ignore = process->releaseChild();
     }
 }
 #endif
@@ -85,13 +88,16 @@ struct LiveHost
 
     /// @param devices Makes the device of each session, in spawn order.
     /// @param config How the host is set up; its sessions always pump.
-    explicit LiveHost(Devices devices, SessionHostConfig config = sequentialIds()):
+    /// @param settings The sessions' terminal settings.
+    explicit LiveHost(Devices devices,
+                      SessionHostConfig config = sequentialIds(),
+                      vtbackend::Settings settings = {}):
         host { loop,
                [devices = std::move(devices)](vtpty::PageSize size,
                                               std::optional<vtpty::Process::ExecInfo> const&) {
                    return devices(size);
                },
-               vtbackend::Settings {},
+               std::move(settings),
                core::defaultEnvironment(),
                pumping(std::move(config)) }
     {
@@ -143,7 +149,7 @@ struct LiveHost
     /// handled what they posted.
     void settle()
     {
-        REQUIRE(eventually([this] { return host.quiesceAll().has_value(); }));
+        REQUIRE(eventually([this] { return host.stopAllPumps().has_value(); }));
         REQUIRE(eventually([this] { return host.pumpEventsInFlight() == 0; }));
     }
 

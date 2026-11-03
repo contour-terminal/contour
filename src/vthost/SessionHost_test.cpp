@@ -82,6 +82,7 @@
 
 using vthost::SessionHost;
 using vthost::testing::eventually;
+using vthost::testing::occurrences;
 using vtworkspace::SplitState;
 
 namespace
@@ -3651,16 +3652,6 @@ template <typename T>
     return lines;
 }
 
-/// @return How often @p needle occurs in @p text.
-[[nodiscard]] std::size_t occurrences(std::string_view text, std::string_view needle)
-{
-    auto count = std::size_t { 0 };
-    for (auto at = text.find(needle); at != std::string_view::npos;
-         at = text.find(needle, at + needle.size()))
-        ++count;
-    return count;
-}
-
 #ifndef _WIN32
 /// @return A hosted session running `/bin/sh -c @p script` on a PTY of its own, not yet started.
 /// @param onClosed Invoked on the pump thread once the session's close is announced.
@@ -3755,6 +3746,37 @@ TEST_CASE("input delivered while quiesced is carried, not lost", "[vthost][host]
     CHECK(occurrences(text, "abc") == 1);
     CHECK(occurrences(text, "^[[?") == 1);
     CHECK(text.find("abc") < text.find("^[[?"));
+}
+
+TEST_CASE("a pump stopped for a capture queues input, which the capture carries once",
+          "[vthost][host][upgrade][threading]")
+{
+    auto session = liveSession("stty -echo; printf ready; exec cat -v");
+    session->start();
+    REQUIRE(eventually([&] { return pageText(*session).contains("ready"); }));
+    REQUIRE(session->stopForCapture().has_value());
+
+    // Stopped as quiesce() stops it: nothing handed over reaches the child, and nothing is lost.
+    session->writeInput("abc\n");
+    auto const quiesced = session->quiesce();
+    REQUIRE(quiesced.has_value());
+    CHECK(
+        quiesced->carried
+        == std::vector<vthost::CarriedDelivery> { { .kind = vthost::DeliveryKind::Pty, .bytes = "abc\n" } });
+    CHECK_FALSE(pageText(*session).contains("abc"));
+
+    session->resume();
+    REQUIRE(eventually([&] { return pageText(*session).contains("abc"); }));
+    CHECK(occurrences(pageText(*session), "abc") == 1);
+}
+
+TEST_CASE("occurrences counts each occurrence once, none overlapping", "[vthost][testing]")
+{
+    CHECK(occurrences("", "a") == 0);
+    CHECK(occurrences("xyz", "a") == 0);
+    CHECK(occurrences("abab", "ab") == 2);
+    CHECK(occurrences("aaa", "aa") == 1);
+    CHECK(occurrences("xaby", "ab") == 1);
 }
 
 TEST_CASE("resume after quiesce continues output with no gap", "[vthost][host][upgrade][threading]")
@@ -4192,6 +4214,72 @@ TEST_CASE("quiesce interrupts a write the program never reads, and carries exact
     CHECK(all.substr(payload.size()).starts_with("\033[?"));
     CHECK(occurrences(all, "\033[?") == 1);
     CHECK(session.inputBacklog() == 0);
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a reply queued while a write was interrupted goes out after the write's rest, not inside it",
+          "[vthost][host][upgrade][threading]")
+{
+    // The program reads nothing until the test lets it, then copies what it reads into a file. A megabyte is
+    // pasted; the capture interrupts the write. A reply the terminal queues meanwhile (a focus report, here
+    // any reply) must reach the program after the paste, as it would have without the capture.
+    auto const directory = std::filesystem::temp_directory_path()
+                           / std::format("contour-rest-{}-{}",
+                                         ::getpid(),
+                                         std::chrono::steady_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(directory);
+    auto const flag = directory / "go";
+    auto const received = directory / "received";
+    auto const script = std::format("stty raw -echo; printf ready; while [ ! -e '{}' ]; do sleep 0.02; done; "
+                                    "exec cat > '{}'",
+                                    flag.string(),
+                                    received.string());
+
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost {
+        loop,
+        [&script](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+            return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", script }),
+                                                    vtpty::createPty(size, std::nullopt),
+                                                    /*escapeSandbox=*/false,
+                                                    std::make_shared<vtpty::NoPlacement>());
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    auto& session = onlySession(host);
+    REQUIRE(eventually([&] { return pageText(session).contains("ready"); }));
+
+    auto const payload = letterPayload(std::size_t { 1024 } * 1024);
+    session.writeInput(payload);
+    std::this_thread::sleep_for(std::chrono::milliseconds { 300 });
+    auto capture = std::async(std::launch::async, [&session] { return session.quiesce(); });
+    REQUIRE(readyPromptly(capture));
+    auto const quiesced = capture.get();
+    REQUIRE(quiesced.has_value());
+    REQUIRE_FALSE(quiesced->carried.empty());
+    CHECK(quiesced->carried.front().progress == vthost::DeliveryProgress::InterruptedRest);
+
+    // Queued by the terminal while the write waited.
+    {
+        auto& terminal = session.terminal();
+        auto const _ = std::lock_guard { terminal };
+        terminal.reply("<REPLY>");
+    }
+
+    // Rolled back: the rest of the paste, then the reply.
+    session.resume();
+    std::ofstream { flag }.put('\n');
+    REQUIRE(eventually([&] { return fileContents(received).size() >= payload.size() + 7; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+    auto const all = fileContents(received);
+    CHECK(all.size() == payload.size() + 7);
+    CHECK(all.starts_with(payload));
+    CHECK(all.ends_with("<REPLY>"));
 
     std::filesystem::remove_all(directory);
 }
