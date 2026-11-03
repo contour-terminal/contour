@@ -103,6 +103,21 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
 {
     if (_acceptedConnections == 0)
         _timeline.mark(vthost::latency::StartupMark::Connected);
+    // The area the hello states: what the window composes to now, else what was last stated, else the
+    // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
+    auto const helloArea = [&]() -> std::optional<vtpty::PageSize> {
+        auto const lock = std::lock_guard { _mutex };
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        auto area = _acceptedConnections > 0 ? composedClientArea() : std::nullopt;
+        if (!area)
+            area = _lastStatedArea;
+        if (!area)
+            area = _attachSettings.transform([](auto const& s) { return s.pageSize; });
+        _helloArea = area;
+        if (area)
+            _lastStatedArea = area;
+        return area;
+    }();
     return std::make_unique<NativeClient>(
         loop,
         std::move(connection->socket),
@@ -146,9 +161,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::ColorPreference }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
-            .clientArea = _attachSettings.transform([](auto const& s) {
-                return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(s.pageSize.columns),
-                                                       .lines = unbox<uint32_t>(s.pageSize.lines) };
+            .clientArea = helloArea.transform([](auto const& size) {
+                return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(size.columns),
+                                                       .lines = unbox<uint32_t>(size.lines) };
             }),
             .attachIntent = std::move(intent),
             .profileName = _profileName,
@@ -404,6 +419,9 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
+        // The daemon projected every pane onto the hello's area: they are re-asserted once the GUI
+        // reconciled.
+        _geometryReassert = GeometryReassert::Pending;
         if (restarted)
         {
             _paneSizes.clear();
@@ -1080,15 +1098,27 @@ void NativeController::flushGeometry()
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _geometryFlushScheduled = false;
 
-        if (auto const composed = composedClientArea(); composed && _lastReportedArea != composed)
+        // The hello of this connection stated an area already: when the window still composes to it, the
+        // daemon has it, but it projected every pane onto it, so the panes are all sent again.
+        auto resendAll = false;
+        auto const composed = composedClientArea();
+        if (auto const hello = std::exchange(_helloArea, std::nullopt); hello && composed == hello)
+        {
+            _lastReportedArea = hello;
+            resendAll = true;
+        }
+        if (composed && _lastReportedArea != composed)
         {
             _lastReportedArea = composed;
+            _lastStatedArea = composed;
             area = composed;
         }
-
         // A new client area re-projects every pane on the daemon, so each must be re-asserted then
         // — not just the ones that moved here.
-        auto const resendAll = area.has_value();
+        resendAll = resendAll || area.has_value();
+        // A reconnect re-projected them too, whatever an earlier flush already did with the hello's area.
+        if (std::exchange(_geometryReassert, GeometryReassert::Idle) == GeometryReassert::Pending)
+            resendAll = true;
         for (auto const& [session, size]: _paneSizes)
         {
             if (!_bindings.contains(session))
@@ -1113,6 +1143,17 @@ void NativeController::flushGeometry()
         for (auto const& [session, size]: panes)
             _client->resizePane(session, unbox<uint32_t>(size.columns), unbox<uint32_t>(size.lines));
     });
+}
+
+void NativeController::reassertGeometryAfterReconcile()
+{
+    {
+        // Released before flushGeometry(), which takes _mutex and then this one.
+        auto const lock = std::lock_guard { _geometryMutex };
+        if (_geometryReassert != GeometryReassert::Pending)
+            return;
+    }
+    flushGeometry();
 }
 
 std::optional<vtpty::PageSize> NativeController::composedClientArea() const

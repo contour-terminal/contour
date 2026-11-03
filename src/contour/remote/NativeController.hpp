@@ -284,6 +284,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// setNextBindSession, not the FIFO queue.
     void setRealizingLayout(bool realizing);
 
+    /// GUI thread. After a reconnect, once the GUI reconciled a layout of the new connection: re-sends every
+    /// bound pane's size once, even though no display geometry changed. No-op otherwise.
+    void reassertGeometryAfterReconcile();
+
     /// @return Whether a layout realization is in progress (so a split it triggers
     ///         is built locally, not re-authored on the daemon).
     [[nodiscard]] bool isRealizingLayout() const;
@@ -830,6 +834,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// snapshot per followed session.
     std::optional<vtpty::PageSize> _lastReportedArea;
     std::unordered_map<uint64_t, vtpty::PageSize> _lastReportedPaneSizes;
+    /// The last area stated to any connection (a hello, or a resize request). Never reset, not even for a
+    /// restarted daemon: it is what the window is, and the next hello states it while no layout composes one.
+    std::optional<vtpty::PageSize> _lastStatedArea;
+    /// The area this connection's hello stated; consumed by the first flushGeometry(), which then does not
+    /// state it again.
+    std::optional<vtpty::PageSize> _helloArea;
+    /// Whether every pane's size is yet to be re-asserted after a reconnect.
+    enum class GeometryReassert : uint8_t
+    {
+        Idle = 0,
+        Pending, ///< Set by a reconnect; the flush that follows the next reconcile sends every pane.
+    };
+    GeometryReassert _geometryReassert = GeometryReassert::Idle;
     /// The session whose pane last reported a grid; anchors which tab the client area is composed
     /// from, @see vthost::client::composeAnchoredClientArea. Outlives the individual flush it was
     /// set for — a report is not "consumed" — but never its pane: `unbind` clears it, so it either
