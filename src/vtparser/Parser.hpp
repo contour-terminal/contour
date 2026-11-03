@@ -877,7 +877,8 @@ class Parser
     /// Records that the byte the state machine just took, at @p byte, began a sequence, if it did.
     void noteSequenceStart(char const* byte) noexcept
     {
-        if (_sequenceStart == SequenceStart::AtLastByte) [[unlikely]]
+        // No branch hint: on SGR-dense output an Escape arrives every eight to fifteen bytes.
+        if (_sequenceStart == SequenceStart::AtLastByte)
         {
             _lastSequenceStart = byte;
             _sequenceStart = SequenceStart::None;
