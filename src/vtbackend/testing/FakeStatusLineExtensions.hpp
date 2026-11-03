@@ -40,6 +40,7 @@ class FakeStatusLineExtensions final: public IStatusLineExtensions
     {
         auto const lock = std::scoped_lock { _mutex };
         _resizes.push_back(statusLineSize);
+        _postedAtResize.push_back(_posted.size());
     }
 
     [[nodiscard]] std::shared_ptr<StatusLineExtensionSnapshot const> snapshot(
@@ -107,6 +108,13 @@ class FakeStatusLineExtensions final: public IStatusLineExtensions
         return _resizes;
     }
 
+    /// @return For each resize, how many events had been posted when it arrived.
+    [[nodiscard]] std::vector<std::size_t> postedAtResize() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _postedAtResize;
+    }
+
     [[nodiscard]] int snapshotCalls(std::string const& name) const
     {
         auto const lock = std::scoped_lock { _mutex };
@@ -126,6 +134,7 @@ class FakeStatusLineExtensions final: public IStatusLineExtensions
     mutable std::mutex _mutex;
     std::vector<StatusLineEvent> _posted;
     std::vector<PageSize> _resizes;
+    std::vector<std::size_t> _postedAtResize;
     std::map<std::string, std::shared_ptr<StatusLineExtensionSnapshot const>> _snapshots;
     mutable std::map<std::string, int> _snapshotCalls;
     std::optional<std::string> _takeOver;
