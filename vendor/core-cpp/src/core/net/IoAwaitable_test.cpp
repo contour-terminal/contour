@@ -200,11 +200,38 @@ TEST_CASE("Many inline completions in a loop do not recurse to overflow", "[net]
     // A TLS connection draining pipelined records, each decrypted from an already-buffered BIO so
     // the read completes with no real wait. Resuming the consumer re-entrantly from inside
     // `await_suspend` nests one frame per record; returning the awaiting handle instead iterates
-    // in constant stack space. A regression here does not fail the case, it crashes the binary.
+    // in constant stack space -- where the compiler makes that transfer a tail call. A regression
+    // here does not fail the case, it crashes the binary.
+    //
+    // Where the compiler does not, the transfer is an ordinary call and this loop nests one
+    // coroutine frame per iteration however `await_suspend` is written: a limit decided in 0.5.0
+    // (core-cpp#15, docs/modules/async.md), not a defect of this awaitable, so the case skips there
+    // exactly as Task_test.cpp's deep-chain case does. The case below keeps the loop itself
+    // covered on those builds, at a depth every stack holds.
+#if defined(__EMSCRIPTEN__) && !defined(__wasm_tail_call__)
+    SKIP("WebAssembly without -mtail-call has no tail call for symmetric transfer (core-cpp#15)");
+#elif defined(__GNUC__) && !defined(__clang__) && !defined(CORE_ASYNC_SYMMETRIC_TRANSFER_IS_TAIL_CALL)
+    // Measured with GCC 14.2 on aarch64 Linux at -O0: 64 bytes of stack per iteration, so the
+    // 200000 iterations need 12.8 MB and overflow the default 8 MiB stack (they pass with 13 MiB).
+    SKIP("this GCC build does not optimise sibling calls, so symmetric transfer is not a tail call "
+         "(core-cpp#15)");
+#endif
     auto owner = ScriptedOwner {};
     owner.inlineValue = 1;
     constexpr auto Iterations = 200000;
     CHECK(syncRun(awaitInlineMany(&owner, Iterations)) == static_cast<std::size_t>(Iterations));
+}
+
+TEST_CASE("A loop of inline completions resolves every await", "[net][ioawaitable]")
+{
+    // The loop above at a depth that fits any stack whether or not the transfer is a tail call, so
+    // the builds that skip it still check that each inline completion hands back its own value and
+    // that the loop resumes after each one.
+    auto owner = ScriptedOwner {};
+    owner.inlineValue = 3;
+    constexpr auto Iterations = 1000;
+    CHECK(syncRun(awaitInlineMany(&owner, Iterations))
+          == static_cast<std::size_t>(Iterations) * owner.inlineValue);
 }
 
 TEST_CASE("A cancel from the flow's own token throws", "[net][ioawaitable][cancel]")

@@ -22,6 +22,11 @@
 # target over a DOWNLOAD_ONLY source tree. It is called with the dependency's name
 # and sees <name>_SOURCE_DIR.
 #
+# libsystemd (CORE_CPP_WITH_SYSTEMD) takes no row: it is found with pkg-config in
+# src/core/platform/CMakeLists.txt and linked by value, because a PkgConfig::libsystemd imported
+# target would be classified by CoreCppInstall.cmake but never re-created by the installed package
+# config, which would break a consumer's link.
+#
 # The table is the whole list: adding a dependency takes an option, a row here and a
 # CHANGELOG entry. Rows are added by the task that first needs them, so a configure
 # never fetches what nothing links.

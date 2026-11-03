@@ -401,6 +401,9 @@ core_cpp_add_test(net
         windows/SocketErrors_test.cpp
         windows/UnixListener_test.cpp
     LABELS loopback
+    # IoAwaitable_test.cpp's loop of inline completions skips where symmetric transfer is not a
+    # tail call (cmake/CoreCppToolchain.cmake, core-cpp#15).
+    DEFINITIONS ${CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS}
     # A reactor defect does not fail a case here, it HANGS it: a lost readiness wake-up parks a
     # flow with nothing left to resume it. Each such case bounds its own wait and says what it
     # waited for; this is the backstop for one that forgets, and reports in two minutes rather

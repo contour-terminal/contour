@@ -482,7 +482,7 @@ TEST_CASE("Deep co_await chains keep the stack bounded (symmetric transfer)", "[
     // and passes at -O2 and -O3. GCC makes the transfer a tail call only when it optimises sibling
     // calls, and it exposes no macro for the level -- __OPTIMIZE__ is 1 at -Og and -O1 too, so
     // keying on it left this case running there, where it crashes the process and takes every
-    // other case in the binary with it. Whoever builds decides: src/core/async/CMakeLists.txt
+    // other case in the binary with it. Whoever builds decides: cmake/CoreCppToolchain.cmake
     // reads the level off the build's own flags and defines the macro below only at -O2 or better,
     // so a build outside core-cpp's presets -- a distro package, a bisect, -Og for a debugger --
     // skips this case instead of losing the binary (core-cpp#15).

@@ -85,39 +85,12 @@ if(CORE_CPP_USE_THREADS)
     list(APPEND _coreCppAsyncStopTokenTests ThreadPoolExecutor_test.cpp)
 endif()
 
-# Whether this build's GCC makes the symmetric transfer of a deep co_await chain a tail call. It
-# does so only when it optimises sibling calls, from -O2 up, and it defines no macro for the level:
-# __OPTIMIZE__ is 1 at -Og and -O1 too, where the 100000-frame chain of Task_test.cpp's deep-chain
-# case overflows the stack and takes every other case in the binary with it. So the build says, and
-# the case skips wherever the answer is not yes -- including every build outside core-cpp's presets
-# (core-cpp#15). Clang and MSVC make the transfer a tail call at every level and are not asked.
-set(_coreCppAsyncDefinitions "")
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(_coreCppAsyncOptimisation "${CMAKE_CXX_FLAGS}")
-    if(CMAKE_BUILD_TYPE)
-        string(TOUPPER "${CMAKE_BUILD_TYPE}" _coreCppAsyncConfiguration)
-        string(APPEND _coreCppAsyncOptimisation " ${CMAKE_CXX_FLAGS_${_coreCppAsyncConfiguration}}")
-    endif()
-    # The last -O on the command line is the one that counts, as it is for the compiler; GCC's
-    # default, where there is none at all, is -O0.
-    set(_coreCppAsyncLevel "-O0")
-    string(REGEX MATCHALL "(^| )-O[0-9A-Za-z]*" _coreCppAsyncLevels "${_coreCppAsyncOptimisation}")
-    if(_coreCppAsyncLevels)
-        list(POP_BACK _coreCppAsyncLevels _coreCppAsyncLevel)
-        string(STRIP "${_coreCppAsyncLevel}" _coreCppAsyncLevel)
-    endif()
-    set(_coreCppAsyncTailCall "no, so the deep-chain case is skipped")
-    if(_coreCppAsyncLevel MATCHES "^-O([23]|fast)$")
-        list(APPEND _coreCppAsyncDefinitions CORE_ASYNC_SYMMETRIC_TRANSFER_IS_TAIL_CALL=1)
-        set(_coreCppAsyncTailCall "yes")
-    endif()
-    message(STATUS "[core-cpp] async: GCC at ${_coreCppAsyncLevel}, symmetric transfer tail-calls: "
-                   "${_coreCppAsyncTailCall}")
-endif()
-
+# CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS says whether this build's GCC makes symmetric transfer a
+# tail call, so Task_test.cpp's deep-chain case can skip where it does not (cmake/CoreCppToolchain.cmake,
+# core-cpp#15).
 core_cpp_add_test(async
     SOURCES ${_coreCppAsyncStopTokenTests}
-    DEFINITIONS ${_coreCppAsyncDefinitions})
+    DEFINITIONS ${CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS})
 
 # The same tests over the StopToken fallback, on every platform, whether or not the standard
 # library has std::stop_token. A binary of their own: CORE_ASYNC_FORCE_STOP_TOKEN_FALLBACK changes
@@ -125,7 +98,7 @@ core_cpp_add_test(async
 # inline function that names a StopToken two definitions.
 core_cpp_add_test(async NAME async-fallback
     SOURCES ${_coreCppAsyncStopTokenTests}
-    DEFINITIONS CORE_ASYNC_FORCE_STOP_TOKEN_FALLBACK ${_coreCppAsyncDefinitions})
+    DEFINITIONS CORE_ASYNC_FORCE_STOP_TOKEN_FALLBACK ${CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS})
 
 # What a strand does when an allocation it needs fails: a binary of its own because it replaces the
 # global allocation functions, which would reach every case linked beside it. Not under a sanitizer,
