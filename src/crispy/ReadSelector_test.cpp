@@ -4,13 +4,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifndef _WIN32
+    #include <algorithm>
     #include <array>
     #include <atomic>
     #include <chrono>
+    #include <iterator>
+    #include <memory>
     #include <ranges>
     #include <thread>
     #include <tuple>
+    #include <vector>
 
+    #include <fcntl.h>
     #include <unistd.h>
 
 using crispy::ReadSelector;
@@ -218,6 +223,45 @@ TEST_CASE("PosixReadSelector.concurrent_cancel_during_wait_is_race_free")
         REQUIRE(selector.isWanted(b.reader));
         REQUIRE_FALSE(selector.isWanted(a.reader));
     }
+}
+
+namespace
+{
+
+/// @return Every descriptor below 1024 this process has open.
+[[nodiscard]] std::vector<int> openDescriptors()
+{
+    auto open = std::vector<int> {};
+    for (auto const fd: std::views::iota(0, 1024))
+        if (::fcntl(fd, F_GETFD) >= 0)
+            open.push_back(fd);
+    return open;
+}
+
+/// Checks that every descriptor @p make opens, kept open while it lives, is close-on-exec and non-blocking.
+template <typename Make>
+void checkOpensOnlyCloseOnExecDescriptors(Make make)
+{
+    auto const before = openDescriptors();
+    auto const selector = make();
+    auto opened = std::vector<int> {};
+    std::ranges::set_difference(openDescriptors(), before, std::back_inserter(opened));
+    REQUIRE_FALSE(opened.empty());
+    for (auto const fd: opened)
+    {
+        INFO("descriptor " << fd);
+        CHECK((::fcntl(fd, F_GETFD) & FD_CLOEXEC) != 0);
+        CHECK((::fcntl(fd, F_GETFL) & O_NONBLOCK) != 0);
+    }
+}
+
+} // namespace
+
+TEST_CASE("PosixReadSelector.break_pipe_is_close_on_exec")
+{
+    // A daemon's live upgrade execs itself: a descriptor that is not close-on-exec leaks into the new image,
+    // two per session per upgrade.
+    checkOpensOnlyCloseOnExecDescriptors([] { return std::make_unique<crispy::PosixReadSelector>(); });
 }
 
 #endif // !_WIN32
