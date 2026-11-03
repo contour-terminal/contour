@@ -230,6 +230,34 @@ TEST_CASE("Parser.PM")
     CHECK(listener.text == "ABCDEF");
 }
 
+namespace
+{
+/// Records the character REP would repeat whenever a CSI is dispatched.
+class RecordingPrecedingCharacterEvents final: public vtparser::NullParserEvents
+{
+  public:
+    vtparser::Parser<vtparser::ParserEvents>* parser = nullptr;
+    std::u32string preceding;
+
+    size_t print(std::string_view /*text*/, size_t /*cellCount*/) override { return 80; }
+    void dispatchCSI(char /*function*/) override { preceding += parser->precedingGraphicCharacter(); }
+};
+} // namespace
+
+TEST_CASE("Parser.precedingGraphicCharacter is the last character printed in bulk", "[Parser]")
+{
+    // The bulk scanner stops in front of the CSI that asks: it must not have forgotten the character there.
+    auto const [text, expected] = GENERATE(std::pair { "a\033[b"sv, U"a"sv },
+                                           std::pair { "x\xF0\x9F\x98\x80\033[b"sv, U"\U0001F600"sv },
+                                           std::pair { "\xC3\xA9\xE2\x9C\x85\033[b"sv, U"✅"sv },
+                                           std::pair { "ab\xCC\x81\033[b"sv, U"́"sv });
+    RecordingPrecedingCharacterEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    listener.parser = &p;
+    p.parseFragment(text);
+    CHECK(listener.preceding == expected);
+}
+
 TEST_CASE("Parser.DCS_Ignore prints none of its payload", "[Parser]")
 {
     // A ':' among a DCS's parameters makes it one to ignore: everything up to its ST is dropped, UTF-8

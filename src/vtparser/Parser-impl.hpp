@@ -699,6 +699,26 @@ auto Parser<EventListener, TraceStateChanges>::fallBackToStateMachineAfterScan()
     return 0;
 }
 
+/// The last character of a run of text the bulk scanner hands on, decoded as the state machine decodes
+/// text: a byte that is not UTF-8 -- which the scan hands on inside its run -- as the replacement character.
+/// @param text A non-empty run that ends at a character boundary.
+/// @return Its last character.
+[[nodiscard]] inline char32_t lastCharacterOf(std::string_view text) noexcept
+{
+    // A character takes at most four bytes; it starts at the last byte that is not a continuation byte.
+    constexpr auto MaxCharacterBytes = size_t { 4 };
+    auto start = text.size() - 1;
+    while (start > 0 && text.size() - start < MaxCharacterBytes
+           && (static_cast<uint8_t>(text[start]) & 0xC0) == 0x80)
+        --start;
+    auto decoder = unicode::utf8_decoder_state {};
+    auto last = ReplacementCharacter;
+    for (auto const byte: text.substr(start))
+        decodeUtf8Byte(
+            decoder, static_cast<uint8_t>(byte), [&last](char32_t codepoint) { last = codepoint; });
+    return isDecoderIdle(decoder) ? last : ReplacementCharacter;
+}
+
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> size_t
@@ -771,11 +791,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     {
         _eventListener.print(text, cellCount);
 
-        // Update lastCodepointHint for REP (CSI Ps b) support.
-        // scan_text's ASCII fast-path (scan_for_text_ascii) doesn't update this field.
-        // The non-ASCII path (scan_for_text_nonascii) already sets it correctly.
-        if (auto const lastByte = static_cast<uint8_t>(text.back()); lastByte < 0x80)
+        // REP (CSI Ps b) repeats the character printed last, as the state machine records it. The scan
+        // cannot be asked: it forgets the character where it stops in front of a control -- in front of
+        // the very REP that wants it. So it is decoded again, as the state machine would decode it.
+        if (auto const lastByte = static_cast<uint8_t>(text.back()); lastByte < 0x80) [[likely]]
             _scanState.lastCodepointHint = static_cast<char32_t>(lastByte);
+        else
+            _scanState.lastCodepointHint = lastCharacterOf(text);
     }
 
     if (isDecoderIdle(_scanState.utf8))
