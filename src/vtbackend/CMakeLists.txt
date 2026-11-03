@@ -15,6 +15,7 @@ set(vtbackend_HEADERS
     screen/AsciiText.hpp
     vt/Capabilities.hpp
     testing/CatchStringMakers.hpp
+    testing/CounterColumns.hpp
     testing/Deflate.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
@@ -439,6 +440,7 @@ if(LIBTERMINAL_TESTING)
         graphics/regis/ReGISTextRasterizer_test.cpp
         graphics/regis/ReGISParser_test.cpp
         input/vi/ViCommands_test.cpp
+        testing/CounterColumns_test.cpp
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
@@ -498,7 +500,7 @@ if(LIBTERMINAL_TESTING)
         add_test(NAME bench_headless_throughput_links_smoke
                  COMMAND bench-headless throughput size 16 runs 1 kinds ascii screens primary pty refresh-hz 60 links)
         set_tests_properties(bench_headless_throughput_links_smoke PROPERTIES PASS_REGULAR_EXPRESSION
-                             "link detection: on\r?\nascii +primary +[0-9.]+ MiB/s +[0-9]+ bytes/read( +[0-9.]+% arrived)? +[0-9]+ match jobs in the run, +[0-9]+ after it, +[0-9]+ links(  \\(under [0-9]+ ms, detection's longest wait: it could not scan inside the measurement\\))?\r?\n")
+                             "link detection: on\r?\nCPU counters: not measured through a PTY\r?\nascii +primary +[0-9.]+ MiB/s +[0-9]+ bytes/read( +[0-9.]+% arrived)? +[0-9]+ match jobs in the run, +[0-9]+ after it, +[0-9]+ links(  \\(under [0-9]+ ms, detection's longest wait: it could not scan inside the measurement\\))?\r?\n")
         add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
         set(BENCH_HEADLESS_SMOKE_TESTS
             bench_headless_throughput_smoke
