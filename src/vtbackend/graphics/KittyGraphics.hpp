@@ -167,8 +167,31 @@ struct Command
     /// `Y=`: the RGBA background a newly created frame is filled with.
     uint32_t frameBackground = 0;
 
-    /// `X=`: how the transmitted rectangle meets what is already in the frame.
+    /// How the transmitted rectangle meets what is already in the frame: `X=` under `a=f`, `C=` under
+    /// `a=c` (1 means overwrite).
     CompositionMode compositionMode = CompositionMode::AlphaBlend;
+
+    /// `X=` as it came off the wire. Its meaning depends on the action, which may follow it in the
+    /// control data, so it is interpreted once parsing is done: a composition mode under `a=f`, a
+    /// source x origin under `a=c`. Consumers read the decoded fields, never this one.
+    uint32_t rawX = 0;
+
+    /// Frame composition only (`a=c`), where the protocol reuses keys that mean cell geometry or frame
+    /// transmission elsewhere. Frame numbers are 1-based; zero means "unset".
+    /// `r=`: the frame the rectangle is read from.
+    uint32_t composeSourceFrame = 0;
+
+    /// `c=`: the frame the rectangle is composed onto.
+    uint32_t composeDestinationFrame = 0;
+
+    /// `X=`, `Y=`: the top-left corner, in pixels, of the rectangle in the source frame. Its size is
+    /// `sourceWidth` x `sourceHeight` (`w=`, `h=`).
+    uint32_t composeSourceX = 0;
+    uint32_t composeSourceY = 0;
+
+    /// `x=`, `y=`: the top-left corner, in pixels, where the rectangle lands in the destination frame.
+    uint32_t composeDestinationX = 0;
+    uint32_t composeDestinationY = 0;
 
     /// The payload, still base64-encoded exactly as it arrived.
     std::string payload;

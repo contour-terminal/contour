@@ -5,6 +5,7 @@
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/RowMove.hpp>
+#include <vtbackend/graphics/KittyInflate.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/graphics/regis/ReGISContext.hpp>
@@ -55,7 +56,9 @@
 #include <array>
 #include <cassert>
 #include <charconv>
+#include <cstdint>
 #include <cstring>
+#include <expected>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -64,6 +67,7 @@
 #include <span>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -364,6 +368,55 @@ namespace // {{{ helper
         };
     }
 
+    /// The byte size of a raw @p width x @p height x @p bytesPerPixel buffer, if it is sane to hold.
+    ///
+    /// Dimensions come straight from the escape sequence, so the product can overflow `size_t`, and a
+    /// legitimate-looking one can still name more memory than the terminal is willing to keep.
+    ///
+    /// @param quota Largest size to accept.
+    /// @return The size, or nothing when the product overflows or exceeds @p quota.
+    [[nodiscard]] std::optional<size_t> boundedRawBytes(size_t width,
+                                                        size_t height,
+                                                        size_t bytesPerPixel,
+                                                        size_t quota) noexcept
+    {
+        constexpr auto Max = std::numeric_limits<size_t>::max();
+        if (height != 0 && width > Max / height)
+            return std::nullopt;
+        auto const area = width * height;
+        if (bytesPerPixel != 0 && area > Max / bytesPerPixel)
+            return std::nullopt;
+        auto const bytes = area * bytesPerPixel;
+        if (bytes > quota)
+            return std::nullopt;
+        return bytes;
+    }
+
+    /// Base64-decodes a kitty graphics payload and, for `o=z`, inflates it.
+    ///
+    /// @param command The command carrying the payload.
+    /// @param maxInflatedBytes Largest inflated size to accept; a compressed payload claiming more is
+    ///        refused before it is materialised.
+    /// @param tooLargeReply Reply for a payload that inflates past @p maxInflatedBytes.
+    /// @return The pixel (or PNG file) bytes, or the reply to send instead.
+    [[nodiscard]] std::expected<Image::Data, std::string_view> decodeKittyPayload(
+        kitty_graphics::Command const& command, size_t maxInflatedBytes, std::string_view tooLargeReply)
+    {
+        // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
+        // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and
+        // the blend arithmetic into nonsense. Straight into the vector, so the payload is held once.
+        auto bytes = Image::Data(core::base64::decodeLength(command.payload));
+        bytes.resize(core::base64::decode(command.payload, bytes.data()));
+        if (command.compression == kitty_graphics::Compression::None)
+            return bytes;
+
+        return kitty_graphics::inflateZlib(std::span<uint8_t const> { bytes }, maxInflatedBytes)
+            .transform_error([&](kitty_graphics::InflateError error) -> std::string_view {
+                return error == kitty_graphics::InflateError::TooLarge ? tooLargeReply
+                                                                       : "EINVAL:corrupt compressed payload";
+            });
+    }
+
 } // namespace
 
 // }}}
@@ -495,6 +548,10 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
     updateCursorIterator();
 
     // TODO: find out what to do with DECOM mode. Reset it to?
+
+    // Rows the resize brought back from the history hold the frame they left with.
+    if (sizeChanged)
+        resyncKittyAnimations();
 
     verifyState();
 }
@@ -5740,6 +5797,10 @@ void Screen::processAPC(std::string_view body)
         return;
 
     processKittyGraphics(body.substr(1));
+
+    // Once here rather than at each path that starts, stops, re-arms or frees an animation: there are many,
+    // and the terminal tells the display only when the deadline actually moved.
+    publishKittyAnimationDue();
 }
 
 void Screen::replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status)
@@ -5775,17 +5836,19 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
         // terminal at any file the user can read. Not implemented deliberately.
         return "ENOTSUP:only direct transmission is supported";
 
-    if (command.compression != Compression::None)
-        return "ENOTSUP:compressed payloads are not supported";
-
     return std::nullopt;
 }
 
 void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto const& selects,
                                   std::invocable<CellProxy&, ImageFragment const&> auto const& update)
 {
+    ++_kittyFragmentWalks;
     for (auto const line: std::views::iota(0, *pageSize().lines))
     {
+        // A blank line holds no cells, let alone a fragment, and reading a cell of one would
+        // materialise it: every animation frame would inflate every empty line of the page.
+        if (std::as_const(_grid).lineAt(LineOffset(line)).isBlank())
+            continue;
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
             auto cell = at(LineOffset(line), ColumnOffset(column));
@@ -5856,7 +5919,7 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
             // than the base -- the current one, since every advance replaces the frame before it --
             // so put the base back under it before the frames go.
             if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
-                showKittyFrame(animation->second.currentImage(), stored->second);
+                showKittyFrame(command.imageId, stored->second, nullptr);
             _kittyAnimations.erase(animation);
             return {};
         }
@@ -5873,13 +5936,8 @@ void Screen::removeKittyPlacementsOf(uint32_t imageId)
 {
     // Every frame counts as "this image": after an advance the cells hold a frame Image, and matching
     // only the base would skip them.
-    auto wanted = std::unordered_set<Image const*> {};
-    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
-        wanted.insert(image->second.get());
-    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
-        for (auto const& frame: animation->second.frames)
-            if (frame.image)
-                wanted.insert(frame.image.get());
+    auto wanted = KittyFrameSwaps {};
+    addKittyFrameSwaps(wanted, imageId, nullptr);
 
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
@@ -6000,6 +6058,10 @@ void Screen::processKittyGraphics(std::string_view body)
             auto const current =
                 animation != _kittyAnimations.end() ? animation->second.currentImage() : nullptr;
             renderKittyImage(command, current ? current : it->second);
+            // A playing animation that held for want of a placement has one again. Only here: a=T replaces
+            // the image under its id, and its animation with it.
+            if (animation != _kittyAnimations.end() && animation->second.isHeld())
+                animation->second.arm(_terminal->steadyTimeNow());
             replyKittyGraphics(command, "OK");
             return;
         }
@@ -6007,11 +6069,7 @@ void Screen::processKittyGraphics(std::string_view body)
         case Action::TransmitAndDisplay: break;
         case Action::Frame: transmitKittyFrame(command); return;
         case Action::Animate: controlKittyAnimation(command); return;
-        case Action::Compose:
-            // Composing one frame onto another is a separate operation from building a frame, and
-            // nothing observed in the wild uses it. Say so rather than silently accepting it.
-            replyKittyGraphics(command, "ENOTSUP:frame composition not supported");
-            return;
+        case Action::Compose: composeKittyFrames(command); return;
     }
 
     if (auto const rejection = validateKittyTransmission(command))
@@ -6020,24 +6078,48 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto const decoded = core::base64::decode(command.payload);
-    auto pixmap = Image::Data(decoded.begin(), decoded.end());
-
     auto const format = toImageFormat(command.transmissionFormat());
     auto const pixelSize =
         ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
 
-    if (format != ImageFormat::PNG)
+    // The renderer reads width*height*bytesPerPixel from a raw buffer, so a payload that does not
+    // match the declared size is a read past the end waiting to happen. That size is also the
+    // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
+    // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
+    // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
+    // though, so they bound an inflate only when they are sane: an overflowing or over-quota size is
+    // refused before a single byte is inflated.
+    auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
+                          * bytesPerPixel(command.transmissionFormat());
+    if (command.compression != Compression::None && format != ImageFormat::PNG
+        && !boundedRawBytes(command.pixelWidth,
+                            command.pixelHeight,
+                            bytesPerPixel(command.transmissionFormat()),
+                            _settings->kittyImageStorageQuota))
     {
-        // The renderer reads width*height*bytesPerPixel from this buffer, so a payload that does not
-        // match the declared size is a read past the end waiting to happen.
-        auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
-                              * bytesPerPixel(command.transmissionFormat());
-        if (pixmap.size() != expected)
-        {
-            replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
-            return;
-        }
+        replyKittyGraphics(command, "EINVAL:image dimensions too large");
+        return;
+    }
+    // Everything stored except this id's image and frames, which a re-transmission replaces.
+    auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
+    auto const quota = _settings->kittyImageStorageQuota;
+    auto payload =
+        format == ImageFormat::PNG
+            ? decodeKittyPayload(command,
+                                 storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
+                                 "ENOSPC:image storage quota exceeded")
+            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
+    if (!payload)
+    {
+        replyKittyGraphics(command, payload.error());
+        return;
+    }
+    auto pixmap = std::move(*payload);
+
+    if (format != ImageFormat::PNG && pixmap.size() != expected)
+    {
+        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+        return;
     }
 
     auto image = _terminal->imagePool().create(format, pixelSize, std::move(pixmap));
@@ -6058,8 +6140,7 @@ void Screen::processKittyGraphics(std::string_view body)
         // were composited from that image and go with it, so charging the new one for bytes that are
         // about to be freed refuses a re-transmission that in fact fits. They are dropped only once
         // the replacement is accepted -- a refused re-transmission leaves the image as it was.
-        if (storedKittyBytes() - storedKittyBytesOf(command.imageId) + image->data().size()
-            > _settings->kittyImageStorageQuota)
+        if (storedByOthers + image->data().size() > quota)
         {
             replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
             return;
@@ -6102,7 +6183,7 @@ size_t Screen::storedKittyBytesOf(uint32_t imageId) const
     return total;
 }
 
-Screen::KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
+KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
 {
     // Every transmitted image already has a root frame in this protocol -- frame 1 IS the image -- so
     // an animation exists as soon as the image does. Materialising it here rather than at the first
@@ -6125,6 +6206,33 @@ uint32_t Screen::kittyFrameCount(uint32_t imageId) const
     return _kittyImages.contains(imageId) ? 1 : 0;
 }
 
+KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
+                                        uint32_t target,
+                                        std::shared_ptr<Image const> frame,
+                                        std::shared_ptr<Image const> const& previous)
+{
+    auto* animation = kittyAnimationFor(imageId);
+    Require(animation != nullptr); // The caller found the image.
+    if (target > animation->frames.size())
+        animation->frames.push_back(
+            { .image = std::move(frame), .gapMilliseconds = kitty_graphics::DefaultFrameGapMilliseconds });
+    else
+        animation->frames[target - 1].image = std::move(frame);
+
+    // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
+    // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
+    // quota for as long as the image exists.
+    if (target == 1)
+        _kittyImages[imageId] = animation->frames[0].image;
+
+    // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
+    // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
+    // while every later delta is silently accepted.
+    if (target == animation->currentFrame)
+        showKittyFrame(imageId, animation->frames[target - 1].image, previous);
+    return *animation;
+}
+
 std::shared_ptr<Image const> Screen::kittyFrameImage(uint32_t imageId, uint32_t number) const
 {
     if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
@@ -6135,8 +6243,35 @@ std::shared_ptr<Image const> Screen::kittyFrameImage(uint32_t imageId, uint32_t 
     return nullptr;
 }
 
-void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
-                            std::shared_ptr<Image const> const& next)
+void Screen::addKittyFrameSwaps(KittyFrameSwaps& swaps,
+                                uint32_t imageId,
+                                std::shared_ptr<Image const> const& next) const
+{
+    auto const add = [&](std::shared_ptr<Image const> const& image) {
+        if (image)
+            swaps.insert_or_assign(image.get(), KittyFrameSwap { .next = next, .imageId = imageId });
+    };
+    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
+        add(image->second);
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        for (auto const& frame: animation->second.frames)
+            add(frame.image);
+}
+
+auto Screen::showKittyFrame(uint32_t imageId,
+                            std::shared_ptr<Image const> const& next,
+                            std::shared_ptr<Image const> const& superseded) -> Placed
+{
+    if (!next)
+        return Placed::No;
+    auto swaps = KittyFrameSwaps {};
+    addKittyFrameSwaps(swaps, imageId, next);
+    if (superseded)
+        swaps.insert_or_assign(superseded.get(), KittyFrameSwap { .next = next, .imageId = imageId });
+    return showKittyFrames(swaps).empty() ? Placed::No : Placed::Yes;
+}
+
+std::unordered_set<uint32_t> Screen::showKittyFrames(KittyFrameSwaps const& swaps)
 {
     // Deliberately NOT driven from a recorded placement. A placement is the fragments in the cells,
     // and the cells move: they scroll in either direction, are inserted and deleted, are erased, and
@@ -6144,8 +6279,9 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     // had to remember to keep the record in step, and the ones that did not produced frames stamped
     // over live text. Finding the fragments where they actually are cannot drift: if the image was
     // scrolled away, erased or overwritten, there is nothing to find and nothing happens.
-    if (previous == next || !previous || !next)
-        return;
+    auto placed = std::unordered_set<uint32_t> {};
+    if (swaps.empty())
+        return placed;
 
     // One replacement per placement, not per image: the same image placed twice at different sizes is
     // two rasters, and sharing one would hand the second placement the first one's geometry. Keyed on
@@ -6153,8 +6289,17 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     auto replacements =
         std::unordered_map<std::shared_ptr<RasterizedImage const>, std::shared_ptr<RasterizedImage>> {};
     updateKittyFragments(
-        [&](ImageFragment const& fragment) { return fragment.rasterizedImage().imagePointer() == previous; },
+        [&](ImageFragment const& fragment) {
+            auto const& shown = fragment.rasterizedImage().imagePointer();
+            auto const swap = swaps.find(shown.get());
+            if (swap == swaps.end())
+                return false;
+            // On the page whichever frame it shows; replaced only when that is not already the one to show.
+            placed.insert(swap->second.imageId);
+            return shown != swap->second.next;
+        },
         [&](CellProxy& cell, ImageFragment const& fragment) {
+            auto const& next = swaps.at(fragment.rasterizedImage().imagePointer().get()).next;
             // Built from the fragment already on screen, so the new frame inherits the geometry,
             // alignment and gap colour the placement was made with -- rather than whatever the cursor
             // happens to carry now, which would repaint the letterbox in the current SGR background
@@ -6173,6 +6318,83 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
                                                                 previousRaster.imageSubSize());
             cell.setImageFragment(replacement, fragment.offset());
         });
+    return placed;
+}
+
+KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_point now)
+{
+    // Every due animation advances first, and then the page is walked once for all of them: a walk per
+    // animation made a page of tiny looping images cost cells times images on every frame, under the lock.
+    auto advanced = std::vector<uint32_t> {};
+    auto swaps = KittyFrameSwaps {};
+    for (auto& [imageId, animation]: _kittyAnimations)
+    {
+        if (animation.advance(now) == KittyAnimation::FrameChanged::No)
+            continue;
+        if (auto const current = animation.currentImage())
+        {
+            advanced.push_back(imageId);
+            addKittyFrameSwaps(swaps, imageId, current);
+        }
+    }
+    if (advanced.empty())
+        return { .shown = KittyFrameShown::No, .nextDue = nextKittyFrameDue() };
+
+    auto const placed = showKittyFrames(swaps);
+    auto shown = KittyFrameShown::No;
+    for (auto const imageId: advanced)
+    {
+        // The frame changed and nothing on the page shows this image -- scrolled off, erased, overwritten.
+        // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put, a
+        // resize that brings it back).
+        if (placed.contains(imageId))
+            shown = KittyFrameShown::Yes;
+        else
+            _kittyAnimations.at(imageId).hold();
+    }
+    return { .shown = shown, .nextDue = nextKittyFrameDue() };
+}
+
+void Screen::resyncKittyAnimations()
+{
+    if (_kittyAnimations.empty())
+        return;
+    auto swaps = KittyFrameSwaps {};
+    for (auto const& [imageId, animation]: _kittyAnimations)
+        if (auto const current = animation.currentImage())
+            addKittyFrameSwaps(swaps, imageId, current);
+    auto const placed = showKittyFrames(swaps);
+
+    auto const now = _terminal->steadyTimeNow();
+    for (auto& [imageId, animation]: _kittyAnimations)
+        if (animation.isPlaying() && animation.isHeld() && placed.contains(imageId))
+            animation.arm(now);
+    publishKittyAnimationDue();
+}
+
+std::optional<std::chrono::steady_clock::time_point> Screen::nextKittyFrameDue() const noexcept
+{
+    auto earliest = KittyAnimation::Held;
+    for (auto const& animation: _kittyAnimations | std::views::values)
+        earliest = std::min(earliest, animation.nextFrameDue);
+    return toDeadline(earliest);
+}
+
+void Screen::stopKittyAnimations() noexcept
+{
+    for (auto& animation: _kittyAnimations | std::views::values)
+    {
+        animation.state = kitty_graphics::AnimationState::Stop;
+        animation.hold();
+    }
+}
+
+void Screen::publishKittyAnimationDue()
+{
+    // Each page keeps its own animations; only the one on display may wake the display. The terminal
+    // republishes when another page comes on display (Terminal::showPage).
+    if (&_terminal->displayedPage() == this)
+        _terminal->publishKittyAnimationDeadline(nextKittyFrameDue());
 }
 
 namespace
@@ -6241,20 +6463,13 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     using namespace kitty_graphics;
 
     // A frame carries a payload exactly as a transmission does, so it owes the same honest answers
-    // about how that payload arrives: without this, `a=f,o=z` is refused for the size its compressed
-    // payload happens to have rather than for being compressed, and one that happened to match the
-    // expected byte count would be composited as raw pixels.
+    // about how that payload arrives: a medium we do not read is refused as such, and a compressed
+    // payload is inflated before its size is checked, never composited as if it were raw pixels.
     if (command.medium != Medium::Direct)
     {
         replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
         return;
     }
-    if (command.compression != Compression::None)
-    {
-        replyKittyGraphics(command, "ENOTSUP:compressed payloads are not supported");
-        return;
-    }
-
     auto const stored = _kittyImages.find(command.imageId);
     if (stored == _kittyImages.end())
     {
@@ -6272,7 +6487,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
 
     // `f=` is not merely unused here, it is a claim about the payload's layout. Silently reading
     // 3-byte pixels as 4-byte ones (or a PNG file's header as pixels) is exactly the reinterpretation
-    // the medium and compression checks above exist to prevent.
+    // the medium check above and the inflate below exist to prevent.
     if (command.format && toImageFormat(*command.format) != base.format())
     {
         replyKittyGraphics(command, "EINVAL:frame format does not match the image");
@@ -6296,12 +6511,22 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
 
-    // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
-    // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and the
-    // blend arithmetic below into nonsense.
-    auto const decoded = core::base64::decode(command.payload);
-    auto const pixmap = Image::Data { decoded.begin(), decoded.end() };
-    if (pixmap.size() != rectWidth * rectHeight * bpp)
+    auto const bounded = boundedRawBytes(rectWidth, rectHeight, bpp, _settings->kittyImageStorageQuota);
+    if (!bounded)
+    {
+        replyKittyGraphics(command, "EINVAL:image dimensions too large");
+        return;
+    }
+    auto const expectedBytes = *bounded;
+    auto const payload =
+        decodeKittyPayload(command, expectedBytes, "EINVAL:payload size does not match dimensions");
+    if (!payload)
+    {
+        replyKittyGraphics(command, payload.error());
+        return;
+    }
+    auto const& pixmap = *payload;
+    if (pixmap.size() != expectedBytes)
     {
         replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
         return;
@@ -6386,29 +6611,108 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
 
-    auto* animation = kittyAnimationFor(command.imageId);
-    Require(animation != nullptr); // The image was found above.
-    if (target > animation->frames.size())
-        animation->frames.push_back(
-            { .image = std::move(frame), .gapMilliseconds = DefaultFrameGapMilliseconds });
-    else
-        animation->frames[target - 1].image = std::move(frame);
-
-    // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
-    // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
-    // quota for as long as the image exists.
-    if (target == 1)
-        _kittyImages[command.imageId] = animation->frames[0].image;
-
+    auto& animation = storeKittyFrame(command.imageId, target, std::move(frame), superseded);
     if (command.frameGapMilliseconds != 0)
-        animation->frames[target - 1].gapMilliseconds = command.frameGapMilliseconds;
+        animation.frames[target - 1].gapMilliseconds = command.frameGapMilliseconds;
 
-    // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
-    // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
-    // while every later delta is silently accepted.
-    if (target == animation->currentFrame)
-        showKittyFrame(superseded, animation->frames[target - 1].image);
+    // A playing animation that held for want of somewhere to go -- `s=2` out of frames, `s=3` with only one
+    // frame with a gap -- goes on now that this frame gives it one. At once: the frame it held on has been
+    // shown since the hold began.
+    if (animation.isPlaying() && animation.isHeld() && animation.successor())
+        animation.nextFrameDue = _terminal->steadyTimeNow();
 
+    replyKittyGraphics(command, "OK");
+}
+
+void Screen::composeKittyFrames(kitty_graphics::Command const& command)
+{
+    using namespace kitty_graphics;
+
+    if (!_kittyImages.contains(command.imageId))
+    {
+        replyKittyGraphics(command, "ENOENT:no such image");
+        return;
+    }
+    // Frame numbers are 1-based, so an absent `r=`/`c=` names no frame.
+    auto const source = kittyFrameImage(command.imageId, command.composeSourceFrame);
+    auto const destination = kittyFrameImage(command.imageId, command.composeDestinationFrame);
+    if (!source || !destination)
+    {
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+
+    auto const bpp = static_cast<size_t>(bytesPerPixel(source->format()));
+    if (bpp == 0)
+    {
+        replyKittyGraphics(command, "ENOTSUP:only raw pixel frames are supported");
+        return;
+    }
+
+    // All frames of an image share its geometry, which the a=f path checks before storing one.
+    auto const imageWidth = static_cast<size_t>(unbox<unsigned>(source->size().width));
+    auto const imageHeight = static_cast<size_t>(unbox<unsigned>(source->size().height));
+    auto const rectWidth = command.sourceWidth != 0 ? static_cast<size_t>(command.sourceWidth) : imageWidth;
+    auto const rectHeight =
+        command.sourceHeight != 0 ? static_cast<size_t>(command.sourceHeight) : imageHeight;
+
+    // Origins and sizes are 32-bit off the wire and summed in size_t, so the sums cannot wrap.
+    auto const sourceX = static_cast<size_t>(command.composeSourceX);
+    auto const sourceY = static_cast<size_t>(command.composeSourceY);
+    auto const destinationX = static_cast<size_t>(command.composeDestinationX);
+    auto const destinationY = static_cast<size_t>(command.composeDestinationY);
+    if (sourceX + rectWidth > imageWidth || sourceY + rectHeight > imageHeight
+        || destinationX + rectWidth > imageWidth || destinationY + rectHeight > imageHeight)
+    {
+        replyKittyGraphics(command, "EINVAL:rectangle does not fit the image");
+        return;
+    }
+    // Within one frame the two rectangles must not share a pixel: the result of blending a region
+    // onto itself depends on the order the pixels are visited in.
+    auto const overlaps = [](size_t a, size_t b, size_t length) {
+        return a < b + length && b < a + length;
+    };
+    if (command.composeSourceFrame == command.composeDestinationFrame
+        && overlaps(sourceX, destinationX, rectWidth) && overlaps(sourceY, destinationY, rectHeight))
+    {
+        replyKittyGraphics(command, "EINVAL:source and destination rectangles overlap");
+        return;
+    }
+    if (source->data().size() != imageWidth * imageHeight * bpp
+        || destination->data().size() != imageWidth * imageHeight * bpp)
+    {
+        replyKittyGraphics(command, "EINVAL:frame does not match the image geometry");
+        return;
+    }
+
+    // The rectangle is lifted out of the source as a tightly packed pixmap, which is the shape
+    // compositeKittyRectangle() takes an a=f payload in.
+    auto pixmap = Image::Data {};
+    pixmap.reserve(rectWidth * rectHeight * bpp);
+    for (auto const row: std::views::iota(size_t { 0 }, rectHeight))
+    {
+        auto const offset = (((sourceY + row) * imageWidth) + sourceX) * bpp;
+        std::ranges::copy(std::views::counted(source->data().begin() + static_cast<ptrdiff_t>(offset),
+                                              static_cast<ptrdiff_t>(rectWidth * bpp)),
+                          std::back_inserter(pixmap));
+    }
+
+    auto data = destination->data();
+    compositeKittyRectangle(data,
+                            pixmap,
+                            KittyRectangle { .imageWidth = imageWidth,
+                                             .x = command.composeDestinationX,
+                                             .y = command.composeDestinationY,
+                                             .width = rectWidth,
+                                             .height = rectHeight,
+                                             .bytesPerPixel = bpp },
+                            command.compositionMode);
+
+    // Frames are immutable and shared, so the destination is replaced rather than edited. Its size
+    // is unchanged, which is why this needs no quota check (unlike a=f, which can grow the total).
+    auto frame = _terminal->imagePool().create(destination->format(), destination->size(), std::move(data));
+
+    storeKittyFrame(command.imageId, command.composeDestinationFrame, std::move(frame), destination);
     replyKittyGraphics(command, "OK");
 }
 
@@ -6439,30 +6743,34 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
     Require(animation != nullptr); // The image was found above.
 
     if (command.loopCount != 0)
+    {
         animation->loopCount = command.loopCount;
+        animation->loopsDone = 0;
+    }
     if (command.targetFrame != 0 && command.frameGapMilliseconds != 0)
         animation->frames[command.targetFrame - 1].gapMilliseconds = command.frameGapMilliseconds;
 
-    // Applied BEFORE the playback answer below: the keys are independent, nothing stops a client
-    // sending `a=a,c=2,s=3`, and refusing the half we cannot do must not discard the half we can.
+    // The keys are independent, and nothing stops a client sending `a=a,c=2,s=3`: the frame is selected
+    // whatever the playback state, playing or stopped.
     if (command.currentFrame != 0)
     {
-        auto const showing = animation->currentImage();
         animation->currentFrame = command.currentFrame;
-        showKittyFrame(showing, animation->currentImage());
+        showKittyFrame(command.imageId, animation->currentImage(), nullptr);
     }
 
-    // Frames advance only when the application says so with `c=`. Nothing here drives them on a
-    // timer, so answering OK to "play" would leave the client believing an animation is running while
-    // the screen holds one frame forever.
-    if (command.animationState == AnimationState::RunAwaitingFrames
-        || command.animationState == AnimationState::Loop)
+    auto const stateChanged =
+        command.animationState != AnimationState::Unset && command.animationState != animation->state;
+    if (stateChanged)
     {
-        replyKittyGraphics(command, "ENOTSUP:self-running animation is not supported");
-        return;
-    }
-    if (command.animationState != AnimationState::Unset)
         animation->state = command.animationState;
+        animation->loopsDone = 0;
+    }
+
+    // Selecting a frame starts its gap afresh, and so does a change of state (s=1 holds). A command that
+    // does neither leaves a running deadline where it was, or it would stretch the frame on screen; only a
+    // playing animation that holds none -- its placement had gone -- is given a fresh one to try.
+    if (command.currentFrame != 0 || stateChanged || animation->isHeld())
+        animation->arm(_terminal->steadyTimeNow());
 
     replyKittyGraphics(command, "OK");
 }

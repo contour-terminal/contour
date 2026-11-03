@@ -72,6 +72,7 @@
 
 #include <gsl/pointers>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bitset>
@@ -79,6 +80,7 @@
 #include <cmath>
 #include <concepts>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <format>
@@ -89,8 +91,10 @@
 #include <optional>
 #include <span>
 #include <stack>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -584,6 +588,17 @@ class Terminal: public IStatusLinePublishTarget
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+        /// When the next kitty animation frame of the page on display is due moved (@see
+        /// Terminal::kittyAnimationDue). Raised under renderBufferUpdated()'s rules, which it forwards to by
+        /// default: a display re-reads nextRender() on it, and a host that renders nothing itself (the
+        /// daemon) can hear this alone.
+        virtual void kittyAnimationDeadlineMoved() { renderBufferUpdated(); }
+        /// tick() advanced a kitty animation frame on the page on display. Raised on the thread that ticks --
+        /// the render thread, the daemon's loop -- with no lock held. Forwards to screenUpdated() by default,
+        /// which is all a host that renders nothing itself (the daemon) needs; a display that draws on its
+        /// own thread only has to schedule a redraw, and need not treat it as output the way screenUpdated()
+        /// is.
+        virtual void kittyFrameAdvanced() { screenUpdated(); }
 
         /// Whether the frame shows a running block's time changed (@see Terminal::hasVisibleRunningStatus):
         /// a time on display goes stale unless a frame is drawn again. Raised by the frame build -- on the
@@ -1513,6 +1528,15 @@ class Terminal: public IStatusLinePublishTarget
         return _clocks.wall.now();
     }
 
+    /// @return The steady clock's present instant, from the clock the terminal was constructed with. Not
+    ///         currentTime(), which only the display's tick() moves and which therefore stands still in a
+    ///         host that does not paint.
+    /// @see TerminalClocks::steady
+    [[nodiscard]] std::chrono::steady_clock::time_point steadyTimeNow() const noexcept
+    {
+        return _clocks.steady.now();
+    }
+
     /// Retrieves reference to the underlying PTY device.
     [[nodiscard]] vtpty::Pty& device() noexcept { return *_pty; }
     [[nodiscard]] vtpty::Pty const& device() const noexcept { return *_pty; }
@@ -2425,13 +2449,28 @@ class Terminal: public IStatusLinePublishTarget
     /// @return The wait, or nullopt when nothing is due.
     std::optional<std::chrono::milliseconds> nextRender() const;
 
-    /// Sets the terminal's clock to @p now, and advances what runs on it between frames: the cursor's blink
-    /// and a momentum glide. The render thread's alone, before and after each frame, and a test's: no other
-    /// thread ticks, so what it advances has one owner. Takes the state lock while a glide is armed, so it is
-    /// never called with that lock held.
+    /// Sets the terminal's clock to @p now, and advances what runs on it between frames: the cursor's blink,
+    /// a momentum glide, and the kitty animations of the page on display (@see kittyAnimationDue). The render
+    /// thread's alone, before and after each frame, the daemon's frame timer's, and a test's: one ticker per
+    /// terminal, so what it advances has one owner. Takes the state lock while a glide is armed or a frame is
+    /// due, so it is never called with that lock held; after a frame that changed what a placement shows it
+    /// raises kittyFrameAdvanced(), outside it.
     /// @param now The time of the frame.
     void tick(std::chrono::steady_clock::time_point now) noexcept;
     void tick(std::chrono::milliseconds delta) { tick(currentTime() + delta); }
+
+    /// When the next frame of a kitty animation on the page on display is due, as the state lock last left
+    /// it. Takes no lock. Unlike nextRender(), which folds it in for the display, this carries nothing else
+    /// (no blink, no status line), so a host that renders nothing itself -- the daemon -- arms its frame
+    /// timer from this alone and stays idle while no animation plays.
+    /// @return The deadline, or nullopt while no animation on display is due to advance.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> kittyAnimationDue() const noexcept;
+
+    /// Publishes the page on display's next kitty animation deadline for kittyAnimationDue() and
+    /// nextRender(), and tells the display when it moved, so an idle one re-reads nextRender(). Under the
+    /// state lock; called by the page whose animations changed, which alone knows the deadline.
+    /// @param due The deadline, or nullopt when no animation on display is due to advance.
+    void publishKittyAnimationDeadline(std::optional<std::chrono::steady_clock::time_point> due);
     // }}}
 
     // {{{ RenderBuffer synchronization API
@@ -3434,6 +3473,9 @@ class Terminal: public IStatusLinePublishTarget
     void screenUpdated();
     /// As screenUpdated(), for a mirror's full replay: the listener hears Events::screenReplayed().
     void screenReplayed();
+    /// As screenUpdated(), for a kitty animation frame tick() advanced: the listener hears
+    /// Events::kittyFrameAdvanced().
+    void kittyFrameAdvanced();
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
@@ -5155,6 +5197,12 @@ class Terminal: public IStatusLinePublishTarget
     /// is. Atomic, for nextRender() to read on the render thread without the state lock, under which a reload
     /// replaces the detector.
     std::atomic<std::chrono::steady_clock::time_point> _linkScanDue =
+        std::chrono::steady_clock::time_point::max();
+
+    /// When the page on display's next kitty animation frame is due; max() while none is. Written under the
+    /// state lock by publishKittyAnimationDeadline(), read without it by kittyAnimationDue(), nextRender()
+    /// and tick() -- which takes that lock to advance a frame only once this is due, as it does for a glide.
+    std::atomic<std::chrono::steady_clock::time_point> _kittyAnimationDue =
         std::chrono::steady_clock::time_point::max();
 
     // {{{ Momentum scrolling state

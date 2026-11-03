@@ -299,6 +299,9 @@ class HostedSession
     /// @param fileSystem Where the terminal looks printed paths up. Borrowed: it must outlive the session.
     /// @param onScreenUpdated Invoked on the PUMP thread after each processed
     ///        input batch (the host marshals it onto the loop).
+    /// @param onKittyAnimationDeadlineMoved Invoked on ANY thread, possibly with the terminal lock held, when
+    ///        the next frame of a kitty animation on display is due at another time, or no longer due. It
+    ///        must read no terminal state: the host only posts it to the loop.
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
     ///        pump loop ended (the host marshals it onto the loop).
     /// @param onSignal Invoked on the PARSER thread, with the terminal lock held, for each SessionSignal (the
@@ -317,6 +320,7 @@ class HostedSession
                   vtbackend::TerminalClocks clocks,
                   core::platform::FileSystem const& fileSystem,
                   std::function<void()> onScreenUpdated,
+                  std::function<void()> onKittyAnimationDeadlineMoved,
                   std::function<void()> onBell,
                   SessionNotifyCallback onNotify,
                   std::function<void(std::string)> onCopyToClipboard,
@@ -426,6 +430,7 @@ class HostedSession
     {
         Events(vtbackend::HostIdentity hostIdentity,
                std::function<void()> screenUpdated,
+               std::function<void()> kittyAnimationDeadlineMoved,
                std::function<void()> bell,
                SessionNotifyCallback notify,
                std::function<void(std::string)> copyToClipboard,
@@ -433,6 +438,7 @@ class HostedSession
                std::function<void()> extensionPublished):
             identity(std::move(hostIdentity)),
             onScreenUpdated(std::move(screenUpdated)),
+            onKittyAnimationDeadlineMoved(std::move(kittyAnimationDeadlineMoved)),
             onBell(std::move(bell)),
             onNotify(std::move(notify)),
             onCopyToClipboard(std::move(copyToClipboard)),
@@ -445,6 +451,9 @@ class HostedSession
         /// parser thread.
         vtbackend::HostIdentity identity;
         std::function<void()> onScreenUpdated;
+        /// A kitty animation's next deadline moved: invoked on any thread, possibly under the terminal lock.
+        /// Fixed at construction, as those threads read it without a lock.
+        std::function<void()> onKittyAnimationDeadlineMoved;
         std::function<void()> onBell;
         SessionNotifyCallback onNotify;
         std::function<void(std::string)> onCopyToClipboard;
@@ -472,6 +481,13 @@ class HostedSession
         {
             if (onScreenUpdated)
                 onScreenUpdated();
+        }
+        /// The daemon renders no frame of its own, so of the wakeups it hears only this one, and arms its
+        /// frame timer from it. Hands it on without reading terminal state.
+        void kittyAnimationDeadlineMoved() override
+        {
+            if (onKittyAnimationDeadlineMoved)
+                onKittyAnimationDeadlineMoved();
         }
         void bell() override
         {
@@ -664,6 +680,14 @@ struct SessionSpawnRequest
 /// (a shell without prompt marks). Measured on the loop's injected clock.
 inline constexpr auto InitialInputFallback = std::chrono::seconds { 2 };
 
+/// The shortest gap between two kitty animation frames a hosted session advances. Every advanced frame is a
+/// whole image on the wire to every client, so the daemon plays no faster than this; a frame due sooner is
+/// skipped, not queued -- the next tick lands on the frame its time shows, however far behind it is: whole
+/// loops are skipped at once (counted towards `v=`), the rest walked frame by frame from the deadline. Local
+/// playback is not throttled.
+/// Measured on the loop's injected clock.
+inline constexpr std::chrono::milliseconds DaemonMinimumFrameInterval { 100 };
+
 /// A workspace snapshot for a host to bring back as it starts, and what it re-runs in it.
 struct WorkspaceRestore
 {
@@ -711,7 +735,8 @@ struct SessionHostConfig
     vtbackend::HostIdentity identity {};
     /// The clocks every session it spawns reads: command durations, record and row times, and the session
     /// epoch, all of which travel to the clients. Borrowed: they must outlive the host. The default is the
-    /// system's; tests pass manual ones to drive time.
+    /// system's; tests pass manual ones to drive time. Its steady clock must be the one the host's EventLoop
+    /// reads, as the kitty frame timer compares the loop's time with deadlines the terminals stamp on it.
     vtbackend::TerminalClocks clocks = vtbackend::TerminalClocks::system();
     /// Where every session it spawns looks up the paths printed on its screen. Borrowed: it must outlive
     /// the host. The default is the machine's own.
@@ -1020,6 +1045,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param answer The answer.
     void answerPermission(std::string_view hostId, std::string_view digest, GrantState answer);
 
+    /// @param session A hosted session.
+    /// @return Whether a frame timer is armed for @p session's kitty animations: only while one on its page
+    ///         on display is due to advance.
+    [[nodiscard]] bool ticksKittyAnimations(vtworkspace::SessionId session) const noexcept;
+
     /// @return Whether the hosted programs are asked who runs in the foreground: only while a session's
     ///         extensions follow it.
     [[nodiscard]] bool pollsForegroundProcesses() const noexcept
@@ -1297,6 +1327,30 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// What the fallback timer does. @param pending The PendingInitialInput.
     static void initialInputFallbackExpired(void* pending);
 
+    /// A session's kitty animation frame timer: armed while an animation on its page on display is due.
+    struct AnimationTick
+    {
+        SessionHost* host;                                ///< The host, for the timer's callback.
+        vtworkspace::SessionId session;                   ///< The session whose animations it advances.
+        std::optional<core::net::DeadlineTimer> timer {}; ///< Fires at @ref deadline; settled when idle.
+        core::platform::SteadyTimePoint deadline {};      ///< When @ref timer fires, while it is armed.
+        std::optional<core::platform::SteadyTimePoint> lastTick {}; ///< When it last fired, for the throttle.
+
+        /// @return whether the timer is waiting to fire.
+        [[nodiscard]] bool isArmed() const noexcept { return timer && !timer->settled(); }
+    };
+
+    /// Arms @p session's frame timer from its terminal's kittyAnimationDue(), no sooner than
+    /// DaemonMinimumFrameInterval after the last tick. Idempotent: keeps an armed timer unless the deadline
+    /// moved earlier, as the terminal announces a deadline from many places. Loop thread: the post of the
+    /// session's kittyAnimationDeadlineMoved(), and the timer's own callback.
+    void armAnimationTick(vtworkspace::SessionId session);
+
+    /// What the frame timer does: ticks the session's terminal at the loop's time -- which raises the
+    /// screen update a client is sent, when a frame advanced -- and re-arms from the next deadline.
+    /// @param tick The AnimationTick.
+    static void animationTickExpired(void* tick);
+
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes
     /// never drift from the advertised layout.
@@ -1501,6 +1555,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;
+    /// Every session's kitty animation frame timer, by session id, once one was armed. Erased with the
+    /// session, by eraseSession(), so no timer outlives the terminal it ticks. Owned by pointer: its timer is
+    /// handed the entry's address.
+    std::unordered_map<uint64_t, std::unique_ptr<AnimationTick>> _animationTicks;
     /// The restored sessions whose command the restart stopped and that have run nothing since. Loop thread.
     std::unordered_map<uint64_t, Interruption> _interruptions;
     RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome

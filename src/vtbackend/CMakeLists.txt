@@ -15,6 +15,7 @@ set(vtbackend_HEADERS
     screen/AsciiText.hpp
     vt/Capabilities.hpp
     testing/CatchStringMakers.hpp
+    testing/Deflate.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
     testing/InMemoryGitFileSystem.hpp
@@ -70,7 +71,9 @@ set(vtbackend_HEADERS
     input/InputHandler.hpp
     input/vi/JumpHistory.hpp
     vt/KittyClipboard.hpp
+    graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
+    graphics/KittyInflate.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
@@ -205,7 +208,9 @@ set(vtbackend_SOURCES
     screen/PreeditPlacement.cpp
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
+    graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
+    graphics/KittyInflate.cpp
     vt/TextSizing.cpp
     screen/LinkDetector.cpp
     links/LinkIndex.cpp
@@ -280,6 +285,8 @@ target_link_libraries(vtbackend PUBLIC
     vtparser
     vtpty
 )
+# PRIVATE: only the inflater (graphics/KittyInflate.cpp) includes zlib.h; no header of ours exposes it.
+target_link_libraries(vtbackend PRIVATE ZLIB::ZLIB)
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
@@ -380,7 +387,9 @@ if(LIBTERMINAL_TESTING)
         vt/KittyClipboard_test.cpp
         vt/MacroDefinition_test.cpp
         vt/PointerShape_test.cpp
+        graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
+        graphics/KittyInflate_test.cpp
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp
@@ -433,7 +442,8 @@ if(LIBTERMINAL_TESTING)
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace)
+    # ZLIB::ZLIB for testing/Deflate.hpp, which compresses what the tests send.
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 

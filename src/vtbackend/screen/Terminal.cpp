@@ -53,10 +53,13 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <map>
+#include <new>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -3167,6 +3170,14 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             nextWakeup,
             chrono::ceil<chrono::milliseconds>(std::max(due - now, chrono::steady_clock::duration::zero())));
 
+    // A kitty animation's next frame, as the state lock last published it. Measured against the steady clock
+    // as well: where nothing paints, nothing moves currentTime(), and the wait would never shrink.
+    if (auto const due = kittyAnimationDue())
+        nextWakeup =
+            std::min(nextWakeup,
+                     chrono::ceil<chrono::milliseconds>(std::max(*due - std::max(now, _clocks.steady.now()),
+                                                                 chrono::steady_clock::duration::zero())));
+
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
@@ -3191,6 +3202,73 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         auto const _ = std::scoped_lock { _ownStateLock };
         advanceMomentumGlide(now);
     }
+
+    // A kitty animation frame that is due: grid state, under the state lock, which is taken only once one is,
+    // as for the glide. Advanced at the frame's own time, which is what the display and the daemon pass.
+    if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
+        return;
+    // tick() is noexcept, and the listener behind both notifications below may fail: the daemon posts to its
+    // loop, which allocates (std::bad_alloc) and takes a mutex (std::system_error). One that fails is dropped
+    // rather than let terminate the process -- any std::exception, nothing broader. Dropping either is
+    // benign. The deadline is stored before the listener hears of it, so the next frame's nextRender() still
+    // sees it, and a dropped frame notification is made up for by the next one.
+    enum class Notification : uint8_t
+    {
+        Delivered,
+        Dropped,
+    };
+    auto const notifying = [](auto&& notify) noexcept -> Notification {
+        try
+        {
+            notify();
+            return Notification::Delivered;
+        }
+        catch (std::exception const&)
+        {
+            return Notification::Dropped;
+        }
+    };
+
+    auto advance = KittyAdvance {};
+    {
+        auto const _ = std::scoped_lock { _ownStateLock };
+        // Moved or dropped by the parser between the read above and the lock.
+        if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
+            return;
+        auto& page = displayedPage();
+        try
+        {
+            advance = page.advanceKittyAnimations(now);
+        }
+        catch (std::bad_alloc const&)
+        {
+            // The frame could not be built. Stop rather than retry on every frame: a deadline left behind
+            // would be due again at once. Another animation may have advanced before this one failed.
+            page.stopKittyAnimations();
+            advance = KittyAdvance { .shown = KittyFrameShown::Yes, .nextDue = nullopt };
+        }
+        std::ignore = notifying([&] { publishKittyAnimationDeadline(advance.nextDue); });
+    }
+    // Outside the lock, as it calls back into the frontend. The only news of the frame the daemon hears, and
+    // only when there is a frame: a due deadline that only ended a wait (s=2 out of frames, a placement gone,
+    // a whole number of loops landing on the frame it started from) changed nothing on screen.
+    if (advance.shown == KittyFrameShown::Yes)
+        std::ignore = notifying([this] { kittyFrameAdvanced(); });
+}
+
+optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept
+{
+    return toDeadline(_kittyAnimationDue.load(std::memory_order_relaxed));
+}
+
+void Terminal::publishKittyAnimationDeadline(optional<chrono::steady_clock::time_point> due)
+{
+    auto const value = due.value_or(chrono::steady_clock::time_point::max());
+    // Straight to the listener, not through renderBufferUpdated(), whose swap bookkeeping swallows the
+    // notification while a frame waits for its swap -- and an idle display must hear of the deadline to
+    // re-read nextRender(). Only on a change: every kitty command publishes, and most move nothing.
+    if (_kittyAnimationDue.exchange(value, std::memory_order_relaxed) != value)
+        _eventListener.kittyAnimationDeadlineMoved();
 }
 
 void Terminal::advanceMomentumGlide(chrono::steady_clock::time_point now)
@@ -5628,6 +5706,12 @@ void Terminal::screenReplayed()
 {
     if (markScreenChanged() == ScreenNotification::Due)
         _eventListener.screenReplayed();
+}
+
+void Terminal::kittyFrameAdvanced()
+{
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.kittyFrameAdvanced();
 }
 
 Terminal::ScreenNotification Terminal::markScreenChanged()
@@ -8141,6 +8225,8 @@ void Terminal::hardReset()
     _savedCursorPage = NoSavedCursorPages; // DEC STD 070 DECSC: on reset the save buffer's page is 1
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
+    // Every page's animations went with their images; showPage() above republished only if the page changed.
+    publishKittyAnimationDeadline(nullopt);
 
     _imagePool.clear();
     _tabs.clear();
@@ -8360,6 +8446,8 @@ void Terminal::showPage(PageIndex page)
         _displayedScreenType = screenTypeFromPage(page);
         // The glide and the sub-line offset were the page shown before's.
         resetSmoothScroll();
+        // So were its kitty animations: each page keeps its own, and only the one on display plays.
+        publishKittyAnimationDeadline(pageAt(page).nextKittyFrameDue());
     }
     _viewport.clampScrollOffset();
     if (!isAnotherPage)

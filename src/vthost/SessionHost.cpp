@@ -70,6 +70,7 @@ HostedSession::HostedSession(SessionId id,
                              vtbackend::TerminalClocks clocks,
                              core::platform::FileSystem const& fileSystem,
                              std::function<void()> onScreenUpdated,
+                             std::function<void()> onKittyAnimationDeadlineMoved,
                              std::function<void()> onBell,
                              SessionNotifyCallback onNotify,
                              std::function<void(std::string)> onCopyToClipboard,
@@ -85,6 +86,7 @@ HostedSession::HostedSession(SessionId id,
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
+            std::move(onKittyAnimationDeadlineMoved),
             std::move(onBell),
             std::move(onNotify),
             std::move(onCopyToClipboard),
@@ -357,6 +359,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
 
 SessionHost::~SessionHost()
 {
+    // No frame timer may tick a terminal the teardown below destroys, nor fire in the drain it turns.
+    _animationTicks.clear();
     // Close every PTY first so all pump threads unblock and join promptly.
     for (auto& [id, session]: _sessions)
         session->terminate();
@@ -503,6 +507,12 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
             // Pump thread -> loop thread; the host may already be gone at
             // drain time only if the loop is too, so `this` stays valid.
             _loop.post([this, id] { onSessionScreenUpdated(id); });
+        },
+        /*onKittyAnimationDeadlineMoved=*/
+        [this, id] {
+            // Any thread, possibly under the terminal lock: only handed to the loop, which reads the
+            // deadline.
+            _loop.post([this, id] { armAnimationTick(id); });
         },
         /*onBell=*/
         [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
@@ -1239,6 +1249,8 @@ void SessionHost::eraseSession(uint64_t session)
     _interruptions.erase(session);
     _lastInput.erase(session);
     _colorPreferences.erase(session);
+    // Before the terminal it ticks: no frame timer outlives its session.
+    _animationTicks.erase(session);
     _sessions.erase(session);
 }
 
@@ -1738,6 +1750,66 @@ void SessionHost::pollForegroundProcesses(void* host)
     // Not while no extension follows the foreground process any more: a build that subscribes re-arms it.
     self._foregroundPoll.reset();
     self.armForegroundPoll();
+}
+
+void SessionHost::armAnimationTick(SessionId session)
+{
+    auto const hosted = _sessions.find(session.value);
+    if (hosted == _sessions.end())
+        return;
+    auto entry = _animationTicks.find(session.value);
+    // The kitty deadline alone, never nextRender(): that carries the cursor and text blink and the status
+    // line's minute too, which the daemon draws none of -- armed from it, an idle session would tick forever.
+    auto const due = hosted->second->terminal().kittyAnimationDue();
+    if (!due)
+    {
+        // Nothing on display plays any more.
+        if (entry != _animationTicks.end())
+            entry->second->timer.reset();
+        return;
+    }
+    if (entry == _animationTicks.end())
+        entry = _animationTicks.emplace(session.value, std::make_unique<AnimationTick>(this, session)).first;
+    auto& tick = *entry->second;
+    auto const deadline = tick.lastTick ? std::max(*due, *tick.lastTick + DaemonMinimumFrameInterval) : *due;
+    // The terminal announces its deadline from many places, most of which move nothing: an armed timer stays,
+    // unless the next frame is now due sooner. One due later finds nothing to advance, and re-arms.
+    if (tick.isArmed() && tick.deadline <= deadline)
+        return;
+    tick.deadline = deadline;
+    tick.timer.emplace(_loop, deadline, &animationTickExpired, &tick);
+}
+
+void SessionHost::animationTickExpired(void* tick)
+{
+    auto& self = *static_cast<AnimationTick*>(tick);
+    auto& host = *self.host;
+    // The entry is erased with its session, which disarms this timer; the lookup is the second guard.
+    auto const hosted = host._sessions.find(self.session.value);
+    if (hosted == host._sessions.end())
+        return;
+    // The loop's time, which the throttle measures. The terminal catches up from its own deadline, so the
+    // frames a throttled tick skips are dropped, not queued: it lands on the frame that time shows, however
+    // far behind it is, because whole loops are skipped arithmetically (KittyAnimation::advance).
+    auto const now = host._loop.clock().now();
+    auto& terminal = hosted->second->terminal();
+    // A deadline that moved later since this was armed leaves nothing to advance, nor a tick to throttle by.
+    if (auto const due = terminal.kittyAnimationDue(); due && *due <= now)
+    {
+        self.lastTick = now;
+        // With no lock held: tick() takes the terminal's own, and raises kittyFrameAdvanced() -- which the
+        // session hears as screenUpdated(), what reaches every client -- once it released it, when a frame
+        // advanced.
+        terminal.tick(now);
+    }
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    host.armAnimationTick(self.session);
+}
+
+bool SessionHost::ticksKittyAnimations(SessionId session) const noexcept
+{
+    auto const it = _animationTicks.find(session.value);
+    return it != _animationTicks.end() && it->second->isArmed();
 }
 
 void SessionHost::scheduleRetiredRelease()

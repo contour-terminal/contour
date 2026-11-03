@@ -48,6 +48,7 @@ BuildRequires:  ninja-build
 BuildRequires:  pkgconf
 BuildRequires:  systemd-devel
 BuildRequires:  yaml-cpp-devel
+BuildRequires:  zlib-devel
 %if %{without daemon}
 # The keyboard pipeline's libxkbcommon adapter exists in the GUI build only (src/contour/input).
 BuildRequires:  libxkbcommon-devel

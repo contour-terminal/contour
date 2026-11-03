@@ -456,6 +456,8 @@ set(CORE_CPP_TESTING ${CONTOUR_TESTING_CORE_CPP})
 set(CORE_CPP_WITH_TUI OFF)
 set(CORE_CPP_WITH_TLS ON)
 find_package(OpenSSL REQUIRED)
+# vtbackend inflates kitty graphics `o=z` payloads.
+find_package(ZLIB REQUIRED)
 file(STRINGS "${PROJECT_SOURCE_DIR}/vendor/core-cpp/MANIFEST" _core_cpp_ref REGEX "^# ref ")
 string(REPLACE "# ref " "" _core_cpp_ref "${_core_cpp_ref}")
 # EXCLUDE_FROM_ALL builds only the core-cpp targets contour links -- and would skip core-cpp's own
