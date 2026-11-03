@@ -2080,49 +2080,96 @@ jobs:
             test/images
           retention-days: 1
   # }}}
-  # {{{ Linux AppImage (Using Ubuntu 24.04 as base).
+  # {{{ Linux AppImage (Ubuntu 24.04: the oldest glibc the other Linux jobs support).
   package_for_AppImage:
-    if: github.ref == 'disabled'
     name: "Packaging for AppImage"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: all
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: latest
-      - name: update APT database
+      - name: "update APT database"
         run: sudo ./scripts/apt-update.sh
       - name: Installing xmllint for ci-set-vars
-        run: sudo apt-get -qy install libxml2-utils
+        run: sudo apt -qy install libxml2-utils
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: build inside docker
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: "ccache-appimage"
+          max-size: 1200M
+          save: ${{ github.event_name == 'push' }}
+          evict-old-files: job
+      - name: "install dependencies"
+        run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: "install Rust (wasm32-wasip1)"
+        run: ./scripts/install-rust-wasm.sh
+      # The Qt that is bundled: Ubuntu 24.04 ships 6.4, Contour needs 6.11. Same pin, modules and
+      # retry past a bad mirror as the matrix job's copy of this step.
+      - name: "Install Qt"
+        id: install_qt
+        continue-on-error: true
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.1"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      - name: "Install Qt -- retry past a bad mirror"
+        if: steps.install_qt.outcome == 'failure'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.1"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      - name: Install GCC
         run: |
-          docker buildx build --tag contour-appimage \
-          -f .github/appimage/Dockerfile --load .
-          docker create --name contour-appimage contour-appimage
-          docker cp contour-appimage:/contour/Contour-latest-x86_64.AppImage  contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
-          docker container rm contour-appimage
-      - name: "set mode"
-        run: sudo chmod +x contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
-      - name: "libfuse"
-        run: sudo apt-get -qy install libfuse2
-      - name: "Testing AppImage"
-        run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update -q
+          sudo apt install -y g++-15
+      # Qt's text-to-speech plugin links libspeechd, which linuxdeploy must find to bundle it.
+      - name: "install libspeechd"
+        run: sudo apt install -y libspeechd2
+      - name: "build the AppImage"
+        run: |
+          set -euo pipefail
+          CXX=g++-15 \
+          VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}" \
+          OUTPUT_DIR="$PWD" \
+              ./scripts/build-appimage.sh
+          ls -lh ./*.AppImage
+      # Run the bundle itself, not the build tree: a missing library, plugin or QML module is only
+      # visible here. No FUSE on the runner, hence --appimage-extract-and-run, and no display either,
+      # so only commands that open no window run.
+      - name: "Smoke test the AppImage"
+        run: |
+          set -euo pipefail
+          image="./contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
+          export QT_QPA_PLATFORM=offscreen
+          set -x
+          "$image" --appimage-extract-and-run version
+          "$image" --appimage-extract-and-run help > /dev/null
+          generated="$(mktemp -d)/contour.bash"
+          "$image" --appimage-extract-and-run generate integration shell bash to "$generated"
+          test -s "$generated"
+          # The bundle carries Qt 6.11, its QML modules and the plugins the window needs.
+          "$image" --appimage-extract
+          test -n "$(find squashfs-root/usr/share/terminfo -type f -name contour)"
+          test -f squashfs-root/usr/share/applications/org.contourterminal.Contour.desktop
+          for extension in agent-status clock git plasma sysload; do
+            test -f "squashfs-root/usr/share/contour/extensions/$extension.wasm"
+          done
+          test -d squashfs-root/usr/qml/QtQuick/Controls
+          test -f squashfs-root/usr/plugins/platforms/libqxcb.so
+          set +x
+          ls squashfs-root/usr/plugins/platforms squashfs-root/usr/plugins/multimedia squashfs-root/usr/plugins/tls || true
+          test -f squashfs-root/usr/plugins/multimedia/libffmpegmediaplugin.so
       - name: "Uploading AppImage"
         uses: actions/upload-artifact@v4
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
           if-no-files-found: error
           retention-days: 7
   # }}}
@@ -2849,6 +2896,7 @@ jobs:
       - check_release
       - check_notcurses_test_matrix
       - macOSArm
+      - package_for_AppImage
       - package_for_Ubuntu
       - package_daemon_for_Ubuntu
       - test_daemon_package_swap
@@ -2910,10 +2958,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      # - name: "fetch artifact: AppImage"
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: "contour-${{ steps.set_vars.outputs.version }}.AppImage"
+      - name: "fetch artifact: AppImage"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
       - name: "fetch artifact: Static build"
         uses: actions/download-artifact@v4
         with:
@@ -2945,7 +2993,7 @@ jobs:
             *.dmg
             *.msi
             *.zip
-          # *.AppImage
+            *.AppImage
   # }}}
 
 

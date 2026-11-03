@@ -43,6 +43,33 @@ If you want to provide feedback in case of any crashes, also install the debug s
 sudo dpkg -i ~/Downloads/contour-0.3.12.262-UBUNTU_VERSION-ARCH.ddeb
 ```
 
+## AppImage
+
+Every release also carries `contour-VERSION-x86_64.AppImage`, a single file that bundles Qt 6.11 (which
+Debian and Ubuntu do not ship) and everything else Contour needs but the C library. Make it executable
+and run it:
+
+```sh
+chmod +x contour-VERSION-x86_64.AppImage
+./contour-VERSION-x86_64.AppImage
+```
+
+It runs on distributions with a glibc at least as new as Ubuntu 24.04's. Without FUSE, run it with
+`--appimage-extract-and-run`.
+
+To build it yourself, on the oldest distribution you want it to run on, install the build dependencies
+(`scripts/install-deps.sh`), Qt 6.11 with the `qtmultimedia`, `qt5compat`, `qtshadertools` and `qtspeech`
+modules (for instance through [aqtinstall](https://github.com/miurahr/aqtinstall)), a C++23 compiler and
+`scripts/install-rust-wasm.sh`, then:
+
+```sh
+QT_ROOT_DIR=/path/to/Qt/6.11.1/gcc_64 CXX=g++-15 VERSION_STRING=dev ./scripts/build-appimage.sh
+```
+
+The script builds Contour, installs it into an `AppDir` and packs it with
+[linuxdeploy](https://github.com/linuxdeploy/linuxdeploy) and its Qt plugin, which scans the QML files
+for the modules to bundle. The result is `contour-dev-x86_64.AppImage` in the current directory.
+
 ## Flatpak
 
 Contour is available at the Flathub store.
