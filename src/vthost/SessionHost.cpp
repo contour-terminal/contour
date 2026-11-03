@@ -1326,25 +1326,26 @@ void SessionHost::splitActivePane(TabId tab,
     }
 }
 
-void SessionHost::resolveAuthoritativeArea()
+SizeChange SessionHost::resolveAuthoritativeArea()
 {
     auto const resolved = resolveClientArea(_sizePolicy, _clientAreas | std::views::values);
     // No client has reported one: keep what we had. The sessions still exist and must stay some
     // size, and the last attached client's area is a better guess than the settings' default.
     if (!resolved || *resolved == _pageSize)
-        return;
+        return SizeChange::Unchanged;
     sessionLog()("client area now {}x{} ({} of {} client(s)); reprojecting every pane",
                  unbox(resolved->columns),
                  unbox(resolved->lines),
                  nameOf(_sizePolicy),
                  _clientAreas.size());
     _pageSize = *resolved;
+    return SizeChange::Applied;
 }
 
 SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::PageSize size)
 {
     _clientAreas.insert_or_assign(client, ClientArea { .size = size, .sequence = _nextAreaSequence++ });
-    resolveAuthoritativeArea();
+    std::ignore = resolveAuthoritativeArea();
 
     // Whether mirrors must resync is NOT answered by the area alone, in either direction.
     // An unchanged area still re-projects — that is how a per-pane refinement (applyPaneSize)
@@ -1697,11 +1698,14 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     // survivors their size back — otherwise a client that is gone keeps every application on the
     // daemon at its dimensions for the daemon's whole life. The reproject is what makes it visible
     // (and, through resizeLocked, announces itself to everyone still attached).
-    if (_clientAreas.erase(observer) != 0)
-    {
-        resolveAuthoritativeArea();
+    //
+    // Only when the area actually moved, though. Unlike a report (applyClientSize), a departure
+    // states nothing about the survivors' panes, and re-projecting an unchanged area would discard
+    // the per-pane refinements they made: a half-open connection noticed only after its successor's
+    // hello and pane reports would put every split pane back on the ratio-derived estimate, which
+    // the client — seeing no local geometry change — never corrects.
+    if (_clientAreas.erase(observer) != 0 && resolveAuthoritativeArea() == SizeChange::Applied)
         std::ignore = reprojectLayouts();
-    }
 }
 
 std::vector<SessionId> SessionHost::sessionIds() const

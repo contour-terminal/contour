@@ -677,6 +677,37 @@ TEST_CASE("a detaching client stops counting toward the client area", "[vthost][
     CHECK(unbox<int>(h.host.pageSize().columns) == 200);
 }
 
+TEST_CASE("a detaching client that leaves the client area unchanged keeps the per-pane refinements",
+          "[vthost][host][size]")
+{
+    // A half-open connection: the daemon learns the OLD connection is gone only after the NEW one
+    // has said hello and re-asserted its pane sizes (a remote daemon after a client's sleep). The
+    // area the survivor reported is the one the departed client had, so nothing is re-decided, and
+    // re-projecting anyway would put every split pane back on the ratio-derived estimate -- which
+    // the client, seeing no local geometry change, never corrects.
+    auto const area = vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) };
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.subscribeStream(&h.client);
+    std::ignore = h.host.applyClientSize(&h.client, area);
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    auto const firstSession = tab->rootPane()->first()->session();
+
+    h.host.subscribeStream(&h.otherClient);
+    std::ignore = h.host.applyClientSize(&h.otherClient, area);
+    std::ignore = h.host.applyPaneSize(
+        firstSession, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
+    REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+
+    h.host.unsubscribeStream(&h.client);
+
+    CHECK(unbox<int>(h.host.pageSize().columns) == 100);
+    CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+
+    h.host.unsubscribeStream(&h.otherClient);
+}
+
 TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "[vthost][host][concurrency]")
 {
     auto h = HostHarness {};

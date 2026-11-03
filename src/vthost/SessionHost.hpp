@@ -1717,7 +1717,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// policy. Called whenever the reported set changes — a report arriving, or a client leaving.
     /// Leaves `_pageSize` alone when no client has reported, since the hosted sessions still need
     /// to be some size.
-    void resolveAuthoritativeArea();
+    /// @return SizeChange::Applied when `_pageSize` moved, SizeChange::Unchanged otherwise.
+    [[nodiscard]] SizeChange resolveAuthoritativeArea();
 
     /// The session hooks a new session's status-line extensions reach the host through, every one of which
     /// does nothing once the session is gone.
