@@ -55,7 +55,7 @@ class FakeDaemonControl final: public DaemonControl, public CensusEvents
     /// Records the request; completes with @ref upgradeOutcome, after announcing the upgrade to the observers
     /// when @ref upgradeAnnounces says it proceeds.
     [[nodiscard]] core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
-        handover::UpgradeTarget target, std::function<void()> onStarted) override
+        handover::UpgradeTarget target, UpgradeStarted onStarted) override
     {
         upgrades.push_back(target.imageId);
         if (upgradeThrows)
@@ -63,7 +63,7 @@ class FakeDaemonControl final: public DaemonControl, public CensusEvents
         if (upgradeOutcome)
         {
             if (onStarted)
-                onStarted();
+                onStarted("9.9.10");
             announceUpgrade("9.9.10");
             closeObservers();
         }

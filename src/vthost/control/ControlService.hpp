@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@
 #include <vtcontrol/ControlApi.hpp>
 #include <vtcontrol/ControlError.hpp>
 #include <vtcontrol/Target.hpp>
+#include <vthost/DaemonControl.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/control/BlockWaiters.hpp>
 #include <vthost/control/EventHub.hpp>
@@ -33,6 +35,14 @@ inline constexpr std::size_t DefaultMaxSubscriptionsPerConnection = 64;
 
 /// The most `block.wait`s and `pane.send` waits one connection may have pending at once, by default.
 inline constexpr std::size_t DefaultMaxWaitsPerConnection = 256;
+
+/// Starts a live upgrade of the daemon on behalf of a control call: what DaemonControl::requestUpgrade does,
+/// run as a free-standing flow (serveUpgrade()).
+/// @param target What to upgrade to.
+/// @param onStarted Answers the caller just before the daemon announces the upgrade.
+/// @param onFailed Told why the upgrade did not happen.
+using UpgradeStarter =
+    std::function<void(handover::UpgradeTarget target, UpgradeStarted onStarted, UpgradeFailed onFailed)>;
 
 /// How a ControlService is set up. Fixed at construction.
 struct ControlServiceConfig
@@ -49,6 +59,9 @@ struct ControlServiceConfig
     /// The most waits one connection may have pending at once; one more is refused `LimitReached`. Bounds
     /// what a connection that pipelines waits without reading their replies costs the daemon.
     std::size_t maxWaitsPerConnection = DefaultMaxWaitsPerConnection;
+    /// How `daemon.upgrade` starts an upgrade; empty for a service of no daemon, which refuses it
+    /// `notSupported`.
+    UpgradeStarter upgrade {};
 };
 
 /// Implements the control API over a SessionHost: one method per catalog row.
@@ -80,6 +93,7 @@ class ControlService final:
 
     // clang-format off
     void handle(vtcontrol::CallContext& context, vtcontrol::DaemonInfoRequest const& request, vtcontrol::Completion<vtcontrol::DaemonInfoReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::DaemonUpgradeRequest const& request, vtcontrol::Completion<vtcontrol::DaemonUpgradeReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ListRequest const& request, vtcontrol::Completion<vtcontrol::ListReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::CreateTabRequest const& request, vtcontrol::Completion<vtcontrol::CreateTabReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SplitRequest const& request, vtcontrol::Completion<vtcontrol::SplitReply> done) override;

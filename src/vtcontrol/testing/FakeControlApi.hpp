@@ -37,10 +37,12 @@ struct FakeCallContext final: public CallContext
     [[nodiscard]] std::string_view caller() const noexcept override { return callerPane; }
     [[nodiscard]] EventSink& events() noexcept override { return sink; }
     [[nodiscard]] ControlGrants grants() const noexcept override { return granted; }
+    [[nodiscard]] CallerLocality locality() const noexcept override { return from; }
 
     std::string callerPane;                       ///< What `caller()` returns.
     RecordingEventSink sink;                      ///< What `events()` returns.
     ControlGrants granted = ControlGrants::all(); ///< What `grants()` returns.
+    CallerLocality from = CallerLocality::Local;  ///< What `locality()` returns.
 };
 
 /// A `ControlApi` for tests: records the last request of each type and answers with the configured reply.
@@ -48,6 +50,7 @@ struct FakeControlApi final: public ControlApi
 {
     // clang-format off
     void handle(CallContext& /*context*/, DaemonInfoRequest const& request, Completion<DaemonInfoReply> done) override { lastDaemonInfo = request; done(daemonInfoReply); }
+    void handle(CallContext& /*context*/, DaemonUpgradeRequest const& request, Completion<DaemonUpgradeReply> done) override { lastDaemonUpgrade = request; done(daemonUpgradeReply); }
     void handle(CallContext& /*context*/, ListRequest const& request, Completion<ListReply> done) override { lastList = request; done(listReply); }
     void handle(CallContext& /*context*/, CreateTabRequest const& request, Completion<CreateTabReply> done) override { lastCreateTab = request; done(createTabReply); }
     void handle(CallContext& /*context*/, SplitRequest const& request, Completion<SplitReply> done) override { lastSplit = request; done(splitReply); }
@@ -70,6 +73,7 @@ struct FakeControlApi final: public ControlApi
     FakeCallContext context; ///< A context to pass to `dispatch`.
 
     DaemonInfoReply daemonInfoReply;
+    DaemonUpgradeReply daemonUpgradeReply { .started = true, .toRelease = "9.9.9" };
     ListReply listReply;
     CreateTabReply createTabReply;
     SplitReply splitReply;
@@ -82,6 +86,7 @@ struct FakeControlApi final: public ControlApi
     std::optional<ControlError> closeTabFailure; ///< When set, `tab.close` fails with it.
 
     std::optional<DaemonInfoRequest> lastDaemonInfo;
+    std::optional<DaemonUpgradeRequest> lastDaemonUpgrade;
     std::optional<ListRequest> lastList;
     std::optional<CreateTabRequest> lastCreateTab;
     std::optional<SplitRequest> lastSplit;

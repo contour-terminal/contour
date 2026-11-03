@@ -2020,28 +2020,14 @@ core::async::Task<void> NativeSession::serveUpgradeRequest(DaemonControl* daemon
                                                            handover::UpgradeTarget target)
 {
     // The answer to "started" is sent by the daemon from inside its announcement, ahead of DaemonUpgrading
-    // and of the closing of this very connection; the callback holds the link, never the connection.
-    auto result = std::expected<void, handover::UpgradeError> {};
-    try
-    {
-        result = co_await daemon->requestUpgrade(
-            std::move(target), [link, serial] { replyThroughLink(*link, serial, upgradeStartedReply()); });
-    }
-    catch (std::exception const& failure)
-    {
-        // Rolled back as it unwound; this flow is a root, which would swallow it, and the requester waits.
-        errorLog()("live upgrade failed: {}", failure.what());
-        result = std::unexpected(handover::UpgradeError {
-            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
-    }
-    catch (...)
-    {
-        errorLog()("live upgrade failed: unknown exception");
-        result = std::unexpected(handover::UpgradeError {
-            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
-    }
-    if (!result)
-        replyThroughLink(*link, serial, upgradeFailureReply(result.error()));
+    // and of the closing of this very connection; the callbacks hold the link, never the connection.
+    co_await serveUpgrade(
+        daemon,
+        std::move(target),
+        [link, serial](std::string_view) { replyThroughLink(*link, serial, upgradeStartedReply()); },
+        [link, serial](handover::UpgradeError const& error) {
+            replyThroughLink(*link, serial, upgradeFailureReply(error));
+        });
 }
 
 void NativeSession::announceUpgrade(std::string_view toRelease)
@@ -2079,19 +2065,22 @@ namespace
       public:
         RequestContext(std::string_view caller,
                        vtcontrol::EventSink& events,
-                       vtcontrol::ControlGrants grants):
-            _caller(caller), _events(events), _grants(grants)
+                       vtcontrol::ControlGrants grants,
+                       vtcontrol::CallerLocality locality):
+            _caller(caller), _events(events), _grants(grants), _locality(locality)
         {
         }
 
         [[nodiscard]] std::string_view caller() const noexcept override { return _caller; }
         [[nodiscard]] vtcontrol::EventSink& events() noexcept override { return _events; }
         [[nodiscard]] vtcontrol::ControlGrants grants() const noexcept override { return _grants; }
+        [[nodiscard]] vtcontrol::CallerLocality locality() const noexcept override { return _locality; }
 
       private:
         std::string_view _caller;
         vtcontrol::EventSink& _events;
         vtcontrol::ControlGrants _grants;
+        vtcontrol::CallerLocality _locality;
     };
 } // namespace
 
@@ -2111,17 +2100,23 @@ NativeSession::DaemonRequest NativeSession::serveControlApiRequest(proto::Decode
 
 void NativeSession::serveControlRequest(uint64_t serial, proto::ControlRequest const& request)
 {
-    auto context = RequestContext { request.context, _controlEvents, _grants };
+    auto context = RequestContext { request.context,
+                                    _controlEvents,
+                                    _grants,
+                                    isLocal(_id) ? vtcontrol::CallerLocality::Local
+                                                 : vtcontrol::CallerLocality::Remote };
     vtcontrol::dispatch(_services.control.get(),
                         context,
                         vtcontrol::Caller::Socket,
                         request.method,
                         request.params,
-                        // Possibly completed later -- a wait -- but never after the connection: run() drops
-                        // this sink's waiters before it lets `this` go.
-                        [this, serial, requestId = request.requestId](
+                        // Possibly completed later -- a wait, or an upgrade -- and an upgrade's flow outlives
+                        // the connection (it closes this very one), so the completion holds the link, never
+                        // `this`: a wait is dropped by run() before it lets `this` go, an upgrade is not.
+                        [link = _upgradeLink, serial, requestId = request.requestId](
                             std::expected<std::string, vtcontrol::ControlError> result) {
-                            if (_closed)
+                            auto* const session = link->session;
+                            if (session == nullptr || session->_closed)
                                 return;
                             auto reply = proto::ControlReply { .requestId = requestId };
                             if (result)
@@ -2131,7 +2126,7 @@ void NativeSession::serveControlRequest(uint64_t serial, proto::ControlRequest c
                                 reply.outcome = proto::ControlOutcome::Error;
                                 reply.body = vtcontrol::encodeJson(result.error());
                             }
-                            send(serial, proto::DecodedPdu { std::move(reply) });
+                            session->send(serial, proto::DecodedPdu { std::move(reply) });
                         });
 }
 

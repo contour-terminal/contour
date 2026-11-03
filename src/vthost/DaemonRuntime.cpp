@@ -86,7 +86,7 @@ ClientCensus::Ticket DaemonRuntime::admitClient()
 }
 
 core::async::Task<std::expected<void, handover::UpgradeError>> DaemonRuntime::requestUpgrade(
-    handover::UpgradeTarget target, std::function<void()> onStarted)
+    handover::UpgradeTarget target, UpgradeStarted onStarted)
 {
     if (!_upgrade)
         co_return std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::NotSupported });

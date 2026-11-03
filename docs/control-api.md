@@ -144,6 +144,30 @@ A connection holds at most 64 subscriptions and 256 pending waits; one more is r
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
 
+## Upgrading the daemon
+
+`daemon.upgrade` replaces the running daemon with a newer release in place, keeping every program running
+(see [Live upgrade](persistent-sessions.md#live-upgrade)); `contour daemon upgrade` is its verb.
+
+```sh
+contour api call daemon.upgrade '{"image":""}'
+```
+
+`image` names a staged image of the daemon's store; empty, the daemon upgrades to its own installed
+executable, the file a package upgrade replaced. The call needs `write` and a connection on the daemon's own
+machine (its socket or standard input and output): over a TCP token it is refused. It is not offered to
+extensions or to the agent's tools.
+
+The reply, `{"started":true,"toRelease":"0.9.1"}`, is sent before the daemon tells its clients it is
+upgrading and closes every connection, this one included; the clients reconnect to the same daemon. A
+refusal is an error with code `failed` whose message leads with a stable name, then says why:
+`sandboxed: the daemon runs in a sandbox that cannot reach the new release`. The names are `inProgress`,
+`notStaged`, `sandboxed`, `formatUnreadable`, `inFlightTailTooLarge`, `targetUnresponsive`,
+`notSupported`, `unsupportedSession`, `sessionStarting`, `quiesceTimedOut`, `imageTooLarge`,
+`configUnreadable`, `localOnly` and, for a `exec` that failed after the daemon stopped its sessions' pumps
+and resumed them, `execFailed`. A connection that breaks before the reply leaves the outcome unknown: ask
+`daemon.info` for the version again.
+
 ## A workflow: run the tests beside you
 
 ```sh

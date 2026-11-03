@@ -110,6 +110,27 @@ TEST_CASE("daemon.info reports the configured version", "[vthost][control]")
     CHECK(info->uptimeSeconds == 42);
 }
 
+TEST_CASE("daemon.upgrade is refused to a remote caller, and without an upgrade to start",
+          "[vthost][control][upgrade]")
+{
+    auto h = ControlHarness {};
+    SECTION("a remote caller is refused localOnly")
+    {
+        h.context.from = vtcontrol::CallerLocality::Remote;
+        auto const upgraded =
+            callSync<vtcontrol::DaemonUpgradeReply>(h.service, h.context, vtcontrol::DaemonUpgradeRequest {});
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().message.starts_with("localOnly: "));
+    }
+    SECTION("a service that starts no upgrade refuses notSupported")
+    {
+        auto const upgraded =
+            callSync<vtcontrol::DaemonUpgradeReply>(h.service, h.context, vtcontrol::DaemonUpgradeRequest {});
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().message.starts_with("notSupported: "));
+    }
+}
+
 TEST_CASE("daemon.info reports the connection's grants", "[vthost][control]")
 {
     auto h = ControlHarness {};

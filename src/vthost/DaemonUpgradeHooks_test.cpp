@@ -64,7 +64,7 @@ TEST_CASE("the requester is answered before any client is told", "[vthost][upgra
     auto second = RecordingObserver { "b", log };
     hooks.subscribe(first);
     hooks.subscribe(second);
-    hooks.setRequester([&log] { log.emplace_back("requester answered"); });
+    hooks.setRequester([&log](std::string_view) { log.emplace_back("requester answered"); });
 
     hooks.announceUpgrade("1.2.3");
     hooks.writeWorkspaceSnapshot();

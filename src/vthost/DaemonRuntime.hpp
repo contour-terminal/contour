@@ -77,7 +77,7 @@ class DaemonRuntime final: public DaemonControl
     /// Refuses InProgress while an upgrade runs, NotSupported without a DaemonUpgradePort; otherwise runs it
     /// with @p onStarted as the requester's answer (@see DaemonUpgradeHooks::setRequester).
     [[nodiscard]] core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
-        handover::UpgradeTarget target, std::function<void()> onStarted) override;
+        handover::UpgradeTarget target, UpgradeStarted onStarted) override;
     void subscribeUpgrade(UpgradeObserver& observer) override;
     void unsubscribeUpgrade(UpgradeObserver& observer) override;
 

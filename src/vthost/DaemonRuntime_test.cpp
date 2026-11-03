@@ -258,7 +258,7 @@ TEST_CASE("a second upgrade request while one runs is refused InProgress", "[vth
     auto answered = 0;
     auto first = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
     h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out, int* count) -> core::async::Task<void> {
-        *out = co_await daemon->requestUpgrade({ .imageId = "a" }, [count] { ++*count; });
+        *out = co_await daemon->requestUpgrade({ .imageId = "a" }, [count](std::string_view) { ++*count; });
     }(&runtime, &first, &answered));
     std::ignore = h.loop.runUntilIdle();
     REQUIRE(first.has_value());

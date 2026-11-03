@@ -24,6 +24,7 @@ namespace
       public:
         // clang-format off
         void handle(CallContext& /*context*/, DaemonInfoRequest const& /*request*/, Completion<DaemonInfoReply> done) override { refuse(done); }
+        void handle(CallContext& /*context*/, DaemonUpgradeRequest const& /*request*/, Completion<DaemonUpgradeReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, ListRequest const& /*request*/, Completion<ListReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, CreateTabRequest const& /*request*/, Completion<CreateTabReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, SplitRequest const& /*request*/, Completion<SplitReply> done) override { refuse(done); }

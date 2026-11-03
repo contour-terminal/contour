@@ -688,12 +688,23 @@ namespace
     /// @return How the daemon's control service is set up: a reply carries at most a quarter of a native
     ///         connection's send-queue bound of pane text, so that it always fits beside a backlog.
     [[nodiscard]] control::ControlServiceConfig controlServiceConfig(DaemonConfig const& config,
-                                                                     core::platform::IWallClock const& clock)
+                                                                     core::platform::IWallClock const& clock,
+                                                                     core::net::EventLoop& loop,
+                                                                     DaemonControl& daemon)
     {
-        return control::ControlServiceConfig { .version = config.releaseVersion,
-                                               .socketPath = config.socketPath,
-                                               .clock = clock,
-                                               .maxReplyBytes = NativeSession::DefaultWriteQueueBytes / 4 };
+        return control::ControlServiceConfig {
+            .version = config.releaseVersion,
+            .socketPath = config.socketPath,
+            .clock = clock,
+            .maxReplyBytes = NativeSession::DefaultWriteQueueBytes / 4,
+            // The same flow the native UpgradeDaemon runs: one upgrade path, whoever asks.
+            .upgrade =
+                [&loop,
+                 &daemon](handover::UpgradeTarget target, UpgradeStarted onStarted, UpgradeFailed onFailed) {
+                    loop.spawn(
+                        serveUpgrade(&daemon, std::move(target), std::move(onStarted), std::move(onFailed)));
+                },
+        };
     }
 
     /// Probes whether a daemon is accepting connections on the native socket at
@@ -1094,7 +1105,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
-    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
+    auto controlService =
+        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
     // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
     // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
     // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,
@@ -1389,7 +1401,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // See the POSIX body above for why the runtime and the control service are declared here, before the
     // drain.
     auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
-    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
+    auto controlService =
+        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
     // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
     auto lifecycleWatchers = LifecycleWatchers {};
     installLifecycleWatchers(
