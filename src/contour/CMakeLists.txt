@@ -353,6 +353,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
+        remote/DaemonDriftFollower.hpp
         remote/NativeController.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
@@ -1003,6 +1004,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/DaemonDriftChoice_test.cpp
             window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp

@@ -555,10 +555,11 @@ at least the previous two releases, so a client from a newer release attaches to
 and an older client to a newer daemon — as long as the two are within that window. Features the older
 side does not know are simply not used on that connection.
 
-When the daemon's release differs from the client's, the window shows a quiet chip at the bottom
-right, for instance `daemon 0.8.1 is older than this client`. Clicking it offers **Restart daemon on
-the new version**. The confirmation says what that costs: it **ends every shell the daemon hosts**,
-and a fresh one opens on the new daemon. A daemon that keeps its workspace brings your windows, tabs,
+When the daemon's release differs from the client's, the window shows a quiet chip, for instance
+`daemon 0.8.1 is older than this client`. For a local daemon that supports it, clicking it offers
+**Upgrade daemon (keeps your programs running)**; see [Live upgrade](#live-upgrade) below. Otherwise
+it offers **Restart daemon on the new version**. The confirmation says what that costs: it **ends
+every shell the daemon hosts**, and a fresh one opens on the new daemon. A daemon that keeps its workspace brings your windows, tabs,
 directories and scrollback back, and the confirmation says so (see
 [Surviving reboots](#surviving-reboots)). After the restart a new Contour window attaches to the new
 daemon, and this one closes. The chip is shown
@@ -566,6 +567,55 @@ only for the local daemon: a remote one (`--connect-tcp`) is not yours to restar
 
 The restart stops the daemon for an upgrade, then starts one the same way a client would: through the
 registered service when there is one, on demand otherwise.
+
+### Live upgrade
+
+A live upgrade replaces the daemon with the new release **without ending anything it hosts**. The
+daemon re-executes the new release's binary in its own process, so every shell and program keeps its
+process, its process ID, its parent and its terminal. Each session's screens, scrollback, images,
+cursor and modes, and an escape sequence cut in half by the switch (up to a bound, below), come across
+as they were; so do your windows, tabs and splits. The windows show `Upgrading daemon…` for a moment and reconnect by
+themselves.
+
+Start it from the chip, or from a shell or script:
+
+```sh
+contour daemon upgrade [--label NAME | --socket PATH]
+```
+
+It exits 0 once the daemon upgraded, 4 when no daemon runs, and 5 with the reason on standard error
+when the daemon declines (the daemon then serves on as before; nothing was stopped). When the daemon
+neither answers nor comes back within 15 seconds, the outcome is unknown and the exit status is 1; check
+`contour daemon status`.
+
+What the daemon checks before it stops anything, and declines on:
+
+| The daemon declines when | Because |
+| --- | --- |
+| it runs in a Flatpak sandbox | the sandbox cannot reach the new release's binary; update the Flatpak and use the restart |
+| the new release cannot read the state it would hand over, or load its configuration | the check runs the new binary first; the restart is the way across a gap wider than two releases |
+| a session runs on an SSH or channel connection | nothing could adopt it after the switch |
+| a program is in the middle of an escape sequence longer than the handover carries, or its sessions' state is too large | the handover has a fixed bound |
+| a session is still starting, or the new release's image is not in the daemon's store | try again in a moment; the next upgrade stages the image anew |
+| another upgrade is under way, or the clients and sessions do not settle in time | try again in a moment |
+
+A refusal never costs a program, and neither does a failure after it: if the new binary cannot start,
+the old daemon resumes and says so.
+
+A few things to know:
+
+- The chip offers the upgrade only for a daemon on this machine that announced it supports it and is not
+  newer than the client (a newer one is offered the restart, as an upgrade would be a downgrade). A remote
+  daemon (`--connect-tcp`, `--host`) is not yours to upgrade, and the chip offers nothing for it.
+- It is available on Linux, macOS and the BSDs. Windows daemons are restarted.
+- **Flatpak:** a running sandbox keeps the old `/app` mounted, so the daemon cannot reach the new
+  release. Update the Flatpak, then restart the daemon from the chip (this ends its shells).
+- **The first release that has it can be upgraded from, not to.** The readiness check needs code in the
+  *old* daemon, so a daemon from before live upgrade is restarted once, and every daemon after that is
+  upgraded live.
+- Extensions that a status line runs in the daemon are started again by the new daemon; the programs in
+  your panes are never restarted.
+- The daemon keeps its workspace snapshot current, as always; it is the safety net if everything else fails.
 
 Outside the window, or against a daemon from Contour 0.7.0 or another release before version
 negotiation, the client is refused, and it tells you both sides' versions:

@@ -19,6 +19,7 @@
 
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 #ifdef _WIN32
@@ -359,6 +360,42 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
                 ? "daemon stopped; its workspace is kept\n"
                 : "daemon stopped\n");
     return ExitStatus::Ok;
+}
+
+ExitStatus daemonUpgradeVerb(DaemonControlPort& control,
+                             vthost::DaemonBinarySource& binary,
+                             vthost::client::SettlePacer& pacer,
+                             std::string_view targetRelease,
+                             std::filesystem::path const& socket,
+                             std::ostream& out,
+                             std::ostream& err)
+{
+    using vthost::client::DaemonUpgradeError;
+    auto const upgraded = vthost::client::upgradeDaemonTo(control, binary, pacer);
+    if (upgraded)
+    {
+        out << std::format("daemon upgraded to {}; its sessions keep running\n", targetRelease);
+        return ExitStatus::Ok;
+    }
+    auto const& failure = upgraded.error();
+    switch (failure.error)
+    {
+        case DaemonUpgradeError::NotRunning:
+            err << std::format("no daemon is running on {}\n", core::pathToUtf8(socket));
+            return ExitStatus::Unreachable;
+        case DaemonUpgradeError::StageFailed:
+            err << std::format("contour daemon: {}\n", vthost::client::describeFailure(failure));
+            return ExitStatus::Failed;
+        case DaemonUpgradeError::Refused: break;
+    }
+    if (failure.outcome == vthost::client::DaemonUpgradeOutcome::Unknown)
+    {
+        err << std::format("contour daemon: the outcome of the upgrade is unknown: {}\n",
+                           vthost::client::describeFailure(failure));
+        return ExitStatus::Failed;
+    }
+    err << std::format("contour daemon: not upgraded: {}\n", vthost::client::describeFailure(failure));
+    return ExitStatus::Refused;
 }
 
 vthost::WorkspacePersistenceConfig workspacePersistenceOf(config::DaemonRestoreConfig const& restore,

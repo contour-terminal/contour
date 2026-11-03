@@ -92,6 +92,11 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRef
                                   }),
               "UpgradeRefusalRows must list every refusal in enumerator order");
 
+/// What the user is told of an ExecFailure: the one outcome that is no refusal (UpgradeRefusal has no
+/// enumerator for it). The daemon stopped its sessions' pumps, could not exec, and resumed them.
+inline constexpr std::string_view ExecFailureText =
+    "the daemon could not start the new release and keeps serving on the old one";
+
 /// @return The refusal with the highest number: the bound a wire decoder holds a byte to.
 [[nodiscard]] constexpr UpgradeRefusal lastRefusal() noexcept
 {

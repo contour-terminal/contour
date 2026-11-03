@@ -126,6 +126,7 @@ separated list of:
 | 2 | The command line was malformed, or a setting it names cannot be used (a `--tls-ca` that does not parse). |
 | 3 | The pane, tab, window or block named does not exist, or the name matches several. |
 | 4 | No daemon could be reached. |
+| 5 | The daemon declined; the reason is on standard error. |
 | 130 | Interrupted by Ctrl+C. |
 
 `contour send --wait` exits with the command's own status instead (0 to 255). A command with no exit code,

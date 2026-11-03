@@ -1499,6 +1499,62 @@ the pid started is still the daemon, that `APPIMAGE` in its `/proc/<pid>/environ
 directory is listed by `ls -l /proc/<pid>/fd`, and that deleting the original AppImage file leaves
 the daemon serving.
 
+### Live upgrade
+
+A daemon replaces itself with a new release without ending a hosted program (`handover::LiveUpgrade`,
+`DaemonRuntime::requestUpgrade`). The client drives it; the daemon decides.
+
+**Who names the target.** The old daemon cannot find the new release's binary, so the client (the new
+release) stages its own image into the shared store, as a restart does, and sends
+`UpgradeDaemon{imageId}` naming it by store id (`<release>-<fingerprint>`). The daemon `exec`s only an
+image inside its own `DaemonImageStore`, never a caller-supplied path. The one exception is a packaged
+Linux daemon running in place: an empty id means its own installed executable, the file the package
+replaced. The request needs a local control connection and no grant, and a TCP listener refuses it
+(`UpgradeRefusal::LocalOnly`). `client::upgradeDaemon` stages and asks; `upgradeDaemonTo` also settles an
+outcome that is not known (below).
+
+**Sequence.** (1) Lease the image and run its readiness probe, `contour daemon handover-info`, in an empty
+environment: the release, the handover and terminal-state formats it reads, and whether it loads the
+daemon's configuration and profile. Nothing is stopped before this passes. (2) Announce `DaemonUpgrading`
+to clients that negotiated `Capability::LiveUpgrade`, write the final workspace snapshot (the safety net),
+hold the listeners' accepting and close every connection; the requester is answered just before that
+(`onStarted`). (3) Quiesce each session's pump
+at a byte boundary; what is unread stays in the kernel. (4) Encode the handover image into an anonymous
+memory object (`memfd_create`; never a named file, since scrollback may hold secrets). (5) Clear
+close-on-exec on exactly the descriptors that cross (PTY masters, listening sockets, the image lease, the
+handover object) and `exec` with `--handover-fd`. A child's pid needs no descriptor: an unreaped child keeps
+its pid, so the new image reaps and reads its status. (6) If the `exec` fails, close-on-exec is restored,
+the pumps and listeners resume and the requester is told (`ExecFailedResult`); the old daemon carries on. (7)
+The new image decodes the handover, rebuilds the sessions over the inherited descriptors and serves as the
+same daemon: the handover carries `daemonInstance` and the whole `vtworkspace` id space, so
+`NativeController::adoptReconnect` keeps every pane binding.
+
+**Refusals are a table.** `handover::UpgradeRefusalRows` holds the enumerator and the sentence the user is
+told, in enumerator order (a `static_assert` holds the order, and the wire carries `refusal + 1`);
+`handover::ExecFailureText` is the one outcome that is no refusal. Every surface that reports a failure goes
+through `client::describeFailure`, so the chip and `contour daemon upgrade` say the same words, and a new
+refusal is one row.
+
+**The client's hold.** `ConnectionState::Upgrading` is the state between the announcement and the daemon's
+return. `ClientSupervisor` starts a hold (`UpgradeHold`, 15 s) on the transport factory so that
+`ensureDaemon` does not run: an absent daemon reads as one that is coming back, never as one to start, or a
+third daemon would appear. The hold ends on the next accepted handshake, or when it expires, after which the
+factory starts a daemon as before. `NativeController` treats Upgrading as a reconnect to the same instance.
+
+**An outcome that is not known.** A control call that times out, or whose connection breaks
+(`DaemonUpgradeOutcome::Unknown`), may be the daemon already re-execing. `upgradeDaemonTo` then asks the
+daemon's status again with the reconnect backoff, on an injected `SettlePacer` (so tests never sleep), until
+`UpgradeHold` ran out. A release other than the one read before the call means the upgrade happened; the
+same release means it was refused or rolled back (a known failure); no answer leaves it unknown, which
+`contour daemon upgrade` reports as exit status 1.
+
+**The chip.** `window::driftOfferFor(DriftKind, DaemonLocality, CapabilitySet)` decides what the drift chip
+offers from facts alone: nothing for a remote daemon or matching releases, a restart for a local daemon
+without `Capability::LiveUpgrade` or newer than the client (a downgrade), an upgrade (with the restart as the fallback after a refusal) for one
+that has it. `DaemonDriftModel` holds the outcome for QML; `ContourGuiApp` runs the call off the GUI thread.
+
+**Windows.** There is no `exec`; the daemon declines `NotSupported` and the restart stays.
+
 ## Binary imsg IPC (the real tmux binary as a client)
 
 The daemon's third endpoint, `<control-socket>-tmux`, speaks tmux's binary
