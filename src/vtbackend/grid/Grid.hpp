@@ -988,6 +988,27 @@ class Grid
     /// and never the guarantee, and is the price of not re-walking the scrollback per line.
     void clampHistory();
 
+    /// Settles a finite scrollback that a resize left above its capacity back down to it.
+    ///
+    /// A resize evicts nothing: the rows a narrowing reflow or a shorter page pushes above the capacity
+    /// stay held, so a resize that is undone -- a split zoomed and unzoomed, a status line shown and
+    /// hidden -- gives every row back. The first scroll after it ends the hold: the oldest rows go until
+    /// the history is at the capacity, and the ring shrinks to `page + capacity` slots, so neither
+    /// later scrolling nor the surplus rows' storage keeps the overshoot alive. That scroll's clampHistory()
+    /// then moves the cut to a command boundary where the scrollback has one.
+    /// @pre ringExceedsCapacity()
+    void settleHeldHistory() noexcept;
+
+    /// Whether the ring has more slots than a finite capacity allows -- held rows, free slots, or both,
+    /// which a resize leaves for the next scroll to settle. Inline because every scroll asks.
+    /// @see settleHeldHistory
+    /// @return true when the capacity is finite and the ring exceeds `page + capacity` slots.
+    [[nodiscard]] bool ringExceedsCapacity() const noexcept
+    {
+        auto const* capacity = std::get_if<LineCount>(&_historyLimits.capacity);
+        return capacity && _lines.size() > unbox<size_t>(_pageSize.lines + *capacity);
+    }
+
     /// Resets the bottom @p count lines of the page, which a scroll just rotated in from the top of a
     /// full ring, keeping their storage for the write that follows. @see Line::recycle
     /// @param count             How many lines were evicted into the page.
@@ -1002,7 +1023,24 @@ class Grid
         _pageSize = newSize;
     }
 
-    void rezeroBuffers() noexcept { _lines.rezero(); }
+    /// The storage index of the slot just after the page: where the page meets the free region.
+    [[nodiscard]] size_t slotAfterPage() const noexcept;
+
+    /// Adds @p count blank slots where the page meets the free region, without moving any row.
+    ///
+    /// Slots appear and vanish at that boundary, NOT at storage's end. In logical order the ring reads
+    /// [page][free][history], the history newest-last, so storage's end -- once the ring has scrolled -- lies
+    /// anywhere among the rows. The boundary is the one place where slots come and go without moving a row
+    /// relative to offset 0, so every stable id stays put. In place: no rotation, no reallocation beyond
+    /// the insert's own.
+    /// @param count How many slots to add.
+    /// @param flags The new slots' line flags.
+    void insertSlotsAfterPage(size_t count, LineFlags flags);
+
+    /// Removes @p count slots where the page meets the free region: the free slots first, then the OLDEST
+    /// history rows -- precisely the end a shrunken scrollback has to forget. No surviving row moves.
+    /// @param count How many slots to remove; at most the ring's non-page slots.
+    void eraseSlotsAfterPage(size_t count) noexcept;
 
     // The ONLY ring-rotation entry points: stable-id accounting lives here so every
     // scroll/unscroll/grow path keeps row identity by construction. (The former
@@ -1020,9 +1058,9 @@ class Grid
     /// and gives them the ids just below the page's.
     ///
     /// The reflow renamed every row and dropped none, so unlike rotateBuffersLeft() this moves the floor
-    /// without counting an eviction. A narrowing that overflows a finite capacity is trimmed back to it
-    /// once resize() has applied both dimensions, and that trim's syncStableFloor() counts the rows it
-    /// drops. The caller's generation bump is what tells id holders their ids are gone.
+    /// without counting an eviction. A narrowing that overflows a finite capacity holds the overflow
+    /// until the next scroll settles it (@see settleHeldHistory), and that scroll counts what it drops.
+    /// The caller's generation bump is what tells id holders their ids are gone.
     /// @param history The rebuilt ring's history row count.
     void rekeyRebuiltRing(LineCount history) noexcept
     {

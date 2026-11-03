@@ -9,6 +9,7 @@
 #include <vtbackend/vt/Sequence.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <cctype>
 #include <chrono>
@@ -1873,3 +1874,112 @@ TEST_CASE("SBQUERY replies are version 2", "[vtbackend][sbquery]")
 }
 
 // }}}
+
+TEST_CASE("ShellIntegration.a row wrapped onto sheds the marks of the line it headed", "[vtbackend][resize]")
+{
+    // A command's output stops part-way into row 2, so its head carries ;D's column. A full-screen
+    // program then redraws from row 1 with a line long enough to wrap onto row 2 -- without scrolling,
+    // as an agent's UI does -- and row 2 becomes a continuation of the line row 1 heads.
+    auto mc =
+        MockTerm { PageSize { LineCount(5), ColumnCount(10) }, HistoryLimits::plain(Infinite {}), 1024 };
+    mc.writeToScreen("\033[3;1Habc\033]133;D\033\\");
+    REQUIRE(mc.terminal.primaryScreen().grid().lineAt(LineOffset(2)).commandEndOffset() == ColumnOffset(3));
+    mc.writeToScreen("\033[2;1H0123456789abcde");
+
+    auto const& row = mc.terminal.primaryScreen().grid().lineAt(LineOffset(2));
+    CHECK(row.wrapped());
+    CHECK_FALSE(row.isFlagEnabled(HeadOnlyLineFlags));
+    CHECK(row.commandEndOffset() == ColumnOffset(0));
+
+    // Reflow rebuilds a continuation from its parts and must not find a head's border on it.
+    mc.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(6) });
+    CHECK(mc.terminal.primaryScreen().renderMainPageText().contains("6789ab"));
+}
+
+TEST_CASE("ShellIntegration.a block whose head row is wrapped onto is headed afresh",
+          "[vtbackend][semanticblocks]")
+{
+    // A command's prompt on row 2 and its output on row 3. A redraw from row 1 wraps onto row 2, which
+    // stops heading anything: the block is headed afresh by the logical line row 2 is now a part of.
+    auto mc =
+        MockTerm { PageSize { LineCount(6), ColumnCount(10) }, HistoryLimits::plain(Infinite {}), 1024 };
+    mc.writeToScreen("\033[3;1H\033]133;A\033\\$ ls\033]133;C\033\\\r\nout");
+    auto const* record = mc.terminal.commandBlocks().current();
+    REQUIRE(record != nullptr);
+    auto const id = record->id;
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    REQUIRE(grid.lineOffsetOf(record->headStableId) == LineOffset(2));
+
+    mc.writeToScreen("\033[2;1H0123456789abcde");
+
+    auto const* after = mc.terminal.commandBlocks().find(id);
+    REQUIRE(after != nullptr);
+    CHECK(grid.lineOffsetOf(after->headStableId) == LineOffset(1));
+}
+
+TEST_CASE("ShellIntegration.a wrap that cannot leave its row keeps the row's own marks",
+          "[vtbackend][resize]")
+{
+    // The cursor sits below a scrolling region, where a line feed goes nowhere: the prompt wraps over its
+    // own row, which stays the head of its own line, marks and all.
+    auto mc =
+        MockTerm { PageSize { LineCount(5), ColumnCount(10) }, HistoryLimits::plain(Infinite {}), 1024 };
+    mc.writeToScreen("\033[1;3r\033[5;1H\033]133;A\033\\$ 0123456789abc");
+
+    auto const& row = mc.terminal.primaryScreen().grid().lineAt(LineOffset(4));
+    CHECK(row.isFlagEnabled(LineFlag::Marked));
+    CHECK_FALSE(row.wrapped());
+}
+
+TEST_CASE("ShellIntegration.a row standing in for a head gone from the scrollback becomes the head",
+          "[vtbackend][resize]")
+{
+    // With no scrollback, a line longer than the page leaves its continuation at the top: the head it
+    // continues is gone. A ;D then marks that row, and the row becomes the head -- for a continuation may
+    // carry no head's marks, and reflow refuses one that does.
+    auto const history = GENERATE(LineCount(0), LineCount(3));
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) }, HistoryLimits::plain(history), 1024 };
+    mc.writeToScreen(std::string(95, 'a') + "\033]133;D\033\\");
+
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const top = -boxed_cast<LineOffset>(grid.historyLineCount());
+    auto const& row = grid.lineAt(top);
+    CHECK_FALSE(row.wrapped());
+    CHECK(row.isFlagEnabled(LineFlag::CommandEnd));
+
+    // Scrolled down into the page and written over, then narrowed: the marked row reflows as a head, and
+    // no continuation anywhere comes out of it carrying a head's marks.
+    mc.writeToScreen("\033[T\033[1;1H0123456789");
+    mc.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(6) });
+    auto const& narrowed = mc.terminal.primaryScreen().grid();
+    auto const rows = std::views::iota(-unbox<int>(narrowed.historyLineCount()), 5);
+    CHECK(std::ranges::none_of(rows, [&](int line) {
+        auto const& row = narrowed.lineAt(LineOffset(line));
+        return row.wrapped() && row.isFlagEnabled(HeadOnlyLineFlags);
+    }));
+}
+
+TEST_CASE("ShellIntegration.a wrap within left and right margins keeps the row's own marks",
+          "[vtbackend][resize]")
+{
+    // Left and right margins narrower than the page confine a wrap to the band of the row below, whose
+    // cells around the band are still the prompt's: that row heads its own line, marks and all -- whether
+    // the band scrolled or the cursor moved down, and whichever margin is moved in.
+    struct Case
+    {
+        std::string_view margins;
+        std::string_view write;
+    };
+    auto const [margins, write] = GENERATE(Case { "\033[3;8s", "\033[5;3H0123456" },
+                                           Case { "\033[3;10s", "\033[5;3H012345678" },
+                                           Case { "\033[1;8s", "\033[5;1H012345678" },
+                                           Case { "\033[3;8s", "\033[4;3H0123456" });
+    auto mc =
+        MockTerm { PageSize { LineCount(5), ColumnCount(10) }, HistoryLimits::plain(Infinite {}), 1024 };
+    mc.writeToScreen("\033[5;1H\033]133;A\033\\$ x\033]133;D\033\\");
+    mc.writeToScreen(std::format("\033[?69h{}{}", margins, write));
+
+    auto const& row = mc.terminal.primaryScreen().grid().lineAt(LineOffset(4));
+    CHECK(row.isFlagEnabled(LineFlag::Marked));
+    CHECK_FALSE(row.wrapped());
+}
