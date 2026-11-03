@@ -113,8 +113,10 @@ struct HyperlinkStorage
         {
             if (href.value->userId == id)
             {
-                cache.touch(href.key);
-                return href.key;
+                // Copy the id first: touching moves the entry, which frees the node @c href refers to.
+                auto const key = href.key;
+                cache.touch(key);
+                return key;
             }
         }
         return HyperlinkId {};
