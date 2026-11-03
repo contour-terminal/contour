@@ -189,8 +189,9 @@ UseColor: true
 # forward-slash-only pattern would skip every first-party header there without a word.
 HeaderFilterRegex: 'src[/\\](contour|vthost|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtworkspace|vtconformance|vtextension|vtcontrol)[/\\]'
 # Qt's AUTOMOC/AUTOUIC output lands under out/<preset>/src/<module>/..._autogen/, whose
-# path matches HeaderFilterRegex; it is generated code and not ours to lint.
-ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|.*_autogen[/\\].*|.*\.moc$'
+# path matches HeaderFilterRegex; it is generated code and not ours to lint. So are the qtwaylandscanner
+# headers (qwayland-<protocol>.h) generated from protocols/*.xml.
+ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|qwayland-.*\.h|.*_autogen[/\\].*|.*\.moc$'
 FormatStyle: none
 
 CheckOptions:
