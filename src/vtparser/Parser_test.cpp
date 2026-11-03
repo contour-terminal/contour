@@ -4,6 +4,8 @@
 #include <vtparser/ParserEvents.hpp>
 #include <vtparser/Utf8Decoding.hpp>
 
+#include <core/Escape.hpp>
+
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>
 
@@ -53,6 +55,25 @@ class MockParserEvents final: public vtparser::NullParserEvents
     void dispatchPM() override { pm += "}"; }
 };
 
+/// What feeding @p byte to @p state settles: nothing, one codepoint, or two where it ends an ill-formed
+/// character.
+std::u32string feed(unicode::utf8_decoder_state& state, uint8_t byte)
+{
+    auto settled = std::u32string {};
+    vtparser::decodeUtf8Byte(state, byte, [&](char32_t codepoint) { settled += codepoint; });
+    return settled;
+}
+
+/// What @p bytes decode to, a byte at a time, and whether the decoder is idle at the end.
+std::u32string decodeAll(std::string_view bytes)
+{
+    auto state = unicode::utf8_decoder_state {};
+    auto codepoints = std::u32string {};
+    for (auto const byte: bytes)
+        codepoints += feed(state, static_cast<uint8_t>(byte));
+    return codepoints;
+}
+
 /// @p text decoded the way the state machine decodes it, a byte that is not UTF-8 as U+FFFD. The bulk
 /// text path hands such a byte on as it came, inside its run of text.
 std::u32string decodedAsTheStateMachineDoes(std::string_view text)
@@ -60,8 +81,7 @@ std::u32string decodedAsTheStateMachineDoes(std::string_view text)
     auto state = unicode::utf8_decoder_state {};
     auto codepoints = std::u32string {};
     for (auto const ch: text)
-        if (auto const codepoint = vtparser::decodeUtf8Byte(state, static_cast<uint8_t>(ch)))
-            codepoints += *codepoint;
+        codepoints += feed(state, static_cast<uint8_t>(ch));
     return codepoints;
 }
 
@@ -95,6 +115,107 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
     p.parseFragment("\xC3\xB6"); // ö
 
     REQUIRE(textListener.text == "\xC3\xB6");
+}
+
+TEST_CASE("Parser.IncompleteUtf8_EndsAtAByteThatCannotContinueIt", "[Parser]")
+{
+    // #2209: a character cut off by another byte is replaced by U+FFFD, and that byte is then handled as
+    // itself, never taken as the character's continuation.
+    constexpr auto Replacement = "\xEF\xBF\xBD"sv;
+    struct Row
+    {
+        std::string_view input;
+        std::string expectedText;
+    };
+    auto const rows = std::vector<Row> {
+        { "\xE5\xAF"
+          "a"sv,
+          std::string(Replacement) + "a" }, // ASCII
+        { "\xE5\xAF\n"
+          "x"sv,
+          std::string(Replacement) + "x" }, // a C0 control
+        { "\xE5\xAF\x1b"
+          "c"
+          "alive"sv,
+          std::string(Replacement) + "alive" },                          // ESC, here RIS
+        { "\xE5\xAF\xC3\xB6"sv, std::string(Replacement) + "\xC3\xB6" }, // the next lead byte
+        { "\xE5\xAF\xE5\xAF\xA1"sv, std::string(Replacement) + "\xE5\xAF\xA1" },
+        { "\xC3"
+          "ab"sv,
+          std::string(Replacement) + "ab" },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.input));
+        MockParserEvents listener;
+        auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+        p.parseFragment(row.input);
+        CHECK(listener.text == row.expectedText);
+    }
+}
+
+TEST_CASE("Parser.IncompleteUtf8_EndsAtAByteInTheNextRead", "[Parser]")
+{
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("\xE5\xAF"sv);
+    p.parseFragment("\033"
+                    "calive"sv);
+    CHECK(listener.text
+          == "\xEF\xBF\xBD"
+             "alive");
+
+    // The same when the first read went through the bulk text scanner: text, then the cut-off character.
+    MockParserEvents scanned;
+    auto q = vtparser::Parser<vtparser::ParserEvents>(scanned);
+    q.parseFragment("x\xE5\xAF"sv);
+    CHECK(scanned.text == "x");
+    q.parseFragment("\033"
+                    "calive"sv);
+    CHECK(scanned.text
+          == "x\xEF\xBF\xBD"
+             "alive");
+}
+
+TEST_CASE("Parser.String_IllFormedUtf8_DoesNotHideThe8bitST", "[Parser]")
+{
+    // 0x9C is a valid continuation byte (U+2705 is E2 9C 85) but not after E0, whose second byte is A0..BF:
+    // E0 9C is no character, so the 9C is an ST and ends the string.
+    struct Recording final: public vtparser::NullParserEvents
+    {
+        std::string events;
+        void print(char32_t ch) override { events += static_cast<char>(ch); }
+        size_t print(std::string_view chars, size_t) override
+        {
+            events += chars;
+            return 0;
+        }
+        void startOSC() override { events += "{"; }
+        void putOSC(char ch) override { events += ch; }
+        void dispatchOSC() override { events += "}"; }
+    };
+    auto const check = [](std::string_view input, std::string_view expected) {
+        INFO(core::escape(input));
+        auto listener = Recording {};
+        auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+        p.parseFragment(input);
+        CHECK(listener.events == expected);
+    };
+    check("\033]2;a\xE0\x9C"
+          "X"sv,
+          "{2;a\xE0}X");
+    check("\033]2;a\xC0\x9C"
+          "X"sv,
+          "{2;a\xC0}X");
+    check("\033]2;a\xF4\x9C"
+          "X"sv,
+          "{2;a\xF4}X");
+    // Where it is a continuation byte, it stays content.
+    check("\033]2;a\xE2\x9C\x85"
+          "b\x9C"
+          "X"sv,
+          "{2;a\xE2\x9C\x85"
+          "b}X");
 }
 
 TEST_CASE("Parser.PM")
@@ -261,8 +382,8 @@ TEST_CASE("Utf8Decoding.anAsciiByteDecodesAsFromUtf8Does", "[Parser]")
         REQUIRE(std::holds_alternative<unicode::Success>(expected));
 
         auto viaHelper = unicode::utf8_decoder_state {};
-        CHECK(vtparser::decodeUtf8Byte(viaHelper, static_cast<uint8_t>(byte))
-              == std::get<unicode::Success>(expected).value);
+        CHECK(feed(viaHelper, static_cast<uint8_t>(byte))
+              == std::u32string { std::get<unicode::Success>(expected).value });
         CHECK(viaHelper.expectedLength == 0);
         CHECK(viaFromUtf8.expectedLength == 0);
     }
@@ -271,10 +392,10 @@ TEST_CASE("Utf8Decoding.anAsciiByteDecodesAsFromUtf8Does", "[Parser]")
 TEST_CASE("Utf8Decoding.everythingElseIsFromUtf8sDecision", "[Parser]")
 {
     auto state = unicode::utf8_decoder_state {};
-    CHECK(vtparser::decodeUtf8Byte(state, 0xE2) == std::nullopt); // a character begins
-    CHECK(vtparser::decodeUtf8Byte(state, 0x94) == std::nullopt);
-    CHECK(vtparser::decodeUtf8Byte(state, 0x82) == U'│');
-    CHECK(vtparser::decodeUtf8Byte(state, 0xFF) == vtparser::ReplacementCharacter); // never UTF-8
+    CHECK(feed(state, 0xE2).empty()); // a character begins
+    CHECK(feed(state, 0x94).empty());
+    CHECK(feed(state, 0x82) == U"│");
+    CHECK(feed(state, 0xFF) == U"\uFFFD"); // never UTF-8
     CHECK(state.expectedLength == 0);
 }
 
@@ -282,20 +403,107 @@ TEST_CASE("Utf8Decoding.idleOnlyAtACharacterBoundary", "[Parser]")
 {
     auto state = unicode::utf8_decoder_state {};
     CHECK(vtparser::isDecoderIdle(state));
-    std::ignore = vtparser::decodeUtf8Byte(state, 0xF0); // a 4-byte character begins
+    std::ignore = feed(state, 0xF0); // a 4-byte character begins
     CHECK_FALSE(vtparser::isDecoderIdle(state));
-    std::ignore = vtparser::decodeUtf8Byte(state, 0x9F);
-    std::ignore = vtparser::decodeUtf8Byte(state, 0x98);
+    std::ignore = feed(state, 0x9F);
+    std::ignore = feed(state, 0x98);
     CHECK_FALSE(vtparser::isDecoderIdle(state));
-    std::ignore = vtparser::decodeUtf8Byte(state, 0x80); // U+1F600 is complete
+    std::ignore = feed(state, 0x80); // U+1F600 is complete
     CHECK(vtparser::isDecoderIdle(state));
 
-    // Why idleness matters: after a lead byte, from_utf8 takes an ASCII byte as the continuation byte
-    // and folds it into the pending character, so 0xC3 'a' decodes to U+00E1 rather than to 'a'.
-    std::ignore = vtparser::decodeUtf8Byte(state, 0xC3);
+    // Why idleness matters: after a lead byte, a bare from_utf8 takes an ASCII byte as the continuation
+    // byte and folds it into the pending character, so 0xC3 'a' would decode to U+00E1 rather than to
+    // 'a'. The decoder ends the character first, and decodes the 'a' on its own.
+    std::ignore = feed(state, 0xC3);
     CHECK_FALSE(vtparser::isDecoderIdle(state));
-    CHECK(vtparser::decodeUtf8Byte(state, 'a') == U'á');
+    CHECK(feed(state, 'a') == U"\uFFFDa");
     CHECK(vtparser::isDecoderIdle(state));
+}
+
+TEST_CASE("Utf8Decoding.illFormedSequencesAreReplacedPerMaximalSubpart", "[Parser]")
+{
+    // Unicode's Table 3-7: the second byte after E0, ED, F0 and F4 is restricted, and C0, C1 and F5..FF are
+    // never valid. Overlong forms, surrogates, and values above U+10FFFF must not decode (#2211).
+    struct Row
+    {
+        std::string_view bytes;
+        std::u32string expected;
+    };
+    auto const rows = std::vector<Row> {
+        { "\xC0\x80"sv, U"\uFFFD\uFFFD" },           // overlong NUL
+        { "\xC1\xBF"sv, U"\uFFFD\uFFFD" },           // overlong DEL
+        { "\xC0\x9B"sv, U"\uFFFD\uFFFD" },           // overlong ESC
+        { "\xE0\x80\xAF"sv, U"\uFFFD\uFFFD\uFFFD" }, // overlong '/'
+        { "\xE0\x9F\xBF"sv, U"\uFFFD\uFFFD\uFFFD" }, // overlong U+07FF
+        { "\xED\xA0\x80"sv, U"\uFFFD\uFFFD\uFFFD" }, // surrogate U+D800
+        { "\xED\xBF\xBF"sv, U"\uFFFD\uFFFD\uFFFD" }, // surrogate U+DFFF
+        { "\xF0\x80\x80\x80"sv, U"\uFFFD\uFFFD\uFFFD\uFFFD" },
+        { "\xF0\x8F\xBF\xBF"sv, U"\uFFFD\uFFFD\uFFFD\uFFFD" },
+        { "\xF4\x90\x80\x80"sv, U"\uFFFD\uFFFD\uFFFD\uFFFD" }, // above U+10FFFF
+        { "\xF5\x80\x80\x80"sv, U"\uFFFD\uFFFD\uFFFD\uFFFD" },
+        { "\xF7\xBF\xBF\xBF"sv, U"\uFFFD\uFFFD\uFFFD\uFFFD" },
+        { "\xFF"sv, U"\uFFFD" },
+        { "\xFE"sv, U"\uFFFD" },
+        { "\xE0\x80\x41"sv, U"\uFFFD\uFFFDA" }, // E0, then 80, then 'A'
+        { "\xE0\xA0\x41"sv, U"\uFFFDA" },       // E0 A0 is a maximal subpart
+        { "\xF0\x90\x80\x41"sv, U"\uFFFDA" },
+        { "\xF4\x8F\xC3\xB6"sv, U"\uFFFD\u00F6" }, // cut off by the next lead byte
+    };
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.bytes));
+        CHECK(decodeAll(row.bytes) == row.expected);
+    }
+}
+
+TEST_CASE("Utf8Decoding.wellFormedBoundaryValuesStillDecode", "[Parser]")
+{
+    struct Row
+    {
+        std::string_view bytes;
+        char32_t expected;
+    };
+    auto const rows = std::vector<Row> {
+        { "\xC2\x80"sv, 0x0080 },          { "\xDF\xBF"sv, 0x07FF },           { "\xE0\xA0\x80"sv, 0x0800 },
+        { "\xED\x9F\xBF"sv, 0xD7FF },      { "\xEE\x80\x80"sv, 0xE000 },       { "\xEF\xBF\xBF"sv, 0xFFFF },
+        { "\xF0\x90\x80\x80"sv, 0x10000 }, { "\xF4\x8F\xBF\xBF"sv, 0x10FFFF },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.bytes));
+        CHECK(decodeAll(row.bytes) == std::u32string { row.expected });
+    }
+}
+
+TEST_CASE("Parser.IllFormedUtf8_ByteThatBrokeTheSequenceIsProcessedAsItself", "[Parser]")
+{
+    // An 8-bit CSI after E0 is not E0's second byte, so it is a CSI, not swallowed text.
+    struct Recording final: public vtparser::NullParserEvents
+    {
+        std::string events;
+        void print(char32_t ch) override
+        {
+            events += ch == 0xFFFD ? std::string { "<FFFD>" } : std::string { static_cast<char>(ch) };
+        }
+        size_t print(std::string_view s, size_t) override
+        {
+            events += s;
+            return 0;
+        }
+        void dispatchCSI(char function) override { events += std::format("<CSI {}>", function); }
+    };
+    auto listener = Recording {};
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("\xE0\x9B"
+                    "1mX"sv);
+    CHECK(listener.events == "<FFFD><CSI m>X");
+
+    // An overlong ESC is not an ESC.
+    auto overlong = Recording {};
+    auto q = vtparser::Parser<vtparser::ParserEvents>(overlong);
+    q.parseFragment("\xC0\x9B"
+                    "1mX"sv);
+    CHECK(overlong.events == "<FFFD><CSI m>X"); // C0 is one replacement; the 9B is the CSI it is
 }
 
 TEST_CASE("Parser.BulkText_ZeroWidthAfterAsciiBase", "[Parser]")
@@ -425,6 +633,9 @@ class EventRecorder final: public vtparser::NullParserEvents
     void print(char32_t codepoint) override { _text += codepoint; }
     size_t print(std::string_view chars, size_t /*cellCount*/) override
     {
+        // The bulk path hands on text only where the state machine would decode it without a replacement.
+        auto const decoded = decodedAsTheStateMachineDoes(chars);
+        REQUIRE(unicode::convert_to<char>(std::u32string_view { decoded }) == chars);
         _text += decodedAsTheStateMachineDoes(chars);
         return 0;
     }
@@ -721,6 +932,8 @@ TEST_CASE("Parser.BulkScan.KnownStreamsMatchTheStateMachine", "[Parser][BulkScan
         "0;t\x9C"
         "Z"sv,                                           // 8-bit CSI, 8-bit OSC and ST
         "\xE2\x94\x82\xE2\x94\x82 x \xF0\x9F\x98\x80"sv, // multi-byte text, split mid-character
+        "x\xC0"sv,  // a lead byte no text has, as the last byte of a read
+        "ab\xF5"sv, // ... likewise
     }));
     checkEveryTwoWaySplit(input);
 }
@@ -732,7 +945,7 @@ TEST_CASE("Parser.BulkScan.ReadsEndingInsideIllFormedUtf8MatchTheStateMachine", 
     // from there, in the middle of a stretch of ASCII, of mixed text, or on its own.
     auto const input = GENERATE(values<std::string_view>({
         "\xE2"
-        "abcdefghijklmnopqrstuvwxyz tail"sv, // a lead byte, then ASCII it takes for continuation bytes
+        "abcdefghijklmnopqrstuvwxyz tail"sv, // a lead byte, then ASCII, which ends it
         "head abcdefghijklmnopqrstuvwxyz\xF0\x9F"
         " tail"sv,                                               // a stretch, then a four-byte lead cut short
         "w\xC3\xB6rld \xC3 abcdefghijklmnopqrstuvwxyz"sv,        // mixed text, a lead cut short, a stretch

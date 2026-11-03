@@ -122,6 +122,23 @@ auto inline const vtCaptureBufferLog = core::log::Category("vt.ext.capturebuffer
 
 namespace // {{{ helper
 {
+    /// The cells, rounded up, that an image of @p pixels covers when a cell is @p cell pixels large.
+    /// An image is laid out in cells, which cannot be done before the display has reported how large one is
+    /// (a headless or daemon session never does): dividing by that zero would give infinite line and column
+    /// counts, and a walk over them that never ends.
+    /// @param pixels The image's size in pixels.
+    /// @param cell The size of a cell in pixels.
+    /// @return The extent in cells, or nothing while @p cell is not known.
+    [[nodiscard]] std::optional<GridSize> cellsCovering(ImageSize pixels, ImageSize cell)
+    {
+        if (cell.area() == 0)
+            return std::nullopt;
+        return GridSize {
+            .lines = LineCount::cast_from(std::ceil(pixels.height.as<double>() / cell.height.as<double>())),
+            .columns = ColumnCount::cast_from(std::ceil(pixels.width.as<double>() / cell.width.as<double>()))
+        };
+    }
+
     constexpr bool isLightColor(RGBColor color) noexcept
     {
         return ((5 * color.green) + (2 * color.red) + color.blue) > 8 * 128;
@@ -696,16 +713,10 @@ void Screen::appendToLastCluster(char32_t codepoint)
 
 void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
 {
-    // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
-    // on inside its run, and it must become the same U+FFFD here that it becomes there.
+    // Decoded as the state machine decodes text, from an idle decoder: @p text is cut only at character
+    // boundaries, and a byte that is not well-formed UTF-8 becomes the same U+FFFD here that it does there.
     auto utf8 = unicode::utf8_decoder_state {};
-    for (auto const byte: text)
-    {
-        auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));
-        if (!decoded)
-            continue;
-        auto const rawCp = *decoded;
-
+    auto const writeCodepoint = [&](char32_t const rawCp) {
         // A wrap can scroll a different line under the cell the last write ended in, which makes the
         // run's state stale: seed again after it, as writeTextInternal does.
         auto const wrapPending = _cursor.wrapPending;
@@ -719,7 +730,7 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
             // What seeding from the glyph's cell would replay: a space, alone.
             run.previousCodepoint = U' ';
             unicode::grapheme_process_init(U' ', run.segmenter);
-            continue;
+            return;
         }
 
         auto const codepoint = _cursor.charsets.map(rawCp);
@@ -728,7 +739,9 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
         else
             appendToLastCluster(codepoint);
         _terminal->resetInstructionCounter();
-    }
+    };
+    for (auto const byte: text)
+        vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte), writeCodepoint);
 }
 
 void Screen::writeTextEnd()
@@ -2977,13 +2990,23 @@ void Screen::singleShiftSelect(CharsetTable table)
     _cursor.charsets.singleShift(table);
 }
 
+void Screen::logImageDroppedForUnknownCellSize(std::string_view kind, ImageSize pixelSize)
+{
+    if (std::exchange(_cellSizeDropLog, CellSizeDropLog::Logged) == CellSizeDropLog::Logged)
+        return;
+    errorLog()(
+        "Dropping a {} image of {}: the cell size in pixels is not known (logged once).", kind, pixelSize);
+}
+
 void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
 {
-    auto const columnCount = ColumnCount::cast_from(
-        ceil(pixelSize.width.as<double>() / _terminal->cellPixelSize().width.as<double>()));
-    auto const lineCount = LineCount::cast_from(
-        ceil(pixelSize.height.as<double>() / _terminal->cellPixelSize().height.as<double>()));
-    auto const extent = GridSize { .lines = lineCount, .columns = columnCount };
+    // Dropped while the cell size is not known, and the log says so.
+    auto const extent = cellsCovering(pixelSize, _terminal->cellPixelSize());
+    if (!extent)
+    {
+        logImageDroppedForUnknownCellSize("sixel", pixelSize);
+        return;
+    }
     auto const autoScrollAtBottomMargin = !_terminal->isModeEnabled(DECMode::NoSixelScrolling);
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
@@ -2996,7 +3019,7 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
     shared_ptr<Image const> const imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
     renderImage(imageRef,
                 topLeft,
-                extent,
+                *extent,
                 imageOffset,
                 imageSize,
                 alignmentPolicy,
@@ -3054,7 +3077,10 @@ void Screen::renderImage(shared_ptr<Image const> image,
     // Compute the cursor line offset after rendering.
     // For Sixel images (identified by non-zero pixel imageSize), use VT340-compatible sixel band math.
     // For GIP images, simply place the cursor at the last row of the rendered area.
-    auto const isSixelImage = imageSize.width.value > 0 && imageSize.height.value > 0;
+    // Sixel's band math divides by the cell height, which is zero until the display has reported it; such an
+    // image is then placed like a GIP one.
+    auto const isSixelImage =
+        imageSize.width.value > 0 && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
     auto const cursorLineOffset = [&]() -> LineOffset {
         if (isSixelImage)
         {
@@ -9124,16 +9150,20 @@ bool Screen::renderImage(ImageFormat format,
 
     auto const topLeft = _cursor.position;
 
-    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> GridSize {
-        if (*gridSize.lines && *gridSize.columns)
+    // Without a grid size of its own the image is sized in cells, which needs the cell size in pixels.
+    auto const needsCellSize = !(*gridSize.lines && *gridSize.columns);
+    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> std::optional<GridSize> {
+        if (!needsCellSize)
             return gridSize;
-        auto const cellSize = _terminal->cellPixelSize();
-        auto const columns = ColumnCount::cast_from(
-            std::ceil(decodedPixelSize.width.as<double>() / cellSize.width.as<double>()));
-        auto const lines = LineCount::cast_from(
-            std::ceil(decodedPixelSize.height.as<double>() / cellSize.height.as<double>()));
-        return GridSize { .lines = *gridSize.lines ? gridSize.lines : lines,
-                          .columns = *gridSize.columns ? gridSize.columns : columns };
+        auto const covered = cellsCovering(decodedPixelSize, _terminal->cellPixelSize());
+        if (!covered)
+            return std::nullopt;
+        return GridSize { .lines = *gridSize.lines ? gridSize.lines : covered->lines,
+                          .columns = *gridSize.columns ? gridSize.columns : covered->columns };
+    };
+    auto const dropForWantOfCellSize = [&](ImageSize size) {
+        logImageDroppedForUnknownCellSize("inline", size);
+        return false;
     };
 
     if (format == ImageFormat::PNG)
@@ -9142,10 +9172,12 @@ bool Screen::renderImage(ImageFormat format,
         if (auto decodedData = decodePng(pixmap, decodedSize))
         {
             auto const effectiveGridSize = computeGridSize(decodedSize);
+            if (!effectiveGridSize)
+                return dropForWantOfCellSize(decodedSize);
             auto const imageRef = uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData));
             renderImage(imageRef,
                         topLeft,
-                        effectiveGridSize,
+                        *effectiveGridSize,
                         PixelOffset,
                         PixelSize,
                         alignmentPolicy,
@@ -9160,11 +9192,13 @@ bool Screen::renderImage(ImageFormat format,
     }
 
     auto const effectiveGridSize = computeGridSize(imageSize);
+    if (!effectiveGridSize)
+        return dropForWantOfCellSize(imageSize);
     auto const imageRef = uploadImage(format, imageSize, std::move(pixmap));
 
     renderImage(imageRef,
                 topLeft,
-                effectiveGridSize,
+                *effectiveGridSize,
                 PixelOffset,
                 PixelSize,
                 alignmentPolicy,

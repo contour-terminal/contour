@@ -1722,3 +1722,32 @@ TEST_CASE("Terminal.userVar.repaintsTheIndicator", "[statusline][uservar]")
     mc.writeToScreen("\033]1337;SetUserVar=foo=bnZpbQ==\a"); // "nvim"
     CHECK(indicatorTextAfterRefresh(mc.terminal).starts_with("[nvim]"));
 }
+
+TEST_CASE("StatusLineBuilder.privateUseGlyphsDoNotShiftTheRightSegment", "[statusline]")
+{
+    // #1925: a Nerd Font separator (U+E0BB) in an item's adornment must be measured as the grid lays it
+    // out, or the right segment ends short of the last column by one per glyph.
+    constexpr auto Columns = 80;
+    auto const render = [&](std::string_view right, std::string_view prelude) {
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(Columns) } };
+        mc.writeToScreen(prelude);
+        mc.writeToScreen("\033]2;title\033\\");
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("", "", right));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        REQUIRE(mc.terminal.refreshRenderBuffer());
+        auto const& screen = mc.terminal.indicatorStatusLineDisplay();
+        return std::pair { screen.grid().lineText(LineOffset(0)), screen.clusterWidthPolicy() };
+    };
+
+    // Both ways of measuring a cluster: DEC mode 2027 reset (the first codepoint decides) and set.
+    for (auto const prelude: { ""sv, "\033[?2027h"sv })
+    {
+        INFO(prelude);
+        auto const [line, policy] =
+            render("{Title:Right= \xEE\x82\xBB }{HistoryLineCount:Right= \xEE\x82\xBB }{VTType} ", prelude);
+        INFO(line);
+        CHECK(line.ends_with("VT525 "));
+        // The line, blanks included, fills the page exactly: nothing ends short, nothing overflows.
+        CHECK(columnsOnTheGrid(line, policy) == ColumnCount(Columns));
+    }
+}

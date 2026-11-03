@@ -399,6 +399,7 @@ if(LIBTERMINAL_TESTING)
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/Screen_binaryInput_test.cpp
         screen/StatusLineLayout_test.cpp
         screen/GitHead_test.cpp
         screen/StatusLineCommandCache_test.cpp

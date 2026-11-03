@@ -2855,8 +2855,8 @@ namespace
         {
             auto utf8 = unicode::utf8_decoder_state {};
             for (auto const byte: chars)
-                if (auto const codepoint = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte)))
-                    writeText(*codepoint);
+                vtparser::decodeUtf8Byte(
+                    utf8, static_cast<uint8_t>(byte), [this](char32_t codepoint) { writeText(codepoint); });
         }
 
         void writeTextEnd() { targetScreen.writeTextEnd(); }

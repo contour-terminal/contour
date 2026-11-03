@@ -4,6 +4,8 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/core/Utf8Prefix.hpp>
 
+#include <vtparser/Utf8Decoding.hpp>
+
 #include <libunicode/codepoint_properties.h>
 #include <libunicode/utf8.h>
 
@@ -71,11 +73,13 @@ namespace
         while (begin > 0 && isUtf8ContinuationByte(text[begin]))
             --begin;
         auto state = unicode::utf8_decoder_state {};
-        auto result = unicode::ConvertResult { unicode::Incomplete {} };
+        auto last = vtparser::ReplacementCharacter;
         for (auto const byte: text.substr(begin))
-            result = unicode::from_utf8(state, static_cast<uint8_t>(byte));
-        auto const* const decoded = std::get_if<unicode::Success>(&result);
-        return { decoded != nullptr ? decoded->value : U'�', text.size() - begin };
+            vtparser::decodeUtf8Byte(
+                state, static_cast<uint8_t>(byte), [&](char32_t codepoint) { last = codepoint; });
+        // A character cut short at the end of the text is malformed, too.
+        return { vtparser::isDecoderIdle(state) ? last : vtparser::ReplacementCharacter,
+                 text.size() - begin };
     }
 
     [[nodiscard]] bool isPunctuation(char32_t codepoint) noexcept

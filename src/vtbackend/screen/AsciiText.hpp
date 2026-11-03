@@ -63,32 +63,6 @@ constexpr auto AsciiScanBlockSize = size_t { 32 };
     return isAsciiOnly(tail) ? text.size() : tailBegin + firstNonAscii(tail);
 }
 
-/// Tests whether a UTF-8 decoder that is idle where @p text begins is idle again where byte @p offset
-/// begins, so that an ASCII byte there is a character of its own.
-///
-/// Mirrors unicode::from_utf8, which vtparser::decodeUtf8Byte decodes text with. A lead byte announces
-/// as many bytes as it has leading one bits, two to four, and starts a new character even when the one
-/// before is incomplete; every other byte that follows it, ASCII included, is taken as a continuation
-/// byte until the character has the bytes its lead announced. So only the last lead byte among the
-/// three bytes before @p offset can still be waiting for bytes there.
-/// @param text   The bytes of a run, decoded from its first byte on.
-/// @param offset An offset into @p text, at most its size.
-/// @return true if no character is incomplete where @p offset begins.
-[[nodiscard]] constexpr bool isDecoderIdleAt(std::string_view text, size_t offset) noexcept
-{
-    auto const announcedLength = [](char byte) {
-        return static_cast<size_t>(std::countl_one(static_cast<unsigned char>(byte)));
-    };
-    auto const lookBehindSize = std::min(offset, size_t { 3 });
-    auto const lookBehind = text.substr(offset - lookBehindSize, lookBehindSize) | std::views::reverse;
-    auto const lead = std::ranges::find_if(
-        lookBehind, [&](char byte) { return announcedLength(byte) >= 2 && announcedLength(byte) <= 4; });
-    if (lead == lookBehind.end())
-        return true;
-    auto const bytesSinceLead = static_cast<size_t>(lead - lookBehind.begin()) + 1;
-    return bytesSinceLead >= announcedLength(*lead);
-}
-
 /// The shortest interior of an ASCII stretch inside mixed text that is worth a bulk write. A shorter
 /// one costs more to set up than the per-codepoint path costs to write it. Tuned on the utf8 and
 /// utf8sparse throughput workloads: 2 costs dense text more than it saves, 4 does not, and longer
@@ -116,7 +90,7 @@ constexpr auto MinimumBulkAsciiStretch = size_t { 4 };
 /// Finds the parts of a run of mixed text that may be written straight into a line as ASCII.
 ///
 /// Calls @p onInterior with the interior of each ASCII stretch of @p text that is long enough to repay
-/// a bulk write and begins where the decoder is idle (isDecoderIdleAt), in order. A stretch's first byte
+/// a bulk write, in order. A stretch's first byte
 /// is never part of its interior, because it may join the character before it (GB9b: nothing breaks
 /// after a Prepend character); its last byte is, because whatever joins it later -- a combining mark,
 /// VS16 -- finds it as the last cell written. Every offset handed on is a character boundary, so the
@@ -141,7 +115,7 @@ constexpr void forEachBulkAsciiInterior(std::string_view text, size_t cellCount,
             return;
         auto const stretchEnd = stretchBegin + asciiPrefixLength(text.substr(stretchBegin));
         auto const interiorBegin = stretchBegin + 1;
-        if (stretchEnd - interiorBegin >= MinimumBulkAsciiStretch && isDecoderIdleAt(text, stretchBegin))
+        if (stretchEnd - interiorBegin >= MinimumBulkAsciiStretch)
             onInterior(interiorBegin, stretchEnd);
         position = stretchEnd;
     }

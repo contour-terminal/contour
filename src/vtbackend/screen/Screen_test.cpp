@@ -652,6 +652,99 @@ TEST_CASE("AppendChar.abandoned_width_revision_restores_the_head_cell", "[screen
     CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoints() == U"ℹ️");
 }
 
+namespace
+{
+/// What a line of @p screen holds as text, one string per cell with continuation cells left out, for the
+/// first @p count columns.
+[[nodiscard]] std::vector<std::u32string> clustersOnLine(Screen const& screen, ColumnCount count)
+{
+    auto result = std::vector<std::u32string> {};
+    for (auto const column: std::views::iota(0, unbox(count)))
+    {
+        auto const& cell = screen.at(LineOffset(0), ColumnOffset(column));
+        if (!cell.isFlagEnabled(CellFlag::WideCharContinuation))
+            result.emplace_back(cell.codepoints());
+    }
+    return result;
+}
+} // namespace
+
+TEST_CASE("Screen.wideEmojiSurviveReadsOfTheLine", "[screen][regression]")
+{
+    // #1375: an emoji written as a cluster -- a heart with VS16, a ZWJ sequence -- is two columns wide, with
+    // the character after it in a cell of its own. Reading the line back cell by cell (what the vi cursor
+    // crossing it does) must not change that.
+    struct Row
+    {
+        std::u32string_view text;
+        std::vector<std::u32string> clusters; // continuation cells left out
+        ColumnOffset cursor;
+    };
+    auto const rows = std::vector<Row> {
+        { U"A\u2764\uFE0F\u200D\U0001F525B",
+          { U"A", U"\u2764\uFE0F\u200D\U0001F525", U"B", U"", U"", U"", U"" },
+          ColumnOffset(4) },
+        { U"A\u2764\uFE0FB", { U"A", U"\u2764\uFE0F", U"B", U"", U"", U"", U"" }, ColumnOffset(4) },
+    };
+    for (auto const& row: rows)
+    {
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(8) } };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.terminal.setMode(DECMode::Unicode, true);
+        mock.writeToScreen(row.text);
+
+        CHECK(screen.cursor().position.column == row.cursor);
+        CHECK(clustersOnLine(screen, ColumnCount(8)) == row.clusters);
+        CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 2);
+        CHECK(screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlag::WideCharContinuation));
+        CHECK(screen.at(LineOffset(0), ColumnOffset(3)).codepoints() == U"B");
+
+        // Read the line the way the vi cursor does, through the mutable accessors, then look again.
+        auto& line = screen.grid().lineAt(LineOffset(0));
+        for (auto const column: std::views::iota(0, 8))
+            (void) line.useCellAt(ColumnOffset(column)).width();
+        CHECK(clustersOnLine(screen, ColumnCount(8)) == row.clusters);
+        CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 2);
+        CHECK(screen.at(LineOffset(0), ColumnOffset(3)).codepoints() == U"B");
+
+        // And through the text paths, which walk the cells too.
+        auto const expectedText = std::u32string { row.text };
+        CHECK(unicode::convert_to<char32_t>(std::string_view { line.toUtf8Trimmed() }) == expectedText);
+        CHECK(screen.grid().lineText(LineOffset(0)).starts_with(unicode::convert_to<char>(row.text)));
+        CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 2);
+        CHECK(screen.at(LineOffset(0), ColumnOffset(3)).codepoints() == U"B");
+    }
+}
+
+TEST_CASE("Screen.alternateScreenAdvancesLikeTheMainScreenUnderMode2027", "[screen][regression]")
+{
+    // #1461: 🏳️‍🌈, 📎 and 📡 are wide, and the alternate screen must advance the cursor by as
+    // many columns as the primary one does with DEC mode 2027 set.
+    auto const emojis = std::array<std::u32string_view, 3> { U"\U0001F3F3\uFE0F\u200D\U0001F308",
+                                                             U"\U0001F4CE",
+                                                             U"\U0001F4E1" };
+    for (auto const emoji: emojis)
+    {
+        auto const advanceOn = [&](std::string_view first, std::string_view second) {
+            auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+            mock.writeToScreen(first);
+            mock.writeToScreen(second);
+            mock.writeToScreen(emoji);
+            auto const column = mock.terminal.currentScreen().cursor().position.column;
+            mock.writeToScreen("B");
+            return std::pair { column, mock.terminal.currentScreen().cursor().position.column };
+        };
+        auto const primary = advanceOn("\033[?2027h"sv, ""sv);
+        auto const alternate = advanceOn("\033[?2027h"sv, "\033[?1049h"sv);
+        auto const modeSetOnAlternate = advanceOn("\033[?1049h"sv, "\033[?2027h"sv);
+        CHECK(primary.first == ColumnOffset(2));
+        CHECK(alternate.first == primary.first);
+        CHECK(alternate.second == primary.second);
+        CHECK(modeSetOnAlternate.first == primary.first);
+        CHECK(modeSetOnAlternate.second == primary.second);
+    }
+}
+
 TEST_CASE("Screen.copyArea_does_not_remeasure_cluster_widths", "[screen]")
 {
     // DECCRA reproduces cells; it does not re-write them. Re-measuring the cluster would apply
