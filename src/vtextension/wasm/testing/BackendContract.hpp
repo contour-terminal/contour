@@ -232,7 +232,7 @@ class RecordingHostContext final: public IHostContext
   public:
     /// @param answer What every host function call returns.
     explicit RecordingHostContext(std::expected<void, ExtensionError> answer = {}) noexcept:
-        _answer { std::move(answer) }
+        _answer { answer }
     {
     }
 
