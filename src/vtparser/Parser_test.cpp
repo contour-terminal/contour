@@ -230,6 +230,17 @@ TEST_CASE("Parser.PM")
     CHECK(listener.text == "ABCDEF");
 }
 
+TEST_CASE("Parser.DCS_Ignore prints none of its payload", "[Parser]")
+{
+    // A ':' among a DCS's parameters makes it one to ignore: everything up to its ST is dropped, UTF-8
+    // text included, and an 8-bit ST inside a character's bytes does not end it.
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("A\033P1:2q\xC3\xA9 \xE2\x9C\x85 x\033\\B"sv);
+    CHECK(p.state() == vtparser::State::Ground);
+    CHECK(listener.text == "AB");
+}
+
 TEST_CASE("Parser.APC")
 {
     MockParserEvents listener;

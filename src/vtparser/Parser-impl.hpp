@@ -218,8 +218,9 @@ constexpr ParserTable ParserTable::get() // {{{
             0x19_b,
             Range { .first = 0x1C_b, .last = 0x1F_b },
             Range { .first = 0x20_b, .last = 0x7F_b });
-    t.event(State::DCS_Ignore, Action::Print, Range { .first = 0xA0_b, .last = 0xFF_b });
-    t.event(State::DCS_Ignore, Action::Print, UnicodeRange);
+    // UTF-8 in the payload is ignored as the rest is: an 8-bit ST is told apart from a continuation byte
+    // before the table is consulted (processOnceViaStateMachine()), and nothing is printed.
+    t.event(State::DCS_Ignore, Action::Ignore, UnicodeRange);
 
     // DCS_Intermediate
     t.event(State::DCS_Intermediate,
