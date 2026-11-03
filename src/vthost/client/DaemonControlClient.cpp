@@ -55,6 +55,7 @@ namespace
     {
         Status = 0,
         Stop,
+        Upgrade,
     };
 
     /// How far a Control conversation has come.
@@ -71,14 +72,16 @@ namespace
         Phase phase = Phase::AwaitHello;
         std::optional<ControlError> failure;
         std::optional<proto::DaemonStatusReply> reply;
+        std::optional<proto::UpgradeDaemonReply> upgradeReply;
         proto::CapabilitySet offered; ///< What the daemon's ServerHello offered.
     };
 
     /// What a Control conversation came to.
     struct Answer
     {
-        std::optional<proto::DaemonStatusReply> reply; ///< The status, for Purpose::Status.
-        proto::CapabilitySet offered;                  ///< What the daemon's ServerHello offered.
+        std::optional<proto::DaemonStatusReply> reply;         ///< The status, for Purpose::Status.
+        std::optional<proto::UpgradeDaemonReply> upgradeReply; ///< The outcome, for Purpose::Upgrade.
+        proto::CapabilitySet offered;                          ///< What the daemon's ServerHello offered.
     };
 
     /// @return Whether a conversation ended with the daemon hanging up, cleanly or by a reset.
@@ -104,18 +107,39 @@ namespace
         return writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() });
     }
 
-    /// Runs one Control conversation over @p socket: hello, one request, then its answer (status) or the
-    /// daemon's EOF (stop).
-    /// @return The status for Purpose::Status, nothing for Purpose::Stop, with what the daemon offered; or
-    ///         the failure.
+    /// @param purpose What a conversation is for.
+    /// @return The capabilities it needs both ends to share: an upgrade needs LiveUpgrade besides.
+    [[nodiscard]] proto::CapabilitySet capabilitiesFor(Purpose purpose)
+    {
+        if (purpose == Purpose::Upgrade)
+            return proto::CapabilitySet::of(
+                { proto::Capability::DaemonControl, proto::Capability::LiveUpgrade });
+        return proto::CapabilitySet::of({ proto::Capability::DaemonControl });
+    }
+
+    /// @param offered What the daemon's ServerHello offered.
+    /// @param needed What the conversation needs it to.
+    /// @return Whether it offered all of it.
+    [[nodiscard]] bool offersAll(proto::CapabilitySet const& offered, proto::CapabilitySet const& needed)
+    {
+        return std::ranges::all_of(needed.idents, [&offered](auto const ident) {
+            return std::ranges::contains(offered.idents, ident);
+        });
+    }
+
+    /// Runs one Control conversation over @p socket: hello, one request, then its answer (status, upgrade) or
+    /// the daemon's EOF (stop).
+    /// @param request The request, sent once the daemon's ServerHello offered what @p purpose needs.
+    /// @return The status for Purpose::Status, the reply for Purpose::Upgrade, nothing for Purpose::Stop,
+    ///         with what the daemon offered; or the failure.
     core::async::Task<std::expected<Answer, ControlError>> converse(
         core::net::EventLoop* loop,
         std::unique_ptr<core::net::ISocket> socket,
         Purpose purpose,
-        proto::StopReason reason)
+        proto::DecodedPdu request)
     {
         auto writer = core::net::WriteQueue { *loop, socket.get(), ControlQueueBytes };
-        auto const offered = proto::CapabilitySet::of({ proto::Capability::DaemonControl });
+        auto const offered = capabilitiesFor(purpose);
         auto conversation = Conversation {};
         auto const ours = proto::SupportedVersions;
 
@@ -146,7 +170,7 @@ namespace
                     return false;
                 }
                 conversation.offered = hello->capabilities;
-                if (!hello->capabilities.contains(proto::Capability::DaemonControl))
+                if (!offersAll(hello->capabilities, offered))
                 {
                     conversation.failure = fail(ControlErrorCode::Unsupported,
                                                 hello->releaseVersion.empty()
@@ -154,10 +178,6 @@ namespace
                                                     : std::format("release {}", hello->releaseVersion));
                     return false;
                 }
-                auto const request =
-                    purpose == Purpose::Status
-                        ? proto::DecodedPdu { proto::DaemonStatusRequest {} }
-                        : proto::DecodedPdu { proto::StopDaemon { .reason = std::to_underlying(reason) } };
                 if (!enqueue(writer, 2, request))
                 {
                     conversation.failure = sendFailure();
@@ -179,6 +199,13 @@ namespace
                     conversation.phase = Phase::Done;
                     return false;
                 }
+            if (purpose == Purpose::Upgrade)
+                if (auto const* reply = std::get_if<proto::UpgradeDaemonReply>(&frame.pdu))
+                {
+                    conversation.upgradeReply = *reply;
+                    conversation.phase = Phase::Done;
+                    return false;
+                }
             return true; // anything else is not an answer to this request
         };
 
@@ -187,13 +214,17 @@ namespace
 
         if (conversation.failure)
             co_return std::unexpected { *conversation.failure };
-        if (conversation.reply)
-            co_return Answer { .reply = conversation.reply, .offered = std::move(conversation.offered) };
+        if (conversation.reply || conversation.upgradeReply)
+            co_return Answer { .reply = conversation.reply,
+                               .upgradeReply = std::move(conversation.upgradeReply),
+                               .offered = std::move(conversation.offered) };
         // The stop is done once the daemon hangs up after having been asked. A reset counts as hanging up
         // here: Windows resets a connection whose process closes it with input unread, and whether the
         // daemon is gone is what the reconnects that follow find out.
         if (purpose == Purpose::Stop && conversation.phase == Phase::AwaitAnswer && hungUp(outcome))
-            co_return Answer { .reply = std::nullopt, .offered = std::move(conversation.offered) };
+            co_return Answer { .reply = std::nullopt,
+                               .upgradeReply = std::nullopt,
+                               .offered = std::move(conversation.offered) };
         co_return std::unexpected { fail(
             ControlErrorCode::Transport,
             describe(outcome).value_or(std::string { "the daemon closed the connection" })) };
@@ -215,7 +246,8 @@ namespace
         auto socket = co_await open(connect);
         if (!socket)
             co_return std::unexpected { socket.error() };
-        auto answer = co_await converse(loop, std::move(*socket), Purpose::Status, proto::StopReason::User);
+        auto answer =
+            co_await converse(loop, std::move(*socket), Purpose::Status, proto::DaemonStatusRequest {});
         if (!answer)
             co_return std::unexpected { answer.error() };
         auto status = fromWire(*answer->reply);
@@ -233,7 +265,10 @@ namespace
         auto socket = co_await open(connect);
         if (!socket)
             co_return std::unexpected { socket.error() };
-        auto stopped = co_await converse(loop, std::move(*socket), Purpose::Stop, reason);
+        auto stopped = co_await converse(loop,
+                                         std::move(*socket),
+                                         Purpose::Stop,
+                                         proto::StopDaemon { .reason = std::to_underlying(reason) });
         if (!stopped)
             co_return std::unexpected { stopped.error() };
         // The daemon hung up; it has stopped once nothing accepts a connection any more.
@@ -249,6 +284,21 @@ namespace
             (*again).reset(); // it still accepts: it is not gone yet
             co_await loop->delay(ReconnectInterval);
         }
+    }
+
+    core::async::Task<std::expected<proto::UpgradeDaemonReply, ControlError>> requestUpgrade(
+        core::net::EventLoop* loop, SocketDaemonControl::Connector const* connect, std::string imageId)
+    {
+        auto socket = co_await open(connect);
+        if (!socket)
+            co_return std::unexpected { socket.error() };
+        auto answer = co_await converse(loop,
+                                        std::move(*socket),
+                                        Purpose::Upgrade,
+                                        proto::UpgradeDaemon { .imageId = std::move(imageId) });
+        if (!answer)
+            co_return std::unexpected { answer.error() };
+        co_return *std::move(answer->upgradeReply);
     }
 
     /// Runs @p work to completion on @p loop, bounded by @p timeout.
@@ -301,6 +351,12 @@ namespace
             return _inner.stop(reason);
         }
 
+        [[nodiscard]] std::expected<proto::UpgradeDaemonReply, ControlError> upgrade(
+            std::string imageId) override
+        {
+            return _inner.upgrade(std::move(imageId));
+        }
+
       private:
         std::unique_ptr<core::net::IoBackend> _backend = core::net::makeDefaultBackend();
         core::net::EventLoop _loop;
@@ -351,6 +407,11 @@ std::expected<DaemonStatus, ControlError> SocketDaemonControl::status()
 std::expected<void, ControlError> SocketDaemonControl::stop(proto::StopReason reason)
 {
     return bounded(_loop, requestStop(&_loop, &_connect, reason), _timeout);
+}
+
+std::expected<proto::UpgradeDaemonReply, ControlError> SocketDaemonControl::upgrade(std::string imageId)
+{
+    return bounded(_loop, requestUpgrade(&_loop, &_connect, std::move(imageId)), _timeout);
 }
 
 std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,

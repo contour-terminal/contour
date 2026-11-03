@@ -186,6 +186,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // window is moved by the daemon (requestRemoteMove), whose layout pushes are then realized here.
             // LayoutBatch so that the daemon says where each push ends, and the GUI reconciles each push
             // whole: a pane a move took out of one window is then always seen in the window it went to.
+            // LiveUpgrade so that a daemon replacing itself in place says so first, and the supervisor waits
+            // for that same daemon to come back rather than starting another one into the gap.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -201,7 +203,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::LayoutBatch,
                                                    vthost::proto::Capability::TabEditAcks,
                                                    vthost::proto::Capability::ColorPreference,
-                                                   vthost::proto::Capability::PanesReprojected }),
+                                                   vthost::proto::Capability::PanesReprojected,
+                                                   vthost::proto::Capability::LiveUpgrade }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = helloArea.transform([](auto const& size) {
@@ -331,13 +334,19 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 attachLog()("Attached to {}.", where);
                 break;
             case ConnectionState::Reconnecting:
+            case ConnectionState::Upgrading:
+                // An upgrade is a reconnect to the same daemon: adoptReconnect() keeps every binding then.
                 _client = nullptr;
                 _inputConnection = 0;
                 forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
                     _state = State::Reconnecting;
-                attachLog()("Lost the connection to {} ({}); reconnecting.", where, reason);
+                attachLog()("Lost the connection to {} ({}); {}.",
+                            where,
+                            reason,
+                            state == ConnectionState::Upgrading ? "waiting for it to come back"
+                                                                : "reconnecting");
                 break;
             case ConnectionState::Failed:
             case ConnectionState::Refused:

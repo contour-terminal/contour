@@ -21,9 +21,12 @@ enum class ConnectionState : uint8_t
     Failed = 3,       ///< The first connect failed; nothing is retried, the caller decides what follows.
     Refused = 4,      ///< A reconnect met a refusal or a permanent transport error; nothing is retried.
     Stopped = 5,      ///< stop() ended it, or the attempt was cancelled.
+    /// The daemon announced it replaces itself in place (DaemonUpgrading) and closed the connection: the same
+    /// daemon is waited for, and none is started meanwhile (ClientSupervisor's UpgradeHold).
+    Upgrading = 6,
 };
 
 /// Number of @c ConnectionState enumerators, derived from the last one; tables indexed by state pin to it.
-inline constexpr std::size_t ConnectionStateCount = static_cast<std::size_t>(ConnectionState::Stopped) + 1;
+inline constexpr std::size_t ConnectionStateCount = static_cast<std::size_t>(ConnectionState::Upgrading) + 1;
 
 } // namespace vthost::client

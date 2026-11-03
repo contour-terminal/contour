@@ -8,6 +8,8 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/platform/Clock.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -17,10 +19,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +37,7 @@
 #include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/client/Liveness.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 
 using core::async::Task;
@@ -87,14 +92,19 @@ class ScriptedTransport final: public vthost::ITransportFactory
 /// A daemon on the test's loop: one SessionHost, serving a NativeSession per connection.
 struct Daemon
 {
+    /// @param clock What the loop -- the daemon's and the client's alike -- tells time by.
+    explicit Daemon(core::platform::IClock& clock = core::platform::defaultSteadyClock()): clock(clock)
+    {
+        std::ignore = vthost::testing::newSession(*host);
+    }
+
+    core::platform::IClock& clock;
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
-    core::net::EventLoop loop { *source };
+    core::net::EventLoop loop { *source, clock };
     std::unique_ptr<vthost::SessionHost> host = makeHost();
     std::vector<std::unique_ptr<vthost::NativeSession>> sessions;
     std::vector<core::net::ISocket*> serverSockets; ///< Each connection's daemon end, to drop it.
     std::vector<std::unique_ptr<core::net::ISocket>> unanswered; ///< The daemon ends silent() holds open.
-
-    Daemon() { std::ignore = vthost::testing::newSession(*host); }
 
     ~Daemon()
     {
@@ -203,7 +213,8 @@ struct Supervised
                     std::move(connection->socket),
                     NativeClient::HandshakeOptions {
                         .token = connection->token,
-                        .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
+                        .capabilities = proto::CapabilitySet::of(
+                            { proto::Capability::AttachIntent, proto::Capability::LiveUpgrade }),
                         .attachIntent = std::move(intent) },
                     vtbackend::CommandBlockStoreLimits {},
                     NativeClient::UpdateHandler {},
@@ -553,4 +564,232 @@ TEST_CASE("a permanent transport error during reconnect stops retrying", "[vthos
                            ConnectionState::Refused });
     CHECK(h.states.back().reason == "run `ssh home` once");
     CHECK(h.transport->calls() == 2);
+}
+
+namespace
+{
+
+/// A daemon that upgrades in place: it closes every connection and is gone until the test says it is back,
+/// or a transport starts one. Its first connect, and every one once it is back, reach the test's daemon;
+/// every other goes to a real unix factory over a socket nobody serves, which reads as DaemonAbsent and
+/// starts a daemon by @ref ensured -- unless the factory holds that back.
+class UpgradingTransport final: public vthost::ITransportFactory
+{
+  public:
+    /// @param daemon The daemon its connections reach.
+    /// @param control What announces the upgrade to those connections.
+    /// @param nobody A unix socket path nobody serves.
+    UpgradingTransport(Daemon& daemon, vthost::DaemonControl& control, std::filesystem::path const& nobody):
+        _daemon(daemon), _control(control), _absent(nobody, [this] {
+            ++ensured;
+            return std::expected<void, TransportError> {};
+        })
+    {
+    }
+
+    [[nodiscard]] Task<std::expected<std::unique_ptr<Connection>, TransportError>> connect(
+        core::net::EventLoop& loop) override
+    {
+        return connectOn(&loop);
+    }
+
+    [[nodiscard]] std::string describe() const override { return "upgrading:"; }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return vthost::PeerTrust::Local; }
+    void holdDaemonStart(core::platform::SteadyTimePoint until) override { _absent.holdDaemonStart(until); }
+
+    std::atomic<int> ensured = 0; ///< How many daemon starts the factory made. Written on its worker.
+    bool back = false;            ///< Whether the upgraded daemon serves again.
+    std::size_t calls = 0;        ///< How many attempts were made.
+
+  private:
+    Task<std::expected<std::unique_ptr<Connection>, TransportError>> connectOn(core::net::EventLoop* loop)
+    {
+        if (calls++ != 0 && !back)
+        {
+            auto absent = co_await _absent.connect(*loop);
+            // A daemon the factory started is served from now on.
+            if (ensured == 0)
+                co_return absent;
+            back = true;
+        }
+        co_return _daemon.serving(liveUpgrade())(*loop);
+    }
+
+    /// @return What the daemon serves with: LiveUpgrade offered, and the upgrade announced by its control.
+    [[nodiscard]] vthost::NativeSessionServices liveUpgrade() const
+    {
+        auto services = vthost::NativeSessionServices {};
+        services.handshake.capabilities.idents.push_back(std::to_underlying(proto::Capability::LiveUpgrade));
+        services.daemon = _control;
+        return services;
+    }
+
+    Daemon& _daemon;
+    vthost::DaemonControl& _control;
+    vthost::UnixTransportFactory _absent;
+};
+
+/// A supervisor on a manual clock over an UpgradingTransport, driven turn by turn from the test.
+struct UpgradeRun
+{
+    UpgradeRun(): transport(std::make_shared<UpgradingTransport>(daemon, control, tmp.path() / "nobody"))
+    {
+        supervisor.emplace(
+            daemon.loop,
+            transport,
+            [this](std::unique_ptr<Connection> connection, proto::AttachIntent intent) {
+                return std::make_unique<NativeClient>(
+                    daemon.loop,
+                    std::move(connection->socket),
+                    NativeClient::HandshakeOptions {
+                        .token = connection->token,
+                        .capabilities = proto::CapabilitySet::of(
+                            { proto::Capability::AttachIntent, proto::Capability::LiveUpgrade }),
+                        .attachIntent = std::move(intent) },
+                    vtbackend::CommandBlockStoreLimits {},
+                    NativeClient::UpdateHandler {},
+                    NativeClient::ImageHandler {},
+                    NativeClient::SessionEventHandler {},
+                    NativeClient::LayoutHandler {});
+            },
+            proto::AttachIntent { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+            BackoffSchedule { .first = 1ms, .ceiling = 4ms },
+            [this](ConnectionState state, std::string const& reason) {
+                states.push_back(Entered { .state = state, .reason = reason });
+            });
+        daemon.loop.spawn(runToEnd(&*supervisor, &ended));
+    }
+
+    UpgradeRun(UpgradeRun const&) = delete;
+    UpgradeRun& operator=(UpgradeRun const&) = delete;
+    UpgradeRun(UpgradeRun&&) = delete;
+    UpgradeRun& operator=(UpgradeRun&&) = delete;
+
+    ~UpgradeRun()
+    {
+        supervisor->stop();
+        std::ignore = turnUntil([this] { return ended; });
+    }
+
+    /// Turns the loop until @p ready holds, at most @p turns times, without moving the clock.
+    [[nodiscard]] bool turnUntil(std::function<bool()> const& ready, int turns = 5000)
+    {
+        for ([[maybe_unused]] auto const turn: std::views::iota(0, turns))
+        {
+            if (ready())
+                return true;
+            std::ignore = daemon.loop.runOnce(1ms);
+        }
+        return ready();
+    }
+
+    /// Moves the clock on by @p seconds, a second at a time, letting the loop settle after each.
+    void letTimePass(int seconds)
+    {
+        for ([[maybe_unused]] auto const second: std::views::iota(0, seconds))
+        {
+            clock.advance(1s);
+            std::ignore = turnUntil([] { return false; }, 20);
+        }
+    }
+
+    /// The daemon announces its upgrade to every connection and closes them.
+    void upgrade() const
+    {
+        control.announceUpgrade("9.9.10");
+        control.closeObservers();
+    }
+
+    /// @return How many times @p state was entered.
+    [[nodiscard]] std::size_t count(ConnectionState state) const
+    {
+        return static_cast<std::size_t>(std::ranges::count(states, state, &Entered::state));
+    }
+
+    /// @return The states entered, in order.
+    [[nodiscard]] std::vector<ConnectionState> sequence() const
+    {
+        return std::ranges::to<std::vector>(states | std::views::transform(&Entered::state));
+    }
+
+    static Task<void> runToEnd(ClientSupervisor* supervisor, bool* ended)
+    {
+        co_await supervisor->run();
+        *ended = true;
+    }
+
+    core::testing::ScopedTempDir tmp { "contour-upgrade-hold" };
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
+    /// The daemon's control, which announces the upgrade to every connection. Before the daemon, whose
+    /// connections unsubscribe from it as they go.
+    vthost::testing::FakeDaemonControl control;
+    Daemon daemon { clock };
+    std::shared_ptr<UpgradingTransport> transport;
+    std::optional<ClientSupervisor> supervisor;
+    std::vector<Entered> states;
+    bool ended = false;
+};
+
+} // namespace
+
+// [afunix]: the attempts during the hold go to a real unix socket nobody serves.
+TEST_CASE("during the upgrade hold DaemonAbsent never runs ensureDaemon",
+          "[vthost][reconnect][upgrade][afunix]")
+{
+    auto h = UpgradeRun {};
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Connected) == 1; }));
+
+    h.upgrade();
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Upgrading) == 1; }));
+    CHECK(h.states.back().reason == "the daemon is upgrading to 9.9.10");
+    auto const before = h.transport->calls;
+    h.letTimePass(14);
+
+    // Retried with the normal backoff, each attempt meeting an absent daemon, and none starting one.
+    CHECK(h.transport->calls > before + 5);
+    CHECK(h.transport->ensured == 0);
+    CHECK(h.count(ConnectionState::Reconnecting) == 0);
+    CHECK(h.states.back().state == ConnectionState::Upgrading);
+}
+
+TEST_CASE("a daemon back within the upgrade hold is reconnected without a start",
+          "[vthost][reconnect][upgrade][afunix]")
+{
+    auto h = UpgradeRun {};
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Connected) == 1; }));
+    h.upgrade();
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Upgrading) == 1; }));
+    h.letTimePass(2);
+
+    h.transport->back = true;
+    h.letTimePass(1);
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Connected) == 2; }));
+    CHECK(h.sequence()
+          == std::vector { ConnectionState::Connecting,
+                           ConnectionState::Connected,
+                           ConnectionState::Upgrading,
+                           ConnectionState::Connected });
+    CHECK(h.transport->ensured == 0);
+}
+
+TEST_CASE("after the hold, a still-absent daemon is started as before",
+          "[vthost][reconnect][upgrade][afunix]")
+{
+    auto h = UpgradeRun {};
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Connected) == 1; }));
+    h.upgrade();
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Upgrading) == 1; }));
+    h.letTimePass(14);
+    REQUIRE(h.transport->ensured == 0);
+
+    h.letTimePass(2);
+    REQUIRE(h.turnUntil([&h] { return h.count(ConnectionState::Connected) == 2; }));
+    CHECK(h.transport->ensured == 1);
+    CHECK(h.sequence()
+          == std::vector { ConnectionState::Connecting,
+                           ConnectionState::Connected,
+                           ConnectionState::Upgrading,
+                           ConnectionState::Reconnecting,
+                           ConnectionState::Connected });
+    CHECK(h.states[3].reason.contains("did not come back from its upgrade"));
 }

@@ -227,6 +227,14 @@ class SymbolicLinks
 /// @return The production leases.
 [[nodiscard]] std::unique_ptr<ImageLeases> makeNativeImageLeases();
 
+/// Where a StagedImage's executable lies.
+enum class ImageOrigin : uint8_t
+{
+    Installed = 0, ///< Where it was installed: the layout stages nothing.
+    Staged,        ///< In an image of the store, named by StagedImage::imageId.
+    StagingFailed, ///< Where it was installed, because staging this release's image failed.
+};
+
 /// A staged image, ready to start a daemon from.
 struct StagedImage
 {
@@ -236,6 +244,13 @@ struct StagedImage
     /// The image's lease, held: whoever holds a StagedImage keeps the image from being pruned. Null
     /// for an InPlace layout, which has no image.
     std::unique_ptr<ImageLease> lease;
+
+    /// Where @ref executable lies.
+    ImageOrigin origin = ImageOrigin::Installed;
+
+    /// The image's name in its store, `<release>-<fingerprint>` (imageDirectoryName()), as a live upgrade
+    /// names it to a daemon; empty unless @ref origin is Staged.
+    std::string imageId = {};
 };
 
 /// What a DaemonImageStore stages, and where.

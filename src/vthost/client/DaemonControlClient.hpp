@@ -82,6 +82,14 @@ class DaemonControlPort
     /// @param reason Why the daemon is asked.
     /// @return Nothing once the daemon is gone, or why it is not known to be.
     [[nodiscard]] virtual std::expected<void, ControlError> stop(proto::StopReason reason) = 0;
+
+    /// Asks the daemon to upgrade itself in place (proto::UpgradeDaemon), keeping every session running.
+    /// @param imageId The image of the daemon's store to upgrade to (`<release>-<fingerprint>`); empty for
+    ///        the daemon's own installed executable.
+    /// @return The daemon's answer, as the wire spells it -- started, refused, or the exec failed -- or why
+    ///         none came: ControlErrorCode::Unsupported for a daemon that offers no live upgrade.
+    [[nodiscard]] virtual std::expected<proto::UpgradeDaemonReply, ControlError> upgrade(
+        std::string imageId) = 0;
 };
 
 /// Daemon control over Control-role connections, one per call. Runs a blocking call on @p loop, so it must
@@ -102,6 +110,8 @@ class SocketDaemonControl final: public DaemonControlPort
 
     [[nodiscard]] std::expected<DaemonStatus, ControlError> status() override;
     [[nodiscard]] std::expected<void, ControlError> stop(proto::StopReason reason) override;
+    [[nodiscard]] std::expected<proto::UpgradeDaemonReply, ControlError> upgrade(
+        std::string imageId) override;
 
   private:
     core::net::EventLoop& _loop;
@@ -120,6 +130,11 @@ inline constexpr auto DefaultControlTimeout = std::chrono::milliseconds { 2000 }
 /// snapshot inside the shutdown, before it hangs up: up to MaxSnapshotFileBytes, on whatever disk the state
 /// directory is on.
 inline constexpr auto DefaultStopTimeout = std::chrono::milliseconds { 15'000 };
+
+/// The control timeout of a port that upgrades the daemon. The daemon answers once the new image passed its
+/// readiness probe (handover::DefaultReadinessTimeout) and every session was captured, which a session still
+/// starting retries for up to a second.
+inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 15'000 };
 
 /// Daemon control over a real transport, owning the loop it runs on.
 /// @param transport How to reach the daemon. A probe passes one that never starts a daemon (a

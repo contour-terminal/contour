@@ -79,6 +79,7 @@
 #include <vthost/Transport.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Negotiation.hpp>
+#include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -4863,6 +4864,52 @@ TEST_CASE("a restarted listener re-snapshots the same sessions into the same pan
     CHECK(controller.connectionState() == ConnectionState::Connected);
     CHECK(log.windowsLost().empty());
     CHECK(pane.shows("before"));
+
+    // The same session reaches the same pane over the new connection.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(session)->writeToScreen("\r\nafter");
+        return 0;
+    });
+    CHECK(pane.shows("after"));
+    CHECK_FALSE(pane.pty().isClosed());
+    CHECK(controller.isBound(session.value));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][controller][reconnect][upgrade]")
+{
+    // A live upgrade: the daemon announces it, closes every connection, and comes back as the same run. The
+    // pane stays bound to its session -- nothing is lost, nothing realized again.
+    using vthost::client::ConnectionState;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    auto const session = daemon.seedSession("before");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("before"));
+    REQUIRE(controller.isBound(session.value));
+
+    daemon.onDaemon([&control] {
+        control.announceUpgrade("9.9.10");
+        control.closeObservers();
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(log.count(ConnectionState::Upgrading) == 1);
+    CHECK(log.count(ConnectionState::Reconnecting) == 0);
+    CHECK(log.windowsLost().empty());
 
     // The same session reaches the same pane over the new connection.
     daemon.onDaemon([&] {

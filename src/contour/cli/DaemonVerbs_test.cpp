@@ -56,6 +56,11 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
         return {};
     }
 
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(std::string) override
+    {
+        return vthost::proto::UpgradeDaemonReply {};
+    }
+
     std::vector<vthost::proto::StopReason> stops;
 
   private:

@@ -115,7 +115,9 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Un
 core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> UnixTransportFactory::connectOn(
     core::net::EventLoop* loop)
 {
-    if (_ensureDaemon)
+    // Held back while a daemon that announced its upgrade comes back: it is waited for, never doubled.
+    auto const held = loop->clock().now().time_since_epoch().count() < _holdUntil.load();
+    if (_ensureDaemon && !held)
         if (auto ensured = co_await ensureOffLoop(loop); !ensured)
             co_return std::unexpected(std::move(ensured.error()));
     auto socket = co_await core::net::connectUnix(loop, core::pathToUtf8(nativeSocketPath(_socketPath)));
@@ -123,6 +125,11 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Un
         co_return std::unexpected(classifyUnixConnectFailure(socket.error()));
     co_return std::make_unique<Connection>(
         Connection { .lifetime = {}, .socket = std::move(*socket), .token = {} });
+}
+
+void UnixTransportFactory::holdDaemonStart(core::platform::SteadyTimePoint until)
+{
+    _holdUntil = until.time_since_epoch().count();
 }
 
 std::string UnixTransportFactory::describe() const

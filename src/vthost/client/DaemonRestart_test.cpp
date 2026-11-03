@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <vthost/client/DaemonRestart.hpp>
@@ -25,6 +26,11 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
         if (stopError)
             return std::unexpected(*stopError);
         return {};
+    }
+
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(std::string) override
+    {
+        return vthost::proto::UpgradeDaemonReply {};
     }
 
     std::vector<vthost::proto::StopReason> stops;

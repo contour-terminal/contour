@@ -45,6 +45,8 @@ inline constexpr std::array<HostChipRow, vthost::client::ConnectionStateCount> H
     HostChipRow { vthost::client::ConnectionState::Failed, HostChipState::Disconnected },
     HostChipRow { vthost::client::ConnectionState::Refused, HostChipState::Disconnected },
     HostChipRow { vthost::client::ConnectionState::Stopped, HostChipState::Disconnected },
+    // The same daemon comes back: on the chip, a reconnect like any other.
+    HostChipRow { vthost::client::ConnectionState::Upgrading, HostChipState::Reconnecting },
 };
 
 namespace detail

@@ -25,6 +25,7 @@ TEST_CASE("hostChip.stateTable", "[hostchip]")
     CHECK(hostChipStateOf(ConnectionState::Failed) == HostChipState::Disconnected);
     CHECK(hostChipStateOf(ConnectionState::Refused) == HostChipState::Disconnected);
     CHECK(hostChipStateOf(ConnectionState::Stopped) == HostChipState::Disconnected);
+    CHECK(hostChipStateOf(ConnectionState::Upgrading) == HostChipState::Reconnecting);
 }
 
 TEST_CASE("hostChip.reconnectRoundTrip", "[hostchip]")

@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <string>
 
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
@@ -54,6 +55,12 @@ class FakeControl final: public vthost::client::DaemonControlPort
     [[nodiscard]] std::expected<void, vthost::client::ControlError> stop(vthost::proto::StopReason) override
     {
         return {};
+    }
+
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, vthost::client::ControlError> upgrade(
+        std::string) override
+    {
+        return vthost::proto::UpgradeDaemonReply {};
     }
 
   private:
