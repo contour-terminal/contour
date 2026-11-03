@@ -57,6 +57,8 @@
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/SystemPower.hpp>
+#include <core/platform/testing/FakeSystemPowerMonitor.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <algorithm>
@@ -102,13 +104,16 @@ struct TestTimeline
 /// @param colorPreference The light/dark preference its first hello states; none states none.
 /// @param attachSettings The emulation settings its hello states, the profile page size among them; none
 ///        states none, and so no client area.
+/// @param powerMonitor Where it hears of system sleep and wake; null for nowhere. It must outlive the
+///        controller.
 /// @return The controller, not yet connecting.
 [[nodiscard]] std::unique_ptr<contour::remote::NativeController> makeNativeController(
     vthost::TcpEndpoint endpoint,
     TestTimeline& timeline,
     contour::remote::NativeController::SessionSettingsSource sessionSettings = {},
     std::optional<vtbackend::ColorPreference> colorPreference = std::nullopt,
-    std::optional<vtbackend::Settings> attachSettings = std::nullopt)
+    std::optional<vtbackend::Settings> attachSettings = std::nullopt,
+    core::platform::ISystemPowerMonitor* powerMonitor = nullptr)
 {
     return std::make_unique<contour::remote::NativeController>(
         std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
@@ -118,7 +123,8 @@ struct TestTimeline
         std::move(sessionSettings),
         colorPreference,
         core::platform::defaultSteadyClock(),
-        timeline.timeline);
+        timeline.timeline,
+        powerMonitor);
 }
 
 /// Captures every log category into one buffer that several threads may write while another
@@ -221,7 +227,8 @@ class ClientFrameCounts
 {
   public:
     /// The PDU kinds counted.
-    static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest };
+    static constexpr auto Kinds =
+        std::array { vthost::proto::PduType::ResizeRequest, vthost::proto::PduType::Heartbeat };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
@@ -1760,6 +1767,9 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     ac->stop();
 }
 
+namespace
+{
+
 /// A profile whose terminal is 100x30 cells: what a window states in its hello before it knows its real size.
 [[nodiscard]] vtbackend::Settings profileSettings()
 {
@@ -1802,9 +1812,8 @@ struct ResizedWindow
         return daemon.onDaemon([&] { return daemon.host->pageSize(); });
     }
 
-    /// @return How many ResizeRequests the daemon received so far. Fails the case if the client's bytes did
-    /// not
-    ///         decode, for the count is then incomplete.
+    /// @return How many ResizeRequests the daemon received so far. Fails the case if the client's bytes
+    ///         did not decode, for the count is then incomplete.
     [[nodiscard]] uint64_t resizeRequests() const
     {
         CHECK(daemon.clientFrames.decodeErrors() == 0);
@@ -1829,6 +1838,8 @@ struct ResizedWindow
         return owned;
     }
 };
+
+} // namespace
 
 // The hello states the area the client has, not the profile's: the daemon, which projects every pane onto the
 // area of the latest client, would otherwise shrink them to a size no display has.
@@ -3822,7 +3833,8 @@ struct FollowingGui
             contour::remote::NativeController::SessionSettingsSource {},
             std::nullopt,
             core::platform::defaultSteadyClock(),
-            timeline.timeline);
+            timeline.timeline,
+            nullptr);
         controller = owned.get();
         return owned;
     }
@@ -4835,6 +4847,12 @@ struct NativeControllerTestAccess
         done.get_future().wait();
     }
 
+    /// Runs @p action on the controller's reactor thread, after everything posted to it before.
+    static void post(contour::remote::NativeController& controller, std::function<void()> action)
+    {
+        controller._reactor.post(std::move(action));
+    }
+
     /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.
     static void killReactor(contour::remote::NativeController& controller)
     {
@@ -4852,6 +4870,91 @@ struct NativeControllerTestAccess
 };
 
 } // namespace contour::remote
+
+TEST_CASE("a controller subscribes to power events for its lifetime", "[attach][controller][power]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+
+    auto controller =
+        makeNativeController(daemon.endpoint(), timeline, {}, std::nullopt, std::nullopt, &power);
+    CHECK(power.subscriberCount() == 1);
+
+    controller.reset();
+    CHECK(power.subscriberCount() == 0);
+}
+
+// Review focus 3: while no connection is up there is no client to probe with, and the wake is a hint, not a
+// verdict -- it must neither reach the connection that was lost nor stop the reconnect.
+TEST_CASE("a wake while reconnecting is dropped", "[attach][controller][reconnect][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, {}, std::nullopt, std::nullopt, &power);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+    // The wake was posted before this: once this ran on the reactor, the wake has too.
+    // Shared, so a reactor that runs it after a timed-out wait still sets a live promise.
+    auto const drained = std::make_shared<std::promise<void>>();
+    contour::remote::NativeControllerTestAccess::post(controller, [drained] { drained->set_value(); });
+    REQUIRE(drained->get_future().wait_for(5s) == std::future_status::ready);
+    CHECK(controller.connectionState() == ConnectionState::Reconnecting);
+
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+
+    controller.stop();
+}
+
+// The OS says the machine slept: the daemon is asked whether it is still there, and as it answers, the
+// connection stays up -- no reconnect, so no hello that restates the profile's size over the panes' real one.
+TEST_CASE("a wake probes the daemon", "[attach][controller][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, {}, std::nullopt, std::nullopt, &power);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto const heartbeats = [&daemon] {
+        CHECK(daemon.clientFrames.decodeErrors() == 0);
+        return daemon.clientFrames.count(vthost::proto::PduType::Heartbeat);
+    };
+    auto const heartbeatsBefore = heartbeats();
+
+    power.deliver(core::platform::SystemPowerEvent::WillSleep);
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+
+    REQUIRE(waitUntil([&] { return heartbeats() > heartbeatsBefore; }, 200));
+    // The daemon answered the probe as it read it, so a push it makes now goes out behind the answer: once
+    // the client holds that push, it has taken the answer in, and a connection given up on it would show by
+    // now.
+    auto const before = controller.settledLayout();
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->model().setTabTitle(tab->id(), "awake");
+        return 0;
+    });
+    CHECK(waitUntil([&] { return controller.settledLayout() != before; }));
+    CHECK(log.count(ConnectionState::Reconnecting) == 0);
+    CHECK(controller.connectionState() == ConnectionState::Connected);
+
+    controller.stop();
+}
 
 TEST_CASE("a pane closed as its connection ends is closed once the same daemon answers again",
           "[attach][controller][reconnect]")
@@ -5193,7 +5296,8 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
         {},
         std::nullopt,
         core::platform::defaultSteadyClock(),
-        timeline.timeline
+        timeline.timeline,
+        nullptr
     };
     controller.startConnecting();
     REQUIRE(waitUntil([&] { return started.load(); }));
@@ -5522,7 +5626,8 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
             {},
             std::nullopt,
             core::platform::defaultSteadyClock(),
-            timeline.timeline
+            timeline.timeline,
+            nullptr
         };
         auto const connected = controller.connectAndWait(10s);
         REQUIRE_FALSE(connected.has_value());
@@ -5590,7 +5695,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         {},
         std::nullopt,
         core::platform::defaultSteadyClock(),
-        timeline.timeline
+        timeline.timeline,
+        nullptr
     };
     auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
     REQUIRE_FALSE(connected.has_value());

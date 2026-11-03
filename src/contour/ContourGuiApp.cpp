@@ -1374,6 +1374,24 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     else
         errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
 
+    // A wake has the daemon probed instead of the connection given up, which would reconnect and shrink the
+    // panes to the profile's size. Without a monitor the liveness ticks still notice a sleep, only later.
+    // A platform with no backend (a BSD, a Flatpak sandbox, a build without systemd) is expected and logged
+    // where attaching is; an OS that refused the registration is not, and is said where the user sees it.
+    // The attach starts once per process, so either is said once.
+    if (!_powerMonitor)
+    {
+        if (auto monitor = core::platform::makeNativeSystemPowerMonitor(); monitor)
+            _powerMonitor = *std::move(monitor);
+        else if (monitor.error() == core::platform::PlatformError::NotImplemented)
+            attachLog()("attach: no system sleep/wake notifications on this platform; a sleep is noticed "
+                        "later, by the connection's liveness check.");
+        else
+            errorLog()("attach: no system sleep/wake notifications ({}); a sleep is noticed later, by the "
+                       "connection's liveness check.",
+                       core::platform::toString(monitor.error()));
+    }
+
     _nativeController = std::make_unique<remote::NativeController>(
         std::move(target->transport),
         std::move(target->intent),
@@ -1382,7 +1400,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         [this] { return currentEmulationSettings(); },
         _colorPreference,
         core::platform::defaultSteadyClock(),
-        _startupTimeline);
+        _startupTimeline,
+        _powerMonitor.get());
     // A window spawned to host a daemon window binds itself here (from its Main.qml, via
     // consumeAttachWindow) instead of creating a fresh first tab.
     _sessionManager.setAttachWindowBinder(

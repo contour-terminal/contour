@@ -28,6 +28,8 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/platform/SystemPower.hpp>
+
 #include <QtCore/QObject>
 
 #include <algorithm>
@@ -132,6 +134,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///        Borrowed: it must outlive the controller.
     /// @param timeline Where the connect, the layout and the first session are stamped. Borrowed: it must
     ///        outlive the controller.
+    /// @param powerMonitor Where the system's sleep and wake are heard of, so a wake has the daemon probed
+    ///        rather than the connection given up; null where nothing reports them. Subscribed to for the
+    ///        controller's lifetime. Borrowed: it must outlive the controller.
     NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
                      vthost::proto::AttachIntent intent,
                      std::string profileName,
@@ -139,7 +144,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
                      SessionSettingsSource sessionSettings,
                      std::optional<vtbackend::ColorPreference> colorPreference,
                      core::platform::IClock const& clock,
-                     vthost::latency::StartupTimeline& timeline);
+                     vthost::latency::StartupTimeline& timeline,
+                     core::platform::ISystemPowerMonitor* powerMonitor);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~NativeController() override;
@@ -643,6 +649,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param layout A window's layout the daemon just pushed.
     void replayUnsentCloses(vthost::proto::LayoutState const& layout);
 
+    /// Reactor-side: hands a system sleep or wake to the connection that is up; dropped while none is, as
+    /// the next connection starts with a fresh liveness verdict anyway.
+    /// @param event What the system did.
+    void notePowerEvent(core::platform::SystemPowerEvent event);
+
     /// Reactor-side: closes @p session's pane on the daemon, or remembers to when no connection can take it.
     /// @param session The session whose pane the user closed.
     void closePaneOnReactor(uint64_t session);
@@ -874,6 +885,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The windows the last reconnect lost, announced with the first layout that came instead. Under _mutex.
     std::vector<uint64_t> _lostWindows;
     uint64_t _nextBindingSerial = 1; ///< @see Binding::serial. Under _mutex.
+    /// Keeps the power monitor's handler, which posts each event to notePowerEvent() on the reactor; empty
+    /// without a monitor. ~NativeController() stops and joins the reactor before members die, so a handler
+    /// may still post onto the stopped loop until this unsubscribes: that is safe because
+    /// ReactorThread::post() only queues (the lambda is destroyed with the loop, never run), not because of
+    /// where this member sits. Unsubscribing waits out a handler that is running.
+    core::platform::PowerSubscription _powerSubscription;
 };
 
 } // namespace contour::remote

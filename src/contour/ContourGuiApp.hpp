@@ -50,6 +50,7 @@
 #include <core/async/ThreadPoolExecutor.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/SystemPower.hpp>
 
 #include <QtCore/QPointer>
 #include <QtGui/QPalette>
@@ -1171,6 +1172,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// When each step from process start to the first frame happened. Declared before the attach
     /// engines, which stamp it, so it outlives them.
     vthost::latency::StartupTimeline _startupTimeline;
+
+    /// Where the native attach engine hears of the system's sleep and wake; created with it, once, and
+    /// null where the platform (or session) reports none. Declared before the engine, which subscribes
+    /// to it, so it outlives the engine.
+    std::unique_ptr<core::platform::ISystemPowerMonitor> _powerMonitor;
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.

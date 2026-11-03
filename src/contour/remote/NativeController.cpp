@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Logging.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/NativeController.hpp>
@@ -24,8 +25,6 @@ using vthost::client::RemoteScreen;
 
 namespace
 {
-    auto const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
-
     /// @return Whether @p state ends a run: nothing but a new run's Connecting follows it.
     [[nodiscard]] constexpr bool isEnding(vthost::client::ConnectionState state) noexcept
     {
@@ -54,7 +53,8 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
                                    SessionSettingsSource sessionSettings,
                                    std::optional<vtbackend::ColorPreference> colorPreference,
                                    core::platform::IClock const& clock,
-                                   vthost::latency::StartupTimeline& timeline):
+                                   vthost::latency::StartupTimeline& timeline,
+                                   core::platform::ISystemPowerMonitor* powerMonitor):
     RemoteController(clock),
     _transport(std::move(transport)),
     _intent(std::move(intent)),
@@ -65,6 +65,36 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
 {
     if (colorPreference)
         _statedColors = wireOf(*colorPreference);
+    // On the monitor's platform thread: only marshaled from there, as its contract asks.
+    if (powerMonitor != nullptr)
+        _powerSubscription = powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
+            // The monitor's dispatch is noexcept, so a throw here would terminate; a hint lost to a failed
+            // post is harmless, since the late-tick check still notices the sleep.
+            try
+            {
+                _reactor.post([this, event] { notePowerEvent(event); });
+            }
+            catch (...)
+            {
+            }
+        });
+}
+
+void NativeController::notePowerEvent(core::platform::SystemPowerEvent event)
+{
+    if (_client == nullptr)
+        return;
+    switch (event)
+    {
+        case core::platform::SystemPowerEvent::WillSleep:
+            attachLog()("attach: the system is going to sleep");
+            _client->noteSystemSleep();
+            break;
+        case core::platform::SystemPowerEvent::DidWake:
+            attachLog()("attach: the system woke");
+            _client->noteSystemWake();
+            break;
+    }
 }
 
 void NativeController::postSessionCreation(std::function<void(NativeClient&)> create)
@@ -1103,7 +1133,9 @@ void NativeController::flushGeometry()
         // once there is an area to compare and a connection that heard the hello: a flush before the
         // layout composes to nothing, and one before the handshake answers no one, and spending it there
         // would have the next flush state the very area the hello did — one more re-projection of every
-        // pane on the daemon.
+        // pane on the daemon. The connection half is defensive: only a reconnect composes an area before
+        // its handshake answers, and that reconnect re-asserts every pane after its first layout anyway
+        // (GeometryReassert), so spending the hello early there changes nothing a daemon would see.
         auto resendAll = false;
         auto const composed = composedClientArea();
         if (composed.has_value() && _client != nullptr)
