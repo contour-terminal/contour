@@ -2225,3 +2225,303 @@ TEST_CASE("KittyGraphics.playback.tick_and_parser_do_not_race", "[kitty][threadi
     CHECK(mock.terminal.kittyAnimationDue().has_value());
 }
 // }}}
+
+namespace
+{
+/// A 2x2 pixel image occupies exactly one 2x2-pixel cell, so a placement is one cell on the page.
+struct PlacementFixture
+{
+    MockTerm<vtpty::MockPty> mock { PageSize { LineCount(4), ColumnCount(8) },
+                                    HistoryLimits::plain(LineCount(10)) };
+
+    PlacementFixture() { mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) }); }
+
+    /// Transmits (without displaying) a 2x2 image under @p imageId.
+    void transmit(uint32_t imageId)
+    {
+        auto pixels = std::string {};
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            pixels += "\xFF\x00\x00\xFF"sv;
+        mock.writeToScreen(
+            std::format("\033_Ga=t,f=32,s=2,v=2,i={};{}\033\\", imageId, core::base64::encode(pixels)));
+    }
+
+    /// Sends `a=p` with @p keys at the 0-based @p column of the 0-based @p line of the page.
+    void placeAt(std::string_view keys, int line, int column)
+    {
+        mock.writeToScreen(std::format("\033[{};{}H\033_Ga=p,C=1,{}\033\\", line + 1, column + 1, keys));
+    }
+
+    /// Sends `a=p` with @p keys at the 0-based @p column of the first line.
+    void place(std::string_view keys, int column) { placeAt(keys, 0, column); }
+
+    /// Scrolls the page up by @p lines, which carries the top rows into the scrollback.
+    void scrollUp(int lines)
+    {
+        mock.writeToScreen(std::format("\033[4;1H{}", std::string(static_cast<size_t>(lines), '\n')));
+    }
+
+    /// Sends `a=d` with @p keys.
+    void remove(std::string_view keys) { mock.writeToScreen(std::format("\033_Ga=d,{}\033\\", keys)); }
+
+    /// @param line 0-based page line; negative reaches into the scrollback.
+    [[nodiscard]] bool isPlacedAt(int line, int column)
+    {
+        return mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column)).imageFragment()
+               != nullptr;
+    }
+
+    [[nodiscard]] bool isPlacedAt(int column) { return isPlacedAt(0, column); }
+
+    /// @return the pixels the placement at the cell shows, or nothing when there is none.
+    [[nodiscard]] std::vector<uint8_t> pixelsAt(int line, int column)
+    {
+        auto const fragment =
+            mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column)).imageFragment();
+        if (!fragment)
+            return {};
+        auto const& data = fragment->rasterizedImage().image().data();
+        return { data.begin(), data.end() };
+    }
+
+    /// @return whether placing image @p imageId still works, i.e. its data is resident.
+    [[nodiscard]] bool isResident(uint32_t imageId)
+    {
+        mock.terminal.flushInput();
+        // The probe is itself a placement; give it an id of its own and take it away again so it
+        // neither disturbs nor keeps alive what the test is looking at.
+        place(std::format("i={},p=999", imageId), 7);
+        auto const resident = !mock.terminal.peekInput().contains("ENOENT") && isPlacedAt(7);
+        remove(std::format("d=i,i={},p=999", imageId));
+        return resident;
+    }
+};
+} // namespace
+
+TEST_CASE("KittyGraphics.placement_id.same_pair_replaces_the_placement", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+    REQUIRE(f.isPlacedAt(0));
+
+    f.place("i=1,p=5", 3);
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(3));
+}
+
+TEST_CASE("KittyGraphics.placement_id.transmit_and_display_replaces_too", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+    REQUIRE(f.isPlacedAt(0));
+
+    auto pixels = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        pixels += "\x00\xFF\x00\xFF"sv;
+    f.mock.writeToScreen(
+        std::format("\033[1;5H\033_Ga=T,C=1,f=32,s=2,v=2,i=1,p=5;{}\033\\", core::base64::encode(pixels)));
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(4));
+}
+
+TEST_CASE("KittyGraphics.placement_id.distinct_pairs_coexist", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.transmit(2);
+    f.place("i=1,p=5", 0);
+    f.place("i=1,p=6", 1); // other placement id
+    f.place("i=2,p=5", 2); // other image id
+    CHECK(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(1));
+    CHECK(f.isPlacedAt(2));
+}
+
+TEST_CASE("KittyGraphics.placement_id.without_p_every_placement_is_distinct", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1", 0);
+    f.place("i=1", 1);
+    f.place("i=1,p=5", 2);
+    f.place("i=1", 3);
+    CHECK(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(1));
+    CHECK(f.isPlacedAt(2));
+    CHECK(f.isPlacedAt(3));
+}
+
+TEST_CASE("KittyGraphics.placement_id.delete_by_image_and_placement", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.transmit(2);
+    f.place("i=1,p=5", 0);
+    f.place("i=1,p=6", 1);
+    f.place("i=2,p=5", 2);
+    f.place("i=1", 3);
+
+    f.remove("d=i,i=1,p=5");
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(1));
+    CHECK(f.isPlacedAt(2));
+    CHECK(f.isPlacedAt(3));
+}
+
+TEST_CASE("KittyGraphics.placement_id.delete_by_image_alone_removes_every_placement", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.transmit(2);
+    f.place("i=1,p=5", 0);
+    f.place("i=1,p=6", 1);
+    f.place("i=2,p=5", 2);
+
+    f.remove("d=i,i=1");
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK_FALSE(f.isPlacedAt(1));
+    CHECK(f.isPlacedAt(2));
+}
+
+TEST_CASE("KittyGraphics.placement_id.upper_case_delete_frees_data_when_unreferenced", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+    f.place("i=1,p=6", 1);
+
+    // Another placement remains, so the data stays ...
+    f.remove("d=I,i=1,p=5");
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(1));
+    CHECK(f.isResident(1));
+
+    // ... and goes with the last one.
+    f.remove("d=I,i=1,p=6");
+    CHECK_FALSE(f.isPlacedAt(1));
+    CHECK_FALSE(f.isResident(1));
+}
+
+TEST_CASE("KittyGraphics.placement_id.is_ignored_without_an_image_id", "[kitty]")
+{
+    // kitty stores no placement id for an anonymous image, so two such placements never replace
+    // one another.
+    auto f = PlacementFixture {};
+    auto pixels = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        pixels += "\xFF\x00\x00\xFF"sv;
+    auto const payload = core::base64::encode(pixels);
+    f.mock.writeToScreen(std::format("\033[1;1H\033_Ga=T,C=1,f=32,s=2,v=2,p=5;{}\033\\", payload));
+    f.mock.writeToScreen(std::format("\033[1;3H\033_Ga=T,C=1,f=32,s=2,v=2,p=5;{}\033\\", payload));
+    CHECK(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(2));
+}
+
+TEST_CASE("KittyGraphics.placement_id.scrollback_placement_keeps_the_data_alive", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=6", 0);
+    f.placeAt("i=1,p=5", 3, 1);
+    f.scrollUp(1);
+    REQUIRE(f.isPlacedAt(-1, 0)); // p=6 is in the scrollback now
+    REQUIRE(f.isPlacedAt(2, 1));
+
+    // p=5 goes; p=6, out of sight, still references the image.
+    f.remove("d=I,i=1,p=5");
+    CHECK_FALSE(f.isPlacedAt(2, 1));
+    CHECK(f.isPlacedAt(-1, 0));
+    CHECK(f.isResident(1));
+
+    // And with the last one the data goes, scrolled away or not.
+    f.remove("d=I,i=1,p=6");
+    CHECK_FALSE(f.isPlacedAt(-1, 0));
+    CHECK_FALSE(f.isResident(1));
+}
+
+TEST_CASE("KittyGraphics.placement_id.replace_finds_the_placement_in_the_scrollback", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=6", 0);
+    f.scrollUp(1);
+    REQUIRE(f.isPlacedAt(-1, 0));
+
+    f.placeAt("i=1,p=6", 1, 2);
+    CHECK_FALSE(f.isPlacedAt(-1, 0));
+    CHECK(f.isPlacedAt(1, 2));
+}
+
+TEST_CASE("KittyGraphics.placement_id.survives_a_frame_advance", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.mock.terminal.setCellPixelSize(ImageSize { Width(1), Height(1) });
+    f.mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1,p=5,C=1;/wAA\033\\"sv);
+    f.mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=20;AP8A\033\\"sv);
+    f.mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    f.mock.discardPendingReplies();
+    REQUIRE(f.pixelsAt(0, 0) == green()); // the cell holds frame 2 now
+
+    // The advanced placement is still the one named (7, 5): placing it again replaces it ...
+    f.place("i=7,p=5", 3);
+    CHECK_FALSE(f.isPlacedAt(0));
+    CHECK(f.isPlacedAt(3));
+    f.place("i=7,p=5", 4);
+    CHECK_FALSE(f.isPlacedAt(3));
+    CHECK(f.isPlacedAt(4));
+
+    // ... and deleting it finds it.
+    f.remove("d=i,i=7,p=5");
+    CHECK_FALSE(f.isPlacedAt(4));
+}
+
+TEST_CASE("KittyGraphics.placement_id.delete_of_something_absent_changes_nothing", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+
+    f.remove("d=i,i=1,p=77"); // no such placement of a real image
+    CHECK(f.isPlacedAt(0));
+    f.remove("d=I,i=1,p=77"); // upper case: nothing matched, so nothing is freed either
+    CHECK(f.isPlacedAt(0));
+    CHECK(f.isResident(1));
+    f.remove("d=I,i=99,p=5"); // an image that was never transmitted
+    CHECK(f.isPlacedAt(0));
+    CHECK(f.isResident(1));
+}
+
+TEST_CASE("KittyGraphics.placement_id.placing_an_unknown_image_leaves_the_placement_alone", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+
+    f.mock.terminal.flushInput();
+    f.place("i=42,p=5", 3);
+    CHECK(f.mock.terminal.peekInput().contains("ENOENT"));
+    CHECK(f.isPlacedAt(0));
+    CHECK_FALSE(f.isPlacedAt(3));
+}
+
+TEST_CASE("KittyGraphics.placement_id.transmit_and_display_replacement_shows_the_new_pixels", "[kitty]")
+{
+    auto f = PlacementFixture {};
+    f.transmit(1);
+    f.place("i=1,p=5", 0);
+    REQUIRE(f.pixelsAt(0, 0).front() == 0xFF);
+    REQUIRE(f.pixelsAt(0, 0)[1] == 0x00);
+
+    auto pixels = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        pixels += "\x00\xFF\x00\xFF"sv;
+    f.mock.writeToScreen(
+        std::format("\033[1;5H\033_Ga=T,C=1,f=32,s=2,v=2,i=1,p=5;{}\033\\", core::base64::encode(pixels)));
+    CHECK_FALSE(f.isPlacedAt(0));
+    auto const shown = f.pixelsAt(0, 4);
+    REQUIRE_FALSE(shown.empty());
+    CHECK(shown[0] == 0x00);
+    CHECK(shown[1] == 0xFF);
+}

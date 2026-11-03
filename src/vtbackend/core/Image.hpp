@@ -87,6 +87,10 @@ enum class ImageFormat : uint8_t
 // clang-format off
 namespace detail { struct ImageId {}; }
 using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+
+namespace detail { struct KittyPlacementIdTag {}; }
+/// A kitty graphics placement id (`p=`); zero means the placement has none.
+using KittyPlacementId = boxed::boxed<uint32_t, detail::KittyPlacementIdTag>;
 // clang-format on
 
 struct ImageStats
@@ -226,7 +230,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     ImageSize cellSize,
                     ImageLayer layer = ImageLayer::Replace,
                     PixelCoordinate imageOffset = {},
-                    ImageSize imageSubSize = {}):
+                    ImageSize imageSubSize = {},
+                    KittyPlacementId kittyPlacementId = {}):
         _image { std::move(image) },
         _alignmentPolicy { alignmentPolicy },
         _resizePolicy { resizePolicy },
@@ -235,7 +240,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
         _cellSize { cellSize },
         _layer { layer },
         _imageOffset { imageOffset },
-        _imageSubSize { imageSubSize }
+        _imageSubSize { imageSubSize },
+        _kittyPlacementId { kittyPlacementId }
     {
         ++ImageStats::get().rasterized;
     }
@@ -259,6 +265,11 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     ImageLayer layer() const noexcept { return _layer; }
     PixelCoordinate imageOffset() const noexcept { return _imageOffset; }
     ImageSize imageSubSize() const noexcept { return _imageSubSize; }
+
+    /// The kitty graphics placement id (`p=`) this placement was made with, or zero for none.
+    /// Together with the image id it identifies the placement: placing again under the same pair
+    /// replaces it, and `a=d,d=i,p=` deletes it alone.
+    [[nodiscard]] KittyPlacementId kittyPlacementId() const noexcept { return _kittyPlacementId; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     ///
@@ -288,6 +299,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     ImageLayer _layer;                   //!< Layer for z-ordering relative to text.
     PixelCoordinate _imageOffset;        //!< Pixel offset into the source image for sub-rectangle rendering.
     ImageSize _imageSubSize;             //!< Sub-region pixel size (zero means full image).
+    KittyPlacementId _kittyPlacementId;  //!< Kitty `p=` of this placement; zero means none.
 };
 
 std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,

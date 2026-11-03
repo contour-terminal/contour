@@ -149,6 +149,26 @@ TEST_CASE("fragments of one placement share a single RasterizedImage after resto
     CHECK(restoredSecond->offset() == second->offset());
 }
 
+TEST_CASE("a kitty placement keeps its placement id across restore", "[ImageState]")
+{
+    auto source = makeTerminal();
+    source->writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=5,p=7;{}\033\\", encodedPixels()));
+    auto const placed = source->terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(placed);
+    REQUIRE(placed->rasterizedImage().kittyPlacementId() == KittyPlacementId(7));
+
+    auto target = makeTerminal();
+    auto const keepAlive = restoreInto(*target, throughBytes(capture(*source)));
+
+    auto const restored = target->terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment();
+    REQUIRE(restored);
+    CHECK(restored->rasterizedImage().kittyPlacementId() == KittyPlacementId(7));
+
+    // Deleting by that placement id still finds the restored placement.
+    target->writeToScreen("\033_Ga=d,d=i,i=5,p=7;\033\\"sv);
+    CHECK_FALSE(target->terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
+}
+
 TEST_CASE("restored images keep their ids and the pool continues numbering after them", "[ImageState]")
 {
     auto source = makeTerminal();
