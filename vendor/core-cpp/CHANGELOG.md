@@ -7,6 +7,29 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.12.0] - 2026-11-03
+
+### Added
+
+- **`core::platform::ICpuCounterSource`, a portable seam for CPU work counts.** `CpuCounters.hpp` names the
+  measures (`CpuCounter`: instructions, cycles, reference cycles), a `CpuCounterSample` and its delta, `measure()`
+  around a piece of work, and `makeDefaultCpuCounterSource()`, which never returns null and says per measure
+  why it is unsupported. What each platform reports, for the calling process and every thread of it:
+  - **Linux** counts instructions and cycles in user mode only, through `perf_event_open`, summed over the
+    core PMUs of a hybrid machine. It needs a hardware PMU and a permissive `perf_event_paranoid`; a measure the
+    kernel multiplexed away between two consecutive reads is absent from that sample rather than wrong; a delta
+    between non-consecutive samples is not checked and may undercount, so use one source per measured region and
+    do not nest `measure()` on one source. Kernels before
+    5.13 cannot tell threads from child processes, which `note()` says.
+  - **macOS** counts instructions and cycles in user and kernel mode together, through `proc_pid_rusage`; a
+    virtualized machine that exposes no counters reports them unsupported.
+  - **Windows** reports reference cycles only: the ticks of a constant-rate clock that
+    `QueryProcessCycleTime` accounts to the process's CPU time, not core cycles.
+  - Every other platform reports nothing.
+
+  Figures from different platforms are therefore not comparable. `testing::FakeCpuCounterSource` is the scripted
+  test double.
+
 ## [0.11.4] - 2026-10-30
 
 ### Fixed
