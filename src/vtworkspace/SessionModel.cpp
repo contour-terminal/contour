@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtworkspace/SessionModel.hpp>
 
+#include <core/Assert.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <ranges>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -82,6 +86,174 @@ std::span<vtbackend::RGBColor const> SessionModel::colorPalette() const noexcept
 {
     // View over the single constexpr table (static storage duration) — no per-instance copy/allocation.
     return DefaultPalette;
+}
+
+// }}}
+// {{{ Snapshot & restore
+
+namespace
+{
+    PaneTreeState captureNode(Pane const& pane)
+    {
+        auto state = PaneTreeState { .id = pane.id(),
+                                     .split = pane.splitState(),
+                                     .ratio = pane.ratio(),
+                                     .session = pane.isLeaf() ? pane.session() : SessionId {},
+                                     .children = {} };
+        if (!pane.isLeaf())
+        {
+            state.children.push_back(captureNode(*pane.first()));
+            state.children.push_back(captureNode(*pane.second()));
+        }
+        return state;
+    }
+
+    std::unique_ptr<Pane> buildNode(PaneTreeState const& state)
+    {
+        if (state.split == SplitState::None)
+            return std::make_unique<Pane>(state.id, state.session);
+        return Pane::join(
+            state.id, state.split, state.ratio, buildNode(state.children[0]), buildNode(state.children[1]));
+    }
+
+    /// What restore() checks a state against, and the ids it has met so far.
+    struct RestoreValidator
+    {
+        ModelIdState ids;
+        std::unordered_set<uint64_t> windows;
+        std::unordered_set<uint64_t> tabs;
+        std::unordered_set<uint64_t> panes;
+        std::unordered_set<uint64_t> sessions;
+
+        /// Notes @p id as met in @p seen, below @p counter.
+        static std::expected<void, ModelRestoreError> note(std::unordered_set<uint64_t>& seen,
+                                                           uint64_t id,
+                                                           uint64_t counter)
+        {
+            if (id >= counter)
+                return std::unexpected(ModelRestoreError::IdBeyondCounter);
+            if (!seen.insert(id).second)
+                return std::unexpected(ModelRestoreError::DuplicateId);
+            return {};
+        }
+
+        /// Checks @p node and its subtree; every leaf met is added to @p leaves.
+        std::expected<void, ModelRestoreError> checkNode(PaneTreeState const& node,
+                                                         std::vector<PaneId>& leaves)
+        {
+            auto const expectedChildren =
+                node.split == SplitState::None ? std::size_t { 0 } : std::size_t { 2 };
+            if (node.children.size() != expectedChildren
+                || (node.split != SplitState::None && !std::isfinite(node.ratio)))
+                return std::unexpected(ModelRestoreError::MalformedTree);
+            if (auto noted = note(panes, node.id.value, ids.nextPane.value); !noted)
+                return noted;
+            if (node.split == SplitState::None)
+            {
+                leaves.push_back(node.id);
+                if (node.session == SessionId {})
+                    return std::unexpected(ModelRestoreError::MissingSession);
+                if (!sessions.insert(node.session.value).second)
+                    return std::unexpected(ModelRestoreError::DuplicateId);
+            }
+            for (auto const& child: node.children)
+                if (auto checked = checkNode(child, leaves); !checked)
+                    return checked;
+            return {};
+        }
+
+        std::expected<void, ModelRestoreError> checkTab(TabState const& tab)
+        {
+            if (auto noted = note(tabs, tab.id.value, ids.nextTab.value); !noted)
+                return noted;
+            auto leaves = std::vector<PaneId> {};
+            if (auto checked = checkNode(tab.root, leaves); !checked)
+                return checked;
+            if (!std::ranges::contains(leaves, tab.view.activePane))
+                return std::unexpected(ModelRestoreError::UnknownActivePane);
+            return {};
+        }
+
+        std::expected<void, ModelRestoreError> checkWindow(WindowState const& window)
+        {
+            if (auto noted = note(windows, window.id.value, ids.nextWindow.value); !noted)
+                return noted;
+            auto const count = static_cast<int>(window.tabs.size());
+            auto const inRange = [count](int index) {
+                return index >= -1 && index < count;
+            };
+            if (!inRange(window.activeTabIndex) || !inRange(window.previousActiveTabIndex)
+                || (count > 0 && window.activeTabIndex < 0))
+                return std::unexpected(ModelRestoreError::BadTabIndex);
+            for (auto const& tab: window.tabs)
+                if (auto checked = checkTab(tab); !checked)
+                    return checked;
+            return {};
+        }
+    };
+} // namespace
+
+SessionId firstUnusedSessionId(WorkspaceTreeState const& tree)
+{
+    auto const highest = [](this auto const& self, PaneTreeState const& node) -> uint64_t {
+        auto value = node.split == SplitState::None ? node.session.value : uint64_t { 0 };
+        for (auto const& child: node.children)
+            value = std::max(value, self(child));
+        return value;
+    };
+    auto value = uint64_t { 0 };
+    for (auto const& window: tree.windows)
+        for (auto const& tab: window.tabs)
+            value = std::max(value, highest(tab.root));
+    return SessionId { value + 1 };
+}
+
+WorkspaceTreeState SessionModel::captureTree() const
+{
+    auto tree = WorkspaceTreeState {};
+    for (auto const& window: _windows)
+    {
+        auto state = WindowState { .id = window->id(),
+                                   .tabs = {},
+                                   .activeTabIndex = window->_activeTabIndex,
+                                   .previousActiveTabIndex = window->_previousActiveTabIndex };
+        for (auto const& tab: window->_tabs)
+            state.tabs.push_back(TabState {
+                .id = tab->id(), .root = captureNode(*tab->rootPane()), .view = tab->viewState() });
+        tree.windows.push_back(std::move(state));
+    }
+    return tree;
+}
+
+ModelIdState SessionModel::idState() const noexcept
+{
+    return ModelIdState { .nextWindow = _nextWindowId, .nextTab = _nextTabId, .nextPane = _nextPaneId };
+}
+
+std::expected<void, ModelRestoreError> SessionModel::restore(WorkspaceTreeState const& tree,
+                                                             ModelIdState const& ids)
+{
+    Require(_windows.empty());
+
+    auto validator = RestoreValidator { .ids = ids, .windows = {}, .tabs = {}, .panes = {}, .sessions = {} };
+    for (auto const& window: tree.windows)
+        if (auto checked = validator.checkWindow(window); !checked)
+            return checked;
+
+    for (auto const& windowState: tree.windows)
+    {
+        auto window = std::make_unique<Window>(windowState.id);
+        for (auto const& tabState: windowState.tabs)
+            window->_tabs.push_back(
+                std::make_unique<Tab>(tabState.id, buildNode(tabState.root), tabState.view));
+        window->_activeTabIndex = windowState.activeTabIndex;
+        window->_previousActiveTabIndex = windowState.previousActiveTabIndex;
+        _windows.push_back(std::move(window));
+    }
+    _nextWindowId = ids.nextWindow;
+    _nextTabId = ids.nextTab;
+    _nextPaneId = ids.nextPane;
+    return {};
 }
 
 // }}}

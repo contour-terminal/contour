@@ -766,6 +766,9 @@ struct SessionHostConfig
     /// (proto::ServerHello::daemonInstance): the daemon draws it at random as it starts. 0 states none, as an
     /// embedded host or a test does.
     uint64_t instance = 0;
+    /// The id the first session this host mints gets. A host that takes over a previous run's sessions (a
+    /// live upgrade) starts above every session id it adopted, so that no new session is named as an old one.
+    uint64_t firstSessionId = 1;
     /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
     /// startup layout is realized only when it realizes none (or none is given).
     std::optional<WorkspaceRestore> restore {};
@@ -1517,7 +1520,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// clock, so a test can reproduce an ordering exactly.
     uint64_t _nextAreaSequence = 1;
 
-    uint64_t _nextSessionId = 1;
+    uint64_t _nextSessionId;
     std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.

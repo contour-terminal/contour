@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtworkspace/Tab.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -9,6 +10,39 @@
 
 namespace vtworkspace
 {
+
+static_assert(TabViewState {}.colors.size() == TabColorSourceCount);
+
+Tab::Tab(TabId id, std::unique_ptr<Pane> root, TabViewState const& view):
+    _id { id },
+    _root { std::move(root) },
+    _activeLeaf { _root->findPane(view.activePane) },
+    _zoomed { view.zoom == ZoomState::Zoomed },
+    _runtimeTitle { view.title },
+    _colors { view.colors }
+{
+    assert(_activeLeaf != nullptr && _activeLeaf->isLeaf());
+    auto leaves = std::vector<PaneId> {};
+    _root->walkTree([&leaves](Pane const& pane) {
+        if (pane.isLeaf())
+            leaves.push_back(pane.id());
+    });
+    for (auto const recent: view.recentPanes)
+        if (std::ranges::contains(leaves, recent) && !std::ranges::contains(_mru, recent))
+            _mru.push_back(recent);
+    for (auto const leaf: leaves)
+        if (!std::ranges::contains(_mru, leaf))
+            _mru.push_back(leaf);
+}
+
+TabViewState Tab::viewState() const
+{
+    return TabViewState { .activePane = _activeLeaf->id(),
+                          .zoom = _zoomed ? ZoomState::Zoomed : ZoomState::Unzoomed,
+                          .recentPanes = _mru,
+                          .title = _runtimeTitle,
+                          .colors = _colors };
+}
 
 void Tab::touchMru(PaneId id)
 {

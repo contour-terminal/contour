@@ -17,6 +17,7 @@
 #include <vtworkspace/Arrangement.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
+#include <vtworkspace/WorkspaceState.hpp>
 
 namespace vtworkspace
 {
@@ -67,6 +68,16 @@ class Tab
     {
         _mru.push_back(rootPaneId);
     }
+
+    /// Restores a tab from a snapshot: its whole tree, with the ids it had.
+    /// @param id   The tab's id.
+    /// @param root The tree; every node is as the snapshot had it.
+    /// @param view Active pane, zoom, recency, title and colours. @p view.activePane must be a leaf of
+    ///        @p root; recency is completed with any leaf it omits and stripped of ids that are none.
+    Tab(TabId id, std::unique_ptr<Pane> root, TabViewState const& view);
+
+    /// @return What the tab remembers besides its tree, for a snapshot.
+    [[nodiscard]] TabViewState viewState() const;
 
     Tab(Tab const&) = delete;
     Tab& operator=(Tab const&) = delete;

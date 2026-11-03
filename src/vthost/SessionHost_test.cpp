@@ -3560,3 +3560,24 @@ TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost]
     CHECK(h.shownFrame().has_value());
     CHECK(h.host.ticksKittyAnimations(h.session));
 }
+
+TEST_CASE("the first session id a host mints is the one its config seeds", "[vthost][host]")
+{
+    // A host that adopts a previous run's sessions starts above every id it took over.
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig {
+                                  .pumping = vthost::SessionPumping::Manual,
+                                  .firstSessionId = 4242,
+                                  .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() } };
+
+    auto* const tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(tab->rootPane()->session().value == 4242);
+}
