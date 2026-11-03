@@ -411,6 +411,8 @@ variable is unset, clone the trees first (they are not vendored into this repo).
 - Zero-warning policy is non-negotiable: the build must be clean under `-Werror` (see above).
 - Ensure changes are covered by tests and run them (`ctest --preset=clang-asan`).
 - For perf-sensitive changes, check for regressions with Callgrind:
-  `valgrind --tool=callgrind` and analyze with `callgrind_annotate`.
+  `valgrind --tool=callgrind` and analyze with `callgrind_annotate`, or compare `bench-headless`'s
+  instruction counts before/after (Linux and macOS; Windows reports reference cycles only; usually
+  unavailable in VMs and CI; see docs/internals/profiling.md).
 - In change summaries, report: performance impact (if any), a risk assessment, and code
   coverage results.
