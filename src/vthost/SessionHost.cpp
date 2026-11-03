@@ -6,10 +6,12 @@
 #include <core/Assert.hpp>
 #include <core/Overloaded.hpp>
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <iterator>
 #include <mutex>
 #include <ranges>
 #include <string_view>
@@ -155,7 +157,7 @@ void HostedSession::pollForegroundProcess()
 
 HostedSession::~HostedSession()
 {
-    terminate();
+    terminate(TerminationReason::Teardown);
     if (_pumpThread && _pumpThread->joinable())
         _pumpThread->join();
 }
@@ -178,8 +180,11 @@ void HostedSession::start()
     _terminal.setReaderThread(_pumpThread->get_id());
 }
 
-void HostedSession::terminate()
+void HostedSession::terminate(TerminationReason reason)
 {
+    // A quiesced session's pump is not running, and announces nothing: asked before the close, which a
+    // resume() checks for.
+    auto const isQuiesced = _pumpThread && !_pumpThread->joinable() && quiesceRequested();
     _pumpEnd.store(PumpEnd::Terminated, std::memory_order_release);
     if (!_terminal.device().isClosed())
         _terminal.device().close();
@@ -188,6 +193,19 @@ void HostedSession::terminate()
     // below. A second wakeup costs one eventfd write and removes the whole class of "who closed it
     // first" lost-wakeup reasoning from the teardown path.
     _terminal.device().wakeupReader();
+    if (isQuiesced && reason == TerminationReason::Requested)
+    {
+        _endCause = SessionEnd::Requested;
+        announceClosed();
+    }
+}
+
+void HostedSession::announceClosed()
+{
+    if (_closeAnnounced.test_and_set(std::memory_order_acq_rel))
+        return;
+    if (_onClosed)
+        _onClosed();
 }
 
 void HostedSession::pumpLoop()
@@ -206,18 +224,36 @@ void HostedSession::pumpLoop()
     // SIGTERM as soon as it hosted a single session. The GUI's mainLoop ends for the same reason,
     // via its own `_terminating` flag; deriving the condition from the device instead keeps
     // one source of truth, since the device is what terminate() actually mutates.
+    //
+    // Before the first read, what waits already goes out: the terminal's queued replies, then what clients
+    // handed over -- carried over from a previous process (replayCarried()), or queued while quiesced.
+    // Named first, so that the flush below writes rather than wakes the reader it would name otherwise.
+    //
+    // A capture stops it between any two of these steps: after a batch, after a delivery (what a write it
+    // interrupted did not get to the PTY is queued again), after a flush (what that did not write stays the
+    // terminal's). What clients handed over stays queued, and the PTY open.
+    _terminal.setReaderThread(std::this_thread::get_id());
+    _terminal.flushInput();
+    if (quiesceRequested() || deliverPending() == DeliveryOutcome::Stopped)
+        return;
     while (!_terminal.device().isClosed() && _terminal.processInputOnce())
     {
-        deliverPending();
+        if (quiesceRequested() || deliverPending() == DeliveryOutcome::Stopped)
+            return;
         _terminal.flushInput();
+        if (quiesceRequested())
+            return;
     }
+    // Ended on its own: a quiesce() asking from now on fails its exchange and learns the session ended. One
+    // that asked first finds the PTY closed.
+    auto running = PumpEnd::ProcessExited;
+    _pumpEnd.compare_exchange_strong(running, PumpEnd::Ended, std::memory_order_acq_rel);
     _endCause = observeEnd();
     // Strictly before the close is announced, and only for a process that ended by itself: a close the
     // host asked for (terminate()) ends the session, and its program-status records with it.
     if (!terminateRequested())
         _terminal.markProcessExited();
-    if (_onClosed)
-        _onClosed();
+    announceClosed();
 }
 
 SessionEnd HostedSession::observeEnd() const
@@ -240,54 +276,159 @@ SessionEnd HostedSession::observeEnd() const
     return sessionEndOf(status);
 }
 
-void HostedSession::deliverOnPump(Delivery deliver, std::string_view bytes)
+void HostedSession::deliverOnPump(DeliveryKind kind, std::string_view bytes)
 {
-    if (!_pumpThread)
-    {
-        deliver(_terminal, bytes);
-        return;
-    }
     {
         auto const _ = std::scoped_lock { _pendingMutex };
-        if (!_pending.empty() && _pending.back().deliver == deliver)
+        if (!_pending.empty() && _pending.back().kind == kind)
             _pending.back().bytes.append(bytes);
         else
-            _pending.push_back(PendingDelivery { .deliver = deliver, .bytes = std::string { bytes } });
+            _pending.push_back(CarriedDelivery { .kind = kind, .bytes = std::string { bytes } });
         _pendingBytes += bytes.size();
     }
-    // Its read returns, and it delivers what was queued before it reads again.
-    _terminal.device().wakeupReader();
+    // Without a pump, the caller stands in for it: what the terminal queued and what was carried over go
+    // first, as the pump's first steps would send them.
+    if (!_pumpThread)
+    {
+        _terminal.flushInput();
+        std::ignore = deliverPending();
+        return;
+    }
+    // Its read returns, and it delivers what was queued before it reads again. A quiesced pump reads nothing
+    // to return from: resume() starts it, which delivers this first.
+    if (!quiesceRequested())
+        _terminal.device().wakeupReader();
 }
 
 namespace
 {
-    /// How the pump delivers a client's input: written to the PTY as the client encoded it.
-    void writeToDevice(vtbackend::Terminal& terminal, std::string_view bytes)
+    /// Delivers @p bytes as @p kind says.
+    /// @return How many of them were delivered: all, unless a PTY write was interrupted or failed.
+    std::size_t deliver(vtbackend::Terminal& terminal, DeliveryKind kind, std::string_view bytes)
     {
-        std::ignore = terminal.device().write(bytes);
+        switch (kind)
+        {
+            case DeliveryKind::Pty:
+                return static_cast<std::size_t>(std::max(terminal.device().write(bytes), 0));
+            case DeliveryKind::Screen: terminal.writeToScreen(bytes); return bytes.size();
+        }
+        return bytes.size();
     }
 } // namespace
 
 void HostedSession::writeInput(std::string_view bytes)
 {
-    deliverOnPump(writeToDevice, bytes);
+    deliverOnPump(DeliveryKind::Pty, bytes);
 }
 
-void HostedSession::deliverPending()
+HostedSession::DeliveryOutcome HostedSession::deliverPending()
 {
-    auto pending = std::vector<PendingDelivery> {};
+    auto pending = std::vector<CarriedDelivery> {};
     {
         auto const _ = std::scoped_lock { _pendingMutex };
         pending = std::exchange(_pending, {});
     }
-    for (auto const& delivery: pending)
+    // What a capture stopped this before, from @p first on, goes back to the front: ahead of what was handed
+    // over since.
+    auto const stopAt = [&](std::size_t first) {
+        auto const _ = std::scoped_lock { _pendingMutex };
+        _pending.insert(_pending.begin(),
+                        std::make_move_iterator(pending.begin() + static_cast<std::ptrdiff_t>(first)),
+                        std::make_move_iterator(pending.end()));
+        return DeliveryOutcome::Stopped;
+    };
+    for (auto const index: std::views::iota(std::size_t { 0 }, pending.size()))
     {
-        delivery.deliver(_terminal, delivery.bytes);
+        if (quiesceRequested())
+            return stopAt(index);
+        auto& delivery = pending[index];
+        auto const delivered = deliver(_terminal, delivery.kind, delivery.bytes);
+        if (delivered < delivery.bytes.size() && quiesceRequested())
+        {
+            // A write the capture interrupted: its rest goes ahead of everything after it -- and of the
+            // terminal's queued replies, which this does not flush, so that none lands in the middle of it.
+            delivery.bytes.erase(0, delivered);
+            core::locked(_pendingMutex, [&] { _pendingBytes -= delivered; });
+            return stopAt(index);
+        }
         // What a parse asked to send goes out ahead of what was handed over after it.
         _terminal.flushInput();
-        auto const _ = std::scoped_lock { _pendingMutex };
-        _pendingBytes -= delivery.bytes.size();
+        // Delivered; or the device failed under the write, which leaves nothing to deliver the rest to.
+        core::locked(_pendingMutex, [&] { _pendingBytes -= delivery.bytes.size(); });
     }
+    return DeliveryOutcome::Delivered;
+}
+
+std::expected<QuiescedSession, QuiesceError> HostedSession::quiesce()
+{
+    // Refused before anything stops: a child that has not flushed its terminal yet would lose what is
+    // written to it in between, which a capture taken now would claim to carry.
+    if (auto const* const child = process();
+        child != nullptr && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress)
+        return std::unexpected(QuiesceError::SpawnInProgress);
+
+    // Restarted on a refusal below only when this call stopped it: a session quiesced already stays so.
+    auto const pumpWasRunning = _pumpThread && _pumpThread->joinable();
+    stopPump();
+    // A pump that did not stop as asked ended on its own, or was terminated; either closed the PTY.
+    if (_terminal.device().isClosed() || (_pumpThread && !quiesceRequested()))
+        return std::unexpected(QuiesceError::Ended);
+
+    auto state = [this] {
+        auto const _ = std::lock_guard { _terminal };
+        return _terminal.captureState();
+    }();
+    if (state.inFlightTailOverflowed == vtbackend::TailCompleteness::Overflowed)
+    {
+        if (pumpWasRunning)
+            resume();
+        return std::unexpected(QuiesceError::InFlightTailOverflowed);
+    }
+
+    // A copy: the live session keeps its queue, for resume() to deliver should the upgrade roll back.
+    auto carried = core::locked(_pendingMutex, [this] { return _pending; });
+    return QuiescedSession { .terminal = std::move(state), .carried = std::move(carried) };
+}
+
+void HostedSession::stopPump()
+{
+    if (!_pumpThread || !_pumpThread->joinable())
+        return;
+    // Unless terminate() asked first, or the pump ended on its own: that pump ends for good, and is waited
+    // for all the same.
+    auto running = PumpEnd::ProcessExited;
+    _pumpEnd.compare_exchange_strong(running, PumpEnd::Quiesced, std::memory_order_acq_rel);
+    // A write it waits in returns with what it wrote, and its read returns; it stops before it delivers
+    // anything more. A parse in progress ends first; a child blocked on a full PTY needs no progress for
+    // that, nor one that reads nothing.
+    _terminal.device().interruptWrites();
+    _terminal.device().wakeupReader();
+    _pumpThread->join();
+}
+
+void HostedSession::resume()
+{
+    // Not quiesced: never started, still running, or ended by itself (its close announced already).
+    if (!_pumpThread || _pumpThread->joinable() || !quiesceRequested() || _terminal.device().isClosed())
+        return;
+    // Before the pump starts: it writes again, and waits for the application to read.
+    _terminal.device().allowWrites();
+    _pumpEnd.store(PumpEnd::ProcessExited, std::memory_order_release);
+    *_pumpThread = std::thread { [this] { pumpLoop(); } };
+    _terminal.setReaderThread(_pumpThread->get_id());
+}
+
+void HostedSession::replayCarried(std::vector<CarriedDelivery> carried)
+{
+    auto const empty =
+        std::ranges::remove_if(carried, [](auto const& delivery) { return delivery.bytes.empty(); });
+    carried.erase(empty.begin(), empty.end());
+
+    auto const _ = std::scoped_lock { _pendingMutex };
+    for (auto const& delivery: carried)
+        _pendingBytes += delivery.bytes.size();
+    _pending.insert(
+        _pending.begin(), std::make_move_iterator(carried.begin()), std::make_move_iterator(carried.end()));
 }
 
 std::size_t HostedSession::inputBacklog() const
@@ -341,6 +482,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
            }),
     _window(_model.createWindow()->id())
 {
+    // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
+    Require(config.firstSessionId != 0);
     // The first window is named before anything is spawned into it: its UUID is part of every pane's
     // environment.
     _objects.bind(_window, _objects.mint());
@@ -364,7 +507,7 @@ SessionHost::~SessionHost()
     _animationTicks.clear();
     // Close every PTY first so all pump threads unblock and join promptly.
     for (auto& [id, session]: _sessions)
-        session->terminate();
+        session->terminate(TerminationReason::Teardown);
     if (_extensions)
     {
         // The drain below turns the loop: from inside a turn -- or beside one on another thread -- it would
@@ -1199,6 +1342,12 @@ HostedSession const* SessionHost::hostedSession(SessionId session) const noexcep
     return it != _sessions.end() ? it->second.get() : nullptr;
 }
 
+HostedSession* SessionHost::hostedSession(SessionId session) noexcept
+{
+    auto const it = _sessions.find(session.value);
+    return it != _sessions.end() ? it->second.get() : nullptr;
+}
+
 void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles)
 {
     if (!profiles)
@@ -1269,13 +1418,13 @@ namespace
     using LoopPerform = void (*)(vtbackend::Terminal& terminal, proto::PerformOperation const& request);
 
     /// What an engine operation does, and so on which thread: the loop thread's (LoopPerform), or the session
-    /// pump's, between two reads, as it parses the application's output (HostedSession::Delivery), handed the
+    /// pump's, between two reads, as it parses the application's output (a DeliveryKind), handed the
     /// request's text alone: a parse, which can sleep (DECSCLM) and reply.
     /// @see HostedSession::deliverOnPump()
     ///
     /// Or a light/dark preference to re-seed the session's palette under, which needs the host's profiles.
     /// @see SessionHost::applyColorPreference()
-    using OperationPerform = std::variant<LoopPerform, HostedSession::Delivery, vtbackend::ColorPreference>;
+    using OperationPerform = std::variant<LoopPerform, DeliveryKind, vtbackend::ColorPreference>;
 
     /// One engine operation a client may ask the host to perform.
     struct OperationRow
@@ -1316,11 +1465,7 @@ namespace
                            LoopPerform { [](vtbackend::Terminal& terminal, proto::PerformOperation const&) {
                                terminal.softReset();
                            } } },
-        OperationRow {
-            .operation = proto::EngineOperation::WriteScreen,
-            .perform = HostedSession::Delivery { [](vtbackend::Terminal& terminal, std::string_view text) {
-                terminal.writeToScreen(text);
-            } } },
+        OperationRow { .operation = proto::EngineOperation::WriteScreen, .perform = DeliveryKind::Screen },
         // A mirror's vi marks are the session's, so every client shows them and the host's reflow carries
         // them.
         OperationRow { .operation = proto::EngineOperation::SetUserMark,
@@ -1351,25 +1496,24 @@ std::expected<void, OperationError> SessionHost::performOperation(proto::Perform
         return std::unexpected(OperationError::UnknownOperation);
 
     auto& hostedSession = *hosted->second;
-    std::visit(
-        core::Overloaded {
-            [&](LoopPerform perform) {
-                {
-                    auto& terminal = hostedSession.terminal();
-                    auto const guard = std::lock_guard { terminal };
-                    perform(terminal, request);
-                }
-                // Outside the lock, as a resize is announced: an observer builds the delta under it.
-                // Announced by the host rather than left to the terminal, since only a parse raises a
-                // screen update of its own, and every attached client renders this grid, not only the
-                // one that asked.
-                fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
-            },
-            // A parse, which raises a screen update of its own as the application's output does.
-            [&](HostedSession::Delivery deliver) { hostedSession.deliverOnPump(deliver, request.text); },
-            [&](vtbackend::ColorPreference preference) { applyColorPreference(session, preference); },
-        },
-        row->perform);
+    std::visit(core::Overloaded {
+                   [&](LoopPerform perform) {
+                       {
+                           auto& terminal = hostedSession.terminal();
+                           auto const guard = std::lock_guard { terminal };
+                           perform(terminal, request);
+                       }
+                       // Outside the lock, as a resize is announced: an observer builds the delta under it.
+                       // Announced by the host rather than left to the terminal, since only a parse raises a
+                       // screen update of its own, and every attached client renders this grid, not only the
+                       // one that asked.
+                       fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
+                   },
+                   // A parse, which raises a screen update of its own as the application's output does.
+                   [&](DeliveryKind kind) { hostedSession.deliverOnPump(kind, request.text); },
+                   [&](vtbackend::ColorPreference preference) { applyColorPreference(session, preference); },
+               },
+               row->perform);
     return {};
 }
 

@@ -35,6 +35,7 @@
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 #ifndef __FreeBSD__
@@ -241,6 +242,14 @@ struct Process::Private
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
 
+    /// The parent's end of the settle signal: a socket pair the child writes one byte to, then closes, once
+    /// its terminal is set up, so that this end turns readable (the byte, or end-of-file as a child exits
+    /// before it got there). Open from fork() until observed readable. A helper another thread forks in
+    /// between may hold the child's end on, which the byte makes harmless.
+    /// @see Process::spawnProgress()
+    mutable OwnedFd settleSignal {};
+    mutable std::mutex settleSignalMutex {}; ///< Guards settleSignal.
+
     /// Started by close() while the child runs: kills it once hangupGrace has passed without it ending.
     std::optional<std::thread> hangupWatch {};
     std::mutex hangupWatchMutex {}; ///< Guards hangupWatch.
@@ -413,6 +422,12 @@ StartResult Process::start()
     if (!gate)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
+    // The same kind of channel, the other way round: the child closes its end once its terminal is set up.
+    // @see Process::spawnProgress()
+    auto settle = makeGate();
+    if (!settle)
+        return std::unexpected(
+            StartFailure { .error = StartError::SpawnFailed, .detail = settle.error().message() });
     // Formatted before the fork: the child may not allocate. Nor may it ask sysconf(), which POSIX.1-2008
     // took off the async-signal-safe list.
     auto const oomScoreAdjust = _d->placement->childOomScoreAdjust()
@@ -429,6 +444,8 @@ StartResult Process::start()
         default: // in parent
             core::locked(_d->exitStatusMutex, [&] { _d->pid = forked; });
             gate->childEnd.reset();
+            settle->childEnd.reset();
+            core::locked(_d->settleSignalMutex, [&] { _d->settleSignal = std::move(settle->parentEnd); });
             _d->pty->slave().close();
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
@@ -443,11 +460,18 @@ StartResult Process::start()
             // Parked first, before the setup below can dup2() over the gate's descriptors. Only
             // async-signal-safe calls, on values prepared before the fork.
             ::close(gate->parentEnd.get());
+            ::close(settle->parentEnd.get());
             writeOwnOomScoreAdjust(oomScoreAdjust);
             awaitGateRelease(gate->childEnd.get());
             ::close(gate->childEnd.get());
 
             (void) _d->pty->slave().login();
+            // Its terminal's queues are flushed: what the parent writes from now on reaches the program. Said
+            // with a byte, not only the close: a helper another thread forks before the parent's copy is
+            // close-on-exec (macOS sets that after socketpair()) holds this end on, and would keep the
+            // parent's from reading end-of-file for as long as it lives.
+            std::ignore = ::write(settle->childEnd.get(), "s", 1);
+            ::close(settle->childEnd.get());
 
             if (passesOwnEnvironment)
             {
@@ -672,6 +696,22 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
 bool Process::alive() const noexcept
 {
     return _d->child() != NoChild && !_d->checkStatus(false).has_value();
+}
+
+Process::SpawnProgress Process::spawnProgress() const
+{
+    auto const _ = lock_guard { _d->settleSignalMutex };
+    if (!_d->settleSignal.isOpen())
+        return SpawnProgress::Settled;
+    // Readable means settled: the child's byte, or end-of-file as it exited before. Without waiting.
+    auto pollFd = pollfd { .fd = _d->settleSignal.get(), .events = POLLIN, .revents = 0 };
+    auto ready = 0;
+    while ((ready = ::poll(&pollFd, 1, 0)) < 0 && errno == EINTR)
+        ;
+    if (ready == 0)
+        return SpawnProgress::InProgress;
+    _d->settleSignal.reset();
+    return SpawnProgress::Settled;
 }
 
 void Process::terminate(TerminationHint terminationHint)

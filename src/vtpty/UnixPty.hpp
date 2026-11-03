@@ -65,6 +65,8 @@ class UnixPty final: public Pty
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override;
     int write(std::string_view data) override;
+    void interruptWrites() override;
+    void allowWrites() override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
@@ -83,7 +85,8 @@ class UnixPty final: public Pty
     [[nodiscard]] InheritedPty handoverDescriptors() const;
 
     /// Gives up the descriptors without closing them and leaves this PTY closed, for an adopter in the
-    /// same process (the descriptors then belong to the returned value's adopter).
+    /// same process (the descriptors then belong to the returned value's adopter). Only while started
+    /// (Require): an unstarted or closed PTY has none to give.
     /// @return What handoverDescriptors() returned.
     [[nodiscard]] InheritedPty releaseDescriptors();
 
@@ -104,9 +107,18 @@ class UnixPty final: public Pty
     /// @return How much it took; -1, with errno set, where it took nothing.
     int writeAvailable(std::string_view data);
 
-    /// Waits, with _mutex released, until the master descriptor takes a write again or the PTY closes.
-    /// @return False once the PTY is closed.
-    [[nodiscard]] bool awaitWritable();
+    /// What a write waiting for the application to read was woken by.
+    enum class WriteWait : uint8_t
+    {
+        Writable = 0, ///< The master descriptor takes a write again.
+        Closed,       ///< The PTY closed, or the wait failed.
+        Interrupted,  ///< interruptWrites().
+    };
+
+    /// Waits, with _mutex released, until the master descriptor takes a write again, the PTY closes, or
+    /// writes are interrupted.
+    /// @return What ended the wait.
+    [[nodiscard]] WriteWait awaitWritable();
 
     /// Whether the master descriptor is open, published by start() and close() for isClosed().
     enum class MasterState : uint8_t
@@ -119,6 +131,9 @@ class UnixPty final: public Pty
     UnixPipe _stdoutFastPipe;
     /// Written once by close(), and never read: it wakes a write waiting for the application to read.
     UnixPipe _closeSignal { O_CLOEXEC | O_NONBLOCK };
+    /// Readable from interruptWrites() until allowWrites() drains it: it wakes a write waiting for the
+    /// application to read, and stops every later one from waiting.
+    UnixPipe _interruptSignal { O_CLOEXEC | O_NONBLOCK };
     crispy::ReadSelector _readSelector;
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
@@ -130,6 +145,15 @@ class UnixPty final: public Pty
     std::mutex _writeMutex;
     /// @see MasterState
     std::atomic<MasterState> _masterState { MasterState::Closed };
+
+    /// Whether a write may wait for the application to read.
+    enum class WriteInterruption : uint8_t
+    {
+        Allowed = 0, ///< It may: the default, and after allowWrites().
+        Interrupted, ///< It may not: after interruptWrites(), and _interruptSignal is readable.
+    };
+    /// Raised by interruptWrites(), lowered by allowWrites(): keeps _interruptSignal at one byte at most.
+    std::atomic<WriteInterruption> _writeInterruption { WriteInterruption::Allowed };
 };
 
 } // namespace vtpty

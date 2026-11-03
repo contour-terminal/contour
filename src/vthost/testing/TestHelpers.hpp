@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 
@@ -157,6 +158,22 @@ class StallingPty final: public vtpty::MockPty
     int _pendingWakeups = 0;
     int _parkedWrites = 0;
 };
+
+/// Waits for @p condition to hold, asking every few milliseconds, as what another thread does comes to pass.
+/// @param condition Asked until it holds.
+/// @return Whether it held within ten seconds.
+template <typename Condition>
+[[nodiscard]] bool eventually(Condition const& condition)
+{
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    while (!condition())
+    {
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
+    }
+    return true;
+}
 
 /// Opens a tab in @p host's window.
 /// @param host The host to open it in.

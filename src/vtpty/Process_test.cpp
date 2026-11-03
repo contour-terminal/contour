@@ -425,6 +425,27 @@ TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]"
     }
 }
 
+TEST_CASE("Process.spawnSettlesOnceTheChildHasItsTerminal", "[process][placement]")
+{
+    // Parked between fork() and exec(), the child has not flushed its terminal yet: what is written to it now
+    // is discarded, which a live upgrade's capture must not promise to carry.
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled); // no child yet
+    auto const dropOnExit = DropOnExit { *placement };
+    REQUIRE(process.start().has_value());
+    REQUIRE(placement->pids().size() == 1);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::InProgress);
+
+    placement->release(placement->pids().front());
+    // The program prints only after its terminal is set up, so by then the spawn has settled, and stays so.
+    REQUIRE(printed(process, "ready"));
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled);
+
+    (void) hangUp(process);
+}
+
 TEST_CASE("Process.terminateWhileParked", "[process][placement]")
 {
     // A tab closed before its shell was released: the parked child dies, wait() returns, and the

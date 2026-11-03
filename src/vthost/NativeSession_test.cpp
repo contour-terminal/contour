@@ -76,6 +76,7 @@ using vtbackend::test::recordIds;
 using vtbackend::test::reportedOutputStart;
 using vthost::NativeSession;
 using vthost::SessionHost;
+using vthost::testing::eventually;
 using vthost::testing::newSession;
 namespace proto = vthost::proto;
 
@@ -561,19 +562,6 @@ struct StalledExchange
     exchanged.set_value();
     watchdog.join();
     return { .answered = answered, .received = std::move(received) };
-}
-
-/// Waits up to five seconds for @p done to hold, as what a pump does on its own thread comes to pass.
-/// @return Whether it held by then.
-[[nodiscard]] bool eventually(std::function<bool()> const& done)
-{
-    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
-    {
-        if (done())
-            return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
-    }
-    return done();
 }
 
 /// Waits up to five seconds for what @p pty was written to satisfy @p done, as a pump writes it on its own
