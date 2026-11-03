@@ -3084,6 +3084,20 @@ TEST_CASE("an announced wake probes the daemon at once", "[vthost][attach][liven
     h.settle();
 }
 
+TEST_CASE("a daemon that does not echo is never probed on a wake", "[vthost][attach][liveness]")
+{
+    // An older daemon would answer every Heartbeat Unsupported: the client offers it, the daemon does not.
+    auto h = ManualClockAttach { answeringHello(Script { { std::nullopt, acceptingHello() } }) };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.client->noteSystemSleep();
+    h.client->noteSystemWake();
+    h.letTimePass(20);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>));
+    h.settle();
+}
+
 namespace
 {
 /// What a client saw of a focus change that raced an unrelated layout change on a real daemon.

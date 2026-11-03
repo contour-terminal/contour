@@ -1099,14 +1099,19 @@ void NativeController::flushGeometry()
         _geometryFlushScheduled = false;
 
         // The hello of this connection stated an area already: when the window still composes to it, the
-        // daemon has it, but it projected every pane onto it, so the panes are all sent again.
+        // daemon has it, but it projected every pane onto it, so the panes are all sent again. Spent only
+        // once there is an area to compare and a connection that heard the hello: a flush before the
+        // layout composes to nothing, and one before the handshake answers no one, and spending it there
+        // would have the next flush state the very area the hello did — one more re-projection of every
+        // pane on the daemon.
         auto resendAll = false;
         auto const composed = composedClientArea();
-        if (auto const hello = std::exchange(_helloArea, std::nullopt); hello && composed == hello)
-        {
-            _lastReportedArea = hello;
-            resendAll = true;
-        }
+        if (composed.has_value() && _client != nullptr)
+            if (auto const hello = std::exchange(_helloArea, std::nullopt); hello && composed == hello)
+            {
+                _lastReportedArea = hello;
+                resendAll = true;
+            }
         if (composed && _lastReportedArea != composed)
         {
             _lastReportedArea = composed;

@@ -81,7 +81,52 @@ TEST_CASE("a sleep announced and never taken does not disable liveness", "[vthos
 {
     auto t = makeWakeTracker();
     t.noteSleep(wakeT0 + 1s);
-    for (auto const n: std::views::iota(2, 8))
+    for (auto const n: std::views::iota(2, 6))
+        t.noteTick(wakeT0 + std::chrono::seconds { n }, wakeT0 + std::chrono::seconds { n });
+    // The tick at +5 s is 4 s into the announced sleep, short of awakeGap: still asleep.
+    CHECK(t.decide(wakeT0 + 5s) == LivenessAction::None);
+    for (auto const n: std::views::iota(6, 8))
         t.noteTick(wakeT0 + std::chrono::seconds { n }, wakeT0 + std::chrono::seconds { n });
     CHECK(t.decide(wakeT0 + 7s) == LivenessAction::SendHeartbeat);
+}
+
+TEST_CASE("a frame arriving during an announced sleep does not end it", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteSleep(wakeT0 + 1s);
+    t.noteInbound(wakeT0 + 2s);
+    // Awake, 498 s of silence would be a loss; asleep, there is no verdict at all.
+    CHECK(t.decide(wakeT0 + 500s) == LivenessAction::None);
+}
+
+TEST_CASE("a late tick during an announced sleep enters the wake state", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteSleep(wakeT0 + 1s);
+    t.noteTick(wakeT0 + 2s, wakeT0 + 500s);
+    CHECK(t.decide(wakeT0 + 500s) == LivenessAction::SendHeartbeat);
+    CHECK(t.silenceLimit() == 5s);
+}
+
+TEST_CASE("a wake forgets a probe sent before the sleep", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    REQUIRE(t.decide(wakeT0 + 5s) == LivenessAction::SendHeartbeat);
+    t.noteProbeSent(wakeT0 + 5s);
+    t.noteSleep(wakeT0 + 6s);
+    t.noteWake(wakeT0 + 500s);
+    // The probe out was sent on a connection the sleep may have killed: the wake probes afresh.
+    CHECK(t.decide(wakeT0 + 500s) == LivenessAction::SendHeartbeat);
+}
+
+TEST_CASE("a second wake while waking restarts the wake deadline", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteWake(wakeT0 + 500s);
+    t.noteProbeSent(wakeT0 + 500s);
+    t.noteWake(wakeT0 + 503s);
+    CHECK(t.decide(wakeT0 + 503s) == LivenessAction::SendHeartbeat);
+    t.noteProbeSent(wakeT0 + 503s);
+    CHECK(t.decide(wakeT0 + 507s) == LivenessAction::None); // past the first wake's deadline
+    CHECK(t.decide(wakeT0 + 508s) == LivenessAction::DeclareLost);
 }

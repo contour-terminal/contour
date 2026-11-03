@@ -77,7 +77,7 @@ class LivenessTracker
     void noteTick(core::platform::SteadyTimePoint due, core::platform::SteadyTimePoint now) noexcept
     {
         if (now - due >= _policy.awakeGap
-            || (_phase == Phase::Asleep && _asleepSince && now - *_asleepSince >= _policy.awakeGap))
+            || (_phase == Phase::Asleep && now - _asleepSince >= _policy.awakeGap))
             noteWake(now);
     }
 
@@ -95,7 +95,6 @@ class LivenessTracker
     void noteWake(core::platform::SteadyTimePoint at) noexcept
     {
         _phase = Phase::Waking;
-        _asleepSince.reset();
         _lastInbound = at;
         _probeOutstanding = ProbeState::None;
     }
@@ -146,7 +145,8 @@ class LivenessTracker
     std::optional<core::platform::SteadyTimePoint> _lastInbound;
     ProbeState _probeOutstanding = ProbeState::None;
     Phase _phase = Phase::Awake;
-    std::optional<core::platform::SteadyTimePoint> _asleepSince;
+    /// When the announced sleep began; meaningful only in Phase::Asleep, which is what says there is one.
+    core::platform::SteadyTimePoint _asleepSince {};
 };
 
 } // namespace vthost::client

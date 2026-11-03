@@ -595,10 +595,13 @@ class NativeClient final
         Closed = 1,   ///< Declared lost and the read cancelled: the tick must not re-arm.
     };
 
-    /// @return Whether the liveness tick is armed for this connection: open, negotiated, Heartbeat shared.
+    /// @return Whether the liveness tick is armed for this connection: open, negotiated, Heartbeat shared,
+    ///         and not yet given up on. A declared loss counts as closed at once, though `_closing` follows
+    ///         only when run() resumes: a sleep or wake hint in between must not probe a cancelled connection
+    ///         or cancel its read a second time.
     [[nodiscard]] bool livenessIsLive() const noexcept
     {
-        return !_closing && !_detached && shares(proto::Capability::Heartbeat);
+        return !_closing && !_detached && !_lossReason && shares(proto::Capability::Heartbeat);
     }
 
     /// Acts on what _liveness decides at @p now: probes, gives up, or does nothing.

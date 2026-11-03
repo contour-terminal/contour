@@ -238,8 +238,15 @@ class ClientFrameCounts
             ++_counts[static_cast<std::size_t>(row - Kinds.begin())];
     }
 
+    /// Records that the client's bytes did not decode, past which the counts above are no longer complete.
+    void noteDecodeError() noexcept { ++_decodeErrors; }
+
+    /// @return How many times the client's bytes failed to decode; 0 for a count that can be trusted.
+    [[nodiscard]] uint64_t decodeErrors() const noexcept { return _decodeErrors.load(); }
+
   private:
     std::array<std::atomic<uint64_t>, Kinds.size()> _counts {};
+    std::atomic<uint64_t> _decodeErrors {};
 };
 
 /// A daemon end of a connection that decodes the frames the client sends, keeping partial frames across
@@ -274,8 +281,16 @@ class CountingSocket final: public core::net::testing::SocketDecorator
             for (;;)
             {
                 auto const decoded = vthost::proto::decodePdu(_pending);
-                if (!decoded)
+                if (!decoded && decoded.error() == vthost::proto::DecodeError::NeedMoreData)
                     break; // incomplete: the rest arrives with the next read
+                if (!decoded)
+                {
+                    // Not a frame boundary this decoder can find again: what follows is not counted, and
+                    // the case reading the counts is told so instead of reading a silent undercount.
+                    _counts.noteDecodeError();
+                    _pending.clear();
+                    break;
+                }
                 _counts.note(vthost::proto::typeOf(decoded->pdu));
                 _pending.erase(_pending.begin(), _pending.begin() + static_cast<long>(decoded->consumed));
             }
@@ -1787,9 +1802,12 @@ struct ResizedWindow
         return daemon.onDaemon([&] { return daemon.host->pageSize(); });
     }
 
-    /// @return How many ResizeRequests the daemon received so far.
+    /// @return How many ResizeRequests the daemon received so far. Fails the case if the client's bytes did
+    /// not
+    ///         decode, for the count is then incomplete.
     [[nodiscard]] uint64_t resizeRequests() const
     {
+        CHECK(daemon.clientFrames.decodeErrors() == 0);
         return daemon.clientFrames.count(vthost::proto::PduType::ResizeRequest);
     }
 
@@ -1858,6 +1876,7 @@ TEST_CASE("the hello's area is not sent again after the layout", "[attach][contr
 {
     auto f = ResizedWindow {};
     auto const before = f.resizeRequests();
+    REQUIRE(before >= 1); // the fixture's own resize was counted: the counter works
 
     f.daemon.dropConnections();
     f.awaitReconnected();
@@ -1866,6 +1885,34 @@ TEST_CASE("the hello's area is not sent again after the layout", "[attach][contr
     drainGuiEvents();
 
     // A negative: the window did not change, so nothing more is stated.
+    CHECK_FALSE(waitUntil([&] { return f.resizeRequests() != before; }, /*attempts=*/100));
+    CHECK(f.clientArea() == cells(120, 40));
+}
+
+TEST_CASE("a flush before the layout does not spend the hello's area", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+    auto const before = f.resizeRequests();
+    REQUIRE(before >= 1);
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+    // No layout of the new connection yet, so the window composes to no area: these flushes cannot tell
+    // whether the daemon holds the hello's, and must leave that to the flush after the layout.
+    f.session->terminal().device().resizeScreen(cells(100, 30));
+    drainGuiEvents();
+    f.session->terminal().device().resizeScreen(cells(120, 40));
+    drainGuiEvents();
+    f.daemon.releaseHeld();
+    REQUIRE(waitUntil([&] { return f.ac->settledLayout() != nullptr; }));
+    contour::remote::applyRemoteLayout(f.app.manager(), f.win.id, *f.ac);
+    drainGuiEvents();
+    // A report of the size the pane already has: a flush in which the window composes to the hello's area.
+    f.session->terminal().device().resizeScreen(cells(120, 40));
+    drainGuiEvents();
+
+    // The window composes to the hello's area again: the daemon has it, and is not told it a second time.
     CHECK_FALSE(waitUntil([&] { return f.resizeRequests() != before; }, /*attempts=*/100));
     CHECK(f.clientArea() == cells(120, 40));
 }
