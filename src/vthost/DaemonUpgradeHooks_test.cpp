@@ -140,3 +140,16 @@ TEST_CASE("aborting the clients closes every observer's connection at once, and 
 
     CHECK(log == std::vector<std::string> { "a aborted", "b aborted" });
 }
+
+TEST_CASE("a connection is ending for as long as it stays subscribed", "[vthost][upgrade][hooks]")
+{
+    auto log = std::vector<std::string> {};
+    auto const registry = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto observer = RecordingObserver { "a", log };
+    CHECK(hooks.endingConnections() == 0);
+    hooks.subscribe(observer);
+    CHECK(hooks.endingConnections() == 1);
+    hooks.unsubscribe(observer);
+    CHECK(hooks.endingConnections() == 0);
+}

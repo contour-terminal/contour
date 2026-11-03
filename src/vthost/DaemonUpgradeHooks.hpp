@@ -63,6 +63,9 @@ class DaemonUpgradeHooks final: public handover::UpgradeHooks
     /// Closes every observer's connection at once, and every other connection.
     void abortClients() override;
 
+    /// @return The observers still subscribed: a native connection unsubscribes as its orderly end is done.
+    [[nodiscard]] std::size_t endingConnections() const override { return _observers.size(); }
+
   private:
     ConnectionRegistry const& _connections;
     std::function<void()> _writeSnapshot;

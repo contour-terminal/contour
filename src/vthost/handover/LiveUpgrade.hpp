@@ -73,6 +73,11 @@ class UpgradeHooks
     /// client attached (SessionHost::connectedClients()).
     virtual void closeClients() = 0;
 
+    /// @return How many connections closeClients() asked to end in an orderly way that have not ended yet.
+    ///         Counts what no attached client does: a Control connection, such as the one the upgrade was
+    ///         requested over, whose last answer must reach its peer before the exec takes the descriptor.
+    [[nodiscard]] virtual std::size_t endingConnections() const = 0;
+
     /// Closes every client connection at once, whatever it has queued for its peer: what the upgrade does to
     /// those still attached half way through LiveUpgradeConfig::settleTimeout, since a peer that stopped
     /// reading would hold an orderly close up for as long as it lives.
