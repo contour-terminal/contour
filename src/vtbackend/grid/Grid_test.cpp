@@ -3606,3 +3606,41 @@ TEST_CASE("Grid.resize.growingLinesOnAScrolledRingKeepsEveryRowInOrder", "[grid]
     CHECK(allRowsText(grid) == expected);
     CHECK(grid.historyLineCount() == historyBefore - pulledDown);
 }
+
+TEST_CASE("Grid.resize.withoutReflowRowsScrolledIntoUseHaveTheNewWidth", "[grid]")
+{
+    // The ring is sized to the scrollback capacity but holds only a few rows. A column change without
+    // reflow keeps those rows' content, and costs what the grid holds rather than what it could hold:
+    // the unused slots are re-widthed when they are brought into use (issue #2124).
+    auto const newColumns = ColumnCount(GENERATE(3, 9));
+    CAPTURE(newColumns);
+
+    auto grid = setupGrid(PageSize { LineCount(2), ColumnCount(5) },
+                          false,
+                          LineCount(8),
+                          { "ABCDE", "FGHIJ", "KLMNO" }); // "ABCDE" has scrolled into history
+    REQUIRE(grid.historyLineCount() == LineCount(1));
+
+    (void) grid.resize(PageSize { LineCount(2), newColumns }, CellLocation {}, WrapPending::No);
+
+    SECTION("the rows held keep their content")
+    {
+        auto const expected = [&](std::string_view text) {
+            return std::string(text.substr(0, unbox<size_t>(newColumns)))
+                   + std::string(unbox<size_t>(newColumns) - std::min(text.size(), unbox<size_t>(newColumns)),
+                                 ' ');
+        };
+        CHECK(grid.lineText(LineOffset(-1)) == expected("ABCDE"));
+        CHECK(grid.lineText(LineOffset(0)) == expected("FGHIJ"));
+        CHECK(grid.lineText(LineOffset(1)) == expected("KLMNO"));
+    }
+
+    SECTION("rows scrolled into use, appended or recycled, come out with the new width")
+    {
+        // 12 rows run past the history capacity of 8, so the tail is both appended to and recycled.
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 12))
+            (void) grid.scrollUp(LineCount(1));
+        for (auto const y: std::views::iota(*-grid.historyLineCount(), *grid.pageSize().lines))
+            CHECK(grid.lineLength(LineOffset(y)) == newColumns);
+    }
+}
