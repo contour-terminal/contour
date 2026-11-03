@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/UnixPty.hpp>
 
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/UnixUtils.hpp>
 
@@ -307,6 +308,68 @@ PtySlave& UnixPty::slave() noexcept
 {
     assert(started());
     return *_slave;
+}
+
+InheritedPty UnixPty::handoverDescriptors() const
+{
+    auto inherited = InheritedPty {
+        .masterFd = _masterFd.get(), .stdoutFastPipe = std::nullopt, .pageSize = _pageSize, .pixels = _pixels
+    };
+    if (_stdoutFastPipe.reader() != -1)
+        inherited.stdoutFastPipe = std::pair { _stdoutFastPipe.reader(), _stdoutFastPipe.writer() };
+    return inherited;
+}
+
+InheritedPty UnixPty::releaseDescriptors()
+{
+    auto const _ = std::scoped_lock { _mutex };
+    auto inherited = handoverDescriptors();
+    if (!_masterFd.isClosed())
+        _readSelector.cancelRead(_masterFd);
+    if (inherited.stdoutFastPipe)
+        _readSelector.cancelRead(inherited.stdoutFastPipe->first);
+    std::ignore = _masterFd.release();
+    _stdoutFastPipe.pfd = { -1, -1 };
+    _masterState.store(MasterState::Closed, std::memory_order_release);
+    wakeupReader();
+    return inherited;
+}
+
+std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty inherited)
+{
+    auto const isOpen = [](int fd) {
+        return fd >= 0 && ::fcntl(fd, F_GETFD) >= 0;
+    };
+    if (!isOpen(inherited.masterFd) || !::isatty(inherited.masterFd))
+        return std::unexpected(AdoptError::BadDescriptor);
+    if (inherited.stdoutFastPipe && !isOpen(inherited.stdoutFastPipe->first))
+        return std::unexpected(AdoptError::BadDescriptor);
+
+    auto pty = std::make_unique<UnixPty>(inherited.pageSize, inherited.pixels);
+    // The constructor made a pipe of its own; an adopted PTY has the inherited one, or none.
+    pty->_stdoutFastPipe.close();
+    if (inherited.stdoutFastPipe)
+        pty->_stdoutFastPipe.pfd = { inherited.stdoutFastPipe->first,
+                                     isOpen(inherited.stdoutFastPipe->second)
+                                         ? inherited.stdoutFastPipe->second
+                                         : -1 };
+    pty->_masterFd = crispy::FileDescriptor::fromNative(inherited.masterFd);
+    pty->_slave = make_unique<Slave>();
+
+    // Close-on-exec again: only a hand-off keeps these across an exec. The reader of the fast pipe is
+    // non-blocking, as start() makes it.
+    for (auto const fd: inherited.descriptors())
+        if (fd >= 0)
+            std::ignore = util::setExecInheritance(fd, util::ExecInheritance::CloseOnExec);
+    std::ignore = util::setNonBlocking(pty->_masterFd);
+    if (pty->_stdoutFastPipe.reader() != -1)
+        std::ignore = util::setNonBlocking(pty->_stdoutFastPipe.reader());
+
+    pty->_masterState.store(MasterState::Open, std::memory_order_release);
+    pty->_readSelector.wantRead(pty->_masterFd);
+    if (pty->_stdoutFastPipe.reader() != -1)
+        pty->_readSelector.wantRead(pty->_stdoutFastPipe.reader());
+    return pty;
 }
 
 PtyMasterHandle UnixPty::handle() const noexcept

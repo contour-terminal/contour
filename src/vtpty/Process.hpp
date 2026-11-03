@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
 
@@ -10,6 +11,8 @@
 #include <core/platform/Clock.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -38,6 +41,20 @@ struct HangupGrace
 
     /// The clock the grace is measured on. It must outlive the Process.
     std::reference_wrapper<core::platform::IClock const> clock = core::platform::defaultSteadyClock();
+};
+
+/// A running child process a previous image of this process left behind across an exec (live upgrade).
+///
+/// Plain data, compiled on every platform so a handover image can carry it anywhere; only
+/// Process::adopt() turns it back into a Process, and that is POSIX-only. The child stays a child of this
+/// process across exec (the process id is kept), so waiting for it works as for a spawned one.
+struct AdoptedChild
+{
+    std::int64_t pid = -1;         ///< The child's process id.
+    std::string executable;        ///< The program it runs, as spawned.
+    std::vector<std::string> args; ///< Its arguments, as spawned.
+    std::filesystem::path cwd;     ///< Its working directory, as spawned.
+    HangupGrace hangupGrace;       ///< The grace close() gives it.
 };
 
 /**
@@ -133,6 +150,21 @@ class [[nodiscard]] Process: public Pty
             HangupGrace hangupGrace = {});
 
     ~Process() override;
+
+#ifndef _WIN32
+    /// Takes over a running child a previous image left behind: no fork, no placement (it was placed when
+    /// spawned). It is started already, and exit detection is as for a spawned child.
+    /// @param child The child, from releaseChild() or a handover image.
+    /// @param pty The PTY it runs on, usually from UnixPty::adopt().
+    /// @return The process; or AdoptError::NoSuchChild where @p child.pid is no child of this process.
+    [[nodiscard]] static std::expected<std::unique_ptr<Process>, AdoptError> adopt(AdoptedChild const& child,
+                                                                                   std::unique_ptr<Pty> pty);
+
+    /// Gives up the child without signalling or reaping it, leaving this Process without one, so that
+    /// destroying it neither kills nor waits for it; for an adopter in the same process.
+    /// @return The child, or nullopt where there is none running.
+    [[nodiscard]] std::optional<AdoptedChild> releaseChild();
+#endif
 
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();

@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/OwnedFd.hpp>
+#include <vtpty/Process.hpp>
 #include <vtpty/UnixPty.hpp>
 #include <vtpty/UnixUtils.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
 
 #include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <sys/ioctl.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdlib>
 #include <future>
@@ -314,4 +319,62 @@ TEST_CASE("UnixPty.inputEcho.followsTheSlavesTermios", "[vtpty][unixpty][inputec
     slave.reset();
     pty.close();
     CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
+}
+
+TEST_CASE("UnixPty.adopt.readsWhatTheChildWrites", "[vtpty][unixpty][handover]")
+{
+    // A pty adopted from its master fd reads what the child writes, takes input and resizes -- and the
+    // original object can go without closing the descriptor or killing the child.
+    auto const size = vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) };
+    auto adopted = std::unique_ptr<vtpty::UnixPty> {};
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    {
+        auto original = vtpty::testing::unplacedProcess(
+            vtpty::testing::execInfo("/bin/sh", { "-c", "echo ready; exec cat" }), size);
+        REQUIRE(original.start().has_value());
+        auto* const unixPty = dynamic_cast<vtpty::UnixPty*>(&original.pty());
+        REQUIRE(unixPty != nullptr);
+        // The child flushes the terminal as it starts, which would eat what is written before it ran.
+        REQUIRE(vtpty::testing::printed(original, "ready"));
+
+        auto const inherited = unixPty->releaseDescriptors();
+        CHECK(unixPty->isClosed());
+        child = original.releaseChild();
+        REQUIRE(child.has_value());
+        // As a hand-off leaves it: inheritable, which the adopter undoes.
+        REQUIRE(vtpty::util::setExecInheritance(inherited.masterFd, vtpty::util::ExecInheritance::KeepOnExec)
+                    .has_value());
+        auto result = vtpty::UnixPty::adopt(inherited);
+        REQUIRE(result.has_value());
+        adopted = std::move(*result);
+    } // The original Process is gone: neither the descriptor nor the child may be.
+
+    REQUIRE(::fcntl(unbox<int>(adopted->handle()), F_GETFD) >= 0);
+    CHECK((::fcntl(unbox<int>(adopted->handle()), F_GETFD) & FD_CLOEXEC) != 0);
+    CHECK(::kill(static_cast<pid_t>(child->pid), 0) == 0);
+    CHECK(adopted->pageSize() == size);
+
+    adopted->write("hello\n");
+    CHECK(vtpty::testing::printed(*adopted, "hello"));
+
+    auto const resized = vtpty::PageSize { .lines = vtpty::LineCount(10), .columns = vtpty::ColumnCount(40) };
+    adopted->resizeScreen(resized);
+    auto ws = winsize {};
+    REQUIRE(::ioctl(unbox<int>(adopted->handle()), TIOCGWINSZ, &ws) == 0);
+    CHECK(ws.ws_row == 10);
+    CHECK(ws.ws_col == 40);
+
+    auto process = vtpty::Process::adopt(*child, std::move(adopted));
+    REQUIRE(process.has_value());
+    (*process)->terminate(vtpty::Process::TerminationHint::Kill);
+    CHECK((*process)->wait().has_value());
+}
+
+TEST_CASE("UnixPty.adopt.refusesADescriptorThatIsNotOpen", "[vtpty][unixpty][handover]")
+{
+    auto inherited =
+        vtpty::InheritedPty { .masterFd = 987, .stdoutFastPipe = std::nullopt, .pageSize = {}, .pixels = {} };
+    auto const result = vtpty::UnixPty::adopt(inherited);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == vtpty::AdoptError::BadDescriptor);
 }

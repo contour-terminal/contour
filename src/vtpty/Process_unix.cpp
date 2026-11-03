@@ -226,6 +226,14 @@ struct Process::Private
     shared_ptr<ProcessPlacement> placement {};
     HangupGrace hangupGrace;
 
+    /// Whether this process spawned the child itself.
+    enum class Origin : uint8_t
+    {
+        Spawned = 0, ///< By start().
+        Adopted,     ///< Left behind by a previous image; running already.
+    };
+    Origin origin = Origin::Spawned;
+
     // The child's id, or NoChild: before start() spawned one, when fork() failed, and once the child has
     // been reaped. Never 0, which waitpid() and kill() read as the caller's whole process group, nor any
     // other id they would read as more than one process. Written under exitStatusMutex.
@@ -279,6 +287,9 @@ bool Process::isFlatpak()
 
 StartResult Process::start()
 {
+    if (_d->origin == Private::Origin::Adopted)
+        return {}; // Running already, on a PTY that is open.
+
     if (auto started = _d->pty->start(); !started)
         return started;
 
@@ -498,6 +509,45 @@ StartResult Process::start()
     // cannot be executed, is discovered in the CHILD, which writes its own diagnostic onto the pty
     // (see the fallback ladder above) and exits. The parent only fails when fork() itself does.
     return {};
+}
+
+std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild const& child,
+                                                                   std::unique_ptr<Pty> pty)
+{
+    Require(pty != nullptr);
+    auto const pid = static_cast<pid_t>(child.pid);
+    // Only a child of ours can be waited for; this also rejects a recycled or foreign id.
+    auto info = siginfo_t {};
+    if (pid <= 0 || child.pid != static_cast<std::int64_t>(pid)
+        || waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) < 0)
+        return std::unexpected(AdoptError::NoSuchChild);
+
+    auto process = std::make_unique<Process>(child.executable,
+                                             child.args,
+                                             child.cwd,
+                                             Environment {},
+                                             std::vector<std::string> {},
+                                             /*escapeSandbox=*/false,
+                                             std::move(pty),
+                                             std::make_shared<NoPlacement>(),
+                                             child.hangupGrace);
+    process->_d->origin = Private::Origin::Adopted;
+    process->_d->pid = pid;
+    return process;
+}
+
+std::optional<AdoptedChild> Process::releaseChild()
+{
+    auto const _ = lock_guard { _d->exitStatusMutex };
+    if (_d->pid == NoChild)
+        return nullopt;
+    auto child = AdoptedChild { .pid = _d->pid,
+                                .executable = _d->path,
+                                .args = _d->args,
+                                .cwd = _d->cwd,
+                                .hangupGrace = _d->hangupGrace };
+    _d->pid = NoChild;
+    return child;
 }
 
 Process::~Process()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/UnixUtils.hpp>
 
@@ -10,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -36,6 +38,7 @@ class UnixPty final: public Pty
         FileDescriptor _slaveFd;
 
       public:
+        Slave() = default; ///< A slave that is closed already: what an adopted PTY has.
         explicit Slave(PtySlaveHandle fd): _slaveFd { FileDescriptor::fromNative(unbox<int>(fd)) } {}
         ~Slave() override;
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
@@ -72,6 +75,25 @@ class UnixPty final: public Pty
     [[nodiscard]] InputEcho inputEcho() const noexcept override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
+
+    /// @name Live-upgrade hand-over (exec of the daemon keeps descriptors, not objects)
+    /// @{
+
+    /// @return The descriptors that must cross an exec, with the terminal size. Only valid while started.
+    [[nodiscard]] InheritedPty handoverDescriptors() const;
+
+    /// Gives up the descriptors without closing them and leaves this PTY closed, for an adopter in the
+    /// same process (the descriptors then belong to the returned value's adopter).
+    /// @return What handoverDescriptors() returned.
+    [[nodiscard]] InheritedPty releaseDescriptors();
+
+    /// Takes over the PTY a previous image left behind: no openpty(), no slave. The descriptors are made
+    /// close-on-exec again and the master non-blocking.
+    /// @param inherited The descriptors and size from handoverDescriptors().
+    /// @return The running PTY; or AdoptError::BadDescriptor where a descriptor is not open or the master
+    ///         is no terminal. On error no descriptor is closed.
+    [[nodiscard]] static std::expected<std::unique_ptr<UnixPty>, AdoptError> adopt(InheritedPty inherited);
+    /// @}
 
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;

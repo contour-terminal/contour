@@ -33,6 +33,8 @@
 #include <vector>
 
 #ifndef _WIN32
+    #include <vtpty/UnixPty.hpp>
+
     #include <sys/wait.h>
 
     #include <unistd.h>
@@ -726,4 +728,46 @@ TEST_CASE("startDetached.sets the oom_score_adj its placement supplies", "[proce
     ::kill(*pid, SIGKILL); // started by this test, and nobody's child here: nothing else ends it
 }
     #endif
+#endif
+
+#ifndef _WIN32
+TEST_CASE("Process.adopt.reportsTheExitStatusOfItsChild", "[process][handover]")
+{
+    // The child survives its parent object, and the process id stays ours across an exec: the adopted
+    // Process reaps it exactly as a spawned one does.
+    auto original =
+        vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "sleep 0.2; exit 7" }), PageSize);
+    REQUIRE(original.start().has_value());
+    auto* const unixPty = dynamic_cast<vtpty::UnixPty*>(&original.pty());
+    REQUIRE(unixPty != nullptr);
+    auto const inherited = unixPty->releaseDescriptors();
+    auto child = original.releaseChild();
+    REQUIRE(child.has_value());
+    CHECK_FALSE(original.alive());
+
+    auto pty = vtpty::UnixPty::adopt(inherited);
+    REQUIRE(pty.has_value());
+    auto adopted = vtpty::Process::adopt(*child, std::move(*pty));
+    REQUIRE(adopted.has_value());
+    CHECK((*adopted)->alive());
+    CHECK((*adopted)->start().has_value()); // already running: starting is a no-op
+
+    auto const status = (*adopted)->wait();
+    REQUIRE(status.has_value());
+    auto const* const normal = std::get_if<vtpty::Process::NormalExit>(&*status);
+    REQUIRE(normal != nullptr);
+    CHECK(normal->exitCode == 7);
+    CHECK_FALSE((*adopted)->alive());
+}
+
+TEST_CASE("Process.adopt.refusesAProcessThatIsNotOurChild", "[process][handover]")
+{
+    auto pty = std::make_unique<vtpty::MockPty>(PageSize);
+    auto const result = vtpty::Process::adopt(
+        vtpty::AdoptedChild {
+            .pid = ::getppid(), .executable = "x", .args = {}, .cwd = {}, .hangupGrace = {} },
+        std::move(pty));
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == vtpty::AdoptError::NoSuchChild);
+}
 #endif
