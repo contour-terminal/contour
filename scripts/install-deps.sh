@@ -591,7 +591,7 @@ install_deps_fedora() {
             qt6-qtbase-gui
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
-            qt6-qtmultimedia-devel
+            qt6-qtshadertools-devel
             qt6-qtsvg
             qt6-qtwayland-devel
             qt6-qtquickcontrols2-devel
