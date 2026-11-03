@@ -5984,6 +5984,72 @@ TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
     }
 }
 
+namespace
+{
+/// How the grid takes a column change under a pending wrap, one per way a row can end up cut or reflowed.
+enum class ResizeVariant : uint8_t
+{
+    Reflow,            ///< the rows wrap and reflow
+    ReflowOff,         ///< the grid does not reflow
+    TextReflowModeOff, ///< DECRST 2028: reflow is on, but the row cannot wrap
+    AlternateScreen,   ///< the alternate screen never reflows
+};
+} // namespace
+
+TEST_CASE("Screen.resize.aPendingWrapAtTheRightMarginIsNotLeftOnItsCharacter", "[screen]")
+{
+    // Issue #2123. A wrap pending at a DECSLRM right margin is not pending at the page's right edge, and
+    // a resize resets the margins. Whichever way the column count moves, and whether the row is reflowed
+    // or cut, the next character must not land on the one the wrap was pending after.
+    //
+    // This diverges from xterm, which never clears its pending wrap on a resize, so the next character
+    // always goes to the next row. Contour places it after the last one when the new width has room, as
+    // it did before this fix; #1010 (7cd1a851c) did not decide the question, it is left to the owner.
+    auto const variant = GENERATE(ResizeVariant::Reflow,
+                                  ResizeVariant::ReflowOff,
+                                  ResizeVariant::TextReflowModeOff,
+                                  ResizeVariant::AlternateScreen);
+    auto const columns = GENERATE(9, 10, 15, 25);
+    CAPTURE(static_cast<int>(variant), columns);
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    if (variant == ResizeVariant::ReflowOff)
+        mock.terminal.primaryScreen().grid().setReflowOnResize(false);
+    if (variant == ResizeVariant::TextReflowModeOff)
+        mock.writeToScreen("\033[?2028l"sv);
+    if (variant == ResizeVariant::AlternateScreen)
+        mock.writeToScreen("\033[?1049h"sv);
+    mock.writeToScreen("\033[?69h\033[1;10s\033[1;10HA"sv);
+    auto const& screen = std::as_const(mock.terminal).currentScreen();
+    REQUIRE(screen.cursor().wrapPending);
+    REQUIRE(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(9) });
+
+    mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(columns) });
+    mock.writeToScreen("B"sv);
+
+    auto const text = screen.grid().renderMainPageText();
+    CAPTURE(text);
+    auto const rowOfB = text.find('B') / (static_cast<size_t>(columns) + 1);
+    if (columns > 10)
+    {
+        CHECK(screen.at(LineOffset(0), ColumnOffset(9)).codepoints() == U"A");
+        CHECK(screen.at(LineOffset(0), ColumnOffset(10)).codepoints() == U"B");
+    }
+    else if (variant == ResizeVariant::Reflow && columns < 10)
+    {
+        // The reflow wrapped "A" onto the next row, and "B" follows it.
+        CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"A");
+        CHECK(screen.at(LineOffset(1), ColumnOffset(1)).codepoints() == U"B");
+    }
+    else
+    {
+        CHECK(rowOfB == 1);
+        CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"B");
+        if (columns == 10)
+            CHECK(screen.at(LineOffset(0), ColumnOffset(9)).codepoints() == U"A");
+    }
+}
+
 TEST_CASE("BulkText.aSingleShiftMapsOneCharacterOnly", "[screen]")
 {
     // SS2 invokes G2 for the next graphic character alone. The bulk write asked whether the table for

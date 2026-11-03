@@ -957,8 +957,9 @@ void Grid::insertSlotsAfterPage(size_t count, LineFlags flags)
     auto const boundary = slotAfterPage();
     auto& slots = _lines.storage();
     auto const at = boundary == 0 ? slots.size() : boundary;
-    // The prototype rather than a default-constructed Line: a cols=0 line would violate the "every slot is
-    // at least pageSize.columns wide" invariant the other paths rely on.
+    // The prototype rather than a default-constructed Line: a slot narrower than the page would reach
+    // the used range once it is scrolled into use. Only the slots in use are held to the page width; a
+    // column change leaves the unused tail at its old width, to be re-widthed when it is recycled.
     slots.insert(std::next(slots.begin(), static_cast<ptrdiff_t>(at)),
                  count,
                  Line(_pageSize.columns, flags, GraphicsAttributes {}));
@@ -1924,10 +1925,26 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
     };
 
     auto const growColumns = [&](ColumnCount newColumnCount) {
-        if (!_reflowOnResize)
+        // Reflow exists to rejoin lines that were split by wrapping. Without it, or when nothing in
+        // the used range is wrapped, there is nothing to rejoin, and the reflow below would emit
+        // exactly the lines already held, only wider -- which this does in place, without rebuilding
+        // the ring.
+        //
+        // Worth the check because rebuilding is not proportional to what the grid holds but to
+        // what it *could* hold: the ring is sized to HistoryLimits::capacity, so a column change
+        // constructs that many blank Lines and destroys as many old ones. At a 100,000-line
+        // scrollback that is 20 MB of memory traffic and ~4.5ms per column change, on an empty
+        // grid, and a window drag pays one per column step. The scan is over the used lines
+        // only, so it costs nothing when there is nothing to skip.
+        if (!_reflowOnResize || !anyUsedLineWrapped())
         {
-            for (auto& line: _lines)
-                if (line.size() < newColumnCount)
+            // Only the used lines need widening. The blank tail keeps its old width and is
+            // given the current one when it is recycled -- every Line::reset() call site in
+            // this file passes _pageSize.columns for exactly that reason. Walking the tail here
+            // would be ~100,000 iterations per column change at a large scrollback, whatever
+            // the grid actually holds.
+            for (auto const i: std::views::iota(-*historyLineCount(), *_pageSize.lines))
+                if (auto& line = _lines[i]; line.size() < newColumnCount)
                     line.resize(newColumnCount);
             _pageSize.columns = newColumnCount;
             verifyState();
@@ -1937,32 +1954,6 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
         {
             auto const extendCount = newColumnCount - _pageSize.columns;
             Require(*extendCount > 0);
-
-            // Reflow exists to rejoin lines that were split by wrapping. When nothing in the used
-            // range is wrapped there is nothing to rejoin, and the reflow below would emit exactly
-            // the lines already held, only wider -- which is what the non-reflow path above does in
-            // place, without rebuilding the ring.
-            //
-            // Worth the check because rebuilding is not proportional to what the grid holds but to
-            // what it *could* hold: the ring is sized to HistoryLimits::capacity, so a column change
-            // constructs that many blank Lines and destroys as many old ones. At a 100,000-line
-            // scrollback that is 20 MB of memory traffic and ~4.5ms per column change, on an empty
-            // grid, and a window drag pays one per column step. The scan is over the used lines
-            // only, so it costs nothing when there is nothing to skip.
-            if (!anyUsedLineWrapped())
-            {
-                // Only the used lines need widening. The blank tail keeps its old width and is
-                // given the current one when it is recycled -- every Line::reset() call site in
-                // this file passes _pageSize.columns for exactly that reason. Walking the tail here
-                // would be ~100,000 iterations per column change at a large scrollback, whatever
-                // the grid actually holds.
-                for (auto i = -*historyLineCount(); i < *_pageSize.lines; ++i)
-                    if (_lines[i].size() < newColumnCount)
-                        _lines[i].resize(newColumnCount);
-                _pageSize.columns = newColumnCount;
-                verifyState();
-                return;
-            }
 
             auto const tallBlocks = liftedTallBlocks();
             followTallBlocks(tallBlocks);
@@ -2088,8 +2079,8 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
         if (!_reflowOnResize)
         {
             _pageSize.columns = newColumnCount;
-            for (auto& line: _lines)
-                if (newColumnCount < line.size())
+            for (auto const i: std::views::iota(-*historyLineCount(), *_pageSize.lines))
+                if (auto& line = _lines[i]; newColumnCount < line.size())
                     line.resize(newColumnCount);
             verifyState();
             // A cursor that still fits stays where it is; one past the new width moves onto its last column.
