@@ -57,6 +57,7 @@ BuildRequires:  qt6-qtbase-private-devel
 BuildRequires:  qt6-qtbase-gui
 BuildRequires:  qt6-qtdeclarative-devel
 BuildRequires:  qt6-qtmultimedia-devel
+BuildRequires:  qt6-qtshadertools-devel
 %endif
 
 Requires:       cairo
