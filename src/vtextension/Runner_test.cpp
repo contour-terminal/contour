@@ -37,10 +37,22 @@ using vtextension::testing::toModule;
 namespace
 {
 
+/// @return The limits of a test that is not about the call deadline. The real one, 50 ms of wall clock
+/// on a watchdog thread, is the guest's budget to render; a loaded CI machine can spend it on a guest
+/// that does nothing, which faults the instance and leaves a test that waits for its first frame empty
+/// handed -- whatever the manual scheduler does.
+[[nodiscard]] ExtensionLimits steadyLimits()
+{
+    auto limits = ExtensionLimits {};
+    limits.callDeadline = 10s;
+    limits.loadDeadline = 10s;
+    return limits;
+}
+
 /// @return What a test runner called @p name is.
 [[nodiscard]] RunnerConfig configFor(std::string name,
                                      ConfigMap config = {},
-                                     ExtensionLimits limits = {},
+                                     ExtensionLimits limits = steadyLimits(),
                                      CommandPermission runCommand = CommandPermission::Deny)
 {
     return RunnerConfig { .name = std::move(name),
@@ -57,7 +69,7 @@ namespace
                                                  std::vector<std::byte> bytes,
                                                  std::string name,
                                                  ConfigMap config = {},
-                                                 ExtensionLimits limits = {},
+                                                 ExtensionLimits limits = steadyLimits(),
                                                  CommandPermission runCommand = CommandPermission::Deny)
 {
     auto module = loadModule(*harness.backend, std::move(bytes), limits);
@@ -122,7 +134,7 @@ TEST_CASE("Runner.renderThrottle", "[vtextension][runner]")
 {
     // Renders are at least minFrameInterval apart: a resize right after a render waits for it.
     auto harness = RunnerHarness {};
-    auto const limits = ExtensionLimits {};
+    auto const limits = steadyLimits();
     auto const runner =
         makeRunner(harness, toModule(vtextension::testing::MinimalModule), "minimal", {}, limits);
     runner->post(surfaceOf(10, 1));
@@ -142,7 +154,7 @@ TEST_CASE("Runner.backoffThenDisable", "[vtextension][runner]")
 {
     // The malicious guest's render traps on a one-row surface: every instance faults on its first frame.
     auto harness = RunnerHarness {};
-    auto const limits = ExtensionLimits {};
+    auto const limits = steadyLimits();
     REQUIRE(limits.faultsBeforeDisable == 3);
     auto const runner =
         makeRunner(harness, toModule(vtextension::testing::MaliciousModule), "malicious", {}, limits);
@@ -178,7 +190,7 @@ TEST_CASE("Runner.faultWindow", "[vtextension][runner]")
 {
     // Faults further apart than faultWindow never add up to a disable.
     auto harness = RunnerHarness {};
-    auto limits = ExtensionLimits {};
+    auto limits = steadyLimits();
     limits.faultWindow = 1s;
     limits.initialBackoff = 2s;
     auto const runner =
@@ -217,7 +229,7 @@ TEST_CASE("Runner.logBudget", "[vtextension][runner]")
     // The guest's cabi_realloc logs on every allocation, and loading 40 settings allocates over 80 times
     // in one call: only maxLogsPerCall of those messages reach the host.
     auto harness = RunnerHarness {};
-    auto const limits = ExtensionLimits {};
+    auto const limits = steadyLimits();
     auto config = ConfigMap {};
     for (auto const index: std::views::iota(0, 40))
         config.emplace_back("key" + std::to_string(index), "value");
@@ -454,7 +466,7 @@ TEST_CASE("Runner.frameClamp", "[vtextension][runner][guest]")
     // The frame-flood guest requests 1000 frames of 0 ms per render, and asks for a render on every
     // event: renders are paced at minFrameInterval all the same.
     auto harness = RunnerHarness {};
-    auto const limits = ExtensionLimits {};
+    auto const limits = steadyLimits();
     auto const runner =
         makeRunner(harness, readTestModule("hostile.wasm"), "hostile", { { "mode", "frame-flood" } }, limits);
     runner->post(surfaceOf(80, 1));
@@ -503,8 +515,8 @@ TEST_CASE("Runner.runCommand", "[vtextension][runner][guest]")
 {
     auto harness = RunnerHarness {};
     harness.capture.answer = "hi";
-    auto const runner =
-        makeRunner(harness, readTestModule("spawner.wasm"), "spawner", {}, {}, CommandPermission::Allow);
+    auto const runner = makeRunner(
+        harness, readTestModule("spawner.wasm"), "spawner", {}, steadyLimits(), CommandPermission::Allow);
     runner->post(surfaceOf(40, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -520,8 +532,8 @@ TEST_CASE("Runner.runCommand.shellDialect", "[vtextension][runner][guest]")
     auto harness = RunnerHarness {};
     harness.shellDialect = ShellDialect::WindowsCmd;
     harness.capture.answer = "hi";
-    auto const runner =
-        makeRunner(harness, readTestModule("spawner.wasm"), "spawner", {}, {}, CommandPermission::Allow);
+    auto const runner = makeRunner(
+        harness, readTestModule("spawner.wasm"), "spawner", {}, steadyLimits(), CommandPermission::Allow);
     runner->post(surfaceOf(40, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -534,8 +546,8 @@ TEST_CASE("Runner.runCommand.timedOut", "[vtextension][runner][guest]")
     auto harness = RunnerHarness {};
     harness.capture.answer = std::unexpected(
         vtpty::CommandCaptureError { .kind = vtpty::CommandCaptureError::Kind::TimedOut, .cause = {} });
-    auto const runner =
-        makeRunner(harness, readTestModule("spawner.wasm"), "spawner", {}, {}, CommandPermission::Allow);
+    auto const runner = makeRunner(
+        harness, readTestModule("spawner.wasm"), "spawner", {}, steadyLimits(), CommandPermission::Allow);
     runner->post(surfaceOf(40, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -546,8 +558,8 @@ TEST_CASE("Runner.runCommand.pending", "[vtextension][runner][guest]")
 {
     // Unanswered: the call fails at once, and the host is asked exactly once, however often it retries.
     auto harness = RunnerHarness {};
-    auto const runner =
-        makeRunner(harness, readTestModule("spawner.wasm"), "spawner", {}, {}, CommandPermission::Ask);
+    auto const runner = makeRunner(
+        harness, readTestModule("spawner.wasm"), "spawner", {}, steadyLimits(), CommandPermission::Ask);
     runner->post(surfaceOf(40, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -581,7 +593,7 @@ TEST_CASE("Runner.control", "[vtextension][runner][control]")
     auto const module =
         vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
                                            "name = reporter\nversion = 1\ncontrol read\n");
-    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Ask);
+    auto const runner = makeRunner(harness, module, "reporter", {}, steadyLimits(), CommandPermission::Ask);
     runner->post(surfaceOf(80, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -609,7 +621,7 @@ TEST_CASE("Runner.control.deny", "[vtextension][runner][control]")
     auto const module =
         vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
                                            "name = reporter\nversion = 1\ncontrol read\n");
-    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Deny);
+    auto const runner = makeRunner(harness, module, "reporter", {}, steadyLimits(), CommandPermission::Deny);
     runner->post(surfaceOf(80, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -624,7 +636,7 @@ TEST_CASE("Runner.control.allowIsNoGrant", "[vtextension][runner][control]")
     auto const module =
         vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
                                            "name = reporter\nversion = 1\ncontrol read\n");
-    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Allow);
+    auto const runner = makeRunner(harness, module, "reporter", {}, steadyLimits(), CommandPermission::Allow);
     runner->post(surfaceOf(80, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -643,10 +655,11 @@ TEST_CASE("Runner.control.notServed", "[vtextension][runner][control]")
                                                       "name = reporter\nversion = 1\ncontrol read\n"));
     auto services = harness.services();
     services.callControl = nullptr;
-    auto const runner = std::make_unique<Runner>(std::move(module.engine),
-                                                 std::move(module.compiled),
-                                                 configFor("reporter", {}, {}, CommandPermission::Ask),
-                                                 std::move(services));
+    auto const runner =
+        std::make_unique<Runner>(std::move(module.engine),
+                                 std::move(module.compiled),
+                                 configFor("reporter", {}, steadyLimits(), CommandPermission::Ask),
+                                 std::move(services));
     runner->post(surfaceOf(80, 1));
     harness.scheduler.runPending();
     REQUIRE(runner->latest() != nullptr);
@@ -714,10 +727,11 @@ TEST_CASE("Runner.threading.spinNeverBlocksThePoster", "[vtextension][runner][th
     auto harness = RunnerHarness {};
     auto pool = ExtensionWorkerPool(*harness.backend, 1);
     auto module = loadModule(*harness.backend, readTestModule("hostile.wasm"));
-    auto runner = Runner(std::move(module.engine),
-                         std::move(module.compiled),
-                         configFor("hostile", { { "mode", "spin" } }),
-                         harness.services(pool));
+    auto runner =
+        Runner(std::move(module.engine),
+               std::move(module.compiled),
+               configFor("hostile", { { "mode", "spin" } }, ExtensionLimits {}), // the real deadline cuts it
+               harness.services(pool));
     runner.post(surfaceOf(80, 1));
     for (auto const index: std::views::iota(0U, 1000U))
         runner.post(ReplyBytes { .bytes = { static_cast<uint8_t>(index) } });
