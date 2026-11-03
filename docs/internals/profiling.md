@@ -174,6 +174,34 @@ be dropped, laced with queries that make the terminal reply, or read in larger o
   count.** Count block closes (`syncOut.refreshed` + `syncOut.dropped.*`) instead: the cap can expire
   mid-body and draw the same application frame several times.
 
+## Counting CPU work with `bench-headless`
+
+Tracy shows where time goes; for a before/after comparison of a change, wall time is noisy and Callgrind
+exists on one OS only. `bench-headless throughput` and `bench-headless snapshot` therefore also report the
+CPU work of each row, read from the operating system's counters: `Ginstr` and `Gcyc` (instructions and core
+cycles, with an SI prefix) for a run fed from memory. The snapshot shows the work per frame, beside each of its measurements. Runs through a real PTY (`pty`) carry no counters.
+
+```
+utf8       primary        47.3 MiB/s    3.13 Ginstr  536.25 Mcyc
+```
+
+| Platform | Measures                      | Scope                                  |
+|----------|-------------------------------|----------------------------------------|
+| Linux    | instructions, cycles          | user mode only (`perf_event`)          |
+| macOS    | instructions, cycles          | user and kernel mode together          |
+| Windows  | reference cycles (`refcyc`)   | user and kernel mode together          |
+
+Figures from different platforms are not comparable; compare runs on one machine. Virtual machines and CI
+runners usually expose no counters, and Linux needs `perf_event_paranoid` of at most 2 and a hardware PMU.
+Where the counters are unavailable, the benchmark prints `CPU counters unavailable: <reason>` once under its
+header, shows no columns, and never prints a zero.
+
+To compare a change, build `bench-headless` in a release tree before and after, and run the same invocation
+with a fixed `size` and `runs`, e.g. `bench-headless throughput size 8 runs 3 kinds utf8 screens primary`.
+On Linux and macOS, instruction counts barely move between runs, so a difference of a percent is a real
+one, unlike the same difference in MiB/s. The counts are process-wide, so the worker threads of `extensions`
+and `indicator` land in them: the counts are deterministic only without extensions. Callgrind stays the tool for the per-function breakdown.
+
 ## Zone and plot inventory
 
 ### Parser thread (`Terminal.Loop`)

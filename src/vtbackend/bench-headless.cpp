@@ -3,6 +3,7 @@
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/CounterColumns.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/Workloads.hpp>
 
@@ -23,6 +24,7 @@
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/CpuCounters.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
@@ -32,6 +34,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <compare>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -1802,6 +1805,16 @@ struct LinkDetectionCounts
 /// run's count of indexed links says what detection found.
 constexpr auto LinkSettleTime = std::chrono::seconds { 1 };
 
+/// Says once, before a table, why it has no CPU counter columns, and what deviates from the documented scope.
+void printCounterAvailability(core::platform::ICpuCounterSource const& counters)
+{
+    if (auto const availability = vtbackend::testing::formatCounterAvailability(counters);
+        !availability.empty())
+        cout << availability << '\n';
+    if (auto const note = counters.note(); !note.empty())
+        cout << "CPU counters: " << note << '\n';
+}
+
 /// How the throughput benchmark runs. Its defaults are the command line's.
 struct ThroughputOptions
 {
@@ -1820,7 +1833,7 @@ struct ThroughputOptions
     ExtensionRig* extensionRig = nullptr;
 };
 
-/// What one throughput run measured. Runs order by how long they took first, so the fastest of several is the
+/// What one throughput run measured. Runs order by how long they took alone, so the fastest of several is the
 /// least.
 struct ThroughputRun
 {
@@ -1831,15 +1844,22 @@ struct ThroughputRun
     std::optional<double> arrived {};
     /// What link detection did; counted with link detection on only.
     std::optional<LinkDetectionCounts> detection {};
+    /// The CPU work the run took; counted for runs fed from memory only, and only where the platform counts.
+    std::optional<core::platform::CpuCounterSample> counters {};
 
-    auto operator<=>(ThroughputRun const&) const = default;
+    /// Orders by elapsed time alone: the counters have no order, and the fastest run is the least.
+    [[nodiscard]] std::weak_ordering operator<=>(ThroughputRun const& other) const
+    {
+        return elapsed <=> other.elapsed;
+    }
 };
 
 /// @return How long a terminal took to take in @p input on @p screen, fed from memory @p ptyReadSize
 ///         bytes per read, once an untimed pass of the same input had brought it to its steady state.
 [[nodiscard]] ThroughputRun measureFromMemory(std::string_view input,
                                               BenchScreen const& screen,
-                                              ThroughputOptions const& options)
+                                              ThroughputOptions const& options,
+                                              core::platform::ICpuCounterSource& counters)
 {
     auto const extensions = startPaneExtensions(options.extensionRig); // outlives the terminal
     auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(
@@ -1854,10 +1874,14 @@ struct ThroughputRun
     feed(vt, screen.entrySequence);
     feed(vt, input); // fills the scrollback, @see BenchHistory
     vt.mockPty().setReadData(input);
-    return ThroughputRun { .elapsed = runWorkloadOnce(vt.terminal, vt.mockPty()),
+    auto elapsed = std::chrono::nanoseconds {};
+    auto const work =
+        core::platform::measure(counters, [&] { elapsed = runWorkloadOnce(vt.terminal, vt.mockPty()); });
+    return ThroughputRun { .elapsed = elapsed,
                            .bytesPerRead = std::nullopt,
                            .arrived = std::nullopt,
-                           .detection = std::nullopt };
+                           .detection = std::nullopt,
+                           .counters = work };
 }
 
 /// Refreshes @p terminal's render buffer @p hz times a second until stopped, the way the render thread
@@ -1997,7 +2021,8 @@ struct ThroughputRun
             return ThroughputRun { .elapsed = finished - *firstRead,
                                    .bytesPerRead = process.bytesRead() / process.reads(),
                                    .arrived = arrived,
-                                   .detection = detection };
+                                   .detection = detection,
+                                   .counters = std::nullopt };
         });
 }
 
@@ -2083,12 +2108,14 @@ struct WriterStartupCost
     BenchScreen const& screen,
     ThroughputOptions const& options,
     std::optional<WriterStartupCost> const& writerStartup,
-    core::Environment const& env)
+    core::Environment const& env,
+    core::platform::ICpuCounterSource& counters)
 {
     switch (options.device)
     {
         case ThroughputDevice::MockPty:
-            return fastestOf(options.runs, [&] { return measureFromMemory(input, screen, options); });
+            return fastestOf(options.runs,
+                             [&] { return measureFromMemory(input, screen, options, counters); });
         case ThroughputDevice::RealPty:
             // The writer reads the workload from a file, which every run reuses.
             return ScratchFile::create("throughput", input).and_then([&](ScratchFile const& file) {
@@ -2110,7 +2137,8 @@ struct WriterStartupCost
 int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                            std::span<BenchScreen const> screens,
                            ThroughputOptions const& options,
-                           core::Environment const& env)
+                           core::Environment const& env,
+                           core::platform::ICpuCounterSource& counters)
 {
     Require((options.linkDetection == LinkDetection::On) == (options.linkRig != nullptr));
     auto const writerStartup = measureWriterStartup(options, env);
@@ -2139,13 +2167,19 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
         cout << "The indicator status line is shown, and the terminal focused.\n";
     if (options.extensionRig)
         cout << "Status-line extensions run beside every terminal.\n";
+    switch (options.device)
+    {
+        case ThroughputDevice::MockPty: printCounterAvailability(counters); break;
+        case ThroughputDevice::RealPty: cout << "CPU counters: not measured through a PTY\n"; break;
+    }
     for (auto const& workload: workloads)
     {
         auto const input = vtbackend::test::makeWorkload(workload, options.bytesPerWorkload);
         auto const mebibytes = static_cast<double>(input.size()) / (1024.0 * 1024.0);
         for (auto const& screen: screens)
         {
-            auto const fastest = measureFastestThroughput(input, screen, options, *writerStartup, env);
+            auto const fastest =
+                measureFastestThroughput(input, screen, options, *writerStartup, env, counters);
             if (!fastest)
             {
                 cerr << fastest.error() << '\n';
@@ -2161,6 +2195,8 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                 row += std::format(" {:9} bytes/read", *fastest->bytesPerRead);
             if (fastest->arrived)
                 row += std::format(" {:6.1f}% arrived", 100.0 * *fastest->arrived);
+            if (fastest->counters)
+                row += vtbackend::testing::formatCounterColumns(*fastest->counters, counters, 1);
             if (fastest->detection)
                 row += describe(*fastest->detection, fastest->elapsed, options.linkRig->tuning.maxWait);
             cout << row << '\n';
@@ -2214,11 +2250,26 @@ struct SnapshotOptions
     return std::chrono::steady_clock::now() - start;
 }
 
-/// @return The mean time of one frame, once @p fill has been written on @p screen with @p statusLine shown.
-[[nodiscard]] std::chrono::duration<double, std::micro> measureSnapshot(std::string_view fill,
-                                                                        BenchScreen const& screen,
-                                                                        SnapshotStatusLine const& statusLine,
-                                                                        unsigned frames)
+/// What one snapshot run measured; runs order by their time alone, so the fastest of several is the least.
+struct SnapshotRun
+{
+    std::chrono::duration<double, std::micro> perFrame {}; ///< The mean time of one frame.
+    core::platform::CpuCounterSample counters {};          ///< The CPU work of all the frames together.
+
+    /// Orders by time alone: the counters have no order.
+    [[nodiscard]] std::weak_ordering operator<=>(SnapshotRun const& other) const
+    {
+        return std::weak_order(perFrame.count(), other.perFrame.count());
+    }
+};
+
+/// @return The mean time and the CPU work of one run of frames, once @p fill has been written on @p screen
+///         with @p statusLine shown.
+[[nodiscard]] SnapshotRun measureSnapshot(std::string_view fill,
+                                          BenchScreen const& screen,
+                                          SnapshotStatusLine const& statusLine,
+                                          unsigned frames,
+                                          core::platform::ICpuCounterSource& counters)
 {
     auto const totalPageSize = vtbackend::PageSize { .lines = BenchPageSize.lines + statusLine.height,
                                                      .columns = BenchPageSize.columns };
@@ -2228,19 +2279,27 @@ struct SnapshotOptions
     assert(vt.terminal.pageSize() == BenchPageSize && "a status line's height is not the terminal's");
     feed(vt, screen.entrySequence);
     feed(vt, fill);
-    return std::chrono::duration<double, std::micro>(runSnapshotFrames(vt.terminal, frames)) / frames;
+    // A read right before, so that the interval the source checks for multiplexing is the measured one.
+    std::ignore = counters.read();
+    auto elapsed = std::chrono::nanoseconds {};
+    auto const work =
+        core::platform::measure(counters, [&] { elapsed = runSnapshotFrames(vt.terminal, frames); });
+    return SnapshotRun { .perFrame = std::chrono::duration<double, std::micro>(elapsed) / frames,
+                         .counters = work };
 }
 
 /// Measures every picked workload on every picked screen with every status line, and prints the fastest run
 /// of each.
 int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
                          std::span<BenchScreen const> screens,
-                         SnapshotOptions const& options)
+                         SnapshotOptions const& options,
+                         core::platform::ICpuCounterSource& counters)
 {
     cout << std::format(
         "Render snapshot: refreshRenderBuffer() per frame, mean of {} frames, fastest of {} runs\n",
         options.frames,
         options.runs);
+    printCounterAvailability(counters);
     for (auto const& workload: workloads)
     {
         auto const fill = vtbackend::test::makeWorkload(workload, SnapshotFillBytes);
@@ -2250,9 +2309,12 @@ int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
                 "{:<{}} {:<{}}", workload.name, WorkloadColumnWidth, screen.name, ScreenColumnWidth);
             for (auto const& statusLine: SnapshotStatusLines)
             {
-                auto const fastest = fastestOf(
-                    options.runs, [&] { return measureSnapshot(fill, screen, statusLine, options.frames); });
-                line += std::format(" {:9.1f} us/frame ({})", fastest.count(), statusLine.label);
+                auto const fastest = fastestOf(options.runs, [&] {
+                    return measureSnapshot(fill, screen, statusLine, options.frames, counters);
+                });
+                line += std::format(" {:9.1f} us/frame", fastest.perFrame.count());
+                line += vtbackend::testing::formatCounterColumns(fastest.counters, counters, options.frames);
+                line += std::format(" ({})", statusLine.label);
             }
             cout << line << '\n';
         }
@@ -2270,8 +2332,11 @@ class ContourHeadlessBench: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the benchmark reads through.
-    explicit ContourHeadlessBench(core::Environment const& env):
-        App(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
+    /// @param counters Where the CPU work counts come from; outlives the benchmark, and was made before any
+    ///                 thread started, as the platform's source requires.
+    ContourHeadlessBench(core::Environment const& env, core::platform::ICpuCounterSource& counters):
+        App(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0"),
+        _counters { counters }
     {
         using Project = core::cli::about::Project;
         core::cli::about::registerProjects(
@@ -2683,7 +2748,7 @@ class ContourHeadlessBench: public core::cli::App
         }
         options.extensionRig = *madeRig;
         return runThroughputBenchmark(
-            selection->workloads, selection->screens, options, processEnvironment());
+            selection->workloads, selection->screens, options, processEnvironment(), _counters);
     }
 
     /// Makes the extension rig @p command's `extensions` and `extension-config` options name, if any.
@@ -2765,7 +2830,7 @@ class ContourHeadlessBench: public core::cli::App
             cerr << "frames and runs must each be at least 1.\n";
             return EXIT_FAILURE;
         }
-        return runSnapshotBenchmark(selection->workloads, selection->screens, options);
+        return runSnapshotBenchmark(selection->workloads, selection->screens, options, _counters);
     }
 
     /// Runs `bench-headless pty-child`: the application on the other end of a PTY benchmark's PTY.
@@ -2976,11 +3041,16 @@ class ContourHeadlessBench: public core::cli::App
             benchOptionsFor("parser"),
             "Parser only");
     }
+
+  private:
+    core::platform::ICpuCounterSource& _counters;
 };
 } // namespace
 
 int main(int argc, char const* argv[])
 {
-    ContourHeadlessBench app { core::defaultEnvironment() };
+    // Before anything starts a thread: on Linux the counters follow the threads started after they open.
+    auto const counters = core::platform::makeDefaultCpuCounterSource();
+    ContourHeadlessBench app { core::defaultEnvironment(), *counters };
     return app.run(argc, argv);
 }
