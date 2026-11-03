@@ -3059,19 +3059,28 @@ TEST_CASE("a daemon gone during a sleep is given up on within the wake deadline"
     h.settle();
 }
 
-TEST_CASE("an announced sleep and wake keep the connection", "[vthost][attach][liveness]")
+TEST_CASE("an announced sleep holds the liveness verdict back", "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { silentAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.letTimePass(3); // 3 s of silence: short of idleBeforeProbe (5 s)
+    h.client->noteSystemSleep();
+    h.letTimePass(3); // 6 s of silence, 3 s asleep: past idleBeforeProbe, short of awakeGap
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>)); // nothing probed while asleep
+    h.settle();
+}
+
+TEST_CASE("an announced wake probes the daemon at once", "[vthost][attach][liveness]")
 {
     auto h = ManualClockAttach { echoingAfterHello() };
     REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
-    auto const seenBefore = h.seen.size();
-    h.client->noteSystemSleep();
-    h.clock.advance(1000s);
-    std::ignore = turnUntil(h.loop, [] { return false; }, 20);
-    h.client->noteSystemWake();
-    h.letTimePass(10);
+    REQUIRE_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>));
+    h.client->noteSystemWake(); // the clock does not move: no tick is late, only the hint says so
 
+    CHECK(turnUntil(h.loop, [&h] { return std::ranges::any_of(h.seen, carries<proto::Heartbeat>); }));
     CHECK_FALSE(h.clientEnded);
-    CHECK(std::ranges::any_of(h.seen | std::views::drop(seenBefore), carries<proto::Heartbeat>));
     h.settle();
 }
 
