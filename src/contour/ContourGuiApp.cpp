@@ -1378,18 +1378,22 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // panes to the profile's size. Without a monitor the liveness ticks still notice a sleep, only later.
     // A platform with no backend (a BSD, a Flatpak sandbox, a build without systemd) is expected and logged
     // where attaching is; an OS that refused the registration is not, and is said where the user sees it.
-    // The attach starts once per process, so either is said once.
-    if (!_powerMonitor)
+    // Created once per process: a failure is remembered, not retried, so either is said once.
+    if (!_powerMonitor && !_powerMonitorFailure)
     {
         if (auto monitor = core::platform::makeNativeSystemPowerMonitor(); monitor)
             _powerMonitor = *std::move(monitor);
-        else if (monitor.error() == core::platform::PlatformError::NotImplemented)
-            attachLog()("attach: no system sleep/wake notifications on this platform; a sleep is noticed "
-                        "later, by the connection's liveness check.");
         else
-            errorLog()("attach: no system sleep/wake notifications ({}); a sleep is noticed later, by the "
-                       "connection's liveness check.",
-                       core::platform::toString(monitor.error()));
+        {
+            _powerMonitorFailure = monitor.error();
+            if (monitor.error() == core::platform::PlatformError::NotImplemented)
+                attachLog()("attach: no system sleep/wake notifications on this platform; a sleep is noticed "
+                            "later, by the connection's liveness check.");
+            else
+                errorLog()("attach: no system sleep/wake notifications ({}); a sleep is noticed later, by "
+                           "the connection's liveness check.",
+                           core::platform::toString(monitor.error()));
+        }
     }
 
     _nativeController = std::make_unique<remote::NativeController>(

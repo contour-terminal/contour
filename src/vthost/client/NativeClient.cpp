@@ -433,7 +433,7 @@ void NativeClient::noteSystemWake()
         return;
     auto const now = _loop.clock().now();
     _liveness.noteWake(now);
-    std::ignore = applyLivenessDecision(now);
+    applyLivenessDecision(now);
 }
 
 void NativeClient::handshakeExpired(void* self)
@@ -450,7 +450,7 @@ void NativeClient::handshakeExpired(void* self)
     client._connection->cancelRead();
 }
 
-NativeClient::LivenessOutcome NativeClient::applyLivenessDecision(core::platform::SteadyTimePoint now)
+void NativeClient::applyLivenessDecision(core::platform::SteadyTimePoint now)
 {
     switch (_liveness.decide(now))
     {
@@ -464,22 +464,23 @@ NativeClient::LivenessOutcome NativeClient::applyLivenessDecision(core::platform
                 "no answer from the daemon for {} s",
                 std::chrono::duration_cast<std::chrono::seconds>(_liveness.silenceLimit()).count());
             errorLog()("attach: {}; closing the connection", *_lossReason);
-            // As detach() does: the parked read is retired and run() closes the connection in order. Nothing
-            // comes after it, for the read's resumption can end the flow that owns this object.
+            // As detach() does: the parked read is retired and run() closes the connection in order, once the
+            // read resumes in the loop's drain step -- never inline, so this object outlives the call.
             _connection->cancelRead();
-            return LivenessOutcome::Closed;
+            break;
     }
-    return LivenessOutcome::Continue;
 }
 
 void NativeClient::livenessTick(void* self)
 {
     auto& client = *static_cast<NativeClient*>(self);
-    if (client._closing || client._detached)
+    if (!client.livenessIsLive())
         return;
     auto const now = client._loop.clock().now();
     client._liveness.noteTick(client._livenessTickDue, now);
-    if (client.applyLivenessDecision(now) == LivenessOutcome::Closed)
+    client.applyLivenessDecision(now);
+    // A daemon declared lost is not ticked for again.
+    if (!client.livenessIsLive())
         return;
     // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
     client.armLivenessTick();

@@ -1177,6 +1177,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// null where the platform (or session) reports none. Declared before the engine, which subscribes
     /// to it, so it outlives the engine.
     std::unique_ptr<core::platform::ISystemPowerMonitor> _powerMonitor;
+    /// Why _powerMonitor could not be created, so a failed creation is logged once and not retried.
+    std::optional<core::platform::PlatformError> _powerMonitorFailure;
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.

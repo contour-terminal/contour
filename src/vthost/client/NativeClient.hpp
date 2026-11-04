@@ -593,13 +593,6 @@ class NativeClient final
     /// Arms the next liveness tick, a second from now on the loop's clock.
     void armLivenessTick();
 
-    /// What a liveness decision leaves of the connection.
-    enum class LivenessOutcome : uint8_t
-    {
-        Continue = 0, ///< Still open: the tick re-arms.
-        Closed = 1,   ///< Declared lost and the read cancelled: the tick must not re-arm.
-    };
-
     /// @return Whether the liveness tick is armed for this connection: open, negotiated, Heartbeat shared,
     ///         and not yet given up on. A declared loss counts as closed at once, though `_closing` follows
     ///         only when run() resumes: a sleep or wake hint in between must not probe a cancelled connection
@@ -610,9 +603,9 @@ class NativeClient final
     }
 
     /// Acts on what _liveness decides at @p now: probes, gives up, or does nothing.
+    /// A daemon declared lost leaves livenessIsLive() false.
     /// @param now The loop's clock.
-    /// @return Closed when the daemon was declared lost.
-    [[nodiscard]] LivenessOutcome applyLivenessDecision(core::platform::SteadyTimePoint now);
+    void applyLivenessDecision(core::platform::SteadyTimePoint now);
 
     /// One liveness tick: probes a silent daemon, or gives up on one silent for too long.
     /// @param self The NativeClient.
