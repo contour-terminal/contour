@@ -128,8 +128,7 @@ Item {
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             // A fixed line height is whole pixels, a cell row need not be: the rows the lines take are set too.
-            Layout.preferredHeight: card.bracketed ? Math.max(1, lineCount) * chromeStyle.cellHeight
-                                                   : implicitHeight
+            Layout.preferredHeight: card.bracketed ? lineCount * chromeStyle.cellHeight : implicitHeight
             lineHeightMode: card.bracketed ? Text.FixedHeight : Text.ProportionalHeight
             lineHeight: card.bracketed ? chromeStyle.cellHeight : 1.0
             verticalAlignment: Text.AlignVCenter
