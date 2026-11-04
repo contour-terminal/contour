@@ -270,6 +270,16 @@ TEST_CASE("ShellIntegrationOffer.line.PowerShell", "[shellintegration]")
               .value()
               .contains("generate integration shell pwsh to -"));
     CHECK(shellRcLine(ShellKind::Pwsh, "/opt/con\ttour").error() == ShellRcLineError::UnusablePath);
+    // PowerShell reads the typographic quotes as single quotes too: each is doubled as itself.
+    // The paths are built from UTF-8 literals: a narrow literal is read in the ANSI code page on Windows.
+    CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { u8"/opt/O’Brien/contour" })
+              .value()
+              .contains("'/opt/O\xE2\x80\x99\xE2\x80\x99"
+                        "Brien/contour'"));
+    CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { u8"/opt/a'b‘c/contour" })
+              .value()
+              .contains("'/opt/a''b\xE2\x80\x98\xE2\x80\x98"
+                        "c/contour'"));
 #ifdef _WIN32
     // The path text is UTF-8, whatever the narrow code page.
     CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { L"C:\\Users\\M\u00fcller\\contour.exe" })

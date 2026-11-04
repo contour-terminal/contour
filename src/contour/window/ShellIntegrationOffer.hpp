@@ -9,6 +9,7 @@
 #include <contour/config/ExecutionPolicy.hpp>
 #include <contour/config/ShellKind.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/window/DroppedText.hpp> // detail::PowerShellQuotes
 
 #include <vtbackend/core/Primitives.hpp>
 
@@ -354,21 +355,29 @@ namespace detail
     }
 
     /// Quotes @p path in single quotes for @p syntax: POSIX `'` becomes `'\''`; fish `\` becomes `\\`
-    /// and `'` becomes `\'`; PowerShell `'` becomes `''`.
+    /// and `'` becomes `\'`; PowerShell doubles each of `'`, U+2018, U+2019, U+201A and U+201B (all of
+    /// which it treats as a single quote), each as itself.
     [[nodiscard]] inline std::string quotePath(std::string_view path, config::RcSyntax syntax)
     {
         auto quoted = std::string { "'" };
-        for (auto const c: path)
+        while (!path.empty())
         {
-            if (c == '\'')
+            if (syntax == config::RcSyntax::PowerShell)
             {
-                switch (syntax)
+                auto const match = std::ranges::find_if(
+                    PowerShellQuotes, [&](std::string_view quote) { return path.starts_with(quote); });
+                if (match != PowerShellQuotes.end())
                 {
-                    case config::RcSyntax::Posix: quoted += "'\\''"; break;
-                    case config::RcSyntax::Fish: quoted += "\\'"; break;
-                    case config::RcSyntax::PowerShell: quoted += "''"; break;
+                    quoted += *match;
+                    quoted += *match;
+                    path.remove_prefix(match->size());
+                    continue;
                 }
             }
+            auto const c = path.front();
+            path.remove_prefix(1);
+            if (c == '\'')
+                quoted += syntax == config::RcSyntax::Posix ? "'\\''" : "\\'";
             else if (c == '\\' && syntax == config::RcSyntax::Fish)
                 quoted += "\\\\";
             else
