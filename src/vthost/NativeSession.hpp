@@ -226,8 +226,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     void sessionResized(vtworkspace::SessionId session) override;
 
-    /// Sends proto::PanesReprojected and then every followed window's layout again, unchanged: the client
-    /// re-sends its pane sizes once it reconciled that push. The re-sent sizes push nothing back.
+    /// Sends proto::PanesReprojected, and nothing else: the client re-sends its pane sizes, which push
+    /// nothing back.
     void clientAreaReprojected() override;
 
     void sessionBell(vtworkspace::SessionId session) override;

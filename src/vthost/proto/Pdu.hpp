@@ -1428,8 +1428,7 @@ struct LayoutBatchEnd
 
 /// Server→client: the daemon re-projected every pane onto a client area this client did not ask for --
 /// another client departed and took the authoritative area with it -- discarding the per-pane grids this
-/// client reported. Sent right before the layout push that follows it, so the client re-sends its pane sizes
-/// once it reconciled that push; no other push asks for that.
+/// client reported. Sent alone, for a departure changes no tree: the client re-sends its pane sizes.
 struct PanesReprojected
 {
     bool operator==(PanesReprojected const&) const = default;

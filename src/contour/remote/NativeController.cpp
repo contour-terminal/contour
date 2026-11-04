@@ -135,14 +135,15 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         _timeline.mark(vthost::latency::StartupMark::Connected);
     // The area the hello states: what the window composes to now, else what was last stated, else the
     // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
+    // A first connection composes nothing: no layout came in yet.
     auto const helloArea = [&]() -> std::optional<vtpty::PageSize> {
         auto const lock = std::lock_guard { _mutex };
         auto const geometryLock = std::lock_guard { _geometryMutex };
-        auto area = _acceptedConnections > 0 ? composedClientArea() : std::nullopt;
-        if (!area)
-            area = _lastStatedArea;
-        if (!area)
-            area = _attachSettings.transform([](auto const& s) { return s.pageSize; });
+        auto const area = composedClientArea()
+                              .or_else([this] { return _lastStatedArea; })
+                              .or_else([this]() -> std::optional<vtpty::PageSize> {
+                                  return _attachSettings.transform([](auto const& s) { return s.pageSize; });
+                              });
         _helloArea = area;
         if (area)
             _lastStatedArea = area;
@@ -575,8 +576,8 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         //
         // Only the bookkeeping is dropped, never a report issued: at this point the panes have not
         // been laid out against the new tree, so composing an area would mix a stale pane extent
-        // with a fresh one and propose one that neither describes. A push that re-projected panes this
-        // client's geometry will not move is marked as such by the daemon (onPanesReprojected).
+        // with a fresh one and propose one that neither describes. Panes re-projected under a geometry of
+        // this client's that does not move are the daemon's to tell (onPanesReprojected).
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
@@ -624,10 +625,13 @@ std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlig
 
 void NativeController::onPanesReprojected()
 {
-    // The layout push that follows is reconciled with nothing of this client's moving, so nothing would
-    // report the panes again: the reconcile re-asserts them (reassertGeometryAfterReconcile).
-    auto const geometryLock = std::lock_guard { _geometryMutex };
-    _geometryReassert = GeometryReassert::Pending;
+    // Nothing of this client's moved, so nothing would report the panes again. Pending until a flush that
+    // composes an area spends it, should this one find the panes not laid out yet.
+    {
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        _geometryReassert = GeometryReassert::Pending;
+    }
+    platform::postToObject(this, [this] { flushGeometry(GeometryFlush::PanesOnly); });
 }
 
 void NativeController::onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end)
@@ -1138,42 +1142,33 @@ void NativeController::flushGeometry(GeometryFlush scope)
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _geometryFlushScheduled = false;
 
-        // The hello of this connection stated an area already: when the window still composes to it, the
-        // daemon has it, but it projected every pane onto it, so the panes are all sent again. Spent only
-        // once there is an area to compare and a connection that heard the hello: a flush before the
-        // layout composes to nothing, and one before the handshake answers no one, and spending it there
-        // would have the next flush state the very area the hello did — one more re-projection of every
-        // pane on the daemon. The connection half is defensive: only a reconnect composes an area before
-        // its handshake answers, and that reconnect re-asserts every pane after its first layout anyway
-        // (GeometryReassert), so spending the hello early there changes nothing a daemon would see.
-        auto resendAll = false;
         auto const composed = composedClientArea();
-        if (scope == GeometryFlush::Report)
-        {
-            if (composed.has_value() && _client != nullptr)
-                if (auto const hello = std::exchange(_helloArea, std::nullopt); hello && composed == hello)
-                {
-                    _lastReportedArea = hello;
-                    resendAll = true;
-                }
-            if (composed && _lastReportedArea != composed)
-            {
-                _lastReportedArea = composed;
-                _lastStatedArea = composed;
-                area = composed;
-            }
-            // A new client area re-projects every pane on the daemon, so each must be re-asserted then
-            // — not just the ones that moved here.
-            resendAll = resendAll || area.has_value();
-        }
-        // A reconnect, or a departure the daemon marked (onPanesReprojected), re-projected them too, whatever
-        // an earlier flush already did with the hello's area. Spent only once the panes compose to an area,
-        // that is once they are laid out against the tree; until then it waits for the next flush.
-        if (composed.has_value()
-            && std::exchange(_geometryReassert, GeometryReassert::Idle) == GeometryReassert::Pending)
-            resendAll = true;
-        if (scope == GeometryFlush::PanesOnly && !resendAll)
+        // A reconnect or a departure (onPanesReprojected) re-projected every pane: spent once they compose.
+        auto const reassert =
+            composed.has_value()
+            && std::exchange(_geometryReassert, GeometryReassert::Idle) == GeometryReassert::Pending;
+        if (scope == GeometryFlush::PanesOnly && !reassert)
             return;
+        auto resendAll = reassert;
+        // The hello's area, once composed with a connection that heard it, is the daemon's: not stated again.
+        if (composed.has_value() && _client != nullptr && _helloArea.has_value())
+        {
+            if (composed == _helloArea)
+            {
+                _lastReportedArea = std::exchange(_helloArea, std::nullopt);
+                resendAll = true;
+            }
+            else if (scope == GeometryFlush::Report)
+                _helloArea.reset(); // the window moved on: this report states its own area
+        }
+        // A new client area re-projects every pane on the daemon: all are re-asserted, not just the moved.
+        if (scope == GeometryFlush::Report && composed.has_value() && _lastReportedArea != composed)
+        {
+            _lastReportedArea = composed;
+            _lastStatedArea = composed;
+            area = composed;
+            resendAll = true;
+        }
         for (auto const& [session, size]: _paneSizes)
         {
             if (!_bindings.contains(session))
@@ -1203,14 +1198,11 @@ void NativeController::flushGeometry(GeometryFlush scope)
 void NativeController::reassertGeometryAfterReconcile()
 {
     {
-        // Released before flushGeometry(), which takes _mutex and then this one.
+        // So that a reconcile with nothing pending takes no _mutex; released before flushGeometry() takes it.
         auto const lock = std::lock_guard { _geometryMutex };
         if (_geometryReassert != GeometryReassert::Pending)
             return;
     }
-    // The panes only: the area is the hello's, or the next report's once the GUI laid the tree out. Stated
-    // now, it would be composed from panes the reconcile just created, at their birth size, beside others not
-    // yet resized to make room.
     flushGeometry(GeometryFlush::PanesOnly);
 }
 

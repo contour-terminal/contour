@@ -299,7 +299,7 @@ class NativeClient final
     /// MoveNode request whose effects the push completes, if one did.
     using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
     /// Handler invoked when the daemon re-projected every pane onto an area this client did not ask for
-    /// (proto::PanesReprojected); the layout push it marks follows.
+    /// (proto::PanesReprojected).
     using PanesReprojectedHandler = std::function<void()>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;

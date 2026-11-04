@@ -290,9 +290,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// setNextBindSession, not the FIFO queue.
     void setRealizingLayout(bool realizing);
 
-    /// GUI thread. Once the GUI reconciled a layout of a reconnect, or the push the daemon marked with
-    /// proto::PanesReprojected: re-sends every bound pane's size once (never the client area), even though no
-    /// display geometry changed. No-op otherwise.
+    /// GUI thread. Once the GUI reconciled a layout of a reconnect: re-sends every bound pane's size once
+    /// (never the client area), even though no display geometry changed. No-op otherwise.
     void reassertGeometryAfterReconcile();
 
     /// @return Whether a layout realization is in progress (so a split it triggers
@@ -682,7 +681,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     void onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end);
 
     /// Reactor-side: the daemon re-projected every pane onto an area this client did not ask for
-    /// (proto::PanesReprojected); the panes are re-asserted once the layout push that follows is reconciled.
+    /// (proto::PanesReprojected); re-asserts the panes from the GUI thread, which lays them out.
     void onPanesReprojected();
 
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
@@ -712,7 +711,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     enum class GeometryFlush : uint8_t
     {
         Report = 0, ///< A pane reported a grid: the client area if it moved, and the panes that did.
-        PanesOnly,  ///< A pending re-assertion: every pane, and never the client area.
+        PanesOnly,  ///< A pending re-assertion: every pane, and never the client area, which panes a
+                    ///< reconcile just created at their birth size do not compose yet.
     };
 
     /// Sends the pending geometry report (GUI thread): the composed client area if it moved (unless
@@ -862,8 +862,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The last area stated to any connection (a hello, or a resize request). Never reset, not even for a
     /// restarted daemon: it is what the window is, and the next hello states it while no layout composes one.
     std::optional<vtpty::PageSize> _lastStatedArea;
-    /// The area this connection's hello stated; consumed by the first flushGeometry(), which then does not
-    /// state it again.
+    /// The area this connection's hello stated; spent by the first flushGeometry() that composes it (which
+    /// then does not state it again), or by a report that composes another.
     std::optional<vtpty::PageSize> _helloArea;
     /// Whether every pane's size is yet to be re-asserted after the daemon re-projected them.
     enum class GeometryReassert : uint8_t

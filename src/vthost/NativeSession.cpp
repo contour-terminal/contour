@@ -419,9 +419,8 @@ void NativeSession::clientAreaReprojected()
 {
     if (_phase != ConnectionPhase::Viewing || _closed)
         return;
-    // Marked ahead of the push it qualifies: the client re-sends its pane sizes once it reconciled that push.
+    // Alone: a departure changes no tree, so there is no layout to push with it.
     send(0, proto::DecodedPdu { proto::PanesReprojected {} });
-    pushLayout();
 }
 
 void NativeSession::sessionBell(SessionId session)

@@ -383,6 +383,17 @@ pushed the layout in the same batch machinery a move uses; there is no reply PDU
 "Toggle Split Orientation" when the daemon serves `MoveNode` and does not flip locally, because the next
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
 
+**`PanesReprojected`** (tag 41, server→client, no fields) tells a client that the daemon re-projected every
+pane onto a client area it did not ask for: another client departed and took the authoritative area with it
+(`SessionStreamEvents::clientAreaReprojected`), discarding the per-pane grids this client refined. The survivor's own
+geometry did not move, so nothing on its side would report them again. The daemon sends it alone -- a
+departure changes no tree, so no layout goes with it -- and the client re-sends every pane's size, never the
+client area (`NativeController::onPanesReprojected`); the re-sent sizes push nothing back. A report never
+raises it, for a report re-projects at the reporting client's own request, and neither does a departure that
+leaves the area where it was. It is not gated on a capability: a client that does not know the tag answers
+`Unsupported`, the daemon stops sending it, and that client loses only the re-assertion after another
+client's departure.
+
 **Coexistence with `MergeTabIntoSplit`.** A daemon serves both. A client that shares `MoveNode` sends every
 drop as one; a client that does not, against a daemon that shares `TabMerge`, still merges a whole tab beside a
 pane of its own window with `MergeTabIntoSplit`, and reorders, moves and tears off tabs with the tab verbs.
