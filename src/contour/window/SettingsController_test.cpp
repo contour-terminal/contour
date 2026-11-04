@@ -4837,7 +4837,7 @@ TEST_CASE("SettingsController: Install is offered only where the card would offe
     };
     auto const cases = std::array {
         Case { config::HostPlatform::Other, BinaryReach::Reachable, InstallBlock::None },
-        Case { config::HostPlatform::Windows, BinaryReach::Reachable, InstallBlock::WindowsHost },
+        Case { config::HostPlatform::Windows, BinaryReach::Reachable, InstallBlock::NotOnWindows },
         Case { config::HostPlatform::Other, BinaryReach::Unreachable, InstallBlock::BinaryUnreachable },
     };
     for (auto const& c: cases)

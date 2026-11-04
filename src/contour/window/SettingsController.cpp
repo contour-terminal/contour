@@ -2159,11 +2159,11 @@ platform::RcEnvironment SettingsController::rcEnvironment() const
     return platform::rcEnvironmentOf(shell.env, shell.removedEnvironment);
 }
 
-InstallBlock SettingsController::installBlock() const
+InstallBlock SettingsController::installBlock(config::ShellRow const& shell) const
 {
     auto const reach =
         _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
-    return installBlockOf(_services.shell.host, reach);
+    return installBlockOf(shell, _services.shell.host, reach, config::ProfileScripts::Run);
 }
 
 void SettingsController::listShellRows()
@@ -2171,11 +2171,10 @@ void SettingsController::listShellRows()
     _shellRows.clear();
     if (_services.shell.editor != nullptr)
     {
-        auto const block = installBlock();
         for (auto const& shell: config::ShellRows)
         {
-            auto const row =
-                shellInstallRowOf(shell, inspectShell(shell.kind), _services.shell.homeDirectory, block);
+            auto const row = shellInstallRowOf(
+                shell, inspectShell(shell.kind), _services.shell.homeDirectory, installBlock(shell));
             _shellRows.push_back(QVariantMap {
                 { QStringLiteral("shell"), static_cast<int>(row.shell) },
                 { QStringLiteral("name"), toQString(row.name) },
@@ -2227,9 +2226,10 @@ QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
 void SettingsController::installShellIntegration(int shell)
 {
     auto const kind = static_cast<config::ShellKind>(shell);
-    if (_services.shell.editor == nullptr || config::shellRow(kind) == nullptr)
+    auto const* const shellRow = config::shellRow(kind);
+    if (_services.shell.editor == nullptr || shellRow == nullptr)
         return;
-    if (auto const block = installBlock(); block != InstallBlock::None)
+    if (auto const block = installBlock(*shellRow); block != InstallBlock::None)
     {
         emit errorOccurred(toQString(InstallBlockRows[std::to_underlying(block)].text));
         return;

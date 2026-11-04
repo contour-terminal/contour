@@ -649,8 +649,6 @@ TEST_CASE("ShellRow: the line Contour appends is its guard followed by its conti
 {
     for (auto const& row: contour::config::ShellRows)
     {
-        if (row.syntax == contour::config::RcSyntax::PowerShell)
-            continue; // shellRcLine() writes no PowerShell line yet.
         auto const line = contour::window::shellRcLine(row.kind, "/usr/bin/contour").value();
         CHECK(line.starts_with(std::string(row.guard) + std::string(row.continuation)));
     }

@@ -624,9 +624,10 @@ class SettingsController: public QObject
     ///         (platform::rcEnvironmentOf()); empty when the profile is not in the configuration.
     [[nodiscard]] platform::RcEnvironment rcEnvironment() const;
 
-    /// @return What stops Install on this host and binary (installBlockOf()); a missing binary source is
-    ///         an unreachable binary.
-    [[nodiscard]] InstallBlock installBlock() const;
+    /// @param shell The shell's row.
+    /// @return What stops Install of @p shell on this host and binary (installBlockOf()); a missing binary
+    ///         source is an unreachable binary.
+    [[nodiscard]] InstallBlock installBlock(config::ShellRow const& shell) const;
 
     /// The origin of @p name among the current profiles, defaulting to Builtin if unknown.
     [[nodiscard]] config::SettingsOrigin profileOrigin(std::string const& name) const;

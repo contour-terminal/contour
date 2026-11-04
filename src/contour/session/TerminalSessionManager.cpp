@@ -972,7 +972,8 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
                            .binary = binary.reach,
                            .dismissal = dismissal,
                            .rc = inspection->state,
-                           .slot = _shellCardSlot });
+                           .slot = _shellCardSlot,
+                           .scripts = config::ProfileScripts::Run });
     if (offer != window::ShellIntegrationOffer::Card)
         return;
 
