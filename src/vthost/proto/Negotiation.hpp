@@ -85,9 +85,10 @@ enum class Capability : uint8_t
     /// The peer serves UpgradeDaemon and announces DaemonUpgrading: a daemon replaces itself in place, and a
     /// client that negotiated this waits for the same daemon to come back instead of starting a new one.
     LiveUpgrade = 18,
-    /// The peer re-asserts its pane sizes on demand: a daemon sends PanesReprojected when another client
-    /// departs, and a client answers it by re-sending every pane's size. A daemon sends it only to a client
-    /// sharing it; without it that client keeps whatever grids the departure left.
+    /// The peer re-asserts its pane sizes on demand: a client answers PanesReprojected by re-sending every
+    /// pane's size. The daemon no longer offers it -- it restores the survivors' pane sizes itself when a
+    /// client departs, where several survivors' re-asserts would fight its pick -- and a client keeps
+    /// offering it for interop with daemons built while they sent it on every departure.
     PanesReprojected = 19,
 };
 

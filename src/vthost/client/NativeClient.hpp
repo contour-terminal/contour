@@ -298,8 +298,8 @@ class NativeClient final
     /// every window's layout of the change was handed to the LayoutHandler before it, and the PDU names the
     /// MoveNode request whose effects the push completes, if one did.
     using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
-    /// Handler invoked when the daemon asks this client to re-assert its pane sizes, because another client
-    /// departed (proto::PanesReprojected, Capability::PanesReprojected).
+    /// Handler invoked when the daemon asks this client to re-assert its pane sizes (proto::PanesReprojected,
+    /// Capability::PanesReprojected), which only a daemon built while that was sent on departures does.
     using PanesReprojectedHandler = std::function<void()>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
@@ -355,8 +355,8 @@ class NativeClient final
     /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
     /// @param onMoveNodeRefused Told when the daemon refuses a moveNode(), so the user can be.
     /// @param onLayoutBatchEnd Told when a daemon sharing Capability::LayoutBatch ends a layout push.
-    /// @param onPanesReprojected Told when the daemon asks for this client's pane sizes again: another
-    ///        client departed, and its refinements or a re-projection may have replaced this client's.
+    /// @param onPanesReprojected Told when the daemon asks for this client's pane sizes again (only a daemon
+    ///        built while it asked on every departure of another client does).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,

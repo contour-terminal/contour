@@ -684,8 +684,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// the GUI to reconcile the push whole.
     void onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end);
 
-    /// Reactor-side: the daemon asks for this client's pane sizes again, as another client departed
-    /// (proto::PanesReprojected); re-asserts the panes from the GUI thread, which lays them out.
+    /// Reactor-side: the daemon asks for this client's pane sizes again (proto::PanesReprojected, which only
+    /// a daemon built while it was sent on departures sends); re-asserts the panes from the GUI thread.
     void onPanesReprojected();
 
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.

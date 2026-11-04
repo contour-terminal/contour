@@ -116,11 +116,10 @@ struct ClientArea
         case ClientSizePolicy::Largest: {
             // Per axis, not per client: two clients can each be the wider and the shorter one, and
             // picking a single client's area would then hand the other a grid it cannot show. tmux
-            // combines the axes independently for the same reason.
-            auto const lines =
-                areas | std::views::transform([](ClientArea const& a) { return a.size.lines; });
-            auto const columns =
-                areas | std::views::transform([](ClientArea const& a) { return a.size.columns; });
+            // combines the axes independently for the same reason. Not const: a filtered range of areas
+            // (SessionHost's eligible pane refinements) can only be iterated mutably.
+            auto lines = areas | std::views::transform([](ClientArea const& a) { return a.size.lines; });
+            auto columns = areas | std::views::transform([](ClientArea const& a) { return a.size.columns; });
             if (policy == ClientSizePolicy::Smallest)
                 return vtpty::PageSize { .lines = std::ranges::min(lines),
                                          .columns = std::ranges::min(columns) };
