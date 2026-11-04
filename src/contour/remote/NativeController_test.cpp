@@ -5073,8 +5073,10 @@ TEST_CASE("a controller subscribes to power events for its lifetime", "[attach][
 }
 
 // Review focus 3: while no connection is up there is no client to probe with, and the wake is a hint, not a
-// verdict -- it must neither reach the connection that was lost nor stop the reconnect.
-TEST_CASE("a wake while reconnecting is dropped", "[attach][controller][reconnect][power]")
+// verdict -- it must neither reach the connection that was lost nor stop the reconnect; it only cuts the
+// backoff short (ClientSupervisor_test pins how promptly).
+TEST_CASE("a wake while reconnecting retries without ending the reconnect",
+          "[attach][controller][reconnect][power]")
 {
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};

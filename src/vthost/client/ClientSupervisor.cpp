@@ -55,6 +55,38 @@ void ClientSupervisor::stop()
         _current->detach();
 }
 
+void ClientSupervisor::retryNow()
+{
+    auto const lock = std::lock_guard { _retryMutex };
+    _retry.request_stop();
+}
+
+core::async::StopToken ClientSupervisor::retryToken()
+{
+    auto const lock = std::lock_guard { _retryMutex };
+    return _retry.get_token();
+}
+
+void ClientSupervisor::resetRetry()
+{
+    auto const lock = std::lock_guard { _retryMutex };
+    _retry = core::async::StopSource {};
+}
+
+core::async::Task<void> ClientSupervisor::backoffUntil(core::platform::SteadyTimePoint deadline)
+{
+    // One park, woken by either source: each is forwarded onto a source of this wait's own.
+    auto wait = core::async::StopSource {};
+    auto const onStop =
+        core::async::StopCallback { _stop.get_token(), [wait]() mutable { wait.request_stop(); } };
+    auto const onRetry =
+        core::async::StopCallback { retryToken(), [wait]() mutable { wait.request_stop(); } };
+    std::ignore = co_await core::net::interruptibleSleepUntil(&_loop, wait.get_token(), deadline);
+    // Spent: a retryNow() from now on asks for the wait after the next attempt to be skipped.
+    if (retryToken().stop_requested())
+        resetRetry();
+}
+
 core::async::Task<void> ClientSupervisor::connectInto(std::optional<ConnectResult>* result)
 {
     *result = co_await _transport->connect(_loop);
@@ -118,11 +150,12 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
 
 core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::reconnect()
 {
+    // A retryNow() while still connected is no reason to skip this reconnect's first wait.
+    resetRetry();
     for (auto const retry: std::views::iota(uint32_t { 1 }))
     {
-        auto const wake = co_await core::net::interruptibleSleepUntil(
-            &_loop, _stop.get_token(), _loop.clock().now() + backoffDelay(_backoff, retry));
-        if (wake == core::net::WakeReason::Cancelled || _stop.stop_requested())
+        co_await backoffUntil(_loop.clock().now() + backoffDelay(_backoff, retry));
+        if (_stop.stop_requested())
             co_return Outcome {};
 
         auto outcome = co_await attempt(resumeIntent());

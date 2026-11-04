@@ -649,8 +649,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param layout A window's layout the daemon just pushed.
     void replayUnsentCloses(vthost::proto::LayoutState const& layout);
 
-    /// Reactor-side: hands a system sleep or wake to the connection that is up; dropped while none is, as
-    /// the next connection starts with a fresh liveness verdict anyway.
+    /// Reactor-side: hands a system sleep or wake to the connection that is up. While none is, a wake cuts
+    /// the reconnect backoff short (ClientSupervisor::retryNow()) and a sleep is dropped, as the next
+    /// connection starts with a fresh liveness verdict anyway.
     /// @param event What the system did.
     void notePowerEvent(core::platform::SystemPowerEvent event);
 

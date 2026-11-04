@@ -84,7 +84,16 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
 void NativeController::notePowerEvent(core::platform::SystemPowerEvent event)
 {
     if (_client == nullptr)
+    {
+        // Reconnecting, or still connecting: there is no connection to probe, but a wake may have brought
+        // the network back, so a backoff wait under way is cut short (a first connect is not retried).
+        if (event == core::platform::SystemPowerEvent::DidWake && _supervisor != nullptr)
+        {
+            attachLog()("attach: the system woke; reconnecting now");
+            _supervisor->retryNow();
+        }
         return;
+    }
     switch (event)
     {
         case core::platform::SystemPowerEvent::WillSleep:

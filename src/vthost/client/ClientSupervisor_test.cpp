@@ -444,6 +444,52 @@ TEST_CASE("stop during backoff ends run promptly", "[vthost][reconnect]")
     CHECK(h.transport->calls() == 1);
 }
 
+TEST_CASE("retryNow during backoff reconnects promptly", "[vthost][reconnect]")
+{
+    // A wake while reconnecting: the network may be back, so the long backoff wait is cut short.
+    auto daemon = Daemon {};
+    auto h = Supervised { daemon, { daemon.serving() }, { .first = 10s, .ceiling = 10s } };
+    auto const began = std::chrono::steady_clock::now();
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
+        daemon->dropConnection();
+        auto const reconnecting = co_await h->reached(ConnectionState::Reconnecting);
+        REQUIRE(reconnecting);
+        co_await h->loop.delay(50ms);
+        h->supervisor->retryNow();
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        CHECK(reconnected); // not REQUIRE: the stop below must run either way, or run() never ends
+        h->supervisor->stop();
+    }(&h, &daemon));
+
+    CHECK(std::chrono::steady_clock::now() - began < 5s);
+    CHECK(h.transport->calls() == 2);
+    CHECK(h.states.back().state == ConnectionState::Stopped);
+}
+
+TEST_CASE("retryNow from another thread cuts the backoff short", "[vthost][reconnect][threading]")
+{
+    auto daemon = Daemon {};
+    auto h = Supervised { daemon, { daemon.serving() }, { .first = 10s, .ceiling = 10s } };
+    auto const began = std::chrono::steady_clock::now();
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
+        daemon->dropConnection();
+        auto const reconnecting = co_await h->reached(ConnectionState::Reconnecting);
+        REQUIRE(reconnecting);
+        auto waker = std::async(std::launch::async, [h] { h->supervisor->retryNow(); });
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        waker.get();
+        CHECK(reconnected); // not REQUIRE: the stop below must run either way, or run() never ends
+        h->supervisor->stop();
+    }(&h, &daemon));
+
+    CHECK(std::chrono::steady_clock::now() - began < 5s);
+    CHECK(h.transport->calls() == 2);
+}
+
 TEST_CASE("stop during a slow daemon start ends run promptly", "[vthost][reconnect][threading]")
 {
     // The start runs on the transport's worker, which stop() does not wait for.
