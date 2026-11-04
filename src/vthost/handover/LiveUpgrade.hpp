@@ -73,6 +73,11 @@ class UpgradeHooks
     /// client attached (SessionHost::connectedClients()).
     virtual void closeClients() = 0;
 
+    /// @return How many connections closeClients() asked to end in an orderly way that have not ended yet.
+    ///         Counts what no attached client does: a Control connection, such as the one the upgrade was
+    ///         requested over, whose last answer must reach its peer before the exec takes the descriptor.
+    [[nodiscard]] virtual std::size_t endingConnections() const = 0;
+
     /// Closes every client connection at once, whatever it has queued for its peer: what the upgrade does to
     /// those still attached half way through LiveUpgradeConfig::settleTimeout, since a peer that stopped
     /// reading would hold an orderly close up for as long as it lives.
@@ -84,6 +89,9 @@ struct LiveUpgradeConfig
 {
     std::string release;         ///< The release this daemon is: what the image says wrote it.
     uint64_t daemonInstance = 0; ///< Which run of the daemon this is, kept across the exec.
+    /// How many live upgrades this run has completed, which the image hands on
+    /// (HandoverImage::upgradeGeneration).
+    uint64_t upgradeGeneration = 0;
     /// This process's command line; the exec runs it again, its program replaced by the target's and the
     /// handover argument (`--handover-fd=N`) appended in place of any it carried.
     std::vector<std::string> argv;

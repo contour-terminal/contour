@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/DaemonControl.hpp>
 
+#include <exception>
+#include <system_error>
 #include <utility>
+
+#include <vthost/Logging.hpp>
 
 namespace vthost
 {
@@ -26,8 +30,34 @@ ClientCensus::Ticket NullDaemonControl::admitClient()
     return {};
 }
 
+core::async::Task<void> serveUpgrade(DaemonControl* daemon,
+                                     handover::UpgradeTarget target,
+                                     UpgradeStarted onStarted,
+                                     UpgradeFailed onFailed)
+{
+    auto result = std::expected<void, handover::UpgradeError> {};
+    try
+    {
+        result = co_await daemon->requestUpgrade(std::move(target), std::move(onStarted));
+    }
+    catch (std::exception const& failure)
+    {
+        errorLog()("live upgrade failed: {}", failure.what());
+        result = std::unexpected(handover::UpgradeError {
+            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
+    }
+    catch (...)
+    {
+        errorLog()("live upgrade failed: unknown exception");
+        result = std::unexpected(handover::UpgradeError {
+            handover::ExecFailure { std::make_error_code(std::errc::not_enough_memory) } });
+    }
+    if (!result && onFailed)
+        onFailed(result.error());
+}
+
 core::async::Task<std::expected<void, handover::UpgradeError>> NullDaemonControl::requestUpgrade(
-    handover::UpgradeTarget /*target*/, std::function<void()> /*onStarted*/)
+    handover::UpgradeTarget /*target*/, UpgradeStarted /*onStarted*/)
 {
     co_return std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::NotSupported });
 }

@@ -353,6 +353,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
+        remote/DaemonDriftFollower.hpp
         remote/NativeController.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
@@ -1003,6 +1004,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/DaemonDriftChoice_test.cpp
             window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
@@ -1376,8 +1378,8 @@ if(CONTOUR_FRONTEND_GUI)
             # stays fully enabled here; the unit-test suites keep full leak checking.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
-                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
+                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
+                contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1385,8 +1387,8 @@ if(CONTOUR_FRONTEND_GUI)
                     LABELS e2e)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
-            set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable contour_e2e_hosting
-                              contour_e2e_stdio_relay
+            set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable
+                              contour_e2e_hosting contour_e2e_stdio_relay
                          APPEND PROPERTY LABELS daemon)
 
             # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
@@ -1398,8 +1400,38 @@ if(CONTOUR_FRONTEND_GUI)
             # in such bodies has its races tested in an unsilenced module suite, not through these runs.
             if(CONTOUR_SANITIZE STREQUAL "thread")
                 set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
-                                  contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                                  contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
+                                  contour_e2e_cli contour_e2e_daemon
+                                  contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay
+                                  contour_e2e_connect
+                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            endif()
+        endif()
+
+        # A real in-place daemon upgrade: the daemon re-execs itself while a program runs in a pane, and the
+        # program, its screen (alternate screen, mouse modes, a kitty image), a non-default profile setting
+        # and the counter it prints all come through; a configuration the new release cannot load refuses it,
+        # and a reloaded one is carried over. On every host the live upgrade runs on, macOS among them: it
+        # opens no window and drives only CLI verbs and a daemon, from a POSIX sh with no GNU tool. `setsid -w`
+        # where there is one, for the same reason as contour_e2e_daemon's: a daemon must not inherit the
+        # developer's controlling terminal. macOS ships no setsid(1); there the script runs as it is, its
+        # daemon a background job of a non-interactive shell, which a terminal's ^C does not reach.
+        if(UNIX)
+            find_program(SETSID_EXECUTABLE setsid)
+            set(_live_upgrade_launcher "")
+            if(SETSID_EXECUTABLE)
+                set(_live_upgrade_launcher ${SETSID_EXECUTABLE} -w)
+            endif()
+            add_test(NAME contour_e2e_daemon_live_upgrade
+                COMMAND ${_live_upgrade_launcher} sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-live-upgrade.sh
+                        $<TARGET_FILE:contour>)
+            set_tests_properties(contour_e2e_daemon_live_upgrade
+                PROPERTIES
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
+                    TIMEOUT 120
+                    RUN_SERIAL TRUE
+                    LABELS "e2e;daemon")
+            if(CONTOUR_SANITIZE STREQUAL "thread")
+                set_property(TEST contour_e2e_daemon_live_upgrade
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()

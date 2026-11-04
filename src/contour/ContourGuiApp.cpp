@@ -40,6 +40,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/platform/SecureInput.hpp>
+#include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
@@ -117,6 +118,7 @@
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/DaemonRestart.hpp>
+#include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/client/ReleaseDrift.hpp>
 #include <vthost/latency/Report.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
@@ -951,19 +953,80 @@ std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(std::chrono::m
     _attachedHostLabel = std::move(hostLabel);
     _routingFactory->setDelegate(_nativeController.get());
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
-    // can restart -- a local one, which is what _restartDaemon is set for -- is offered a restart.
-    if (_restartDaemon)
-        offerDaemonRestartIfDrifted(*_nativeController);
+    // can restart -- a local one, which is what _restartDaemon is set for -- is offered anything.
+    offerDaemonRestartIfDrifted(*_nativeController);
     return {};
 }
 
-void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController const& controller)
+void ContourGuiApp::showDaemonDrift(remote::NativeController const& controller)
 {
-    auto const layout = controller.negotiated()
-                            .transform(vthost::client::layoutSurvivesRestart)
+    auto const negotiated = controller.negotiated();
+    auto const layout = negotiated.transform(vthost::client::layoutSurvivesRestart)
                             .value_or(vthost::client::LayoutAfterRestart::Lost);
-    _daemonDrift.show(
-        vthost::client::assessDrift(CONTOUR_VERSION_STRING, controller.daemonRelease(), layout));
+    _shownDaemonRelease = controller.daemonRelease();
+    auto notice = vthost::client::assessDrift(CONTOUR_VERSION_STRING, _shownDaemonRelease, layout);
+    auto const offer =
+        window::driftOfferFor(notice.kind,
+                              _restartDaemon ? window::DaemonLocality::Local : window::DaemonLocality::Remote,
+                              negotiated ? negotiated->shared : vthost::proto::CapabilitySet {});
+    // A daemon that is not ours to touch shows no badge: there is nothing the user could do about it.
+    _daemonDrift.show(offer == window::DriftOffer::None ? vthost::client::DriftNotice {} : std::move(notice),
+                      offer);
+}
+
+std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
+    upgradeLocalDaemon(std::filesystem::path const& controlPath, std::stop_token stop)
+{
+    // Never starts a daemon: an upgrade asks the one that runs. The answer waits on the new image's
+    // readiness.
+    auto const transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr);
+    auto const control = vthost::client::makeDaemonControl(transport, vthost::client::DefaultUpgradeTimeout);
+    // The status reads before and after wait on nothing: a short timeout bounds how long one in flight holds
+    // up a shutdown.
+    auto const settling = vthost::client::makeDaemonControl(transport, vthost::client::DefaultControlTimeout);
+    // Staged from this process's own copy, as a daemon this client starts is.
+    auto const binary = vthost::makeOwnDaemonBinary(
+        processEnvironment(), fileSystem(), CONTOUR_VERSION_STRING, std::filesystem::path { programPath() });
+    auto pacer = vthost::client::SystemSettlePacer { std::move(stop) };
+    return vthost::client::upgradeDaemonTo(*control, *settling, *binary, pacer);
+}
+
+void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController& controller)
+{
+    showDaemonDrift(controller);
+    // An upgrade closes this client's connection and holds it for the daemon's return; the badge says so
+    // meanwhile, and shows what the new daemon runs once the connection is back. Whichever client asked, and
+    // whether or not the daemon is ours to upgrade: its windows wait all the same.
+    remote::followDaemonDrift(
+        controller, _daemonDrift, [this, &controller](window::DriftReassessment reassessment) {
+            if (reassessment == window::DriftReassessment::Reassess
+                || controller.daemonRelease() != _shownDaemonRelease)
+                showDaemonDrift(controller);
+        });
+    if (!_restartDaemon)
+        return;
+    connect(&_daemonDrift, &window::DaemonDriftModel::upgradeRequested, this, [this] {
+        // The model asks for no other upgrade or restart until this one reports back, so no worker still
+        // running is joined here, on the GUI thread. On shutdown the settling stops waiting at once; a
+        // control call already under way is not interrupted, and ends within its timeout
+        // (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request itself).
+        _daemonRestartThread = std::jthread { [this](std::stop_token const& stop) {
+            auto const upgraded = _upgradeDaemon(stop);
+            QMetaObject::invokeMethod(
+                &_daemonDrift,
+                [this,
+                 reason = upgraded
+                              ? QString {}
+                              : QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
+                    // On success the connection comes back to the upgraded daemon, and the badge follows it.
+                    if (reason.isEmpty())
+                        _daemonDrift.noteUpgradeRequestDone();
+                    else
+                        _daemonDrift.noteUpgradeFailed(reason);
+                },
+                Qt::QueuedConnection);
+        } };
+    });
     connect(&_daemonDrift, &window::DaemonDriftModel::restartRequested, this, [this] {
         // Stopping the daemon drops this client's connection, which closes every window. Without this
         // the last window closing would quit the app before the queued hand-off below ever ran.
@@ -1338,6 +1401,9 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
         };
+        _upgradeDaemon = [this, controlPath](std::stop_token stop) {
+            return upgradeLocalDaemon(controlPath, std::move(stop));
+        };
         // Before every connect, the first and each reconnect alike, so a daemon that crashed or was stopped
         // is started again. Spawned, if it must be, from this version's own copy where an upgrade would
         // disturb the installed binary, and that copy held leased until the daemon serves. Runs on the
@@ -1535,6 +1601,7 @@ std::expected<void, std::string> ContourGuiApp::settleHosting(
             errorLog()("Hosting this window's sessions in-process: {}", attached.error());
             _onGuiBooted = nullptr;
             _restartDaemon = nullptr;
+            _upgradeDaemon = nullptr;
             _sessionManager.setAttachWindowBinder(nullptr);
             _hostingNotice = cli::hostingNotice(attached.error());
             return {};

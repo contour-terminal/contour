@@ -398,19 +398,39 @@ namespace
         return bindDaemonEndpoint(loop, path);
     }
 
+    /// Which run of the daemon this is, and how many live upgrades it has seen: what an upgrade carries on.
+    struct DaemonLineage
+    {
+        uint64_t instance = 0;          ///< The run, as every ServerHello states it.
+        uint64_t upgradeGeneration = 0; ///< The live upgrades it completed (proto::DaemonUpgradeRecord).
+    };
+
+    /// @param config The daemon's configuration.
+    /// @param image The handover image it starts from; nullopt for a daemon started afresh.
+    /// @return The run it serves as: the image's, one upgrade further, or a fresh run of @p config's.
+    [[nodiscard]] DaemonLineage lineageOf(DaemonConfig const& config,
+                                          std::optional<handover::HandoverImage> const& image)
+    {
+        if (!image)
+            return DaemonLineage { .instance = config.instance, .upgradeGeneration = 0 };
+        return DaemonLineage { .instance = image->daemonInstance,
+                               .upgradeGeneration = image->upgradeGeneration + 1 };
+    }
+
     /// @param config The daemon's configuration.
     /// @param services What it upgrades itself with.
-    /// @param instance The run of the daemon it serves as, which the upgrade carries on.
+    /// @param lineage The run of the daemon it serves as, which the upgrade carries on.
     /// @param tlsIdentities The TLS identities it made up for its listeners, by listener name.
     /// @return How its live upgrade runs: as this release, of this run, repeating this command line.
     [[nodiscard]] handover::LiveUpgradeConfig liveUpgradeConfigOf(
         DaemonConfig const& config,
         LiveUpgradeServices const& services,
-        uint64_t instance,
+        DaemonLineage lineage,
         std::map<std::string, handover::TlsIdentity, std::less<>> tlsIdentities)
     {
         return handover::LiveUpgradeConfig { .release = config.releaseVersion,
-                                             .daemonInstance = instance,
+                                             .daemonInstance = lineage.instance,
+                                             .upgradeGeneration = lineage.upgradeGeneration,
                                              .argv = services.argv,
                                              .installedExecutable = services.installedExecutable,
                                              .sandbox = services.sandbox,
@@ -625,15 +645,17 @@ namespace
     };
 
     /// @param config The daemon's configuration.
+    /// @param upgradeGeneration How many live upgrades this run of the daemon has completed.
     /// @return What its DaemonRuntime states about it.
-    [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config)
+    [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config, uint64_t upgradeGeneration)
     {
         return DaemonRuntimeConfig { .releaseVersion = config.releaseVersion,
                                      .processId = currentProcessId(),
                                      .socketPath = config.socketPath,
                                      .executablePath = config.executablePath,
                                      .logFile = config.logFile,
-                                     .lifecycle = config.lifecycle };
+                                     .lifecycle = config.lifecycle,
+                                     .upgradeGeneration = upgradeGeneration };
     }
 
     /// What every native endpoint of a daemon serves its connections with: @p runtime behind them, and a
@@ -688,12 +710,23 @@ namespace
     /// @return How the daemon's control service is set up: a reply carries at most a quarter of a native
     ///         connection's send-queue bound of pane text, so that it always fits beside a backlog.
     [[nodiscard]] control::ControlServiceConfig controlServiceConfig(DaemonConfig const& config,
-                                                                     core::platform::IWallClock const& clock)
+                                                                     core::platform::IWallClock const& clock,
+                                                                     core::net::EventLoop& loop,
+                                                                     DaemonControl& daemon)
     {
-        return control::ControlServiceConfig { .version = config.releaseVersion,
-                                               .socketPath = config.socketPath,
-                                               .clock = clock,
-                                               .maxReplyBytes = NativeSession::DefaultWriteQueueBytes / 4 };
+        return control::ControlServiceConfig {
+            .version = config.releaseVersion,
+            .socketPath = config.socketPath,
+            .clock = clock,
+            .maxReplyBytes = NativeSession::DefaultWriteQueueBytes / 4,
+            // The same flow the native UpgradeDaemon runs: one upgrade path, whoever asks.
+            .upgrade =
+                [&loop,
+                 &daemon](handover::UpgradeTarget target, UpgradeStarted onStarted, UpgradeFailed onFailed) {
+                    loop.spawn(
+                        serveUpgrade(&daemon, std::move(target), std::move(onStarted), std::move(onFailed)));
+                },
+        };
     }
 
     /// Probes whether a daemon is accepting connections on the native socket at
@@ -1029,8 +1062,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     auto restore = image ? std::nullopt : restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
-    // The same run of the daemon goes on across a live upgrade.
-    auto const instance = image ? image->daemonInstance : config.instance;
+    // The same run of the daemon goes on across a live upgrade, one upgrade further.
+    auto const lineage = lineageOf(config, image);
 
     auto host = SessionHost {
         loop,
@@ -1047,7 +1080,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
                                 config.profiles
                                     ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
                                     : ProfilePtyFactory {},
-                            .instance = instance,
+                            .instance = lineage.instance,
                             .restore = std::move(restore),
                             .handover = std::exchange(image, std::nullopt) }
     };
@@ -1086,7 +1119,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
     // the funnel.
-    auto runtime = DaemonRuntime { runtimeConfigOf(config),
+    auto runtime = DaemonRuntime { runtimeConfigOf(config, lineage.upgradeGeneration),
                                    host,
                                    clock,
                                    postedShutdown(loop, funnel),
@@ -1094,7 +1127,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
-    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
+    auto controlService =
+        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
     // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
     // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
     // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,
@@ -1241,7 +1275,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
             config.liveUpgrade->probe,
             upgradeHooks,
             servers,
-            liveUpgradeConfigOf(config, *config.liveUpgrade, instance, std::move(tlsIdentities)));
+            liveUpgradeConfigOf(config, *config.liveUpgrade, lineage, std::move(tlsIdentities)));
 
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
@@ -1388,8 +1422,12 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     };
     // See the POSIX body above for why the runtime and the control service are declared here, before the
     // drain.
-    auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
-    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
+    // No live upgrade on this platform: every run is the first of its line.
+    auto runtime = DaemonRuntime {
+        runtimeConfigOf(config, /*upgradeGeneration=*/0), host, clock, postedShutdown(loop, funnel)
+    };
+    auto controlService =
+        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
     // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
     auto lifecycleWatchers = LifecycleWatchers {};
     installLifecycleWatchers(

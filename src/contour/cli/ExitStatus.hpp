@@ -19,6 +19,7 @@ enum class ExitStatus : uint8_t
     BadUsage = 2,       ///< The command line was malformed.
     TargetNotFound = 3, ///< The session, pane or block a control verb named does not exist.
     Unreachable = 4,    ///< The daemon the verb talks to is not running.
+    Refused = 5,        ///< The daemon declined the request; the reason is on standard error.
     Interrupted = 130,  ///< The verb ended on Ctrl+C.
 };
 
@@ -40,6 +41,7 @@ enum class ExitStatus : uint8_t
         case ExitStatus::TargetNotFound:
             return "The pane, tab, window or block named does not exist, or the name matches several.";
         case ExitStatus::Unreachable: return "No daemon could be reached.";
+        case ExitStatus::Refused: return "The daemon declined; the reason is on standard error.";
         case ExitStatus::Interrupted: return "Interrupted by Ctrl+C.";
     }
     return {};
@@ -48,8 +50,8 @@ enum class ExitStatus : uint8_t
 /// Every ExitStatus, in value order, for the readers that list them all. An enumerator missing here but
 /// known to meaningOf() (whose switch the compiler keeps exhaustive) fails a test.
 inline constexpr auto ExitStatuses = std::array {
-    ExitStatus::Ok,          ExitStatus::Failed,      ExitStatus::BadUsage, ExitStatus::TargetNotFound,
-    ExitStatus::Unreachable, ExitStatus::Interrupted,
+    ExitStatus::Ok,          ExitStatus::Failed,  ExitStatus::BadUsage,    ExitStatus::TargetNotFound,
+    ExitStatus::Unreachable, ExitStatus::Refused, ExitStatus::Interrupted,
 };
 
 /// @param status A verb's outcome.

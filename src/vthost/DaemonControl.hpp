@@ -47,6 +47,12 @@ class UpgradeObserver
     virtual void abortForUpgrade() = 0;
 };
 
+/// What answers the requester of a live upgrade: called once, with the release the daemon upgrades to.
+using UpgradeStarted = std::function<void(std::string_view toRelease)>;
+
+/// What reports a live upgrade that did not happen.
+using UpgradeFailed = std::function<void(handover::UpgradeError const& error)>;
+
 /// The daemon as its connections see it.
 class DaemonControl
 {
@@ -77,7 +83,7 @@ class DaemonControl
     ///        told and every connection closed: the last moment the requester can still be answered.
     /// @return Why the upgrade did not happen; the daemon serves on as before.
     [[nodiscard]] virtual core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
-        handover::UpgradeTarget target, std::function<void()> onStarted) = 0;
+        handover::UpgradeTarget target, UpgradeStarted onStarted) = 0;
 
     /// Has @p observer told whenever the daemon announces an upgrade, until unsubscribeUpgrade().
     /// @param observer Not owned; must stay alive until unsubscribed.
@@ -87,6 +93,21 @@ class DaemonControl
     /// @param observer A subscriber, or not.
     virtual void unsubscribeUpgrade(UpgradeObserver& observer) = 0;
 };
+
+/// Asks @p daemon to upgrade to @p target, as every surface that offers an upgrade does: the one path.
+///
+/// A free-standing flow, since it outlives the connection that asked: its requester's connection is among
+/// those the upgrade closes. An exception out of the upgrade (it is rolled back as it unwinds) is reported as
+/// an ExecFailure, as the requester would otherwise wait for an answer that never comes.
+/// @param daemon The daemon (not owned; outlives every connection).
+/// @param target What to upgrade to.
+/// @param onStarted Answers the requester just before the announcement; see DaemonControl::requestUpgrade.
+/// @param onFailed Told why the upgrade did not happen. An exec failure may follow @p onStarted, which a
+///        requester whose connection the upgrade closed no longer hears.
+[[nodiscard]] core::async::Task<void> serveUpgrade(DaemonControl* daemon,
+                                                   handover::UpgradeTarget target,
+                                                   UpgradeStarted onStarted,
+                                                   UpgradeFailed onFailed);
 
 /// A subscription to a daemon's upgrade announcements, for as long as it lives.
 class UpgradeSubscription
@@ -120,7 +141,7 @@ class NullDaemonControl final: public DaemonControl
     [[nodiscard]] std::expected<void, DaemonControlError> requestStop(proto::StopReason reason) override;
     [[nodiscard]] ClientCensus::Ticket admitClient() override;
     [[nodiscard]] core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
-        handover::UpgradeTarget target, std::function<void()> onStarted) override;
+        handover::UpgradeTarget target, UpgradeStarted onStarted) override;
     void subscribeUpgrade(UpgradeObserver& observer) override;
     void unsubscribeUpgrade(UpgradeObserver& observer) override;
 };

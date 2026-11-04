@@ -341,7 +341,8 @@ namespace
                                                    "NAME" });
                 break;
             case DaemonVerb::Run:
-            case DaemonVerb::Status: break;
+            case DaemonVerb::Status:
+            case DaemonVerb::Upgrade: break;
         }
         return options;
     }
@@ -1688,6 +1689,26 @@ int ContourApp::mcpAction()
                          CONTOUR_VERSION_STRING);
 }
 
+namespace
+{
+    /// @param verb A `contour daemon` sub-verb.
+    /// @return How long its control calls may take: a stop waits for the daemon's last snapshot, an upgrade
+    ///         for the new image's readiness probe.
+    [[nodiscard]] std::chrono::milliseconds controlTimeoutOf(contour::cli::DaemonVerb verb) noexcept
+    {
+        switch (verb)
+        {
+            case contour::cli::DaemonVerb::Stop: return vthost::client::DefaultStopTimeout;
+            case contour::cli::DaemonVerb::Upgrade: return vthost::client::DefaultUpgradeTimeout;
+            case contour::cli::DaemonVerb::Run:
+            case contour::cli::DaemonVerb::Status:
+            case contour::cli::DaemonVerb::Logs:
+            case contour::cli::DaemonVerb::HandoverInfo: break;
+        }
+        return vthost::client::DefaultControlTimeout;
+    }
+} // namespace
+
 int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
 {
     // Asks no daemon: a daemon about to upgrade runs it on the new release's binary, in an empty environment,
@@ -1720,10 +1741,8 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
     auto const socket = vthost::muxSocketPath(socketLabel, *socketOption);
     // Never starts a daemon: asking about one, or stopping it, must not bring one up. A stop waits for the
     // daemon's last snapshot.
-    auto control =
-        vthost::client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(socket, nullptr),
-                                          verb == DaemonVerb::Stop ? vthost::client::DefaultStopTimeout
-                                                                   : vthost::client::DefaultControlTimeout);
+    auto control = vthost::client::makeDaemonControl(
+        std::make_shared<vthost::UnixTransportFactory>(socket, nullptr), controlTimeoutOf(verb));
 
     switch (verb)
     {
@@ -1744,6 +1763,18 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
                 .savedWorkspace = savedWorkspace ? &*savedWorkspace : nullptr,
             };
             return exitCode(daemonStopVerb(*control, socket, options, *prompt, cout, cerr));
+        }
+        case DaemonVerb::Upgrade: {
+            // Staged from this process's own copy, as a daemon this client starts is, so that the installed
+            // binary a package upgrade replaces is not what the daemon waits on.
+            auto const argv0 = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
+            auto const binary = vthost::makeOwnDaemonBinary(processEnvironment(),
+                                                            core::platform::NativeFileSystem::instance(),
+                                                            CONTOUR_VERSION_STRING,
+                                                            argv0);
+            auto pacer = vthost::client::SystemSettlePacer {};
+            return exitCode(
+                daemonUpgradeVerb(*control, *binary, pacer, CONTOUR_VERSION_STRING, socket, cout, cerr));
         }
         case DaemonVerb::Logs: {
             auto const lines = parameters().get<unsigned>(prefix + ".lines");

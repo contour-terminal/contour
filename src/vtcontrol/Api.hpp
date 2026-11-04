@@ -327,6 +327,25 @@ struct DaemonInfoReply
     std::vector<std::string> grants {};
 };
 
+/// `daemon.upgrade` request.
+struct DaemonUpgradeRequest
+{
+    using ApiRecordTag = void;
+
+    /// A staged image of the daemon's store (`<release>-<fingerprint>`) to upgrade to; empty for the daemon's
+    /// own installed executable, which a package upgrade replaced.
+    std::string image {};
+};
+
+/// `daemon.upgrade` reply.
+struct DaemonUpgradeReply
+{
+    using ApiRecordTag = void;
+
+    bool started = false;     ///< Always true: the upgrade started (a refusal is an error). Wire field.
+    std::string toRelease {}; ///< The release the daemon becomes.
+};
+
 /// `list` request.
 struct ListRequest
 {

@@ -155,10 +155,6 @@ std::string TimestampRun::spell(std::chrono::local_seconds when) const
 
 namespace
 {
-    /// One blank column after the timestamps, so a right-aligned line number that fills its own width
-    /// never runs into the time beside it.
-    constexpr auto TimestampGap = 1;
-
     /// What the gutter's table reads: the settings, and the timestamp format already resolved from them,
     /// so the format is validated once per layout.
     struct SegmentInputs
@@ -170,7 +166,7 @@ namespace
 
     [[nodiscard]] int timestampColumns(SegmentInputs const& inputs)
     {
-        return inputs.timestamp ? inputs.timestamp->columns + TimestampGap : 0;
+        return inputs.timestamp ? inputs.timestamp->columns + TimestampSegmentGap : 0;
     }
 
     [[nodiscard]] int lineNumberColumns(SegmentInputs const& inputs)

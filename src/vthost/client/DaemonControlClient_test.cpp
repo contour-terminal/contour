@@ -78,7 +78,7 @@ class StoppableDaemon final: public vthost::DaemonControl
     [[nodiscard]] vthost::ClientCensus::Ticket admitClient() override { return _inner.admitClient(); }
 
     [[nodiscard]] core::async::Task<std::expected<void, vthost::handover::UpgradeError>> requestUpgrade(
-        vthost::handover::UpgradeTarget target, std::function<void()> onStarted) override
+        vthost::handover::UpgradeTarget target, vthost::UpgradeStarted onStarted) override
     {
         return _inner.requestUpgrade(std::move(target), std::move(onStarted));
     }

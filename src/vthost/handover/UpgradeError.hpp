@@ -56,33 +56,44 @@ using UpgradeError = std::variant<UpgradeRefusal, ExecFailure>;
 struct UpgradeRefusalRow
 {
     UpgradeRefusal refusal; ///< The refusal.
+    std::string_view name;  ///< Its stable name, camelCase: what the control API leads an error with.
     std::string_view text;  ///< Its explanation, one sentence fragment, lower case.
 };
 
 /// What each refusal tells the user, in enumerator order.
 inline constexpr auto UpgradeRefusalRows = std::array {
-    UpgradeRefusalRow { UpgradeRefusal::InProgress, "an upgrade of this daemon is already under way" },
-    UpgradeRefusalRow { UpgradeRefusal::NotStaged,
-                        "the new release is not staged in the daemon's image store" },
+    UpgradeRefusalRow {
+        UpgradeRefusal::InProgress, "inProgress", "an upgrade of this daemon is already under way" },
+    UpgradeRefusalRow {
+        UpgradeRefusal::NotStaged, "notStaged", "the new release is not staged in the daemon's image store" },
     UpgradeRefusalRow { UpgradeRefusal::Sandboxed,
+                        "sandboxed",
                         "the daemon runs in a sandbox that cannot reach the new release" },
     UpgradeRefusalRow { UpgradeRefusal::FormatUnreadable,
+                        "formatUnreadable",
                         "the new release cannot read the state this daemon hands over" },
     UpgradeRefusalRow { UpgradeRefusal::InFlightTailTooLarge,
+                        "inFlightTailTooLarge",
                         "a program is in the middle of an escape sequence too long to carry over" },
     UpgradeRefusalRow { UpgradeRefusal::TargetUnresponsive,
+                        "targetUnresponsive",
                         "the new release did not answer its readiness check" },
-    UpgradeRefusalRow { UpgradeRefusal::NotSupported, "live upgrade is not supported on this platform" },
+    UpgradeRefusalRow {
+        UpgradeRefusal::NotSupported, "notSupported", "live upgrade is not supported on this platform" },
     UpgradeRefusalRow { UpgradeRefusal::UnsupportedSession,
+                        "unsupportedSession",
                         "a session runs on a connection that cannot be carried over (SSH or a channel)" },
-    UpgradeRefusalRow { UpgradeRefusal::SessionStarting, "a session is still starting" },
+    UpgradeRefusalRow { UpgradeRefusal::SessionStarting, "sessionStarting", "a session is still starting" },
     UpgradeRefusalRow { UpgradeRefusal::QuiesceTimedOut,
+                        "quiesceTimedOut",
                         "the daemon's clients and sessions did not settle in time" },
     UpgradeRefusalRow { UpgradeRefusal::ImageTooLarge,
+                        "imageTooLarge",
                         "the sessions' state is too large to hand over (too many images in scrollback)" },
     UpgradeRefusalRow { UpgradeRefusal::ConfigUnreadable,
+                        "configUnreadable",
                         "the new release cannot load the daemon's configuration or profile" },
-    UpgradeRefusalRow { UpgradeRefusal::LocalOnly, "live upgrade is local only" },
+    UpgradeRefusalRow { UpgradeRefusal::LocalOnly, "localOnly", "live upgrade is local only" },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRefusalRows.size()),
@@ -92,10 +103,25 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRef
                                   }),
               "UpgradeRefusalRows must list every refusal in enumerator order");
 
+/// What the user is told of an ExecFailure: the one outcome that is no refusal (UpgradeRefusal has no
+/// enumerator for it). The daemon stopped its sessions' pumps, could not exec, and resumed them.
+inline constexpr std::string_view ExecFailureText =
+    "the daemon could not start the new release and keeps serving on the old one";
+
+/// The stable name of an ExecFailure, beside the refusals' names.
+inline constexpr std::string_view ExecFailureName = "execFailed";
+
 /// @return The refusal with the highest number: the bound a wire decoder holds a byte to.
 [[nodiscard]] constexpr UpgradeRefusal lastRefusal() noexcept
 {
     return UpgradeRefusalRows.back().refusal;
+}
+
+/// @param refusal A refusal.
+/// @return Its stable name.
+[[nodiscard]] constexpr std::string_view nameOf(UpgradeRefusal refusal) noexcept
+{
+    return UpgradeRefusalRows.at(static_cast<std::size_t>(refusal)).name;
 }
 
 /// @param refusal A refusal.

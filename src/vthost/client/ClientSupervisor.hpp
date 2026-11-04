@@ -57,12 +57,19 @@ struct BackoffSchedule
     return std::chrono::milliseconds { first << doublings };
 }
 
+/// How long a client waits for a daemon that announced its upgrade (proto::DaemonUpgrading) to come back
+/// before it may start one: the new image serves again within a few hundred milliseconds, and one that fails
+/// rolls back and keeps serving. Meanwhile the transport starts no daemon
+/// (ITransportFactory::holdDaemonStart) and an absent one is retried with the normal backoff.
+inline constexpr auto UpgradeHold = std::chrono::seconds { 15 };
+
 /// Builds the client for one connection. The client keeps @p connection's socket for as long as it runs and
 /// states its token in the hello; the supervisor keeps the connection's lifetime until the client is gone.
 using ClientFactory = std::function<std::unique_ptr<NativeClient>(std::unique_ptr<Connection> connection,
                                                                   proto::AttachIntent intent)>;
 
-/// Told every state change, on the loop's thread. @p reason says why, for Reconnecting, Failed and Refused.
+/// Told every state change, on the loop's thread. @p reason says why, for Reconnecting, Upgrading, Failed and
+/// Refused.
 using StateHandler = std::function<void(ConnectionState state, std::string const& reason)>;
 
 /// Runs one native connection after another: the first with the caller's intent, every later one resuming
@@ -111,7 +118,16 @@ class ClientSupervisor
         Unaccepted = 2,
         Lost = 3,    ///< The connection ended after the daemon accepted it.
         Stopped = 4, ///< stop() ended it.
+        /// The connection ended after the daemon accepted it and announced that it replaces itself in place.
+        Upgrading = 5,
     };
+
+    /// @param ending How a connection ended.
+    /// @return Whether the daemon had accepted it before it was lost: what a reconnect follows up.
+    [[nodiscard]] static constexpr bool acceptedThenLost(Ending ending) noexcept
+    {
+        return ending == Ending::Lost || ending == Ending::Upgrading;
+    }
 
     /// How one connection ended, and why.
     struct Outcome
@@ -137,7 +153,8 @@ class ClientSupervisor
     [[nodiscard]] core::async::Task<Outcome> attempt(proto::AttachIntent intent);
 
     /// Retries with backoff until a connection is accepted and lost again, or retrying ends.
-    /// @return Ending::Lost to start retrying afresh; any other outcome ends the supervisor.
+    /// @return Ending::Lost or Ending::Upgrading to start retrying afresh; any other outcome ends the
+    ///         supervisor.
     [[nodiscard]] core::async::Task<Outcome> reconnect();
 
     /// @return What a reconnect asks to follow: every window again for a client that followed every window,
@@ -158,6 +175,16 @@ class ClientSupervisor
     /// Installs a fresh retry source: a retryNow() before it no longer counts.
     void resetRetry();
 
+    /// Starts the UpgradeHold: the transport starts no daemon until it ends.
+    void beginUpgradeHold();
+
+    /// Ends the UpgradeHold early, the daemon having answered again.
+    void endUpgradeHold();
+
+    /// Once the UpgradeHold ran out with the daemon still absent: ends it, and reports Reconnecting, as from
+    /// now on the transport starts a daemon as it would after any loss.
+    void expireUpgradeHold();
+
     core::net::EventLoop& _loop;
     std::shared_ptr<ITransportFactory> _transport;
     ClientFactory _makeClient;
@@ -169,6 +196,8 @@ class ClientSupervisor
     std::mutex _retryMutex;
     /// Stopped by retryNow(): what a backoff wait parks on beside @ref _stop. Replaced once spent.
     core::async::StopSource _retry;
+    /// When the UpgradeHold under way ends, on the loop's clock; nullopt while none is.
+    std::optional<core::platform::SteadyTimePoint> _upgradeHoldUntil;
     /// The windows the last accepted connection followed: what the next one resumes.
     std::vector<uint64_t> _followed;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client

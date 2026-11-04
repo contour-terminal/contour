@@ -8,8 +8,10 @@
 
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -132,6 +134,19 @@ class ITransportFactory
     /// @return Whether the peer is authenticated, known before connecting: a control client refuses an
     ///         Unverified transport, as an active man-in-the-middle would take its token.
     [[nodiscard]] virtual PeerTrust peerTrust() const noexcept = 0;
+
+    /// Holds back starting a daemon until @p until: the daemon announced that it replaces itself in place
+    /// (DaemonUpgrading), so its absence meanwhile is a gap to wait out, and a daemon started into it would
+    /// be a second one. An attempt made during the hold connects without starting one, and reads an absent
+    /// daemon as TransportErrorKind::DaemonAbsent. A later call replaces the hold; one with a time already
+    /// past releases it.
+    ///
+    /// Not pure: only the local factory starts a daemon of its own, and the others ignore it. TLS and a
+    /// test's transport start none. ssh does, on the remote host, through the relay's local daemon connector
+    /// -- but that relay probes first (daemonAccepts), and the listener a daemon keeps across its exec
+    /// answers the probe, so the relay starts nothing during an upgrade.
+    /// @param until When the hold ends, on the clock of the loop the attempts run on.
+    virtual void holdDaemonStart(core::platform::SteadyTimePoint /*until*/) {}
 };
 
 /// The local daemon over its AF_UNIX socket.
@@ -170,6 +185,9 @@ class UnixTransportFactory final: public ITransportFactory
     /// @return Local: the socket's owner check is the gate.
     [[nodiscard]] PeerTrust peerTrust() const noexcept override { return PeerTrust::Local; }
 
+    /// Skips @c ensureDaemon in every attempt made before @p until, on the attempt's loop clock. Any thread.
+    void holdDaemonStart(core::platform::SteadyTimePoint until) override;
+
   private:
     /// The connect itself: a coroutine takes the loop by pointer, as its reference would outlive the call.
     [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> connectOn(
@@ -194,6 +212,11 @@ class UnixTransportFactory final: public ITransportFactory
 
     std::filesystem::path _socketPath;
     EnsureDaemon _ensureDaemon;
+    /// Until when no attempt starts a daemon (holdDaemonStart()), as ticks since the loop clock's epoch: the
+    /// minimum holds nothing back.
+    std::atomic<core::platform::SteadyDuration::rep> _holdUntil {
+        core::platform::SteadyTimePoint::min().time_since_epoch().count()
+    };
     std::mutex _ensureMutex;  ///< Held by a worker while it calls @c _ensureDaemon.
     std::mutex _workersMutex; ///< Guards @c _workers.
     /// The workers started and not joined yet. Declared after what they call, so that it is destroyed --

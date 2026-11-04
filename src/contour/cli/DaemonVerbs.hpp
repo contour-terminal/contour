@@ -22,8 +22,10 @@
 #include <string>
 #include <string_view>
 
+#include <vthost/DaemonBinary.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/DaemonUpgrade.hpp>
 
 namespace contour::config
 {
@@ -45,6 +47,7 @@ enum class DaemonVerb : uint8_t
     Status,  ///< Report on the running daemon.
     Logs,    ///< Print the running daemon's log.
     Stop,    ///< Stop the running daemon.
+    Upgrade, ///< Replace the running daemon with this release's, keeping its sessions running.
     /// Print what this binary reads of a live upgrade's handover, for the daemon that would exec it.
     HandoverInfo,
 };
@@ -69,6 +72,11 @@ inline constexpr auto DaemonSubVerbs = std::array {
         "Stops the daemon, ending every session it hosts; asks first when sessions exist. The next "
         "daemon starts afresh, unless --keep-snapshot keeps the workspace for it.",
         DaemonVerb::Stop },
+    DaemonVerbRow {
+        "upgrade",
+        "Upgrades the running daemon to this release without ending its sessions: every program keeps "
+        "running and the clients reconnect. Exits 5 with the reason when the daemon declines.",
+        DaemonVerb::Upgrade },
     DaemonVerbRow {
         "handover-info",
         "Internal: prints, as one line of JSON, this binary's release and the handover and terminal "
@@ -213,6 +221,29 @@ class LogFollower
                                         ConfirmPrompt& prompt,
                                         std::ostream& out,
                                         std::ostream& err);
+
+/// `contour daemon upgrade`.
+///
+/// Stages this release's image, asks the daemon to replace itself with it and reports the outcome. A failure
+/// whose outcome is unknown (the daemon did not answer) is settled by asking the daemon's release again until
+/// the reconnect hold ran out.
+/// @param control The daemon's control port, with a timeout of vthost::client::DefaultUpgradeTimeout.
+/// @param binary What this release's image is staged from.
+/// @param pacer The clock and waits of the settling of an outcome that is not known.
+/// @param targetRelease This release, named in the confirmation.
+/// @param socket The socket asked, named when no daemon answers.
+/// @param out Where the confirmation goes.
+/// @param err Where a failure or refusal goes.
+/// @return Ok once the daemon upgrades; Unreachable when no daemon runs; Refused, with the reason, when it
+///         declines; Failed when this release's image could not be staged, or the outcome stays unknown (the
+///         daemon neither answered nor came back).
+[[nodiscard]] ExitStatus daemonUpgradeVerb(vthost::client::DaemonControlPort& control,
+                                           vthost::DaemonBinarySource& binary,
+                                           vthost::client::SettlePacer& pacer,
+                                           std::string_view targetRelease,
+                                           std::filesystem::path const& socket,
+                                           std::ostream& out,
+                                           std::ostream& err);
 
 /// @param restore The `daemon.restore` section.
 /// @param snapshotPath The daemon's snapshot file; empty keeps no workspace.

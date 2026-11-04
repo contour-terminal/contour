@@ -368,13 +368,19 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        // The socket, executable and log paths name the user's home: left out.
                        auto const& value = std::get<DaemonStatusReply>(pdu);
-                       return std::format("release={} pid={} uptime={}s sessions={} clients={} lifecycle={}",
-                                          value.releaseVersion,
-                                          value.processId,
-                                          value.uptimeSeconds,
-                                          value.sessions,
-                                          value.clients,
-                                          value.lifecycle);
+                       auto text =
+                           std::format("release={} pid={} uptime={}s sessions={} clients={} lifecycle={}",
+                                       value.releaseVersion,
+                                       value.processId,
+                                       value.uptimeSeconds,
+                                       value.sessions,
+                                       value.clients,
+                                       value.lifecycle);
+                       if (value.upgrade)
+                           text += std::format(" generation={} lastFailure={}",
+                                               value.upgrade->generation,
+                                               value.upgrade->lastFailure);
+                       return text;
                    } },
         TraceRow { PduType::StopDaemon,
                    "StopDaemon",

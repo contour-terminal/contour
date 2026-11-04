@@ -819,6 +819,13 @@ namespace
         out.varint(pdu.sessions);
         out.varint(pdu.clients);
         out.u8(pdu.lifecycle);
+        if (pdu.upgrade.has_value())
+        {
+            out.varint(pdu.upgrade->generation);
+            out.varint(pdu.upgrade->attempts);
+            out.u8(pdu.upgrade->lastFailure);
+            out.string(pdu.upgrade->lastFailureDetail);
+        }
     }
 
     void encodeBody(Writer& out, StopDaemon const& pdu)
@@ -1727,6 +1734,17 @@ namespace
             || !assign(in.varint(), pdu.sessions, error) || !assign(in.varint(), pdu.clients, error)
             || !assign(in.u8(), pdu.lifecycle, error))
             return std::unexpected(error);
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0)
+        {
+            auto upgrade = DaemonUpgradeRecord {};
+            if (!assign(in.varint(), upgrade.generation, error)
+                || !assign(in.varint(), upgrade.attempts, error)
+                || !assign(in.u8(), upgrade.lastFailure, error)
+                || !assign(in.string(), upgrade.lastFailureDetail, error))
+                return std::unexpected(error);
+            pdu.upgrade = std::move(upgrade);
+        }
         return pdu;
     }
 

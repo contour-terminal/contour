@@ -1249,6 +1249,38 @@ TEST_CASE("the drift badge ignores clicks while a restart runs", "[contour][qml]
     CHECK(label->property("text").toString() == QStringLiteral("Restarting daemon…"));
 }
 
+TEST_CASE("the drift badge confirms an upgrade, and says so while the daemon upgrades",
+          "[contour][qml][drift]")
+{
+    auto fixture = DriftBadgeFixture {};
+    fixture.model.show(
+        vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost),
+        contour::window::DriftOffer::UpgradeAndRestart);
+
+    auto* upgrade = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftUpgradeConfirm"));
+    REQUIRE(upgrade != nullptr);
+    fixture.click();
+    // The upgrade is what a click offers; the restart's dialog stays shut.
+    CHECK(upgrade->property("visible").toBool());
+    CHECK_FALSE(fixture.dialog()->property("visible").toBool());
+    CHECK(upgrade->property("heading").toString()
+          == QStringLiteral("Upgrade daemon (keeps your programs running)"));
+
+    auto spy = QSignalSpy { &fixture.model, &contour::window::DaemonDriftModel::upgradeRequested };
+    REQUIRE(QMetaObject::invokeMethod(upgrade, "accept"));
+    CHECK(spy.count() == 1);
+    auto* label = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftLabel"));
+    REQUIRE(label != nullptr);
+    CHECK(label->property("text").toString() == QStringLiteral("Upgrading daemon…"));
+
+    // After a refusal the restart is what a click offers, and the refusal is what the chip says.
+    fixture.model.noteUpgradeFailed(QStringLiteral("the daemon runs in a sandbox"));
+    CHECK(label->property("text").toString().contains(QStringLiteral("the daemon runs in a sandbox")));
+    upgrade->setProperty("visible", false);
+    fixture.click();
+    CHECK(fixture.dialog()->property("visible").toBool());
+}
+
 TEST_CASE("Banner: shows its text, and its buttons emit (offscreen)", "[contour][gui][qml][kit][banner]")
 {
     QQmlEngine engine;

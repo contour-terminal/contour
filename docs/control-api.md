@@ -126,6 +126,7 @@ separated list of:
 | 2 | The command line was malformed, or a setting it names cannot be used (a `--tls-ca` that does not parse). |
 | 3 | The pane, tab, window or block named does not exist, or the name matches several. |
 | 4 | No daemon could be reached. |
+| 5 | The daemon declined; the reason is on standard error. |
 | 130 | Interrupted by Ctrl+C. |
 
 `contour send --wait` exits with the command's own status instead (0 to 255). A command with no exit code,
@@ -142,6 +143,37 @@ client can tell what it may call before it tries.
 A connection holds at most 64 subscriptions and 256 pending waits; one more is refused as `limitReached`
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
+
+## Upgrading the daemon
+
+`daemon.upgrade` replaces the running daemon with a newer release in place, keeping every program running
+(see [Live upgrade](persistent-sessions.md#live-upgrade)); `contour daemon upgrade` is its verb.
+
+```sh
+contour api call daemon.upgrade '{"image":""}'
+```
+
+`image` names a staged image of the daemon's store; empty, the daemon upgrades to its own installed
+executable, the file a package upgrade replaced. The call needs `write` and a connection on the daemon's own
+machine, through the daemon's Unix socket: over a TCP token it is refused. It is not offered to
+extensions or to the agent's tools.
+
+The reply, `{"started":true,"toRelease":"0.9.1"}`, is sent before the daemon tells its clients it is
+upgrading and closes every connection, this one included; the clients reconnect to the same daemon. It is
+provisional: the daemon may still decline after it, while it waits for its clients and sessions to settle,
+and the switch to the new binary may fail. Either way the daemon then resumes and serves on as before, and
+the connection that asked is gone by then. `contour daemon status` tells how it ended: its `upgrades`
+count is one higher once the new release serves, and a `last upgrade` line names the failure otherwise.
+`contour daemon upgrade` reads it there for you.
+
+A refusal before the reply is an error with code `failed` whose message leads with a stable name, then
+says why: `sandboxed: the daemon runs in a sandbox that cannot reach the new release`. The names are
+`inProgress`, `notStaged`, `sandboxed`, `formatUnreadable`, `inFlightTailTooLarge`, `targetUnresponsive`,
+`notSupported`, `unsupportedSession`, `sessionStarting`, `quiesceTimedOut`, `imageTooLarge`,
+`configUnreadable` and `localOnly`. `execFailed`, an `exec` that failed after the daemon stopped its
+sessions' pumps and resumed them, always comes after the reply, so this call never returns it; it is the
+name `contour daemon status` reports such a failure under. A connection that breaks before the reply
+leaves the outcome unknown: ask `contour daemon status` again.
 
 ## A workflow: run the tests beside you
 

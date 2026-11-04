@@ -43,6 +43,13 @@ class EventSink
     virtual void subscriptionEnded(uint32_t /*subscription*/) {}
 };
 
+/// Where a control connection comes from.
+enum class CallerLocality : uint8_t
+{
+    Remote = 0, ///< Over the network: a TCP listener's token.
+    Local,      ///< A peer on the daemon's machine: its socket or standard input and output.
+};
+
 /// What a handler knows about the call it is serving.
 ///
 /// Call-scoped, like the request: the transport builds it on its stack for one `dispatch`, and `caller()`
@@ -65,6 +72,10 @@ class CallContext
     /// @return Where this connection's subscribed events go.
     [[nodiscard]] virtual EventSink& events() noexcept = 0;
 
+    /// @return Where the connection comes from. Remote unless the carrier says otherwise, so that a carrier
+    ///         that forgot to is closed rather than open.
+    [[nodiscard]] virtual CallerLocality locality() const noexcept { return CallerLocality::Remote; }
+
     /// @return What the connection is granted; `dispatch` refuses a method outside it as `Forbidden`.
     [[nodiscard]] virtual ControlGrants grants() const noexcept = 0;
 };
@@ -85,6 +96,7 @@ class ControlApi
 
     // clang-format off
     virtual void handle(CallContext& context, DaemonInfoRequest const& request, Completion<DaemonInfoReply> done) = 0;
+    virtual void handle(CallContext& context, DaemonUpgradeRequest const& request, Completion<DaemonUpgradeReply> done) = 0;
     virtual void handle(CallContext& context, ListRequest const& request, Completion<ListReply> done) = 0;
     virtual void handle(CallContext& context, CreateTabRequest const& request, Completion<CreateTabReply> done) = 0;
     virtual void handle(CallContext& context, SplitRequest const& request, Completion<SplitReply> done) = 0;

@@ -10,7 +10,7 @@ void DaemonUpgradeHooks::announceUpgrade(std::string_view toRelease)
 {
     // The requester first: its answer must reach it before DaemonUpgrading and before its connection goes.
     if (auto const answer = std::exchange(_requester, nullptr))
-        answer();
+        answer(toRelease);
     // A copy: an observer's reaction never unsubscribes it inline, but this should not depend on that.
     for (auto* const observer: std::vector<UpgradeObserver*>(_observers))
         observer->announceUpgrade(toRelease);

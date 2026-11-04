@@ -8,9 +8,11 @@
 #include <algorithm>
 #include <format>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <ranges>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -399,6 +401,74 @@ void ControlService::handle(vtcontrol::CallContext& context,
         .uptimeSeconds = apiCount(static_cast<std::size_t>(std::max<int64_t>(uptime.count(), 0))),
         .grants = std::move(grants),
     });
+}
+
+namespace
+{
+    /// @param error Why an upgrade did not happen.
+    /// @return The control error that reports it: `failed`, its message leading with the refusal's stable
+    ///         name (`sandboxed: ...`) and then saying why in the words every surface uses.
+    [[nodiscard]] vtcontrol::ControlError upgradeErrorOf(handover::UpgradeError const& error)
+    {
+        return std::visit(
+            [](auto const& failure) {
+                using Failure = std::decay_t<decltype(failure)>;
+                if constexpr (std::is_same_v<Failure, handover::UpgradeRefusal>)
+                    return vtcontrol::ControlError { .code = vtcontrol::ControlErrorCode::Failed,
+                                                     .message = std::format("{}: {}",
+                                                                            handover::nameOf(failure),
+                                                                            handover::describe(failure)),
+                                                     .candidates = {} };
+                else
+                    return vtcontrol::ControlError { .code = vtcontrol::ControlErrorCode::Failed,
+                                                     .message = std::format("{}: {}: {}",
+                                                                            handover::ExecFailureName,
+                                                                            handover::ExecFailureText,
+                                                                            failure.cause.message()),
+                                                     .candidates = {} };
+            },
+            error);
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::DaemonUpgradeRequest const& request,
+                            vtcontrol::Completion<vtcontrol::DaemonUpgradeReply> done)
+{
+    using Answer = std::shared_ptr<vtcontrol::Completion<vtcontrol::DaemonUpgradeReply>>;
+    // Only a peer on this machine may replace the daemon's binary: a network peer's token is not that.
+    if (context.locality() != vtcontrol::CallerLocality::Local)
+    {
+        done(std::unexpected(upgradeErrorOf(handover::UpgradeError { handover::UpgradeRefusal::LocalOnly })));
+        return;
+    }
+    if (!_config.upgrade)
+    {
+        done(std::unexpected(
+            upgradeErrorOf(handover::UpgradeError { handover::UpgradeRefusal::NotSupported })));
+        return;
+    }
+    // Answered once: "started" comes first, ahead of the announcement and of the closing of this very
+    // connection, and a failure after it (the exec) reaches nobody.
+    auto const answer =
+        std::make_shared<vtcontrol::Completion<vtcontrol::DaemonUpgradeReply>>(std::move(done));
+    auto const answerOnce = [](Answer const& pending, auto reply) {
+        if (auto const complete = std::exchange(*pending, nullptr))
+            complete(std::move(reply));
+    };
+    _config.upgrade(
+        handover::UpgradeTarget { .imageId = request.image },
+        [answer, answerOnce](std::string_view toRelease) {
+            answerOnce(answer,
+                       std::expected<vtcontrol::DaemonUpgradeReply, vtcontrol::ControlError> {
+                           vtcontrol::DaemonUpgradeReply { .started = true,
+                                                           .toRelease = std::string { toRelease } } });
+        },
+        [answer, answerOnce](handover::UpgradeError const& error) {
+            answerOnce(answer,
+                       std::expected<vtcontrol::DaemonUpgradeReply, vtcontrol::ControlError> {
+                           std::unexpected(upgradeErrorOf(error)) });
+        });
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,

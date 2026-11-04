@@ -862,6 +862,13 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
             _onMoveNodeRefused(*refused, frame.serial);
         return true;
     }
+    if (auto const* upgrading = std::get_if<proto::DaemonUpgrading>(&pdu))
+    {
+        // Read once the connection ends: what follows the close is a wait for the same daemon.
+        clientLog()("attach: the daemon is upgrading to {}", upgrading->toRelease);
+        _upgradingTo = upgrading->toRelease;
+        return true;
+    }
     return false;
 }
 

@@ -45,7 +45,7 @@ class DaemonUpgradeHooks final: public handover::UpgradeHooks
     /// Makes @p onStarted the requester's answer: called by the next announceUpgrade() ahead of every
     /// client's announcement, once.
     /// @param onStarted What answers the requester; may be empty.
-    void setRequester(std::function<void()> onStarted) { _requester = std::move(onStarted); }
+    void setRequester(UpgradeStarted onStarted) { _requester = std::move(onStarted); }
 
     /// Forgets the requester.
     void clearRequester() { _requester = nullptr; }
@@ -63,10 +63,13 @@ class DaemonUpgradeHooks final: public handover::UpgradeHooks
     /// Closes every observer's connection at once, and every other connection.
     void abortClients() override;
 
+    /// @return The observers still subscribed: a native connection unsubscribes as its orderly end is done.
+    [[nodiscard]] std::size_t endingConnections() const override { return _observers.size(); }
+
   private:
     ConnectionRegistry const& _connections;
     std::function<void()> _writeSnapshot;
-    std::function<void()> _requester;
+    UpgradeStarted _requester;
     std::vector<UpgradeObserver*> _observers;
 };
 

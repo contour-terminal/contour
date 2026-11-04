@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/HostTransport.hpp>
+#include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/test/AppFixture.hpp>
@@ -79,6 +80,7 @@
 #include <vthost/Transport.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Negotiation.hpp>
+#include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -4875,6 +4877,99 @@ TEST_CASE("a restarted listener re-snapshots the same sessions into the same pan
 
     controller.stop();
     pane.terminal.reset();
+}
+
+TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][controller][reconnect][upgrade]")
+{
+    // A live upgrade: the daemon announces it, closes every connection, and comes back as the same run. The
+    // pane stays bound to its session -- nothing is lost, nothing realized again.
+    using vthost::client::ConnectionState;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    auto const session = daemon.seedSession("before");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("before"));
+    REQUIRE(controller.isBound(session.value));
+
+    daemon.onDaemon([&control] {
+        control.announceUpgrade("9.9.10");
+        control.closeObservers();
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(log.count(ConnectionState::Upgrading) == 1);
+    CHECK(log.count(ConnectionState::Reconnecting) == 0);
+    CHECK(log.windowsLost().empty());
+
+    // The same session reaches the same pane over the new connection.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(session)->writeToScreen("\r\nafter");
+        return 0;
+    });
+    CHECK(pane.shows("after"));
+    CHECK_FALSE(pane.pty().isClosed());
+    CHECK(controller.isBound(session.value));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a remote controller's windows say the daemon is upgrading, and reassess its drift after",
+          "[attach][controller][reconnect][upgrade]")
+{
+    // Over TLS, as `--host` attaches: no daemon this client could upgrade, so the chip offers nothing -- but
+    // while another client upgrades the daemon, this connection is held too, and the windows say why.
+    using contour::window::DriftReassessment;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    std::ignore = daemon.seedSession("before");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto drift = contour::window::DaemonDriftModel {};
+    drift.show(vthost::client::DriftNotice {}, contour::window::DriftOffer::None);
+    auto texts = std::vector<QString> {};
+    QObject::connect(&drift, &contour::window::DaemonDriftModel::changed, [&] {
+        if (drift.isVisible())
+            texts.push_back(drift.text());
+    });
+    auto reassessed = 0;
+    std::ignore = contour::remote::followDaemonDrift(controller, drift, [&](DriftReassessment reassessment) {
+        if (reassessment == DriftReassessment::Reassess)
+        {
+            ++reassessed;
+            drift.show(vthost::client::DriftNotice {}, contour::window::DriftOffer::None);
+        }
+    });
+
+    daemon.onDaemon([&control] {
+        control.announceUpgrade("9.9.10");
+        control.closeObservers();
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return reassessed == 1; }, 2000));
+    CHECK(std::ranges::find(texts, QStringLiteral("Upgrading daemon…")) != texts.end());
+    CHECK_FALSE(drift.isVisible());
+
+    controller.stop();
+    drainGuiEvents();
 }
 
 TEST_CASE("a dark app's controller shows its first pane dark, never the host's light palette",

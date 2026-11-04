@@ -48,7 +48,9 @@ class InstalledDaemonBinary final: public DaemonBinarySource
 
     [[nodiscard]] StagedImage imageForSpawn() override
     {
-        return StagedImage { .executable = _executable, .lease = nullptr };
+        return StagedImage {
+            .executable = _executable, .lease = nullptr, .origin = ImageOrigin::Installed, .imageId = {}
+        };
     }
 
   private:

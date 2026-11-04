@@ -12,15 +12,19 @@ DaemonDriftModel::DaemonDriftModel(QObject* parent): QObject(parent)
 
 bool DaemonDriftModel::isVisible() const noexcept
 {
-    return _notice.kind != vthost::client::DriftKind::None;
+    return _notice.kind != vthost::client::DriftKind::None || _action == DriftAction::Upgrading;
 }
 
 QString DaemonDriftModel::text() const
 {
-    if (_isRestarting)
-        return tr("Restarting daemon…");
+    switch (_action)
+    {
+        case DriftAction::Upgrading: return tr("Upgrading daemon…");
+        case DriftAction::Restarting: return tr("Restarting daemon…");
+        case DriftAction::Idle: break;
+    }
     if (!_failure.isEmpty())
-        return tr("Restart failed: %1").arg(_failure);
+        return _failure;
     return QString::fromStdString(_notice.text);
 }
 
@@ -37,31 +41,133 @@ QString DaemonDriftModel::confirmation() const
 
 bool DaemonDriftModel::isRestarting() const noexcept
 {
-    return _isRestarting;
+    return _action == DriftAction::Restarting;
 }
 
-void DaemonDriftModel::show(vthost::client::DriftNotice notice)
+bool DaemonDriftModel::offersUpgrade() const noexcept
 {
+    return _offer == DriftOffer::UpgradeAndRestart && _upgradeRequest == UpgradeRequest::Settled;
+}
+
+QString DaemonDriftModel::upgradeActionLabel() const
+{
+    return tr("Upgrade daemon (keeps your programs running)");
+}
+
+QString DaemonDriftModel::upgradeConfirmation() const
+{
+    return tr("The daemon replaces itself with the new version. Your programs keep running and the "
+              "windows reconnect in a moment.");
+}
+
+bool DaemonDriftModel::isUpgrading() const noexcept
+{
+    return _action == DriftAction::Upgrading;
+}
+
+void DaemonDriftModel::show(vthost::client::DriftNotice notice, DriftOffer offer)
+{
+    // The same drift assessed again after a failed upgrade (the connection came back) is still that
+    // failure: its reason and the restart-only offer stay until the release changes.
+    auto const sameFailedDrift = !_failedNoticeText.empty() && notice.text == _failedNoticeText;
     _notice = std::move(notice);
+    if (_action == DriftAction::Upgrading)
+        _action = DriftAction::Idle;
+    if (sameFailedDrift)
+    {
+        _offer = DriftOffer::RestartOnly;
+        emit changed();
+        return;
+    }
+    _offer = offer;
+    _failedNoticeText.clear();
     _failure.clear();
     emit changed();
 }
 
 void DaemonDriftModel::requestRestart()
 {
-    if (_isRestarting)
+    if (_action != DriftAction::Idle || _upgradeRequest == UpgradeRequest::InFlight)
         return;
-    _isRestarting = true;
+    _action = DriftAction::Restarting;
     _failure.clear();
     emit changed();
     emit restartRequested();
 }
 
+void DaemonDriftModel::requestUpgrade()
+{
+    if (!offersUpgrade() || _action != DriftAction::Idle)
+        return;
+    _action = DriftAction::Upgrading;
+    _upgradeRequest = UpgradeRequest::InFlight;
+    _failure.clear();
+    emit changed();
+    emit upgradeRequested();
+}
+
 void DaemonDriftModel::noteRestartFailed(QString reason)
 {
-    _isRestarting = false;
-    _failure = reason.isEmpty() ? tr("unknown error") : std::move(reason);
+    _action = DriftAction::Idle;
+    _failure = tr("Restart failed: %1").arg(reason.isEmpty() ? tr("unknown error") : reason);
     emit changed();
+}
+
+void DaemonDriftModel::noteUpgradeFailed(QString const& reason)
+{
+    if (_action == DriftAction::Upgrading)
+        _action = DriftAction::Idle;
+    _upgradeRequest = UpgradeRequest::Settled;
+    _failedNoticeText = _notice.text;
+    // The refusal is what the user reads next to the restart that is now the only action left.
+    _offer = DriftOffer::RestartOnly;
+    _failure = tr("Upgrade failed: %1; restarting the daemon ends its programs")
+                   .arg(reason.isEmpty() ? tr("unknown error") : reason);
+    emit changed();
+}
+
+void DaemonDriftModel::noteUpgradeEnded()
+{
+    if (_action != DriftAction::Upgrading)
+        return;
+    _action = DriftAction::Idle;
+    emit changed();
+}
+
+void DaemonDriftModel::noteDaemonUpgrading()
+{
+    if (_action == DriftAction::Upgrading)
+        return;
+    _action = DriftAction::Upgrading;
+    emit changed();
+}
+
+void DaemonDriftModel::noteUpgradeRequestDone()
+{
+    if (_upgradeRequest == UpgradeRequest::Settled)
+        return;
+    _upgradeRequest = UpgradeRequest::Settled;
+    emit changed();
+}
+
+DriftReassessment DaemonDriftModel::followConnection(vthost::client::ConnectionState state)
+{
+    using vthost::client::ConnectionState;
+    switch (state)
+    {
+        case ConnectionState::Upgrading: noteDaemonUpgrading(); return DriftReassessment::Keep;
+        case ConnectionState::Connected:
+            return _action == DriftAction::Upgrading ? DriftReassessment::Reassess : DriftReassessment::Keep;
+        case ConnectionState::Reconnecting:
+        case ConnectionState::Refused:
+        case ConnectionState::Failed:
+        case ConnectionState::Stopped:
+            // The daemon did not come back as the upgrade it announced: the line must not stay.
+            noteUpgradeEnded();
+            return DriftReassessment::Keep;
+        case ConnectionState::Connecting: return DriftReassessment::Keep;
+    }
+    return DriftReassessment::Keep;
 }
 
 } // namespace contour::window

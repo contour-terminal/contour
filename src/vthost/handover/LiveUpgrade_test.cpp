@@ -6,6 +6,7 @@
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
 
+    #include <core/log/LogSink.hpp>
     #include <core/net/Sockets.hpp>
     #include <core/testing/ScopedTempDir.hpp>
 
@@ -96,9 +97,15 @@ class RecordingHooks final: public UpgradeHooks
             onAbort();
     }
 
+    [[nodiscard]] std::size_t endingConnections() const override
+    {
+        return ending ? ending() : std::size_t { 0 };
+    }
+
     std::vector<std::string> events;
-    std::function<void()> onClose; ///< Runs as the clients are closed, while the sessions still run.
-    std::function<void()> onAbort; ///< Runs as the clients are closed at once.
+    std::function<std::size_t()> ending; ///< How many connections are still ending; none when unset.
+    std::function<void()> onClose;       ///< Runs as the clients are closed, while the sessions still run.
+    std::function<void()> onAbort;       ///< Runs as the clients are closed at once.
 };
 
 /// Thrown from the fake replacer where the exec succeeds: it ends run() as the exec ends the old image.
@@ -219,6 +226,7 @@ struct Upgrade
         return LiveUpgradeConfig {
             .release = "0.9.0",
             .daemonInstance = 0xC0FFEE,
+            .upgradeGeneration = 2,
             .argv = { "/state/bin/0.9.0-00000000/Contour.AppImage",
                       "daemon",
                       "--handover-fd=7",
@@ -329,6 +337,8 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
     REQUIRE(image.has_value());
     CHECK(image->daemonInstance == 0xC0FFEE);
     CHECK(image->fromRelease == "0.9.0");
+    // The generation this run had reached: the new image serves as one more.
+    CHECK(image->upgradeGeneration == 2);
     REQUIRE(image->listeners.size() == 1);
     CHECK(image->listeners.front().name == "control");
     CHECK(image->listeners.front().fd == *listenerFd);
@@ -703,12 +713,19 @@ TEST_CASE("a client that does not go is closed at once half way through the sett
     auto u = Upgrade {};
     REQUIRE(u.live->host.createTab() != nullptr);
     REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
-    // An attached client whose orderly close never ends: its peer reads nothing.
+    // An attached client whose orderly close never ends: its peer reads nothing. A native client is also a
+    // connection the hooks are ending, as the daemon's are.
     auto stuck = ByteCounter {};
     u.live->host.noteClientAttached(&stuck);
+    auto isAttached = true;
+    u.hooks.ending = [&]() -> std::size_t {
+        return isAttached ? 1 : 0;
+    };
     u.hooks.onAbort = [&] {
         u.live->host.noteClientDetached(&stuck);
+        isAttached = false;
     };
+    auto const log = core::log::ScopedCapture { "vthost.daemon" };
     auto config = Upgrade::config();
     config.settleTimeout = 400ms;
     auto upgrade = u.orchestrator(std::move(config));
@@ -719,6 +736,31 @@ TEST_CASE("a client that does not go is closed at once half way through the sett
     CHECK(std::holds_alternative<ExecFailure>(result.error()));
     CHECK(u.hooks.events == std::vector<std::string> { "announce 0.9.1", "snapshot", "close", "abort" });
     CHECK(u.replacer.replacements.size() == 1);
+    // The one client, counted once on each side rather than twice in a sum.
+    CHECK(log.contains("1 attached client(s) and 1 ending connection(s) did not go in time"));
+}
+
+TEST_CASE("the exec waits for a connection that is no attached client to end in its orderly way",
+          "[vthost][handover][upgrade][threading]")
+{
+    auto u = Upgrade {};
+    REQUIRE(u.live->host.createTab() != nullptr);
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    // The requester's Control connection: no client, but its answer is still being flushed.
+    auto polls = 0;
+    auto replacedAtPoll = -1;
+    u.hooks.ending = [&]() -> std::size_t {
+        return ++polls <= 3 ? 1 : 0;
+    };
+    u.replacer.onReplace = [&] {
+        replacedAtPoll = polls;
+    };
+    auto upgrade = u.orchestrator(Upgrade::config());
+
+    auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(std::holds_alternative<ExecFailure>(result.error()));
+    CHECK(replacedAtPoll > 3);
 }
 
 TEST_CASE("a daemon that shuts down while an upgrade settles resumes no listener it destroyed",

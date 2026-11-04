@@ -64,7 +64,7 @@ TEST_CASE("the requester is answered before any client is told", "[vthost][upgra
     auto second = RecordingObserver { "b", log };
     hooks.subscribe(first);
     hooks.subscribe(second);
-    hooks.setRequester([&log] { log.emplace_back("requester answered"); });
+    hooks.setRequester([&log](std::string_view) { log.emplace_back("requester answered"); });
 
     hooks.announceUpgrade("1.2.3");
     hooks.writeWorkspaceSnapshot();
@@ -139,4 +139,17 @@ TEST_CASE("aborting the clients closes every observer's connection at once, and 
     hooks.abortClients();
 
     CHECK(log == std::vector<std::string> { "a aborted", "b aborted" });
+}
+
+TEST_CASE("a connection is ending for as long as it stays subscribed", "[vthost][upgrade][hooks]")
+{
+    auto log = std::vector<std::string> {};
+    auto const registry = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { registry, {} };
+    auto observer = RecordingObserver { "a", log };
+    CHECK(hooks.endingConnections() == 0);
+    hooks.subscribe(observer);
+    CHECK(hooks.endingConnections() == 1);
+    hooks.unsubscribe(observer);
+    CHECK(hooks.endingConnections() == 0);
 }

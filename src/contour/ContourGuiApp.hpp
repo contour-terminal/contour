@@ -69,6 +69,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -76,6 +77,7 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
 
@@ -1140,9 +1142,24 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void connectReconnectSignals();
 
     /// Shows the daemon-drift badge when the daemon @p controller met runs another release than this
-    /// client, and wires the badge's restart action to restartLocalDaemon().
-    /// @param controller The controller connected to the local daemon.
-    void offerDaemonRestartIfDrifted(remote::NativeController const& controller);
+    /// client, and wires the badge's actions: the live upgrade (upgradeLocalDaemon()) where the daemon
+    /// announced it, else the restart (restartLocalDaemon()). Follows the daemon through an upgrade: the
+    /// badge reads "Upgrading daemon…" while the connection is held, and shows the drift anew once it is
+    /// back.
+    /// @param controller The controller connected to the daemon.
+    void offerDaemonRestartIfDrifted(remote::NativeController& controller);
+
+    /// Shows what @p controller's daemon runs against this client's release, and what may be done about it.
+    /// @param controller The controller connected to the daemon.
+    void showDaemonDrift(remote::NativeController const& controller);
+
+    /// Upgrades the local daemon in place to this release, keeping every hosted program running. Runs off the
+    /// GUI thread.
+    /// @param controlPath The daemon's control socket.
+    /// @param stop Ends the settling of the outcome at once (at shutdown), leaving it unknown.
+    /// @return The release the daemon serves once it upgraded, or why it did not.
+    [[nodiscard]] std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>
+    upgradeLocalDaemon(std::filesystem::path const& controlPath, std::stop_token stop);
 
     /// Stops the local daemon for an upgrade and starts one on this release, the way a client would.
     /// Runs off the GUI thread.
@@ -1412,6 +1429,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// unless this run attaches to a local daemon, since a remote one is not ours to restart. Runs
     /// on @ref _daemonRestartThread, so it touches nothing the GUI thread owns.
     std::function<std::expected<void, std::string>()> _restartDaemon;
+    /// Upgrades the local daemon in place; set and cleared with @ref _restartDaemon. Runs on
+    /// @ref _daemonRestartThread.
+    std::function<std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>(
+        std::stop_token)>
+        _upgradeDaemon;
+    /// The daemon release the drift badge was last assessed for, to notice a daemon that came back changed.
+    std::string _shownDaemonRelease;
     /// Whether a daemon spawned on demand may fork yet. The local attach starts beside the boot, but Apple's
     /// libc deadlocks a fork() made while another thread is inside setlocale(), which QApplication's
     /// construction calls: its at-fork handler and setlocale() take the locale and malloc locks in opposite

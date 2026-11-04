@@ -1,13 +1,14 @@
 // vim:syntax=qml
 // A toolbar chip in the title band, shown while the daemon this client talks to runs another release than
-// the client. Clicking it offers to restart the daemon on the new version, after a confirmation that says
-// what the restart costs.
+// the client. Clicking it offers to upgrade the daemon in place, keeping every program running, where the daemon
+// can; otherwise (or after an upgrade it refused) to restart the daemon on the new version, after a
+// confirmation that says what the restart costs. While the daemon upgrades it reads "Upgrading daemon…".
 //
 // Placed by its user: Main.qml puts it in the band's trailing area, and at the content's corner while no
 // band is shown, so a drift never goes unsaid.
 //
 // It reads the `daemonDrift` context property (window::DaemonDriftModel) and neither decides what drifts
-// nor performs the restart: it shows the model's line and forwards the user's confirmation. On the
+// nor performs the upgrade or restart: it shows the model's line and forwards the user's confirmation. On the
 // Terminal row the chip is a run of cells bracketed by the chip glyph tokens.
 import QtQuick
 import QtQuick.Controls
@@ -19,8 +20,8 @@ Item {
     // Guarded with typeof: a window hosted without a daemon (and the lightweight test harnesses) sets no
     // such context property, and an unresolved name in a binding is a ReferenceError.
     readonly property var model: typeof daemonDrift !== "undefined" ? daemonDrift : null
-    // Whether a click may ask for the restart: not while one already runs.
-    readonly property bool canRestart: root.model !== null && !root.model.isRestarting
+    // Whether a click may ask for the upgrade or restart: not while one already runs.
+    readonly property bool canRestart: root.model !== null && !root.model.isRestarting && !root.model.isUpgrading
     // Whether the chip is a run of bracketed cells (the Terminal row) rather than a rounded shape.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
     /// This window's WindowController, which a key the chip does not use is offered to; null for none.
@@ -52,9 +53,13 @@ Item {
         }
     }
 
-    /// Opens the confirmation, unless a restart already runs.
+    /// Opens the confirmation of the upgrade where one is offered, else of the restart; neither while one runs.
     function offerRestart() {
-        if (root.canRestart)
+        if (!root.canRestart)
+            return
+        if (root.model.offersUpgrade)
+            upgradeDialog.open()
+        else
             confirmDialog.open()
     }
 
@@ -110,6 +115,17 @@ Item {
     }
 
     // Over the whole window, not centred on this chip: a dialog centres on its parent.
+    KitDialog {
+        id: upgradeDialog
+        objectName: "daemonDriftUpgradeConfirm"
+        parent: Overlay.overlay
+        heading: root.model !== null ? root.model.upgradeActionLabel : ""
+        message: root.model !== null ? root.model.upgradeConfirmation : ""
+        acceptText: qsTr("Upgrade daemon")
+        rejectText: qsTr("Cancel")
+        onAccepted: root.model.requestUpgrade()
+    }
+
     KitDialog {
         id: confirmDialog
         objectName: "daemonDriftConfirm"

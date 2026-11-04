@@ -550,6 +550,11 @@ class NativeClient final
     ///         handshake — or nullopt while it was not. run() ends once it is set.
     [[nodiscard]] std::optional<std::string> lossReason() const { return _lossReason; }
 
+    /// @return The release the daemon announced it replaces itself with (proto::DaemonUpgrading, sent only
+    ///         where Capability::LiveUpgrade is shared), or nullopt while it announced none. The daemon
+    ///         closes the connection right after, and the same daemon comes back.
+    [[nodiscard]] std::optional<std::string> const& upgradingTo() const noexcept { return _upgradingTo; }
+
     /// @return The daemon's release as its ServerHello stated it; empty until connected(), and for a
     ///         daemon that predates the field.
     [[nodiscard]] std::string const& daemonRelease() const noexcept { return _daemonRelease; }
@@ -679,8 +684,9 @@ class NativeClient final
     std::vector<uint64_t> _followedWindows;           ///< @see followedWindows()
     std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
     std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
-    LivenessTracker _liveness;              ///< When the daemon last spoke, and whether it was probed.
-    std::optional<std::string> _lossReason; ///< @see lossReason()
+    LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.
+    std::optional<std::string> _lossReason;  ///< @see lossReason()
+    std::optional<std::string> _upgradingTo; ///< @see upgradingTo()
     uint64_t _nextHeartbeatNonce = 1;
     /// The once-a-second liveness tick; armed while both ends share Capability::Heartbeat and the
     /// connection is open, disarmed as run() closes it.

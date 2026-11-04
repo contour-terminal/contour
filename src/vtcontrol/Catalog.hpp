@@ -237,6 +237,14 @@ inline constexpr auto Methods = std::tuple {
         R"({})",
         R"({"version":"0.9.0","protocolVersion":1,"platform":"linux","hostname":"devbox","uptimeSeconds":3600,"grants":["read","screen","input","write"]})",
     },
+    Method<DaemonUpgradeRequest, DaemonUpgradeReply> {
+        "daemon.upgrade",
+        "Replace the daemon with a newer release in place, keeping every program running.",
+        Permission::Write,
+        Exposure::SocketOnly,
+        R"({"image":""})",
+        R"({"started":true,"toRelease":"0.9.1"})",
+    },
     Method<ListRequest, ListReply> {
         "workspace.list",
         "List the windows, tabs and panes.",

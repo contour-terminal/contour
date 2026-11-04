@@ -509,13 +509,20 @@ std::expected<void, StateDecodeError> Terminal::validateRestore(TerminalState co
     auto const& cursorGrid = state.pages[static_cast<size_t>(paging.cursorPage.value)].grid;
     auto const& displayedGrid = state.pages[static_cast<size_t>(paging.displayedPage.value)].grid;
     auto const statusPage = PageSize { StatusLineHeight, construction.pageSize.columns };
+    // The indicator's row is as wide as the page and the gutter together, as the gutter's settings stood when
+    // it was last laid out: never narrower than the page, nor wider than the page beside the widest gutter.
+    auto const isIndicatorPage = [&](PageSize size) {
+        return size.lines == statusPage.lines && size.columns >= statusPage.columns
+               && size.columns <= statusPage.columns + ColumnCount(MaxGutterColumns);
+    };
     auto const isTab = [&](ColumnOffset column) {
         return column >= ColumnOffset(0) && column < boxed_cast<ColumnOffset>(cursorGrid.pageSize.columns);
     };
     auto const& selection = state.interaction.selection;
     if (cursorGrid.pageSize != construction.pageSize - statusLines
         || state.hostWritableStatusLine.grid.pageSize != statusPage
-        || state.indicatorStatusLine.grid.pageSize != statusPage || unbox<int64_t>(paging.scrollOffset) < 0
+        || !isIndicatorPage(state.indicatorStatusLine.grid.pageSize)
+        || unbox<int64_t>(paging.scrollOffset) < 0
         || unbox<int64_t>(paging.scrollOffset)
                > unbox<int64_t>(displayedGrid.linesUsed) - unbox<int64_t>(displayedGrid.pageSize.lines)
         || !isInside(state.margins.mainDisplay, cursorGrid.pageSize)

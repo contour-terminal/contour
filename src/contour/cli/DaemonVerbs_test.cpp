@@ -15,6 +15,7 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -22,8 +23,10 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/DaemonBinary.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/handover/UpgradeError.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/testing/RecordingDurableFiles.hpp>
 #include <vthost/testing/RecordingFilePrivacy.hpp>
@@ -56,10 +59,91 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
         return {};
     }
 
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(std::string) override
+    {
+        return vthost::proto::UpgradeDaemonReply {};
+    }
+
     std::vector<vthost::proto::StopReason> stops;
 
   private:
     std::expected<DaemonStatus, ControlError> _result;
+};
+
+/// A source of one staged image, with no lease.
+class FakeBinarySource final: public vthost::DaemonBinarySource
+{
+  public:
+    [[nodiscard]] vthost::StagedImage imageForSpawn() override
+    {
+        return vthost::StagedImage { .executable = "/state/bin/contour",
+                                     .lease = nullptr,
+                                     .origin = vthost::ImageOrigin::Staged,
+                                     .imageId = "2.0.0-abcd" };
+    }
+};
+
+/// A daemon offering a live upgrade, answering the upgrade as told.
+class UpgradablePort final: public vthost::client::DaemonControlPort
+{
+  public:
+    [[nodiscard]] std::expected<DaemonStatus, ControlError> status() override
+    {
+        if (notRunning || (errored && absentAfterError))
+            return std::unexpected(ControlError { .code = ControlErrorCode::NotRunning, .detail = {} });
+        if (errored && releaseAfterError)
+            release = *releaseAfterError;
+        auto status = DaemonStatus {};
+        status.releaseVersion = release;
+        status.capabilities = vthost::proto::CapabilitySet::of(
+            { vthost::proto::Capability::DaemonControl, vthost::proto::Capability::LiveUpgrade });
+        status.upgrade = record;
+        return status;
+    }
+
+    [[nodiscard]] std::expected<void, ControlError> stop(vthost::proto::StopReason) override { return {}; }
+
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(std::string) override
+    {
+        if (error)
+        {
+            errored = true;
+            return std::unexpected(*error);
+        }
+        release = upgradedRelease;
+        if (recordAfterUpgrade)
+            record = *recordAfterUpgrade;
+        return reply;
+    }
+
+    /// The upgrade record status() reports; nullopt as a daemon from before it.
+    std::optional<vthost::proto::DaemonUpgradeRecord> record = std::nullopt;
+    /// The record it reports once it answered the upgrade.
+    std::optional<vthost::proto::DaemonUpgradeRecord> recordAfterUpgrade = std::nullopt;
+
+    bool errored = false;                             ///< Whether the upgrade failed with `error`.
+    bool absentAfterError = false;                    ///< Whether no daemon answers after that.
+    std::optional<std::string> releaseAfterError;     ///< The release it answers with after that.
+    bool notRunning = false;                          ///< Whether no daemon listens.
+    std::string release = "1.0.0";                    ///< The release status() reports.
+    std::string upgradedRelease = "2.0.0";            ///< What it reports once upgraded.
+    vthost::proto::UpgradeDaemonReply reply {};       ///< The answer to the upgrade.
+    std::optional<ControlError> error = std::nullopt; ///< What the upgrade fails with, if it does.
+};
+
+/// Time that passes only when waited for.
+class ManualPacer final: public vthost::client::SettlePacer
+{
+  public:
+    [[nodiscard]] std::chrono::steady_clock::time_point now() const override { return _now; }
+    [[nodiscard]] vthost::client::SettleWait pause(std::chrono::milliseconds duration) override
+    {
+        _now += duration;
+        return vthost::client::SettleWait::Elapsed;
+    }
+
+  private:
+    std::chrono::steady_clock::time_point _now {};
 };
 
 /// A prompt giving one canned answer, remembering the question.
@@ -501,4 +585,146 @@ TEST_CASE("options given before and after a sub-verb merge", "[contour][cli][dae
     auto const clash = mergeSharedOption("socket", "X", "Y", "");
     REQUIRE(!clash);
     CHECK(clash.error().contains("--socket"));
+}
+
+TEST_CASE("daemon upgrade with no daemon exits 4", "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    port.notRunning = true;
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Unreachable);
+    CHECK(contour::cli::exitCode(contour::cli::ExitStatus::Unreachable) == 4);
+    CHECK(err.str() == "no daemon is running on /run/c/default\n");
+}
+
+TEST_CASE("daemon upgrade exits 0 once the daemon upgrades", "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(out.str().contains("2.0.0"));
+    CHECK(err.str().empty());
+}
+
+TEST_CASE("daemon upgrade exits 5 with the refusal text", "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    port.reply = vthost::proto::UpgradeDaemonReply { .result = 3, .detail = {} }; // Sandboxed
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Refused);
+    CHECK(contour::cli::exitCode(contour::cli::ExitStatus::Refused) == 5);
+    CHECK(err.str().contains(vthost::handover::describe(vthost::handover::UpgradeRefusal::Sandboxed)));
+}
+
+TEST_CASE("daemon upgrade settles an unanswered request by asking the release again",
+          "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    port.error = ControlError { .code = ControlErrorCode::Timeout, .detail = "no answer" };
+    SECTION("it now runs another release")
+    {
+        port.releaseAfterError = "2.0.0";
+        CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+              == contour::cli::ExitStatus::Ok);
+    }
+    SECTION("it never comes back: the outcome is unknown, which is a failure and no refusal")
+    {
+        port.absentAfterError = true;
+        CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+              == contour::cli::ExitStatus::Failed);
+        CHECK(err.str().contains("unknown"));
+    }
+    SECTION("it is back on the old release: the daemon declined")
+    {
+        CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+              == contour::cli::ExitStatus::Refused);
+    }
+}
+
+TEST_CASE("daemon upgrade exits 5 when the daemon refuses after it started", "[contour][cli][daemon]")
+{
+    // The daemon answered "started", disconnected every client, then could not quiesce and rolled back: the
+    // status it serves again with is where the refusal is read.
+    using vthost::handover::UpgradeRefusal;
+    auto port = UpgradablePort {};
+    port.upgradedRelease = "1.0.0";
+    port.record = vthost::proto::DaemonUpgradeRecord { .generation = 2 };
+    port.recordAfterUpgrade = vthost::proto::DaemonUpgradeRecord {
+        .generation = 2,
+        .attempts = 1,
+        .lastFailure = static_cast<uint8_t>(1 + std::to_underlying(UpgradeRefusal::QuiesceTimedOut)),
+        .lastFailureDetail = std::string { vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut) }
+    };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "1.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Refused);
+    CHECK(out.str().empty());
+    CHECK(err.str().contains(vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut)));
+}
+
+TEST_CASE("daemon upgrade to the same release succeeds by the generation", "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    port.upgradedRelease = "1.0.0";
+    port.record = vthost::proto::DaemonUpgradeRecord { .generation = 0 };
+    port.recordAfterUpgrade = vthost::proto::DaemonUpgradeRecord { .generation = 1 };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "1.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(err.str().empty());
+}
+
+TEST_CASE("daemon upgrade names the release the daemon serves, not the one it was asked for",
+          "[contour][cli][daemon]")
+{
+    auto port = UpgradablePort {};
+    port.upgradedRelease = "3.0.0";
+    port.record = vthost::proto::DaemonUpgradeRecord { .generation = 0 };
+    port.recordAfterUpgrade = vthost::proto::DaemonUpgradeRecord { .generation = 1, .attempts = 1 };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    // The record makes the CLI settle the upgrade, and the settling status names what runs.
+    CHECK(contour::cli::daemonUpgradeVerb(port, binary, pacer, "2.0.0", "/run/c/default", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(out.str().contains("3.0.0"));
+    CHECK_FALSE(out.str().contains("2.0.0"));
+}
+
+TEST_CASE("status names the upgrade generation and the last failed upgrade", "[contour][cli][daemon]")
+{
+    auto status = sampleStatus();
+    CHECK_FALSE(contour::cli::formatDaemonStatus(status).contains("upgrades:"));
+    status.upgrade = vthost::proto::DaemonUpgradeRecord { .generation = 2 };
+    auto const text = contour::cli::formatDaemonStatus(status);
+    CHECK(text.contains("upgrades:"));
+    CHECK(text.contains(" 2\n"));
+    CHECK_FALSE(text.contains("last upgrade"));
+    status.upgrade->lastFailure = vthost::proto::UpgradeDaemonReply::ExecFailedResult;
+    status.upgrade->lastFailureDetail = "Exec format error";
+    CHECK(contour::cli::formatDaemonStatus(status).contains(
+        "execFailed: " + std::string { vthost::handover::ExecFailureText }));
 }

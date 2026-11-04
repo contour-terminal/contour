@@ -142,6 +142,8 @@ add_library(vthost STATIC
     control/ProgramStatusConvert.hpp
     client/DaemonRestart.cpp
     client/DaemonRestart.hpp
+    client/DaemonUpgrade.cpp
+    client/DaemonUpgrade.hpp
     client/ReleaseDrift.cpp
     client/ReleaseDrift.hpp
     client/Liveness.hpp
@@ -350,6 +352,7 @@ if(VTHOST_TESTING)
         control/PaneText_test.cpp
         control/ProgramStatusConvert_test.cpp
         client/DaemonRestart_test.cpp
+        client/DaemonUpgrade_test.cpp
         client/ReleaseDrift_test.cpp
         client/Liveness_test.cpp
         client/NativeClient_test.cpp

@@ -66,7 +66,10 @@ class CountingBinarySource final: public vthost::DaemonBinarySource
     [[nodiscard]] vthost::StagedImage imageForSpawn() override
     {
         ++calls;
-        return vthost::StagedImage { .executable = "contour-no-such-binary", .lease = nullptr };
+        return vthost::StagedImage { .executable = "contour-no-such-binary",
+                                     .lease = nullptr,
+                                     .origin = vthost::ImageOrigin::Installed,
+                                     .imageId = {} };
     }
 
     std::size_t calls = 0;

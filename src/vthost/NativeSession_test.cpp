@@ -421,10 +421,24 @@ struct NativeHarness
                   vthost::control::ControlServiceConfig { .version = "test",
                                                           .socketPath = {},
                                                           .clock = wall,
-                                                          .maxReplyBytes = options.maxReplyBytes })
+                                                          .maxReplyBytes = options.maxReplyBytes,
+                                                          .upgrade = upgradeStarter() })
             : nullptr;
     std::unique_ptr<NativeSession> session =
         makeSession(pair, vthost::ConnectionId { .endpoint = options.endpoint, .index = 1 });
+
+    /// @return How `daemon.upgrade` starts an upgrade of the services' daemon: the flow the daemon runs.
+    [[nodiscard]] vthost::control::UpgradeStarter upgradeStarter()
+    {
+        return [this](vthost::handover::UpgradeTarget target,
+                      vthost::UpgradeStarted onStarted,
+                      vthost::UpgradeFailed onFailed) {
+            loop.spawn(vthost::serveUpgrade(&options.services.daemon.get(),
+                                            std::move(target),
+                                            std::move(onStarted),
+                                            std::move(onFailed)));
+        };
+    }
 
     /// @return A connection of this harness's host over @p connection, with its services and its control API.
     [[nodiscard]] std::unique_ptr<NativeSession> makeSession(core::net::testing::SocketPair& connection,
@@ -7058,6 +7072,87 @@ TEST_CASE("UpgradeDaemon over TCP is refused", "[vthost][native][upgrade]")
                   static_cast<uint8_t>(std::to_underlying(vthost::handover::UpgradeRefusal::LocalOnly) + 1),
               .detail = "live upgrade is local only" });
     CHECK(daemon.upgrades.empty());
+}
+
+TEST_CASE("daemon.upgrade answers started ahead of the announcement, then the connection closes",
+          "[vthost][native][upgrade][control]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome = {};
+    auto options = controlApiOptions();
+    options.services.daemon = daemon;
+    options.endpoint = "control";
+    // Announced to the requester too, which negotiated it.
+    options.services.handshake.capabilities =
+        proto::CapabilitySet::of({ proto::Capability::ControlApi, proto::Capability::LiveUpgrade });
+    auto h = NativeHarness { options };
+    auto hello = controlApiHello();
+    hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::LiveUpgrade));
+    auto const got = h.exchangeUntil({ hello, controlCall(7, "daemon.upgrade", R"({"image":"0.9.0-a"})") },
+                                     upgradeAnnounced);
+    auto const reply = std::ranges::find_if(got, isControlReply);
+    auto const announced = std::ranges::find_if(
+        got, [](auto const& frame) { return std::holds_alternative<proto::DaemonUpgrading>(frame.pdu); });
+    REQUIRE(reply != got.end());
+    REQUIRE(announced != got.end());
+    CHECK(reply < announced);
+    auto const& body = std::get<proto::ControlReply>(reply->pdu);
+    CHECK(body.requestId == 7);
+    CHECK(body.outcome == proto::ControlOutcome::Ok);
+    auto const decoded = vtcontrol::decodeJson<vtcontrol::DaemonUpgradeReply>(body.body);
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->started);
+    CHECK(decoded->toRelease == "9.9.10");
+    CHECK(daemon.upgrades == std::vector<std::string> { "0.9.0-a" });
+}
+
+TEST_CASE("daemon.upgrade reports a refusal as a coded error", "[vthost][native][upgrade][control]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome =
+        std::unexpected(vthost::handover::UpgradeError { vthost::handover::UpgradeRefusal::Sandboxed });
+    auto options = controlApiOptions();
+    options.services.daemon = daemon;
+    options.endpoint = "control";
+    auto h = NativeHarness { options };
+    auto const got = h.exchange({ controlApiHello(), controlCall(8, "daemon.upgrade") }, 2);
+    REQUIRE(got.size() == 2);
+    auto const error = controlErrorOf(got[1]);
+    CHECK(error.code == vtcontrol::ControlErrorCode::Failed);
+    CHECK(error.message.starts_with("sandboxed: "));
+    CHECK(error.message.contains(vthost::handover::describe(vthost::handover::UpgradeRefusal::Sandboxed)));
+}
+
+TEST_CASE("daemon.upgrade over TCP is refused local only, and needs the write grant",
+          "[vthost][native][upgrade][control]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome = {};
+    SECTION("over TCP")
+    {
+        auto options = controlApiOptions();
+        options.services.daemon = daemon;
+        options.endpoint = "native-tcp";
+        auto h = NativeHarness { options };
+        auto const got = h.exchange({ controlApiHello(), controlCall(9, "daemon.upgrade") }, 2);
+        REQUIRE(got.size() == 2);
+        auto const error = controlErrorOf(got[1]);
+        CHECK(error.message.starts_with("localOnly: "));
+        CHECK(daemon.upgrades.empty());
+    }
+    SECTION("without write")
+    {
+        auto options = narrowTokenOptions();
+        options.services.daemon = daemon;
+        options.endpoint = "control";
+        auto h = NativeHarness { options };
+        auto hello = controlApiHello();
+        hello.token = "ro";
+        auto const got = h.exchange({ hello, controlCall(9, "daemon.upgrade") }, 2);
+        REQUIRE(got.size() == 2);
+        CHECK(controlErrorOf(got[1]).code == vtcontrol::ControlErrorCode::Forbidden);
+        CHECK(daemon.upgrades.empty());
+    }
 }
 
 TEST_CASE("UpgradeDaemon needs the capability and the write grant", "[vthost][native][upgrade]")

@@ -211,6 +211,58 @@ TEST_CASE("a state that does not fit the terminal is refused", "[TerminalState]"
     CHECK_FALSE(refused([](TerminalState& s) { s.session.pointerShapes.clear(); }).has_value());
 }
 
+TEST_CASE("a terminal with a gutter restores onto one with the same gutter", "[TerminalState]")
+{
+    // The indicator status line is as wide as the page and the gutter together, once it was laid out: what a
+    // daemon's terminal comes to as soon as its session resizes. A live upgrade hands that state over.
+    auto const withGutter = [] {
+        auto settings = Mock::createSettings(TestPage, HistoryLimits::plain(TestHistory), 1024);
+        settings.gutter.exitStatus = true;
+        auto mock = std::make_unique<Mock>(std::move(settings));
+        mock->terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+        return mock;
+    };
+    auto source = withGutter();
+    source->terminal.resizeScreen(TestPage);
+    source->writeToScreen("hello"sv);
+    auto const state = source->terminal.captureState();
+    REQUIRE(state.indicatorStatusLine.grid.pageSize.columns > TestPage.columns);
+
+    auto target = withGutter();
+    auto const result = target->terminal.restoreState(throughBytes(state));
+    INFO(std::format("restore failed with error {}", result ? -1 : static_cast<int>(result.error())));
+    CHECK(result.has_value());
+
+    // Still not an indicator that is narrower than the page, nor taller than a status line.
+    auto narrow = state;
+    narrow.indicatorStatusLine.grid.pageSize.columns = TestPage.columns - ColumnCount(1);
+    CHECK_FALSE(withGutter()->terminal.restoreState(narrow).has_value());
+
+    // Nor one wider than the page beside the widest gutter any settings lay out: no terminal writes it. The
+    // rows come from a terminal with a wider page, whose indicator is wide enough for either width.
+    auto wider = [&] {
+        auto const page = PageSize { TestPage.lines, TestPage.columns + ColumnCount(2 * MaxGutterColumns) };
+        auto settings = Mock::createSettings(page, HistoryLimits::plain(TestHistory), 1024);
+        settings.gutter.exitStatus = true;
+        auto mock = std::make_unique<Mock>(std::move(settings));
+        mock->terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+        mock->terminal.resizeScreen(page);
+        return mock->terminal.captureState().indicatorStatusLine.grid;
+    }();
+    auto const indicatorOf = [&](ColumnCount columns) {
+        auto grafted = state;
+        grafted.indicatorStatusLine.grid = wider;
+        grafted.indicatorStatusLine.grid.pageSize.columns = columns;
+        return grafted;
+    };
+    CHECK(withGutter()
+              ->terminal.restoreState(indicatorOf(TestPage.columns + ColumnCount(MaxGutterColumns)))
+              .has_value());
+    CHECK_FALSE(withGutter()
+                    ->terminal.restoreState(indicatorOf(TestPage.columns + ColumnCount(MaxGutterColumns + 1)))
+                    .has_value());
+}
+
 TEST_CASE("a truncated terminal stream is refused by the codec", "[TerminalState]")
 {
     auto source = makeTerminal();

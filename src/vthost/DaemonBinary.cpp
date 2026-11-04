@@ -54,14 +54,18 @@ StagedDaemonBinary::StagedDaemonBinary(DaemonImageStore& store, fs::path install
 StagedImage StagedDaemonBinary::imageForSpawn()
 {
     if (_store.layout() == StagingLayout::InPlace)
-        return StagedImage { .executable = _installed, .lease = nullptr };
+        return StagedImage {
+            .executable = _installed, .lease = nullptr, .origin = ImageOrigin::Installed, .imageId = {}
+        };
     auto staged = _store.stage();
     if (!staged)
     {
         errorLog()("cannot stage the daemon's image ({}); starting {} instead",
                    staged.error().toString(),
                    core::pathToUtf8(_installed));
-        return StagedImage { .executable = _installed, .lease = nullptr };
+        return StagedImage {
+            .executable = _installed, .lease = nullptr, .origin = ImageOrigin::StagingFailed, .imageId = {}
+        };
     }
     // Under the new image's lease, so a prune racing this one, from a launcher of any release, finds
     // it held.

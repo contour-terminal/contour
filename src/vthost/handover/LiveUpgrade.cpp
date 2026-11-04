@@ -294,7 +294,10 @@ core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::qui
         auto image =
             captureHandover(_host, crossingListeners(), leaseFd, _config.daemonInstance, _config.release);
         if (image)
+        {
+            image->upgradeGeneration = _config.upgradeGeneration;
             co_return *std::move(image);
+        }
         if (image.error() != HandoverError::SessionStarting)
             co_return std::unexpected(refusalOf(image.error()));
     }
@@ -307,15 +310,24 @@ core::async::Task<std::expected<void, UpgradeRefusal>> LiveUpgrade::awaitSettled
     auto const deadline = start + _config.settleTimeout;
     auto const abortAt = start + (_config.settleTimeout / 2);
     auto aborted = false;
-    while (_host.connectedClients() != 0 || _host.pumpEventsInFlight() != 0)
+    // The connections that are no attached client count too: nothing yields to the loop otherwise, and a
+    // Control connection -- the requester's -- would be replaced with its answer still queued.
+    auto const pending = [this] {
+        return _host.connectedClients() + _hooks.endingConnections();
+    };
+    while (pending() != 0 || _host.pumpEventsInFlight() != 0)
     {
         auto const now = _loop.clock().now();
         if (now >= deadline)
             co_return std::unexpected(UpgradeRefusal::QuiesceTimedOut);
-        if (!aborted && now >= abortAt && _host.connectedClients() != 0)
+        if (!aborted && now >= abortAt && pending() != 0)
         {
-            daemonLog()("live upgrade: {} client(s) did not go in time; closing them",
-                        _host.connectedClients());
+            // Counted apart: a native client is both attached and an ending connection, and a sum would count
+            // it twice.
+            daemonLog()("live upgrade: {} attached client(s) and {} ending connection(s) did not go in time; "
+                        "closing them",
+                        _host.connectedClients(),
+                        _hooks.endingConnections());
             _hooks.abortClients();
             aborted = true;
         }

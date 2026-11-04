@@ -5,6 +5,7 @@
 #include <core/net/InterruptibleSleep.hpp>
 
 #include <chrono>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <tuple>
@@ -35,6 +36,29 @@ void ClientSupervisor::enter(ConnectionState state, std::string const& reason)
 {
     if (_onState)
         _onState(state, reason);
+}
+
+void ClientSupervisor::beginUpgradeHold()
+{
+    _upgradeHoldUntil = _loop.clock().now() + UpgradeHold;
+    _transport->holdDaemonStart(*_upgradeHoldUntil);
+}
+
+void ClientSupervisor::endUpgradeHold()
+{
+    if (!_upgradeHoldUntil)
+        return;
+    _upgradeHoldUntil.reset();
+    _transport->holdDaemonStart(core::platform::SteadyTimePoint::min());
+}
+
+void ClientSupervisor::expireUpgradeHold()
+{
+    if (!_upgradeHoldUntil || _loop.clock().now() < *_upgradeHoldUntil)
+        return;
+    endUpgradeHold();
+    enter(ConnectionState::Reconnecting,
+          std::format("the daemon did not come back from its upgrade within {}", UpgradeHold));
 }
 
 proto::AttachIntent ClientSupervisor::resumeIntent() const
@@ -117,7 +141,10 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
     _currentLifetime = (**connection)->lifetime;
     _current = _makeClient(std::move(**connection), std::move(intent));
     // Once the daemon accepted the hello: what it follows now is what a reconnect resumes.
-    _current->setHandshakeHandler([this] { enter(ConnectionState::Connected); });
+    _current->setHandshakeHandler([this] {
+        endUpgradeHold();
+        enter(ConnectionState::Connected);
+    });
     co_await _current->run();
 
     auto outcome = Outcome {};
@@ -127,6 +154,11 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
         outcome = Outcome { .ending = Ending::Refused,
                             .error = { .kind = TransportErrorKind::Refused,
                                        .message = proto::describe(*refusal, proto::PeerRole::Daemon) } };
+    else if (auto const& upgrading = _current->upgradingTo(); upgrading && _current->connected())
+        outcome =
+            Outcome { .ending = Ending::Upgrading,
+                      .error = { .kind = TransportErrorKind::Unreachable,
+                                 .message = std::format("the daemon is upgrading to {}", *upgrading) } };
     else if (_current->connected())
         outcome = Outcome { .ending = Ending::Lost,
                             .error = { .kind = TransportErrorKind::Unreachable,
@@ -157,6 +189,8 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::reconnect()
         co_await backoffUntil(_loop.clock().now() + backoffDelay(_backoff, retry));
         if (_stop.stop_requested())
             co_return Outcome {};
+        // Before the attempt that would start a daemon again, so that the state says so first.
+        expireUpgradeHold();
 
         auto outcome = co_await attempt(resumeIntent());
         switch (outcome.ending)
@@ -175,6 +209,7 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::reconnect()
                 break;
             case Ending::Refused:
             case Ending::Lost:
+            case Ending::Upgrading:
             case Ending::Stopped: co_return outcome;
         }
     }
@@ -185,7 +220,7 @@ core::async::Task<void> ClientSupervisor::run()
 {
     enter(ConnectionState::Connecting);
     auto outcome = co_await attempt(_firstIntent);
-    if (outcome.ending != Ending::Lost)
+    if (!acceptedThenLost(outcome.ending))
     {
         // The first connect is not retried: the caller decides what to fall back to.
         auto const cancelled = outcome.ending == Ending::Stopped
@@ -198,12 +233,20 @@ core::async::Task<void> ClientSupervisor::run()
         co_return;
     }
 
-    while (outcome.ending == Ending::Lost)
+    while (acceptedThenLost(outcome.ending))
     {
         clientLog()("reconnect: {}: {}", _transport->describe(), outcome.error.message);
-        enter(ConnectionState::Reconnecting, outcome.error.message);
+        if (outcome.ending == Ending::Upgrading)
+        {
+            // The same daemon comes back: waited for, and not started anew meanwhile.
+            beginUpgradeHold();
+            enter(ConnectionState::Upgrading, outcome.error.message);
+        }
+        else
+            enter(ConnectionState::Reconnecting, outcome.error.message);
         outcome = co_await reconnect();
     }
+    endUpgradeHold();
     if (outcome.ending == Ending::Stopped)
         enter(ConnectionState::Stopped);
     else

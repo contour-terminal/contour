@@ -122,6 +122,15 @@ inline constexpr int MinBlockColumnWidth = 1;
 /// centred; a fold control two cells wide is as tall as the row already allows.
 inline constexpr int MaxBlockColumnWidth = 2;
 
+/// One blank column after the timestamps, part of their segment, so a right-aligned line number that fills
+/// its own width never runs into the time beside it.
+inline constexpr int TimestampSegmentGap = 1;
+
+/// The widest gutter any settings lay out, in columns: every segment on, each at its widest. What a row that
+/// spans the page and the gutter together, such as the indicator status line, is bounded by.
+inline constexpr int MaxGutterColumns =
+    MaxTimestampColumns + TimestampSegmentGap + MaxLineNumberWidth + MaxBlockColumnWidth;
+
 /// How the block column is drawn: in cells, or as a pixel strip beside them.
 ///
 /// A chrome decision rather than a configuration key: contour's chrome row picks it, and this header holds

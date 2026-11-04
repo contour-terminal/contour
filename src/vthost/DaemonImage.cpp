@@ -189,7 +189,10 @@ DaemonImageStore::DaemonImageStore(DaemonImageStoreConfig config,
 std::expected<StagedImage, StagingError> DaemonImageStore::stage()
 {
     if (_plan.layout == StagingLayout::InPlace)
-        return StagedImage { .executable = _config.inputs.executable, .lease = nullptr };
+        return StagedImage { .executable = _config.inputs.executable,
+                             .lease = nullptr,
+                             .origin = ImageOrigin::Installed,
+                             .imageId = {} };
 
     auto const target = currentTarget();
     if (!target)
@@ -430,7 +433,10 @@ std::unique_ptr<SymbolicLinks> makeNativeSymbolicLinks()
 
 StagedImage DaemonImageStore::imageAt(fs::path const& target, std::unique_ptr<ImageLease> lease) const
 {
-    return StagedImage { .executable = target / _plan.executable, .lease = std::move(lease) };
+    return StagedImage { .executable = target / _plan.executable,
+                         .lease = std::move(lease),
+                         .origin = ImageOrigin::Staged,
+                         .imageId = core::pathToUtf8(target.filename()) };
 }
 
 std::optional<fs::path> DaemonImageStore::executableOfImage(std::string_view imageId) const

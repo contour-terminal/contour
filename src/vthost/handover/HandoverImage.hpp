@@ -149,6 +149,10 @@ struct HandoverImage
     int leaseFd = -1;                           ///< The descriptor of the daemon image lease; -1 for none.
     /// The light/dark preference the latest client stated, which new sessions are built under.
     vtbackend::ColorPreference defaultColorPreference = HostedColorPreference;
+    /// How many live upgrades the daemon that wrote it had completed
+    /// (proto::DaemonUpgradeRecord::generation); the image that reads it serves as one more. An image from
+    /// before the field reads as 0.
+    uint64_t upgradeGeneration = 0;
 
     /// Lists the fields for the handover codec.
     void visitFields(this auto& self, auto& visitor)
@@ -163,6 +167,7 @@ struct HandoverImage
         visitor(8, self.listeners);
         visitor(9, self.leaseFd);
         visitor(10, self.defaultColorPreference);
+        visitor(11, self.upgradeGeneration);
     }
 };
 

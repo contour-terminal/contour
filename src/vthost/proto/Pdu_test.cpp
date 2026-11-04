@@ -854,6 +854,32 @@ TEST_CASE("the daemon-control PDUs round-trip", "[vthost][proto]")
     CHECK(roundTrip(stop) == stop);
 }
 
+TEST_CASE("DaemonStatusReply carries the upgrade record, and a body from before it reads as none",
+          "[vthost][proto][upgrade]")
+{
+    auto const recorded = DaemonStatusReply { .releaseVersion = "0.8.1",
+                                              .processId = 4242,
+                                              .sessions = 1,
+                                              .lifecycle = 0,
+                                              .upgrade = DaemonUpgradeRecord { .generation = 3,
+                                                                               .attempts = 4,
+                                                                               .lastFailure = 10,
+                                                                               .lastFailureDetail = "x" } };
+    CHECK(roundTrip(DecodedPdu { recorded }) == DecodedPdu { recorded });
+    // A fresh daemon with no failure states it all the same: told apart from one that says nothing.
+    auto fresh = recorded;
+    fresh.upgrade = DaemonUpgradeRecord {};
+    CHECK(std::get<DaemonStatusReply>(roundTrip(DecodedPdu { fresh })).upgrade == DaemonUpgradeRecord {});
+
+    // A daemon from before the record ends the body where it starts: two varint bytes, one byte, and a string
+    // of one byte behind its one-byte length.
+    auto legacy = recorded;
+    legacy.upgrade = std::nullopt;
+    CHECK(decodeAs<DaemonStatusReply>(encodeWithoutTrailingField(DecodedPdu { recorded }, /*bytesToDrop=*/5))
+          == legacy);
+    CHECK(roundTrip(DecodedPdu { legacy }) == DecodedPdu { legacy });
+}
+
 TEST_CASE("the daemon-control tags are pinned", "[vthost][proto]")
 {
     STATIC_CHECK(std::to_underlying(PduType::DaemonStatusRequest) == 25);
