@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/ShellKind.hpp>
 
+#include <core/Utils.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
-#include <ranges>
 #include <set>
 #include <string_view>
 
@@ -27,7 +28,7 @@ TEST_CASE("ShellKind.shellKindOf.WindowsNames", "[shells]")
 TEST_CASE("ShellKind.rows.inEnumeratorOrder", "[shells]")
 {
     auto names = std::set<std::string_view> {};
-    for (auto const [index, row]: std::views::enumerate(ShellRows))
+    for (auto const [index, row]: core::views::enumerate(ShellRows))
     {
         CHECK(static_cast<std::size_t>(row.kind) == static_cast<std::size_t>(index) + 1);
         CHECK(shellRow(row.kind) == &row);
