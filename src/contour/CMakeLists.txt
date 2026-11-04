@@ -1423,6 +1423,7 @@ if(CONTOUR_TESTING)
         config/ChromeTokenGroups_test.cpp
         config/ControlsStyle_test.cpp
         config/ShellKind_test.cpp
+        config/ExecutionPolicy_test.cpp
         config/DefaultBindings_test.cpp
         config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp
