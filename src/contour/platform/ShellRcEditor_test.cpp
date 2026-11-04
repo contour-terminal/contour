@@ -645,6 +645,41 @@ TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's li
     CHECK(rcStateOf(ShellKind::Zsh, line + "\n") == RcState::Installed);
 }
 
+TEST_CASE("ShellRcEditor.rcStateOf.PowerShell", "[shellrc]")
+{
+    struct Case
+    {
+        ShellKind shell;
+        std::string_view content;
+        RcState expected;
+    };
+    constexpr auto Cases = std::array {
+        Case {
+            ShellKind::Pwsh, ". \"$(Split-Path $PROFILE)/contour-integration.ps1\"\n", RcState::Installed },
+        Case { ShellKind::Pwsh, "# . contour-integration.ps1\n", RcState::Absent },
+        Case { ShellKind::Pwsh, "  . C:\\contour\\shell-integration.pwsh\r\n", RcState::Installed },
+        Case { ShellKind::Pwsh, ". ~/shell-integration.ps1", RcState::Installed },
+        Case { ShellKind::Pwsh, "echo contour-integration.ps1\n", RcState::Absent },
+        Case { ShellKind::Pwsh,
+               "contour generate integration shell pwsh to - | Out-String | Invoke-Expression\n",
+               RcState::Installed },
+        Case { ShellKind::WindowsPowerShell,
+               "contour generate integration shell pwsh to - | Out-String | Invoke-Expression\n",
+               RcState::Installed },
+        Case { ShellKind::WindowsPowerShell, ". \"$HOME\\contour-integration.ps1\"\n", RcState::Installed },
+        Case { ShellKind::Pwsh,
+               "if ($env:TERM_PROGRAM -eq 'contour') { . ([scriptblock]::Create((& '/opt/con",
+               RcState::Partial },
+        // PowerShell's files mean nothing to a POSIX shell.
+        Case { ShellKind::Bash, ". ~/contour-integration.ps1\n", RcState::Absent },
+    };
+    for (auto const& c: Cases)
+    {
+        INFO(c.content);
+        CHECK(rcStateOf(c.shell, c.content) == c.expected);
+    }
+}
+
 TEST_CASE("ShellRow: the line Contour appends is its guard followed by its continuation", "[shellrc]")
 {
     for (auto const& row: contour::config::ShellRows)

@@ -30,6 +30,27 @@ namespace
         AlternateInstall { .shell = config::ShellKind::Fish, .file = "fish/conf.d/contour.fish" },
     };
 
+    /// A script that, loaded from a startup file, is a manual install of the integration.
+    struct ManualInstallScript
+    {
+        config::ShellKind shell = config::ShellKind::Unknown;
+        std::string_view file {}; ///< The script's file name, as a line of the startup file names it.
+    };
+
+    /// PowerShell's manual installs: the script Contour generates, under either extension, and the name the
+    /// documentation suggests keeping it under beside the profile. Both PowerShells load the same script.
+    constexpr auto ManualInstallScripts = std::array {
+        ManualInstallScript { .shell = config::ShellKind::Pwsh, .file = "shell-integration.pwsh" },
+        ManualInstallScript { .shell = config::ShellKind::Pwsh, .file = "shell-integration.ps1" },
+        ManualInstallScript { .shell = config::ShellKind::Pwsh, .file = "contour-integration.ps1" },
+        ManualInstallScript { .shell = config::ShellKind::WindowsPowerShell,
+                              .file = "shell-integration.pwsh" },
+        ManualInstallScript { .shell = config::ShellKind::WindowsPowerShell,
+                              .file = "shell-integration.ps1" },
+        ManualInstallScript { .shell = config::ShellKind::WindowsPowerShell,
+                              .file = "contour-integration.ps1" },
+    };
+
     /// Contour's environment with what the shell's session sets laid over it.
     class SessionEnvironment final: public core::Environment
     {
@@ -194,14 +215,20 @@ config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
     if (content.contains(config::ShellRcMarker))
         return config::RcState::Installed;
 
-    auto const generates = std::format("generate integration shell {}", row->name);
+    auto const generates = std::format("generate integration shell {}", row->script);
     auto const script = std::format("shell-integration.{}", row->name);
+    auto const namesScript = [&](std::string_view line) {
+        return line.contains(script)
+               || std::ranges::any_of(ManualInstallScripts, [&](ManualInstallScript const& manual) {
+                      return manual.shell == shell && line.contains(manual.file);
+                  });
+    };
     auto const loads = [&](std::string_view rawLine) {
         auto const line = trimmed(rawLine);
         if (line.empty() || line.starts_with('#'))
             return false;
         return line.contains(generates)
-               || (line.contains(script) && (line.contains("source") || line.starts_with(". ")));
+               || (namesScript(line) && (line.contains("source") || line.starts_with(". ")));
     };
     auto lines = std::views::split(content, '\n');
     auto const found = std::ranges::any_of(
