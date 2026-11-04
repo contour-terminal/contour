@@ -888,14 +888,17 @@ void Terminal::statusLineExtensionsReplaced()
     _takeOverName = _extensions->takeOverName();
     _takeOverSource.reset();
     _takeOverRow = Line {};
-    // Told again even at an unchanged size: the new extensions were never told it.
-    _extensionSurfaceSize = {};
-    resizeStatusLineExtensions();
-    // Nor the font, which every one of them takes its surface's cell size from, followed or not: told here,
-    // so not replayed below as well.
+    // The font first: an extension draws from the first frame it can, which is once it knows its size, and
+    // that frame must already be at the display's cell size -- an extension that asks for it once (CSI 16 t)
+    // would keep the answer of a frame drawn between the two events.
+    // Every one of them takes its surface's cell size from it, followed or not: told here, so not replayed
+    // below as well.
     if (_statusLineFont != StatusLineFontMetrics {})
         _extensions->post(StatusLineEvents::FontChanged { .metrics = _statusLineFont });
-    // Nor any state: everything they follow already is replayed, and what they follow once loaded later.
+    // Told the size again even at an unchanged one: the new extensions were never told it.
+    _extensionSurfaceSize = {};
+    resizeStatusLineExtensions();
+    // And any state: everything they follow already is replayed, and what they follow once loaded later.
     _extensionEvents.refresh();
     auto replay = _extensionEvents.subscriptions()
                   | StatusLineEventKinds::fromValue(_extensionReplay.exchange(0, std::memory_order_acquire));

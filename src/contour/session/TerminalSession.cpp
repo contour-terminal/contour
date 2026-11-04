@@ -1632,12 +1632,13 @@ void TerminalSession::statusLineExtensionsReplaced()
 {
     {
         auto const lock = scoped_lock { _terminal };
-        // Which tells the new ones the foreground process too: the poll tells each name once.
-        _terminal.statusLineExtensionsReplaced();
-        // And the font the display draws in, which the terminal was not told while there were no extensions;
-        // unchanged, it is not told twice.
+        // The font the display draws in first, which the terminal was not told while there were no
+        // extensions: the new ones must know the cell size before they know the size they draw at, or a
+        // frame drawn between the two is at the wrong one. Unchanged, it is not told twice.
         if (_display && runsStatusLineExtensions())
             _terminal.setStatusLineFontMetrics(displayFontMetrics());
+        // Which tells the new ones the foreground process too: the poll tells each name once.
+        _terminal.statusLineExtensionsReplaced();
     }
     // What the new ones follow is known once they have loaded, which a frame they publish tells: forgotten
     // what the ones before them followed first, so that the frame counts as a change, and the poll

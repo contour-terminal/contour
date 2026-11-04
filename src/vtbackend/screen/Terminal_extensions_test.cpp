@@ -585,6 +585,16 @@ TEST_CASE("Terminal.extensions.font", "[extensions]")
         CHECK(extensions.posted().back() == StatusLineEvent { FontChanged { .metrics = small } });
     }
 
+    SECTION("replaced extensions are told the metrics before the size they draw at")
+    {
+        // A frame is drawn once the size is known; it must not be drawn at a cell size told after it.
+        setFont(small);
+        terminal.runUnderStateLock([&] { terminal.statusLineExtensionsReplaced(); });
+        auto const postedAtResize = extensions.postedAtResize();
+        REQUIRE(!postedAtResize.empty());
+        CHECK(postedAtResize.back() == 2); // the setFont() above, then the replacement's own
+    }
+
     SECTION("replaced extensions are told the metrics once, subscribed or not")
     {
         setFont(small);

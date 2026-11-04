@@ -266,6 +266,7 @@
           <li>Fixes a crash when widening the window while scrolled back into a long scrollback.</li>
           <li>Fixes a crash when narrowing the window after a full-screen program, such as a coding agent, redrew over a finished command's output.</li>
           <li>Fixes the next character overwriting the last one when narrowing the window while the cursor waited to wrap at the right margin, with text reflow off, on the alternate screen or with mode 2028 reset (#2123)</li>
+          <li>Fixes a status-line extension started by a profile switch sometimes drawing at the wrong cell size, and keeping it, when it asked for the cell size (CSI 16 t) in its first frame</li>
           <li>Changing the window width with <code>reflow_on_resize: false</code> no longer walks the whole scrollback buffer, only the lines in use (#2124)</li>
         </ul>
       </description>
