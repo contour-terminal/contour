@@ -2763,6 +2763,45 @@ TEST_CASE("shell integration card: the Terminal row's card is three cell rows wi
                  + host.style().chipCloseGlyph());
 }
 
+TEST_CASE("shell integration card: the Terminal row wraps the policy note into whole cell rows (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    // Narrow enough that the sentence cannot fit on one row.
+    auto host = PaneTreeHost { setup, QSize { 400, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& pane = host.cardOf(leaf);
+    auto const noteText =
+        QStringLiteral("This also lets your own scripts run in Windows PowerShell, for your user "
+                       "only (Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    session.setShellCard(CardStage::Confirm, QString::fromUtf8(ShellCardLine), {}, noteText);
+    host.settle();
+
+    auto const& shellCard = PaneTreeHost::partOf(pane, "shellIntegrationCard");
+    REQUIRE(shellCard.isVisible());
+    auto const& note = PaneTreeHost::partOf(shellCard, "shellIntegrationNote");
+    REQUIRE(note.isVisible());
+    // The consent is wrapped, never cut: all of it is laid out.
+    CHECK(note.property("wrapMode").toInt() == static_cast<int>(QTextOption::WrapAtWordBoundaryOrAnywhere));
+    CHECK(note.property("elide").toInt() == static_cast<int>(Qt::ElideNone));
+    CHECK_FALSE(note.property("truncated").toBool());
+    CHECK(note.property("text").toString() == noteText);
+    auto const lines = note.property("lineCount").toInt();
+    CHECK(lines >= 2);
+
+    // Each of its lines is one cell row, so the card and its band stay whole cell rows.
+    auto const cell = host.style().cellHeight();
+    CHECK(note.height() == lines * cell);
+    CHECK(shellCard.height() == (3 + lines) * cell);
+    CHECK(PaneTreeHost::partOf(pane, "shellIntegrationBand").height() == shellCard.height());
+}
+
 TEST_CASE("shell integration card: every ink reads at 4.5:1 on every row, scheme and appearance (offscreen)",
           "[contour][gui][qml][shellintegration]")
 {

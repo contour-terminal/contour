@@ -4009,10 +4009,24 @@ config::ShellKind TerminalSession::runningShell() const
     if (auto const name = foregroundProcessName(); !name.empty())
         return config::shellKindOf(name);
 
-    // Nothing to ask -- a pane a local daemon hosts has no process group here, and Windows names no
-    // foreground process: the shell is the profile's, unless the window is another machine's. Read as the
-    // spawn reads it, so that `"C:\...\pwsh.exe" -NoLogo` or `bash -l` names its program.
+    // Nothing named: the shell is the profile's where that is known to be what runs -- a pane a local daemon
+    // hosts has no process group here, and Windows names no foreground process for a local pane. Never in a
+    // window that is another machine's, nor for a profile that opens an SSH session (its shell is the remote
+    // host's; on POSIX an empty name is a failed poll, never a reason to guess). Read as the spawn reads it,
+    // so that `"C:\...\pwsh.exe" -NoLogo` or `bash -l` names its program.
     if (_manager == nullptr || !_manager->app().attachedHostLabel().empty())
+        return config::ShellKind::Unknown;
+    auto const profileRuns = [this] {
+        switch (_hosting)
+        {
+            case SessionHosting::Remote: return true;
+            case SessionHosting::Local:
+                return _app.shellHostPlatform() == config::HostPlatform::Windows
+                       && _profile.ssh.value().hostname.empty();
+        }
+        return false;
+    };
+    if (!profileRuns())
         return config::ShellKind::Unknown;
     // What names a program is asked as the spawn asks it (vtpty::programsIn()): on the PATH the child is
     // given -- the profile's own, else this process's -- through the files every session reads.

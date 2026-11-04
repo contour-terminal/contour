@@ -246,11 +246,12 @@ TEST_CASE("shell integration card: a daemon-hosted pane takes its shell from the
     other.pressReturn(ShellIntegrationProbeCommands);
     CHECK(other.session->shellIntegrationCard() == HiddenStage);
 
-    // A local pane with nothing in front falls back to the profile too, as a Windows pane always does.
+    // Off Windows, a local pane with nothing in front stays silent: the poll failed, and the profile's shell
+    // may not be what runs (an SSH profile's pane names nothing either).
     auto local = Rig { {}, contour::session::SessionHosting::Local, "/usr/bin/zsh" };
     local.session = local.openTab(/*foreground=*/"");
     local.pressReturn(ShellIntegrationProbeCommands);
-    CHECK(local.session->shellIntegrationCard() == OfferStage);
+    CHECK(local.session->shellIntegrationCard() == HiddenStage);
 
     // A pane of a window attached to another machine does not: the profile here says nothing of its shell.
     auto remote = Rig { "starfive", Daemon, "/usr/bin/zsh" };
@@ -261,22 +262,19 @@ TEST_CASE("shell integration card: a daemon-hosted pane takes its shell from the
 
 TEST_CASE("TerminalSession.runningShell.profileFallback", "[contour][session][shellintegration]")
 {
-    // Nothing reports a foreground process (as on Windows, where MockPty names none): the profile's shell
-    // program decides, read as the spawn reads it -- a command line where it names no program.
-#ifdef _WIN32
-    constexpr auto PwshCommandLine =
-        std::string_view { R"("C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo)" };
-#else
-    constexpr auto PwshCommandLine = std::string_view { "pwsh -NoLogo" };
-#endif
+    // A Windows shell host names no foreground process for a local pane: the profile's shell program
+    // decides, read as the spawn reads it -- a command line where it names no program. Both readings (POSIX
+    // words, CreateProcess's) keep a quoted Windows path whole, so every case runs on every CI host.
     struct Case
     {
         std::string_view program;
         ShellKind shell;
     };
-    for (auto const& [program, shell]: { Case { PwshCommandLine, ShellKind::Pwsh },
-                                         Case { "powershell.exe", ShellKind::WindowsPowerShell },
-                                         Case { "cmd.exe", ShellKind::Unknown } })
+    for (auto const& [program, shell]:
+         { Case { R"("C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo)", ShellKind::Pwsh },
+           Case { "pwsh -NoLogo", ShellKind::Pwsh },
+           Case { "powershell.exe", ShellKind::WindowsPowerShell },
+           Case { "cmd.exe", ShellKind::Unknown } })
     {
         INFO(program);
         auto rig = Rig { {},
@@ -297,6 +295,39 @@ TEST_CASE("TerminalSession.runningShell.profileFallback", "[contour][session][sh
         auto const displayName = contour::config::shellRow(shell)->displayName;
         CHECK(rig.session->shellIntegrationBody().contains(
             QString::fromUtf8(displayName.data(), static_cast<qsizetype>(displayName.size()))));
+    }
+}
+
+TEST_CASE("TerminalSession.runningShell.noFallbackForSsh", "[contour][session][shellintegration]")
+{
+    // An SSH profile's pane runs the remote host's shell: its local shell program says nothing of it, and an
+    // offer would edit this machine's profile while the user types elsewhere.
+    auto rig = Rig {
+        {}, contour::session::SessionHosting::Local, "powershell.exe", contour::config::HostPlatform::Windows
+    };
+    rig.app.app().config().profile().ssh.value().hostname = "starfive";
+    rig.scriptPowerShellRc(ShellKind::WindowsPowerShell);
+    rig.session = rig.openTab(/*foreground=*/"");
+    rig.pressReturn(ShellIntegrationProbeCommands);
+
+    CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+}
+
+TEST_CASE("TerminalSession.runningShell.noFallbackOffWindows", "[contour][session][shellintegration]")
+{
+    // On a POSIX shell host a local pane's empty foreground name is a failed poll, not a reason to guess.
+    for (auto const host: { contour::config::HostPlatform::Other, contour::config::HostPlatform::MacOS })
+    {
+        auto rig = Rig { {}, contour::session::SessionHosting::Local, "pwsh", host };
+        rig.scriptPowerShellRc(ShellKind::Pwsh);
+        rig.session = rig.openTab(/*foreground=*/"");
+        rig.pressReturn(ShellIntegrationProbeCommands);
+        CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+
+        // The same profile with pwsh in front is offered: the host is not what keeps the card away.
+        auto* const named = rig.openTab("pwsh");
+        Rig::pressReturn(*named, ShellIntegrationProbeCommands);
+        CHECK(named->shellIntegrationCard() == OfferStage);
     }
 }
 

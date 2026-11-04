@@ -117,15 +117,22 @@ Item {
         }
 
         // What else Add Line changes (PowerShell's execution policy), under the line on Confirm; in the
-        // body's type, as part of what is said rather than a warning.
+        // body's type, as part of what is said rather than a warning. It is the consent the button asks for,
+        // so it always wraps and is never cut: the card grows to hold it. On the Terminal row every line it
+        // wraps to is one cell row high, so the card stays whole cell rows.
         Text {
             objectName: "shellIntegrationNote"
             Layout.fillWidth: true
             visible: text.length > 0
             text: card.session ? card.session.shellIntegrationNote : ""
             textFormat: Text.PlainText
-            wrapMode: card.bracketed ? Text.NoWrap : Text.Wrap
-            elide: card.bracketed ? Text.ElideRight : Text.ElideNone
+            wrapMode: Text.Wrap
+            // A fixed line height is whole pixels, a cell row need not be: the rows the lines take are set too.
+            Layout.preferredHeight: card.bracketed ? Math.max(1, lineCount) * chromeStyle.cellHeight
+                                                   : implicitHeight
+            lineHeightMode: card.bracketed ? Text.FixedHeight : Text.ProportionalHeight
+            lineHeight: card.bracketed ? chromeStyle.cellHeight : 1.0
+            verticalAlignment: Text.AlignVCenter
             font.family: chromeStyle.type.tab.family
             font.pixelSize: chromeStyle.type.tab.pixelSize
             font.weight: chromeStyle.type.tab.weight

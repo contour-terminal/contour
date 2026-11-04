@@ -3063,10 +3063,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// shell integration when the probe says so. GUI thread; takes the terminal lock briefly.
     void noteCommandEntered();
 
-    /// Which shell this session runs, from the program in front of it; where none is named -- a pane hosted
-    /// by a local daemon has no process group of its own, and Windows names no foreground process -- from the
-    /// profile's shell program, read as the spawn reads it (vtpty::invocationToRun()). Never from the profile
-    /// in a window attached to another machine.
+    /// Which shell this session runs, from the program in front of it; where none is named, from the
+    /// profile's shell program, read as the spawn reads it (vtpty::invocationToRun()) -- but only for a pane
+    /// a local daemon hosts (no process group of its own), or a local pane on a Windows shell host (which
+    /// names no foreground process) whose profile opens no SSH session. Never in a window attached to another
+    /// machine, and never on a POSIX host's local pane, where an empty name is a failed poll.
     ///
     /// Known limit: a pane of a local tmux server (control mode) is "hosted" the same way, and tmux runs its
     /// `default-shell` there, not the profile's. When the two differ, the card offers the profile's shell.
