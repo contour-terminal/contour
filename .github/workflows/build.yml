@@ -1285,6 +1285,8 @@ jobs:
           binary=out/macos-package/src/contour/contour_test
           # ShellIntegrationShells.profileLine runs the line the one-click install writes, which asks the
           # contour binary for the script: outside ctest, it learns that binary here, and SKIPs without it.
+          # That binary links Qt, and a runner has no display for it, as the AppImage smoke test knows.
+          export QT_QPA_PLATFORM=offscreen
           export CONTOUR_BINARY="$PWD/out/macos-package/src/contour/contour.app/Contents/MacOS/contour"
           [ -x "$CONTOUR_BINARY" ] || { echo "::error::$CONTOUR_BINARY not found; profileLine would skip"; exit 1; }
           output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
@@ -2010,6 +2012,8 @@ jobs:
           binary=out/gcc-debug/src/contour/contour_test
           # ShellIntegrationShells.profileLine runs the line the one-click install writes, which asks the
           # contour binary for the script: outside ctest, it learns that binary here, and SKIPs without it.
+          # That binary links Qt, and a runner has no display for it, as the AppImage smoke test knows.
+          export QT_QPA_PLATFORM=offscreen
           export CONTOUR_BINARY="$PWD/out/gcc-debug/src/contour/contour"
           [ -x "$CONTOUR_BINARY" ] || { echo "::error::$CONTOUR_BINARY not found; profileLine would skip"; exit 1; }
           output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }

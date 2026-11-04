@@ -1580,9 +1580,11 @@ if(CONTOUR_TESTING)
     endif()
     add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
     # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
-    # for the script, as a user's profile asks the installed one.
+    # for the script, as a user's profile asks the installed one. It links Qt, and a CI runner has no display
+    # for it, so it runs offscreen.
     if(TARGET contour)
-        set_property(TEST contour_test APPEND PROPERTY ENVIRONMENT "CONTOUR_BINARY=$<TARGET_FILE:contour>")
+        set_property(TEST contour_test APPEND PROPERTY ENVIRONMENT
+                     "CONTOUR_BINARY=$<TARGET_FILE:contour>" "QT_QPA_PLATFORM=offscreen")
     endif()
 endif()
 # }}}
