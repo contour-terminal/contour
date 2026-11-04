@@ -5,6 +5,8 @@
 /// PowerShell's execution policies, and whether one lets a profile script run.
 /// Pure and Qt-free: reading the policy from the registry or a process is somebody else's job.
 
+#include <contour/config/ConfigEnumInfo.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -68,7 +70,7 @@ enum class ProfileScripts : uint8_t
 /// @return The policy, or nullopt for `Default` and anything that is not a policy.
 [[nodiscard]] constexpr std::optional<ExecutionPolicy> executionPolicyNamed(std::string_view name) noexcept
 {
-    constexpr auto names = std::array {
+    constexpr auto Names = std::array {
         std::pair { std::string_view { "Undefined" }, ExecutionPolicy::Undefined },
         std::pair { std::string_view { "Restricted" }, ExecutionPolicy::Restricted },
         std::pair { std::string_view { "AllSigned" }, ExecutionPolicy::AllSigned },
@@ -76,11 +78,8 @@ enum class ProfileScripts : uint8_t
         std::pair { std::string_view { "Unrestricted" }, ExecutionPolicy::Unrestricted },
         std::pair { std::string_view { "Bypass" }, ExecutionPolicy::Bypass },
     };
-    constexpr auto lower = [](char c) noexcept {
-        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
-    };
-    for (auto const& [spelling, policy]: names)
-        if (std::ranges::equal(spelling, name, {}, lower, lower))
+    for (auto const& [spelling, policy]: Names)
+        if (detail::equalsIgnoreCase(spelling, name))
             return policy;
     return std::nullopt;
 }
@@ -110,7 +109,7 @@ enum class ProfileScripts : uint8_t
         ProfileScripts underGroupPolicy;
         ProfileScripts underOtherScope;
     };
-    constexpr auto rows = std::array {
+    constexpr auto Rows = std::array {
         Row { ProfileScripts::BlockedByGroupPolicy, ProfileScripts::NeedUserPolicy }, // Undefined
         Row { ProfileScripts::BlockedByGroupPolicy, ProfileScripts::NeedUserPolicy }, // Restricted
         Row { ProfileScripts::BlockedByGroupPolicy, ProfileScripts::SignedOnly },     // AllSigned
@@ -118,7 +117,7 @@ enum class ProfileScripts : uint8_t
         Row { ProfileScripts::Run, ProfileScripts::Run },                             // Unrestricted
         Row { ProfileScripts::Run, ProfileScripts::Run },                             // Bypass
     };
-    auto const& row = rows[static_cast<std::size_t>(policy.policy)];
+    auto const& row = Rows[static_cast<std::size_t>(policy.policy)];
     return policy.scope == PolicyScope::GroupPolicy ? row.underGroupPolicy : row.underOtherScope;
 }
 

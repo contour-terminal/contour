@@ -49,7 +49,7 @@ TEST_CASE("ExecutionPolicy.profileScripts", "[shells]")
         ProfileScripts underGroupPolicy;
         ProfileScripts underOtherScope;
     };
-    constexpr auto cells = std::array {
+    constexpr auto Cells = std::array {
         Cell { ExecutionPolicy::Undefined,
                ProfileScripts::BlockedByGroupPolicy,
                ProfileScripts::NeedUserPolicy },
@@ -61,7 +61,7 @@ TEST_CASE("ExecutionPolicy.profileScripts", "[shells]")
         Cell { ExecutionPolicy::Unrestricted, ProfileScripts::Run, ProfileScripts::Run },
         Cell { ExecutionPolicy::Bypass, ProfileScripts::Run, ProfileScripts::Run },
     };
-    for (auto const& cell: cells)
+    for (auto const& cell: Cells)
     {
         CHECK(profileScriptsUnder({ cell.policy, PolicyScope::GroupPolicy }) == cell.underGroupPolicy);
         for (auto const scope: { PolicyScope::Default, PolicyScope::LocalMachine, PolicyScope::CurrentUser })

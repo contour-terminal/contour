@@ -5,6 +5,7 @@
 /// The shells Contour offers to integrate with, and where each keeps its startup file, as one table.
 /// Qt-free: the editor that writes those files and the offer that asks to are both built on it.
 
+#include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
 #include <algorithm>
@@ -243,22 +244,16 @@ inline constexpr std::string_view ShellRcMarker = "# Contour shell integration";
 /// @return The shell whose name matches, ignoring ASCII case, else ShellKind::Unknown.
 [[nodiscard]] constexpr ShellKind shellKindOf(std::string_view processName) noexcept
 {
-    constexpr auto lower = [](char c) noexcept {
-        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
-    };
-    constexpr auto equalsIgnoringCase = [](std::string_view a, std::string_view b) noexcept {
-        return std::ranges::equal(a, b, {}, lower, lower);
-    };
-    constexpr std::string_view exe = ".exe";
+    constexpr auto Exe = std::string_view { ".exe" };
     if (auto const separator = processName.find_last_of("/\\"); separator != std::string_view::npos)
         processName.remove_prefix(separator + 1);
     if (processName.starts_with('-'))
         processName.remove_prefix(1);
-    if (processName.size() > exe.size()
-        && equalsIgnoringCase(processName.substr(processName.size() - exe.size()), exe))
-        processName.remove_suffix(exe.size());
+    if (processName.size() > Exe.size()
+        && detail::equalsIgnoreCase(processName.substr(processName.size() - Exe.size()), Exe))
+        processName.remove_suffix(Exe.size());
     auto const row = std::ranges::find_if(ShellRows, [&](ShellRow const& candidate) {
-        return equalsIgnoringCase(candidate.name, processName);
+        return detail::equalsIgnoreCase(candidate.name, processName);
     });
     return row == ShellRows.end() ? ShellKind::Unknown : row->kind;
 }
