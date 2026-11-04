@@ -298,6 +298,9 @@ class NativeClient final
     /// every window's layout of the change was handed to the LayoutHandler before it, and the PDU names the
     /// MoveNode request whose effects the push completes, if one did.
     using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
+    /// Handler invoked when the daemon asks this client to re-assert its pane sizes, because another client
+    /// departed (proto::PanesReprojected, Capability::PanesReprojected).
+    using PanesReprojectedHandler = std::function<void()>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -352,6 +355,8 @@ class NativeClient final
     /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
     /// @param onMoveNodeRefused Told when the daemon refuses a moveNode(), so the user can be.
     /// @param onLayoutBatchEnd Told when a daemon sharing Capability::LayoutBatch ends a layout push.
+    /// @param onPanesReprojected Told when the daemon asks for this client's pane sizes again: another
+    ///        client departed, and its refinements or a re-projection may have replaced this client's.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -364,7 +369,8 @@ class NativeClient final
                  LivenessPolicy liveness = {},
                  TabMergeRefusedHandler onTabMergeRefused = {},
                  MoveNodeRefusedHandler onMoveNodeRefused = {},
-                 LayoutBatchEndHandler onLayoutBatchEnd = {});
+                 LayoutBatchEndHandler onLayoutBatchEnd = {},
+                 PanesReprojectedHandler onPanesReprojected = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -498,6 +504,17 @@ class NativeClient final
     /// Closes the connection; run() finishes.
     void detach();
 
+    /// The system is about to sleep: no liveness verdict until it wakes, or until
+    /// LivenessPolicy::announcedSleepGrace passes without the sleep. Ignored unless the connection is
+    /// live, negotiated and shares Capability::Heartbeat. Reactor thread only.
+    void noteSystemSleep();
+
+    /// The system woke: the daemon is probed now and must echo that probe within
+    /// LivenessPolicy::wakeDeadline.
+    /// Ignored unless the connection is live, negotiated and shares Capability::Heartbeat. Reactor thread
+    /// only.
+    void noteSystemWake();
+
     /// @return All mirrored screens, keyed by session id.
     [[nodiscard]] std::map<uint64_t, RemoteScreen> const& screens() const noexcept { return _screens; }
 
@@ -579,6 +596,20 @@ class NativeClient final
     /// Arms the next liveness tick, a second from now on the loop's clock.
     void armLivenessTick();
 
+    /// @return Whether the liveness tick is armed for this connection: open, negotiated, Heartbeat shared,
+    ///         and not yet given up on. A declared loss counts as closed at once, though `_closing` follows
+    ///         only when run() resumes: a sleep or wake hint in between must not probe a cancelled connection
+    ///         or cancel its read a second time.
+    [[nodiscard]] bool livenessIsLive() const noexcept
+    {
+        return !_closing && !_detached && !_lossReason && shares(proto::Capability::Heartbeat);
+    }
+
+    /// Acts on what _liveness decides at @p now: probes, gives up, or does nothing.
+    /// A daemon declared lost leaves livenessIsLive() false.
+    /// @param now The loop's clock.
+    void applyLivenessDecision(core::platform::SteadyTimePoint now);
+
     /// One liveness tick: probes a silent daemon, or gives up on one silent for too long.
     /// @param self The NativeClient.
     static void livenessTick(void* self);
@@ -630,6 +661,7 @@ class NativeClient final
     TabMergeRefusedHandler _onTabMergeRefused;
     MoveNodeRefusedHandler _onMoveNodeRefused;
     LayoutBatchEndHandler _onLayoutBatchEnd;
+    PanesReprojectedHandler _onPanesReprojected;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
@@ -653,6 +685,7 @@ class NativeClient final
     /// The once-a-second liveness tick; armed while both ends share Capability::Heartbeat and the
     /// connection is open, disarmed as run() closes it.
     std::optional<core::net::DeadlineTimer> _livenessTimer;
+    core::platform::SteadyTimePoint _livenessTickDue {}; ///< When the armed tick was due, to spot a late one.
     /// LivenessPolicy::handshakeDeadline from the ClientHello; armed as run() sends it, disarmed by the
     /// daemon's answer and as run() closes the connection.
     std::optional<core::net::DeadlineTimer> _handshakeTimer;

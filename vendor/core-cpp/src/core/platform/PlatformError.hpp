@@ -34,8 +34,11 @@ enum class PlatformError : std::uint8_t
     // General
     NotImplemented,
     /// An argument no implementation could act on: an environment variable name that is empty or
-    /// holds '=' or NUL, for instance. Last, so the values before it keep their numbers.
+    /// holds '=' or NUL, for instance.
     InvalidArgument,
+    /// The operating system refused to register for a notification, such as system sleep/wake. Last,
+    /// so the values before it keep their numbers.
+    NotificationRegistrationFailed,
 };
 
 /// Converts a PlatformError to a human-readable string.
@@ -61,6 +64,7 @@ enum class PlatformError : std::uint8_t
         case PlatformError::TerminalControlFailed: return "terminal control failed";
         case PlatformError::NotImplemented: return "not implemented";
         case PlatformError::InvalidArgument: return "invalid argument";
+        case PlatformError::NotificationRegistrationFailed: return "notification registration failed";
     }
     return "unknown error";
 }

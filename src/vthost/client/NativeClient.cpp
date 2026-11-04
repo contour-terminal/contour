@@ -392,7 +392,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            LivenessPolicy liveness,
                            TabMergeRefusedHandler onTabMergeRefused,
                            MoveNodeRefusedHandler onMoveNodeRefused,
-                           LayoutBatchEndHandler onLayoutBatchEnd):
+                           LayoutBatchEndHandler onLayoutBatchEnd,
+                           PanesReprojectedHandler onPanesReprojected):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -407,6 +408,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onTabMergeRefused(std::move(onTabMergeRefused)),
     _onMoveNodeRefused(std::move(onMoveNodeRefused)),
     _onLayoutBatchEnd(std::move(onLayoutBatchEnd)),
+    _onPanesReprojected(std::move(onPanesReprojected)),
     _liveness(liveness)
 {
 }
@@ -414,8 +416,24 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
 void NativeClient::armLivenessTick()
 {
     _livenessTimer.reset();
-    _livenessTimer.emplace(
-        _loop, _loop.clock().now() + std::chrono::seconds { 1 }, &NativeClient::livenessTick, this);
+    _livenessTickDue = _loop.clock().now() + std::chrono::seconds { 1 };
+    _livenessTimer.emplace(_loop, _livenessTickDue, &NativeClient::livenessTick, this);
+}
+
+void NativeClient::noteSystemSleep()
+{
+    if (!livenessIsLive())
+        return;
+    _liveness.noteSleep(_loop.clock().now());
+}
+
+void NativeClient::noteSystemWake()
+{
+    if (!livenessIsLive())
+        return;
+    auto const now = _loop.clock().now();
+    _liveness.noteWake(now);
+    applyLivenessDecision(now);
 }
 
 void NativeClient::handshakeExpired(void* self)
@@ -432,30 +450,38 @@ void NativeClient::handshakeExpired(void* self)
     client._connection->cancelRead();
 }
 
-void NativeClient::livenessTick(void* self)
+void NativeClient::applyLivenessDecision(core::platform::SteadyTimePoint now)
 {
-    auto& client = *static_cast<NativeClient*>(self);
-    if (client._closing || client._detached)
-        return;
-    auto const now = client._loop.clock().now();
-    switch (client._liveness.decide(now))
+    switch (_liveness.decide(now))
     {
         case LivenessAction::None: break;
         case LivenessAction::SendHeartbeat:
-            client.send(proto::DecodedPdu { proto::Heartbeat { .nonce = client._nextHeartbeatNonce++ } });
-            client._liveness.noteProbeSent(now);
+            send(proto::DecodedPdu { proto::Heartbeat { .nonce = _nextHeartbeatNonce++ } });
+            _liveness.noteProbeSent(now);
             break;
         case LivenessAction::DeclareLost:
-            client._lossReason = std::format(
+            _lossReason = std::format(
                 "no answer from the daemon for {} s",
-                std::chrono::duration_cast<std::chrono::seconds>(client._liveness.policy().deadAfter)
-                    .count());
-            errorLog()("attach: {}; closing the connection", *client._lossReason);
-            // As detach() does: the parked read is retired and run() closes the connection in order. Nothing
-            // comes after it, for the read's resumption can end the flow that owns this object.
-            client._connection->cancelRead();
-            return;
+                std::chrono::duration_cast<std::chrono::seconds>(_liveness.silenceLimit()).count());
+            errorLog()("attach: {}; closing the connection", *_lossReason);
+            // As detach() does: the parked read is retired and run() closes the connection in order, once the
+            // read resumes in the loop's drain step -- never inline, so this object outlives the call.
+            _connection->cancelRead();
+            break;
     }
+}
+
+void NativeClient::livenessTick(void* self)
+{
+    auto& client = *static_cast<NativeClient*>(self);
+    if (!client.livenessIsLive())
+        return;
+    auto const now = client._loop.clock().now();
+    client._liveness.noteTick(client._livenessTickDue, now);
+    client.applyLivenessDecision(now);
+    // A daemon declared lost is not ticked for again.
+    if (!client.livenessIsLive())
+        return;
     // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
     client.armLivenessTick();
 }
@@ -789,9 +815,14 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     }
     if (handleNotice(frame))
         return;
-    // A probe's echo: noted as life above, which is all it is for.
-    if (std::holds_alternative<proto::Heartbeat>(pdu))
+    // A probe's echo: noted as life above. The latest probe's echo also ends a wake, which a frame
+    // buffered before the sleep must not; an earlier probe's echo may be such a frame.
+    if (auto const* echo = std::get_if<proto::Heartbeat>(&pdu))
+    {
+        if (echo->nonce + 1 == _nextHeartbeatNonce)
+            _liveness.noteProbeAnswered(_loop.clock().now());
         return;
+    }
     // Unknown PDUs are ignored for forward compatibility — but recorded, so a mirror that is
     // quietly missing an update is distinguishable from one that never received it.
     errorLog()(
@@ -805,6 +836,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onLayoutBatchEnd)
             _onLayoutBatchEnd(*end);
+        return true;
+    }
+    if (std::holds_alternative<proto::PanesReprojected>(pdu))
+    {
+        if (_onPanesReprojected)
+            _onPanesReprojected();
         return true;
     }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))

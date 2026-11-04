@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Logging.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/NativeController.hpp>
@@ -24,8 +25,6 @@ using vthost::client::RemoteScreen;
 
 namespace
 {
-    auto const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
-
     /// @return Whether @p state ends a run: nothing but a new run's Connecting follows it.
     [[nodiscard]] constexpr bool isEnding(vthost::client::ConnectionState state) noexcept
     {
@@ -54,7 +53,8 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
                                    SessionSettingsSource sessionSettings,
                                    std::optional<vtbackend::ColorPreference> colorPreference,
                                    core::platform::IClock const& clock,
-                                   vthost::latency::StartupTimeline& timeline):
+                                   vthost::latency::StartupTimeline& timeline,
+                                   core::platform::ISystemPowerMonitor* powerMonitor):
     RemoteController(clock),
     _transport(std::move(transport)),
     _intent(std::move(intent)),
@@ -65,6 +65,47 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
 {
     if (colorPreference)
         _statedColors = wireOf(*colorPreference);
+    // On the monitor's platform thread: only marshaled from there, as its contract asks.
+    if (powerMonitor != nullptr)
+        _powerSubscription = powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
+            // The monitor's dispatch is noexcept, so a throw here would terminate; a hint lost to a failed
+            // post costs only the hint: on macOS the late liveness tick still reveals the sleep, and where
+            // the steady clock stops during suspend there is no silence to mistake for a loss.
+            try
+            {
+                _reactor.post([this, event] { notePowerEvent(event); });
+            }
+            catch (...)
+            {
+                errorLog()("power: dropped a system power event; the hint is lost");
+            }
+        });
+}
+
+void NativeController::notePowerEvent(core::platform::SystemPowerEvent event)
+{
+    if (_client == nullptr)
+    {
+        // Reconnecting, or still connecting: there is no connection to probe, but a wake may have brought
+        // the network back, so a backoff wait under way is cut short (a first connect is not retried).
+        if (event == core::platform::SystemPowerEvent::DidWake && _supervisor != nullptr)
+        {
+            attachLog()("attach: the system woke; reconnecting now");
+            _supervisor->retryNow();
+        }
+        return;
+    }
+    switch (event)
+    {
+        case core::platform::SystemPowerEvent::WillSleep:
+            attachLog()("attach: the system is going to sleep");
+            _client->noteSystemSleep();
+            break;
+        case core::platform::SystemPowerEvent::DidWake:
+            attachLog()("attach: the system woke");
+            _client->noteSystemWake();
+            break;
+    }
 }
 
 void NativeController::postSessionCreation(std::function<void(NativeClient&)> create)
@@ -103,6 +144,22 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
 {
     if (_acceptedConnections == 0)
         _timeline.mark(vthost::latency::StartupMark::Connected);
+    // The area the hello states: what the window composes to now, else what was last stated, else the
+    // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
+    // A first connection composes nothing: no layout came in yet.
+    auto const helloArea = [&]() -> std::optional<vtpty::PageSize> {
+        auto const lock = std::lock_guard { _mutex };
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        auto const area = composedClientArea()
+                              .or_else([this] { return _lastStatedArea; })
+                              .or_else([this]() -> std::optional<vtpty::PageSize> {
+                                  return _attachSettings.transform([](auto const& s) { return s.pageSize; });
+                              });
+        _helloArea = area;
+        if (area)
+            _lastStatedArea = area;
+        return area;
+    }();
     return std::make_unique<NativeClient>(
         loop,
         std::move(connection->socket),
@@ -143,12 +200,13 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::MoveNode,
                                                    vthost::proto::Capability::LayoutBatch,
                                                    vthost::proto::Capability::TabEditAcks,
-                                                   vthost::proto::Capability::ColorPreference }),
+                                                   vthost::proto::Capability::ColorPreference,
+                                                   vthost::proto::Capability::PanesReprojected }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
-            .clientArea = _attachSettings.transform([](auto const& s) {
-                return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(s.pageSize.columns),
-                                                       .lines = unbox<uint32_t>(s.pageSize.lines) };
+            .clientArea = helloArea.transform([](auto const& size) {
+                return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(size.columns),
+                                                       .lines = unbox<uint32_t>(size.lines) };
             }),
             .attachIntent = std::move(intent),
             .profileName = _profileName,
@@ -179,7 +237,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                 onMoveNodeRefused(refused, serial);
             } },
         NativeClient::LayoutBatchEndHandler {
-            [this](vthost::proto::LayoutBatchEnd const& end) { onLayoutBatchEnd(end); } });
+            [this](vthost::proto::LayoutBatchEnd const& end) { onLayoutBatchEnd(end); } },
+        NativeClient::PanesReprojectedHandler { [this] { onPanesReprojected(); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -404,6 +463,9 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
+        // The daemon projected every pane onto the hello's area: they are re-asserted once the GUI
+        // reconciled.
+        _geometryReassert = GeometryReassert::Pending;
         if (restarted)
         {
             _paneSizes.clear();
@@ -526,7 +588,9 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         //
         // Only the bookkeeping is dropped, never a report issued: at this point the panes have not
         // been laid out against the new tree, so composing an area would mix a stale pane extent
-        // with a fresh one and propose one that neither describes.
+        // with a fresh one and propose one that neither describes. Panes another client's departure left at
+        // sizes this client did not ask for, under a geometry of its own that does not move, are the daemon's
+        // to tell (onPanesReprojected).
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
@@ -570,6 +634,18 @@ std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlig
         completed.push_back(request);
     inFlight.erase(inFlight.begin(), end);
     return completed;
+}
+
+void NativeController::onPanesReprojected()
+{
+    // Another client departed: a re-projection, or its own per-pane sizes still in force, may have replaced
+    // this client's. Nothing of this client's moved, so nothing would report the panes again. Pending until a
+    // flush that composes an area spends it, should this one find the panes not laid out yet.
+    {
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        _geometryReassert = GeometryReassert::Pending;
+    }
+    platform::postToObject(this, [this] { flushGeometry(GeometryFlush::PanesOnly); });
 }
 
 void NativeController::onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end)
@@ -1066,10 +1142,10 @@ void NativeController::reportPaneGeometry(uint64_t session, uint64_t serial, vtp
     // Queued onto the GUI thread: it coalesces every pane resized in this layout pass into one
     // report, and it is what makes the sink safe to call from the parser thread (DECCOLM resizes
     // there). A metacall posted to a QObject is dropped if the object dies first.
-    platform::postToObject(this, [this] { flushGeometry(); });
+    platform::postToObject(this, [this] { flushGeometry(GeometryFlush::Report); });
 }
 
-void NativeController::flushGeometry()
+void NativeController::flushGeometry(GeometryFlush scope)
 {
     auto area = std::optional<vtpty::PageSize> {};
     auto panes = std::vector<std::pair<uint64_t, vtpty::PageSize>> {};
@@ -1080,15 +1156,37 @@ void NativeController::flushGeometry()
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _geometryFlushScheduled = false;
 
-        if (auto const composed = composedClientArea(); composed && _lastReportedArea != composed)
+        auto const composed = composedClientArea();
+        // A reconnect or a departure (onPanesReprojected) asks for every pane again: spent once they compose.
+        // Spent then even if the layout is only partly laid out -- some panes not yet in _paneSizes, so not
+        // re-sent below. That relies on an invariant: every pane reports its grid at least once after a
+        // reconcile (the resize sink fires as its display is created), so a pane missing here is covered by
+        // its own first report, which is never filtered as unchanged.
+        auto const reassert =
+            composed.has_value()
+            && std::exchange(_geometryReassert, GeometryReassert::Idle) == GeometryReassert::Pending;
+        if (scope == GeometryFlush::PanesOnly && !reassert)
+            return;
+        auto resendAll = reassert;
+        // The hello's area, once composed with a connection that heard it, is the daemon's: not stated again.
+        if (composed.has_value() && _client != nullptr && _helloArea.has_value())
+        {
+            if (composed == _helloArea)
+            {
+                _lastReportedArea = std::exchange(_helloArea, std::nullopt);
+                resendAll = true;
+            }
+            else if (scope == GeometryFlush::Report)
+                _helloArea.reset(); // the window moved on: this report states its own area
+        }
+        // A new client area re-projects every pane on the daemon: all are re-asserted, not just the moved.
+        if (scope == GeometryFlush::Report && composed.has_value() && _lastReportedArea != composed)
         {
             _lastReportedArea = composed;
+            _lastStatedArea = composed;
             area = composed;
+            resendAll = true;
         }
-
-        // A new client area re-projects every pane on the daemon, so each must be re-asserted then
-        // — not just the ones that moved here.
-        auto const resendAll = area.has_value();
         for (auto const& [session, size]: _paneSizes)
         {
             if (!_bindings.contains(session))
@@ -1113,6 +1211,17 @@ void NativeController::flushGeometry()
         for (auto const& [session, size]: panes)
             _client->resizePane(session, unbox<uint32_t>(size.columns), unbox<uint32_t>(size.lines));
     });
+}
+
+void NativeController::reassertGeometryAfterReconcile()
+{
+    {
+        // So that a reconcile with nothing pending takes no _mutex; released before flushGeometry() takes it.
+        auto const lock = std::lock_guard { _geometryMutex };
+        if (_geometryReassert != GeometryReassert::Pending)
+            return;
+    }
+    flushGeometry(GeometryFlush::PanesOnly);
 }
 
 std::optional<vtpty::PageSize> NativeController::composedClientArea() const

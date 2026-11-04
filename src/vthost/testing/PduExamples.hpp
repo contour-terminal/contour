@@ -183,6 +183,7 @@ namespace vthost::testing
               proto::UpgradeDaemonReply { .result = 6, .detail = "a session is starting" } } },
         { proto::PduType::DaemonUpgrading,
           proto::DecodedPdu { proto::DaemonUpgrading { .toRelease = "0.9.0" } } },
+        { proto::PduType::PanesReprojected, proto::DecodedPdu { proto::PanesReprojected {} } },
     };
 }
 

@@ -296,6 +296,8 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(toString(PduType::SetSplitOrientation) == "SetSplitOrientation");
     CHECK(toString(PduType::LayoutBatchEnd) == "LayoutBatchEnd");
     CHECK(summarize(DecodedPdu { LayoutBatchEnd { .causeSerial = 6 } }) == "cause=6");
+    CHECK(toString(PduType::PanesReprojected) == "PanesReprojected");
+    CHECK(summarize(DecodedPdu { PanesReprojected {} }).empty());
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
     CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");

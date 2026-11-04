@@ -85,6 +85,10 @@ enum class Capability : uint8_t
     /// The peer serves UpgradeDaemon and announces DaemonUpgrading: a daemon replaces itself in place, and a
     /// client that negotiated this waits for the same daemon to come back instead of starting a new one.
     LiveUpgrade = 18,
+    /// The peer re-asserts its pane sizes on demand: a daemon sends PanesReprojected when another client
+    /// departs, and a client answers it by re-sending every pane's size. A daemon sends it only to a client
+    /// sharing it; without it that client keeps whatever grids the departure left.
+    PanesReprojected = 19,
 };
 
 /// One row of the table naming a Capability.
@@ -114,6 +118,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::MoveNode, .name = "move-node" },
     CapabilityRow { .capability = Capability::LayoutBatch, .name = "layout-batch" },
     CapabilityRow { .capability = Capability::LiveUpgrade, .name = "live-upgrade" },
+    CapabilityRow { .capability = Capability::PanesReprojected, .name = "panes-reprojected" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

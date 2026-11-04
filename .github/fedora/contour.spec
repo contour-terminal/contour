@@ -125,8 +125,8 @@ cmake . \
     -GNinja
 cd build
 %if %{with daemon}
-# The targets the Debian daemon job builds, plus the two suites %check runs, named so they build first
-# (and under CONTOUR_LINK_JOBS=1). %ninja_install below still builds whatever else the install needs.
+# The targets the Debian daemon job builds, plus the two suites %%check runs, named so they build first
+# (and under CONTOUR_LINK_JOBS=1). %%ninja_install below still builds whatever else the install needs.
 %ninja_build contour contour_test crispy_test vtbackend_test
 %else
 %ninja_build

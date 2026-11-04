@@ -30,6 +30,9 @@ option(CORE_CPP_WITH_TUI_OUTPUT "Build core::tui_output, the styled-output leaf 
 cmake_dependent_option(CORE_CPP_WITH_IMAGES "Decode images in core::tui (stb_image)" ON
                        "CORE_CPP_WITH_TUI" OFF)
 option(CORE_CPP_WITH_TLS "Build core::net_tls (OpenSSL)" OFF)
+# Linux only; ignored elsewhere. Needs pkg-config and libsystemd's development files (libsystemd-dev,
+# systemd-devel).
+option(CORE_CPP_WITH_SYSTEMD "Notify of system sleep/wake on Linux through logind (libsystemd)" ON)
 option(CORE_CPP_WITH_TRACY "Instrument core-cpp for the Tracy profiler" OFF)
 option(CORE_CPP_PEDANTIC "Compile core-cpp's targets with the pedantic warning set" ${PROJECT_IS_TOP_LEVEL})
 option(CORE_CPP_WERROR "Treat warnings in core-cpp's targets as errors" OFF)

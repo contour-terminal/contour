@@ -22,4 +22,5 @@ TEST_CASE("PlatformError.toString", "[platform]")
     CHECK(toString(PlatformError::TerminalControlFailed) == "terminal control failed");
     CHECK(toString(PlatformError::NotImplemented) == "not implemented");
     CHECK(toString(PlatformError::InvalidArgument) == "invalid argument");
+    CHECK(toString(PlatformError::NotificationRegistrationFailed) == "notification registration failed");
 }

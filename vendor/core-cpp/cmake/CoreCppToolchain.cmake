@@ -207,6 +207,43 @@ if(CORE_CPP_COVERAGE)
     endif()
 endif()
 
+# --- whether symmetric transfer is a tail call ------------------------------------
+#
+# Whether this build's GCC makes the symmetric transfer of a co_await that completes at once a tail
+# call. It does so only when it optimises sibling calls, from -O2 up, and it defines no macro for
+# the level: __OPTIMIZE__ is 1 at -Og and -O1 too, where Task_test.cpp's 100000-frame chain and
+# IoAwaitable_test.cpp's 200000-iteration loop overflow the stack and take every other case in
+# their binary with them. So the build says, and those cases skip wherever the answer is not yes --
+# including every build outside core-cpp's presets (core-cpp#15, docs/modules/async.md). Clang and
+# MSVC make the transfer a tail call at every level and are not asked.
+#
+# Here, rather than in one module's CMakeLists.txt, because more than one module's tests ask: a
+# definition computed in src/core/async is invisible to src/core/net, a sibling directory, and a
+# case that cannot see the answer runs as though it were yes.
+set(CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS "")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_coreCppTransferOptimisation "${CMAKE_CXX_FLAGS}")
+    if(CMAKE_BUILD_TYPE)
+        string(TOUPPER "${CMAKE_BUILD_TYPE}" _coreCppTransferConfiguration)
+        string(APPEND _coreCppTransferOptimisation " ${CMAKE_CXX_FLAGS_${_coreCppTransferConfiguration}}")
+    endif()
+    # The last -O on the command line is the one that counts, as it is for the compiler; GCC's
+    # default, where there is none at all, is -O0.
+    set(_coreCppTransferLevel "-O0")
+    string(REGEX MATCHALL "(^| )-O[0-9A-Za-z]*" _coreCppTransferLevels "${_coreCppTransferOptimisation}")
+    if(_coreCppTransferLevels)
+        list(POP_BACK _coreCppTransferLevels _coreCppTransferLevel)
+        string(STRIP "${_coreCppTransferLevel}" _coreCppTransferLevel)
+    endif()
+    set(_coreCppTransferTailCall "no, so the deep synchronous-await cases are skipped")
+    if(_coreCppTransferLevel MATCHES "^-O([23]|fast)$")
+        list(APPEND CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS CORE_ASYNC_SYMMETRIC_TRANSFER_IS_TAIL_CALL=1)
+        set(_coreCppTransferTailCall "yes")
+    endif()
+    message(STATUS "[core-cpp] GCC at ${_coreCppTransferLevel}, symmetric transfer tail-calls: "
+                   "${_coreCppTransferTailCall}")
+endif()
+
 set(CORE_CPP_CLANG_TIDY_COMMAND "")
 if(CORE_CPP_CLANG_TIDY)
     # The plain name first: it is what the pinned PyPI release installs. A distribution's

@@ -9,6 +9,7 @@
 #include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -90,6 +92,11 @@ class ClientSupervisor
     /// thread, where the client lives.
     void stop();
 
+    /// Cuts the reconnect backoff short: the wait under way ends at once and the next attempt starts, or,
+    /// while an attempt is under way, the wait after it is skipped. Does nothing outside a reconnect. Unlike
+    /// stop() it ends nothing: a system wake calls it, since the network may be back. Thread-safe.
+    void retryNow();
+
     /// @return The client of the connection under way; null between connections.
     [[nodiscard]] NativeClient* current() noexcept { return _current.get(); }
 
@@ -140,6 +147,17 @@ class ClientSupervisor
     /// Tells the handler of a state change.
     void enter(ConnectionState state, std::string const& reason = {});
 
+    /// Waits until @p deadline, until stop(), or until retryNow(), whichever comes first; the caller tells
+    /// a stop from the other two by asking @ref _stop.
+    /// @param deadline When the backoff ends by itself.
+    [[nodiscard]] core::async::Task<void> backoffUntil(core::platform::SteadyTimePoint deadline);
+
+    /// @return A token of the retry source in force, stopped by retryNow() since it was installed.
+    [[nodiscard]] core::async::StopToken retryToken();
+
+    /// Installs a fresh retry source: a retryNow() before it no longer counts.
+    void resetRetry();
+
     core::net::EventLoop& _loop;
     std::shared_ptr<ITransportFactory> _transport;
     ClientFactory _makeClient;
@@ -147,6 +165,10 @@ class ClientSupervisor
     BackoffSchedule _backoff;
     StateHandler _onState;
     core::async::StopSource _stop;
+    /// Guards @ref _retry, which retryNow() reaches from any thread.
+    std::mutex _retryMutex;
+    /// Stopped by retryNow(): what a backoff wait parks on beside @ref _stop. Replaced once spent.
+    core::async::StopSource _retry;
     /// The windows the last accepted connection followed: what the next one resumes.
     std::vector<uint64_t> _followed;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client

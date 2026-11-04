@@ -2032,6 +2032,15 @@ TEST_CASE("SetSplitOrientation round-trips, and carries a state no axis names", 
     STATIC_CHECK(std::to_underlying(PduType::SetSplitOrientation) == 40);
 }
 
+TEST_CASE("PanesReprojected round-trips, and a newer peer's appended bytes do not break it", "[vthost][pdu]")
+{
+    CHECK(roundTrip(DecodedPdu { PanesReprojected {} }) == DecodedPdu { PanesReprojected {} });
+    auto body = Writer {};
+    body.varint(7); // a field some later version appends
+    CHECK(decodeAs<PanesReprojected>(frameOf(PduType::PanesReprojected, body.view())) == PanesReprojected {});
+    STATIC_CHECK(std::to_underlying(PduType::PanesReprojected) == 44);
+}
+
 TEST_CASE("a truncated MoveNode body is a DecodeError", "[vthost][pdu][move]")
 {
     // The body stops after the source list: the target kind and everything after it are missing.

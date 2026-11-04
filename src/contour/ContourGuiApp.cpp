@@ -218,6 +218,12 @@ namespace
     /// only the other probes.
     constexpr auto LinkProbeThreads = std::size_t { 1 };
 
+    /// What a missing sleep/wake monitor costs, said where it is logged.
+    constexpr auto NoPowerMonitorNote = std::string_view {
+        "on macOS a sleep is still noticed, by the late liveness tick after it; on Linux and the BSDs the "
+        "connection's clock stops during a suspend, so nothing is noticed and nothing is lost."
+    };
+
     /// The production ProgramReachablePredicate: the reachability test every external launch in the
     /// app already asks, phrased for the CLI's UTF-8 token.
     [[nodiscard]] bool isReachableProgram(std::string_view program)
@@ -1374,6 +1380,30 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     else
         errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
 
+    // A wake has the daemon probed instead of the connection given up, which would reconnect and shrink the
+    // panes to the profile's size. Without a monitor only the steady clock can tell: on macOS it counts the
+    // sleep, so the first liveness tick after it runs late and has the daemon probed; on Linux and the BSDs
+    // it stops while the system is suspended, so there is nothing to detect -- and no false loss either.
+    // A platform with no backend (a BSD, a Flatpak sandbox, a build without systemd) is expected and logged
+    // where attaching is; an OS that refused the registration is not, and is said where the user sees it.
+    // Created once per process: a failure is remembered, not retried, so either is said once.
+    if (!_powerMonitor && !_powerMonitorFailure)
+    {
+        if (auto monitor = core::platform::makeNativeSystemPowerMonitor(); monitor)
+            _powerMonitor = *std::move(monitor);
+        else
+        {
+            _powerMonitorFailure = monitor.error();
+            if (monitor.error() == core::platform::PlatformError::NotImplemented)
+                attachLog()("attach: no system sleep/wake notifications on this platform; {}",
+                            NoPowerMonitorNote);
+            else
+                errorLog()("attach: no system sleep/wake notifications ({}); {}",
+                           core::platform::toString(monitor.error()),
+                           NoPowerMonitorNote);
+        }
+    }
+
     _nativeController = std::make_unique<remote::NativeController>(
         std::move(target->transport),
         std::move(target->intent),
@@ -1382,7 +1412,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         [this] { return currentEmulationSettings(); },
         _colorPreference,
         core::platform::defaultSteadyClock(),
-        _startupTimeline);
+        _startupTimeline,
+        _powerMonitor.get());
     // A window spawned to host a daemon window binds itself here (from its Main.qml, via
     // consumeAttachWindow) instead of creating a fresh first tab.
     _sessionManager.setAttachWindowBinder(

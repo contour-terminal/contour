@@ -3461,8 +3461,10 @@ TEST_CASE("a pointer that reaches the sliding band keeps it revealed (offscreen)
             QPoint(band.window->width() / 2, static_cast<int>(band.titleBar->implicitHeight() / 2)));
         band.linger();
         CHECK(band.revealed());
-        CHECK(band.titleBar->y() == 0);
-        CHECK(band.titleBar->opacity() == 1);
+        // The slide (or fade) runs on the animation clock, which a loaded runner can leave behind the
+        // fixed linger; wait for it to settle rather than racing it.
+        CHECK(
+            QTest::qWaitFor([&] { return band.titleBar->y() == 0 && band.titleBar->opacity() == 1; }, 2000));
 
         // Away: it goes, after its short grace.
         QTest::mouseMove(band.window, band.awayPoint());

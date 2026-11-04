@@ -7,6 +7,59 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.14.0] - 2026-11-04
+
+### Breaking
+
+- **`core::platform::testing::FakeSystemPowerMonitor::emit()` is now `deliver()`**, because `emit` is a macro in Qt
+  translation units and the header could not be included there. Migration: rename the call.
+
+## [0.13.0] - 2026-11-03
+
+### Breaking
+
+- **On Linux, core-cpp needs `libsystemd` and `pkg-config` by default.** The new build option
+  `CORE_CPP_WITH_SYSTEMD` (Linux only, ON by default) links `libsystemd` for the system power backend (see Added),
+  found through `pkg-config`, and a configure without either stops, naming the option. Migration: install
+  `pkg-config` and libsystemd's development package (`libsystemd-dev`, `systemd-devel`), or configure with
+  `-DCORE_CPP_WITH_SYSTEMD=OFF`, which builds without it and makes `makeNativeSystemPowerMonitor()` report
+  `NotImplemented`.
+- **`core::platform::PlatformError` has a new enumerator, `NotificationRegistrationFailed`**, appended last so the
+  others keep their values. A `switch` over `PlatformError` that names every enumerator and builds with `-Werror`
+  (`-Wswitch`) must handle it; `toString()` already does.
+
+### Added
+
+- **`core::platform::ISystemPowerMonitor`, system sleep and wake notifications.** `makeNativeSystemPowerMonitor()`
+  returns the platform's monitor, whose `subscribe()` hands out a move-only `PowerSubscription` that delivers
+  `SystemPowerEvent::WillSleep` and `DidWake` to a handler until it is destroyed. Handlers run on a platform thread
+  that is not the caller's; destroying a subscription waits out a handler that is running, except from that
+  handler itself. A handler must not throw (one that does terminates the process, on every backend and in the
+  test double), must not create or destroy a monitor, must not block on a thread that may be destroying its
+  subscription or monitor, and should return promptly. Events are hints: a `DidWake` may come without a
+  `WillSleep`, and a monitor that was created does not guarantee that any event arrives.
+  macOS uses IOKit, Linux uses logind's `PrepareForSleep` over sd-bus (reconnecting a lost system bus with a
+  backoff of 1 s doubling up to 30 s, so delivery pauses while the bus is away), and Windows uses
+  `PowerRegisterSuspendResumeNotification`; elsewhere the factory reports `NotImplemented`.
+  `NotificationRegistrationFailed` means the registration could not be made: on macOS and Windows when the operating
+  system refuses it, on Linux only when the system bus cannot be opened (a match the bus refuses later is retried
+  like a lost bus). `testing::FakeSystemPowerMonitor` is the test double, and
+  `detail::PowerHandlerRegistry` is the supported way to implement another monitor.
+
+### Fixed
+
+- **`core-cpp.net` no longer crashes in a GCC build below `-O2`.** Its case looping over 200000 awaits that
+  complete inline assumed symmetric transfer is a tail call, which GCC makes it only from `-O2` up (core-cpp#15):
+  at GCC 14 `-O0` each iteration nests a 64-byte frame, and the loop overflowed an 8 MiB stack on aarch64
+  Linux. It now skips there, as `Task_test.cpp`'s deep-chain case already did, and a 1000-iteration case keeps
+  the loop covered on every build. The detection moved from `src/core/async/CMakeLists.txt` to
+  `cmake/CoreCppToolchain.cmake` (`CORE_CPP_SYMMETRIC_TRANSFER_DEFINITIONS`), so every module's tests can ask.
+- **`core-cpp.platform`'s CPU counter scaling case no longer fails on a busy machine.** It measured all its
+  small runs, then all its large ones, and compared the least of each, so a slowdown that covered the small
+  stretch alone pushed the ratio under its bound: Windows' reference cycles counted 1.26x for twice the work on
+  a shared CI runner. It now compares each small run with the large run measured right after it and takes the
+  median of the pairs; a counter that does not scale still fails.
+
 ## [0.12.0] - 2026-11-03
 
 ### Added

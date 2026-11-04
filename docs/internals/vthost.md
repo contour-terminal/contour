@@ -162,6 +162,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
 | `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a window's tab well, or into a new window, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
 | `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every window the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one window may be in flight to another |
+| `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: the daemon asks a client to re-assert its pane sizes after another client departs, and the client re-sends every pane's size. Without it the client keeps whatever grids the departure left |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -382,6 +383,18 @@ on that axis fires nothing. On success the model fires `paneOrientationChanged`,
 pushed the layout in the same batch machinery a move uses; there is no reply PDU. The GUI sends it for
 "Toggle Split Orientation" when the daemon serves `MoveNode` and does not flip locally, because the next
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
+
+**`PanesReprojected`** (tag 44, server→client, no fields, gated on `Capability::PanesReprojected`) asks a
+client to re-assert its pane sizes; the name predates that broader meaning. The daemon sends it whenever
+another client that had reported a client area departs (`SessionStreamEvents::otherClientDeparted`). If the
+departure took the authoritative area with it, every pane was re-projected onto the area that is left,
+discarding the per-pane grids this client refined; if the area stayed where it was, nothing is re-projected,
+but the departed client's own per-pane refinements may still be in force, since the last pane report wins.
+Either way the survivor's own geometry did not move, so nothing on its side would report its panes again.
+The daemon sends it alone -- a departure changes no tree, so no layout goes with it -- and the client re-sends
+every pane's size, never the client area (`NativeController::onPanesReprojected`); the re-sent sizes push
+nothing back. A report never raises it, for a report re-projects at the reporting client's own request. A
+client that does not share the capability is not sent it, and keeps whatever grids a departure left.
 
 **Coexistence with `MergeTabIntoSplit`.** A daemon serves both. A client that shares `MoveNode` sends every
 drop as one; a client that does not, against a daemon that shares `TabMerge`, still merges a whole tab beside a
@@ -1055,6 +1068,17 @@ hands over to the reconnect loop above. Any inbound frame counts as life, not on
 sent only to a daemon that shares `Capability::Heartbeat`; the `ClientHello` answer has its own
 `handshakeDeadline` (10 s) that applies to every daemon, so an old one that predates heartbeats is still
 not waited on forever.
+
+A sleep is not a loss. The OS announces it through `core::platform::ISystemPowerMonitor`
+(`NativeClient::noteSystemSleep()`/`noteSystemWake()`): while asleep there is no verdict, and the wake
+probes at once and gives the probe `wakeDeadline` (5 s), measured from the wake, to be answered. Only the
+echo of that probe ends the wake state -- any other frame read then may have been buffered before the sleep
+and proves nothing about the connection now. An announced sleep that is never taken lifts after
+`announcedSleepGrace` (35 s, beyond the 30 s IOKit gives an application to acknowledge one). Without a
+monitor only the steady clock can tell: on macOS it counts the sleep, so the first tick after it runs
+`awakeGap` (5 s) late and enters the same wake state; on Linux and the BSDs it stops while the system is
+suspended, so there is nothing to detect and no false loss either. A late tick otherwise catches a
+`SIGSTOP` or a paused VM.
 
 ### Control channel
 

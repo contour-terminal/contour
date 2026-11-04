@@ -349,6 +349,13 @@ if(CONTOUR_FRONTEND_GUI)
     include(FindQt)
 endif()
 
+# Only Linux has systemd, and inside Flatpak the sandbox may not create units. Decided here, before
+# the dependencies, because core-cpp's sleep/wake monitor follows this option too (see
+# cmake/ContourThirdParties.cmake) and must see the final value, as vtpty's session scopes do.
+if(NOT LINUX OR EXISTS "/.flatpak-info")
+    set(CONTOUR_WITH_SYSTEMD OFF)
+endif()
+
 # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
 # has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.
 # CMAKE_CXX_CLANG_TIDY is inherited by every target created after it is set, so stash it across the

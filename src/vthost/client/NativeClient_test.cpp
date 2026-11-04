@@ -2805,6 +2805,48 @@ TEST_CASE("a daemon's LayoutBatchEnd reaches the client's handler after the layo
     CHECK(heard == std::vector<std::string> { "layout 1", "layout 2", "end 4" });
 }
 
+TEST_CASE("a daemon's PanesReprojected reaches the client's handler", "[vthost][attach]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto told = 0;
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                            { proto::Capability::PanesReprojected }) },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler {},
+                       NativeClient::PermissionHandler {},
+                       vthost::client::LivenessPolicy {},
+                       NativeClient::TabMergeRefusedHandler {},
+                       NativeClient::MoveNodeRefusedHandler {},
+                       NativeClient::LayoutBatchEndHandler {},
+                       NativeClient::PanesReprojectedHandler { [&told] { ++told; } } };
+    auto const departing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(
+                                  proto::CapabilitySet::of({ proto::Capability::PanesReprojected })) },
+                            { std::nullopt, proto::PanesReprojected {} } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client, int const* told) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return *told == 1; });
+        client->detach();
+    }(&loop, &client, &told);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, departing, &seen), std::move(scenario)));
+
+    CHECK(told == 1);
+}
+
 TEST_CASE("against a daemon without MoveNode no MoveNode is written", "[vthost][attach][compat][move]")
 {
     // A newer client, an older daemon: the verb is not written at all, and the caller learns it.
@@ -2914,7 +2956,9 @@ Task<void> daemonToEnd(Task<void> daemon, bool* ended)
         NativeClient::PermissionHandler {},
         vthost::client::LivenessPolicy { .idleBeforeProbe = 5s,
                                          .deadAfter = 15s,
-                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline });
+                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline,
+                                         .awakeGap = 5s,
+                                         .wakeDeadline = 5s });
 }
 
 /// A loop on a manual clock, a client on it, and a scripted daemon answering it with @p answer — driven by
@@ -2966,6 +3010,33 @@ struct ManualClockAttach
         { std::nullopt, acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } });
 }
 
+/// @return A script answering the hello with one that shares Heartbeat, then echoing every Heartbeat.
+[[nodiscard]] ScriptFor echoingAfterHello()
+{
+    return [](proto::DecodedFrame const& frame) -> Script {
+        if (carries<proto::ClientHello>(frame))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
+        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+            return Script { { std::nullopt, *heartbeat } };
+        return Script {};
+    };
+}
+
+/// @return A script answering the hello with one that shares Heartbeat, then answering every Heartbeat with
+///         an echo of another nonce -- a frame, but not the answer to the probe just sent.
+[[nodiscard]] ScriptFor misechoingAfterHello()
+{
+    return [](proto::DecodedFrame const& frame) -> Script {
+        if (carries<proto::ClientHello>(frame))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
+        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+            return Script { { std::nullopt, proto::Heartbeat { .nonce = heartbeat->nonce + 100 } } };
+        return Script {};
+    };
+}
+
 } // namespace
 
 TEST_CASE("a client whose daemon stops answering ends with a loss reason", "[vthost][attach][liveness]")
@@ -2999,21 +3070,92 @@ TEST_CASE("a client whose daemon never answers the hello gives up at the handsha
 
 TEST_CASE("a client whose daemon echoes stays connected", "[vthost][attach][liveness]")
 {
-    auto const echoing = [](proto::DecodedFrame const& frame) -> Script {
-        if (carries<proto::ClientHello>(frame))
-            return Script { { std::nullopt,
-                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
-        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
-            return Script { { std::nullopt, *heartbeat } };
-        return Script {};
-    };
-    auto h = ManualClockAttach { echoing };
+    auto h = ManualClockAttach { echoingAfterHello() };
     REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
     h.letTimePass(40);
 
     CHECK_FALSE(h.clientEnded);
     CHECK_FALSE(h.client->lossReason().has_value());
     CHECK(std::ranges::count_if(h.seen, carries<proto::Heartbeat>) >= 2);
+    h.settle();
+}
+
+TEST_CASE("a client frozen past the deadline probes its daemon instead of dropping it",
+          "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { echoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    auto const seenBefore = h.seen.size();
+    h.clock.advance(1000s); // the whole machine slept: one late tick, no second of it observed
+    h.letTimePass(10);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK(std::ranges::any_of(h.seen | std::views::drop(seenBefore), carries<proto::Heartbeat>));
+    h.settle();
+}
+
+TEST_CASE("a daemon gone during a sleep is given up on within the wake deadline",
+          "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { silentAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.clock.advance(1000s);
+    h.letTimePass(6);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK(h.client->lossReason() == "no answer from the daemon for 5 s");
+    h.settle();
+}
+
+TEST_CASE("after a wake only the probe's own echo keeps the connection", "[vthost][attach][liveness]")
+{
+    // Frames keep coming, but none answers the wake's probe: what was read may predate the sleep.
+    auto h = ManualClockAttach { misechoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.clock.advance(1000s);
+    h.letTimePass(6);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK(h.client->lossReason() == "no answer from the daemon for 5 s");
+    h.settle();
+}
+
+TEST_CASE("an announced sleep holds the liveness verdict back", "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { silentAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.letTimePass(3); // 3 s of silence: short of idleBeforeProbe (5 s)
+    h.client->noteSystemSleep();
+    h.letTimePass(3); // 6 s of silence, 3 s asleep: past idleBeforeProbe, short of announcedSleepGrace
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>)); // nothing probed while asleep
+    h.settle();
+}
+
+TEST_CASE("an announced wake probes the daemon at once", "[vthost][attach][liveness]")
+{
+    auto h = ManualClockAttach { echoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    REQUIRE_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>));
+    h.client->noteSystemWake(); // the clock does not move: no tick is late, only the hint says so
+
+    CHECK(turnUntil(h.loop, [&h] { return std::ranges::any_of(h.seen, carries<proto::Heartbeat>); }));
+    CHECK_FALSE(h.clientEnded);
+    h.settle();
+}
+
+TEST_CASE("a daemon that does not echo is never probed on a wake", "[vthost][attach][liveness]")
+{
+    // An older daemon would answer every Heartbeat Unsupported: the client offers it, the daemon does not.
+    auto h = ManualClockAttach { answeringHello(Script { { std::nullopt, acceptingHello() } }) };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.client->noteSystemSleep();
+    h.client->noteSystemWake();
+    h.letTimePass(20);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>));
     h.settle();
 }
 

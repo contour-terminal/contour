@@ -28,6 +28,8 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/platform/SystemPower.hpp>
+
 #include <QtCore/QObject>
 
 #include <algorithm>
@@ -132,6 +134,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///        Borrowed: it must outlive the controller.
     /// @param timeline Where the connect, the layout and the first session are stamped. Borrowed: it must
     ///        outlive the controller.
+    /// @param powerMonitor Where the system's sleep and wake are heard of, so a wake has the daemon probed
+    ///        rather than the connection given up; null where nothing reports them. Subscribed to for the
+    ///        controller's lifetime. Borrowed: it must outlive the controller.
     NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
                      vthost::proto::AttachIntent intent,
                      std::string profileName,
@@ -139,7 +144,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
                      SessionSettingsSource sessionSettings,
                      std::optional<vtbackend::ColorPreference> colorPreference,
                      core::platform::IClock const& clock,
-                     vthost::latency::StartupTimeline& timeline);
+                     vthost::latency::StartupTimeline& timeline,
+                     core::platform::ISystemPowerMonitor* powerMonitor);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~NativeController() override;
@@ -283,6 +289,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// even with no pending session — during realization panes are bound by
     /// setNextBindSession, not the FIFO queue.
     void setRealizingLayout(bool realizing);
+
+    /// GUI thread. Once the GUI reconciled a layout of a reconnect: re-sends every bound pane's size once
+    /// (never the client area), even though no display geometry changed. No-op otherwise.
+    void reassertGeometryAfterReconcile();
 
     /// @return Whether a layout realization is in progress (so a split it triggers
     ///         is built locally, not re-authored on the daemon).
@@ -639,6 +649,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param layout A window's layout the daemon just pushed.
     void replayUnsentCloses(vthost::proto::LayoutState const& layout);
 
+    /// Reactor-side: hands a system sleep or wake to the connection that is up. While none is, a wake cuts
+    /// the reconnect backoff short (ClientSupervisor::retryNow()) and a sleep is dropped, as the next
+    /// connection starts with a fresh liveness verdict anyway.
+    /// @param event What the system did.
+    void notePowerEvent(core::platform::SystemPowerEvent event);
+
     /// Reactor-side: closes @p session's pane on the daemon, or remembers to when no connection can take it.
     /// @param session The session whose pane the user closed.
     void closePaneOnReactor(uint64_t session);
@@ -665,6 +681,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// the GUI to reconcile the push whole.
     void onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end);
 
+    /// Reactor-side: the daemon asks for this client's pane sizes again, as another client departed
+    /// (proto::PanesReprojected); re-asserts the panes from the GUI thread, which lays them out.
+    void onPanesReprojected();
+
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
     [[nodiscard]] bool layoutBatchShared() const;
 
@@ -688,9 +708,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param cells The pane's new grid.
     void reportPaneGeometry(uint64_t session, uint64_t serial, vtpty::PageSize cells);
 
-    /// Sends the pending geometry report (GUI thread): the composed client area if it moved, plus
-    /// every bound pane whose grid the daemon does not already have.
-    void flushGeometry();
+    /// What a flushGeometry() may state.
+    enum class GeometryFlush : uint8_t
+    {
+        Report = 0, ///< A pane reported a grid: the client area if it moved, and the panes that did.
+        PanesOnly,  ///< A pending re-assertion: every pane, and never the client area, which panes a
+                    ///< reconcile just created at their birth size do not compose yet.
+    };
+
+    /// Sends the pending geometry report (GUI thread): the composed client area if it moved (unless
+    /// @p scope is PanesOnly), plus every bound pane whose grid the daemon does not already have, or every
+    /// one while a re-assertion is pending and the panes compose to an area.
+    /// @param scope What this flush may state.
+    void flushGeometry(GeometryFlush scope);
 
     /// The client area composed from the pane tree the daemon last pushed and the grids its leaves
     /// are rendered at (@see vthost::client::composeClientArea). Prefers the tab holding the pane
@@ -830,6 +860,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// snapshot per followed session.
     std::optional<vtpty::PageSize> _lastReportedArea;
     std::unordered_map<uint64_t, vtpty::PageSize> _lastReportedPaneSizes;
+    /// The last area stated to any connection (a hello, or a resize request). Never reset, not even for a
+    /// restarted daemon: it is what the window is, and the next hello states it while no layout composes one.
+    std::optional<vtpty::PageSize> _lastStatedArea;
+    /// The area this connection's hello stated; spent by the first flushGeometry() that composes it (which
+    /// then does not state it again), or by a report that composes another.
+    std::optional<vtpty::PageSize> _helloArea;
+    /// Whether every pane's size is yet to be re-asserted after the daemon re-projected them.
+    enum class GeometryReassert : uint8_t
+    {
+        Idle = 0,
+        Pending, ///< Set by a reconnect or proto::PanesReprojected; spent by the first flush that composes.
+    };
+    GeometryReassert _geometryReassert = GeometryReassert::Idle;
     /// The session whose pane last reported a grid; anchors which tab the client area is composed
     /// from, @see vthost::client::composeAnchoredClientArea. Outlives the individual flush it was
     /// set for — a report is not "consumed" — but never its pane: `unbind` clears it, so it either
@@ -857,6 +900,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The windows the last reconnect lost, announced with the first layout that came instead. Under _mutex.
     std::vector<uint64_t> _lostWindows;
     uint64_t _nextBindingSerial = 1; ///< @see Binding::serial. Under _mutex.
+    /// Keeps the power monitor's handler, which posts each event to notePowerEvent() on the reactor; empty
+    /// without a monitor. ~NativeController() stops and joins the reactor before members die, so a handler
+    /// may still post onto the stopped loop until this unsubscribes: that is safe because
+    /// ReactorThread::post() only queues (the lambda is destroyed with the loop, never run), not because of
+    /// where this member sits. Unsubscribing waits out a handler that is running.
+    core::platform::PowerSubscription _powerSubscription;
 };
 
 } // namespace contour::remote

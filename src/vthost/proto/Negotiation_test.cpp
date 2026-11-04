@@ -98,3 +98,12 @@ TEST_CASE("the live-upgrade capability keeps its ident and name", "[vthost][nego
     REQUIRE(row != CapabilityTable.end());
     CHECK(row->name == "live-upgrade");
 }
+
+TEST_CASE("the panes-reprojected capability keeps its ident and name", "[vthost][negotiation]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::PanesReprojected) == 19);
+    auto const row =
+        std::ranges::find(CapabilityTable, Capability::PanesReprojected, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "panes-reprojected");
+}

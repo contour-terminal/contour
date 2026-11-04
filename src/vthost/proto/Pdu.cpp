@@ -293,6 +293,10 @@ namespace
     {
         return std::to_underlying(PduType::DaemonUpgrading);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(PanesReprojected const&) noexcept
+    {
+        return std::to_underlying(PduType::PanesReprojected);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -887,6 +891,10 @@ namespace
     void encodeBody(Writer& out, DaemonUpgrading const& pdu)
     {
         out.string(pdu.toRelease);
+    }
+
+    void encodeBody(Writer&, PanesReprojected const&)
+    {
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1840,6 +1848,11 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodePanesReprojected(Reader&)
+    {
+        return PanesReprojected {};
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -2049,6 +2062,7 @@ namespace
         DecodeRow { PduType::UpgradeDaemon, decodeUpgradeDaemon },
         DecodeRow { PduType::UpgradeDaemonReply, decodeUpgradeDaemonReply },
         DecodeRow { PduType::DaemonUpgrading, decodeDaemonUpgrading },
+        DecodeRow { PduType::PanesReprojected, decodePanesReprojected },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

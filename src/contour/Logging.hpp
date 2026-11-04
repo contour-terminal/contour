@@ -28,4 +28,8 @@ auto inline const portalLog = core::log::Category("gui.portal", "xdg-desktop-por
 /// the action that caused them returned, and are the only trace such a failure leaves.
 auto inline const launcherLog = core::log::Category("gui.launcher", "Opening URLs in the desktop's handler");
 
+/// Attaching to a daemon: the native attach engine's connection lifecycle, and the composition root that
+/// creates it. Shared for the same reason as startupLog.
+auto inline const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
+
 } // namespace contour

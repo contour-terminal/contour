@@ -814,6 +814,8 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
     }
 
     controller.setRealizingLayout(false);
+    // A reconnect's daemon projected every pane onto the hello's area: say what the panes are.
+    controller.reassertGeometryAfterReconcile();
 }
 
 } // namespace contour::remote

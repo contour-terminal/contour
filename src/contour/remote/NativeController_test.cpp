@@ -57,6 +57,8 @@
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/SystemPower.hpp>
+#include <core/platform/testing/FakeSystemPowerMonitor.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <algorithm>
@@ -64,6 +66,7 @@
 #include <expected>
 #include <span>
 
+#include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
@@ -94,28 +97,39 @@ struct TestTimeline
     vthost::latency::StartupTimeline timeline { clock, clock.now() };
 };
 
+/// What makeNativeController() builds a controller with beyond its daemon and timeline.
+struct ControllerOptions
+{
+    /// Asked before each session the controller creates; empty to keep none.
+    contour::remote::NativeController::SessionSettingsSource sessionSettings = {};
+    /// The light/dark preference its first hello states; none states none.
+    std::optional<vtbackend::ColorPreference> colorPreference = std::nullopt;
+    /// The emulation settings its hello states, the profile page size among them; none states none, and so
+    /// no client area.
+    std::optional<vtbackend::Settings> attachSettings = std::nullopt;
+    /// Where it hears of system sleep and wake; null for nowhere. It must outlive the controller.
+    core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
+};
+
 /// Builds a controller as every test here does: no attach settings of its own, on the steady clock.
 /// The one place the constructor is spelled, so a collaborator it gains is added here alone.
 /// @param endpoint The daemon to attach to, over TLS.
 /// @param timeline What the controller stamps; it must outlive the controller.
-/// @param sessionSettings Asked before each session the controller creates; empty to keep none.
-/// @param colorPreference The light/dark preference its first hello states; none states none.
+/// @param options What else it is built with; none of it by default.
 /// @return The controller, not yet connecting.
 [[nodiscard]] std::unique_ptr<contour::remote::NativeController> makeNativeController(
-    vthost::TcpEndpoint endpoint,
-    TestTimeline& timeline,
-    contour::remote::NativeController::SessionSettingsSource sessionSettings = {},
-    std::optional<vtbackend::ColorPreference> colorPreference = std::nullopt)
+    vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
 {
     return std::make_unique<contour::remote::NativeController>(
         std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
         vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
         std::string {},
-        std::nullopt,
-        std::move(sessionSettings),
-        colorPreference,
+        std::move(options.attachSettings),
+        std::move(options.sessionSettings),
+        options.colorPreference,
         core::platform::defaultSteadyClock(),
-        timeline.timeline);
+        timeline.timeline,
+        options.powerMonitor);
 }
 
 /// Captures every log category into one buffer that several threads may write while another
@@ -209,6 +223,115 @@ class DroppableSocket final: public core::net::testing::SocketDecorator
   private:
     std::unique_ptr<core::net::ISocket> _inner;
     std::set<DroppableSocket*>& _live;
+};
+
+/// How many PDUs of each counted kind the daemon received from its clients, across every connection. The
+/// kinds are the rows of @c Kinds: counting another is one more row. Written on the daemon thread, read by
+/// any. Every read fails the case if the client's bytes did not decode, for what it reads is then incomplete.
+class ClientFrameCounts
+{
+  public:
+    /// The PDU kinds counted.
+    static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
+                                               vthost::proto::PduType::Heartbeat,
+                                               vthost::proto::PduType::ResizePane };
+
+    /// @param type A counted kind.
+    /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
+    [[nodiscard]] uint64_t count(vthost::proto::PduType type) const
+    {
+        checkDecoded();
+        auto const row = std::ranges::find(Kinds, type);
+        return row == Kinds.end() ? 0 : _counts[static_cast<std::size_t>(row - Kinds.begin())].load();
+    }
+
+    /// Counts @p pdu if it is of a counted kind, and keeps the area a ResizeRequest states.
+    void note(vthost::proto::DecodedPdu const& pdu)
+    {
+        if (auto const row = std::ranges::find(Kinds, vthost::proto::typeOf(pdu)); row != Kinds.end())
+            ++_counts[static_cast<std::size_t>(row - Kinds.begin())];
+        if (auto const* resize = std::get_if<vthost::proto::ResizeRequest>(&pdu))
+        {
+            auto const lock = std::lock_guard { _areasMutex };
+            _areas.push_back(
+                vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(resize->lines)),
+                                  .columns = vtpty::ColumnCount(static_cast<int>(resize->columns)) });
+        }
+    }
+
+    /// @return Every client area a ResizeRequest stated so far, in arrival order.
+    [[nodiscard]] std::vector<vtpty::PageSize> areas() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _areas;
+    }
+
+    /// Records that the client's bytes did not decode, past which the counts above are no longer complete.
+    void noteDecodeError() noexcept { ++_decodeErrors; }
+
+  private:
+    /// Fails the case if the client's bytes ever failed to decode.
+    void checkDecoded() const { CHECK(_decodeErrors.load() == 0); }
+
+    std::array<std::atomic<uint64_t>, Kinds.size()> _counts {};
+    std::atomic<uint64_t> _decodeErrors {};
+    mutable std::mutex _areasMutex {};
+    std::vector<vtpty::PageSize> _areas {}; ///< Under _areasMutex.
+};
+
+/// A daemon end of a connection that decodes the frames the client sends, keeping partial frames across
+/// reads, and counts them into @p counts. Reads pass through unchanged.
+class CountingSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    using ReadResult = std::expected<std::size_t, core::net::NetError>;
+
+    CountingSocket(std::unique_ptr<core::net::ISocket> inner, ClientFrameCounts& counts):
+        SocketDecorator(*inner), _inner(std::move(inner)), _counts(counts)
+    {
+    }
+
+    CountingSocket(CountingSocket const&) = delete;
+    CountingSocket& operator=(CountingSocket const&) = delete;
+    CountingSocket(CountingSocket&&) = delete;
+    CountingSocket& operator=(CountingSocket&&) = delete;
+
+    [[nodiscard]] core::net::IoAwaitable read(std::span<std::byte> buffer) override
+    {
+        return core::net::IoAwaitable { observe(buffer) };
+    }
+
+  private:
+    [[nodiscard]] core::async::Task<ReadResult> observe(std::span<std::byte> buffer)
+    {
+        auto const read = co_await _inner->read(buffer);
+        if (read && *read > 0)
+        {
+            _pending.insert(_pending.end(), buffer.begin(), buffer.begin() + static_cast<long>(*read));
+            for (;;)
+            {
+                auto const decoded = vthost::proto::decodePdu(_pending);
+                if (!decoded && decoded.error() == vthost::proto::DecodeError::NeedMoreData)
+                    break; // incomplete: the rest arrives with the next read
+                if (!decoded)
+                {
+                    // Not a frame boundary this decoder can find again: what follows is not counted, and
+                    // the case reading the counts is told so instead of reading a silent undercount.
+                    _counts.noteDecodeError();
+                    _pending.clear();
+                    break;
+                }
+                _counts.note(decoded->pdu);
+                _pending.erase(_pending.begin(), _pending.begin() + static_cast<long>(decoded->consumed));
+            }
+        }
+        co_return read;
+    }
+
+    std::unique_ptr<core::net::ISocket> _inner;
+    ClientFrameCounts& _counts;
+    std::vector<std::byte> _pending {};
 };
 
 /// A daemon end of a connection that can hold back what the daemon writes once the LayoutState of one window
@@ -337,6 +460,7 @@ struct DaemonFixture
 {
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
     core::net::EventLoop loop { *source };
+    ClientFrameCounts clientFrames; ///< What the clients sent, counted by kind; outlives the sockets.
     std::shared_ptr<vthost::IExtensionHosting> extensions;
     vthost::NativeSessionServices services;
     std::unique_ptr<vthost::SessionHost> host;
@@ -358,6 +482,8 @@ struct DaemonFixture
     std::optional<vthost::WorkspaceRestore> restore;
     /// The tabs the host opens on construction, as `default_layout` would; none opens none.
     vtworkspace::Layout startupLayout;
+    /// How the host resolves one client area from several clients' reports.
+    vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -370,6 +496,7 @@ struct DaemonFixture
             vtbackend::Settings {},
             core::defaultEnvironment(),
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .sizePolicy = sizePolicy,
                                         .startupLayout = startupLayout,
                                         .extensions = extensions,
                                         .profiles = profiles,
@@ -384,18 +511,21 @@ struct DaemonFixture
     /// @param restore The workspace the first host restores as it starts; none by default. Only that host:
     ///        restartHost()'s is a run with nothing to restore.
     /// @param startupLayout The tabs the host opens on construction; none by default.
+    /// @param sizePolicy How the host resolves one client area from several; the latest report by default.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
                            std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
                            std::optional<vthost::WorkspaceRestore> restore = std::nullopt,
-                           vtworkspace::Layout startupLayout = {}):
+                           vtworkspace::Layout startupLayout = {},
+                           vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
         profiles(std::move(profiles)),
         restore(std::move(restore)),
-        startupLayout(std::move(startupLayout))
+        startupLayout(std::move(startupLayout)),
+        sizePolicy(sizePolicy)
     {
         host = makeHost();
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
@@ -411,7 +541,10 @@ struct DaemonFixture
         auto const& context = *tls;
         auto handler = [this, context](vthost::ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
             auto gate = std::make_unique<GatedSocket>(
-                std::make_unique<DroppableSocket>(context->wrap(std::move(socket), loop), live), gated);
+                std::make_unique<CountingSocket>(
+                    std::make_unique<DroppableSocket>(context->wrap(std::move(socket), loop), live),
+                    clientFrames),
+                gated);
             if (holdNewAtLayout)
                 gate->holdAtNextLayout();
             return native(std::move(id), std::move(gate));
@@ -588,6 +721,33 @@ struct DaemonFixture
             auto const id = host->model().window(host->windowId())->activeTab()->rootPane()->session();
             host->terminal(id)->writeToScreen(text);
             return id;
+        });
+    }
+
+    /// @return The client area the host holds.
+    [[nodiscard]] vtpty::PageSize clientArea()
+    {
+        return onDaemon([this] { return host->pageSize(); });
+    }
+
+    /// @return The grid the host's terminal of @p session has; an empty one for a session it does not have.
+    [[nodiscard]] vtpty::PageSize paneSize(uint64_t session)
+    {
+        return onDaemon([this, session] {
+            auto* terminal = host->terminal(vtworkspace::SessionId { session });
+            return terminal != nullptr ? terminal->pageSize() : vtpty::PageSize {};
+        });
+    }
+
+    /// Splits the active pane of the host's active tab, as a split the daemon authors.
+    /// @param state The split's axis.
+    /// @param ratio The share of the first half.
+    void splitActive(vtworkspace::SplitState state, double ratio)
+    {
+        onDaemon([this, state, ratio] {
+            auto* tab = host->model().window(host->windowId())->activeTab();
+            host->splitActivePane(tab->id(), state, ratio);
+            return 0;
         });
     }
 };
@@ -971,11 +1131,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("one");
     // Split the seeded tab so the layout carries a non-trivial pane tree.
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
 
     auto timeline = TestTimeline {};
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
@@ -1009,11 +1165,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
 {
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("root");
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.6);
 
     // The NativeController is the manager's session factory (attach mode).
     auto timeline = TestTimeline {};
@@ -1071,11 +1223,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
 
     // Split the tab on the daemon (after the client attached) and wait for the
     // split to reach the client's layout.
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(waitUntil([&] { return ac->settledLayout()->tabs.front().root.isSplit(); }));
 
     // Reconcile: the already-shown tab grows a second pane.
@@ -1159,11 +1307,7 @@ TEST_CASE("a daemon split the factory refuses ends the reconcile, leaving it for
     contour::remote::applyRemoteLayout(app.manager(), win.id, ac);
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
 
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(waitUntil([&] { return ac.settledLayout()->tabs.front().root.isSplit(); }));
     factory->refuse();
 
@@ -1197,11 +1341,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
 
     // A distinctly uneven split (0.7 to the first/acting child) authored on the daemon.
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.7);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.7);
     for (auto i = 0; i < 200; ++i)
     {
         if (auto const l = ac->settledLayout(); l && !l->tabs.front().root.children.empty())
@@ -1326,11 +1466,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
 {
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
 
     auto timeline = TestTimeline {};
     auto acOwned = makeNativeController(daemon.endpoint(), timeline);
@@ -1590,11 +1726,7 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     REQUIRE(waitUntil([&] { return clientArea() == cells(100, 30); }));
 
     // Split it evenly on the daemon and reconcile the second pane in.
-    daemon.onDaemon([&daemon] {
-        auto* daemonTab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(daemonTab->id(), vtworkspace::SplitState::Vertical, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
     REQUIRE(waitUntil([&] {
         auto const pushed = ac->settledLayout();
         return pushed && pushed->tabs.front().root.children.size() == 2;
@@ -1661,6 +1793,215 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
         CHECK(clientArea() == cells(100, 30));
     }
 
+    ac->stop();
+}
+
+namespace
+{
+
+/// A profile whose terminal is 100x30 cells: what a window states in its hello before it knows its real size.
+[[nodiscard]] vtbackend::Settings profileSettings()
+{
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = cells(100, 30);
+    return settings;
+}
+
+/// A client attached with a 100x30 profile to a daemon with one session, whose window then grew to 120x40.
+struct ResizedWindow
+{
+    DaemonFixture daemon;
+    TestTimeline timeline;
+    contour::remote::NativeController* ac = nullptr;
+    contour::test::TestApp app;
+    contour::test::ScopedController win;
+    contour::session::TerminalSession* session = nullptr;
+
+    ResizedWindow(): daemon(), app(makeOwned()), win(app.manager())
+    {
+        auto* tab = attachAndRealize(*ac, app.manager(), win.id);
+        REQUIRE(tab != nullptr);
+        REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
+        session = app.manager().sessionsOfTab(tab).front();
+        session->terminal().device().resizeScreen(cells(120, 40));
+        REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(120, 40); }));
+    }
+
+    ~ResizedWindow() { ac->stop(); }
+    ResizedWindow(ResizedWindow const&) = delete;
+    ResizedWindow& operator=(ResizedWindow const&) = delete;
+    ResizedWindow(ResizedWindow&&) = delete;
+    ResizedWindow& operator=(ResizedWindow&&) = delete;
+
+    /// @return How many ResizeRequests the daemon received so far.
+    [[nodiscard]] uint64_t resizeRequests() const
+    {
+        return daemon.clientFrames.count(vthost::proto::PduType::ResizeRequest);
+    }
+
+    /// Waits for the controller to notice the drop, and to be connected again.
+    void awaitReconnected() const
+    {
+        using vthost::client::ConnectionState;
+        REQUIRE(waitUntil([&] { return ac->connectionState() == ConnectionState::Reconnecting; }));
+        REQUIRE(waitUntil([&] { return ac->connectionState() == ConnectionState::Connected; }));
+    }
+
+  private:
+    std::unique_ptr<contour::remote::NativeController> makeOwned()
+    {
+        std::ignore = daemon.seedSession("root");
+        auto owned =
+            makeNativeController(daemon.endpoint(), timeline, { .attachSettings = profileSettings() });
+        ac = owned.get();
+        return owned;
+    }
+};
+
+} // namespace
+
+// The hello states the area the client has, not the profile's: the daemon, which projects every pane onto the
+// area of the latest client, would otherwise shrink them to a size no display has.
+TEST_CASE("a reconnect states the window's real size in its hello", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+
+    // No layout of the new connection has come in yet: only the hello can have said so.
+    CHECK(f.daemon.clientArea() == cells(120, 40));
+    f.daemon.releaseHeld();
+}
+
+TEST_CASE("a second drop before the layout states the last area", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+    // The layouts are gone and the new connection has not pushed any: nothing composes an area.
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+
+    CHECK(f.daemon.clientArea() == cells(120, 40));
+    f.daemon.releaseHeld();
+}
+
+TEST_CASE("a reconnect to a restarted daemon states the real size", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.restartHost();
+    f.awaitReconnected();
+
+    CHECK(f.daemon.clientArea() == cells(120, 40));
+    f.daemon.releaseHeld();
+}
+
+TEST_CASE("the hello's area is not sent again after the layout", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+    auto const before = f.resizeRequests();
+    REQUIRE(before >= 1); // the fixture's own resize was counted: the counter works
+
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+    REQUIRE(waitUntil([&] { return f.ac->settledLayout() != nullptr; }));
+    contour::remote::applyRemoteLayout(f.app.manager(), f.win.id, *f.ac);
+    drainGuiEvents();
+
+    // A negative: the window did not change, so nothing more is stated.
+    CHECK_FALSE(waitUntil([&] { return f.resizeRequests() != before; }, /*attempts=*/100));
+    CHECK(f.daemon.clientArea() == cells(120, 40));
+}
+
+TEST_CASE("a flush before the layout does not spend the hello's area", "[attach][controller][reconnect]")
+{
+    auto f = ResizedWindow {};
+    auto const before = f.resizeRequests();
+    REQUIRE(before >= 1);
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+    // No layout of the new connection yet, so the window composes to no area: these flushes cannot tell
+    // whether the daemon holds the hello's, and must leave that to the flush after the layout.
+    f.session->terminal().device().resizeScreen(cells(100, 30));
+    drainGuiEvents();
+    f.session->terminal().device().resizeScreen(cells(120, 40));
+    drainGuiEvents();
+    f.daemon.releaseHeld();
+    REQUIRE(waitUntil([&] { return f.ac->settledLayout() != nullptr; }));
+    contour::remote::applyRemoteLayout(f.app.manager(), f.win.id, *f.ac);
+    drainGuiEvents();
+    // A report of the size the pane already has: a flush in which the window composes to the hello's area.
+    f.session->terminal().device().resizeScreen(cells(120, 40));
+    drainGuiEvents();
+
+    // The window composes to the hello's area again: the daemon has it, and is not told it a second time.
+    CHECK_FALSE(waitUntil([&] { return f.resizeRequests() != before; }, /*attempts=*/100));
+    CHECK(f.daemon.clientArea() == cells(120, 40));
+}
+
+TEST_CASE("a reconnect re-asserts a split pane's size once reconciled", "[attach][controller][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline, { .attachSettings = profileSettings() });
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    auto* tab = attachAndRealize(*ac, app.manager(), win.id);
+    REQUIRE(tab != nullptr);
+    app.manager().sessionsOfTab(tab).front()->terminal().device().resizeScreen(cells(100, 30));
+    REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(100, 30); }));
+
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
+    REQUIRE(waitUntil([&] {
+        auto const pushed = ac->settledLayout();
+        return pushed && pushed->tabs.front().root.children.size() == 2;
+    }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    REQUIRE(app.manager().sessionsOfTab(tab).size() == 2);
+
+    auto const pushed = ac->settledLayout();
+    auto const leftSession = pushed->tabs.front().root.children[0].session;
+    auto const rightSession = pushed->tabs.front().root.children[1].session;
+    auto* left = static_cast<contour::session::TerminalSession*>(nullptr);
+    auto* right = static_cast<contour::session::TerminalSession*>(nullptr);
+    for (auto* session: app.manager().sessionsOfTab(tab))
+    {
+        if (ac->sessionForPty(&session->terminal().device()) == leftSession)
+            left = session;
+        if (ac->sessionForPty(&session->terminal().device()) == rightSession)
+            right = session;
+    }
+    REQUIRE(left != nullptr);
+    REQUIRE(right != nullptr);
+
+    // A dragged divider: not the 0.5 ratio the daemon projects.
+    auto const leftLocalSize = cells(70, 30);
+    left->terminal().device().resizeScreen(leftLocalSize);
+    right->terminal().device().resizeScreen(cells(29, 30));
+    REQUIRE(waitUntil([&] { return daemon.paneSize(leftSession) == leftLocalSize; }));
+
+    daemon.dropConnections();
+    REQUIRE(
+        waitUntil([&] { return ac->connectionState() == vthost::client::ConnectionState::Reconnecting; }));
+    REQUIRE(waitUntil([&] { return ac->connectionState() == vthost::client::ConnectionState::Connected; }));
+    REQUIRE(waitUntil([&] {
+        auto const settled = ac->settledLayout();
+        return settled && settled->tabs.front().root.children.size() == 2;
+    }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+
+    CHECK(waitUntil([&] { return daemon.paneSize(leftSession) == leftLocalSize; }));
     ac->stop();
 }
 
@@ -1905,6 +2246,45 @@ struct AttachedGui
     }
 };
 
+/// Connects @p gui and realizes the daemon's one tab, split in two, into its window.
+void requireRealizedSplit(AttachedGui& gui)
+{
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.size() == 1 && layout->tabs.front().root.children.size() == 2;
+    }));
+    gui.reconcile();
+    REQUIRE(gui.tab().paneCount() == 2);
+}
+
+/// Types @p marker into the active pane of @p gui and waits until the daemon's session read it: everything
+/// the client wrote on the connection before has then been handled by the daemon too.
+void requireDelivered(DaemonFixture& daemon, AttachedGui& gui, std::string const& marker)
+{
+    auto const& leaf = *gui.tab().activePane();
+    auto const remote = gui.remoteOf(leaf);
+    REQUIRE(remote.has_value());
+    std::ignore = gui.app.manager().sessionForId(leaf.session())->terminal().device().write(marker);
+    REQUIRE(waitUntil([&] { return daemon.ptyInput(vtworkspace::SessionId { *remote }).contains(marker); }));
+}
+
+/// Has the daemon retitle its active tab to @p title, waits until @p gui holds that push, and reconciles it:
+/// whatever the daemon pushed before has then been reconciled too.
+void requirePushed(DaemonFixture& daemon, AttachedGui& gui, std::string const& title)
+{
+    daemon.onDaemon([&daemon, &title] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->model().setTabTitle(tab->id(), title);
+        return 0;
+    });
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && !layout->tabs.empty() && layout->tabs.front().title == title;
+    }));
+    gui.reconcile();
+}
+
 /// @return How many EditTab frames the daemon received, by its protocol trace in @p log.
 [[nodiscard]] std::ptrdiff_t editTabsReceived(std::string const& log)
 {
@@ -1919,24 +2299,12 @@ TEST_CASE("a second client sees the first client's zoom, title and colour", "[at
     auto capture = SharedLogCapture {};
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("root");
-    daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
-        daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
-        return 0;
-    });
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
 
     auto a = AttachedGui { daemon };
     auto b = AttachedGui { daemon };
     for (auto* gui: { &a, &b })
-    {
-        requireConnected(*gui->controller);
-        REQUIRE(waitUntil([&] {
-            auto const layout = gui->controller->settledLayout();
-            return layout && layout->tabs.size() == 1 && layout->tabs.front().root.children.size() == 2;
-        }));
-        gui->reconcile();
-        REQUIRE(gui->tab().paneCount() == 2);
-    }
+        requireRealizedSplit(*gui);
 
     // What B shows, once the daemon pushed it and B reconciled the push.
     auto const bShows = [&](auto const& predicate) {
@@ -1970,6 +2338,160 @@ TEST_CASE("a second client sees the first client's zoom, title and colour", "[at
     std::this_thread::sleep_for(100ms);
     CHECK(editTabsReceived(capture.text()) == 3);
 
+    a.controller->stop();
+    b.controller->stop();
+}
+
+// Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
+// re-projects every pane onto the new one, discarding the per-pane grids the survivor refined. The survivor's
+// own geometry did not change, so nothing on its side re-reports them: its split panes stayed on the
+// daemon's ratio estimate until the user next resized the window.
+TEST_CASE("a client that departs with the client area leaves the survivor's panes at their displayed size",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture { {}, {}, 1, {}, std::nullopt, {}, vthost::ClientSizePolicy::Smallest };
+    std::ignore = daemon.seedSession("root");
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
+
+    auto stays = AttachedGui { daemon };
+    auto departs = std::make_unique<AttachedGui>(daemon);
+    for (auto* gui: { &stays, departs.get() })
+        requireRealizedSplit(*gui);
+    // Both clients show the same two panes, and the daemon keeps whichever client's grid for one arrived
+    // last: each client's first report (sent as its displays were created) must have landed before the panes
+    // are sized below, or a late one undoes them.
+    drainGuiEvents();
+    for (auto* gui: { &stays, departs.get() })
+        requireDelivered(daemon, *gui, "realized");
+
+    // Sizes the panes of @p gui, as its SplitView would, and @return the daemon's sessions behind them.
+    auto const showPanes = [](AttachedGui& gui, vtpty::PageSize left, vtpty::PageSize right) {
+        auto const& root = *gui.tab().rootPane();
+        gui.app.manager().sessionForId(root.first()->session())->terminal().device().resizeScreen(left);
+        gui.app.manager().sessionForId(root.second()->session())->terminal().device().resizeScreen(right);
+        return std::pair { gui.remoteOf(*root.first()).value_or(0),
+                           gui.remoteOf(*root.second()).value_or(0) };
+    };
+
+    // The client that stays: a 100-column window whose divider the user dragged to 70 | 29.
+    auto const [left, right] = showPanes(stays, cells(70, 30), cells(29, 30));
+    REQUIRE(waitUntil(
+        [&] { return daemon.paneSize(left) == cells(70, 30) && daemon.paneSize(right) == cells(29, 30); }));
+
+    // The client that departs: an 80-column window, the smaller, so the daemon's area is its.
+    std::ignore = showPanes(*departs, cells(40, 30), cells(39, 30));
+    REQUIRE(waitUntil(
+        [&] { return daemon.clientArea() == cells(80, 30) && daemon.paneSize(left) == cells(40, 30); }));
+
+    departs.reset();
+    REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(100, 30); }));
+
+    // The survivor is told, and re-asserts its panes with no layout push to reconcile first.
+    CHECK(waitUntil(
+        [&] { return daemon.paneSize(left) == cells(70, 30) && daemon.paneSize(right) == cells(29, 30); }));
+    CHECK(daemon.paneSize(left) == cells(70, 30));
+    CHECK(daemon.paneSize(right) == cells(29, 30));
+
+    // And it settles: the re-assertion pushes no layout back, which would have the survivor re-assert again.
+    // Whatever the daemon pushed in answer to the ResizePanes it read before the first marker goes out ahead
+    // of the retitle, so is reconciled with it; nothing re-sent since then means nothing was pushed.
+    requireDelivered(daemon, stays, "settled");
+    auto const resizePanes = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
+    requirePushed(daemon, stays, "settled");
+    requireDelivered(daemon, stays, "still");
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ResizePane) == resizePanes);
+
+    stays.controller->stop();
+}
+
+// Regression: a layout push is reconciled before the GUI lays the new tree out, so what the panes compose to
+// then is neither the old window nor the new one -- the old pane's full width beside the new pane's birth
+// size. Re-asserting at the end of that reconcile stated it as the client area (181x30 for a 100-column
+// window), and the daemon re-projected every pane of every client onto it and back.
+TEST_CASE("a split or a close pushed by the daemon never states a client area the window does not have",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] { return gui.controller->settledLayout() != nullptr; }));
+    gui.reconcile();
+    auto const window = cells(100, 30);
+    gui.app.manager().sessionForId(gui.tab().rootPane()->session())->terminal().device().resizeScreen(window);
+    REQUIRE(waitUntil([&] { return daemon.clientArea() == window; }));
+    auto const stated = daemon.clientFrames.areas().size();
+
+    // Split on the daemon; the GUI reconciles, then lays the two panes out across the window.
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.front().root.children.size() == 2;
+    }));
+    gui.reconcile();
+    REQUIRE(gui.tab().paneCount() == 2);
+    auto const& root = *gui.tab().rootPane();
+    auto const closing = gui.remoteOf(*root.second());
+    REQUIRE(closing.has_value());
+    gui.app.manager().sessionForId(root.first()->session())->terminal().device().resizeScreen(cells(50, 30));
+    gui.app.manager().sessionForId(root.second()->session())->terminal().device().resizeScreen(cells(49, 30));
+    requireDelivered(daemon, gui, "split");
+
+    // Close the second pane on the daemon; the survivor takes the whole window again.
+    daemon.onDaemon([&daemon, &closing] {
+        daemon.host->closeSession(vtworkspace::SessionId { *closing });
+        return 0;
+    });
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->settledLayout();
+        return layout && layout->tabs.front().root.children.empty();
+    }));
+    gui.reconcile();
+    REQUIRE(gui.tab().paneCount() == 1);
+    gui.app.manager().sessionForId(gui.tab().rootPane()->session())->terminal().device().resizeScreen(window);
+    requireDelivered(daemon, gui, "closed");
+
+    auto const areas = daemon.clientFrames.areas();
+    // Spelled out, so a failure names the area that went out.
+    auto const spelled = [](vtpty::PageSize size) {
+        return std::format("{}x{}", unbox<int>(size.columns), unbox<int>(size.lines));
+    };
+    for (auto const& area: areas | std::views::drop(stated))
+        CHECK(spelled(area) == spelled(window));
+    gui.controller->stop();
+}
+
+// A layout push that re-projected nothing -- a focus change, a title -- leaves every pane where it was, so no
+// client re-sends its pane sizes: with two clients, the last one to do so would win every pane.
+TEST_CASE("a focus change pushed to two clients has neither re-send its pane sizes", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("root");
+    daemon.splitActive(vtworkspace::SplitState::Vertical, 0.5);
+    auto a = AttachedGui { daemon };
+    auto b = AttachedGui { daemon };
+    for (auto* gui: { &a, &b })
+        requireRealizedSplit(*gui);
+    requireDelivered(daemon, a, "a-attached");
+    requireDelivered(daemon, b, "b-attached");
+    auto const resizePanes = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
+
+    // A focuses its other pane; B is pushed the change and reconciles it, as is A.
+    auto& tabA = a.tab();
+    auto const* other =
+        tabA.activePane() == tabA.rootPane()->first() ? tabA.rootPane()->second() : tabA.rootPane()->first();
+    auto const focused = a.remoteOf(*other);
+    REQUIRE(focused.has_value());
+    a.app.manager().model().setActivePane(tabA.id(), other->id());
+    REQUIRE(waitUntil([&] {
+        b.reconcile();
+        return b.remoteOf(*b.tab().activePane()) == focused;
+    }));
+    a.reconcile();
+
+    requireDelivered(daemon, a, "a-focused");
+    requireDelivered(daemon, b, "b-focused");
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ResizePane) == resizePanes);
     a.controller->stop();
     b.controller->stop();
 }
@@ -2158,7 +2680,9 @@ TEST_CASE("a session the client creates gets the profile the GUI holds in memory
 
     auto timeline = TestTimeline {};
     auto const controllerOwned =
-        makeNativeController(daemon.endpoint(), timeline, [&app] { return app.currentEmulationSettings(); });
+        makeNativeController(daemon.endpoint(), timeline, { .sessionSettings = [&app] {
+                                 return app.currentEmulationSettings();
+                             } });
     auto& controller = *controllerOwned;
     requireConnected(controller);
 
@@ -3497,7 +4021,8 @@ struct FollowingGui
             contour::remote::NativeController::SessionSettingsSource {},
             std::nullopt,
             core::platform::defaultSteadyClock(),
-            timeline.timeline);
+            timeline.timeline,
+            nullptr);
         controller = owned.get();
         return owned;
     }
@@ -4360,8 +4885,8 @@ TEST_CASE("a dark app's controller shows its first pane dark, never the host's l
     std::ignore = daemon.seedSession("first");
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned =
-        makeNativeController(daemon.endpoint(), timeline, {}, vtbackend::ColorPreference::Dark);
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, { .colorPreference = vtbackend::ColorPreference::Dark });
     auto& controller = *controllerOwned;
     requireConnected(controller);
     auto route = AttachRoute { controller };
@@ -4510,6 +5035,18 @@ struct NativeControllerTestAccess
         done.get_future().wait();
     }
 
+    /// Waits until the controller's reactor thread ran everything posted to it before this call.
+    /// @param timeout How long to wait.
+    /// @return Whether it did within @p timeout.
+    [[nodiscard]] static bool drainReactor(contour::remote::NativeController& controller,
+                                           std::chrono::milliseconds timeout)
+    {
+        // Shared, so a reactor that runs it after a timed-out wait still sets a live promise.
+        auto const drained = std::make_shared<std::promise<void>>();
+        controller._reactor.post([drained] { drained->set_value(); });
+        return drained->get_future().wait_for(timeout) == std::future_status::ready;
+    }
+
     /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.
     static void killReactor(contour::remote::NativeController& controller)
     {
@@ -4527,6 +5064,88 @@ struct NativeControllerTestAccess
 };
 
 } // namespace contour::remote
+
+TEST_CASE("a controller subscribes to power events for its lifetime", "[attach][controller][power]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+
+    auto controller = makeNativeController(daemon.endpoint(), timeline, { .powerMonitor = &power });
+    CHECK(power.subscriberCount() == 1);
+
+    controller.reset();
+    CHECK(power.subscriberCount() == 0);
+}
+
+// Review focus 3: while no connection is up there is no client to probe with, and the wake is a hint, not a
+// verdict -- it must neither reach the connection that was lost nor stop the reconnect; it only cuts the
+// backoff short (ClientSupervisor_test pins how promptly).
+TEST_CASE("a wake while reconnecting retries without ending the reconnect",
+          "[attach][controller][reconnect][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, { .powerMonitor = &power });
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+    // The wake was posted before this: once the reactor ran what came before, the wake has run too.
+    REQUIRE(contour::remote::NativeControllerTestAccess::drainReactor(controller, 5s));
+    CHECK(controller.connectionState() == ConnectionState::Reconnecting);
+
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+
+    controller.stop();
+}
+
+// The OS says the machine slept: the daemon is asked whether it is still there, and as it answers, the
+// connection stays up -- no reconnect, so no hello that restates the profile's size over the panes' real one.
+TEST_CASE("a wake probes the daemon", "[attach][controller][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, { .powerMonitor = &power });
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto const heartbeats = [&daemon] {
+        return daemon.clientFrames.count(vthost::proto::PduType::Heartbeat);
+    };
+    auto const heartbeatsBefore = heartbeats();
+
+    power.deliver(core::platform::SystemPowerEvent::WillSleep);
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+
+    REQUIRE(waitUntil([&] { return heartbeats() > heartbeatsBefore; }, 200));
+    // The daemon answered the probe as it read it, so a push it makes now goes out behind the answer: once
+    // the client holds that push, it has taken the answer in, and a connection given up on it would show by
+    // now.
+    auto const before = controller.settledLayout();
+    daemon.onDaemon([&daemon] {
+        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        daemon.host->model().setTabTitle(tab->id(), "awake");
+        return 0;
+    });
+    CHECK(waitUntil([&] { return controller.settledLayout() != before; }));
+    CHECK(log.count(ConnectionState::Reconnecting) == 0);
+    CHECK(controller.connectionState() == ConnectionState::Connected);
+
+    controller.stop();
+}
 
 TEST_CASE("a pane closed as its connection ends is closed once the same daemon answers again",
           "[attach][controller][reconnect]")
@@ -4868,7 +5487,8 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
         {},
         std::nullopt,
         core::platform::defaultSteadyClock(),
-        timeline.timeline
+        timeline.timeline,
+        nullptr
     };
     controller.startConnecting();
     REQUIRE(waitUntil([&] { return started.load(); }));
@@ -5197,7 +5817,8 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
             {},
             std::nullopt,
             core::platform::defaultSteadyClock(),
-            timeline.timeline
+            timeline.timeline,
+            nullptr
         };
         auto const connected = controller.connectAndWait(10s);
         REQUIRE_FALSE(connected.has_value());
@@ -5265,7 +5886,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         {},
         std::nullopt,
         core::platform::defaultSteadyClock(),
-        timeline.timeline
+        timeline.timeline,
+        nullptr
     };
     auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
     REQUIRE_FALSE(connected.has_value());
