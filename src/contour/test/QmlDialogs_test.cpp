@@ -42,6 +42,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
+#include <QtGui/QTextOption>
 #include <QtQml/QJSValue>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -2662,6 +2663,40 @@ TEST_CASE("shell integration card: the line is selectable, in the terminal font,
     showCard(session, CardStage::Offer);
     host.settle();
     CHECK(body.property("font").value<QFont>().family() != session.fontFamily());
+}
+
+TEST_CASE("shell integration card: the policy note shows below the line only when there is one (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& shellCard = PaneTreeHost::partOf(host.cardOf(leaf), "shellIntegrationCard");
+
+    showCard(session, CardStage::Confirm);
+    host.settle();
+    auto const& body = PaneTreeHost::partOf(shellCard, "shellIntegrationBody");
+    auto const& note = PaneTreeHost::partOf(shellCard, "shellIntegrationNote");
+    CHECK_FALSE(note.isVisible());
+
+    auto const noteText =
+        QStringLiteral("This also lets your own scripts run in PowerShell, for your user only "
+                       "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    session.setShellCard(CardStage::Confirm, QString::fromUtf8(ShellCardLine), {}, noteText);
+    host.settle();
+    CHECK(note.isVisible());
+    CHECK(note.property("text").toString() == noteText);
+    // Text.Wrap: the note is a sentence, which the card wraps rather than cuts.
+    CHECK(note.property("wrapMode").toInt() == static_cast<int>(QTextOption::WrapAtWordBoundaryOrAnywhere));
+    CHECK(QTest::qWaitFor([&] { return note.y() > body.y(); }));
+
+    showCard(session, CardStage::Confirm);
+    host.settle();
+    CHECK_FALSE(note.isVisible());
 }
 
 TEST_CASE("shell integration card: an ended pane shows its footer and no card (offscreen)",

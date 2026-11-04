@@ -31,6 +31,7 @@
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
+using contour::config::ProfileScripts;
 using contour::config::ShellKind;
 using contour::platform::RcInspection;
 using contour::platform::ShellRcError;
@@ -116,6 +117,24 @@ struct Rig
     void scriptZshRc(contour::config::RcState state)
     {
         app.shellRcEditor().inspections[ShellKind::Zsh] = RcInspection { .file = zshRc(), .state = state };
+    }
+
+    /// The profile @p shell would use on Windows, under the home the manager shortens paths by.
+    [[nodiscard]] std::filesystem::path powerShellRc(ShellKind shell)
+    {
+        return std::filesystem::path { app.manager().homeDirectory() }
+               / contour::config::rcLocationOn(*contour::config::shellRow(shell),
+                                               contour::config::HostPlatform::Windows)
+                     .file;
+    }
+
+    /// Has the editor find @p shell's profile without the line, and @p scripts as what its execution
+    /// policy does to it.
+    void scriptPowerShellRc(ShellKind shell, ProfileScripts scripts = ProfileScripts::Run)
+    {
+        app.shellRcEditor().inspections[shell] = RcInspection { .file = powerShellRc(shell),
+                                                                .state = contour::config::RcState::Absent,
+                                                                .scripts = scripts };
     }
 
     static void pressReturn(TerminalSession& target, int times = 1)
@@ -227,11 +246,124 @@ TEST_CASE("shell integration card: a daemon-hosted pane takes its shell from the
     other.pressReturn(ShellIntegrationProbeCommands);
     CHECK(other.session->shellIntegrationCard() == HiddenStage);
 
-    // Only a daemon-hosted pane falls back to the profile: a local pane with nothing in front stays silent.
+    // A local pane with nothing in front falls back to the profile too, as a Windows pane always does.
     auto local = Rig { {}, contour::session::SessionHosting::Local, "/usr/bin/zsh" };
     local.session = local.openTab(/*foreground=*/"");
     local.pressReturn(ShellIntegrationProbeCommands);
-    CHECK(local.session->shellIntegrationCard() == HiddenStage);
+    CHECK(local.session->shellIntegrationCard() == OfferStage);
+
+    // A pane of a window attached to another machine does not: the profile here says nothing of its shell.
+    auto remote = Rig { "starfive", Daemon, "/usr/bin/zsh" };
+    remote.session = remote.openTab(/*foreground=*/"");
+    remote.pressReturn(ShellIntegrationProbeCommands);
+    CHECK(remote.session->shellIntegrationCard() == HiddenStage);
+}
+
+TEST_CASE("TerminalSession.runningShell.profileFallback", "[contour][session][shellintegration]")
+{
+    // Nothing reports a foreground process (as on Windows, where MockPty names none): the profile's shell
+    // program decides, read as the spawn reads it -- a command line where it names no program.
+#ifdef _WIN32
+    constexpr auto PwshCommandLine =
+        std::string_view { R"("C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo)" };
+#else
+    constexpr auto PwshCommandLine = std::string_view { "pwsh -NoLogo" };
+#endif
+    struct Case
+    {
+        std::string_view program;
+        ShellKind shell;
+    };
+    for (auto const& [program, shell]: { Case { PwshCommandLine, ShellKind::Pwsh },
+                                         Case { "powershell.exe", ShellKind::WindowsPowerShell },
+                                         Case { "cmd.exe", ShellKind::Unknown } })
+    {
+        INFO(program);
+        auto rig = Rig { {},
+                         contour::session::SessionHosting::Local,
+                         std::string { program },
+                         contour::config::HostPlatform::Windows };
+        rig.scriptPowerShellRc(ShellKind::Pwsh);
+        rig.scriptPowerShellRc(ShellKind::WindowsPowerShell);
+        rig.session = rig.openTab(/*foreground=*/"");
+        rig.pressReturn(ShellIntegrationProbeCommands);
+
+        if (shell == ShellKind::Unknown)
+        {
+            CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+            continue;
+        }
+        REQUIRE(rig.session->shellIntegrationCard() == OfferStage);
+        auto const displayName = contour::config::shellRow(shell)->displayName;
+        CHECK(rig.session->shellIntegrationBody().contains(
+            QString::fromUtf8(displayName.data(), static_cast<qsizetype>(displayName.size()))));
+    }
+}
+
+TEST_CASE("ShellIntegrationCard.powershellPolicyFix", "[contour][session][shellintegration]")
+{
+    auto rig = Rig {
+        {}, contour::session::SessionHosting::Local, "powershell.exe", contour::config::HostPlatform::Windows
+    };
+    rig.scriptPowerShellRc(ShellKind::WindowsPowerShell, ProfileScripts::NeedUserPolicy);
+    rig.session = rig.openTab(/*foreground=*/"");
+    rig.pressReturn(ShellIntegrationProbeCommands);
+
+    REQUIRE(rig.session->shellIntegrationCard() == OfferStage);
+    CHECK(rig.session->shellIntegrationBody().contains(QStringLiteral("Windows PowerShell")));
+    CHECK(rig.session->shellIntegrationPrimary() == QStringLiteral("Install"));
+    // The note belongs to the step that shows what will change.
+    CHECK(rig.session->shellIntegrationNote().isEmpty());
+
+    rig.session->acceptShellIntegrationCard();
+    REQUIRE(rig.session->shellIntegrationCard() == ConfirmStage);
+    CHECK(rig.session->shellIntegrationPrimary() == QStringLiteral("Allow Scripts and Add Line"));
+    CHECK(rig.session->shellIntegrationNote()
+          == QStringLiteral("This also lets your own scripts run in Windows PowerShell, for your user only "
+                            "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned)."));
+    CHECK(rig.app.shellRcEditor().installs.empty());
+
+    rig.session->acceptShellIntegrationCard();
+    auto const expectedLine =
+        contour::window::shellRcLine(ShellKind::WindowsPowerShell, TestApp::ContourBinary).value();
+    REQUIRE(rig.app.shellRcEditor().installs.size() == 1);
+    CHECK(rig.app.shellRcEditor().installs.front().shell == ShellKind::WindowsPowerShell);
+    CHECK(rig.app.shellRcEditor().installs.front().line == expectedLine);
+    CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+    CHECK(rig.session->shellIntegrationNote().isEmpty());
+    CHECK(rig.window->notices().toastText().contains(QStringLiteral("New Windows PowerShell sessions")));
+}
+
+TEST_CASE("ShellIntegrationCard.powershellGroupPolicy", "[contour][session][shellintegration]")
+{
+    // Contour may not change a policy the organisation set, so it offers nothing it could not install.
+    auto rig = Rig {
+        {}, contour::session::SessionHosting::Local, "powershell.exe", contour::config::HostPlatform::Windows
+    };
+    rig.scriptPowerShellRc(ShellKind::WindowsPowerShell, ProfileScripts::BlockedByGroupPolicy);
+    rig.session = rig.openTab(/*foreground=*/"");
+    rig.pressReturn(ShellIntegrationProbeCommands);
+
+    CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+}
+
+TEST_CASE("ShellIntegrationCard.policyUnchangedError", "[contour][session][shellintegration]")
+{
+    auto rig = Rig {
+        {}, contour::session::SessionHosting::Local, "powershell.exe", contour::config::HostPlatform::Windows
+    };
+    rig.scriptPowerShellRc(ShellKind::WindowsPowerShell, ProfileScripts::NeedUserPolicy);
+    rig.app.shellRcEditor().installResult = std::unexpected(ShellRcError::PolicyUnchanged);
+    rig.session = rig.openTab(/*foreground=*/"");
+    rig.pressReturn(ShellIntegrationProbeCommands);
+    rig.session->acceptShellIntegrationCard();
+    rig.session->acceptShellIntegrationCard();
+
+    auto const rc = contour::window::displayRcPath(rig.powerShellRc(ShellKind::WindowsPowerShell),
+                                                   rig.app.manager().homeDirectory());
+    CHECK(rig.session->shellIntegrationCard() == ConfirmStage);
+    CHECK(rig.session->shellIntegrationError().toStdString()
+          == rc + " was not changed: PowerShell's script policy could not be changed.");
 }
 
 TEST_CASE(
