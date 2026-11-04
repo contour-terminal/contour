@@ -69,11 +69,27 @@ The line goes into the profile of the shell:
   `>` and `Out-File` write, is read and appended to in its own encoding. A new profile is created as UTF-8 with
   a BOM. A Contour path with non-ASCII characters is refused for a Windows PowerShell profile without a BOM,
   which 5.1 would misread; a UTF-16BE or UTF-32 profile is refused.
-* **Execution policy (Windows):** when the effective policy for the shell is Restricted, which is Windows
-  PowerShell 5.1's default on Windows 10 and 11 clients, the confirm step also offers "Allow Scripts and Add
-  Line": it sets your user's policy to RemoteSigned (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`)
-  before adding the line. A policy enforced by Group Policy, or AllSigned, blocks the install, and the dialog
-  says why. PowerShell 7's default, RemoteSigned, needs no change.
+* **Execution policy (Windows):** Contour reads the policy each shell would apply, the way the shell does.
+  Windows PowerShell 5.1: Group Policy (machine, then user), then the user's and the machine's
+  `ShellIds\Microsoft.PowerShell` setting in the registry, else Restricted (RemoteSigned on Windows Server).
+  PowerShell 7: its own Group Policy (`Policies\Microsoft\PowerShellCore`), then
+  `"Microsoft.PowerShell:ExecutionPolicy"` in the user's `<Documents>\PowerShell\powershell.config.json`, then
+  in the `powershell.config.json` beside the installed PowerShell 7, else RemoteSigned. A configuration file
+  that is not a JSON object sets no policy.
+* **Fixing the policy:** when the effective policy is Restricted (or none is set and the default is), which is
+  Windows PowerShell 5.1's default on Windows 10 and 11 clients, the confirm step also offers "Allow Scripts and
+  Add Line": it sets your user's policy to RemoteSigned, as `Set-ExecutionPolicy -Scope CurrentUser
+  RemoteSigned` does, before adding the line. For Windows PowerShell 5.1 that is the user's registry setting;
+  for PowerShell 7 it is that key in the user's `powershell.config.json`, created if missing, with every other
+  key kept. A `powershell.config.json` that does not parse is never overwritten: the install is refused, and
+  the profile stays as it was. If the line cannot be added after the policy was set, the policy stays set (you
+  agreed to it), and trying again only adds the line. A policy enforced by Group Policy, or AllSigned, blocks
+  the install, and the dialog says why. PowerShell 7's default, RemoteSigned, needs no change.
+* **Installed, but the policy stops it:** a profile that already loads Contour under a policy that keeps it from
+  running is listed in Settings as "Installed in …, but PowerShell's script policy stops it from running", with
+  Install… offering "Allow Scripts": the same per-user fix, adding no line. Under Group Policy or AllSigned the
+  row says why instead, and offers nothing. The pane's card does not offer this: it offers only where the line is
+  missing.
 * **Which shell a pane runs:** on Windows, Contour cannot see which program runs in a pane, so the card
   assumes the shell the pane's profile starts (and none for SSH profiles).
 
