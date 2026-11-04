@@ -13,9 +13,13 @@
 // A shell that is not installed SKIPs. CI installs bash, zsh, fish and tcsh and fails when any of them
 // skipped ("verify the shell-integration tests actually ran", build.yml). The POSIX shells are not
 // run on Windows, where `bash` on PATH may be WSL's launcher; PowerShell runs wherever it is found, on
-// Windows through ConPTY.
+// Windows through ConPTY -- and there Windows PowerShell 5.1 runs the same script and the same cases.
+// ShellIntegrationShells.profileLine runs the line the one-click install appends to a profile, which
+// asks the contour binary CONTOUR_BINARY names (ctest sets it) for the script.
 
 #include <contour/cli/ShellIntegration.hpp>
+#include <contour/config/ShellKind.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
@@ -38,6 +42,8 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <algorithm>
 #include <array>
@@ -106,6 +112,13 @@ constexpr auto ExitThreeCommand = "sh -c 'exit 3'"sv;
 /// command before it failed.
 constexpr auto PwshStartup = "Set-PSReadLineOption -HistorySaveStyle SaveNothing -PredictionSource None\n"
                              "function prompt { if ($?) { 'PS> ' } else { 'PS!> ' } }\n"sv;
+
+#ifdef _WIN32
+/// What Windows PowerShell's start-up file holds before the script: PwshStartup without its
+/// -PredictionSource, which PSReadLine 2.0 -- the one Windows PowerShell 5.1 ships with -- does not know.
+constexpr auto WindowsPowerShellStartup = "Set-PSReadLineOption -HistorySaveStyle SaveNothing\n"
+                                          "function prompt { if ($?) { 'PS> ' } else { 'PS!> ' } }\n"sv;
+#endif
 
 /// One OSC sequence found in a byte stream.
 struct OscPayload
@@ -176,7 +189,8 @@ struct Mark
 /// the user's -- a private HOME holds the start-up file that sources it.
 struct ShellLaunch
 {
-    std::string shell;                  ///< The integration table's name for it.
+    std::string key;                    ///< This row's own name, unique; launchFor() looks it up.
+    std::string shell;                  ///< The integration table's name for the script it runs.
     std::string program;                ///< The executable looked up on PATH.
     std::string scriptFile;             ///< Where in HOME the script goes; PowerShell runs only *.ps1.
     std::string startupFile;            ///< A start-up file written into HOME, by relative path.
@@ -186,6 +200,13 @@ struct ShellLaunch
     vtbackend::CommandLineSource commandLineSource {}; ///< How the terminal learns that command line.
     /// The command line that puts the shell into AwkwardDirectory, whose name the shell expands from "cwd*".
     std::string enterDirectory = "cd cwd*";
+    /// The command line that enters the directory "probe*" and leaves it again, failing when it cannot enter.
+    std::string probeDirectory = "cd probe* && cd ..";
+    /// Variables set for the shell beyond those of isolatedEnvironment(), overriding userShellSettings().
+    vtpty::Process::Environment environment {};
+    /// Symbolic links made in HOME before the shell starts: each relative path, and the absolute path it
+    /// points to.
+    std::vector<std::pair<std::string, std::filesystem::path>> homeLinks {};
 };
 
 /// @return Every shell the integration scripts target, and how each is started here.
@@ -193,6 +214,7 @@ struct ShellLaunch
 {
     static auto const launches = std::vector<ShellLaunch> {
         ShellLaunch {
+            .key = "bash",
             .shell = "bash",
             .program = "bash",
             .scriptFile = "shell-integration.bash",
@@ -203,6 +225,7 @@ struct ShellLaunch
             .commandLineSource = vtbackend::CommandLineSource::Reported,
         },
         ShellLaunch {
+            .key = "zsh",
             .shell = "zsh",
             .program = "zsh",
             .scriptFile = "shell-integration.zsh",
@@ -213,6 +236,7 @@ struct ShellLaunch
             .commandLineSource = vtbackend::CommandLineSource::Reported,
         },
         ShellLaunch {
+            .key = "fish",
             .shell = "fish",
             .program = "fish",
             .scriptFile = "shell-integration.fish",
@@ -224,6 +248,7 @@ struct ShellLaunch
             .commandLineSource = vtbackend::CommandLineSource::Reported,
         },
         ShellLaunch {
+            .key = "tcsh",
             .shell = "tcsh",
             .program = "tcsh",
             .scriptFile = "shell-integration.tcsh",
@@ -238,6 +263,7 @@ struct ShellLaunch
             .enterDirectory = "sh -c 'cd cwd* && exec tcsh -i'",
         },
         ShellLaunch {
+            .key = "pwsh",
             .shell = "pwsh",
             .program = std::string { PwshProgram },
             .scriptFile = "shell-integration.ps1", // PowerShell runs only *.ps1 files
@@ -247,15 +273,54 @@ struct ShellLaunch
             .command = std::string { PwshCommand },
             .commandLineSource = vtbackend::CommandLineSource::Reported,
         },
+#ifdef _WIN32
+        // Windows PowerShell 5.1 runs the very script pwsh does. Its execution policy may forbid running
+        // a script file at all, which the one-click install fixes for the user, and -ExecutionPolicy here.
+        // It knows no '&&' (PowerShell 7's), so the probe stops at the error -ErrorAction Stop makes.
+        ShellLaunch {
+            .key = "powershell",
+            .shell = "pwsh",
+            .program = "powershell.exe",
+            .scriptFile = "shell-integration.ps1",
+            .startupFile = "startup.ps1",
+            .startupText = std::string { WindowsPowerShellStartup } + ". '${SCRIPT}'\n",
+            .arguments = { "-NoLogo",
+                           "-NoProfile",
+                           "-ExecutionPolicy",
+                           "Bypass",
+                           "-NoExit",
+                           "-Command",
+                           ". '${HOME}/startup.ps1'" },
+            .command = std::string { PwshCommand },
+            .commandLineSource = vtbackend::CommandLineSource::Reported,
+            .probeDirectory = "Set-Location probe* -ErrorAction Stop; Set-Location ..",
+        },
+#endif
     };
     return launches;
 }
 
-/// @return The row for @p shell.
+/// A PowerShell these tests run, and the shell table's kind for it.
+struct PowerShellRow
+{
+    std::string_view key;               ///< Its ShellLaunch row.
+    contour::config::ShellKind kind {}; ///< What the shell table calls it.
+};
+
+/// Every PowerShell the PowerShell cases run, one run of the case each: PowerShell 7 everywhere, and on
+/// Windows also Windows PowerShell 5.1, which ships with it.
+constexpr auto PowerShellRows = std::array {
+    PowerShellRow { .key = "pwsh", .kind = contour::config::ShellKind::Pwsh },
+#ifdef _WIN32
+    PowerShellRow { .key = "powershell", .kind = contour::config::ShellKind::WindowsPowerShell },
+#endif
+};
+
+/// @return The row whose key is @p shell.
 [[nodiscard]] ShellLaunch const& launchFor(std::string_view shell)
 {
     auto const& launches = shellLaunches();
-    auto const row = std::ranges::find(launches, shell, &ShellLaunch::shell);
+    auto const row = std::ranges::find(launches, shell, &ShellLaunch::key);
     REQUIRE(row != launches.end());
     return *row;
 }
@@ -435,6 +500,12 @@ class ShellSession
         REQUIRE(script.has_value());
         writeFile(home / launch.scriptFile, *script);
         writeFile(home / launch.startupFile, substitute(launch.startupText));
+        for (auto const& [link, target]: launch.homeLinks)
+        {
+            auto const path = home.path() / core::pathFromTrustedUtf8(link);
+            std::filesystem::create_directories(path.parent_path());
+            std::filesystem::create_symlink(target, path);
+        }
 
         // The path found, as a user's configuration names it -- on Windows a path with a space in it,
         // "C:\Program Files\PowerShell\7\pwsh.exe".
@@ -445,6 +516,8 @@ class ShellSession
                                                .removedEnvironment = userShellSettings() };
         for (auto const& argument: launch.arguments)
             exec.arguments.push_back(substitute(argument));
+        for (auto const& [name, value]: launch.environment)
+            exec.env.insert_or_assign(name, value);
         return exec;
     }
 
@@ -568,12 +641,13 @@ constexpr auto AwkwardDirectory = "cwd a%41\xc3\xbc\xe2\x82\xac\xf0\x9f\x98\x80\
 /// Whether @p session's shell can hold a four-byte UTF-8 character in a string: whether it can change into a
 /// directory named with one.
 /// @param session The shell, at a prompt in its HOME; it is left there.
+/// @param launch  Its row, whose probeDirectory is typed.
 /// @return Whether it can.
-[[nodiscard]] bool holdsFourByteCharacters(ShellSession& session)
+[[nodiscard]] bool holdsFourByteCharacters(ShellSession& session, ShellLaunch const& launch)
 {
     auto const probe = std::string { "probe" } + std::string { FourByteCharacter };
     REQUIRE(std::filesystem::create_directory(session.home() / core::pathFromTrustedUtf8(probe)));
-    auto const typedAt = runCommand(session, "cd probe* && cd ..");
+    auto const typedAt = runCommand(session, launch.probeDirectory);
     auto const marks = osc133Marks(std::string_view { session.transcript() }.substr(typedAt));
     auto const finished = std::ranges::find(marks, 'D', &Mark::kind);
     REQUIRE(finished != marks.end());
@@ -594,7 +668,7 @@ void checkWorkingDirectoryReport(ShellLaunch const& launch)
     // at one in a UTF-8 locale (the tcsh mailing list, "UTF-8 character problems", February 2025). Asked
     // first, so that such a shell is still tested on everything else the name holds -- and says so.
     auto name = std::string { AwkwardDirectory };
-    if (!holdsFourByteCharacters(*session))
+    if (!holdsFourByteCharacters(*session, launch))
     {
         WARN(launch.shell
              << " cannot hold a four-byte UTF-8 character in a string: its directory leaves it out");
@@ -1178,20 +1252,86 @@ TEST_CASE("tcsh integration sends no working directory once it is gone", "[shell
         CHECK(report.text != std::format("file://{}", host));
 }
 
+namespace
+{
+
+/// @return The arguments that make @p launch's PowerShell run @p command and exit: its own, up to -NoExit,
+///         then @p command, non-interactively.
+[[nodiscard]] std::vector<std::string> oneShotArguments(ShellLaunch const& launch, std::string command)
+{
+    auto arguments =
+        std::vector<std::string> { launch.arguments.begin(), std::ranges::find(launch.arguments, "-NoExit") };
+    arguments.emplace_back("-NonInteractive");
+    arguments.emplace_back("-Command");
+    arguments.push_back(std::move(command));
+    return arguments;
+}
+
+/// @return The contour binary the environment names in CONTOUR_BINARY, as ctest sets it; SKIPs when it names
+///         none, or one that is not there.
+[[nodiscard]] std::filesystem::path contourBinary()
+{
+    auto const named = core::defaultEnvironment().get("CONTOUR_BINARY");
+    if (!named || named->empty())
+        SKIP("CONTOUR_BINARY names no contour binary");
+    auto const binary = core::pathFromTrustedUtf8(*named);
+    if (!std::filesystem::exists(binary))
+        SKIP("CONTOUR_BINARY names no file: " << *named);
+    return binary;
+}
+
+/// @return How @p shell is started with @p rcLine as its only start-up line: PSReadLine kept away from the
+///         user's history file, and a prompt short enough for one line, come from the command line.
+[[nodiscard]] ShellLaunch profileLineLaunch(std::string_view shell, std::string const& rcLine)
+{
+    auto launch = launchFor(shell);
+    launch.startupText = rcLine + "\n";
+    launch.arguments.back() =
+        "Set-PSReadLineOption -HistorySaveStyle SaveNothing; function prompt { 'PS> ' }; "
+        + launch.arguments.back();
+    return launch;
+}
+
+/// Starts @p launch inside Contour and checks that its profile line loaded the integration once: the
+/// prompt is marked, and a command makes exactly one command block.
+void checkProfileLineInsideContour(ShellLaunch launch)
+{
+    launch.environment = { { "TERM_PROGRAM", "contour" } };
+    auto const session = start(launch);
+    awaitFirstPromptEnd(*session);
+    CHECK(kindsOf(osc133Marks(session->transcript())).contains('A'));
+    launch.command = "Write-Output ok";
+    checkCommandCycle(*session, launch);
+    auto const finished = std::ranges::count(session->terminal().terminal.commandBlocks().records(),
+                                             vtbackend::CommandBlockState::Finished,
+                                             &vtbackend::CommandBlockRecord::state);
+    CHECK(finished == 1);
+}
+
+} // namespace
+
+// Each PowerShell case runs once for every PowerShell in PowerShellRows -- on Windows, Windows PowerShell 5.1
+// as well as PowerShell 7 -- the very same script in each.
+
 TEST_CASE("PowerShell integration reports prompts, the command line and its end",
           "[shell-integration][shells][pwsh]")
 {
     // On Windows this runs through ConPTY, whose passing OSC 133 on is what vtpty_test's
     // ConPty.passesOsc133Through establishes. The command line is PSReadLine's, as it accepted it: C goes
     // out once it returns, after the newline, so the command's output starts below the prompt.
-    auto const session = start(launchFor("pwsh"));
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const& launch = launchFor(powershell.key);
+    auto const session = start(launch);
     awaitFirstPromptEnd(*session);
-    checkCommandCycle(*session, launchFor("pwsh"));
+    checkCommandCycle(*session, launch);
 }
 
 TEST_CASE("PowerShell integration dot-sourced twice wraps once", "[shell-integration][shells][pwsh]")
 {
-    auto launch = launchFor("pwsh");
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto launch = launchFor(powershell.key);
     launch.startupText += ". '${SCRIPT}'\n";
     auto const session = start(launch);
     awaitFirstPromptEnd(*session);
@@ -1202,9 +1342,12 @@ TEST_CASE("PowerShell integration turns reflow off for a plain-text prompt too",
           "[shell-integration][shells][pwsh]")
 {
     // PowerShell takes every DECSET and DECRST out of a prompt it renders as plain text, as it does
-    // under NO_COLOR -- so the integration writes its own rather than return them in the prompt.
-    auto launch = launchFor("pwsh");
-    launch.startupText = "$PSStyle.OutputRendering = 'PlainText'\n" + launch.startupText;
+    // under NO_COLOR -- so the integration writes its own rather than return them in the prompt. (Windows
+    // PowerShell has no $PSStyle, and takes nothing out of a prompt.)
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto launch = launchFor(powershell.key);
+    launch.startupText = "if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }\n" + launch.startupText;
     auto const session = start(launch);
     awaitFirstPromptEnd(*session);
     checkCommandCycle(*session, launch);
@@ -1220,55 +1363,54 @@ TEST_CASE("PowerShell integration turns reflow off for a plain-text prompt too",
 
 TEST_CASE("PowerShell integration reports how a command ended", "[shell-integration][shells][pwsh]")
 {
-    auto const session = start(launchFor("pwsh"));
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const& launch = launchFor(powershell.key);
+    auto const session = start(launch);
     awaitFirstPromptEnd(*session);
-    auto const promptAfter = [&](ShellLaunch const& launch, int exitCode) {
+    auto const promptAfter = [&](std::string command, int exitCode) {
+        auto typed = launch;
+        typed.command = std::move(command);
         auto const typedAt = session->transcript().size();
-        checkCommandCycle(*session, launch, exitCode);
+        checkCommandCycle(*session, typed, exitCode);
         return session->transcript().substr(typedAt);
     };
 
     // A native program's exit status, from $LASTEXITCODE; and the prompt sees the $? it would have seen
     // without the integration.
-    auto native = launchFor("pwsh");
-    native.command = std::string { ExitThreeCommand };
-    CHECK(promptAfter(native, 3).contains("PS!> "));
+    CHECK(promptAfter(std::string { ExitThreeCommand }, 3).contains("PS!> "));
 
     // A PowerShell error: 1, whatever the native program before it left in $LASTEXITCODE.
-    auto failing = launchFor("pwsh");
-    failing.command = "Get-Item nosuchfile";
-    CHECK(promptAfter(failing, 1).contains("PS!> "));
+    CHECK(promptAfter("Get-Item nosuchfile", 1).contains("PS!> "));
 
     // Success: 0, even with that $LASTEXITCODE still about.
-    auto succeeding = launchFor("pwsh");
-    succeeding.command = "Write-Output ok";
-    CHECK(promptAfter(succeeding, 0).contains("PS> "));
+    CHECK(promptAfter("Write-Output ok", 0).contains("PS> "));
 }
 
 TEST_CASE("PowerShell integration percent-encodes the command line byte by byte",
           "[shell-integration][shells][pwsh]")
 {
-    auto const argumentsFor = [](std::vector<std::string> const& inputs) {
-        // Handed over in hex, which no quoting on the way can touch.
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const argumentsFor = [&](std::vector<std::string> const& inputs) {
+        // Handed over in hex, which no quoting on the way can touch, and decoded as Windows PowerShell can
+        // too: it has no [Convert]::FromHexString.
         auto hexInputs = std::string {};
         for (auto const& input: inputs)
             hexInputs += std::format(
                 "{}'{}'", hexInputs.empty() ? "" : ", ", core::toHexString(std::string_view { input }));
-        return std::vector<std::string> {
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            std::format(". '${{SCRIPT}}'; "
-                        "foreach ($hex in @({})) {{ "
-                        "$text = [Text.Encoding]::UTF8.GetString([Convert]::FromHexString($hex)); "
-                        "'[' + (__Contour-PercentEncode $text) + ']' }}",
-                        hexInputs),
-        };
+        return oneShotArguments(launchFor(powershell.key),
+                                std::format(". '${{SCRIPT}}'; "
+                                            "foreach ($hex in @({})) {{ "
+                                            "$bytes = [byte[]]@($hex -split '(..)' -ne '' | ForEach-Object "
+                                            "{{ [Convert]::ToByte($_, 16) }}); "
+                                            "$text = [Text.Encoding]::UTF8.GetString($bytes); "
+                                            "'[' + (__Contour-PercentEncode $text) + ']' }}",
+                                            hexInputs));
     };
     // A byte that no UTF-8 holds PSReadLine cannot hand the script: what it hands over is a .NET string.
     checkPercentEncoding(
-        "pwsh", argumentsFor, [](std::string_view input) { return !input.contains('\xff'); });
+        powershell.key, argumentsFor, [](std::string_view input) { return !input.contains('\xff'); });
 }
 
 TEST_CASE("PowerShell integration percent-encodes what no UTF-8 input holds, and a text it cuts",
@@ -1280,8 +1422,10 @@ TEST_CASE("PowerShell integration percent-encodes what no UTF-8 input holds, and
                              "'[' + (__Contour-PercentEncode ('a' + [char]0xD800 + 'b')) + ']'; "
                              "'[' + (__Contour-PercentEncode 'a b/c' 4) + ']'; "
                              "'[' + (__Contour-PercentEncode ('x' + [char]0xFC + 'y') 2) + ']'"sv;
-    auto launch = launchFor("pwsh");
-    launch.arguments = { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", std::string { Command } };
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto launch = launchFor(powershell.key);
+    launch.arguments = oneShotArguments(launch, std::string { Command });
     auto const printed = resultsPrintedBy(launch, 3);
     CHECK(printed == std::vector<std::string> { "a%EF%BF%BDb", "a%20b/", "x%C3" });
 }
@@ -1289,7 +1433,9 @@ TEST_CASE("PowerShell integration percent-encodes what no UTF-8 input holds, and
 TEST_CASE("PowerShell integration reports the working directory as a file URL",
           "[shell-integration][shells][pwsh]")
 {
-    checkWorkingDirectoryReport(launchFor("pwsh"));
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    checkWorkingDirectoryReport(launchFor(powershell.key));
 }
 
 #ifndef _WIN32
@@ -1297,5 +1443,65 @@ TEST_CASE("PowerShell integration reports a directory entered through a symbolic
           "[shell-integration][shells][pwsh]")
 {
     checkSymlinkedDirectoryReport(launchFor("pwsh"));
+}
+#endif
+
+TEST_CASE("ShellIntegrationShells.profileLine", "[shell-integration][shells][pwsh]")
+{
+    // The very line the one-click install appends to a PowerShell profile, in a start-up file of its own,
+    // dot-sourced as PowerShell dot-sources a profile: it asks the contour binary for the script through a
+    // pipe -- in a release build on Windows, from a GUI-subsystem binary -- and runs it inside Contour only.
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const binary = contourBinary();
+    auto const rcLine = contour::window::shellRcLine(powershell.kind, binary);
+    REQUIRE(rcLine.has_value());
+    auto launch = profileLineLaunch(powershell.key, *rcLine);
+
+    SECTION("inside Contour")
+    {
+        checkProfileLineInsideContour(launch);
+    }
+
+    SECTION("outside Contour")
+    {
+        // TERM_PROGRAM is one of userShellSettings(), so the shell inherits none. The prompt shows, and
+        // a command typed at it runs; nothing says where a prompt starts, and nothing failed.
+        auto const session = start(launch);
+        session->pumpUntil([](std::string_view text) { return text.contains("PS> "); }, "the prompt");
+        session->type("Write-Output ('profile' + 'line')\r");
+        session->pumpUntil([](std::string_view text) { return text.contains("profileline"); },
+                           "the command's output");
+        auto const& transcript = session->transcript();
+        INFO("what the shell wrote: " << core::escape(transcript));
+        CHECK(osc133Marks(transcript).empty());
+        // What PowerShell says when a profile line fails: a script it may not load, a command it does not
+        // know, the record under every error it prints, and a line it cannot parse.
+        for (auto const failure:
+             { "cannot be loaded"sv, "is not recognized"sv, "CategoryInfo"sv, "ParserError"sv })
+            CHECK_FALSE(transcript.contains(failure));
+    }
+}
+
+#ifndef _WIN32
+TEST_CASE("ShellIntegrationShells.profileLine.apostrophe", "[shell-integration][shells][pwsh]")
+{
+    // The line quotes the binary's path for PowerShell, so it runs from a directory whose name has an
+    // apostrophe in it, as one named after its owner may. Reached through a symbolic link in such a
+    // directory under the shell's HOME, which is not known before the shell starts: the line is made for a
+    // stand-in HOME, which ${HOME} then replaces.
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const binary = contourBinary();
+    constexpr auto StandInHome = "/contour-stand-in-home"sv;
+    auto rcLine =
+        contour::window::shellRcLine(powershell.kind, std::format("{}/O'Brien/contour", StandInHome));
+    REQUIRE(rcLine.has_value());
+    REQUIRE(rcLine->contains("O''Brien"));
+    rcLine->replace(rcLine->find(StandInHome), StandInHome.size(), "${HOME}");
+
+    auto launch = profileLineLaunch(powershell.key, *rcLine);
+    launch.homeLinks = { { "O'Brien/contour", std::filesystem::absolute(binary) } };
+    checkProfileLineInsideContour(launch);
 }
 #endif

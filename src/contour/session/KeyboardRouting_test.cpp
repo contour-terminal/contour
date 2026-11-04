@@ -130,6 +130,7 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(QString shellIntegrationPrimary READ shellIntegrationPrimary CONSTANT)
     Q_PROPERTY(QString shellIntegrationSecondary READ shellIntegrationSecondary CONSTANT)
     Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError CONSTANT)
+    Q_PROPERTY(QString shellIntegrationNote READ shellIntegrationNote CONSTANT)
     Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)
 
   public:
@@ -160,6 +161,7 @@ class RoutingMockSession: public QObject
     [[nodiscard]] QString shellIntegrationPrimary() const { return {}; }
     [[nodiscard]] QString shellIntegrationSecondary() const { return {}; }
     [[nodiscard]] QString shellIntegrationError() const { return {}; }
+    [[nodiscard]] QString shellIntegrationNote() const { return {}; }
     [[nodiscard]] QString fontFamily() const { return {}; }
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }

@@ -13,7 +13,11 @@ Contour ships a script for bash, zsh, fish, tcsh and PowerShell. Write it out on
 | zsh | `contour generate integration shell zsh to ~/.config/contour/shell-integration.zsh` | in `~/.zshrc`: `source ~/.config/contour/shell-integration.zsh` |
 | fish | `contour generate integration shell fish to ~/.config/fish/conf.d/contour.fish` | nothing to do: fish reads `conf.d/` by itself |
 | tcsh | `contour generate integration shell tcsh to ~/.config/contour/shell-integration.tcsh` | in `~/.tcshrc`, after setting `prompt`: `source ~/.config/contour/shell-integration.tcsh` |
-| PowerShell | `contour generate integration shell pwsh to "$(Split-Path $PROFILE)/contour-integration.ps1"` | in your `$PROFILE`, after anything that sets up the prompt: `. "$(Split-Path $PROFILE)/contour-integration.ps1"` |
+| PowerShell 7 and Windows PowerShell 5.1 | `contour generate integration shell pwsh to "$(Split-Path $PROFILE)/contour-integration.ps1"` | in your `$PROFILE`, after anything that sets up the prompt: `. "$(Split-Path $PROFILE)/contour-integration.ps1"` |
+
+The same `pwsh` script serves both PowerShell 7 and Windows PowerShell 5.1; there is no separate `powershell` name.
+Contour can also install it for you: see
+[Installing PowerShell's integration from Contour](#installing-powershells-integration-from-contour).
 
 Every script marks the start of the prompt (`A`), its end (`B`), the start of the command's output (`C`)
 and the end of the command with its exit status (`D`), and reports the working directory with OSC 7. What
@@ -31,10 +35,63 @@ differs is the command line:
   recorded it, so a command kept out of the history (`HISTIGNORE`, `HISTCONTROL`, `set +o history`) is read
   off the screen instead.
 * **tcsh:** the script extends `prompt` once, so it is sourced after `prompt` is set.
-* **PowerShell:** the script is for PowerShell 7 and needs PSReadLine, which comes with it. Like VS Code's
+* **PowerShell:** the script runs in PowerShell 7 and in Windows PowerShell 5.1, and needs PSReadLine. Like VS Code's
   integration, it wraps `PSConsoleHostReadLine`, so the command line is reported when PSReadLine hands it
   back — after the newline, before the command runs — rather than from a key handler. Without PSReadLine
   there is no `C`, and so no `D` either.
+
+### Installing PowerShell's integration from Contour
+
+Instead of editing your profile by hand, install it from **Settings › Shell Integration** (the rows
+"PowerShell", and on Windows "Windows PowerShell"), or from the pane's "Turn on command blocks" card, which
+appears after three commands without prompt marks. The confirm step shows the exact line and the profile file
+before anything is written. The line is
+
+```powershell
+if ($env:TERM_PROGRAM -eq 'contour') { . ([scriptblock]::Create((& '<contour binary>' generate integration shell pwsh to - | Out-String))) } # Contour shell integration
+```
+
+It runs only inside Contour, and regenerates the script from the running Contour at every start. A manual
+install that dot-sources `contour-integration.ps1`, `shell-integration.ps1` or `shell-integration.pwsh` counts
+as installed. Writing the script to a `.ps1` and dot-sourcing it, as in the table above, stays an alternative.
+
+The line goes into the profile of the shell:
+
+| Shell | Profile |
+|-------|---------|
+| PowerShell 7, Windows | `<Documents>\PowerShell\Microsoft.PowerShell_profile.ps1` |
+| Windows PowerShell 5.1 | `<Documents>\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` |
+| PowerShell 7, Linux and macOS | `$XDG_CONFIG_HOME/powershell/Microsoft.PowerShell_profile.ps1`, else `~/.config/powershell/Microsoft.PowerShell_profile.ps1` |
+
+`<Documents>` is the Documents known folder, so a OneDrive-redirected Documents is followed.
+
+* **Encoding:** a profile in UTF-8 (with or without a BOM) or UTF-16LE, the encoding Windows PowerShell 5.1's
+  `>` and `Out-File` write, is read and appended to in its own encoding. A new profile is created as UTF-8 with
+  a BOM. A Contour path with non-ASCII characters is refused for a Windows PowerShell profile without a BOM,
+  which 5.1 would misread; a UTF-16BE or UTF-32 profile is refused.
+* **Execution policy (Windows):** Contour reads the policy each shell would apply, the way the shell does.
+  Windows PowerShell 5.1: Group Policy (machine, then user), then the user's and the machine's
+  `ShellIds\Microsoft.PowerShell` setting in the registry, else Restricted (RemoteSigned on Windows Server).
+  PowerShell 7: its own Group Policy (`Policies\Microsoft\PowerShellCore`), then
+  `"Microsoft.PowerShell:ExecutionPolicy"` in the user's `<Documents>\PowerShell\powershell.config.json`, then
+  in the `powershell.config.json` beside the installed PowerShell 7, else RemoteSigned. A configuration file
+  that is not a JSON object sets no policy.
+* **Fixing the policy:** when the effective policy is Restricted (or none is set and the default is), which is
+  Windows PowerShell 5.1's default on Windows 10 and 11 clients, the confirm step also offers "Allow Scripts and
+  Add Line": it sets your user's policy to RemoteSigned, as `Set-ExecutionPolicy -Scope CurrentUser
+  RemoteSigned` does, before adding the line. For Windows PowerShell 5.1 that is the user's registry setting;
+  for PowerShell 7 it is that key in the user's `powershell.config.json`, created if missing, with every other
+  key kept. A `powershell.config.json` that does not parse is never overwritten: the install is refused, and
+  the profile stays as it was. If the line cannot be added after the policy was set, the policy stays set (you
+  agreed to it), and trying again only adds the line. A policy enforced by Group Policy, or AllSigned, blocks
+  the install, and the dialog says why. PowerShell 7's default, RemoteSigned, needs no change.
+* **Installed, but the policy stops it:** a profile that already loads Contour under a policy that keeps it from
+  running is listed in Settings as "Installed in …, but PowerShell's script policy stops it from running", with
+  Install… offering "Allow Scripts": the same per-user fix, adding no line. Under Group Policy or AllSigned the
+  row says why instead, and offers nothing. The pane's card does not offer this: it offers only where the line is
+  missing.
+* **Which shell a pane runs:** on Windows, Contour cannot see which program runs in a pane, so the card
+  assumes the shell the pane's profile starts (and none for SSH profiles).
 
 ### Shells that speak OSC 133 themselves
 

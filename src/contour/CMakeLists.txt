@@ -977,6 +977,8 @@ if(CONTOUR_FRONTEND_GUI)
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
+            platform/ExecutionPolicySource_test.cpp
+            platform/RcText_test.cpp
             platform/ShellRcEditor_test.cpp
             platform/WindowShadowController_test.cpp
             platform/WindowShadowGeometry_test.cpp
@@ -1422,6 +1424,8 @@ if(CONTOUR_TESTING)
         config/BindingCollisions_test.cpp
         config/ChromeTokenGroups_test.cpp
         config/ControlsStyle_test.cpp
+        config/ShellKind_test.cpp
+        config/ExecutionPolicy_test.cpp
         config/DefaultBindings_test.cpp
         config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp
@@ -1575,6 +1579,13 @@ if(CONTOUR_TESTING)
         target_link_libraries(contour_test PRIVATE contour_extensions)
     endif()
     add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
+    # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
+    # for the script, as a user's profile asks the installed one. It links Qt, and a CI runner has no display
+    # for it, so it runs offscreen.
+    if(TARGET contour)
+        set_property(TEST contour_test APPEND PROPERTY ENVIRONMENT
+                     "CONTOUR_BINARY=$<TARGET_FILE:contour>" "QT_QPA_PLATFORM=offscreen")
+    endif()
 endif()
 # }}}
 

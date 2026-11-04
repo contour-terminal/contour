@@ -2159,11 +2159,36 @@ platform::RcEnvironment SettingsController::rcEnvironment() const
     return platform::rcEnvironmentOf(shell.env, shell.removedEnvironment);
 }
 
-InstallBlock SettingsController::installBlock() const
+BinaryReach SettingsController::binaryReach() const
 {
-    auto const reach =
-        _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
-    return installBlockOf(_services.shell.host, reach);
+    return _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
+}
+
+config::ProfileScripts SettingsController::profileScripts(config::ShellRow const& shell) const
+{
+    // A shell the host rules out has no file worth looking at.
+    if (_services.shell.editor == nullptr || !config::isInstallableOn(shell, _services.shell.host))
+        return config::ProfileScripts::Run;
+    auto const inspection = inspectShell(shell.kind);
+    return inspection ? inspection->scripts : config::ProfileScripts::Run;
+}
+
+config::RcState SettingsController::rcState(config::ShellRow const& shell) const
+{
+    if (_services.shell.editor == nullptr || !config::isInstallableOn(shell, _services.shell.host))
+        return config::RcState::Unknown;
+    auto const inspection = inspectShell(shell.kind);
+    return inspection ? inspection->state : config::RcState::Unknown;
+}
+
+ShellInstallRow SettingsController::shellInstallRow(config::ShellRow const& shell) const
+{
+    auto const host = _services.shell.host;
+    if (!config::isInstallableOn(shell, host))
+        return blockedShellInstallRowOf(
+            shell, installBlockOf(shell, host, binaryReach(), config::ProfileScripts::Run));
+    return shellInstallRowOf(
+        shell, inspectShell(shell.kind), _services.shell.homeDirectory, host, binaryReach());
 }
 
 void SettingsController::listShellRows()
@@ -2171,11 +2196,13 @@ void SettingsController::listShellRows()
     _shellRows.clear();
     if (_services.shell.editor != nullptr)
     {
-        auto const block = installBlock();
-        for (auto const& shell: config::ShellRows)
+        auto const host = _services.shell.host;
+        for (auto const& shell:
+             config::ShellRows | std::views::filter([host](config::ShellRow const& candidate) {
+                 return config::isListedOn(candidate, host);
+             }))
         {
-            auto const row =
-                shellInstallRowOf(shell, inspectShell(shell.kind), _services.shell.homeDirectory, block);
+            auto const row = shellInstallRow(shell);
             _shellRows.push_back(QVariantMap {
                 { QStringLiteral("shell"), static_cast<int>(row.shell) },
                 { QStringLiteral("name"), toQString(row.name) },
@@ -2215,10 +2242,14 @@ QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
         return {};
     auto const rc = shellIntegrationRcPath(shell).toStdString();
     auto const line = shellIntegrationLine(shell).toStdString();
-    auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    auto const words = confirmWordsFor(rcState(*row), profileScripts(*row));
+    auto const text = [&](std::string_view pattern) {
+        return toQString(cardText(pattern, row->displayName, rc, line));
+    };
     return QVariantMap {
-        { QStringLiteral("title"), toQString(cardText(words.title, row->name, rc, line)) },
-        { QStringLiteral("line"), toQString(cardText(words.body, row->name, rc, line)) },
+        { QStringLiteral("title"), text(words.title) },
+        { QStringLiteral("line"), text(words.line) },
+        { QStringLiteral("note"), text(words.note) },
         { QStringLiteral("primary"), toQString(words.primary) },
         { QStringLiteral("secondary"), toQString(words.secondary) },
     };
@@ -2227,9 +2258,12 @@ QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
 void SettingsController::installShellIntegration(int shell)
 {
     auto const kind = static_cast<config::ShellKind>(shell);
-    if (_services.shell.editor == nullptr || config::shellRow(kind) == nullptr)
+    auto const* const shellRow = config::shellRow(kind);
+    if (_services.shell.editor == nullptr || shellRow == nullptr)
         return;
-    if (auto const block = installBlock(); block != InstallBlock::None)
+    if (auto const block =
+            installBlockOf(*shellRow, _services.shell.host, binaryReach(), profileScripts(*shellRow));
+        block != InstallBlock::None)
     {
         emit errorOccurred(toQString(InstallBlockRows[std::to_underlying(block)].text));
         return;

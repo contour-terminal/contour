@@ -6,12 +6,15 @@
 /// the shell's startup file. Pure: the session feeds the probe, the manager asks offerFor(), the card
 /// shows CardStageRows, and the tests read the same rows.
 
+#include <contour/config/ExecutionPolicy.hpp>
 #include <contour/config/ShellKind.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/window/DroppedText.hpp> // detail::PowerShellQuotes
 
 #include <vtbackend/core/Primitives.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <algorithm>
 #include <array>
@@ -151,12 +154,15 @@ struct LocatedBinary
     return { .path = applicationFile, .reach = BinaryReach::Reachable };
 }
 
-/// What stops Install from being offered on this host, whichever surface asks.
+/// What stops Install from being offered for a shell, whichever surface asks.
 enum class InstallBlock : uint8_t
 {
-    None = 0,         ///< Nothing stops it.
-    WindowsHost,      ///< Windows shells do not read these startup files.
-    BinaryUnreachable ///< The line could not name a binary a later shell finds.
+    None = 0,          ///< Nothing stops it.
+    NotOnWindows,      ///< A POSIX shell's startup files are not read on a Windows host.
+    WindowsOnly,       ///< A Windows shell has no startup file off Windows.
+    BinaryUnreachable, ///< The line could not name a binary a later shell finds.
+    GroupPolicy,       ///< The organisation's PowerShell policy forbids profile scripts.
+    SignedScriptsOnly, ///< PowerShell runs only signed scripts here, and the profile is not.
 };
 
 /// The words of one block, shown by the Settings page in place of the status of a file it cannot install to.
@@ -169,22 +175,38 @@ struct InstallBlockRow
 /// Every block, in enumerator order.
 inline constexpr auto InstallBlockRows = std::array {
     InstallBlockRow { .block = InstallBlock::None, .text = "" },
-    InstallBlockRow { .block = InstallBlock::WindowsHost,
-                      .text = "Not available on Windows: its shells do not read these files" },
+    InstallBlockRow { .block = InstallBlock::NotOnWindows, .text = "Not available on Windows" },
+    InstallBlockRow { .block = InstallBlock::WindowsOnly, .text = "Only available on Windows" },
     InstallBlockRow { .block = InstallBlock::BinaryUnreachable,
                       .text = "Not available here: shells outside this sandbox cannot run this Contour" },
+    InstallBlockRow { .block = InstallBlock::GroupPolicy,
+                      .text = "Blocked by your organisation's PowerShell policy" },
+    InstallBlockRow { .block = InstallBlock::SignedScriptsOnly,
+                      .text = "PowerShell requires signed scripts here" },
 };
 
 /// The one decision both the card and the Settings page ask.
+/// @param shell The shell.
 /// @param host The host.
 /// @param binary Whether the running binary can be named by an rc line.
-/// @return What blocks Install; None when nothing does.
-[[nodiscard]] constexpr InstallBlock installBlockOf(config::HostPlatform host, BinaryReach binary) noexcept
+/// @param scripts Whether the shell's profile runs under its execution policy (Run for a shell without one).
+/// @return What blocks Install, host first, then binary, then policy; None when nothing does.
+[[nodiscard]] constexpr InstallBlock installBlockOf(config::ShellRow const& shell,
+                                                    config::HostPlatform host,
+                                                    BinaryReach binary,
+                                                    config::ProfileScripts scripts) noexcept
 {
-    if (host == config::HostPlatform::Windows)
-        return InstallBlock::WindowsHost;
+    if (!config::isInstallableOn(shell, host))
+        return host == config::HostPlatform::Windows ? InstallBlock::NotOnWindows : InstallBlock::WindowsOnly;
     if (binary == BinaryReach::Unreachable)
         return InstallBlock::BinaryUnreachable;
+    switch (scripts)
+    {
+        case config::ProfileScripts::BlockedByGroupPolicy: return InstallBlock::GroupPolicy;
+        case config::ProfileScripts::SignedOnly: return InstallBlock::SignedScriptsOnly;
+        case config::ProfileScripts::Run:
+        case config::ProfileScripts::NeedUserPolicy: break;
+    }
     return InstallBlock::None;
 }
 
@@ -198,17 +220,20 @@ struct OfferInputs
     OfferDismissal dismissal = OfferDismissal::Open;
     config::RcState rc = config::RcState::Unknown;
     CardSlot slot = CardSlot::Free;
+    config::ProfileScripts scripts = config::ProfileScripts::Run; ///< Whether the profile runs (PowerShell).
 };
 
 /// Decides whether the card shows.
 /// @param in The facts.
 /// @return Card iff the shell is known, its startup file is on this machine, installBlockOf() finds
-///         nothing in the way (not Windows, a binary a later shell can run), the shell was not dismissed, its
-///         file does not load Contour's script, and no card showed yet.
+///         nothing in the way (the shell fits the host, a binary a later shell can run, a policy that lets
+///         the profile run or be made to), the shell was not dismissed, its file does not load Contour's
+///         script, and no card showed yet.
 [[nodiscard]] constexpr ShellIntegrationOffer offerFor(OfferInputs const& in) noexcept
 {
-    auto const offered = in.shell != config::ShellKind::Unknown && in.locality == RcLocality::ThisMachine
-                         && installBlockOf(in.host, in.binary) == InstallBlock::None
+    auto const* const row = config::shellRow(in.shell);
+    auto const offered = row != nullptr && in.locality == RcLocality::ThisMachine
+                         && installBlockOf(*row, in.host, in.binary, in.scripts) == InstallBlock::None
                          && in.dismissal == OfferDismissal::Open && in.rc == config::RcState::Absent
                          && in.slot == CardSlot::Free;
     return offered ? ShellIntegrationOffer::Card : ShellIntegrationOffer::None;
@@ -247,6 +272,69 @@ inline constexpr auto CardStageRows = std::array {
                    .primary = "Add Line",
                    .secondary = "Cancel" },
 };
+
+/// The confirm step's extra sentence when Install also fixes the execution policy. `{shell}` is replaced.
+inline constexpr std::string_view PolicyFixNote =
+    "This also lets your own scripts run in {shell}, for your user only (Set-ExecutionPolicy -Scope "
+    "CurrentUser RemoteSigned).";
+
+/// The confirm step's primary button when Install also fixes the execution policy.
+inline constexpr std::string_view PolicyFixPrimary = "Allow Scripts and Add Line";
+
+/// @param scripts Whether the profile runs under the shell's execution policy.
+/// @return PolicyFixNote when the policy must be changed first, else empty.
+[[nodiscard]] constexpr std::string_view policyNoteFor(config::ProfileScripts scripts) noexcept
+{
+    return scripts == config::ProfileScripts::NeedUserPolicy ? PolicyFixNote : std::string_view {};
+}
+
+/// @param scripts Whether the profile runs under the shell's execution policy.
+/// @return PolicyFixPrimary when the policy must be changed first, else the Confirm stage's primary.
+[[nodiscard]] constexpr std::string_view confirmPrimaryFor(config::ProfileScripts scripts) noexcept
+{
+    return scripts == config::ProfileScripts::NeedUserPolicy
+               ? PolicyFixPrimary
+               : CardStageRows[std::to_underlying(CardStage::Confirm)].primary;
+}
+
+/// What an install's confirmation says, as cardText() patterns.
+struct ConfirmWords
+{
+    std::string_view title {};     ///< The question.
+    std::string_view line {};      ///< The line to add; empty when none is added.
+    std::string_view note {};      ///< What else the install changes; empty when nothing does.
+    std::string_view primary {};   ///< The accept button.
+    std::string_view secondary {}; ///< The reject button.
+
+    /// @return Whether all members are equal.
+    [[nodiscard]] constexpr bool operator==(ConfirmWords const&) const = default;
+};
+
+/// The Settings page's confirmation for a profile that loads Contour already but is kept from running by an
+/// execution policy the user may change: only the policy changes, and no line is added.
+inline constexpr auto PolicyOnlyConfirm = ConfirmWords { .title = "Allow scripts in {shell}?",
+                                                         .line = "",
+                                                         .note = PolicyFixNote,
+                                                         .primary = "Allow Scripts",
+                                                         .secondary = "Cancel" };
+
+/// The Settings page's confirmation of an install.
+/// @param rc What the startup file holds.
+/// @param scripts Whether the profile runs under the shell's execution policy.
+/// @return PolicyOnlyConfirm for a file that loads Contour already under a policy the user must fix, else the
+///         card's Confirm stage, with policyNoteFor() and confirmPrimaryFor().
+[[nodiscard]] constexpr ConfirmWords confirmWordsFor(config::RcState rc,
+                                                     config::ProfileScripts scripts) noexcept
+{
+    if (rc == config::RcState::Installed && scripts == config::ProfileScripts::NeedUserPolicy)
+        return PolicyOnlyConfirm;
+    auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    return ConfirmWords { .title = words.title,
+                          .line = words.body,
+                          .note = policyNoteFor(scripts),
+                          .primary = confirmPrimaryFor(scripts),
+                          .secondary = words.secondary };
+}
 
 /// Fills a card pattern in.
 /// @param pattern Text holding `{shell}`, `{rc}` and `{line}` placeholders. Substituted text is never
@@ -306,12 +394,27 @@ namespace detail
     }
 
     /// Quotes @p path in single quotes for @p syntax: POSIX `'` becomes `'\''`; fish `\` becomes `\\`
-    /// and `'` becomes `\'`.
+    /// and `'` becomes `\'`; PowerShell doubles each of `'`, U+2018, U+2019, U+201A and U+201B (all of
+    /// which it treats as a single quote), each as itself.
     [[nodiscard]] inline std::string quotePath(std::string_view path, config::RcSyntax syntax)
     {
         auto quoted = std::string { "'" };
-        for (auto const c: path)
+        while (!path.empty())
         {
+            if (syntax == config::RcSyntax::PowerShell)
+            {
+                auto const match = std::ranges::find_if(
+                    PowerShellQuotes, [&](std::string_view quote) { return path.starts_with(quote); });
+                if (match != PowerShellQuotes.end())
+                {
+                    quoted += *match;
+                    quoted += *match;
+                    path.remove_prefix(match->size());
+                    continue;
+                }
+            }
+            auto const c = path.front();
+            path.remove_prefix(1);
             if (c == '\'')
                 quoted += syntax == config::RcSyntax::Posix ? "'\\''" : "\\'";
             else if (c == '\\' && syntax == config::RcSyntax::Fish)
@@ -336,7 +439,7 @@ namespace detail
         return std::unexpected(ShellRcLineError::UnknownShell);
     if (!config::isRootedPath(contourBinary))
         return std::unexpected(ShellRcLineError::RelativePath);
-    auto const path = contourBinary.string();
+    auto const path = core::pathToUtf8(contourBinary);
     if (std::ranges::any_of(path, detail::isControl))
         return std::unexpected(ShellRcLineError::UnusablePath);
 
@@ -345,10 +448,14 @@ namespace detail
     {
         case config::RcSyntax::Posix:
             return std::string(row->guard) + R"x(eval "$()x" + quoted + " generate integration shell "
-                   + std::string(row->name) + R"x( to -)"; fi )x" + std::string(config::ShellRcMarker);
+                   + std::string(row->script) + R"x( to -)"; fi )x" + std::string(config::ShellRcMarker);
         case config::RcSyntax::Fish:
-            return std::string(row->guard) + quoted + " generate integration shell " + std::string(row->name)
-                   + " to - | source; end " + std::string(config::ShellRcMarker);
+            return std::string(row->guard) + quoted + " generate integration shell "
+                   + std::string(row->script) + " to - | source; end " + std::string(config::ShellRcMarker);
+        case config::RcSyntax::PowerShell:
+            return std::string(row->guard) + ". ([scriptblock]::Create((& " + quoted
+                   + " generate integration shell " + std::string(row->script) + " to - | Out-String))) } "
+                   + std::string(config::ShellRcMarker);
     }
     return std::unexpected(ShellRcLineError::UnknownShell);
 }
@@ -364,9 +471,16 @@ namespace detail
     {
         auto const relative = rc.lexically_relative(home);
         if (!relative.empty() && *relative.begin() != "..")
-            return "~/" + relative.generic_string();
+        {
+            // The generic form, in UTF-8: `~/` reads with forward slashes on every host.
+            auto text = core::pathToUtf8(relative);
+            if constexpr (std::filesystem::path::preferred_separator != '/')
+                std::ranges::replace(
+                    text, static_cast<char>(std::filesystem::path::preferred_separator), '/');
+            return "~/" + text;
+        }
     }
-    return rc.string();
+    return core::pathToUtf8(rc);
 }
 
 } // namespace contour::window

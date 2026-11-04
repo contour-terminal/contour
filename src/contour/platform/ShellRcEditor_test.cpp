@@ -5,6 +5,9 @@
 // full disk, a file edited between the read and the write. Everything runs over an in-memory file
 // system and a fake environment; no test reaches the real HOME.
 
+#include <contour/config/ExecutionPolicy.hpp>
+#include <contour/platform/ExecutionPolicySource.hpp>
+#include <contour/platform/KnownFolders.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 
@@ -14,10 +17,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -172,14 +177,127 @@ struct Rig
 {
     RcDisk disk;
     core::testing::FakeEnvironment env;
+    NullKnownFolders knownFolders;
+    NoExecutionPolicySource executionPolicy;
     FileShellRcEditor editor;
 
     explicit Rig(std::map<std::string, std::string, std::less<>> variables = { { "HOME", "/home/me" } },
                  HostPlatform host = HostPlatform::Other):
-        env { std::move(variables) }, editor { disk, env, host, RunningAs::User }
+        env { std::move(variables) },
+        editor { disk, env, knownFolders, executionPolicy, host, RunningAs::User }
     {
     }
 };
+
+/// A Documents folder the test chooses, or none.
+struct FakeKnownFolders final: IKnownFolders
+{
+    std::optional<fs::path> folder;
+
+    explicit FakeKnownFolders(std::optional<fs::path> documents): folder { std::move(documents) } {}
+
+    [[nodiscard]] std::optional<fs::path> documents() const override { return folder; }
+};
+
+/// Whether FakeExecutionPolicySource lets a policy write succeed.
+enum class PolicyWrites : uint8_t
+{
+    Succeed = 0,
+    Fail, ///< "Access denied": the policy stays as it was.
+};
+
+/// An execution policy the test sets, which records every attempt to allow the user's scripts.
+struct FakeExecutionPolicySource final: IExecutionPolicySource
+{
+    contour::config::EffectivePolicy policy { .policy = contour::config::ExecutionPolicy::RemoteSigned,
+                                              .scope = contour::config::PolicyScope::Default };
+    PolicyWrites writes = PolicyWrites::Succeed;
+    std::vector<ShellKind> attempts;   ///< Every allowUserScripts() call, successful or not.
+    std::function<void()> duringWrite; ///< Runs inside allowUserScripts(), to see the disk at that moment.
+
+    [[nodiscard]] contour::config::EffectivePolicy effectivePolicy(ShellKind /*shell*/) const override
+    {
+        return policy;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> allowUserScripts(ShellKind shell) override
+    {
+        attempts.push_back(shell);
+        if (duringWrite)
+            duringWrite();
+        if (writes == PolicyWrites::Fail)
+            return std::unexpected(std::string { "Access denied" });
+        policy = { .policy = contour::config::ExecutionPolicy::RemoteSigned,
+                   .scope = contour::config::PolicyScope::CurrentUser };
+        return {};
+    }
+};
+
+/// A harness for PowerShell's profiles: a chosen Documents folder and execution policy.
+struct ProfileRig
+{
+    RcDisk disk;
+    core::testing::FakeEnvironment env;
+    FakeKnownFolders knownFolders;
+    FakeExecutionPolicySource executionPolicy;
+    FileShellRcEditor editor;
+
+    explicit ProfileRig(std::optional<fs::path> documents,
+                        HostPlatform host = HostPlatform::Windows,
+                        std::map<std::string, std::string, std::less<>> variables = { { "HOME",
+                                                                                        "/home/me" } }):
+        env { std::move(variables) },
+        knownFolders { std::move(documents) },
+        editor { disk, env, knownFolders, executionPolicy, host, RunningAs::User }
+    {
+    }
+};
+
+/// The Documents folder of the PowerShell tests: rooted on every host.
+fs::path documents()
+{
+    return "/home/me/OneDrive/Documents";
+}
+
+/// PowerShell 7's profile under documents().
+fs::path pwshProfile()
+{
+    return documents() / "PowerShell/Microsoft.PowerShell_profile.ps1";
+}
+
+/// Windows PowerShell's profile under documents().
+fs::path windowsPowerShellProfile()
+{
+    return documents() / "WindowsPowerShell/Microsoft.PowerShell_profile.ps1";
+}
+
+/// @return @p ascii as UTF-16LE, without a byte order mark; ASCII only, so the test needs no encoder.
+std::string utf16Le(std::string_view ascii)
+{
+    auto out = std::string {};
+    for (auto const c: ascii)
+    {
+        out.push_back(c);
+        out.push_back('\0');
+    }
+    return out;
+}
+
+constexpr auto Utf8Bom = std::string_view { "\xEF\xBB\xBF" };
+constexpr auto Utf16LeBom = std::string_view { "\xFF\xFE" };
+
+/// Contour's line for @p shell, running a binary under a non-ASCII home directory.
+std::string nonAsciiLine(ShellKind shell)
+{
+    return contour::window::shellRcLine(shell, fs::path { std::u8string_view { u8"/home/Müller/contour" } })
+        .value();
+}
+
+/// Contour's line for @p shell, running an ASCII path.
+std::string asciiLine(ShellKind shell)
+{
+    return contour::window::shellRcLine(shell, "/usr/bin/contour").value();
+}
 
 /// The zsh rc file under the fake HOME.
 fs::path zshRc()
@@ -396,8 +514,10 @@ TEST_CASE("ShellRcEditor: a superuser's Contour inspects and writes nothing", "[
 {
     auto disk = RcDisk {};
     auto const env = core::testing::FakeEnvironment { { { "HOME", "/home/me" } } };
-    auto const editor =
-        std::make_unique<FileShellRcEditor>(disk, env, HostPlatform::Other, RunningAs::Superuser);
+    auto const knownFolders = NullKnownFolders {};
+    auto executionPolicy = NoExecutionPolicySource {};
+    auto const editor = std::make_unique<FileShellRcEditor>(
+        disk, env, knownFolders, executionPolicy, HostPlatform::Other, RunningAs::Superuser);
     for (auto const& row: ShellRows)
     {
         CHECK(editor->inspect(row.kind, noSession).error() == ShellRcError::Superuser);
@@ -422,7 +542,9 @@ TEST_CASE("ShellRcEditor: no HOME, no file", "[shellrc]")
              {}, { { "HOME", "" } }, { { "HOME", "relative/home" } } })
     {
         auto rig = Rig { variables };
-        for (auto const& row: ShellRows)
+        for (auto const& row: ShellRows | std::views::filter([](contour::config::ShellRow const& row) {
+                                  return contour::config::isInstallableOn(row, HostPlatform::Other);
+                              }))
         {
             CHECK(rig.editor.inspect(row.kind, noSession).error() == ShellRcError::NoHome);
             CHECK(rig.editor.install(row.kind, Line, noSession).error() == ShellRcError::NoHome);
@@ -645,6 +767,41 @@ TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's li
     CHECK(rcStateOf(ShellKind::Zsh, line + "\n") == RcState::Installed);
 }
 
+TEST_CASE("ShellRcEditor.rcStateOf.PowerShell", "[shellrc]")
+{
+    struct Case
+    {
+        ShellKind shell;
+        std::string_view content;
+        RcState expected;
+    };
+    constexpr auto Cases = std::array {
+        Case {
+            ShellKind::Pwsh, ". \"$(Split-Path $PROFILE)/contour-integration.ps1\"\n", RcState::Installed },
+        Case { ShellKind::Pwsh, "# . contour-integration.ps1\n", RcState::Absent },
+        Case { ShellKind::Pwsh, "  . C:\\contour\\shell-integration.pwsh\r\n", RcState::Installed },
+        Case { ShellKind::Pwsh, ". ~/shell-integration.ps1", RcState::Installed },
+        Case { ShellKind::Pwsh, "echo contour-integration.ps1\n", RcState::Absent },
+        Case { ShellKind::Pwsh,
+               "contour generate integration shell pwsh to - | Out-String | Invoke-Expression\n",
+               RcState::Installed },
+        Case { ShellKind::WindowsPowerShell,
+               "contour generate integration shell pwsh to - | Out-String | Invoke-Expression\n",
+               RcState::Installed },
+        Case { ShellKind::WindowsPowerShell, ". \"$HOME\\contour-integration.ps1\"\n", RcState::Installed },
+        Case { ShellKind::Pwsh,
+               "if ($env:TERM_PROGRAM -eq 'contour') { . ([scriptblock]::Create((& '/opt/con",
+               RcState::Partial },
+        // PowerShell's files mean nothing to a POSIX shell.
+        Case { ShellKind::Bash, ". ~/contour-integration.ps1\n", RcState::Absent },
+    };
+    for (auto const& c: Cases)
+    {
+        INFO(c.content);
+        CHECK(rcStateOf(c.shell, c.content) == c.expected);
+    }
+}
+
 TEST_CASE("ShellRow: the line Contour appends is its guard followed by its continuation", "[shellrc]")
 {
     for (auto const& row: contour::config::ShellRows)
@@ -738,8 +895,13 @@ TEST_CASE("ShellRcEditor: every error has words", "[shellrc]")
                                          ShellRcError::Superuser,
                                          ShellRcError::AppendCutShort,
                                          ShellRcError::AppendLineEndingOnly,
-                                         ShellRcError::AppendUnterminated };
-    static_assert(Errors.size() == std::to_underlying(ShellRcError::AppendUnterminated) + 1U);
+                                         ShellRcError::AppendUnterminated,
+                                         ShellRcError::NoDocuments,
+                                         ShellRcError::UnsupportedEncoding,
+                                         ShellRcError::AnsiProfile,
+                                         ShellRcError::PolicyUnchanged,
+                                         ShellRcError::PolicyBlocked };
+    static_assert(Errors.size() == std::to_underlying(ShellRcError::PolicyBlocked) + 1U);
     CHECK(describe(ShellRcError::NoHome) == "the home directory is not known");
     CHECK(describe(ShellRcError::Unreadable) == "the file could not be read");
     CHECK(describe(ShellRcError::Unwritable) == "the file could not be written");
@@ -752,6 +914,19 @@ TEST_CASE("ShellRcEditor: every error has words", "[shellrc]")
     CHECK(changedFile(ShellRcError::AppendCutShort));
     CHECK(changedFile(ShellRcError::AppendLineEndingOnly));
     CHECK(changedFile(ShellRcError::AppendUnterminated));
+    CHECK(describe(ShellRcError::NoDocuments) == "the Documents folder is not known");
+    CHECK(describe(ShellRcError::UnsupportedEncoding) == "it is in a text encoding Contour does not write");
+    CHECK(describe(ShellRcError::AnsiProfile)
+          == "it has no byte-order mark, so Windows PowerShell would misread the non-ASCII characters in "
+             "Contour's line");
+    CHECK(describe(ShellRcError::PolicyUnchanged) == "PowerShell's script policy could not be changed");
+    CHECK(describe(ShellRcError::PolicyBlocked) == "PowerShell's script policy does not let the profile run");
+    for (auto const error: { ShellRcError::NoDocuments,
+                             ShellRcError::UnsupportedEncoding,
+                             ShellRcError::AnsiProfile,
+                             ShellRcError::PolicyUnchanged,
+                             ShellRcError::PolicyBlocked })
+        CHECK(!changedFile(error));
 }
 
 TEST_CASE("ShellRcEditor: a path rooted at / is a place on every host, a relative one on none", "[shellrc]")
@@ -763,4 +938,356 @@ TEST_CASE("ShellRcEditor: a path rooted at / is a place on every host, a relativ
     CHECK_FALSE(contour::config::isRootedPath("relative"));
     CHECK_FALSE(contour::config::isRootedPath("./contour"));
     CHECK_FALSE(contour::config::isRootedPath(""));
+}
+
+TEST_CASE("ShellRcEditor.powershell.locationOnWindows", "[shellrc]")
+{
+    auto rig = ProfileRig { documents() };
+    CHECK(rig.editor.inspect(ShellKind::Pwsh, noSession)->file == pwshProfile());
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->file == windowsPowerShellProfile());
+
+#ifdef _WIN32
+    // A drive is a root only where there are drives.
+    auto onDrive = ProfileRig { fs::path { "D:/OneDrive/Documents" } };
+    CHECK(onDrive.editor.inspect(ShellKind::Pwsh, noSession)->file
+          == fs::path { "D:/OneDrive/Documents/PowerShell/Microsoft.PowerShell_profile.ps1" });
+    CHECK(onDrive.editor.inspect(ShellKind::WindowsPowerShell, noSession)->file
+          == fs::path { "D:/OneDrive/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1" });
+#endif
+
+    // HOME does not stand in for an unknown or relative Documents folder.
+    for (auto const& folder: { std::optional<fs::path> {}, std::optional<fs::path> { "Documents" } })
+    {
+        auto none = ProfileRig { folder };
+        for (auto const shell: { ShellKind::Pwsh, ShellKind::WindowsPowerShell })
+        {
+            CHECK(none.editor.inspect(shell, noSession).error() == ShellRcError::NoDocuments);
+            CHECK(none.editor.install(shell, asciiLine(shell), noSession).error()
+                  == ShellRcError::NoDocuments);
+        }
+        CHECK(none.disk.calls.empty());
+        CHECK(none.disk.reads == 0);
+    }
+}
+
+TEST_CASE("ShellRcEditor.powershell.locationOnLinux", "[shellrc]")
+{
+    auto rig = ProfileRig { std::nullopt,
+                            HostPlatform::Other,
+                            { { "HOME", "/home/me" }, { "XDG_CONFIG_HOME", "/x" } } };
+    auto const profile = fs::path { "/x/powershell/Microsoft.PowerShell_profile.ps1" };
+    CHECK(rig.editor.inspect(ShellKind::Pwsh, noSession)->file == profile);
+    REQUIRE(rig.editor.install(ShellKind::Pwsh, asciiLine(ShellKind::Pwsh), noSession)
+            == RcInstall::Appended);
+    CHECK(rig.disk.text(profile) == std::string(Utf8Bom) + "\n" + asciiLine(ShellKind::Pwsh) + "\n");
+
+    // Windows PowerShell is Windows only: nothing to inspect, nothing to write, not even a read.
+    rig.disk.calls.clear();
+    rig.disk.reads = 0;
+    CHECK(*rig.editor.inspect(ShellKind::WindowsPowerShell, noSession) == RcInspection {});
+    CHECK(rig.editor.install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+              .error()
+          == ShellRcError::Unwritable);
+    CHECK(rig.disk.calls.empty());
+    CHECK(rig.disk.reads == 0);
+}
+
+TEST_CASE("ShellRcEditor.powershell.newProfile", "[shellrc]")
+{
+    for (auto const shell: { ShellKind::Pwsh, ShellKind::WindowsPowerShell })
+    {
+        auto rig = ProfileRig { documents() };
+        auto const profile = rig.editor.inspect(shell, noSession)->file;
+        REQUIRE(!rig.disk.files.isDirectory(profile.parent_path()));
+        auto const line = nonAsciiLine(shell);
+        REQUIRE(rig.editor.install(shell, line, noSession) == RcInstall::Appended);
+        CHECK(rig.disk.files.isDirectory(profile.parent_path()));
+        CHECK(rig.disk.text(profile) == std::string(Utf8Bom) + "\n" + line + "\n");
+        CHECK(rig.editor.inspect(shell, noSession)->state == RcState::Installed);
+    }
+
+    // `New-Item $PROFILE -Force`, as PowerShell's documentation suggests, leaves an empty file: it is new
+    // too.
+    auto rig = ProfileRig { documents() };
+    rig.disk.files.addFile(windowsPowerShellProfile(), "");
+    auto const line = nonAsciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession) == RcInstall::Appended);
+    CHECK(rig.disk.text(windowsPowerShellProfile()) == std::string(Utf8Bom) + "\n" + line + "\n");
+}
+
+TEST_CASE("ShellRcEditor.powershell.utf16Profile", "[shellrc]")
+{
+    auto rig = ProfileRig { documents() };
+    auto const before = std::string(Utf16LeBom) + utf16Le("Set-Alias ll ls\r\n");
+    rig.disk.files.addFile(windowsPowerShellProfile(), before);
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->state == RcState::Absent);
+
+    auto const line = asciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession) == RcInstall::Appended);
+    CHECK(rig.disk.text(windowsPowerShellProfile()) == before + utf16Le("\n" + line + "\n"));
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->state == RcState::Installed);
+}
+
+TEST_CASE("ShellRcEditor.powershell.utf16AlreadyInstalled", "[shellrc]")
+{
+    auto rig = ProfileRig { documents() };
+    auto const line = asciiLine(ShellKind::WindowsPowerShell);
+    auto const before = std::string(Utf16LeBom) + utf16Le("Set-Alias ll ls\r\n" + line + "\r\n");
+    rig.disk.files.addFile(windowsPowerShellProfile(), before);
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->state == RcState::Installed);
+    CHECK(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession) == RcInstall::AlreadyInstalled);
+    CHECK(rig.disk.text(windowsPowerShellProfile()) == before);
+    CHECK(!rig.disk.touched("appendFile"));
+}
+
+TEST_CASE("ShellRcEditor.powershell.utf16CutShort", "[shellrc]")
+{
+    // A UTF-16 profile cut short mid-line is Partial, and the line to delete is told in UTF-8.
+    auto rig = ProfileRig { documents() };
+    auto const line = asciiLine(ShellKind::WindowsPowerShell);
+    auto const cut = line.substr(0, line.size() / 2);
+    rig.disk.files.addFile(windowsPowerShellProfile(),
+                           std::string(Utf16LeBom) + utf16Le("Set-Alias ll ls\n" + cut));
+    auto const inspection = rig.editor.inspect(ShellKind::WindowsPowerShell, noSession);
+    CHECK(inspection->state == RcState::Partial);
+    CHECK(inspection->partialLine == cut);
+    CHECK(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession).error()
+          == ShellRcError::PartialWrite);
+
+    // An append that lands an odd number of bytes leaves text no decoder reads: it was cut short.
+    auto odd = ProfileRig { documents() };
+    odd.disk.files.addFile(windowsPowerShellProfile(),
+                           std::string(Utf16LeBom) + utf16Le("Set-Alias ll ls\n"));
+    odd.disk.fault = DiskFault::SilentPrefix;
+    odd.disk.landBytes = 7;
+    CHECK(odd.editor.install(ShellKind::WindowsPowerShell, line, noSession).error()
+          == ShellRcError::AppendCutShort);
+}
+
+TEST_CASE("ShellRcEditor.powershell.ansiProfile", "[shellrc]")
+{
+    auto const before = std::string { "Set-Alias ll ls\n" };
+
+    // Windows PowerShell reads a BOM-less file in the ANSI code page, which would garble Contour's path.
+    auto windows = ProfileRig { documents() };
+    windows.disk.files.addFile(windowsPowerShellProfile(), before);
+    CHECK(windows.editor
+              .install(ShellKind::WindowsPowerShell, nonAsciiLine(ShellKind::WindowsPowerShell), noSession)
+              .error()
+          == ShellRcError::AnsiProfile);
+    CHECK(windows.disk.text(windowsPowerShellProfile()) == before);
+    CHECK(!windows.disk.touched("appendFile"));
+    CHECK(windows.executionPolicy.attempts.empty());
+
+    // An ASCII line reads the same in every code page.
+    auto ascii = ProfileRig { documents() };
+    ascii.disk.files.addFile(windowsPowerShellProfile(), before);
+    auto const asciiOnly = asciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(ascii.editor.install(ShellKind::WindowsPowerShell, asciiOnly, noSession) == RcInstall::Appended);
+    CHECK(ascii.disk.text(windowsPowerShellProfile()) == before + "\n" + asciiOnly + "\n");
+
+    // With a byte order mark Windows PowerShell reads UTF-8 too.
+    auto marked = ProfileRig { documents() };
+    marked.disk.files.addFile(windowsPowerShellProfile(), std::string(Utf8Bom) + before);
+    auto const windowsLine = nonAsciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(marked.editor.install(ShellKind::WindowsPowerShell, windowsLine, noSession)
+            == RcInstall::Appended);
+    CHECK(marked.disk.text(windowsPowerShellProfile())
+          == std::string(Utf8Bom) + before + "\n" + windowsLine + "\n");
+
+    // PowerShell 7 reads a BOM-less file as UTF-8.
+    auto pwsh = ProfileRig { documents() };
+    pwsh.disk.files.addFile(pwshProfile(), before);
+    auto const line = nonAsciiLine(ShellKind::Pwsh);
+    REQUIRE(pwsh.editor.install(ShellKind::Pwsh, line, noSession) == RcInstall::Appended);
+    CHECK(pwsh.disk.text(pwshProfile()) == before + "\n" + line + "\n");
+}
+
+TEST_CASE("ShellRcEditor.powershell.unsupportedEncoding", "[shellrc]")
+{
+    auto rig = ProfileRig { documents() };
+    auto const before = std::string { "\xFE\xFF\0S\0e\0t", 8 }; // UTF-16BE
+    rig.disk.files.addFile(pwshProfile(), before);
+    CHECK(rig.editor.inspect(ShellKind::Pwsh, noSession).error() == ShellRcError::UnsupportedEncoding);
+    CHECK(rig.editor.install(ShellKind::Pwsh, asciiLine(ShellKind::Pwsh), noSession).error()
+          == ShellRcError::UnsupportedEncoding);
+    CHECK(rig.disk.text(pwshProfile()) == before);
+    CHECK(!rig.disk.touched("appendFile"));
+
+    // A UTF-16 file that is not valid UTF-16 cannot be read.
+    auto malformed = ProfileRig { documents() };
+    malformed.disk.files.addFile(pwshProfile(), std::string(Utf16LeBom) + "S");
+    CHECK(malformed.editor.inspect(ShellKind::Pwsh, noSession).error() == ShellRcError::Unreadable);
+    CHECK(malformed.editor.install(ShellKind::Pwsh, asciiLine(ShellKind::Pwsh), noSession).error()
+          == ShellRcError::Unreadable);
+    CHECK(!malformed.disk.touched("appendFile"));
+}
+
+TEST_CASE("ShellRcEditor.powershell.policyFix", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+    using contour::config::ProfileScripts;
+
+    auto rig = ProfileRig { documents() };
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts == ProfileScripts::Run);
+
+    rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts
+          == ProfileScripts::NeedUserPolicy);
+
+    auto appendedBeforePolicy = std::optional<bool> {};
+    rig.executionPolicy.duringWrite = [&] {
+        appendedBeforePolicy = rig.disk.touched("appendFile");
+    };
+    REQUIRE(
+        rig.editor.install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+        == RcInstall::Appended);
+    CHECK(rig.executionPolicy.attempts == std::vector { ShellKind::WindowsPowerShell });
+    CHECK(appendedBeforePolicy == false);
+    CHECK(rig.disk.touched("appendFile"));
+    CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts == ProfileScripts::Run);
+}
+
+TEST_CASE("ShellRcEditor.powershell.policyFixFails", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+
+    for (auto const& existing:
+         { std::optional<std::string> {}, std::optional<std::string> { "Set-Alias ll ls\n" } })
+    {
+        auto rig = ProfileRig { documents() };
+        if (existing)
+            rig.disk.files.addFile(windowsPowerShellProfile(), *existing);
+        rig.executionPolicy.policy = { .policy = ExecutionPolicy::Undefined, .scope = PolicyScope::Default };
+        rig.executionPolicy.writes = PolicyWrites::Fail;
+        CHECK(rig.editor
+                  .install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+                  .error()
+              == ShellRcError::PolicyUnchanged);
+        CHECK(rig.executionPolicy.attempts.size() == 1);
+        CHECK(!rig.disk.touched("appendFile"));
+        CHECK(rig.disk.files.exists(windowsPowerShellProfile()) == existing.has_value());
+        if (existing)
+            CHECK(rig.disk.text(windowsPowerShellProfile()) == *existing);
+    }
+}
+
+TEST_CASE("ShellRcEditor.powershell.policyBlocked", "[shellrc]")
+{
+    using contour::config::EffectivePolicy;
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+    using contour::config::ProfileScripts;
+
+    struct Case
+    {
+        EffectivePolicy policy;
+        ProfileScripts scripts {};
+    };
+    constexpr auto Cases = std::array {
+        Case { .policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::GroupPolicy },
+               .scripts = ProfileScripts::BlockedByGroupPolicy },
+        Case { .policy = { .policy = ExecutionPolicy::AllSigned, .scope = PolicyScope::LocalMachine },
+               .scripts = ProfileScripts::SignedOnly },
+    };
+    for (auto const& c: Cases)
+    {
+        auto rig = ProfileRig { documents() };
+        rig.executionPolicy.policy = c.policy;
+        CHECK(rig.editor.inspect(ShellKind::Pwsh, noSession)->scripts == c.scripts);
+        CHECK(rig.editor.install(ShellKind::Pwsh, asciiLine(ShellKind::Pwsh), noSession).error()
+              == ShellRcError::PolicyBlocked);
+        CHECK(rig.executionPolicy.attempts.empty());
+        CHECK(!rig.disk.touched("appendFile"));
+        CHECK(!rig.disk.files.exists(pwshProfile()));
+    }
+}
+
+TEST_CASE("ShellRcEditor.powershell.policyFixIntoMissingProfile", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+
+    auto rig = ProfileRig { documents() };
+    rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+    auto profileDuringWrite = std::optional<bool> {};
+    rig.executionPolicy.duringWrite = [&] {
+        profileDuringWrite = rig.disk.files.exists(windowsPowerShellProfile());
+    };
+    auto const line = nonAsciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession) == RcInstall::Appended);
+    CHECK(rig.executionPolicy.attempts == std::vector { ShellKind::WindowsPowerShell });
+    CHECK(profileDuringWrite == false);
+    CHECK(rig.disk.text(windowsPowerShellProfile()) == std::string(Utf8Bom) + "\n" + line + "\n");
+}
+
+TEST_CASE("ShellRcEditor.powershell.installedButStopped", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+    using contour::config::ProfileScripts;
+
+    auto const installed =
+        std::string(Utf8Bom) + "Set-Alias ll ls\n" + asciiLine(ShellKind::WindowsPowerShell) + "\n";
+
+    SECTION("a policy the user may change is fixed, and no line is added")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+        REQUIRE(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts
+                == ProfileScripts::NeedUserPolicy);
+        CHECK(rig.editor.install(
+                  ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+              == RcInstall::AlreadyInstalled);
+        CHECK(rig.executionPolicy.attempts == std::vector { ShellKind::WindowsPowerShell });
+        CHECK(!rig.disk.touched("appendFile"));
+        CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+        CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts == ProfileScripts::Run);
+    }
+
+    SECTION("a policy write that fails is reported")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+        rig.executionPolicy.writes = PolicyWrites::Fail;
+        CHECK(rig.editor
+                  .install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+                  .error()
+              == ShellRcError::PolicyUnchanged);
+        CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+    }
+
+    SECTION("group policy, or signed scripts only, blocks it")
+    {
+        for (auto const policy: { contour::config::EffectivePolicy { .policy = ExecutionPolicy::Restricted,
+                                                                     .scope = PolicyScope::GroupPolicy },
+                                  contour::config::EffectivePolicy { .policy = ExecutionPolicy::AllSigned,
+                                                                     .scope = PolicyScope::CurrentUser } })
+        {
+            auto rig = ProfileRig { documents() };
+            rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+            rig.executionPolicy.policy = policy;
+            CHECK(
+                rig.editor
+                    .install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+                    .error()
+                == ShellRcError::PolicyBlocked);
+            CHECK(rig.executionPolicy.attempts.empty());
+            CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+        }
+    }
+
+    SECTION("a policy that lets it run changes nothing")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        CHECK(rig.editor.install(
+                  ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+              == RcInstall::AlreadyInstalled);
+        CHECK(rig.executionPolicy.attempts.empty());
+    }
 }

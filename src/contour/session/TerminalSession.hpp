@@ -4,6 +4,7 @@
 #include <contour/command/ContextMenuState.hpp>
 #include <contour/config/ActionsFwd.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ExecutionPolicy.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/input/KeyEvent.hpp>
@@ -334,6 +335,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(
         QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
     Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
+    // What else Add Line changes (the execution policy PowerShell needs first), under the line on Confirm.
+    Q_PROPERTY(QString shellIntegrationNote READ shellIntegrationNote NOTIFY shellIntegrationCardChanged)
     // The profile's regular font family, in which the card sets the line it would add.
     Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY shellIntegrationCardChanged)
     // The question this session asks its user now, as the permission dialog shows it; empty while nothing is
@@ -1080,6 +1083,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Why the last install failed, shown under the line on Confirm; empty otherwise.
     [[nodiscard]] QString shellIntegrationError() const { return QString::fromStdString(_shellCard.error); }
 
+    /// @return What else Add Line changes, shown under the line on Confirm: window::policyNoteFor() with the
+    /// shell's display name; empty on any other stage and where nothing else changes.
+    [[nodiscard]] QString shellIntegrationNote() const;
+
     /// The card's accent button: on Offer it shows the line (Confirm); on Confirm it adds the line to the
     /// shell's startup file through the manager, which hides the card on success and keeps it, with the
     /// reason, on failure. GUI thread.
@@ -1094,9 +1101,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param shell The shell the card names.
     /// @param rcFile The startup file the line would go into.
     /// @param line The line that would be added.
+    /// @param scripts Whether the shell's execution policy lets the file run; the Confirm stage says what Add
+    ///        Line changes besides the file where it does not (shellIntegrationNote()).
     void showShellIntegrationCard(config::ShellKind shell,
                                   std::filesystem::path const& rcFile,
-                                  std::string line);
+                                  std::string line,
+                                  config::ProfileScripts scripts);
 
     /// Closes this ended pane (the footer's Close): prunes it from the model, then lets the display go. A
     /// no-op while the session runs; idempotent once it has ended.
@@ -3041,6 +3051,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         std::string rcDisplay {}; ///< The startup file as the user would say it, `~/.zshrc`.
         std::string line {};      ///< The line that would be added.
         std::string error {};     ///< Why the last install failed.
+        /// Whether the shell's execution policy lets the file run; decides Confirm's note and primary.
+        config::ProfileScripts scripts = config::ProfileScripts::Run;
     };
 
     /// Decides when the lack of OSC 133 marks is worth an offer. GUI thread.
@@ -3051,8 +3063,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// shell integration when the probe says so. GUI thread; takes the terminal lock briefly.
     void noteCommandEntered();
 
-    /// Which shell this session runs, from the program in front of it; for a pane hosted by a local daemon,
-    /// which has no process group of its own, from the profile's shell program.
+    /// Which shell this session runs, from the program in front of it; where none is named, from the
+    /// profile's shell program, read as the spawn reads it (vtpty::invocationToRun()) -- but only for a pane
+    /// a local daemon hosts (no process group of its own), or a local pane on a Windows shell host (which
+    /// names no foreground process) whose profile opens no SSH session. Never in a window attached to another
+    /// machine, and never on a POSIX host's local pane, where an empty name is a failed poll.
     ///
     /// Known limit: a pane of a local tmux server (control mode) is "hosted" the same way, and tmux runs its
     /// `default-shell` there, not the profile's. When the two differ, the card offers the profile's shell.

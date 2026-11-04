@@ -6,8 +6,9 @@
 //
 // Offer asks "Turn on command blocks" with Install and Not Now. Install shows the exact line first
 // (Confirm): the line is set in the session's terminal font in a read-only field the pointer can select,
-// so it can be copied, and Add Line writes it. A failure keeps the card on Confirm with the reason under
-// the line.
+// so it can be copied, and Add Line writes it. Where PowerShell's execution policy must change too, a note
+// under the line says so and the button says it allows scripts. A failure keeps the card on Confirm with
+// the reason under the line.
 //
 // PaneCard.qml places it in a band of its own below the cells, never over them: the terminal's bottom
 // meets the band's top. On the native rows it is a rounded popover surface, `size.noticeCard` wide and
@@ -111,6 +112,30 @@ Item {
             color: chromeStyle.colors.paletteSecondaryText
             selectedTextColor: chromeStyle.colors.paletteSelectionText
             selectionColor: chromeStyle.colors.paletteSelectionFill
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        // What else Add Line changes (PowerShell's execution policy), under the line on Confirm; in the
+        // body's type, as part of what is said rather than a warning. It is the consent the button asks for,
+        // so it always wraps and is never cut: the card grows to hold it. On the Terminal row every line it
+        // wraps to is one cell row high, so the card stays whole cell rows.
+        Text {
+            objectName: "shellIntegrationNote"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: card.session ? card.session.shellIntegrationNote : ""
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            // A fixed line height is whole pixels, a cell row need not be: the rows the lines take are set too.
+            Layout.preferredHeight: card.bracketed ? lineCount * chromeStyle.cellHeight : implicitHeight
+            lineHeightMode: card.bracketed ? Text.FixedHeight : Text.ProportionalHeight
+            lineHeight: card.bracketed ? chromeStyle.cellHeight : 1.0
+            verticalAlignment: Text.AlignVCenter
+            font.family: chromeStyle.type.tab.family
+            font.pixelSize: chromeStyle.type.tab.pixelSize
+            font.weight: chromeStyle.type.tab.weight
+            color: chromeStyle.colors.paletteSecondaryText
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }

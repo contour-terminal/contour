@@ -972,7 +972,8 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
                            .binary = binary.reach,
                            .dismissal = dismissal,
                            .rc = inspection->state,
-                           .slot = _shellCardSlot });
+                           .slot = _shellCardSlot,
+                           .scripts = inspection->scripts });
     if (offer != window::ShellIntegrationOffer::Card)
         return;
 
@@ -983,7 +984,7 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
         return;
     }
     _shellCardSlot = window::CardSlot::Taken;
-    session.showShellIntegrationCard(shell, inspection->file, *std::move(line));
+    session.showShellIntegrationCard(shell, inspection->file, *std::move(line), inspection->scripts);
 }
 
 std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManager::installShellIntegration(
@@ -993,10 +994,10 @@ std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManage
 
     // The file as the user would say it: asked of the editor again, so the toast names the very file written.
     auto const* const row = config::shellRow(shell);
-    auto const shellName = row != nullptr ? row->name : std::string_view {};
+    auto const shellName = row != nullptr ? row->displayName : std::string_view {};
     auto rc = std::string { shellName };
     if (auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session)))
-        rc = window::displayRcPath(inspection->file, _homeDirectory);
+        rc = window::displayRcPath(inspection->file, core::pathFromTrustedUtf8(_homeDirectory));
 
     if (installed)
         postNotice(

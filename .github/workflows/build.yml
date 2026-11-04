@@ -1283,6 +1283,12 @@ jobs:
         run: |
           set -o pipefail
           binary=out/macos-package/src/contour/contour_test
+          # ShellIntegrationShells.profileLine runs the line the one-click install writes, which asks the
+          # contour binary for the script: outside ctest, it learns that binary here, and SKIPs without it.
+          # That binary links Qt, and a runner has no display for it, as the AppImage smoke test knows.
+          export QT_QPA_PLATFORM=offscreen
+          export CONTOUR_BINARY="$PWD/out/macos-package/src/contour/contour.app/Contents/MacOS/contour"
+          [ -x "$CONTOUR_BINARY" ] || { echo "::error::$CONTOUR_BINARY not found; profileLine would skip"; exit 1; }
           output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then
@@ -1574,16 +1580,26 @@ jobs:
         # @see "verify the AF_UNIX tests actually ran": a Catch2 SKIP exits 0, and contour_test SKIPs
         # the PowerShell integration's cases where no pwsh is on PATH. windows-latest carries
         # PowerShell 7 (per actions/runner-images' Windows2025-VS2026-Readme.md), so a skip here is a
-        # regression -- and Windows is where the script's OSC 133 has to pass through ConPTY. Only
+        # regression -- and Windows is where the script's OSC 133 has to pass through ConPTY. Each case
+        # runs under Windows PowerShell 5.1 too, which every Windows ships, PSReadLine 2.0 and all. Only
         # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
+        #
+        # ShellIntegrationShells.profileLine runs the very line the one-click install appends to a profile,
+        # which asks contour.exe for the script through a pipe: RelWithDebInfo builds the GUI-subsystem
+        # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
+        # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
         shell: pwsh
         run: |
           $binary = "out/build/$env:CMAKE_PRESET/bin/contour_test.exe"
+          $contour = "out/build/$env:CMAKE_PRESET/bin/contour.exe"
           # A missing binary must not read as "nothing skipped".
-          if (-not (Test-Path $binary)) {
-            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
-            exit 1
+          foreach ($required in $binary, $contour) {
+            if (-not (Test-Path $required)) {
+              Write-Output "::error::$required not found; the assertion below would pass vacuously"
+              exit 1
+            }
           }
+          $env:CONTOUR_BINARY = (Resolve-Path $contour).Path
           Write-Output "--- $binary [pwsh]"
           $output = & $binary '[pwsh]' 2>&1 | Out-String
           $status = $LASTEXITCODE
@@ -1994,6 +2010,12 @@ jobs:
         run: |
           set -o pipefail
           binary=out/gcc-debug/src/contour/contour_test
+          # ShellIntegrationShells.profileLine runs the line the one-click install writes, which asks the
+          # contour binary for the script: outside ctest, it learns that binary here, and SKIPs without it.
+          # That binary links Qt, and a runner has no display for it, as the AppImage smoke test knows.
+          export QT_QPA_PLATFORM=offscreen
+          export CONTOUR_BINARY="$PWD/out/gcc-debug/src/contour/contour"
+          [ -x "$CONTOUR_BINARY" ] || { echo "::error::$CONTOUR_BINARY not found; profileLine would skip"; exit 1; }
           output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then

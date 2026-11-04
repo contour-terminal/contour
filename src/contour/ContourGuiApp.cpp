@@ -468,10 +468,17 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _nativeMenus(appearanceServices.menus()),
     _menuBarPlacement(command::menuBarPlacementFor(_hostPlatform)),
     _menuBarIntegration(appearanceServices.menuBar()),
+    _knownFolders(platform::makePlatformKnownFolders()),
+    _registry(platform::makePlatformRegistry()),
+    _executionPolicy(platform::makePlatformExecutionPolicySource(*_registry, _fileSystem, *_knownFolders)),
     _shellRcEditor(shellIntegration.editor
                        ? std::move(shellIntegration.editor)
-                       : std::make_unique<platform::FileShellRcEditor>(
-                             _fileSystem, env, _shellHostPlatform, platform::currentRunningAs())),
+                       : std::make_unique<platform::FileShellRcEditor>(_fileSystem,
+                                                                       env,
+                                                                       *_knownFolders,
+                                                                       *_executionPolicy,
+                                                                       _shellHostPlatform,
+                                                                       platform::currentRunningAs())),
     _contourBinary(std::move(shellIntegration.contourBinary)),
     _binaryEnvironment(window::binaryEnvironmentOf(env)),
     _globalHotkey(appearanceServices.globalHotkey()),
@@ -3504,7 +3511,7 @@ window::SettingsController& ContourGuiApp::settingsController()
                 .shell = { .editor = _shellRcEditor.get(),
                            .contourBinary = [this] { return locatedContourBinary(); },
                            .host = _shellHostPlatform,
-                           .homeDirectory = std::filesystem::path { QDir::homePath().toStdString() } },
+                           .homeDirectory = core::pathFromTrustedUtf8(QDir::homePath().toStdString()) },
                 .menuBar = _menuBarPlacement,
                 // A host page's Attach runs as the menu bar's commands do: in the window the app would use.
                 .runAction =

@@ -37,7 +37,7 @@ constexpr OfferInputs AllYes {
 };
 } // namespace
 
-static_assert(ShellRows.size() == std::to_underlying(ShellKind::Fish));
+static_assert(ShellRows.size() == std::to_underlying(ShellKind::WindowsPowerShell));
 static_assert(CardStageRows.size() == std::to_underlying(CardStage::Confirm) + 1U);
 
 TEST_CASE("shellKind.rowsAreInEnumeratorOrderAndKnownToGenerateIntegration", "[shellintegration]")
@@ -47,7 +47,7 @@ TEST_CASE("shellKind.rowsAreInEnumeratorOrderAndKnownToGenerateIntegration", "[s
         CHECK(std::to_underlying(row.kind) == static_cast<std::size_t>(index) + 1U);
         CHECK(shellRow(row.kind) == &row);
         auto const known = std::ranges::any_of(contour::cli::supportedShells(),
-                                               [&](auto const& shell) { return shell.name == row.name; });
+                                               [&](auto const& shell) { return shell.name == row.script; });
         CHECK(known);
     }
     CHECK(shellRow(ShellKind::Unknown) == nullptr);
@@ -156,6 +156,10 @@ TEST_CASE("offerFor.everyFieldFlippedOnceGivesNone", "[shellintegration]")
     slot.slot = CardSlot::Taken;
     CHECK(offerFor(slot) == ShellIntegrationOffer::None);
 
+    auto scripts = AllYes;
+    scripts.scripts = ProfileScripts::BlockedByGroupPolicy;
+    CHECK(offerFor(scripts) == ShellIntegrationOffer::None);
+
     CHECK(offerFor({}) == ShellIntegrationOffer::None);
 }
 
@@ -169,7 +173,7 @@ TEST_CASE("offerFor.everyNonWindowsHostOffers", "[shellintegration]")
     }
 }
 
-static_assert(InstallBlockRows.size() == std::to_underlying(InstallBlock::BinaryUnreachable) + 1U);
+static_assert(InstallBlockRows.size() == std::to_underlying(InstallBlock::SignedScriptsOnly) + 1U);
 
 TEST_CASE("locateBinary.aPlainInstallNamesTheRunningFile", "[shellintegration]")
 {
@@ -210,12 +214,27 @@ TEST_CASE("binaryEnvironmentOf.readsTheTwoVariablesFromTheInjectedEnvironment", 
 
 TEST_CASE("installBlockOf.windowsThenAnUnreachableBinary", "[shellintegration]")
 {
-    CHECK(installBlockOf(HostPlatform::Other, BinaryReach::Reachable) == InstallBlock::None);
-    CHECK(installBlockOf(HostPlatform::Windows, BinaryReach::Reachable) == InstallBlock::WindowsHost);
-    CHECK(installBlockOf(HostPlatform::Other, BinaryReach::Unreachable) == InstallBlock::BinaryUnreachable);
-    CHECK(installBlockOf(HostPlatform::Windows, BinaryReach::Unreachable) == InstallBlock::WindowsHost);
+    auto const& zsh = *shellRow(ShellKind::Zsh);
+    constexpr auto Run = ProfileScripts::Run;
+    CHECK(installBlockOf(zsh, HostPlatform::Other, BinaryReach::Reachable, Run) == InstallBlock::None);
+    CHECK(installBlockOf(zsh, HostPlatform::Windows, BinaryReach::Reachable, Run)
+          == InstallBlock::NotOnWindows);
+    CHECK(installBlockOf(zsh, HostPlatform::Other, BinaryReach::Unreachable, Run)
+          == InstallBlock::BinaryUnreachable);
+    CHECK(installBlockOf(zsh, HostPlatform::Windows, BinaryReach::Unreachable, Run)
+          == InstallBlock::NotOnWindows);
     for (auto const& row: InstallBlockRows)
         CHECK((row.block == InstallBlock::None) == row.text.empty());
+}
+
+TEST_CASE("installBlockOf.anUnreachableBinaryOutranksThePolicy", "[shellintegration]")
+{
+    auto const& pwsh = *shellRow(ShellKind::Pwsh);
+    CHECK(installBlockOf(
+              pwsh, HostPlatform::Windows, BinaryReach::Unreachable, ProfileScripts::BlockedByGroupPolicy)
+          == InstallBlock::BinaryUnreachable);
+    CHECK(installBlockOf(pwsh, HostPlatform::Windows, BinaryReach::Unreachable, ProfileScripts::SignedOnly)
+          == InstallBlock::BinaryUnreachable);
 }
 
 TEST_CASE("shellRcLine.quotesThePathForTheShellsSyntax", "[shellintegration]")
@@ -251,8 +270,111 @@ TEST_CASE("shellRcLine.everyLineEndsInTheMarkerAndHasNoLineBreak", "[shellintegr
         auto const line = shellRcLine(row.kind, "/opt/contour").value();
         CHECK(line.ends_with(ShellRcMarker));
         CHECK(!line.contains('\n'));
-        CHECK(line.contains(std::string("generate integration shell ") + std::string(row.name)));
+        CHECK(line.contains(std::string("generate integration shell ") + std::string(row.script)));
     }
+}
+
+TEST_CASE("ShellIntegrationOffer.line.PowerShell", "[shellintegration]")
+{
+    CHECK(
+        shellRcLine(ShellKind::Pwsh, "/opt/O'Brien/contour").value()
+        == R"(if ($env:TERM_PROGRAM -eq 'contour') { . ([scriptblock]::Create((& '/opt/O''Brien/contour' generate integration shell pwsh to - | Out-String))) } # Contour shell integration)");
+    // The script column names the generator's script, not the shell's own name.
+    CHECK(shellRcLine(ShellKind::WindowsPowerShell, "/opt/contour")
+              .value()
+              .contains("generate integration shell pwsh to -"));
+    CHECK(shellRcLine(ShellKind::Pwsh, "/opt/con\ttour").error() == ShellRcLineError::UnusablePath);
+    // PowerShell reads the typographic quotes as single quotes too: each is doubled as itself.
+    // The paths are built from UTF-8 literals: a narrow literal is read in the ANSI code page on Windows.
+    CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { u8"/opt/O’Brien/contour" })
+              .value()
+              .contains("'/opt/O\xE2\x80\x99\xE2\x80\x99"
+                        "Brien/contour'"));
+    CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { u8"/opt/a'b‘c/contour" })
+              .value()
+              .contains("'/opt/a''b\xE2\x80\x98\xE2\x80\x98"
+                        "c/contour'"));
+#ifdef _WIN32
+    // The path text is UTF-8, whatever the narrow code page.
+    CHECK(shellRcLine(ShellKind::Pwsh, std::filesystem::path { L"C:\\Users\\M\u00fcller\\contour.exe" })
+              .value()
+              .contains("'C:\\Users\\M\xc3\xbc"
+                        "ller\\contour.exe'"));
+#endif
+}
+
+TEST_CASE("ShellIntegrationOffer.installBlockOf.perShell", "[shellintegration]")
+{
+    auto const& bash = *shellRow(ShellKind::Bash);
+    auto const& pwsh = *shellRow(ShellKind::Pwsh);
+    auto const& winPs = *shellRow(ShellKind::WindowsPowerShell);
+    constexpr auto Run = ProfileScripts::Run;
+    constexpr auto Reachable = BinaryReach::Reachable;
+    CHECK(installBlockOf(bash, HostPlatform::Windows, Reachable, Run) == InstallBlock::NotOnWindows);
+    CHECK(installBlockOf(pwsh, HostPlatform::Windows, Reachable, Run) == InstallBlock::None);
+    CHECK(installBlockOf(winPs, HostPlatform::MacOS, Reachable, Run) == InstallBlock::WindowsOnly);
+    CHECK(installBlockOf(pwsh, HostPlatform::Windows, BinaryReach::Unreachable, Run)
+          == InstallBlock::BinaryUnreachable);
+    CHECK(installBlockOf(winPs, HostPlatform::Windows, Reachable, ProfileScripts::BlockedByGroupPolicy)
+          == InstallBlock::GroupPolicy);
+    CHECK(installBlockOf(winPs, HostPlatform::Windows, Reachable, ProfileScripts::SignedOnly)
+          == InstallBlock::SignedScriptsOnly);
+    CHECK(installBlockOf(winPs, HostPlatform::Windows, Reachable, ProfileScripts::NeedUserPolicy)
+          == InstallBlock::None);
+}
+
+TEST_CASE("ShellIntegrationOffer.offerFor.PowerShellOnWindows", "[shellintegration]")
+{
+    auto in = OfferInputs { .shell = ShellKind::Pwsh,
+                            .locality = RcLocality::ThisMachine,
+                            .host = HostPlatform::Windows,
+                            .binary = BinaryReach::Reachable,
+                            .dismissal = OfferDismissal::Open,
+                            .rc = RcState::Absent,
+                            .slot = CardSlot::Free,
+                            .scripts = ProfileScripts::NeedUserPolicy };
+    CHECK(offerFor(in) == ShellIntegrationOffer::Card);
+    in.scripts = ProfileScripts::BlockedByGroupPolicy;
+    CHECK(offerFor(in) == ShellIntegrationOffer::None);
+    in.scripts = ProfileScripts::Run;
+    in.shell = ShellKind::Bash;
+    CHECK(offerFor(in) == ShellIntegrationOffer::None);
+}
+
+TEST_CASE("ShellIntegrationOffer.policyWords", "[shellintegration]")
+{
+    CHECK(policyNoteFor(ProfileScripts::NeedUserPolicy) == PolicyFixNote);
+    CHECK(policyNoteFor(ProfileScripts::Run).empty());
+    CHECK(confirmPrimaryFor(ProfileScripts::NeedUserPolicy) == "Allow Scripts and Add Line");
+    CHECK(confirmPrimaryFor(ProfileScripts::Run) == "Add Line");
+}
+
+TEST_CASE("ShellIntegrationOffer.confirmWordsFor", "[shellintegration]")
+{
+    auto const& confirm = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    CHECK(confirmWordsFor(RcState::Absent, ProfileScripts::Run)
+          == ConfirmWords { .title = confirm.title,
+                            .line = confirm.body,
+                            .note = "",
+                            .primary = "Add Line",
+                            .secondary = "Cancel" });
+    CHECK(confirmWordsFor(RcState::Absent, ProfileScripts::NeedUserPolicy)
+          == ConfirmWords { .title = confirm.title,
+                            .line = confirm.body,
+                            .note = PolicyFixNote,
+                            .primary = "Allow Scripts and Add Line",
+                            .secondary = "Cancel" });
+    // A file that loads Contour already only needs the policy: no line is shown, as none is added.
+    auto const policyOnly = confirmWordsFor(RcState::Installed, ProfileScripts::NeedUserPolicy);
+    CHECK(policyOnly == PolicyOnlyConfirm);
+    CHECK(cardText(policyOnly.title, "Windows PowerShell", "~/x", "L")
+          == "Allow scripts in Windows PowerShell?");
+    CHECK(policyOnly.line.empty());
+    CHECK(cardText(policyOnly.note, "Windows PowerShell", "~/x", "L")
+          == "This also lets your own scripts run in Windows PowerShell, for your user only "
+             "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    CHECK(policyOnly.primary == "Allow Scripts");
+    CHECK(policyOnly.secondary == "Cancel");
 }
 
 TEST_CASE("shellRcLine.refusesWhatItCannotWriteSafely", "[shellintegration]")
@@ -291,4 +413,14 @@ TEST_CASE("displayRcPath.abbreviatesHome", "[shellintegration]")
     CHECK(displayRcPath("/etc/zshrc", "/Users/me") == "/etc/zshrc");
     CHECK(displayRcPath("/Users/me2/.zshrc", "/Users/me") == "/Users/me2/.zshrc");
     CHECK(displayRcPath("/Users/me/.zshrc", "") == "/Users/me/.zshrc");
+}
+
+TEST_CASE("displayRcPath.speaksUtf8", "[shellintegration]")
+{
+    auto const home = std::filesystem::path { std::u8string_view { u8"/Users/Müller" } };
+    CHECK(displayRcPath(home / "Documents/PowerShell/profile.ps1", home)
+          == "~/Documents/PowerShell/profile.ps1");
+    CHECK(displayRcPath(home / std::u8string_view { u8"ä.ps1" }, home) == "~/\xC3\xA4.ps1");
+    CHECK(displayRcPath(std::filesystem::path { std::u8string_view { u8"/etc/ärc" } }, home)
+          == "/etc/\xC3\xA4rc");
 }

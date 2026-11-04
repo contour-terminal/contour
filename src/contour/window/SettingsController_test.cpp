@@ -4684,11 +4684,15 @@ TEST_CASE("SettingsController: the Install rows list every shell with what its s
     scriptShells(fx);
 
     auto const rows = fx.controller->shellIntegrationRows();
-    REQUIRE(static_cast<std::size_t>(rows.size()) == config::ShellRows.size());
-    // In ShellRows order.
-    for (auto const index: std::views::iota(std::size_t { 0 }, config::ShellRows.size()))
-        CHECK(rows[static_cast<qsizetype>(index)].toMap().value(QStringLiteral("shell")).toInt()
-              == std::to_underlying(config::ShellRows[index].kind));
+    // Every shell listed on the host, in ShellRows order.
+    auto expectedKinds = std::vector<int> {};
+    for (auto const& shell: config::ShellRows)
+        if (config::isListedOn(shell, config::HostPlatform::Other))
+            expectedKinds.push_back(std::to_underlying(shell.kind));
+    auto listedKinds = std::vector<int> {};
+    for (auto const& row: rows)
+        listedKinds.push_back(row.toMap().value(QStringLiteral("shell")).toInt());
+    CHECK(listedKinds == expectedKinds);
 
     auto const zsh = shellRowOf(fx, ShellKind::Zsh);
     CHECK(zsh.value(QStringLiteral("name")).toString() == QStringLiteral("zsh"));
@@ -4837,7 +4841,7 @@ TEST_CASE("SettingsController: Install is offered only where the card would offe
     };
     auto const cases = std::array {
         Case { config::HostPlatform::Other, BinaryReach::Reachable, InstallBlock::None },
-        Case { config::HostPlatform::Windows, BinaryReach::Reachable, InstallBlock::WindowsHost },
+        Case { config::HostPlatform::Windows, BinaryReach::Reachable, InstallBlock::NotOnWindows },
         Case { config::HostPlatform::Other, BinaryReach::Unreachable, InstallBlock::BinaryUnreachable },
     };
     for (auto const& c: cases)
@@ -4869,10 +4873,193 @@ TEST_CASE("SettingsController: Install is offered only where the card would offe
         // An install the page does not offer is refused too, writing nothing.
         fx.controller->installShellIntegration(std::to_underlying(ShellKind::Bash));
         CHECK(fx.shellEditor.installs.size() == (offered ? 1U : 0U));
-        // A file that is already installed keeps saying so, whatever the host.
+        // A file that is already installed keeps saying so, whatever the binary; a host that rules the shell
+        // out says that instead, without looking at the file.
         CHECK(shellRowOf(fx, ShellKind::Zsh).value(QStringLiteral("status")).toString()
-              == QStringLiteral("Installed in ~/.zshrc"));
+              == (c.host == config::HostPlatform::Windows ? QStringLiteral("Not available on Windows")
+                                                          : QStringLiteral("Installed in ~/.zshrc")));
     }
+}
+
+namespace
+{
+/// @return The names of @p fx's Install rows, in order.
+[[nodiscard]] QStringList shellRowNames(Fixture const& fx)
+{
+    auto names = QStringList {};
+    for (auto const& row: fx.controller->shellIntegrationRows())
+        names.push_back(row.toMap().value(QStringLiteral("name")).toString());
+    return names;
+}
+
+/// Builds @p fx's controller anew on @p host, which is read when the controller is built.
+void onHost(Fixture& fx, config::HostPlatform host)
+{
+    fx.shellHost = host;
+    fx.restartController();
+}
+
+/// @return Whether @p fx's editor was asked what @p shell's startup file is.
+[[nodiscard]] bool wasInspected(Fixture const& fx, ShellKind shell)
+{
+    return std::ranges::find(fx.shellEditor.inspectedShells, shell) != fx.shellEditor.inspectedShells.end();
+}
+} // namespace
+
+TEST_CASE("SettingsController.shellRows.windows", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspectedShells.clear();
+    scriptShells(fx);
+
+    CHECK(shellRowNames(fx) == QStringList { "bash", "zsh", "fish", "PowerShell", "Windows PowerShell" });
+    for (auto const shell: { ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish })
+    {
+        CAPTURE(std::to_underlying(shell));
+        auto const row = shellRowOf(fx, shell);
+        CHECK(row.value(QStringLiteral("status")).toString() == QStringLiteral("Not available on Windows"));
+        CHECK_FALSE(row.value(QStringLiteral("canInstall")).toBool());
+        // Ruled out by the host alone: the file is never looked at.
+        CHECK_FALSE(wasInspected(fx, shell));
+    }
+    CHECK(wasInspected(fx, ShellKind::Pwsh));
+    CHECK(wasInspected(fx, ShellKind::WindowsPowerShell));
+}
+
+TEST_CASE("SettingsController.shellRows.linux", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Other);
+    scriptShells(fx);
+    CHECK(shellRowNames(fx) == QStringList { "bash", "zsh", "fish", "PowerShell" });
+    CHECK_FALSE(wasInspected(fx, ShellKind::WindowsPowerShell));
+}
+
+TEST_CASE("SettingsController.shellConfirm.policy", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::WindowsPowerShell] =
+        RcInspection { .file = home() / "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent,
+                       .scripts = config::ProfileScripts::NeedUserPolicy };
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent };
+    fx.controller->refresh();
+    auto const windowsPowerShell = std::to_underlying(ShellKind::WindowsPowerShell);
+
+    // A policy the user can fix still offers the install, and the confirmation says what else it changes.
+    CHECK(shellRowOf(fx, ShellKind::WindowsPowerShell).value(QStringLiteral("canInstall")).toBool());
+    auto const confirm = fx.controller->shellIntegrationConfirm(windowsPowerShell);
+    CHECK(confirm.value(QStringLiteral("primary")).toString()
+          == QStringLiteral("Allow Scripts and Add Line"));
+    CHECK(confirm.value(QStringLiteral("note"))
+              .toString()
+              .contains(QStringLiteral("Windows PowerShell, for your user only")));
+
+    // A shell whose profile already runs asks as before.
+    auto const plain = fx.controller->shellIntegrationConfirm(std::to_underlying(ShellKind::Pwsh));
+    CHECK(plain.value(QStringLiteral("primary")).toString() == QStringLiteral("Add Line"));
+    CHECK(plain.value(QStringLiteral("note")).toString().isEmpty());
+
+    // Accepting installs through the editor, which fixes the policy first.
+    fx.controller->installShellIntegration(windowsPowerShell);
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().shell == ShellKind::WindowsPowerShell);
+    CHECK(fx.errors.isEmpty());
+}
+
+TEST_CASE("SettingsController.shellRows.groupPolicy", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent,
+                       .scripts = config::ProfileScripts::BlockedByGroupPolicy };
+    fx.controller->refresh();
+
+    auto const pwsh = shellRowOf(fx, ShellKind::Pwsh);
+    CHECK(pwsh.value(QStringLiteral("name")).toString() == QStringLiteral("PowerShell"));
+    CHECK(pwsh.value(QStringLiteral("status")).toString()
+          == QStringLiteral("Blocked by your organisation's PowerShell policy"));
+    CHECK_FALSE(pwsh.value(QStringLiteral("canInstall")).toBool());
+
+    // An install the page does not offer is refused in the same words, writing nothing.
+    fx.controller->installShellIntegration(std::to_underlying(ShellKind::Pwsh));
+    CHECK(fx.shellEditor.installs.empty());
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front() == QStringLiteral("Blocked by your organisation's PowerShell policy"));
+}
+
+TEST_CASE("SettingsController.shellRows.signedOnly", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent,
+                       .scripts = config::ProfileScripts::SignedOnly };
+    fx.controller->refresh();
+
+    auto const pwsh = shellRowOf(fx, ShellKind::Pwsh);
+    CHECK(pwsh.value(QStringLiteral("status")).toString()
+          == QStringLiteral("PowerShell requires signed scripts here"));
+    CHECK_FALSE(pwsh.value(QStringLiteral("canInstall")).toBool());
+
+    fx.controller->installShellIntegration(std::to_underlying(ShellKind::Pwsh));
+    CHECK(fx.shellEditor.installs.empty());
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front() == QStringLiteral("PowerShell requires signed scripts here"));
+}
+
+TEST_CASE("SettingsController.shellRows.installedButStopped", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::WindowsPowerShell] =
+        RcInspection { .file = home() / "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Installed,
+                       .scripts = config::ProfileScripts::NeedUserPolicy };
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Installed,
+                       .scripts = config::ProfileScripts::BlockedByGroupPolicy };
+    fx.controller->refresh();
+    auto const windowsPowerShell = std::to_underlying(ShellKind::WindowsPowerShell);
+
+    // A profile the policy stops is not plainly Installed, and the user may let it run.
+    auto const stopped = shellRowOf(fx, ShellKind::WindowsPowerShell);
+    CHECK(
+        stopped.value(QStringLiteral("status")).toString()
+        == QStringLiteral("Installed in ~/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1, but "
+                          "PowerShell's script policy stops it from running"));
+    CHECK(stopped.value(QStringLiteral("canInstall")).toBool());
+
+    // The confirmation asks for the policy alone: no line is added.
+    auto const confirm = fx.controller->shellIntegrationConfirm(windowsPowerShell);
+    CHECK(confirm.value(QStringLiteral("title")).toString()
+          == QStringLiteral("Allow scripts in Windows PowerShell?"));
+    CHECK(confirm.value(QStringLiteral("line")).toString().isEmpty());
+    CHECK(confirm.value(QStringLiteral("note")).toString()
+          == QStringLiteral("This also lets your own scripts run in Windows PowerShell, for your user only "
+                            "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned)."));
+    CHECK(confirm.value(QStringLiteral("primary")).toString() == QStringLiteral("Allow Scripts"));
+    CHECK(confirm.value(QStringLiteral("secondary")).toString() == QStringLiteral("Cancel"));
+
+    // Accepting goes through the editor, which fixes the policy and appends nothing.
+    fx.controller->installShellIntegration(windowsPowerShell);
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().shell == ShellKind::WindowsPowerShell);
+    CHECK(fx.errors.isEmpty());
+
+    // A policy the organisation enforces says so, and offers nothing.
+    auto const blocked = shellRowOf(fx, ShellKind::Pwsh);
+    CHECK(blocked.value(QStringLiteral("status")).toString()
+          == QStringLiteral("Blocked by your organisation's PowerShell policy"));
+    CHECK_FALSE(blocked.value(QStringLiteral("canInstall")).toBool());
 }
 
 TEST_CASE("SettingsController: setHotkey stages the chord as contour.yml spells it",

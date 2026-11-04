@@ -53,6 +53,7 @@
 
 #include <vtpty/CommandLine.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SshSession.hpp>
 
@@ -4005,19 +4006,47 @@ void TerminalSession::noteCommandEntered()
 
 config::ShellKind TerminalSession::runningShell() const
 {
-    auto name = foregroundProcessName();
-    // A pane a local daemon hosts has no process group here to ask; its shell is the profile's.
-    if (name.empty() && _hosting == SessionHosting::Remote && _manager != nullptr
-        && _manager->app().attachedHostLabel().empty())
-        name = _profile.shell.value().program;
-    return config::shellKindOf(name);
+    if (auto const name = foregroundProcessName(); !name.empty())
+        return config::shellKindOf(name);
+
+    // Nothing named: the shell is the profile's where that is known to be what runs -- a pane a local daemon
+    // hosts has no process group here, and Windows names no foreground process for a local pane. Never in a
+    // window that is another machine's, nor for a profile that opens an SSH session (its shell is the remote
+    // host's; on POSIX an empty name is a failed poll, never a reason to guess). Read as the spawn reads it,
+    // so that `"C:\...\pwsh.exe" -NoLogo` or `bash -l` names its program.
+    if (_manager == nullptr || !_manager->app().attachedHostLabel().empty())
+        return config::ShellKind::Unknown;
+    auto const profileRuns = [this] {
+        switch (_hosting)
+        {
+            case SessionHosting::Remote: return true;
+            case SessionHosting::Local:
+                return _app.shellHostPlatform() == config::HostPlatform::Windows
+                       && _profile.ssh.value().hostname.empty();
+        }
+        return false;
+    };
+    if (!profileRuns())
+        return config::ShellKind::Unknown;
+    // What names a program is asked as the spawn asks it (vtpty::programsIn()): on the PATH the child is
+    // given -- the profile's own, else this process's -- through the files every session reads.
+    auto const& shell = _profile.shell.value();
+    auto const configuredPath = shell.env.find("PATH");
+    auto const searchPath = configuredPath != shell.env.end()
+                                ? configuredPath->second
+                                : _app.processEnvironment().get("PATH").value_or(std::string {});
+    auto const namesProgram = vtpty::programsIn(
+        vtpty::ProgramSearch { .path = searchPath, .workingDirectory = {}, .fileSystem = _app.fileSystem() });
+    return config::shellKindOf(vtpty::invocationToRun(shell.program, shell.arguments, namesProgram).program);
 }
 
 QString TerminalSession::shellCardText(std::string_view pattern) const
 {
     auto const* const row = config::shellRow(_shellCard.shell);
-    return QString::fromStdString(window::cardText(
-        pattern, row != nullptr ? row->name : std::string_view {}, _shellCard.rcDisplay, _shellCard.line));
+    return QString::fromStdString(window::cardText(pattern,
+                                                   row != nullptr ? row->displayName : std::string_view {},
+                                                   _shellCard.rcDisplay,
+                                                   _shellCard.line));
 }
 
 QString TerminalSession::shellIntegrationTitle() const
@@ -4030,6 +4059,14 @@ QString TerminalSession::shellIntegrationBody() const
     return shellCardText(window::CardStageRows[std::to_underlying(_shellCard.stage)].body);
 }
 
+QString TerminalSession::shellIntegrationNote() const
+{
+    // Said where the change is shown, before it is made: on the line, not on the offer.
+    if (_shellCard.stage != window::CardStage::Confirm)
+        return {};
+    return shellCardText(window::policyNoteFor(_shellCard.scripts));
+}
+
 QString TerminalSession::fontFamily() const
 {
     return QString::fromStdString(_profile.fonts.value().regular.familyName);
@@ -4037,6 +4074,9 @@ QString TerminalSession::fontFamily() const
 
 QString TerminalSession::shellIntegrationPrimary() const
 {
+    // Add Line also changes the execution policy where the profile could not run otherwise, and says so.
+    if (_shellCard.stage == window::CardStage::Confirm)
+        return QString::fromUtf8(window::confirmPrimaryFor(_shellCard.scripts));
     return QString::fromUtf8(window::CardStageRows[std::to_underlying(_shellCard.stage)].primary);
 }
 
@@ -4047,7 +4087,8 @@ QString TerminalSession::shellIntegrationSecondary() const
 
 void TerminalSession::showShellIntegrationCard(config::ShellKind shell,
                                                std::filesystem::path const& rcFile,
-                                               std::string line)
+                                               std::string line,
+                                               config::ProfileScripts scripts)
 {
     // An ended pane's footer owns its bottom rows.
     if (_end != EndReason::None)
@@ -4055,9 +4096,13 @@ void TerminalSession::showShellIntegrationCard(config::ShellKind shell,
     _shellCard = ShellIntegrationCardState {
         .stage = window::CardStage::Offer,
         .shell = shell,
-        .rcDisplay = window::displayRcPath(rcFile, _manager != nullptr ? _manager->homeDirectory() : ""),
+        .rcDisplay =
+            window::displayRcPath(rcFile,
+                                  _manager != nullptr ? core::pathFromTrustedUtf8(_manager->homeDirectory())
+                                                      : std::filesystem::path {}),
         .line = std::move(line),
         .error = {},
+        .scripts = scripts,
     };
     emit shellIntegrationCardChanged();
 }

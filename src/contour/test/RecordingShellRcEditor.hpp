@@ -50,10 +50,14 @@ class RecordingShellRcEditor final: public platform::IShellRcEditor
     /// The session environment of every inspect() asked for, in order.
     mutable std::vector<platform::RcEnvironment> inspectedEnvironments;
 
+    /// The shell of every inspect() asked for, in order.
+    mutable std::vector<config::ShellKind> inspectedShells;
+
     [[nodiscard]] std::expected<platform::RcInspection, platform::ShellRcError> inspect(
         config::ShellKind shell, platform::RcEnvironment const& sessionEnvironment) const override
     {
         inspectedEnvironments.push_back(sessionEnvironment);
+        inspectedShells.push_back(shell);
         if (auto const found = inspections.find(shell); found != inspections.end())
             return found->second;
         return platform::RcInspection {};

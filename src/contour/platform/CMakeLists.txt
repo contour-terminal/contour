@@ -34,6 +34,10 @@ add_library(contour_platform STATIC
     HotkeyKeys.hpp HotkeyQtKeys.hpp
     NotificationOccasion.hpp
     SessionVisibility.hpp
+    ExecutionPolicySource.cpp ExecutionPolicySource.hpp
+    KnownFolders.cpp KnownFolders.hpp
+    RcText.cpp RcText.hpp
+    Registry.cpp Registry.hpp
     ShellRcEditor.cpp ShellRcEditor.hpp
     # These translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
     # elsewhere. Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT.

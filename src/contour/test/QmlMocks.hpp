@@ -106,6 +106,7 @@ class MockSession: public QObject
     Q_PROPERTY(
         QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
     Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationNote READ shellIntegrationNote NOTIFY shellIntegrationCardChanged)
     Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY shellIntegrationCardChanged)
     // }}}
     // {{{ The find bar and the permission question.
@@ -432,17 +433,20 @@ class MockSession: public QObject
         return cardWords(&window::CardStageRow::secondary);
     }
     [[nodiscard]] QString const& shellIntegrationError() const noexcept { return _cardError; }
+    [[nodiscard]] QString const& shellIntegrationNote() const noexcept { return _cardNote; }
     [[nodiscard]] QString fontFamily() const { return _fontFamily; }
 
     /// Shows the card on @p stage, as TerminalSession::showShellIntegrationCard does.
     /// @param stage The stage to show; Hidden hides it.
     /// @param line The line the Confirm stage shows as its body.
     /// @param error What the Confirm stage says went wrong; empty for nothing.
-    void setShellCard(window::CardStage stage, QString line = {}, QString error = {})
+    /// @param note What the Confirm stage says the install also changes; empty for nothing.
+    void setShellCard(window::CardStage stage, QString line = {}, QString error = {}, QString note = {})
     {
         _cardStage = stage;
         _cardLine = std::move(line);
         _cardError = std::move(error);
+        _cardNote = std::move(note);
         emit shellIntegrationCardChanged();
     }
 
@@ -675,6 +679,7 @@ class MockSession: public QObject
     window::CardStage _cardStage = window::CardStage::Hidden;
     QString _cardLine;
     QString _cardError;
+    QString _cardNote;
     QString _fontFamily = QStringLiteral("Monospace"); ///< The card's line is set in it.
 
     /// One column of the current stage's CardStageRows row.

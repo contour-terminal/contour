@@ -42,6 +42,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
+#include <QtGui/QTextOption>
 #include <QtQml/QJSValue>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -2664,6 +2665,40 @@ TEST_CASE("shell integration card: the line is selectable, in the terminal font,
     CHECK(body.property("font").value<QFont>().family() != session.fontFamily());
 }
 
+TEST_CASE("shell integration card: the policy note shows below the line only when there is one (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& shellCard = PaneTreeHost::partOf(host.cardOf(leaf), "shellIntegrationCard");
+
+    showCard(session, CardStage::Confirm);
+    host.settle();
+    auto const& body = PaneTreeHost::partOf(shellCard, "shellIntegrationBody");
+    auto const& note = PaneTreeHost::partOf(shellCard, "shellIntegrationNote");
+    CHECK_FALSE(note.isVisible());
+
+    auto const noteText =
+        QStringLiteral("This also lets your own scripts run in PowerShell, for your user only "
+                       "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    session.setShellCard(CardStage::Confirm, QString::fromUtf8(ShellCardLine), {}, noteText);
+    host.settle();
+    CHECK(note.isVisible());
+    CHECK(note.property("text").toString() == noteText);
+    // Text.Wrap: the note is a sentence, which the card wraps rather than cuts.
+    CHECK(note.property("wrapMode").toInt() == static_cast<int>(QTextOption::WrapAtWordBoundaryOrAnywhere));
+    CHECK(QTest::qWaitFor([&] { return note.y() > body.y(); }));
+
+    showCard(session, CardStage::Confirm);
+    host.settle();
+    CHECK_FALSE(note.isVisible());
+}
+
 TEST_CASE("shell integration card: an ended pane shows its footer and no card (offscreen)",
           "[contour][gui][qml][shellintegration][paneend]")
 {
@@ -2726,6 +2761,60 @@ TEST_CASE("shell integration card: the Terminal row's card is three cell rows wi
     CHECK(label("shellIntegrationSecondary")->property("text").toString()
           == host.style().chipOpenGlyph() + session.shellIntegrationSecondary()
                  + host.style().chipCloseGlyph());
+}
+
+TEST_CASE("shell integration card: the Terminal row wraps the policy note into whole cell rows (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 400, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& pane = host.cardOf(leaf);
+    auto const noteText =
+        QStringLiteral("This also lets your own scripts run in Windows PowerShell, for your user "
+                       "only (Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    session.setShellCard(CardStage::Confirm, QString::fromUtf8(ShellCardLine), {}, noteText);
+    host.settle();
+
+    auto const& shellCard = PaneTreeHost::partOf(pane, "shellIntegrationCard");
+    REQUIRE(shellCard.isVisible());
+    // The Terminal row's card, whatever Controls style the run draws under.
+    REQUIRE(shellCard.property("bracketed").toBool());
+    auto const& note = PaneTreeHost::partOf(shellCard, "shellIntegrationNote");
+    REQUIRE(note.isVisible());
+
+    // Narrow the pane until the card's row is half the sentence's own width (its implicit width, unwrapped,
+    // in whatever font this platform resolves), so the sentence cannot fit on one row.
+    auto const cellWidth = host.style().cellWidth();
+    REQUIRE(note.implicitWidth() > 0);
+    host.resize(QSize { static_cast<int>(std::ceil((note.implicitWidth() / 2) + (4 * cellWidth))), 400 });
+    // The host settles on the pane's geometry; the card lays out within it a polish later, so wait for that.
+    auto const cell = host.style().cellHeight();
+    auto const laidOut = [&] {
+        auto const count = note.property("lineCount").toInt();
+        return note.width() < note.implicitWidth() && count >= 2 && shellCard.height() == (3 + count) * cell;
+    };
+    CHECK(QTest::qWaitFor(laidOut));
+    INFO("note: " << note.width() << " of " << note.implicitWidth() << " wide");
+    CHECK(note.width() < note.implicitWidth());
+    // The consent is wrapped, never cut: all of it is laid out.
+    CHECK(note.property("wrapMode").toInt() == static_cast<int>(QTextOption::WrapAtWordBoundaryOrAnywhere));
+    CHECK(note.property("elide").toInt() == static_cast<int>(Qt::ElideNone));
+    CHECK_FALSE(note.property("truncated").toBool());
+    CHECK(note.property("text").toString() == noteText);
+    auto const lines = note.property("lineCount").toInt();
+    CHECK(lines >= 2);
+
+    // Each of its lines is one cell row, so the card and its band stay whole cell rows.
+    CHECK(note.height() == lines * cell);
+    CHECK(shellCard.height() == (3 + lines) * cell);
+    CHECK(PaneTreeHost::partOf(pane, "shellIntegrationBand").height() == shellCard.height());
 }
 
 TEST_CASE("shell integration card: every ink reads at 4.5:1 on every row, scheme and appearance (offscreen)",

@@ -55,7 +55,7 @@ SettingsGroupsPage {
         objectName: "shellInstallDialog"
         /// The config::ShellKind the dialog is about.
         property int shell: -1
-        /// What the question says: { title, line, primary, secondary }.
+        /// What the question says: { title, line, note, primary, secondary }.
         property var confirm: ({})
         heading: installDialog.confirm.title !== undefined ? installDialog.confirm.title : ""
         acceptText: installDialog.confirm.primary !== undefined ? installDialog.confirm.primary : ""
@@ -64,16 +64,28 @@ SettingsGroupsPage {
         onAccepted: if (root.controller) root.controller.installShellIntegration(installDialog.shell)
         bodyData: [
             // The line itself, as it will be written, in the terminal's font: what is added is read before it
-            // is.
+            // is. None when only the execution policy changes.
             Label {
                 objectName: "shellInstallLine"
                 Layout.fillWidth: true
+                visible: text.length > 0
                 text: installDialog.confirm.line !== undefined ? installDialog.confirm.line : ""
                 font.family: root.controller && root.controller.fontFamilies.length > 0
                              ? root.controller.fontFamilies[0] : chromeStyle.type.body.family
                 font.pixelSize: chromeStyle.type.footnote.pixelSize
                 color: chromeStyle.colors.settingsLabel
                 wrapMode: Text.WrapAnywhere
+                textFormat: Text.PlainText
+            },
+            // What else the install changes (PowerShell's execution policy), said before it is changed.
+            Label {
+                objectName: "shellInstallNote"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: installDialog.confirm.note !== undefined ? installDialog.confirm.note : ""
+                font: chromeStyle.type.body
+                color: chromeStyle.colors.settingsLabel
+                wrapMode: Text.Wrap
                 textFormat: Text.PlainText
             }
         ]
