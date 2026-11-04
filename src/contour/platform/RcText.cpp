@@ -81,10 +81,12 @@ namespace
         auto out = std::string {};
         out.reserve(bytes.size());
         auto pendingHigh = char32_t { 0 };
-        for (auto const pair: bytes | std::views::chunk(2))
+        // Indexed rather than std::views::chunk(2), which the libc++ that macOS ships lacks.
+        for (auto const index: std::views::iota(0uz, bytes.size() / 2))
         {
-            auto const unit = static_cast<char32_t>(static_cast<unsigned char>(pair[0]))
-                              | (static_cast<char32_t>(static_cast<unsigned char>(pair[1])) << 8);
+            auto const unit =
+                static_cast<char32_t>(static_cast<unsigned char>(bytes[2 * index]))
+                | (static_cast<char32_t>(static_cast<unsigned char>(bytes[(2 * index) + 1])) << 8);
             if (pendingHigh != 0)
             {
                 if (!isLowSurrogate(unit))
