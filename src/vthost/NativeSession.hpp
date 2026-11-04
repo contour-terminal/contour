@@ -95,7 +95,8 @@ struct HandshakePolicy
                                                                    proto::Capability::MoveNode,
                                                                    proto::Capability::LayoutBatch,
                                                                    proto::Capability::TabEditAcks,
-                                                                   proto::Capability::ColorPreference });
+                                                                   proto::Capability::ColorPreference,
+                                                                   proto::Capability::PanesReprojected });
 };
 
 /// When a connection sends a session's program-status set.
@@ -226,9 +227,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     void sessionResized(vtworkspace::SessionId session) override;
 
-    /// Sends proto::PanesReprojected, and nothing else: the client re-sends its pane sizes, which push
-    /// nothing back.
-    void clientAreaReprojected() override;
+    /// Sends proto::PanesReprojected, and nothing else, to a viewing client sharing
+    /// Capability::PanesReprojected: the client re-sends its pane sizes, which push nothing back.
+    void otherClientDeparted() override;
 
     void sessionBell(vtworkspace::SessionId session) override;
     void sessionNotify(vtworkspace::SessionId session,

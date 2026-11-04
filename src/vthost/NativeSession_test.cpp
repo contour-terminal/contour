@@ -7202,3 +7202,123 @@ TEST_CASE("every client receives DaemonUpgrading before its connection closes", 
         CHECK(h.host.connectedClients() == 0);
     }
 }
+
+namespace
+{
+
+/// The title the marker push of departAndMark() carries.
+constexpr auto AfterDepartureTitle = std::string_view { "after the departure" };
+
+/// Once the attach snapshot has landed: tells the connection another client departed, then retitles @p tab,
+/// so the layout push that follows marks the end of whatever the departure sent.
+Task<void> departAndMark(NativeHarness* h, vtworkspace::TabId tab)
+{
+    co_await awaitGate(&h->loop, holdsFrames(&h->received, AttachSnapshotFrames));
+    h->session->otherClientDeparted();
+    h->host.model().setTabTitle(tab, std::string { AfterDepartureTitle });
+}
+
+/// @return Whether @p frame is the marker push of departAndMark().
+[[nodiscard]] bool isDepartureMarker(proto::DecodedFrame const& frame)
+{
+    auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+    return layout != nullptr && std::ranges::any_of(layout->tabs, [](auto const& tab) {
+               return tab.title == AfterDepartureTitle;
+           });
+}
+
+/// @return Whether @p frame is a PanesReprojected.
+[[nodiscard]] bool isPanesReprojected(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::PanesReprojected>(frame.pdu);
+}
+
+/// Attaches with @p hello to a daemon of one tab, has another client depart once the attach landed, and
+/// collects until the push marking the departure's end.
+/// @param hello What the client attaches with.
+/// @return What the client received.
+[[nodiscard]] std::vector<proto::DecodedFrame> departAfterAttach(proto::ClientHello hello)
+{
+    auto h = NativeHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    return h.exchangeUntil(
+        { proto::DecodedPdu { std::move(hello) } },
+        [](auto const& got) { return std::ranges::any_of(got, isDepartureMarker); },
+        departAndMark(&h, tab->id()));
+}
+
+} // namespace
+
+TEST_CASE("a client sharing panes-reprojected is told of another client's departure, alone",
+          "[vthost][native][size]")
+{
+    auto const received = departAfterAttach(proto::ClientHello {
+        .capabilities = proto::CapabilitySet::of({ proto::Capability::PanesReprojected }) });
+
+    auto const* hello = serverHelloOf(received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->capabilities.contains(proto::Capability::PanesReprojected));
+    REQUIRE(std::ranges::count_if(received, isPanesReprojected) == 1);
+    // Right after the attach and right before the marker: no layout or snapshot went with it.
+    auto const notice = std::ranges::find_if(received, isPanesReprojected);
+    CHECK(notice - received.begin() == static_cast<std::ptrdiff_t>(AttachSnapshotFrames));
+    REQUIRE(std::next(notice) != received.end());
+    CHECK(isDepartureMarker(*std::next(notice)));
+}
+
+TEST_CASE("a client without panes-reprojected is not told of another client's departure",
+          "[vthost][native][size][compat]")
+{
+    auto const received = departAfterAttach(proto::ClientHello {});
+
+    REQUIRE(std::ranges::any_of(received, isDepartureMarker));
+    CHECK_FALSE(std::ranges::any_of(received, isPanesReprojected));
+}
+
+namespace
+{
+
+/// Once the ServerHello has landed: tells the connection another client departed, then asks for the daemon's
+/// status, whose reply marks the end of whatever the departure sent.
+Task<void> departThenAskStatus(NativeHarness* h)
+{
+    co_await awaitGate(&h->loop, holdsFrames(&h->received, 1));
+    h->session->otherClientDeparted();
+    auto const request = encodedAt(2, proto::DaemonStatusRequest {});
+    co_await feedBytes(h->pair.second.get(), &request);
+}
+
+} // namespace
+
+TEST_CASE("a connection that is not viewing is not told of another client's departure",
+          "[vthost][native][size]")
+{
+    // The trace logs every PDU send() writes, synchronously, so it shows one written at any phase.
+    auto capture = core::log::ScopedCapture { "vthost.trace.proto" };
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const capabilities = proto::CapabilitySet::of({ proto::Capability::PanesReprojected });
+
+    SECTION("before its hello")
+    {
+        h.session->otherClientDeparted();
+    }
+    SECTION("a Control connection")
+    {
+        auto const received = h.exchange(
+            { proto::ClientHello { .capabilities = capabilities, .role = proto::ConnectionRole::Control } },
+            2,
+            departThenAskStatus(&h));
+        REQUIRE(received.size() == 2);
+        CHECK(std::holds_alternative<proto::DaemonStatusReply>(received[1].pdu));
+    }
+    SECTION("once closed")
+    {
+        std::ignore =
+            h.exchange({ proto::ClientHello { .capabilities = capabilities } }, AttachSnapshotFrames);
+        h.session->otherClientDeparted();
+    }
+
+    CHECK_FALSE(capture.contains("PanesReprojected"));
+}

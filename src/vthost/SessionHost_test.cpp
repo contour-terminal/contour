@@ -342,9 +342,15 @@ class ExitingPty final: public vtpty::Pty
 /// the report, not about who made it.
 struct StubClient final: vthost::SessionStreamEvents
 {
-    void clientAreaReprojected() override { ++reprojections; }
+    void otherClientDeparted() override
+    {
+        ++departuresHeard;
+        if (onDeparture)
+            onDeparture();
+    }
 
-    int reprojections = 0; ///< How often it was told a departure re-projected the panes.
+    int departuresHeard = 0;           ///< How often it was told another client departed.
+    std::function<void()> onDeparture; ///< What its client does when told: re-assert its panes, say.
 };
 
 /// A single-pane tab whose leaf runs @p command — the shape most of the new tests build on.
@@ -707,8 +713,42 @@ TEST_CASE("a detaching client that leaves the client area unchanged keeps the pe
 
     CHECK(unbox<int>(h.host.pageSize().columns) == 100);
     CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
-    // Nothing was discarded, so the survivor has nothing to re-assert.
-    CHECK(h.otherClient.reprojections == 0);
+    // Told all the same: it cannot know whether the departed client's refinements are in force.
+    CHECK(h.otherClient.departuresHeard == 1);
+
+    h.host.unsubscribeStream(&h.otherClient);
+}
+
+TEST_CASE("a detaching client's pane refinements give way to the survivor's own", "[vthost][host][size]")
+{
+    // Both clients state the same area, but the departing one refined a pane last: the area does not
+    // move, so nothing is re-projected, yet the pane stays at the departed client's size unless the
+    // survivor is told to re-assert its own.
+    auto const area = vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) };
+    auto const pane = [](int columns) {
+        return vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(columns) };
+    };
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.subscribeStream(&h.client);
+    h.host.subscribeStream(&h.otherClient);
+    std::ignore = h.host.applyClientSize(&h.otherClient, area);
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    auto const firstSession = tab->rootPane()->first()->session();
+    std::ignore = h.host.applyPaneSize(firstSession, pane(60)); // the survivor's divider
+    std::ignore = h.host.applyClientSize(&h.client, area);
+    std::ignore = h.host.applyPaneSize(firstSession, pane(70)); // the departing client's divider
+    REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+    h.otherClient.onDeparture = [&h, &pane, firstSession] {
+        std::ignore = h.host.applyPaneSize(firstSession, pane(60));
+    };
+
+    h.host.unsubscribeStream(&h.client);
+
+    CHECK(unbox<int>(h.host.pageSize().columns) == 100);
+    CHECK(h.otherClient.departuresHeard == 1);
+    CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 60);
 
     h.host.unsubscribeStream(&h.otherClient);
 }
@@ -728,16 +768,16 @@ TEST_CASE("a detaching client that moves the client area tells the survivors", "
         &h.otherClient, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(80) });
     REQUIRE(unbox<int>(h.host.pageSize().columns) == 80);
     // Reports re-project at the reporter's own request: no one is told.
-    REQUIRE(h.client.reprojections == 0);
+    REQUIRE(h.client.departuresHeard == 0);
 
     h.host.unsubscribeStream(&h.otherClient);
 
     CHECK(unbox<int>(h.host.pageSize().columns) == 100);
-    CHECK(h.client.reprojections == 1);
-    CHECK(h.otherClient.reprojections == 0); // gone before the fan-out
+    CHECK(h.client.departuresHeard == 1);
+    CHECK(h.otherClient.departuresHeard == 0); // gone before the fan-out
 
     h.host.unsubscribeStream(&h.client);
-    CHECK(h.client.reprojections == 1); // nobody left to tell
+    CHECK(h.client.departuresHeard == 1); // nobody left to tell
 }
 
 TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "[vthost][host][concurrency]")

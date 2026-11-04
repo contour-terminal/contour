@@ -2805,6 +2805,48 @@ TEST_CASE("a daemon's LayoutBatchEnd reaches the client's handler after the layo
     CHECK(heard == std::vector<std::string> { "layout 1", "layout 2", "end 4" });
 }
 
+TEST_CASE("a daemon's PanesReprojected reaches the client's handler", "[vthost][attach]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto told = 0;
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                            { proto::Capability::PanesReprojected }) },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler {},
+                       NativeClient::PermissionHandler {},
+                       vthost::client::LivenessPolicy {},
+                       NativeClient::TabMergeRefusedHandler {},
+                       NativeClient::MoveNodeRefusedHandler {},
+                       NativeClient::LayoutBatchEndHandler {},
+                       NativeClient::PanesReprojectedHandler { [&told] { ++told; } } };
+    auto const departing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(
+                                  proto::CapabilitySet::of({ proto::Capability::PanesReprojected })) },
+                            { std::nullopt, proto::PanesReprojected {} } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client, int const* told) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return *told == 1; });
+        client->detach();
+    }(&loop, &client, &told);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, departing, &seen), std::move(scenario)));
+
+    CHECK(told == 1);
+}
+
 TEST_CASE("against a daemon without MoveNode no MoveNode is written", "[vthost][attach][compat][move]")
 {
     // A newer client, an older daemon: the verb is not written at all, and the caller learns it.

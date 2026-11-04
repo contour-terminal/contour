@@ -415,9 +415,12 @@ void NativeSession::sessionResized(SessionId session)
     requestSnapshot(session);
 }
 
-void NativeSession::clientAreaReprojected()
+void NativeSession::otherClientDeparted()
 {
-    if (_phase != ConnectionPhase::Viewing || _closed)
+    // A client that does not share the capability would answer Unsupported, and has nothing to re-assert
+    // with.
+    if (_phase != ConnectionPhase::Viewing || _closed || !_negotiated.has_value()
+        || !_negotiated->shared.contains(proto::Capability::PanesReprojected))
         return;
     // Alone: a departure changes no tree, so there is no layout to push with it.
     send(0, proto::DecodedPdu { proto::PanesReprojected {} });

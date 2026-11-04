@@ -1705,12 +1705,14 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     // hello and pane reports would put every split pane back on the ratio-derived estimate, which
     // the client — seeing no local geometry change — never corrects.
     //
-    // And when it did, the survivors are told: the re-projection discarded their refinements too.
-    if (_clientAreas.erase(observer) != 0 && resolveAuthoritativeArea() == SizeChange::Applied)
-    {
+    // Either way the survivors are told to re-assert their pane sizes: a re-projection discarded their
+    // refinements, and without one the departed client's own refinements may still be in force -- the
+    // last pane report wins, and it may have been the departed client's.
+    if (_clientAreas.erase(observer) == 0)
+        return;
+    if (resolveAuthoritativeArea() == SizeChange::Applied)
         std::ignore = reprojectLayouts();
-        fanOutStream(&SessionStreamEvents::clientAreaReprojected);
-    }
+    fanOutStream(&SessionStreamEvents::otherClientDeparted);
 }
 
 std::vector<SessionId> SessionHost::sessionIds() const

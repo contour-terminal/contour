@@ -190,7 +190,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::MoveNode,
                                                    vthost::proto::Capability::LayoutBatch,
                                                    vthost::proto::Capability::TabEditAcks,
-                                                   vthost::proto::Capability::ColorPreference }),
+                                                   vthost::proto::Capability::ColorPreference,
+                                                   vthost::proto::Capability::PanesReprojected }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = helloArea.transform([](auto const& size) {
@@ -577,8 +578,9 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         //
         // Only the bookkeeping is dropped, never a report issued: at this point the panes have not
         // been laid out against the new tree, so composing an area would mix a stale pane extent
-        // with a fresh one and propose one that neither describes. Panes re-projected under a geometry of
-        // this client's that does not move are the daemon's to tell (onPanesReprojected).
+        // with a fresh one and propose one that neither describes. Panes another client's departure left at
+        // sizes this client did not ask for, under a geometry of its own that does not move, are the daemon's
+        // to tell (onPanesReprojected).
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
@@ -626,8 +628,9 @@ std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlig
 
 void NativeController::onPanesReprojected()
 {
-    // Nothing of this client's moved, so nothing would report the panes again. Pending until a flush that
-    // composes an area spends it, should this one find the panes not laid out yet.
+    // Another client departed: a re-projection, or its own per-pane sizes still in force, may have replaced
+    // this client's. Nothing of this client's moved, so nothing would report the panes again. Pending until a
+    // flush that composes an area spends it, should this one find the panes not laid out yet.
     {
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _geometryReassert = GeometryReassert::Pending;
