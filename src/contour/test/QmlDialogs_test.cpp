@@ -2769,7 +2769,6 @@ TEST_CASE("shell integration card: the Terminal row wraps the policy note into w
     using contour::window::CardStage;
     auto setup = paneCardSetup();
     setup.row = contour::config::ChromeStyle::Terminal;
-    // Narrow enough that the sentence cannot fit on one row.
     auto host = PaneTreeHost { setup, QSize { 400, 400 } };
     MockSession session;
     MockPaneProxy leaf { /*leaf*/ true };
@@ -2785,8 +2784,25 @@ TEST_CASE("shell integration card: the Terminal row wraps the policy note into w
 
     auto const& shellCard = PaneTreeHost::partOf(pane, "shellIntegrationCard");
     REQUIRE(shellCard.isVisible());
+    // The Terminal row's card, whatever Controls style the run draws under.
+    REQUIRE(shellCard.property("bracketed").toBool());
     auto const& note = PaneTreeHost::partOf(shellCard, "shellIntegrationNote");
     REQUIRE(note.isVisible());
+
+    // Narrow the pane until the card's row is half the sentence's own width (its implicit width, unwrapped,
+    // in whatever font this platform resolves), so the sentence cannot fit on one row.
+    auto const cellWidth = host.style().cellWidth();
+    REQUIRE(note.implicitWidth() > 0);
+    host.resize(QSize { static_cast<int>(std::ceil((note.implicitWidth() / 2) + (4 * cellWidth))), 400 });
+    // The host settles on the pane's geometry; the card lays out within it a polish later, so wait for that.
+    auto const cell = host.style().cellHeight();
+    auto const laidOut = [&] {
+        auto const count = note.property("lineCount").toInt();
+        return note.width() < note.implicitWidth() && count >= 2 && shellCard.height() == (3 + count) * cell;
+    };
+    CHECK(QTest::qWaitFor(laidOut));
+    INFO("note: " << note.width() << " of " << note.implicitWidth() << " wide");
+    CHECK(note.width() < note.implicitWidth());
     // The consent is wrapped, never cut: all of it is laid out.
     CHECK(note.property("wrapMode").toInt() == static_cast<int>(QTextOption::WrapAtWordBoundaryOrAnywhere));
     CHECK(note.property("elide").toInt() == static_cast<int>(Qt::ElideNone));
@@ -2796,7 +2812,6 @@ TEST_CASE("shell integration card: the Terminal row wraps the policy note into w
     CHECK(lines >= 2);
 
     // Each of its lines is one cell row, so the card and its band stay whole cell rows.
-    auto const cell = host.style().cellHeight();
     CHECK(note.height() == lines * cell);
     CHECK(shellCard.height() == (3 + lines) * cell);
     CHECK(PaneTreeHost::partOf(pane, "shellIntegrationBand").height() == shellCard.height());
