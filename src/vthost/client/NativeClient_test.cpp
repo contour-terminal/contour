@@ -3014,15 +3014,7 @@ TEST_CASE("a client whose daemon never answers the hello gives up at the handsha
 
 TEST_CASE("a client whose daemon echoes stays connected", "[vthost][attach][liveness]")
 {
-    auto const echoing = [](proto::DecodedFrame const& frame) -> Script {
-        if (carries<proto::ClientHello>(frame))
-            return Script { { std::nullopt,
-                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
-        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
-            return Script { { std::nullopt, *heartbeat } };
-        return Script {};
-    };
-    auto h = ManualClockAttach { echoing };
+    auto h = ManualClockAttach { echoingAfterHello() };
     REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
     h.letTimePass(40);
 
