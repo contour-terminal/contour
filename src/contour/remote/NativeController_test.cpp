@@ -325,7 +325,7 @@ class CountingSocket final: public core::net::testing::SocketDecorator
 
     std::unique_ptr<core::net::ISocket> _inner;
     ClientFrameCounts& _counts;
-    std::vector<std::byte> _pending;
+    std::vector<std::byte> _pending {};
 };
 
 /// A daemon end of a connection that can hold back what the daemon writes once the LayoutState of one window
