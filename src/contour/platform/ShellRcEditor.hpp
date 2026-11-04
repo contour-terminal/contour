@@ -8,8 +8,11 @@
 /// renames the rc file, which keeps its permissions, its owner and, when it is a symlink into a
 /// dotfiles repository, the link itself. Qt-free.
 
+#include <contour/config/ExecutionPolicy.hpp>
 #include <contour/config/ShellKind.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/ExecutionPolicySource.hpp>
+#include <contour/platform/KnownFolders.hpp>
 
 #include <core/Environment.hpp>
 #include <core/platform/FileSystem.hpp>
@@ -42,6 +45,13 @@ enum class ShellRcError : uint8_t
     AppendCutShort, ///< This append was cut short: the file now ends in part of Contour's line.
     AppendLineEndingOnly, ///< This append was cut short before Contour's line: only a line ending landed.
     AppendUnterminated,   ///< This append landed all of Contour's line but its line ending.
+    NoDocuments, ///< The Documents folder, where PowerShell keeps its profile on Windows, is not known.
+    UnsupportedEncoding, ///< The file is in a text encoding Contour does not write (UTF-16BE, UTF-32).
+    AnsiProfile, ///< The file has no byte order mark and is read in the ANSI code page, which would garble
+                 ///< the non-ASCII characters of Contour's line.
+    PolicyUnchanged, ///< The execution policy that keeps the profile from running could not be changed; the
+                     ///< file is as it was.
+    PolicyBlocked, ///< The execution policy keeps the profile from running and Contour may not change it.
 };
 
 /// @param error The failure.
@@ -60,7 +70,12 @@ enum class ShellRcError : uint8_t
         case ShellRcError::Changed:
         case ShellRcError::InvalidLine:
         case ShellRcError::PartialWrite:
-        case ShellRcError::Superuser: return false;
+        case ShellRcError::Superuser:
+        case ShellRcError::NoDocuments:
+        case ShellRcError::UnsupportedEncoding:
+        case ShellRcError::AnsiProfile:
+        case ShellRcError::PolicyUnchanged:
+        case ShellRcError::PolicyBlocked: return false;
     }
     return false;
 }
@@ -91,6 +106,14 @@ enum class ShellRcError : uint8_t
         case ShellRcError::AppendUnterminated:
             return "now holds Contour's line without its line ending: the write stopped at its very end; "
                    "add a line break after it";
+        case ShellRcError::NoDocuments: return "the Documents folder is not known";
+        case ShellRcError::UnsupportedEncoding: return "it is in a text encoding Contour does not write";
+        case ShellRcError::AnsiProfile:
+            return "it has no byte-order mark, so Windows PowerShell would misread the non-ASCII characters "
+                   "in "
+                   "Contour's line";
+        case ShellRcError::PolicyUnchanged: return "PowerShell's script policy could not be changed";
+        case ShellRcError::PolicyBlocked: return "PowerShell's script policy does not let the profile run";
     }
     return "unknown error";
 }
@@ -146,6 +169,9 @@ struct RcInspection
     /// The file's last line, which is what a cut-short install left behind and the user must delete; empty
     /// unless @c state is config::RcState::Partial.
     std::string partialLine {};
+    /// Whether the shell's execution policy lets the file run; always ProfileScripts::Run for a shell that
+    /// has no such policy.
+    config::ProfileScripts scripts = config::ProfileScripts::Run;
 
     [[nodiscard]] bool operator==(RcInspection const&) const = default;
 };
@@ -206,7 +232,7 @@ class NullShellRcEditor final: public IShellRcEditor
 
 /// What a startup file's text says about the integration.
 /// @param shell The shell the file is for.
-/// @param content The file's bytes.
+/// @param content The file's text, in UTF-8 (decodeRcText() of its bytes).
 /// @return Partial when the last line has no line ending and is the beginning of Contour's line (the
 ///         shell's config::ShellRow::guard, then its config::ShellRow::continuation) without its
 ///         config::ShellRcMarker, which is what an append cut short by a full disk leaves behind; a user's
@@ -219,27 +245,34 @@ class NullShellRcEditor final: public IShellRcEditor
 /// The editor over a real (or injected) file system.
 ///
 /// Locates the file from `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME`, each read from the session's own
-/// environment where it sets one and else from Contour's; a file that is a symlink is appended through to
-/// its target. It never runs the shell to ask: a `ZDOTDIR` that only `~/.zshenv` sets is therefore not
-/// seen, and zsh then reads a `.zshrc` elsewhere than the one this appends to (the line is harmless but
-/// does not load; the card names the file it wrote, so the user can move the line). A superuser's
-/// Contour touches nothing: it would leave root-owned files in a user's home. Appending reads the file again
-/// right before writing and refuses when it changed meanwhile, and reads it once more afterwards: the file
-/// system's append may report success for a write that was cut short (a close error nobody checked), so the
-/// file itself decides.
-/// What Contour appends always starts with a line ending (at worst one blank line), so a save that lands
-/// between the re-read and the append, leaving the user's last line unterminated, cannot glue Contour's
-/// line onto it.
+/// environment where it sets one and else from Contour's, and PowerShell's profile on Windows from the
+/// Documents known folder; a file that is a symlink is appended through to its target. A file is read in
+/// its own encoding (UTF-8 with or without a byte order mark, UTF-16LE with one) and appended to in it; a new
+/// PowerShell profile starts with a UTF-8 byte order mark, which every PowerShell reads. When the shell's
+/// execution policy keeps the profile from running and the user may change it, install() allows the user's
+/// own scripts first and appends only once that succeeded. It never runs the shell to ask: a `ZDOTDIR` that
+/// only `~/.zshenv` sets is therefore not seen, and zsh then reads a `.zshrc` elsewhere than the one this
+/// appends to (the line is harmless but does not load; the card names the file it wrote, so the user can move
+/// the line). A superuser's Contour touches nothing: it would leave root-owned files in a user's home.
+/// Appending reads the file again right before writing and refuses when it changed meanwhile, and reads it
+/// once more afterwards: the file system's append may report success for a write that was cut short (a close
+/// error nobody checked), so the file itself decides. What Contour appends always starts with a line ending
+/// (at worst one blank line), so a save that lands between the re-read and the append, leaving the user's
+/// last line unterminated, cannot glue Contour's line onto it.
 class FileShellRcEditor final: public IShellRcEditor
 {
   public:
     /// @param fileSystem The file system the rc files live on; must outlive the editor.
     /// @param environment Where `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME` are read from; must outlive it.
-    /// @param host The host, which decides bash's file.
+    /// @param knownFolders Where the Documents folder is; must outlive the editor.
+    /// @param executionPolicy Reads and changes PowerShell's execution policy; must outlive the editor.
+    /// @param host The host, which decides bash's file and where PowerShell's profile is.
     /// @param runningAs Whose authority Contour runs with; a superuser's editor refuses everything with
     ///        ShellRcError::Superuser. A value rather than a call to the OS, so a test needs no root.
     FileShellRcEditor(core::platform::FileSystem const& fileSystem,
                       core::Environment const& environment,
+                      IKnownFolders const& knownFolders,
+                      IExecutionPolicySource& executionPolicy,
                       config::HostPlatform host,
                       RunningAs runningAs);
 
@@ -251,6 +284,8 @@ class FileShellRcEditor final: public IShellRcEditor
   private:
     core::platform::FileSystem const& _fileSystem;
     core::Environment const& _environment;
+    IKnownFolders const& _knownFolders;
+    IExecutionPolicySource& _executionPolicy;
     config::HostPlatform _host;
     RunningAs _runningAs;
 };

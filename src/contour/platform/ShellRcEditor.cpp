@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/RcText.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 
 #ifndef _WIN32
@@ -85,9 +86,10 @@ namespace
         return path;
     }
 
-    /// The directory @p base names, per R-e: `ZDOTDIR` else `HOME`; `XDG_CONFIG_HOME` else `HOME/.config`.
+    /// The directory @p base names, per R-e: `ZDOTDIR` else `HOME`; `XDG_CONFIG_HOME` else `HOME/.config`;
+    /// the Documents known folder, which nothing stands in for.
     [[nodiscard]] std::expected<std::filesystem::path, ShellRcError> baseDirectory(
-        core::Environment const& environment, config::RcBase base)
+        core::Environment const& environment, IKnownFolders const& knownFolders, config::RcBase base)
     {
         auto const home = absoluteVariable(environment, "HOME");
         switch (base)
@@ -108,7 +110,10 @@ namespace
                 if (!home)
                     return std::unexpected(ShellRcError::NoHome);
                 return *home / ".config";
-            case config::RcBase::Documents: break; // Resolved on Windows only; not wired yet.
+            case config::RcBase::Documents:
+                if (auto documents = knownFolders.documents(); documents && config::isRootedPath(*documents))
+                    return *std::move(documents);
+                return std::unexpected(ShellRcError::NoDocuments);
         }
         return std::unexpected(ShellRcError::NoHome);
     }
@@ -118,7 +123,7 @@ namespace
     {
         std::filesystem::path path {};     ///< As the shell names it.
         std::filesystem::path resolved {}; ///< Where writes go: the target when @c path is a symlink.
-        std::string content {};            ///< Empty when the file does not exist.
+        std::string content {};            ///< The file's bytes; empty when the file does not exist.
         bool exists = false;
     };
 
@@ -151,14 +156,92 @@ namespace
         return file;
     }
 
+    /// The text of @p file, decoded from the encoding it is stored in.
+    [[nodiscard]] std::expected<RcText, ShellRcError> textOf(RcFile const& file)
+    {
+        return decodeRcText(file.content).transform_error([](RcTextError error) {
+            switch (error)
+            {
+                case RcTextError::UnsupportedEncoding: return ShellRcError::UnsupportedEncoding;
+                case RcTextError::Malformed: break;
+            }
+            return ShellRcError::Unreadable;
+        });
+    }
+
+    /// How Contour's line is added to a file.
+    struct AppendEncoding
+    {
+        RcEncoding encoding = RcEncoding::Utf8; ///< The line's encoding.
+        std::string_view preamble {};           ///< What goes before the line: a new file's byte order mark.
+    };
+
+    /// How Contour's line is added to @p file, read as @p text, for @p row: in the file's own encoding, or
+    /// for a file with no bytes yet (missing, or the empty one `New-Item $PROFILE` makes) as the shell's new
+    /// files start.
+    [[nodiscard]] AppendEncoding appendEncodingOf(config::ShellRow const& row,
+                                                  RcFile const& file,
+                                                  RcText const& text) noexcept
+    {
+        if (!file.content.empty())
+            return AppendEncoding { .encoding = text.encoding };
+        switch (row.newFile)
+        {
+            case config::NewRcFile::Plain: break;
+            case config::NewRcFile::Utf8Bom:
+                return AppendEncoding { .encoding = RcEncoding::Utf8Bom,
+                                        .preamble = byteOrderMark(RcEncoding::Utf8Bom) };
+        }
+        return AppendEncoding {};
+    }
+
+    /// Whether @p row's shell reads @p line back as written from a file in @p encoding: a file with no byte
+    /// order mark is read in the ANSI code page by some, where only ASCII survives.
+    [[nodiscard]] bool readsBack(config::ShellRow const& row,
+                                 RcEncoding encoding,
+                                 std::string_view line) noexcept
+    {
+        if (encoding != RcEncoding::Utf8)
+            return true;
+        switch (row.bomless)
+        {
+            case config::BomlessText::Utf8: return true;
+            case config::BomlessText::AnsiCodePage:
+                return std::ranges::none_of(line,
+                                            [](char c) { return static_cast<unsigned char>(c) >= 0x80; });
+        }
+        return false;
+    }
+
+    /// Clears the way for @p shell's profile to run: allows the user's own scripts where the execution policy
+    /// forbids them and the user may change that.
+    /// @return Nothing, or why the profile would not run.
+    [[nodiscard]] std::expected<void, ShellRcError> letProfileRun(IExecutionPolicySource& executionPolicy,
+                                                                  config::ShellKind shell)
+    {
+        switch (config::profileScriptsUnder(executionPolicy.effectivePolicy(shell)))
+        {
+            case config::ProfileScripts::Run: return {};
+            case config::ProfileScripts::NeedUserPolicy:
+                return executionPolicy.allowUserScripts(shell).transform_error(
+                    [](std::string const& /*reason*/) { return ShellRcError::PolicyUnchanged; });
+            case config::ProfileScripts::BlockedByGroupPolicy:
+            case config::ProfileScripts::SignedOnly: break;
+        }
+        return std::unexpected(ShellRcError::PolicyBlocked);
+    }
+
     /// The startup file of @p row.
     [[nodiscard]] std::expected<std::filesystem::path, ShellRcError> rcPath(
-        core::Environment const& environment, config::ShellRow const& row, config::HostPlatform host)
+        core::Environment const& environment,
+        IKnownFolders const& knownFolders,
+        config::ShellRow const& row,
+        config::HostPlatform host)
     {
         auto const& location = config::rcLocationOn(row, host);
         if (location.file.empty())
             return std::unexpected(ShellRcError::NoHome);
-        auto const base = baseDirectory(environment, location.base);
+        auto const base = baseDirectory(environment, knownFolders, location.base);
         if (!base)
             return std::unexpected(base.error());
         return *base / location.file;
@@ -167,9 +250,10 @@ namespace
     /// Whether the shell's own alternate file loads the integration.
     [[nodiscard]] bool hasAlternateInstall(core::platform::FileSystem const& fileSystem,
                                            core::Environment const& environment,
+                                           IKnownFolders const& knownFolders,
                                            config::ShellRow const& row)
     {
-        auto const base = baseDirectory(environment, row.posix.base);
+        auto const base = baseDirectory(environment, knownFolders, row.posix.base);
         if (!base)
             return false;
         return std::ranges::any_of(AlternateInstalls, [&](AlternateInstall const& alternate) {
@@ -238,9 +322,16 @@ config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
 
 FileShellRcEditor::FileShellRcEditor(core::platform::FileSystem const& fileSystem,
                                      core::Environment const& environment,
+                                     IKnownFolders const& knownFolders,
+                                     IExecutionPolicySource& executionPolicy,
                                      config::HostPlatform host,
                                      RunningAs runningAs):
-    _fileSystem { fileSystem }, _environment { environment }, _host { host }, _runningAs { runningAs }
+    _fileSystem { fileSystem },
+    _environment { environment },
+    _knownFolders { knownFolders },
+    _executionPolicy { executionPolicy },
+    _host { host },
+    _runningAs { runningAs }
 {
 }
 
@@ -252,20 +343,29 @@ std::expected<RcInspection, ShellRcError> FileShellRcEditor::inspect(
         return RcInspection {};
     if (_runningAs == RunningAs::Superuser)
         return std::unexpected(ShellRcError::Superuser);
+    if (!config::isInstallableOn(*row, _host))
+        return RcInspection {};
     auto const environment = SessionEnvironment { _environment, sessionEnvironment };
-    auto const path = rcPath(environment, *row, _host);
+    auto const path = rcPath(environment, _knownFolders, *row, _host);
     if (!path)
         return std::unexpected(path.error());
     auto const file = readRc(_fileSystem, *path);
     if (!file)
         return std::unexpected(file.error());
-    auto state = rcStateOf(shell, file->content);
-    if (state == config::RcState::Absent && hasAlternateInstall(_fileSystem, environment, *row))
+    auto const text = textOf(*file);
+    if (!text)
+        return std::unexpected(text.error());
+    auto state = rcStateOf(shell, text->utf8);
+    if (state == config::RcState::Absent
+        && hasAlternateInstall(_fileSystem, environment, _knownFolders, *row))
         state = config::RcState::Installed;
     auto partialLine = std::string {};
     if (state == config::RcState::Partial)
-        partialLine = file->content.substr(file->content.find_last_of('\n') + 1); // npos + 1 is the start
-    return RcInspection { .file = file->path, .state = state, .partialLine = std::move(partialLine) };
+        partialLine = text->utf8.substr(text->utf8.find_last_of('\n') + 1); // npos + 1 is the start
+    return RcInspection { .file = file->path,
+                          .state = state,
+                          .partialLine = std::move(partialLine),
+                          .scripts = config::profileScriptsUnder(_executionPolicy.effectivePolicy(shell)) };
 }
 
 std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellKind shell,
@@ -277,20 +377,26 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
         return std::unexpected(ShellRcError::Unwritable);
     if (_runningAs == RunningAs::Superuser)
         return std::unexpected(ShellRcError::Superuser);
+    if (!config::isInstallableOn(*row, _host))
+        return std::unexpected(ShellRcError::Unwritable);
     if (line.empty() || line.find_first_of("\r\n") != std::string_view::npos)
         return std::unexpected(ShellRcError::InvalidLine);
 
     auto const environment = SessionEnvironment { _environment, sessionEnvironment };
-    auto const path = rcPath(environment, *row, _host);
+    auto const path = rcPath(environment, _knownFolders, *row, _host);
     if (!path)
         return std::unexpected(path.error());
     auto const before = readRc(_fileSystem, *path);
     if (!before)
         return std::unexpected(before.error());
-    auto const state = rcStateOf(shell, before->content);
+    auto const text = textOf(*before);
+    if (!text)
+        return std::unexpected(text.error());
+    auto const state = rcStateOf(shell, text->utf8);
     if (state == config::RcState::Partial)
         return std::unexpected(ShellRcError::PartialWrite); // appending would only make the parse worse
-    if (state == config::RcState::Installed || hasAlternateInstall(_fileSystem, environment, *row))
+    if (state == config::RcState::Installed
+        || hasAlternateInstall(_fileSystem, environment, _knownFolders, *row))
         return RcInstall::AlreadyInstalled;
 
     // Parent directories first: a fish user may have no config directory yet. Creating a directory
@@ -308,15 +414,27 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     if (right->exists != before->exists || right->content != before->content)
         return std::unexpected(ShellRcError::Changed);
 
+    // A profile Windows PowerShell reads in the ANSI code page would garble a non-ASCII path, and guessing
+    // that code page is no better: refuse with words instead.
+    auto const encoding = appendEncodingOf(*row, *before, *text);
+    if (!readsBack(*row, encoding.encoding, line))
+        return std::unexpected(ShellRcError::AnsiProfile);
+
+    // The policy goes first: a line in a profile that does not run helps nobody, and a failed policy write
+    // leaves the profile untouched.
+    if (auto const policy = letProfileRun(_executionPolicy, shell); !policy)
+        return std::unexpected(policy.error());
+
     // The chunk always opens with a line ending, so Contour's line starts on its own line even if the
     // file lost its final one after the re-read above. At worst that is one blank line.
     // CRLF files keep their endings: only the line this adds ends in a bare LF, which every shell reads.
-    auto const chunk = std::format("\n{}\n", line);
+    // It is written in the file's own encoding, after a new file's byte order mark.
+    auto const chunk = encodeRcText(std::format("\n{}\n", line), encoding.encoding);
 
     // The append's own verdict is not trusted: it can report success for a write whose tail never reached
     // the disk. Nothing is truncated or restored either way: an append can only have added bytes, so the
     // user's own lines are intact. The file, read again, says what landed.
-    std::ignore = _fileSystem.appendFile(before->resolved, chunk);
+    std::ignore = _fileSystem.appendFile(before->resolved, std::string(encoding.preamble) + chunk);
     auto const after = readRc(_fileSystem, *path);
     // Not `before + chunk`: a save that landed after the re-read may sit between the two. Whatever the
     // user's bytes are by then, the chunk must be the file's tail and nothing of `before` may be gone.
@@ -324,8 +442,12 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
         return RcInstall::Appended;
     if (after && after->content != before->content)
     {
-        // Something landed, but not all of it: what the file says now picks the words.
-        switch (rcStateOf(shell, after->content))
+        // Something landed, but not all of it: what the file says now picks the words. Text that no longer
+        // decodes (half a UTF-16 unit) was cut short mid-line.
+        auto const landed = textOf(*after);
+        if (!landed)
+            return std::unexpected(ShellRcError::AppendCutShort);
+        switch (rcStateOf(shell, landed->utf8))
         {
             case config::RcState::Partial: return std::unexpected(ShellRcError::AppendCutShort);
             case config::RcState::Installed: return std::unexpected(ShellRcError::AppendUnterminated);

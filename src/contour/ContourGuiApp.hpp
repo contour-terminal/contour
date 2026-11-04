@@ -15,7 +15,10 @@
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/ExecutionPolicySource.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/KnownFolders.hpp>
+#include <contour/platform/Registry.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
@@ -1545,8 +1548,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // the bar, which borrows it.
     std::unique_ptr<platform::IMenuBarIntegration> _menuBarIntegration;
 
-    /// The shells' startup files. Declared after _hostPlatform and _fileSystem, which the default editor
-    /// reads.
+    /// Where the OS keeps the user's folders; PowerShell's profile is in Documents on Windows.
+    std::unique_ptr<platform::IKnownFolders> _knownFolders;
+    /// The Windows registry, or nothing elsewhere. Declared before the execution policy source, which
+    /// borrows it.
+    std::unique_ptr<platform::IRegistry> _registry;
+    /// PowerShell's execution policy, read from and written to _registry.
+    std::unique_ptr<platform::IExecutionPolicySource> _executionPolicy;
+
+    /// The shells' startup files. Declared after _hostPlatform, _fileSystem, _knownFolders and
+    /// _executionPolicy, which the default editor borrows.
     std::unique_ptr<platform::IShellRcEditor> _shellRcEditor;
 
     /// @see ShellIntegrationServices::contourBinary
