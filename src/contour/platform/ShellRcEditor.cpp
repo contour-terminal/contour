@@ -87,6 +87,7 @@ namespace
                 if (!home)
                     return std::unexpected(ShellRcError::NoHome);
                 return *home / ".config";
+            case config::RcBase::Documents: break; // Resolved on Windows only; not wired yet.
         }
         return std::unexpected(ShellRcError::NoHome);
     }
@@ -133,10 +134,13 @@ namespace
     [[nodiscard]] std::expected<std::filesystem::path, ShellRcError> rcPath(
         core::Environment const& environment, config::ShellRow const& row, config::HostPlatform host)
     {
-        auto const base = baseDirectory(environment, row.base);
+        auto const& location = config::rcLocationOn(row, host);
+        if (location.file.empty())
+            return std::unexpected(ShellRcError::NoHome);
+        auto const base = baseDirectory(environment, location.base);
         if (!base)
             return std::unexpected(base.error());
-        return *base / (host == config::HostPlatform::MacOS ? row.rcFileMacOS : row.rcFile);
+        return *base / location.file;
     }
 
     /// Whether the shell's own alternate file loads the integration.
@@ -144,7 +148,7 @@ namespace
                                            core::Environment const& environment,
                                            config::ShellRow const& row)
     {
-        auto const base = baseDirectory(environment, row.base);
+        auto const base = baseDirectory(environment, row.posix.base);
         if (!base)
             return false;
         return std::ranges::any_of(AlternateInstalls, [&](AlternateInstall const& alternate) {

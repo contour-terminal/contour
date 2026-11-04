@@ -349,6 +349,7 @@ namespace detail
         case config::RcSyntax::Fish:
             return std::string(row->guard) + quoted + " generate integration shell " + std::string(row->name)
                    + " to - | source; end " + std::string(config::ShellRcMarker);
+        case config::RcSyntax::PowerShell: break; // Not written yet.
     }
     return std::unexpected(ShellRcLineError::UnknownShell);
 }
