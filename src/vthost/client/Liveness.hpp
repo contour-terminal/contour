@@ -36,7 +36,12 @@ struct LivenessPolicy
     /// sleep leaves no gap to see -- and no false loss either, the silence not having grown. Everywhere it
     /// catches a SIGSTOP or a paused VM.
     std::chrono::milliseconds awakeGap { 5000 };
-    /// After a wake, how long the wake's probe may go unanswered before the connection is lost.
+    /// After a wake, how long the connection may stay silent before it is lost while the wake's probe is
+    /// unanswered: measured from the latest inbound frame, or from the wake when none arrived since. Stale
+    /// frames the wake finds in the socket buffer drain within milliseconds, so a dead connection still runs
+    /// out of silence about wakeDeadline after the wake; a live link busy with bulk output, whose echo is
+    /// queued behind that output, keeps delivering and so keeps the deadline moving. deadAfter, measured
+    /// from the wake, caps it: a link that delivers data but never the echo is not trusted forever.
     std::chrono::milliseconds wakeDeadline { 5000 };
     /// How long an announced sleep may stay untaken before liveness resumes as if it never came. Beyond the
     /// 30 s macOS (IOKit) gives an application to acknowledge a sleep, so a system still legitimately going
@@ -62,14 +67,15 @@ class LivenessTracker
 
     /// Any frame from the daemon counts as life, an echo or not, and answers the probe out -- except while
     /// waking: a frame read then may have been buffered before the sleep and says nothing about the
-    /// connection now, so only noteProbeAnswered() ends a wake. It does not end a sleep either.
+    /// connection now, so only noteProbeAnswered() ends a wake and the probe stays outstanding. It still
+    /// restarts the wake's silence (@see LivenessPolicy::wakeDeadline): stale data is harmless because it
+    /// drains within moments and silence then runs out as if it had not come. It does not end a sleep.
     /// @param at When it arrived.
     void noteInbound(core::platform::SteadyTimePoint at) noexcept
     {
-        if (_phase == Phase::Waking)
-            return;
         _lastInbound = at;
-        _probeOutstanding = ProbeState::None;
+        if (_phase != Phase::Waking)
+            _probeOutstanding = ProbeState::None;
     }
 
     /// The echo of the latest probe arrived: proof the connection carries traffic now, so it ends a wake
@@ -83,7 +89,8 @@ class LivenessTracker
     }
 
     /// @param at When a Heartbeat was sent (unused but for symmetry with noteInbound: the silence is
-    ///        measured from the last inbound frame, or from the wake while waking -- not from the probe).
+    ///        measured from the last inbound frame -- which a wake sets to the wake itself -- never from the
+    ///        probe).
     void noteProbeSent([[maybe_unused]] core::platform::SteadyTimePoint at) noexcept
     {
         _probeOutstanding = ProbeState::Outstanding;
@@ -110,11 +117,13 @@ class LivenessTracker
     }
 
     /// The OS announced a wake, or a late tick showed one: silence restarts at @p at, a probe is due at
-    /// once, and wakeDeadline applies, measured from @p at, until noteProbeAnswered().
+    /// once, and wakeDeadline applies, measured from the latest inbound frame (from @p at when none arrives),
+    /// until noteProbeAnswered() -- or until deadAfter has passed since @p at, however much arrived.
     /// @param at When the wake happened.
     void noteWake(core::platform::SteadyTimePoint at) noexcept
     {
         _phase = Phase::Waking;
+        _wokeAt = at;
         _lastInbound = at;
         _probeOutstanding = ProbeState::None;
     }
@@ -127,25 +136,50 @@ class LivenessTracker
             return LivenessAction::None;
         if (_phase == Phase::Waking && _probeOutstanding == ProbeState::None)
             return LivenessAction::SendHeartbeat;
-        auto const silence = now - *_lastInbound;
-        if (silence >= silenceLimit())
+        if (exceededLimit(now))
             return LivenessAction::DeclareLost;
-        if (silence >= _policy.idleBeforeProbe && _probeOutstanding == ProbeState::None)
+        if (now - *_lastInbound >= _policy.idleBeforeProbe && _probeOutstanding == ProbeState::None)
             return LivenessAction::SendHeartbeat;
         return LivenessAction::None;
     }
 
-    /// @return The silence after which decide() says DeclareLost now: wakeDeadline while waking, deadAfter
-    ///         otherwise. For the loss message.
-    [[nodiscard]] std::chrono::milliseconds silenceLimit() const noexcept
+    /// @param now The current time.
+    /// @return The limit after which decide() says DeclareLost: the one that ran out by @p now if one did --
+    ///         deadAfter since a wake whose echo never came, whatever arrived meanwhile, or the silence limit
+    ///         in force -- else the silence limit in force (wakeDeadline while waking, deadAfter otherwise).
+    ///         For the loss message.
+    [[nodiscard]] std::chrono::milliseconds lossLimit(core::platform::SteadyTimePoint now) const noexcept
     {
-        return _phase == Phase::Waking ? _policy.wakeDeadline : _policy.deadAfter;
+        return exceededLimit(now).value_or(silenceLimit());
     }
 
     /// @return The thresholds.
     [[nodiscard]] LivenessPolicy const& policy() const noexcept { return _policy; }
 
   private:
+    /// @return The silence after which the connection is lost: wakeDeadline while waking, deadAfter
+    /// otherwise.
+    [[nodiscard]] std::chrono::milliseconds silenceLimit() const noexcept
+    {
+        return _phase == Phase::Waking ? _policy.wakeDeadline : _policy.deadAfter;
+    }
+
+    /// @param now The current time.
+    /// @return The limit that ran out by @p now, if one did: deadAfter since the wake while waking (the cap,
+    ///         checked first), else the silence limit since the latest inbound frame. None before anything
+    ///         arrived.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> exceededLimit(
+        core::platform::SteadyTimePoint now) const noexcept
+    {
+        if (!_lastInbound)
+            return std::nullopt;
+        if (_phase == Phase::Waking && now - _wokeAt >= _policy.deadAfter)
+            return _policy.deadAfter;
+        if (now - *_lastInbound >= silenceLimit())
+            return silenceLimit();
+        return std::nullopt;
+    }
+
     /// Whether a probe awaits its echo.
     enum class ProbeState : uint8_t
     {
@@ -167,6 +201,8 @@ class LivenessTracker
     Phase _phase = Phase::Awake;
     /// When the announced sleep began; meaningful only in Phase::Asleep, which is what says there is one.
     core::platform::SteadyTimePoint _asleepSince {};
+    /// When the wake happened; meaningful only in Phase::Waking, where it anchors the deadAfter cap.
+    core::platform::SteadyTimePoint _wokeAt {};
 };
 
 } // namespace vthost::client

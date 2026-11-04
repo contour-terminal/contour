@@ -101,27 +101,35 @@ Task<void> driveExchange(ControlSession* session,
     co_await core::async::whenAll(session->run(), feedCommands(client, commands), collectLines(client, out));
 }
 
+/// The other client of the foreign-resize test: a stream observer like any attached client, which hears
+/// nothing it needs to answer.
+struct OtherClient final: vthost::SessionStreamEvents
+{
+};
+
 /// Resizes a pane the way ANOTHER client would — through the host, which applies it and fans it
 /// out — then detaches, so the collector sees whatever the session announced.
 Task<void> resizeThenDetach(SessionHost* host,
+                            vthost::SessionStreamEvents* other,
                             core::net::ISocket* client,
                             vtworkspace::SessionId sessionId,
                             vtbackend::PageSize size)
 {
-    std::ignore = host->applyPaneSize(sessionId, size);
+    std::ignore = host->applyPaneSize(other, sessionId, size);
     std::ignore = co_await client->write(asBytes("\n")); // empty line -> detach
 }
 
 /// Runs the session concurrently with the foreign resize and the collector.
 Task<void> driveResize(ControlSession* session,
                        SessionHost* host,
+                       vthost::SessionStreamEvents* other,
                        core::net::ISocket* client,
                        vtworkspace::SessionId sessionId,
                        vtbackend::PageSize size,
                        std::vector<std::string>* out)
 {
     co_await core::async::whenAll(
-        session->run(), resizeThenDetach(host, client, sessionId, size), collectLines(client, out));
+        session->run(), resizeThenDetach(host, other, client, sessionId, size), collectLines(client, out));
 }
 
 /// Tells the session the model moved a tab between windows and swapped two panes, then detaches.
@@ -434,15 +442,19 @@ TEST_CASE("a resize another client asked for is announced to this one", "[vthost
     auto* tab = h.host.model().window(h.host.windowId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     h.host.subscribeStream(h.session.get()); // as the daemon's serveControlClient does
+    auto other = OtherClient {};
+    h.host.subscribeStream(&other);
 
     auto emitted = std::vector<std::string> {};
     h.loop.blockOn(driveResize(h.session.get(),
                                &h.host,
+                               &other,
                                h.pair.second.get(),
                                sessionId,
                                vtbackend::PageSize { vtbackend::LineCount(11), vtbackend::ColumnCount(41) },
                                &emitted));
     h.host.unsubscribeStream(h.session.get());
+    h.host.unsubscribeStream(&other);
 
     CHECK(contains(emitted, std::format("%layout-change @{}", tab->id().value)));
 }

@@ -1449,11 +1449,10 @@ struct LayoutBatchEnd
     bool operator==(LayoutBatchEnd const&) const = default;
 };
 
-/// Server→client (Capability::PanesReprojected): re-assert your pane sizes. The name is older than the
-/// meaning: the daemon sends it whenever another client departs, whether or not the departure moved the
-/// authoritative client area. If it did, every pane was re-projected onto the area that is left, discarding
-/// the per-pane grids this client reported; if it did not, the departed client's own per-pane refinements
-/// may still be in force. Sent alone, for a departure changes no tree: the client re-sends its pane sizes.
+/// Server→client (Capability::PanesReprojected): re-assert your pane sizes. Sent alone, for no tree changed.
+/// The daemon no longer sends it: it once did whenever another client departed, but it now restores the
+/// survivors' pane sizes itself in the re-projection the departure triggers, where several survivors'
+/// re-asserts would fight its pick. Kept, with the client's handler, for daemons built while they sent it.
 struct PanesReprojected
 {
     bool operator==(PanesReprojected const&) const = default;

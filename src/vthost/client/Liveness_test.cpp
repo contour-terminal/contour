@@ -47,7 +47,7 @@ TEST_CASE("a tick late by a sleep probes instead of giving up", "[vthost][livene
     t.noteProbeSent(WakeT0 + 1000s);
     CHECK(t.decide(WakeT0 + 1004s) == LivenessAction::None);
     CHECK(t.decide(WakeT0 + 1005s) == LivenessAction::DeclareLost);
-    CHECK(t.silenceLimit() == 5s);
+    CHECK(t.lossLimit(WakeT0 + 1005s) == 5s);
 }
 
 TEST_CASE("an answer after a wake restores the normal limits", "[vthost][liveness]")
@@ -56,7 +56,7 @@ TEST_CASE("an answer after a wake restores the normal limits", "[vthost][livenes
     t.noteTick(WakeT0 + 1s, WakeT0 + 1000s);
     t.noteProbeSent(WakeT0 + 1000s);
     t.noteProbeAnswered(WakeT0 + 1001s);
-    CHECK(t.silenceLimit() == 15s);
+    CHECK(t.lossLimit(WakeT0 + 1001s) == 15s);
     CHECK(t.decide(WakeT0 + 1005s) == LivenessAction::None);
     CHECK(t.decide(WakeT0 + 1006s) == LivenessAction::SendHeartbeat);
 }
@@ -106,7 +106,7 @@ TEST_CASE("a late tick during an announced sleep enters the wake state", "[vthos
     t.noteSleep(WakeT0 + 1s);
     t.noteTick(WakeT0 + 2s, WakeT0 + 500s);
     CHECK(t.decide(WakeT0 + 500s) == LivenessAction::SendHeartbeat);
-    CHECK(t.silenceLimit() == 5s);
+    CHECK(t.lossLimit(WakeT0 + 500s) == 5s);
 }
 
 TEST_CASE("a wake forgets a probe sent before the sleep", "[vthost][liveness]")
@@ -132,17 +132,18 @@ TEST_CASE("a second wake while waking restarts the wake deadline", "[vthost][liv
     CHECK(t.decide(WakeT0 + 508s) == LivenessAction::DeclareLost);
 }
 
-TEST_CASE("a frame read while waking neither ends the wake nor restarts its deadline", "[vthost][liveness]")
+TEST_CASE("a frame read while waking does not end the wake, but restarts its silence", "[vthost][liveness]")
 {
     auto t = makeWakeTracker();
     t.noteWake(WakeT0 + 500s);
     REQUIRE(t.decide(WakeT0 + 500s) == LivenessAction::SendHeartbeat);
     t.noteProbeSent(WakeT0 + 500s);
-    // Buffered before the sleep, read after it: it proves nothing about the connection now.
+    // Buffered before the sleep, read after it: it proves nothing about the connection now, so it neither
+    // ends the wake nor clears the probe -- it only restarts the silence the wake deadline measures.
     t.noteInbound(WakeT0 + 503s);
-    CHECK(t.silenceLimit() == 5s);
-    CHECK(t.decide(WakeT0 + 504s) == LivenessAction::None);
-    CHECK(t.decide(WakeT0 + 505s) == LivenessAction::DeclareLost); // measured from the wake, not the frame
+    CHECK(t.lossLimit(WakeT0 + 503s) == 5s);
+    CHECK(t.decide(WakeT0 + 507s) == LivenessAction::None);
+    CHECK(t.decide(WakeT0 + 508s) == LivenessAction::DeclareLost); // 5 s after the frame
 }
 
 TEST_CASE("the wake probe's echo ends the wake", "[vthost][liveness]")
@@ -151,11 +152,65 @@ TEST_CASE("the wake probe's echo ends the wake", "[vthost][liveness]")
     t.noteWake(WakeT0 + 500s);
     t.noteProbeSent(WakeT0 + 500s);
     t.noteProbeAnswered(WakeT0 + 502s);
-    CHECK(t.silenceLimit() == 15s);
+    CHECK(t.lossLimit(WakeT0 + 502s) == 15s);
     CHECK(t.decide(WakeT0 + 506s) == LivenessAction::None);
     CHECK(t.decide(WakeT0 + 507s) == LivenessAction::SendHeartbeat); // idle again, from the echo
     // Awake again, any frame is life once more.
     t.noteProbeSent(WakeT0 + 507s);
     t.noteInbound(WakeT0 + 508s);
     CHECK(t.decide(WakeT0 + 512s) == LivenessAction::None);
+}
+
+TEST_CASE("a busy link keeps a waking connection alive until the cap", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteWake(WakeT0 + 500s);
+    REQUIRE(t.decide(WakeT0 + 500s) == LivenessAction::SendHeartbeat);
+    t.noteProbeSent(WakeT0 + 500s);
+    for (auto const n: std::views::iota(1, 13)) // a frame every second, the echo stuck behind them
+    {
+        t.noteInbound(WakeT0 + 500s + std::chrono::seconds { n });
+        CHECK(t.decide(WakeT0 + 500s + std::chrono::seconds { n }) == LivenessAction::None);
+    }
+    CHECK(t.decide(WakeT0 + 514s) == LivenessAction::None); // still within the 5 s after the frame at +12 s
+    t.noteInbound(WakeT0 + 514s);
+    CHECK(t.decide(WakeT0 + 514s) == LivenessAction::None);
+    CHECK(t.decide(WakeT0 + 515s) == LivenessAction::DeclareLost); // deadAfter since the wake, traffic or not
+    CHECK(t.lossLimit(WakeT0 + 515s) == 15s);                      // the cap fired, not the 5 s of silence
+}
+
+TEST_CASE("a stale burst at the wake then silence is lost at the wake deadline", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteWake(WakeT0 + 500s);
+    t.noteProbeSent(WakeT0 + 500s);
+    t.noteInbound(WakeT0 + 500s);
+    t.noteInbound(WakeT0 + 500s + 20ms);
+    CHECK(t.decide(WakeT0 + 504s) == LivenessAction::None);
+    CHECK(t.decide(WakeT0 + 505s + 20ms) == LivenessAction::DeclareLost);
+}
+
+TEST_CASE("traffic then the echo ends the wake and the normal rules apply", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteWake(WakeT0 + 500s);
+    t.noteProbeSent(WakeT0 + 500s);
+    t.noteInbound(WakeT0 + 502s);
+    t.noteProbeAnswered(WakeT0 + 504s);
+    CHECK(t.lossLimit(WakeT0 + 504s) == 15s);
+    CHECK(t.decide(WakeT0 + 508s) == LivenessAction::None);
+    CHECK(t.decide(WakeT0 + 509s) == LivenessAction::SendHeartbeat);
+    t.noteProbeSent(WakeT0 + 509s);
+    CHECK(t.decide(WakeT0 + 518s) == LivenessAction::None); // past the cap of the old wake, no longer applied
+}
+
+TEST_CASE("inbound while waking leaves the probe outstanding", "[vthost][liveness]")
+{
+    auto t = makeWakeTracker();
+    t.noteWake(WakeT0 + 500s);
+    REQUIRE(t.decide(WakeT0 + 500s) == LivenessAction::SendHeartbeat);
+    t.noteProbeSent(WakeT0 + 500s);
+    t.noteInbound(WakeT0 + 501s);
+    CHECK(t.decide(WakeT0 + 501s) == LivenessAction::None);
+    CHECK(t.decide(WakeT0 + 505s) == LivenessAction::None); // no second heartbeat, nor loss yet
 }

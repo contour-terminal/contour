@@ -462,7 +462,7 @@ void NativeClient::applyLivenessDecision(core::platform::SteadyTimePoint now)
         case LivenessAction::DeclareLost:
             _lossReason = std::format(
                 "no answer from the daemon for {} s",
-                std::chrono::duration_cast<std::chrono::seconds>(_liveness.silenceLimit()).count());
+                std::chrono::duration_cast<std::chrono::seconds>(_liveness.lossLimit(now)).count());
             errorLog()("attach: {}; closing the connection", *_lossReason);
             // As detach() does: the parked read is retired and run() closes the connection in order, once the
             // read resumes in the loop's drain step -- never inline, so this object outlives the call.

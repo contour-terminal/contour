@@ -1326,6 +1326,16 @@ void SessionHost::splitActivePane(TabId tab,
     }
 }
 
+namespace
+{
+    /// @return The grid a leaf's cell-space rect @p rect holds.
+    [[nodiscard]] vtpty::PageSize cellSize(vtworkspace::PaneCellRect const& rect)
+    {
+        return vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
+                                 .columns = vtpty::ColumnCount(rect.width) };
+    }
+} // namespace
+
 SizeChange SessionHost::resolveAuthoritativeArea()
 {
     auto const resolved = resolveClientArea(_sizePolicy, _clientAreas | std::views::values);
@@ -1344,27 +1354,169 @@ SizeChange SessionHost::resolveAuthoritativeArea()
 
 SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::PageSize size)
 {
+    // A client whose area moved lays its panes out anew, and re-sends every pane's size right after this
+    // report: what it refined under the old area describes a layout it no longer renders.
+    auto const previous = _clientAreas.find(client);
+    auto const areaMoved = previous == _clientAreas.end() || previous->second.size != size;
+    auto const before = snapshotPicks(areaMoved ? client : nullptr);
     _clientAreas.insert_or_assign(client, ClientArea { .size = size, .sequence = _nextAreaSequence++ });
-    std::ignore = resolveAuthoritativeArea();
-
-    // Whether mirrors must resync is NOT answered by the area alone, in either direction.
-    // An unchanged area still re-projects — that is how a per-pane refinement (applyPaneSize)
-    // gets discarded, and clients re-assert an unchanged area on every attach. A changed area
-    // can still leave a given pane on the size it already had. So let the panes report, and
-    // resync only when a grid genuinely moved: a resync is a full-grid snapshot, and answering
-    // a no-op with one per pane is how a healthy client used to lose its connection.
-    return reprojectLayouts();
+    // Re-project only when the resolved area moved (or whether anyone displays it), as unsubscribeStream
+    // does. An unchanged area leaves every pane where it is, but for those whose pick the new area moved:
+    // the reporting client needs no re-projection to be heard, since a new area makes it re-send all its
+    // pane sizes, and an unchanged one changes nothing it laid out.
+    //
+    // Whether mirrors must resync is still not answered by the area alone: a changed area can leave a
+    // given pane on the size it already had. So let the panes report, and resync only when a grid
+    // genuinely moved: a resync is a full-grid snapshot, and answering a no-op with one per pane is
+    // how a healthy client used to lose its connection.
+    auto const resolved = resolveAuthoritativeArea();
+    // When the resolved area moved, every pane is re-projected, and the client's sizes for its old layout
+    // must not come back with it: forgotten first. When it did not, they are forgotten only once the panes
+    // are settled, and not settled again: settling without them would move a pane the client sized to
+    // another client's pick (or the projection), and the client's re-sent size, in the same batch as this
+    // report, would move it straight back -- two resizes for none.
+    if (areaMoved && resolved == SizeChange::Applied)
+        forgetClientRefinements(client);
+    auto const change = settlePicks(resolved, before);
+    if (areaMoved)
+        forgetClientRefinements(client);
+    return change;
 }
 
-SizeChange SessionHost::applyPaneSize(vtworkspace::SessionId session, vtpty::PageSize size)
+std::optional<vtpty::PageSize> SessionHost::refinedSize(PaneRefinements const& refinements) const
 {
+    // Only a client that displays the resolved area measured its panes in it.
+    auto const eligible = [this](auto const& entry) {
+        auto const area = _clientAreas.find(entry.first);
+        return area != _clientAreas.end() && area->second.size == _pageSize;
+    };
+    if (auto const picked = resolveClientArea(
+            ClientSizePolicy::Latest, refinements | std::views::filter(eligible) | std::views::values))
+        return picked;
+    // An area nobody displays (a per-axis `smallest` or `largest` of differently shaped clients) leaves no
+    // client eligible. Refusing every refinement would pin each pane to the ratio estimate, so the latest
+    // word of any client counts, as it did before eligibility.
+    if (anyClientDisplaysPageSize())
+        return std::nullopt;
+    return resolveClientArea(ClientSizePolicy::Latest, refinements | std::views::values);
+}
+
+bool SessionHost::anyClientDisplaysPageSize() const
+{
+    return std::ranges::any_of(_clientAreas | std::views::values,
+                               [this](ClientArea const& area) { return area.size == _pageSize; });
+}
+
+std::optional<vtpty::PageSize> SessionHost::pickOf(SessionId session) const
+{
+    auto const refinements = _paneRefinements.find(session.value);
+    if (refinements == _paneRefinements.end())
+        return std::nullopt;
+    return refinedSize(refinements->second);
+}
+
+std::optional<vtpty::PageSize> SessionHost::projectedSize(SessionId session) const
+{
+    auto const found = _model.findSessionLeaf(session);
+    auto const* tab = std::get<vtworkspace::Tab*>(found);
+    auto const* leaf = std::get<vtworkspace::Pane*>(found);
+    if (tab == nullptr || leaf == nullptr)
+        return std::nullopt;
+    if (tab->layoutRoot() != tab->rootPane() && tab->layoutRoot() == leaf)
+        return _pageSize; // zoomed: the whole area (@see reprojectTab)
+    for (auto const& rect: vtworkspace::layoutInCells(*tab->rootPane(), _pageSize))
+        if (rect.pane == leaf->id())
+            return cellSize(rect);
+    return std::nullopt;
+}
+
+SizeChange SessionHost::resizeToPick(SessionId session,
+                                     vtbackend::Terminal& backing,
+                                     std::optional<vtpty::PageSize> fallback)
+{
+    auto const target =
+        pickOf(session).or_else([&] { return projectedSize(session); }).or_else([&] { return fallback; });
+    if (!target)
+        return SizeChange::Unchanged;
+    return resizeLocked(session, backing, *target);
+}
+
+SessionHost::PickSnapshot SessionHost::snapshotPicks(SessionStreamEvents* forgotten) const
+{
+    auto snapshot = PickSnapshot { .isAreaDisplayed = anyClientDisplaysPageSize(), .picks = {} };
+    // The count spares the walk over every pane for a client that refined none: every ResizeRequest of a
+    // client that never sends ResizePane (tmux control mode), and most of the rest.
+    if (forgotten == nullptr || !_refinementCounts.contains(forgotten))
+        return snapshot;
+    for (auto const& [session, refinements]: _paneRefinements)
+        if (refinements.contains(forgotten))
+            snapshot.picks.emplace_back(SessionId { session }, refinedSize(refinements));
+    return snapshot;
+}
+
+SizeChange SessionHost::settlePicks(SizeChange area, PickSnapshot const& before)
+{
+    // Precondition (see the declaration): `_pageSize` and the refinements are final, so the picks read here
+    // are the ones the panes must end on.
+    if (area == SizeChange::Applied || anyClientDisplaysPageSize() != before.isAreaDisplayed)
+        return reprojectLayouts();
+    // Otherwise only the panes the change took a refinement from can have a new pick; each moves alone,
+    // and only when its pick did.
+    auto moved = false;
+    for (auto const& [session, pick]: before.picks)
+    {
+        if (pickOf(session) == pick)
+            continue;
+        if (auto* backing = terminal(session))
+            moved |= resizeToPick(session, *backing, std::nullopt) == SizeChange::Applied;
+    }
+    return moved ? SizeChange::Applied : SizeChange::Unchanged;
+}
+
+void SessionHost::recordRefinement(SessionStreamEvents* client, SessionId session, vtpty::PageSize size)
+{
+    auto const [_, inserted] = _paneRefinements[session.value].insert_or_assign(
+        client, ClientArea { .size = size, .sequence = _nextAreaSequence++ });
+    if (inserted)
+        ++_refinementCounts[client];
+}
+
+void SessionHost::forgetPaneRefinements(uint64_t session)
+{
+    auto const found = _paneRefinements.find(session);
+    if (found == _paneRefinements.end())
+        return;
+    for (auto* client: found->second | std::views::keys)
+        if (auto const count = _refinementCounts.find(client); --count->second == 0)
+            _refinementCounts.erase(count);
+    _paneRefinements.erase(found);
+}
+
+void SessionHost::forgetClientRefinements(SessionStreamEvents* client)
+{
+    if (_refinementCounts.erase(client) == 0)
+        return;
+    std::erase_if(_paneRefinements, [client](auto& entry) {
+        entry.second.erase(client);
+        return entry.second.empty();
+    });
+}
+
+SizeChange SessionHost::applyPaneSize(SessionStreamEvents* client,
+                                      vtworkspace::SessionId session,
+                                      vtpty::PageSize size)
+{
+    Require(client != nullptr);
     auto* backing = terminal(session);
     if (backing == nullptr)
     {
         errorLog()("applyPaneSize: unknown session {}", session.value);
         return SizeChange::Unchanged;
     }
-    return resizeLocked(session, *backing, size);
+    recordRefinement(client, session, size);
+    // The pane's pick, not blindly @p size: an ineligible client's report is remembered (it may become the
+    // pick later), but resizing to it now would be undone by the next re-projection.
+    return resizeToPick(session, *backing, size);
 }
 
 SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& backing, vtpty::PageSize size)
@@ -1404,26 +1556,39 @@ SizeChange SessionHost::reprojectLayouts()
 SizeChange SessionHost::reprojectTab(vtworkspace::Tab const& tab)
 {
     auto moved = false;
-    // The underlying layout's leaves first; a zoomed leaf then overrides to
-    // the full area (tmux's zoom model: the saved layout keeps the rest).
+    // A zoomed leaf fills the whole area (tmux's zoom model: the saved layout keeps the rest), so it is
+    // sized once, after the underlying layout's other leaves.
+    auto const* zoomed = tab.layoutRoot() != tab.rootPane() ? tab.layoutRoot() : nullptr;
     for (auto const& rect: vtworkspace::layoutInCells(*tab.rootPane(), _pageSize))
-        if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
-            if (auto* backing = terminal(leaf->session()))
-                moved |= resizeLocked(leaf->session(),
-                                      *backing,
-                                      vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
-                                                        .columns = vtpty::ColumnCount(rect.width) })
-                         == SizeChange::Applied;
-    if (auto const* zoomed = tab.layoutRoot(); zoomed != tab.rootPane())
+    {
+        auto const* leaf = tab.rootPane()->findPane(rect.pane);
+        if (leaf == nullptr || leaf == zoomed)
+            continue;
+        auto* backing = terminal(leaf->session());
+        if (backing == nullptr)
+            continue;
+        auto const target = pickOf(leaf->session()).value_or(cellSize(rect));
+        moved |= resizeLocked(leaf->session(), *backing, target) == SizeChange::Applied;
+    }
+    if (zoomed != nullptr)
         if (auto* backing = terminal(zoomed->session()))
-            moved |= resizeLocked(zoomed->session(), *backing, _pageSize) == SizeChange::Applied;
+            moved |= resizeLocked(zoomed->session(), *backing, pickOf(zoomed->session()).value_or(_pageSize))
+                     == SizeChange::Applied;
     return moved ? SizeChange::Applied : SizeChange::Unchanged;
 }
 
 void SessionHost::reprojectTab(TabId tab)
 {
+    forgetRefinements(tab);
     if (auto const* found = _model.findTab(tab))
         std::ignore = reprojectTab(*found);
+}
+
+void SessionHost::forgetRefinements(TabId tab)
+{
+    if (auto const* found = _model.findTab(tab))
+        for (auto const session: found->leafSessions())
+            forgetPaneRefinements(session.value);
 }
 
 vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
@@ -1491,6 +1656,7 @@ std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionI
 
 void SessionHost::eraseSession(uint64_t session)
 {
+    forgetPaneRefinements(session);
     _initialInputs.erase(session);
     _interruptions.erase(session);
     _lastInput.erase(session);
@@ -1699,20 +1865,20 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     // daemon at its dimensions for the daemon's whole life. The reproject is what makes it visible
     // (and, through resizeLocked, announces itself to everyone still attached).
     //
-    // Only when the area actually moved, though. Unlike a report (applyClientSize), a departure
-    // states nothing about the survivors' panes, and re-projecting an unchanged area would discard
-    // the per-pane refinements they made: a half-open connection noticed only after its successor's
-    // hello and pane reports would put every split pane back on the ratio-derived estimate, which
-    // the client — seeing no local geometry change — never corrects.
+    // Only when something is in need of a change, though: the area moved, whether anyone displays it
+    // flipped, or the departed client's refinement was a pane's pick. Re-projecting otherwise would resize
+    // nothing.
     //
-    // Either way the survivors are told to re-assert their pane sizes: a re-projection discarded their
-    // refinements, and without one the departed client's own refinements may still be in force -- the
-    // last pane report wins, and it may have been the departed client's.
-    if (_clientAreas.erase(observer) == 0)
-        return;
-    if (resolveAuthoritativeArea() == SizeChange::Applied)
-        std::ignore = reprojectLayouts();
-    fanOutStream(&SessionStreamEvents::otherClientDeparted);
+    // The survivors are not asked to re-assert their panes: the re-projection hands every pane its pick
+    // among the SURVIVING refinements in the same resize that moves it, so a pane is resized, and
+    // snapshotted, once. With two or more survivors, their re-asserts would only fight over that pick.
+    //
+    // The order is settlePicks()' precondition: the picks before are taken first, then the client's
+    // refinements and area go and the area is re-resolved, so the picks after are the final ones.
+    auto const before = snapshotPicks(observer);
+    forgetClientRefinements(observer);
+    _clientAreas.erase(observer);
+    std::ignore = settlePicks(resolveAuthoritativeArea(), before);
 }
 
 std::vector<SessionId> SessionHost::sessionIds() const

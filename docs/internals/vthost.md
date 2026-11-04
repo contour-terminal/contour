@@ -162,7 +162,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
 | `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a window's tab well, or into a new window, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
 | `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every window the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one window may be in flight to another |
-| `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: the daemon asks a client to re-assert its pane sizes after another client departs, and the client re-sends every pane's size. Without it the client keeps whatever grids the departure left |
+| `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: a client re-sends every pane's size when asked. The daemon no longer offers it (it restores the survivors' pane sizes itself, see "One grid, several clients"); the client keeps offering and answering it for daemons built while it was sent |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -385,16 +385,12 @@ pushed the layout in the same batch machinery a move uses; there is no reply PDU
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
 
 **`PanesReprojected`** (tag 44, server→client, no fields, gated on `Capability::PanesReprojected`) asks a
-client to re-assert its pane sizes; the name predates that broader meaning. The daemon sends it whenever
-another client that had reported a client area departs (`SessionStreamEvents::otherClientDeparted`). If the
-departure took the authoritative area with it, every pane was re-projected onto the area that is left,
-discarding the per-pane grids this client refined; if the area stayed where it was, nothing is re-projected,
-but the departed client's own per-pane refinements may still be in force, since the last pane report wins.
-Either way the survivor's own geometry did not move, so nothing on its side would report its panes again.
-The daemon sends it alone -- a departure changes no tree, so no layout goes with it -- and the client re-sends
-every pane's size, never the client area (`NativeController::onPanesReprojected`); the re-sent sizes push
-nothing back. A report never raises it, for a report re-projects at the reporting client's own request. A
-client that does not share the capability is not sent it, and keeps whatever grids a departure left.
+client to re-assert its pane sizes. The daemon no longer sends it, nor offers the capability: it once did on
+every departure of another client, but the daemon now remembers each client's pane sizes and restores the
+survivors' itself, in the re-projection the departure triggers (see "One grid, several clients"). With two or
+more survivors their re-asserts would only fight over the daemon's pick. The PDU, its codec and the
+capability stay on the wire, and the client still offers and answers it (`NativeController::onPanesReprojected`
+re-sends every pane's size, never the client area), for daemons built while it was sent.
 
 **Coexistence with `MergeTabIntoSplit`.** A daemon serves both. A client that shares `MoveNode` sends every
 drop as one; a client that does not, against a daemon that shares `TabMerge`, still merges a whole tab beside a
@@ -993,6 +989,30 @@ screen update, so nothing else would tell them either until that session next pr
 `SessionStreamEvents::sessionResized` (with the terminal lock released, since observers take it to
 snapshot). Every path inherits it: a client-area re-projection, a per-pane refinement, a layout
 change. The connection that asked is no longer special.
+
+**Which size is each pane?** The host projects each tab's tree onto the resolved area by split ratio,
+but a client laying panes out in pixels knows better, and reports each pane's grid (`ResizePane`,
+`SessionHost::applyPaneSize`). The host remembers those refinements per client and per pane, and one
+rule picks a pane's size everywhere -- when a report arrives, and in every re-projection:
+
+1. the latest refinement that is *eligible*: reported by a client whose own area is the resolved one,
+   for a larger client's pane must never be forced into a smaller area;
+2. else, when no attached client displays the resolved area at all (a per-axis `smallest` or `largest`
+   of differently shaped clients, such as 100x20 and 80x30 resolving to 80x20), the latest refinement
+   of any client, as the last writer won before eligibility;
+3. else its projected rect (for a zoomed pane, the whole area).
+
+So a report is recorded, and the pane resized to its pick -- not to the report: an ineligible client's
+`ResizePane` moves nothing, rather than sizing a pane the next re-projection would size back. A
+refinement is forgotten when its pane's tab changes its tree (the sizes describe the old tree; the
+clients re-send them after the layout push), when its client reports a different area (it re-sends them
+right after), and when its client departs. Each of those last two settles the panes at once: every pane
+is re-projected when the resolved area moved or whether any client displays it flipped (both move the
+pick of panes nobody touched); otherwise only the panes the client had refined are compared, before and
+after, and resized alone where their pick moved. That makes a departure self-correcting: each pane takes
+the survivors' pick in the same resize that moves it, so it is resized and snapshotted once, and the
+survivors are not asked to re-assert anything. A structural change in one tab leaves every other tab's
+refined panes where they are.
 
 **What a client that cannot show the grid does.** A client LARGER than the grid letterboxes — the
 sub-cell remainder already renders as background padding, so the surplus simply is not drawn. A

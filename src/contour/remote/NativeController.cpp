@@ -54,14 +54,16 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
                                    std::optional<vtbackend::ColorPreference> colorPreference,
                                    core::platform::IClock const& clock,
                                    vthost::latency::StartupTimeline& timeline,
-                                   core::platform::ISystemPowerMonitor* powerMonitor):
+                                   core::platform::ISystemPowerMonitor* powerMonitor,
+                                   vthost::client::BackoffSchedule backoff):
     RemoteController(clock),
     _transport(std::move(transport)),
     _intent(std::move(intent)),
     _profileName(std::move(profileName)),
     _attachSettings(std::move(attachSettings)),
     _sessionSettings(std::move(sessionSettings)),
-    _timeline(timeline)
+    _timeline(timeline),
+    _backoff(backoff)
 {
     if (colorPreference)
         _statedColors = wireOf(*colorPreference);
@@ -254,7 +256,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
             return makeClient(*loop, std::move(connection), std::move(intent));
         },
         _intent,
-        vthost::client::BackoffSchedule {},
+        _backoff,
         [this](vthost::client::ConnectionState state, std::string const& reason) {
             onConnectionState(state, reason);
         }
@@ -597,9 +599,9 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         //
         // Only the bookkeeping is dropped, never a report issued: at this point the panes have not
         // been laid out against the new tree, so composing an area would mix a stale pane extent
-        // with a fresh one and propose one that neither describes. Panes another client's departure left at
-        // sizes this client did not ask for, under a geometry of its own that does not move, are the daemon's
-        // to tell (onPanesReprojected).
+        // with a fresh one and propose one that neither describes. Panes another client's departure moves,
+        // under a geometry of this client's own that does not, the daemon restores to this client's
+        // remembered sizes itself.
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
@@ -647,9 +649,10 @@ std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlig
 
 void NativeController::onPanesReprojected()
 {
-    // Another client departed: a re-projection, or its own per-pane sizes still in force, may have replaced
-    // this client's. Nothing of this client's moved, so nothing would report the panes again. Pending until a
-    // flush that composes an area spends it, should this one find the panes not laid out yet.
+    // A daemon built while it asked on every departure of another client wants this client's pane sizes
+    // again; today's daemon restores them itself and never asks. Nothing of this client's moved, so nothing
+    // would report the panes again. Pending until a flush that composes an area spends it, should this one
+    // find the panes not laid out yet.
     {
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _geometryReassert = GeometryReassert::Pending;
@@ -1166,7 +1169,7 @@ void NativeController::flushGeometry(GeometryFlush scope)
         _geometryFlushScheduled = false;
 
         auto const composed = composedClientArea();
-        // A reconnect or a departure (onPanesReprojected) asks for every pane again: spent once they compose.
+        // A reconnect or a daemon's PanesReprojected asks for every pane again: spent once they compose.
         // Spent then even if the layout is only partly laid out -- some panes not yet in _paneSizes, so not
         // re-sent below. That relies on an invariant: every pane reports its grid at least once after a
         // reconcile (the resize sink fires as its display is created), so a pane missing here is covered by

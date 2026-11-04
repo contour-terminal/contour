@@ -415,17 +415,6 @@ void NativeSession::sessionResized(SessionId session)
     requestSnapshot(session);
 }
 
-void NativeSession::otherClientDeparted()
-{
-    // A client that does not share the capability would answer Unsupported, and has nothing to re-assert
-    // with.
-    if (_phase != ConnectionPhase::Viewing || _closed || !_negotiated.has_value()
-        || !_negotiated->shared.contains(proto::Capability::PanesReprojected))
-        return;
-    // Alone: a departure changes no tree, so there is no layout to push with it.
-    send(0, proto::DecodedPdu { proto::PanesReprojected {} });
-}
-
 void NativeSession::sessionBell(SessionId session)
 {
     if (!followsSession(session))
@@ -1719,7 +1708,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         // As above, the resync rides sessionResized(). A client re-asserts every pane size after a
         // client-area change, so most of these arrive already satisfied by the reprojection that
         // change performed — and SizeChange::Unchanged announces nothing.
-        std::ignore = _host.applyPaneSize(SessionId { resize->session }, *size);
+        std::ignore = _host.applyPaneSize(this, SessionId { resize->session }, *size);
         return;
     }
     if (auto const* fetch = std::get_if<proto::FetchImage>(&frame.pdu))

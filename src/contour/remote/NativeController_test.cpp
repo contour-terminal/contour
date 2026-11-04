@@ -111,6 +111,8 @@ struct ControllerOptions
     std::optional<vtbackend::Settings> attachSettings = std::nullopt;
     /// Where it hears of system sleep and wake; null for nowhere. It must outlive the controller.
     core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
+    /// How long its reconnects wait after a loss; the production schedule by default.
+    vthost::client::BackoffSchedule backoff = {};
 };
 
 /// Builds a controller as every test here does: no attach settings of its own, on the steady clock.
@@ -131,7 +133,8 @@ struct ControllerOptions
         options.colorPreference,
         core::platform::defaultSteadyClock(),
         timeline.timeline,
-        options.powerMonitor);
+        options.powerMonitor,
+        options.backoff);
 }
 
 /// Captures every log category into one buffer that several threads may write while another
@@ -2345,9 +2348,10 @@ TEST_CASE("a second client sees the first client's zoom, title and colour", "[at
 }
 
 // Regression: a departing client that moves the daemon's client area (here the smaller of a `smallest` pair)
-// re-projects every pane onto the new one, discarding the per-pane grids the survivor refined. The survivor's
-// own geometry did not change, so nothing on its side re-reports them: its split panes stayed on the
-// daemon's ratio estimate until the user next resized the window.
+// re-projects every pane onto the new one, which used to discard the per-pane grids the survivor refined. The
+// survivor's own geometry did not change, so nothing on its side re-reports them: its split panes stayed on
+// the daemon's ratio estimate until the user next resized the window. The daemon now remembers them, and
+// restores them itself in the departure's re-projection.
 TEST_CASE("a client that departs with the client area leaves the survivor's panes at their displayed size",
           "[attach][controller]")
 {
@@ -2385,23 +2389,25 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
     REQUIRE(waitUntil(
         [&] { return daemon.clientArea() == cells(80, 30) && daemon.paneSize(left) == cells(40, 30); }));
 
+    // Everything either client sent so far has landed, so whatever is counted from here on was sent after.
+    for (auto* gui: { &stays, departs.get() })
+        requireDelivered(daemon, *gui, "sized");
+    auto const resizePanesBefore = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
     departs.reset();
     REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(100, 30); }));
 
-    // The survivor is told, and re-asserts its panes with no layout push to reconcile first.
+    // The daemon puts back the survivor's own grids itself, as part of the departure.
     CHECK(waitUntil(
         [&] { return daemon.paneSize(left) == cells(70, 30) && daemon.paneSize(right) == cells(29, 30); }));
-    CHECK(daemon.paneSize(left) == cells(70, 30));
-    CHECK(daemon.paneSize(right) == cells(29, 30));
 
-    // And it settles: the re-assertion pushes no layout back, which would have the survivor re-assert again.
-    // Whatever the daemon pushed in answer to the ResizePanes it read before the first marker goes out ahead
-    // of the retitle, so is reconciled with it; nothing re-sent since then means nothing was pushed.
-    requireDelivered(daemon, stays, "settled");
-    auto const resizePanes = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
+    // And it settles: the survivor is not asked to re-assert its panes, and sends none of its own accord.
+    // Whatever the daemon pushed before the retitle is reconciled with it, and anything the survivor wrote in
+    // answer has landed before the last marker.
     requirePushed(daemon, stays, "settled");
     requireDelivered(daemon, stays, "still");
-    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ResizePane) == resizePanes);
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ResizePane) == resizePanesBefore);
+    CHECK(daemon.paneSize(left) == cells(70, 30));
+    CHECK(daemon.paneSize(right) == cells(29, 30));
 
     stays.controller->stop();
 }
@@ -5199,6 +5205,33 @@ TEST_CASE("a wake while reconnecting retries without ending the reconnect",
 
     daemon.serveAgain();
     CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+
+    controller.stop();
+}
+
+// The reconnect wait is long enough that only a wake can explain a quick reconnect: the negative holds the
+// daemon reachable and sees the controller still waiting, the positive delivers the wake and sees it connect.
+TEST_CASE("a system wake cuts the reconnect backoff short", "[attach][controller][reconnect][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, { .powerMonitor = &power, .backoff = { .first = 60s, .ceiling = 60s } });
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    daemon.serveAgain(); // reachable again, but the controller is in its 60 s wait
+
+    // Negative: without a wake it keeps waiting.
+    CHECK_FALSE(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 100));
+
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 1000));
 
     controller.stop();
 }

@@ -220,18 +220,6 @@ class SessionStreamEvents
     /// Fires with the terminal lock RELEASED, because an observer will take it to snapshot.
     virtual void sessionResized(vtworkspace::SessionId /*session*/) {}
 
-    /// Another client that had reported a client area departed: this observer's client should re-assert its
-    /// pane sizes. Either the departure moved the authoritative area and every pane was re-projected onto
-    /// the area that is left, discarding the per-pane grids this client refined, or it did not, and the
-    /// departed client's own per-pane refinements may still be in force -- the last pane report wins.
-    ///
-    /// The per-pane sessionResized() that a re-projection raises cannot say so: a client cannot tell a grid
-    /// it must correct from one another client asked for. Nor does this observer's own geometry move, so
-    /// without being told its client never re-asserts its panes (a native connection tells it with
-    /// proto::PanesReprojected). Fires once per such departure, after any re-projection; never for a report,
-    /// which re-projects at the reporting client's own request.
-    virtual void otherClientDeparted() {}
-
     /// @p session rang the bell (BEL).
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
 
@@ -1030,6 +1018,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The registry is keyed by the client's stream subscription, so `unsubscribeStream` drops the
     /// entry: a client's area counts for exactly as long as the client is there to be told about
     /// the consequences.
+    ///
+    /// Every pane is re-projected only when the resolved area changed, or when the report changed
+    /// whether ANY client displays the resolved area (which decides whose pane refinements count, @see
+    /// applyPaneSize). A report of a different area than the client's previous one -- or its first --
+    /// forgets that client's pane refinements, which it measured in a layout it no longer renders: before the
+    /// re-projection when the resolved area moved, and otherwise after the panes are settled, so that no
+    /// pane is moved for the forgetting alone -- the client re-sends every pane's size right after a new
+    /// area, and that re-send sizes them.
     /// @param client The reporting client, identified by its stream observer.
     /// @param size What that client can display, in cells.
     /// @return Whether anything moved. Callers resync their mirrors on @c Applied only:
@@ -1037,19 +1033,33 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         client its entire screen state for nothing.
     SizeChange applyClientSize(SessionStreamEvents* client, vtpty::PageSize size);
 
-    /// Resizes ONE session's terminal to the grid a client actually renders that pane at,
-    /// leaving the client area and every other pane alone.
+    /// Records the grid a client actually renders ONE session's pane at, then resizes that session's
+    /// terminal to the pane's pick, leaving the client area and every other pane alone.
+    ///
+    /// The refinement is remembered per client, and the pick -- here and in every later re-projection --
+    /// is the latest ELIGIBLE refinement, recorded by a client whose own area is the resolved one; when no
+    /// attached client displays the resolved area at all (a per-axis `smallest`/`largest` that matches
+    /// nobody), the latest refinement of any client; else none, and the pane keeps its projected rect. So
+    /// a larger client's report under `smallest` is remembered but resizes nothing, rather than sizing a
+    /// pane that the next re-projection would size back.
     ///
     /// The projection `applyClientSize` performs is the host's own estimate — it must exist, since
     /// clients that never report per-pane sizes (tmux control mode) are served from it — but it
     /// divides by split RATIO, where a client laying panes out in pixels (or whose user dragged a
     /// divider) knows the real answer. This refines one leaf on top of that estimate. The next
-    /// structural change re-projects and thereby discards the refinement, which is correct: those
-    /// sizes are stale the moment the tree changes, and the client re-reports.
+    /// structural change of the pane's tab discards the refinement, which is correct: those sizes are
+    /// stale the moment the tree changes, and the client re-reports after the layout push. So does the
+    /// client's next report of a different area (applyClientSize).
+    /// @param client The reporting client, identified by its stream observer (as for applyClientSize).
+    ///               Must not be null, and must be subscribed (subscribeStream): its refinements are
+    ///               dropped when it unsubscribes, so an unsubscribed one's would outlive it.
     /// @param session The session whose terminal to resize; unknown ids are ignored.
     /// @param size The pane's grid, in cells.
-    /// @return Whether that session's grid actually moved (@c Unchanged for an unknown id).
-    SizeChange applyPaneSize(vtworkspace::SessionId session, vtpty::PageSize size);
+    /// @return Whether that session's grid actually moved (@c Unchanged for an unknown id, and for a
+    ///         report that is not the pane's pick).
+    SizeChange applyPaneSize(SessionStreamEvents* client,
+                             vtworkspace::SessionId session,
+                             vtpty::PageSize size);
 
     /// Creates a tab whose first pane is backed by a freshly spawned session,
     /// using the same pre-mint handshake as the GUI: the backing session is
@@ -1644,17 +1654,30 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes
-    /// never drift from the advertised layout.
+    /// never drift from the advertised layout. A leaf some client refined takes that size instead
+    /// (@see reprojectTab).
     /// @return Whether any leaf's grid moved, so callers can skip a resync of mirrors
     ///         whose grids are already correct.
     SizeChange reprojectLayouts();
 
     /// Resizes the terminals of @p tab's leaves to their projection under the current client area: what
     /// reprojectLayouts() does for every tab, for the one tab an event names.
+    ///
+    /// One rule for every re-projection: a leaf takes its pick (@see refinedSize), else its projected rect.
+    /// The pick prefers a client that displays the resolved area, so a larger client's grid is not forced
+    /// into a smaller area while one does; only an area nobody displays takes any client's. A zoomed leaf's
+    /// projected rect is the whole area, and it is resized once.
+    /// @param tab The tab to project.
     /// @return Whether any leaf's grid moved.
     SizeChange reprojectTab(vtworkspace::Tab const& tab);
-    /// reprojectTab() of the tab @p tab names, if it exists.
+    /// Forgets the refinements of the tab @p tab names, then re-projects it, if it exists: what a tab
+    /// whose tree changed needs.
     void reprojectTab(vtworkspace::TabId tab);
+
+    /// Forgets every client's refinements of @p tab's panes: they were measured against a tree that has
+    /// just changed, and the clients re-send them after the layout push. Other tabs keep theirs.
+    /// @param tab The tab whose tree changed.
+    void forgetRefinements(vtworkspace::TabId tab);
 
     /// Resizes @p backing to @p size while holding its terminal lock, then announces the change to
     /// every stream subscriber (@see SessionStreamEvents::sessionResized).
@@ -1779,14 +1802,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// required order for every layout-shape change, so shells never see a size
     /// that lags what observers are about to advertise. Spelling the reproject at
     /// the call site keeps a newly added shape-changing event from silently
-    /// forgetting it.
+    /// forgetting it. The changed tab's refinements are forgotten first (@see forgetRefinements);
+    /// every other tab keeps its own, so its panes are not bounced through the projection.
     /// @param method A vtworkspace::ModelEvents member function pointer.
-    /// @param args The event arguments (forwarded to fanOut).
+    /// @param tab The tab whose tree changed.
+    /// @param args The remaining event arguments (forwarded to fanOut).
     template <typename Method, typename... Args>
-    void fanOutAfterReproject(Method method, Args... args)
+    void fanOutAfterReproject(Method method, vtworkspace::TabId tab, Args... args)
     {
-        reprojectLayouts();
-        fanOut(method, args...);
+        forgetRefinements(tab);
+        std::ignore = reprojectLayouts();
+        fanOut(method, tab, args...);
     }
 
     /// What a job another thread posts reaches the host through: revoked, on the loop thread, as the host
@@ -1823,6 +1849,68 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Stamps each report so `ClientSizePolicy::Latest` can order them. A counter rather than a
     /// clock, so a test can reproduce an ordering exactly.
     uint64_t _nextAreaSequence = 1;
+    /// One pane's refinements: per reporting client, its latest word on the pane's grid (@see applyPaneSize),
+    /// stamped from _nextAreaSequence so the most recent one can be told apart.
+    using PaneRefinements = std::unordered_map<SessionStreamEvents*, ClientArea>;
+    /// Per session, its pane refinements. Pruned when the client departs (unsubscribeStream) or reports a
+    /// different area (applyClientSize), when the pane's tab changes its tree (forgetRefinements), or when
+    /// the session is erased (eraseSession).
+    std::unordered_map<uint64_t, PaneRefinements> _paneRefinements;
+
+    /// Per client, how many panes it holds a refinement of; a client with none has no entry. Lets the
+    /// paths that forget a client's refinements skip the walk over every pane when it refined none.
+    std::unordered_map<SessionStreamEvents*, size_t> _refinementCounts;
+
+    /// @param refinements One pane's refinements.
+    /// @return The pane's pick: the latest ELIGIBLE one -- from a client whose own reported area is the
+    ///         resolved `_pageSize` -- if there is one; else, when no client's area is `_pageSize` at all,
+    ///         the latest one of any client; else none.
+    [[nodiscard]] std::optional<vtpty::PageSize> refinedSize(PaneRefinements const& refinements) const;
+    /// @return Whether any attached client reported the resolved `_pageSize` as its area.
+    [[nodiscard]] bool anyClientDisplaysPageSize() const;
+    /// @param session A session.
+    /// @return Its pane's pick (@see refinedSize), if it has one.
+    [[nodiscard]] std::optional<vtpty::PageSize> pickOf(vtworkspace::SessionId session) const;
+    /// @param session A session.
+    /// @return Its pane's rect under the current area -- the whole area for a zoomed pane -- or nothing for a
+    ///         session no tab shows.
+    [[nodiscard]] std::optional<vtpty::PageSize> projectedSize(vtworkspace::SessionId session) const;
+    /// Resizes @p session's terminal @p backing to its pane's pick, else its projection, else @p fallback;
+    /// leaves it alone when there is none of the three.
+    /// @return Whether its grid moved.
+    SizeChange resizeToPick(vtworkspace::SessionId session,
+                            vtbackend::Terminal& backing,
+                            std::optional<vtpty::PageSize> fallback);
+
+    /// What decides the picks a change of @p client's area or refinements can move, taken before it.
+    struct PickSnapshot
+    {
+        /// anyClientDisplaysPageSize() at the time: when it flips, so does the pick of panes nobody touched.
+        bool isAreaDisplayed = false;
+        /// Each pane the client held a refinement of, with its pick at the time.
+        std::vector<std::pair<vtworkspace::SessionId, std::optional<vtpty::PageSize>>> picks;
+    };
+    /// @param forgotten The client whose refinements the change is about to forget; null when it forgets
+    /// none.
+    /// @return What settlePicks() compares against afterwards.
+    [[nodiscard]] PickSnapshot snapshotPicks(SessionStreamEvents* forgotten) const;
+    /// Settles the panes after a client's area or refinements changed: re-projects every pane when the
+    /// resolved area moved or whether any client displays it flipped, as both move the pick of panes the
+    /// client never touched; else resizes, alone, each pane of @p before whose pick moved.
+    ///
+    /// Precondition: `_pageSize` is already re-resolved (resolveAuthoritativeArea) and the client's
+    /// forgotten refinements already erased, so the picks compared against @p before are the final ones.
+    /// @param area What resolveAuthoritativeArea() returned.
+    /// @param before snapshotPicks() of the client, taken before the change.
+    /// @return Whether any grid moved.
+    SizeChange settlePicks(SizeChange area, PickSnapshot const& before);
+
+    /// Records @p client's refinement of @p session's pane.
+    void recordRefinement(SessionStreamEvents* client, vtworkspace::SessionId session, vtpty::PageSize size);
+    /// Forgets every client's refinement of the pane of session @p session.
+    void forgetPaneRefinements(uint64_t session);
+    /// Forgets every refinement @p client holds.
+    void forgetClientRefinements(SessionStreamEvents* client);
 
     uint64_t _nextSessionId;
     std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
