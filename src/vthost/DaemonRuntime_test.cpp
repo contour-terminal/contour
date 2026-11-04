@@ -12,6 +12,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -276,4 +277,169 @@ TEST_CASE("a second upgrade request while one runs is refused InProgress", "[vth
     REQUIRE_FALSE(second->has_value());
     CHECK(std::get<UpgradeRefusal>(second->error()) == UpgradeRefusal::InProgress);
     CHECK(targets == std::vector<std::string> { "a" });
+}
+
+namespace
+{
+
+/// An upgrade orchestrator that refuses before it announces anything, as a readiness probe that fails does.
+core::async::Task<std::expected<void, vthost::handover::UpgradeError>> refuseUpgradeBeforeAnnouncing(
+    vthost::handover::UpgradeTarget /*target*/)
+{
+    co_return std::unexpected(
+        vthost::handover::UpgradeError { vthost::handover::UpgradeRefusal::ConfigUnreadable });
+}
+
+/// An upgrade orchestrator that announces the upgrade and then throws, as a failing rollback would.
+core::async::Task<std::expected<void, vthost::handover::UpgradeError>> throwUpgradeAfterAnnouncing(
+    vthost::DaemonUpgradeHooks* hooks)
+{
+    hooks->announceUpgrade("1.2.3");
+    throw std::runtime_error { "boom" };
+    co_return {};
+}
+
+/// Runs one upgrade request on @p runtime to its end.
+void requestUpgradeOn(RuntimeHarness& h, vthost::DaemonRuntime& runtime)
+{
+    auto result = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
+    h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out) -> core::async::Task<void> {
+        *out = co_await daemon->requestUpgrade({ .imageId = "a" }, [](std::string_view) {});
+    }(&runtime, &result));
+    std::ignore = h.loop.runUntilIdle();
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result->has_value());
+}
+
+} // namespace
+
+TEST_CASE("a fresh daemon states upgrade generation 0 and no failure", "[vthost][runtime][upgrade]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const runtime = vthost::DaemonRuntime { {}, h.host, clock, [](vthost::ShutdownCause) {} };
+    auto const status = runtime.status();
+    REQUIRE(status.has_value());
+    CHECK(status->upgrade == vthost::proto::DaemonUpgradeRecord {});
+}
+
+TEST_CASE("an upgrade that fails after its announcement is recorded at the same generation",
+          "[vthost][runtime][upgrade]")
+{
+    using vthost::handover::UpgradeRefusal;
+    using vthost::handover::UpgradeState;
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const connections = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto state = UpgradeState::Idle;
+    auto targets = std::vector<std::string> {};
+    auto announcing = true;
+    auto runtime = vthost::DaemonRuntime {
+        { .releaseVersion = "0.9.0",
+          .processId = 1,
+          .socketPath = {},
+          .executablePath = {},
+          .logFile = {},
+          .lifecycle = vthost::DaemonLifecycle::Persistent,
+          .upgradeGeneration = 3 },
+        h.host,
+        clock,
+        [](vthost::ShutdownCause) {},
+        vthost::DaemonUpgradePort { .hooks = hooks,
+                                    .run =
+                                        [&](vthost::handover::UpgradeTarget target) {
+                                            if (!announcing)
+                                                return refuseUpgradeBeforeAnnouncing(std::move(target));
+                                            return refuseUpgradeAfterAnnouncing(
+                                                &hooks, &targets, &state, std::move(target));
+                                        },
+                                    .state = [&] { return state; } }
+    };
+
+    requestUpgradeOn(h, runtime);
+    state = UpgradeState::Idle;
+    auto const failed = runtime.status();
+    REQUIRE(failed.has_value());
+    REQUIRE(failed->upgrade.has_value());
+    // The requester was answered "started" and is gone: the status is where the failure is read.
+    CHECK(failed->upgrade->generation == 3);
+    CHECK(failed->upgrade->lastFailure == std::to_underlying(UpgradeRefusal::QuiesceTimedOut) + 1);
+    CHECK(failed->upgrade->lastFailureDetail == vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut));
+
+    CHECK(failed->upgrade->attempts == 1);
+
+    SECTION("a refusal before the announcement is its requester's answer, and is counted")
+    {
+        announcing = false;
+        requestUpgradeOn(h, runtime);
+        // The stale failure is gone, so that no client takes it for this request's.
+        auto const after = runtime.status();
+        CHECK(after->upgrade->generation == 3);
+        CHECK(after->upgrade->attempts == 2);
+        CHECK(after->upgrade->lastFailure == 0);
+    }
+
+    SECTION("the next announcement forgets it")
+    {
+        // This orchestrator fails again after it: the record then names the new failure only. Read inside the
+        // announcement, the status already has none.
+        auto seen = std::optional<vthost::proto::DaemonUpgradeRecord> {};
+        auto result = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
+        h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out, auto* seenOut) -> core::async::Task<void> {
+            *out = co_await daemon->requestUpgrade({ .imageId = "b" }, [daemon, seenOut](std::string_view) {
+                *seenOut = daemon->status()->upgrade;
+            });
+        }(&runtime, &result, &seen));
+        std::ignore = h.loop.runUntilIdle();
+        REQUIRE(seen.has_value());
+        CHECK(seen->lastFailure == 0);
+        CHECK(seen->lastFailureDetail.empty());
+        CHECK(seen->generation == 3);
+    }
+}
+
+TEST_CASE("an upgrade that throws after its announcement is recorded as an exec failure",
+          "[vthost][runtime][upgrade]")
+{
+    using vthost::handover::UpgradeState;
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const connections = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto state = UpgradeState::Idle;
+    auto runtime = vthost::DaemonRuntime { {},
+                                           h.host,
+                                           clock,
+                                           [](vthost::ShutdownCause) {},
+                                           vthost::DaemonUpgradePort {
+                                               .hooks = hooks,
+                                               .run =
+                                                   [&](vthost::handover::UpgradeTarget const& /*target*/) {
+                                                       return throwUpgradeAfterAnnouncing(&hooks);
+                                                   },
+                                               .state = [&] { return state; } } };
+
+    auto thrown = false;
+    h.loop.spawn([](vthost::DaemonRuntime* daemon, bool* out) -> core::async::Task<void> {
+        try
+        {
+            auto const result = co_await daemon->requestUpgrade({ .imageId = "a" }, [](std::string_view) {});
+            *out = !result.has_value();
+        }
+        catch (std::runtime_error const&)
+        {
+            *out = true;
+        }
+    }(&runtime, &thrown));
+    std::ignore = h.loop.runUntilIdle();
+    CHECK(thrown);
+
+    auto const status = runtime.status();
+    REQUIRE(status.has_value());
+    REQUIRE(status->upgrade.has_value());
+    CHECK(status->upgrade->attempts == 1);
+    CHECK(status->upgrade->lastFailure == vthost::proto::UpgradeDaemonReply::ExecFailedResult);
+    // The requester is gone with the frame: another announcement reaches no dead lambda.
+    hooks.announceUpgrade("1.2.4");
 }

@@ -63,6 +63,9 @@ struct DaemonStatus
     DaemonLifecycle lifecycle = DaemonLifecycle::Persistent; ///< When it ends on its own.
     /// What its ServerHello offered: which requests it serves, Capability::WorkspaceRestore among them.
     proto::CapabilitySet capabilities {};
+    /// How its live upgrades went: the upgrade generation, and the last upgrade that failed after its
+    /// announcement. nullopt for a daemon from before the record.
+    std::optional<proto::DaemonUpgradeRecord> upgrade {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.

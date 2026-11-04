@@ -294,7 +294,10 @@ core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::qui
         auto image =
             captureHandover(_host, crossingListeners(), leaseFd, _config.daemonInstance, _config.release);
         if (image)
+        {
+            image->upgradeGeneration = _config.upgradeGeneration;
             co_return *std::move(image);
+        }
         if (image.error() != HandoverError::SessionStarting)
             co_return std::unexpected(refusalOf(image.error()));
     }

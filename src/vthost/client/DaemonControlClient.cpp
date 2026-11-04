@@ -389,7 +389,9 @@ std::optional<DaemonStatus> fromWire(proto::DaemonStatusReply const& reply)
                           .logFile = std::filesystem::path { reply.logFile },
                           .sessions = reply.sessions,
                           .clients = reply.clients,
-                          .lifecycle = *lifecycle };
+                          .lifecycle = *lifecycle,
+                          .capabilities = {},
+                          .upgrade = reply.upgrade };
 }
 
 SocketDaemonControl::SocketDaemonControl(core::net::EventLoop& loop,

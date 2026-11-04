@@ -1248,6 +1248,26 @@ struct DaemonStatusRequest
     bool operator==(DaemonStatusRequest const&) const = default;
 };
 
+/// How a daemon's live upgrades went, as a DaemonStatusReply states it: what a client reads after the gap an
+/// upgrade leaves, since the connection that asked for it is gone by the time the upgrade ends.
+struct DaemonUpgradeRecord
+{
+    /// How many live upgrades this run of the daemon has completed: 0 for a daemon started afresh, one more
+    /// than the image it took over from for a daemon started from a handover.
+    uint64_t generation = 0;
+    /// How many upgrade requests this run of the daemon accepted -- past the checks that answer a requester
+    /// at once -- whether they went on to complete or not. A client compares it with the count it read
+    /// before it asked, to tell a failure of its own upgrade from one an earlier request left behind.
+    uint64_t attempts = 0;
+    /// How the last upgrade ended that failed after it was announced -- after every client was told and
+    /// disconnected -- as UpgradeDaemonReply::result spells it: `0` for none, a refusal as `UpgradeRefusal +
+    /// 1`, UpgradeDaemonReply::ExecFailedResult for an exec that failed. Cleared when the next upgrade is
+    /// accepted. An upgrade refused before its announcement is answered to its requester instead.
+    uint8_t lastFailure = 0;
+    std::string lastFailureDetail = {}; ///< The failure, in words for the user; empty without one.
+    bool operator==(DaemonUpgradeRecord const&) const = default;
+};
+
 /// Server→client: the answer to a DaemonStatusRequest.
 struct DaemonStatusReply
 {
@@ -1260,6 +1280,9 @@ struct DaemonStatusReply
     uint32_t sessions = 0;           ///< How many sessions it hosts.
     uint32_t clients = 0;            ///< How many attached clients it counts (Control connections excluded).
     uint8_t lifecycle = 0;           ///< Its DaemonLifecycle, as the wire spells it: when it ends on its own.
+    /// How its live upgrades went. Appended by a later version: nullopt for a daemon from before it, whose
+    /// body ends before it.
+    std::optional<DaemonUpgradeRecord> upgrade = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };
 

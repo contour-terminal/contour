@@ -89,6 +89,9 @@ struct LiveUpgradeConfig
 {
     std::string release;         ///< The release this daemon is: what the image says wrote it.
     uint64_t daemonInstance = 0; ///< Which run of the daemon this is, kept across the exec.
+    /// How many live upgrades this run has completed, which the image hands on
+    /// (HandoverImage::upgradeGeneration).
+    uint64_t upgradeGeneration = 0;
     /// This process's command line; the exec runs it again, its program replaced by the target's and the
     /// handover argument (`--handover-fd=N`) appended in place of any it carried.
     std::vector<std::string> argv;

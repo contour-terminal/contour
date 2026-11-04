@@ -1327,7 +1327,8 @@ The **Control role** (`proto::ConnectionRole::Control`, `ClientHello::role`) is 
 ask the daemon about itself: no session is spawned for it (an unknown role byte decodes as Control, so
 a future role can never spawn one), it is not counted in the census and it does not subscribe to the
 host's stream. It carries `DaemonStatusRequest` (tag 25), answered by `DaemonStatusReply` (tag 26:
-process id, release, uptime, socket, executable, log file, sessions, clients, lifecycle) and
+process id, release, uptime, socket, executable, log file, sessions, clients, lifecycle and, appended
+later, the upgrade record of [Live upgrade](#live-upgrade)) and
 `StopDaemon` (tag 27) with a `StopReason` (`User` or `UpgradeRestart`). `ServerHello::releaseVersion`
 is appended to the hello and tells a client which release it met, which is what drives the GUI's drift
 badge (`vthost::client::assessDrift`). Bodies are append-only: a daemon that predates a field leaves it
@@ -1541,12 +1542,21 @@ return. `ClientSupervisor` starts a hold (`UpgradeHold`, 15 s) on the transport 
 third daemon would appear. The hold ends on the next accepted handshake, or when it expires, after which the
 factory starts a daemon as before. `NativeController` treats Upgrading as a reconnect to the same instance.
 
-**An outcome that is not known.** A control call that times out, or whose connection breaks
-(`DaemonUpgradeOutcome::Unknown`), may be the daemon already re-execing. `upgradeDaemonTo` then asks the
-daemon's status again with the reconnect backoff, on an injected `SettlePacer` (so tests never sleep), until
-`UpgradeHold` ran out. A release other than the one read before the call means the upgrade happened; the
-same release means it was refused or rolled back (a known failure); no answer leaves it unknown, which
-`contour daemon upgrade` reports as exit status 1.
+**How it ended.** The requester's "started" goes out before the quiesce, which may still refuse
+(`QuiesceTimedOut`, `SessionStarting`, `InFlightTailTooLarge`, `ImageTooLarge`), and before the `exec`,
+which may fail; by then its connection is closed. So the daemon keeps a record a client reads after the gap,
+appended to `DaemonStatusReply` (`proto::DaemonUpgradeRecord`, absent from a daemon that predates it): its
+**upgrade generation**, 0 for a fresh daemon and one more than the handover image's
+(`HandoverImage::upgradeGeneration`, field 11; an image without it reads as 0) for one started from a
+handover, and the **last failure after an announcement**, spelled as `UpgradeDaemonReply::result`, held in
+memory by `DaemonRuntime` (a rollback stays in the process) and cleared by the next announcement.
+`upgradeDaemonTo` treats "started" as provisional, and a call that timed out or broke
+(`DaemonUpgradeOutcome::Unknown`) the same way: it asks the daemon's status with the reconnect backoff, on
+an injected `SettlePacer` (so tests never sleep, and the GUI's worker stops at shutdown), until
+`UpgradeHold` ran out. A generation past the one read before the call is success; a recorded failure at the
+same generation is a known failure with the daemon's reason (exit 5); nothing conclusive is unknown (exit
+1). It is judged by the generation, never by the release, so a same-release upgrade is told apart from
+none. A daemon from before the record is judged by its release, and its "started" taken at its word.
 
 **The chip.** `window::driftOfferFor(DriftKind, DaemonLocality, CapabilitySet)` decides what the drift chip
 offers from facts alone: nothing for a remote daemon or matching releases, a restart for a local daemon

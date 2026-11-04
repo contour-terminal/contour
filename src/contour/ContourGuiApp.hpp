@@ -69,6 +69,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1155,9 +1156,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Upgrades the local daemon in place to this release, keeping every hosted program running. Runs off the
     /// GUI thread.
     /// @param controlPath The daemon's control socket.
-    /// @return Nothing once the daemon upgrades, or why it did not.
-    [[nodiscard]] std::expected<void, vthost::client::DaemonUpgradeFailure> upgradeLocalDaemon(
-        std::filesystem::path const& controlPath);
+    /// @param stop Ends the settling of the outcome at once (at shutdown), leaving it unknown.
+    /// @return The release the daemon serves once it upgraded, or why it did not.
+    [[nodiscard]] std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>
+    upgradeLocalDaemon(std::filesystem::path const& controlPath, std::stop_token stop);
 
     /// Stops the local daemon for an upgrade and starts one on this release, the way a client would.
     /// Runs off the GUI thread.
@@ -1429,7 +1431,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::function<std::expected<void, std::string>()> _restartDaemon;
     /// Upgrades the local daemon in place; set and cleared with @ref _restartDaemon. Runs on
     /// @ref _daemonRestartThread.
-    std::function<std::expected<void, vthost::client::DaemonUpgradeFailure>()> _upgradeDaemon;
+    std::function<std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>(
+        std::stop_token)>
+        _upgradeDaemon;
     /// The daemon release the drift badge was last assessed for, to notice a daemon that came back changed.
     std::string _shownDaemonRelease;
     /// Whether a daemon spawned on demand may fork yet. The local attach starts beside the boot, but Apple's

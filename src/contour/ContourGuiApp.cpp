@@ -40,6 +40,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/platform/SecureInput.hpp>
+#include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
@@ -973,56 +974,55 @@ void ContourGuiApp::showDaemonDrift(remote::NativeController const& controller)
                       offer);
 }
 
-std::expected<void, vthost::client::DaemonUpgradeFailure> ContourGuiApp::upgradeLocalDaemon(
-    std::filesystem::path const& controlPath)
+std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
+    upgradeLocalDaemon(std::filesystem::path const& controlPath, std::stop_token stop)
 {
     // Never starts a daemon: an upgrade asks the one that runs. The answer waits on the new image's
     // readiness.
-    auto const control = vthost::client::makeDaemonControl(
-        std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr),
-        vthost::client::DefaultUpgradeTimeout);
+    auto const transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr);
+    auto const control = vthost::client::makeDaemonControl(transport, vthost::client::DefaultUpgradeTimeout);
+    // The status reads before and after wait on nothing: a short timeout bounds how long one in flight holds
+    // up a shutdown.
+    auto const settling = vthost::client::makeDaemonControl(transport, vthost::client::DefaultControlTimeout);
     // Staged from this process's own copy, as a daemon this client starts is.
     auto const binary = vthost::makeOwnDaemonBinary(
         processEnvironment(), fileSystem(), CONTOUR_VERSION_STRING, std::filesystem::path { programPath() });
-    auto pacer = vthost::client::SystemSettlePacer {};
-    return vthost::client::upgradeDaemonTo(*control, *binary, pacer);
+    auto pacer = vthost::client::SystemSettlePacer { std::move(stop) };
+    return vthost::client::upgradeDaemonTo(*control, *settling, *binary, pacer);
 }
 
 void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController& controller)
 {
     showDaemonDrift(controller);
+    // An upgrade closes this client's connection and holds it for the daemon's return; the badge says so
+    // meanwhile, and shows what the new daemon runs once the connection is back. Whichever client asked, and
+    // whether or not the daemon is ours to upgrade: its windows wait all the same.
+    remote::followDaemonDrift(
+        controller, _daemonDrift, [this, &controller](window::DriftReassessment reassessment) {
+            if (reassessment == window::DriftReassessment::Reassess
+                || controller.daemonRelease() != _shownDaemonRelease)
+                showDaemonDrift(controller);
+        });
     if (!_restartDaemon)
         return;
-    // The upgrade closes this client's connection and holds it for the daemon's return; the badge says so
-    // meanwhile, and shows what the new daemon runs once the connection is back. A daemon another client
-    // upgrades reads the same.
-    connect(&controller, &remote::NativeController::connectionStateChanged, this, [this, &controller] {
-        switch (controller.connectionState())
-        {
-            case vthost::client::ConnectionState::Upgrading: _daemonDrift.noteDaemonUpgrading(); break;
-            case vthost::client::ConnectionState::Connected:
-                if (_daemonDrift.isUpgrading() || controller.daemonRelease() != _shownDaemonRelease)
-                    showDaemonDrift(controller);
-                break;
-            case vthost::client::ConnectionState::Reconnecting:
-            case vthost::client::ConnectionState::Refused:
-            case vthost::client::ConnectionState::Failed:
-            case vthost::client::ConnectionState::Stopped:
-                // The daemon did not come back as the upgrade it announced: the line must not stay.
-                _daemonDrift.noteUpgradeEnded();
-                break;
-            case vthost::client::ConnectionState::Connecting: break;
-        }
-    });
     connect(&_daemonDrift, &window::DaemonDriftModel::upgradeRequested, this, [this] {
-        _daemonRestartThread = std::jthread { [this] {
-            auto const upgraded = _upgradeDaemon();
-            if (upgraded)
-                return; // The connection comes back to the upgraded daemon, and the badge follows it.
+        // The model asks for no other upgrade or restart until this one reports back, so no worker still
+        // running is joined here, on the GUI thread. On shutdown the settling stops waiting at once; a
+        // control call already under way is not interrupted, and ends within its timeout
+        // (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request itself).
+        _daemonRestartThread = std::jthread { [this](std::stop_token const& stop) {
+            auto const upgraded = _upgradeDaemon(stop);
             QMetaObject::invokeMethod(
                 &_daemonDrift,
-                [this, reason = QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
-                    _daemonDrift.noteUpgradeFailed(reason);
+                [this,
+                 reason = upgraded
+                              ? QString {}
+                              : QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
+                    // On success the connection comes back to the upgraded daemon, and the badge follows it.
+                    if (reason.isEmpty())
+                        _daemonDrift.noteUpgradeRequestDone();
+                    else
+                        _daemonDrift.noteUpgradeFailed(reason);
                 },
                 Qt::QueuedConnection);
         } };
@@ -1401,8 +1401,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
         };
-        _upgradeDaemon = [this, controlPath] {
-            return upgradeLocalDaemon(controlPath);
+        _upgradeDaemon = [this, controlPath](std::stop_token stop) {
+            return upgradeLocalDaemon(controlPath, std::move(stop));
         };
         // Before every connect, the first and each reconnect alike, so a daemon that crashed or was stopped
         // is started again. Spawned, if it must be, from this version's own copy where an upgrade would

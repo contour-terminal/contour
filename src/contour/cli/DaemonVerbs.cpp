@@ -14,12 +14,14 @@
 #include <iterator>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
+#include <vthost/handover/UpgradeError.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 #ifdef _WIN32
@@ -129,6 +131,25 @@ std::string formatUptime(std::chrono::seconds uptime)
     return core::joinHumanReadable(parts, " ");
 }
 
+namespace
+{
+    /// @param record A daemon's upgrade record that names a failure.
+    /// @return The failure, led by its stable name (the control API's: `quiesceTimedOut`, `execFailed`).
+    [[nodiscard]] std::string describeLastUpgradeFailure(vthost::proto::DaemonUpgradeRecord const& record)
+    {
+        auto const failure = vthost::client::upgradeFailureOf(vthost::proto::UpgradeDaemonReply {
+            .result = record.lastFailure, .detail = record.lastFailureDetail });
+        auto const name = [&]() -> std::string_view {
+            if (failure.refusal)
+                return vthost::handover::nameOf(*failure.refusal);
+            if (record.lastFailure == vthost::proto::UpgradeDaemonReply::ExecFailedResult)
+                return vthost::handover::ExecFailureName;
+            return "unknown";
+        }();
+        return std::format("{}: {}", name, vthost::client::describeFailure(failure));
+    }
+} // namespace
+
 std::string formatDaemonStatus(DaemonStatus const& status)
 {
     struct Row
@@ -136,7 +157,7 @@ std::string formatDaemonStatus(DaemonStatus const& status)
         std::string_view label;
         std::string value;
     };
-    auto const rows = std::array {
+    auto rows = std::vector {
         Row { "daemon", std::format("running (pid {})", status.processId) },
         Row { "version", status.releaseVersion },
         Row { "uptime", formatUptime(status.uptime) },
@@ -148,6 +169,13 @@ std::string formatDaemonStatus(DaemonStatus const& status)
         Row { "clients", std::to_string(status.clients) },
         Row { "lifecycle", std::string { vthost::nameOf(status.lifecycle) } },
     };
+    // A daemon from before the upgrade record states neither.
+    if (status.upgrade)
+    {
+        rows.push_back(Row { "upgrades", std::to_string(status.upgrade->generation) });
+        if (status.upgrade->lastFailure != 0)
+            rows.push_back(Row { "last upgrade", describeLastUpgradeFailure(*status.upgrade) });
+    }
     auto const width =
         std::ranges::max(rows | std::views::transform([](Row const& r) { return r.label.size(); }));
     auto text = std::string {};
@@ -374,7 +402,11 @@ ExitStatus daemonUpgradeVerb(DaemonControlPort& control,
     auto const upgraded = vthost::client::upgradeDaemonTo(control, binary, pacer);
     if (upgraded)
     {
-        out << std::format("daemon upgraded to {}; its sessions keep running\n", targetRelease);
+        // The release the daemon reported serving, which an in-place upgrade may make other than this
+        // client's; this client's where it reported none (a daemon from before the upgrade record).
+        auto const release =
+            upgraded->release.empty() ? targetRelease : std::string_view { upgraded->release };
+        out << std::format("daemon upgraded to {}; its sessions keep running\n", release);
         return ExitStatus::Ok;
     }
     auto const& failure = upgraded.error();

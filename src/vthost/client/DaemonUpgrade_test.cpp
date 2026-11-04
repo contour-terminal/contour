@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -50,6 +51,11 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
     [[nodiscard]] std::expected<vthost::client::DaemonStatus, ControlError> status() override
     {
         ++statusRequests;
+        if (!upgradeAsked && statusesToFail > 0)
+        {
+            --statusesToFail;
+            return std::unexpected(ControlError { .code = ControlErrorCode::Transport, .detail = "broken" });
+        }
         if (upgradeAsked && !laterStatuses.empty())
         {
             auto const next = laterStatuses.front();
@@ -57,12 +63,18 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
             if (!next)
                 return std::unexpected(ControlError { .code = ControlErrorCode::NotRunning, .detail = {} });
             statusRelease = *next;
+            if (!laterRecords.empty())
+            {
+                statusRecord = laterRecords.front();
+                laterRecords.pop_front();
+            }
         }
         if (statusError)
             return std::unexpected(*statusError);
         auto status = vthost::client::DaemonStatus {};
         status.releaseVersion = statusRelease;
         status.capabilities = offered;
+        status.upgrade = statusRecord;
         return status;
     }
 
@@ -87,13 +99,18 @@ class FakeControlPort final: public vthost::client::DaemonControlPort
     proto::UpgradeDaemonReply reply {};                                        ///< What upgrade() answers.
     std::string statusRelease = "1.0.0"; ///< The release status() reports.
     bool upgradeAsked = false;           ///< Whether upgrade() ran.
+    std::size_t statusesToFail = 0;      ///< How many status() calls fail before upgrade() ran.
     /// What status() answers, one per call, once upgrade() ran: a release, or nullopt for no daemon.
     std::deque<std::optional<std::string>> laterStatuses;
     std::optional<std::string> releaseAfterAsked; ///< The release status() reports once upgrade() ran.
-    std::shared_ptr<bool> leaseHeld;              ///< The staged image's lease, as the source handed it out.
-    std::vector<std::string> upgrades;            ///< Every image asked for, in order.
-    std::size_t statusRequests = 0;               ///< How often status() was asked.
-    bool leaseHeldWhileAsked = false;             ///< Whether the lease was held at the last upgrade().
+    /// The upgrade record status() reports; nullopt as a daemon from before the record.
+    std::optional<proto::DaemonUpgradeRecord> statusRecord;
+    /// The record each of laterStatuses' daemons reports, one per daemon that answers, while any are left.
+    std::deque<std::optional<proto::DaemonUpgradeRecord>> laterRecords;
+    std::shared_ptr<bool> leaseHeld;   ///< The staged image's lease, as the source handed it out.
+    std::vector<std::string> upgrades; ///< Every image asked for, in order.
+    std::size_t statusRequests = 0;    ///< How often status() was asked.
+    bool leaseHeldWhileAsked = false;  ///< Whether the lease was held at the last upgrade().
 };
 
 /// A source that hands out one image of the given origin, with a watched lease when staged.
@@ -278,13 +295,18 @@ class ManualPacer final: public vthost::client::SettlePacer
 {
   public:
     [[nodiscard]] std::chrono::steady_clock::time_point now() const override { return _now; }
-    void pause(std::chrono::milliseconds duration) override
+    [[nodiscard]] vthost::client::SettleWait pause(std::chrono::milliseconds duration) override
     {
+        if (cancelled == vthost::client::SettleWait::Cancelled)
+            return cancelled;
         _now += duration;
         waited += duration;
+        return vthost::client::SettleWait::Elapsed;
     }
 
     std::chrono::milliseconds waited {}; ///< All the waiting done.
+    /// What every wait ends in: Cancelled as a pacer whose stop was requested.
+    vthost::client::SettleWait cancelled = vthost::client::SettleWait::Elapsed;
 
   private:
     std::chrono::steady_clock::time_point _now {};
@@ -342,4 +364,215 @@ TEST_CASE("upgradeDaemonTo does not ask again after a refusal", "[vthost][client
     REQUIRE_FALSE(upgraded.has_value());
     CHECK(upgraded.error().outcome == vthost::client::DaemonUpgradeOutcome::Known);
     CHECK(pacer.waited == std::chrono::milliseconds { 0 });
+}
+
+namespace
+{
+using vthost::client::DaemonUpgradeOutcome;
+
+/// @return A record of @p generation, after @p attempts requests, with the failure @p result (as
+/// UpgradeDaemonReply spells it) and its words.
+[[nodiscard]] proto::DaemonUpgradeRecord recordOf(uint64_t generation,
+                                                  uint8_t result = 0,
+                                                  std::string detail = {},
+                                                  uint64_t attempts = 1)
+{
+    return proto::DaemonUpgradeRecord { .generation = generation,
+                                        .attempts = attempts,
+                                        .lastFailure = result,
+                                        .lastFailureDetail = std::move(detail) };
+}
+
+/// @return @p refusal as UpgradeDaemonReply::result spells it.
+[[nodiscard]] uint8_t resultOf(UpgradeRefusal refusal)
+{
+    return static_cast<uint8_t>(1 + std::to_underlying(refusal));
+}
+} // namespace
+
+TEST_CASE("upgradeDaemonTo takes a started upgrade as provisional and settles it by the generation",
+          "[vthost][client][upgrade]")
+{
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    h.control.statusRecord = recordOf(4, 0, {}, 0);
+
+    SECTION("the new image serves: one generation further, on the same release")
+    {
+        h.control.laterStatuses = { std::nullopt, "1.0.0" };
+        h.control.laterRecords = { recordOf(5) };
+        CHECK(vthost::client::upgradeDaemonTo(h.control, h.binary, pacer).has_value());
+    }
+    SECTION("the daemon refused as it quiesced: a known failure, with its reason")
+    {
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(
+            4,
+            resultOf(UpgradeRefusal::QuiesceTimedOut),
+            std::string { vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut) }) };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Known);
+        CHECK(upgraded.error().error == DaemonUpgradeError::Refused);
+        CHECK(upgraded.error().refusal == UpgradeRefusal::QuiesceTimedOut);
+        CHECK(vthost::client::describeFailure(upgraded.error())
+              == vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut));
+    }
+    SECTION("the exec failed: a known failure, naming it")
+    {
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(
+            4, proto::UpgradeDaemonReply::ExecFailedResult, "Exec format error") };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Known);
+        CHECK_FALSE(upgraded.error().refusal.has_value());
+        CHECK(upgraded.error().detail.starts_with(vthost::handover::ExecFailureText));
+        CHECK(upgraded.error().detail.ends_with("Exec format error"));
+    }
+    SECTION("the daemon says nothing conclusive by the end of the hold: unknown")
+    {
+        h.control.laterStatuses.assign(1000, "1.0.0");
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Unknown);
+        CHECK(pacer.waited >= vthost::client::UpgradeHold);
+    }
+    SECTION("the settling is cancelled: unknown, at once")
+    {
+        pacer.cancelled = vthost::client::SettleWait::Cancelled;
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(5) };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Unknown);
+        CHECK(pacer.waited == std::chrono::milliseconds { 0 });
+    }
+}
+
+TEST_CASE("upgradeDaemonTo does not take an earlier request's failure for its own",
+          "[vthost][client][upgrade]")
+{
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    auto const stale = std::string { vthost::handover::describe(UpgradeRefusal::QuiesceTimedOut) };
+    // An earlier request failed after its announcement, and the daemon still records it.
+    h.control.statusRecord = recordOf(4, resultOf(UpgradeRefusal::QuiesceTimedOut), stale, 1);
+    // This request's answer was lost, so its outcome is unknown and the settling polls.
+    h.control.upgradeError = ControlError { .code = ControlErrorCode::Transport, .detail = "broken" };
+
+    SECTION("the stale failure is not reported while the attempts have not advanced")
+    {
+        h.control.laterStatuses.assign(1000, "1.0.0");
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Unknown);
+        CHECK(pacer.waited >= vthost::client::UpgradeHold);
+    }
+    SECTION("the stale failure is overtaken by the upgrade it did not belong to")
+    {
+        h.control.laterStatuses = { "1.0.0", "1.0.0" };
+        h.control.laterRecords = { recordOf(4, resultOf(UpgradeRefusal::QuiesceTimedOut), stale, 1),
+                                   recordOf(5, 0, {}, 2) };
+        CHECK(vthost::client::upgradeDaemonTo(h.control, h.binary, pacer).has_value());
+    }
+    SECTION("a failure of this request is reported, even with the code and words of the earlier one")
+    {
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(4, resultOf(UpgradeRefusal::QuiesceTimedOut), stale, 2) };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Known);
+        CHECK(upgraded.error().refusal == UpgradeRefusal::QuiesceTimedOut);
+    }
+}
+
+TEST_CASE("upgradeDaemonTo names the release the daemon serves", "[vthost][client][upgrade]")
+{
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    h.control.statusRecord = recordOf(4, 0, {}, 0);
+    h.control.laterStatuses = { "3.0.0" };
+    h.control.laterRecords = { recordOf(5) };
+    auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+    REQUIRE(upgraded.has_value());
+    CHECK(upgraded->release == "3.0.0");
+}
+
+TEST_CASE("upgradeDaemonTo settles even where the status before could not be read",
+          "[vthost][client][upgrade]")
+{
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    h.control.statusRecord = recordOf(4, 0, {}, 0);
+
+    SECTION("a second read succeeds: the baseline is there")
+    {
+        h.control.statusesToFail = 1;
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(5) };
+        CHECK(vthost::client::upgradeDaemonTo(h.control, h.binary, pacer).has_value());
+    }
+    SECTION("no baseline, and the daemon states a clean record: success")
+    {
+        h.control.statusesToFail = 2;
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(5) };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE(upgraded.has_value());
+        CHECK(upgraded->release == "1.0.0");
+    }
+    SECTION("no baseline, and the daemon states a failure: that failure")
+    {
+        h.control.statusesToFail = 2;
+        h.control.laterStatuses = { "1.0.0" };
+        h.control.laterRecords = { recordOf(4, resultOf(UpgradeRefusal::QuiesceTimedOut), "x", 1) };
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Known);
+    }
+    SECTION("no baseline, and nothing is ever stated: unknown after the hold")
+    {
+        h.control.statusesToFail = 2;
+        h.control.statusRecord = std::nullopt;
+        h.control.laterStatuses.assign(1000, "1.0.0");
+        auto const upgraded = vthost::client::upgradeDaemonTo(h.control, h.binary, pacer);
+        REQUIRE_FALSE(upgraded.has_value());
+        CHECK(upgraded.error().outcome == DaemonUpgradeOutcome::Unknown);
+        CHECK(pacer.waited >= vthost::client::UpgradeHold);
+    }
+}
+
+TEST_CASE("upgradeDaemonTo settles a same-release upgrade whose answer was lost by the generation",
+          "[vthost][client][upgrade]")
+{
+    // The release cannot tell: before and after are both 1.0.0. Judged by the release, this read "did not
+    // happen"; the generation says it did.
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    h.control.statusRecord = recordOf(0, 0, {}, 0);
+    h.control.upgradeError = ControlError { .code = ControlErrorCode::Transport, .detail = "broken" };
+    h.control.laterStatuses = { "1.0.0" };
+    h.control.laterRecords = { recordOf(1) };
+    CHECK(vthost::client::upgradeDaemonTo(h.control, h.binary, pacer).has_value());
+}
+
+TEST_CASE("upgradeDaemonTo takes an older daemon's started at its word", "[vthost][client][upgrade]")
+{
+    // A daemon from before the record cannot say how its upgrade ended.
+    auto pacer = ManualPacer {};
+    auto h = Upgrade {};
+    CHECK(vthost::client::upgradeDaemonTo(h.control, h.binary, pacer).has_value());
+    CHECK(pacer.waited == std::chrono::milliseconds { 0 });
+}
+
+TEST_CASE("SystemSettlePacer's wait ends at once when its stop is requested", "[vthost][client][upgrade]")
+{
+    auto source = std::stop_source {};
+    auto pacer = vthost::client::SystemSettlePacer { source.get_token() };
+    CHECK(pacer.pause(std::chrono::milliseconds { 1 }) == vthost::client::SettleWait::Elapsed);
+    source.request_stop();
+    auto const start = std::chrono::steady_clock::now();
+    CHECK(pacer.pause(std::chrono::hours { 1 }) == vthost::client::SettleWait::Cancelled);
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds { 10 });
 }

@@ -155,18 +155,25 @@ contour api call daemon.upgrade '{"image":""}'
 
 `image` names a staged image of the daemon's store; empty, the daemon upgrades to its own installed
 executable, the file a package upgrade replaced. The call needs `write` and a connection on the daemon's own
-machine (its socket or standard input and output): over a TCP token it is refused. It is not offered to
+machine, through the daemon's Unix socket: over a TCP token it is refused. It is not offered to
 extensions or to the agent's tools.
 
 The reply, `{"started":true,"toRelease":"0.9.1"}`, is sent before the daemon tells its clients it is
-upgrading and closes every connection, this one included; the clients reconnect to the same daemon. A
-refusal is an error with code `failed` whose message leads with a stable name, then says why:
-`sandboxed: the daemon runs in a sandbox that cannot reach the new release`. The names are `inProgress`,
-`notStaged`, `sandboxed`, `formatUnreadable`, `inFlightTailTooLarge`, `targetUnresponsive`,
+upgrading and closes every connection, this one included; the clients reconnect to the same daemon. It is
+provisional: the daemon may still decline after it, while it waits for its clients and sessions to settle,
+and the switch to the new binary may fail. Either way the daemon then resumes and serves on as before, and
+the connection that asked is gone by then. `contour daemon status` tells how it ended: its `upgrades`
+count is one higher once the new release serves, and a `last upgrade` line names the failure otherwise.
+`contour daemon upgrade` reads it there for you.
+
+A refusal before the reply is an error with code `failed` whose message leads with a stable name, then
+says why: `sandboxed: the daemon runs in a sandbox that cannot reach the new release`. The names are
+`inProgress`, `notStaged`, `sandboxed`, `formatUnreadable`, `inFlightTailTooLarge`, `targetUnresponsive`,
 `notSupported`, `unsupportedSession`, `sessionStarting`, `quiesceTimedOut`, `imageTooLarge`,
-`configUnreadable`, `localOnly` and, for a `exec` that failed after the daemon stopped its sessions' pumps
-and resumed them, `execFailed`. A connection that breaks before the reply leaves the outcome unknown: ask
-`daemon.info` for the version again.
+`configUnreadable` and `localOnly`. `execFailed`, an `exec` that failed after the daemon stopped its
+sessions' pumps and resumed them, always comes after the reply, so this call never returns it; it is the
+name `contour daemon status` reports such a failure under. A connection that breaks before the reply
+leaves the outcome unknown: ask `contour daemon status` again.
 
 ## A workflow: run the tests beside you
 

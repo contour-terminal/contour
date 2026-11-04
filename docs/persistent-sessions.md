@@ -583,12 +583,13 @@ Start it from the chip, or from a shell or script:
 contour daemon upgrade [--label NAME | --socket PATH]
 ```
 
-It exits 0 once the daemon upgraded, 4 when no daemon runs, and 5 with the reason on standard error
-when the daemon declines (the daemon then serves on as before; nothing was stopped). When the daemon
-neither answers nor comes back within 15 seconds, the outcome is unknown and the exit status is 1; check
-`contour daemon status`.
+It exits 0 once the new release serves, 4 when no daemon runs, and 5 with the reason on standard error
+when the daemon declines or the switch fails; the daemon then serves on as before. When the daemon says
+nothing conclusive within 15 seconds, the outcome is unknown and the exit status is 1; check
+`contour daemon status`, whose `upgrades` line counts the live upgrades the daemon has been through and
+whose `last upgrade` line names the last one that failed.
 
-What the daemon checks before it stops anything, and declines on:
+What the daemon declines on:
 
 | The daemon declines when | Because |
 | --- | --- |
@@ -598,6 +599,12 @@ What the daemon checks before it stops anything, and declines on:
 | a program is in the middle of an escape sequence longer than the handover carries, or its sessions' state is too large | the handover has a fixed bound |
 | a session is still starting, or the new release's image is not in the daemon's store | try again in a moment; the next upgrade stages the image anew |
 | another upgrade is under way, or the clients and sessions do not settle in time | try again in a moment |
+
+Most of these are checked before anything is stopped. A few show only after the daemon has told its
+clients it is upgrading and disconnected them: the clients and sessions not settling in time, a session
+that keeps starting, a program caught in an overlong escape sequence, state too large to hand over, and
+the new binary failing to start. The daemon then resumes; the windows reconnect to it a moment later, and
+the chip and `contour daemon upgrade` (exit 5) name the reason.
 
 A refusal never costs a program, and neither does a failure after it: if the new binary cannot start,
 the old daemon resumes and says so.

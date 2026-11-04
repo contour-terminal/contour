@@ -109,6 +109,7 @@ namespace
                                                               .keyPem = "-----BEGIN PRIVATE KEY-----" } } };
     image.leaseFd = 30;
     image.defaultColorPreference = vtbackend::ColorPreference::Dark;
+    image.upgradeGeneration = 4;
     return image;
 }
 
@@ -119,6 +120,7 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.fromRelease == expected.fromRelease);
     CHECK(actual.nextSessionId == expected.nextSessionId);
     CHECK(actual.leaseFd == expected.leaseFd);
+    CHECK(actual.upgradeGeneration == expected.upgradeGeneration);
     CHECK(actual.modelIds.nextWindow == expected.modelIds.nextWindow);
     CHECK(actual.modelIds.nextTab == expected.modelIds.nextTab);
     CHECK(actual.modelIds.nextPane == expected.modelIds.nextPane);
@@ -279,6 +281,8 @@ TEST_CASE("an unknown field is skipped and a missing one is defaulted", "[handov
     CHECK(decoded->fromRelease.empty());
     CHECK(decoded->sessions.empty());
     CHECK(decoded->leaseFd == -1);
+    // An image from before the upgrade generation: its writer had completed none.
+    CHECK(decoded->upgradeGeneration == 0);
 }
 
 TEST_CASE("a field of the wrong kind is Malformed", "[handover]")

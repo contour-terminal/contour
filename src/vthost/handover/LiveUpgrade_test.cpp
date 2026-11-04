@@ -226,6 +226,7 @@ struct Upgrade
         return LiveUpgradeConfig {
             .release = "0.9.0",
             .daemonInstance = 0xC0FFEE,
+            .upgradeGeneration = 2,
             .argv = { "/state/bin/0.9.0-00000000/Contour.AppImage",
                       "daemon",
                       "--handover-fd=7",
@@ -336,6 +337,8 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
     REQUIRE(image.has_value());
     CHECK(image->daemonInstance == 0xC0FFEE);
     CHECK(image->fromRelease == "0.9.0");
+    // The generation this run had reached: the new image serves as one more.
+    CHECK(image->upgradeGeneration == 2);
     REQUIRE(image->listeners.size() == 1);
     CHECK(image->listeners.front().name == "control");
     CHECK(image->listeners.front().fd == *listenerFd);
