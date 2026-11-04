@@ -2173,6 +2173,14 @@ config::ProfileScripts SettingsController::profileScripts(config::ShellRow const
     return inspection ? inspection->scripts : config::ProfileScripts::Run;
 }
 
+config::RcState SettingsController::rcState(config::ShellRow const& shell) const
+{
+    if (_services.shell.editor == nullptr || !config::isInstallableOn(shell, _services.shell.host))
+        return config::RcState::Unknown;
+    auto const inspection = inspectShell(shell.kind);
+    return inspection ? inspection->state : config::RcState::Unknown;
+}
+
 ShellInstallRow SettingsController::shellInstallRow(config::ShellRow const& shell) const
 {
     auto const host = _services.shell.host;
@@ -2234,16 +2242,15 @@ QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
         return {};
     auto const rc = shellIntegrationRcPath(shell).toStdString();
     auto const line = shellIntegrationLine(shell).toStdString();
-    auto const scripts = profileScripts(*row);
-    auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    auto const words = confirmWordsFor(rcState(*row), profileScripts(*row));
     auto const text = [&](std::string_view pattern) {
         return toQString(cardText(pattern, row->displayName, rc, line));
     };
     return QVariantMap {
         { QStringLiteral("title"), text(words.title) },
-        { QStringLiteral("line"), text(words.body) },
-        { QStringLiteral("note"), text(policyNoteFor(scripts)) },
-        { QStringLiteral("primary"), toQString(confirmPrimaryFor(scripts)) },
+        { QStringLiteral("line"), text(words.line) },
+        { QStringLiteral("note"), text(words.note) },
+        { QStringLiteral("primary"), toQString(words.primary) },
         { QStringLiteral("secondary"), toQString(words.secondary) },
     };
 }

@@ -297,6 +297,45 @@ inline constexpr std::string_view PolicyFixPrimary = "Allow Scripts and Add Line
                : CardStageRows[std::to_underlying(CardStage::Confirm)].primary;
 }
 
+/// What an install's confirmation says, as cardText() patterns.
+struct ConfirmWords
+{
+    std::string_view title {};     ///< The question.
+    std::string_view line {};      ///< The line to add; empty when none is added.
+    std::string_view note {};      ///< What else the install changes; empty when nothing does.
+    std::string_view primary {};   ///< The accept button.
+    std::string_view secondary {}; ///< The reject button.
+
+    /// @return Whether all members are equal.
+    [[nodiscard]] constexpr bool operator==(ConfirmWords const&) const = default;
+};
+
+/// The Settings page's confirmation for a profile that loads Contour already but is kept from running by an
+/// execution policy the user may change: only the policy changes, and no line is added.
+inline constexpr auto PolicyOnlyConfirm = ConfirmWords { .title = "Allow scripts in {shell}?",
+                                                         .line = "",
+                                                         .note = PolicyFixNote,
+                                                         .primary = "Allow Scripts",
+                                                         .secondary = "Cancel" };
+
+/// The Settings page's confirmation of an install.
+/// @param rc What the startup file holds.
+/// @param scripts Whether the profile runs under the shell's execution policy.
+/// @return PolicyOnlyConfirm for a file that loads Contour already under a policy the user must fix, else the
+///         card's Confirm stage, with policyNoteFor() and confirmPrimaryFor().
+[[nodiscard]] constexpr ConfirmWords confirmWordsFor(config::RcState rc,
+                                                     config::ProfileScripts scripts) noexcept
+{
+    if (rc == config::RcState::Installed && scripts == config::ProfileScripts::NeedUserPolicy)
+        return PolicyOnlyConfirm;
+    auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    return ConfirmWords { .title = words.title,
+                          .line = words.body,
+                          .note = policyNoteFor(scripts),
+                          .primary = confirmPrimaryFor(scripts),
+                          .secondary = words.secondary };
+}
+
 /// Fills a card pattern in.
 /// @param pattern Text holding `{shell}`, `{rc}` and `{line}` placeholders. Substituted text is never
 ///        scanned again, so a line that contains `{rc}` stays as it is.

@@ -1204,3 +1204,90 @@ TEST_CASE("ShellRcEditor.powershell.policyBlocked", "[shellrc]")
         CHECK(!rig.disk.files.exists(pwshProfile()));
     }
 }
+
+TEST_CASE("ShellRcEditor.powershell.policyFixIntoMissingProfile", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+
+    auto rig = ProfileRig { documents() };
+    rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+    auto profileDuringWrite = std::optional<bool> {};
+    rig.executionPolicy.duringWrite = [&] {
+        profileDuringWrite = rig.disk.files.exists(windowsPowerShellProfile());
+    };
+    auto const line = nonAsciiLine(ShellKind::WindowsPowerShell);
+    REQUIRE(rig.editor.install(ShellKind::WindowsPowerShell, line, noSession) == RcInstall::Appended);
+    CHECK(rig.executionPolicy.attempts == std::vector { ShellKind::WindowsPowerShell });
+    CHECK(profileDuringWrite == false);
+    CHECK(rig.disk.text(windowsPowerShellProfile()) == std::string(Utf8Bom) + "\n" + line + "\n");
+}
+
+TEST_CASE("ShellRcEditor.powershell.installedButStopped", "[shellrc]")
+{
+    using contour::config::ExecutionPolicy;
+    using contour::config::PolicyScope;
+    using contour::config::ProfileScripts;
+
+    auto const installed =
+        std::string(Utf8Bom) + "Set-Alias ll ls\n" + asciiLine(ShellKind::WindowsPowerShell) + "\n";
+
+    SECTION("a policy the user may change is fixed, and no line is added")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+        REQUIRE(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts
+                == ProfileScripts::NeedUserPolicy);
+        CHECK(rig.editor.install(
+                  ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+              == RcInstall::AlreadyInstalled);
+        CHECK(rig.executionPolicy.attempts == std::vector { ShellKind::WindowsPowerShell });
+        CHECK(!rig.disk.touched("appendFile"));
+        CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+        CHECK(rig.editor.inspect(ShellKind::WindowsPowerShell, noSession)->scripts == ProfileScripts::Run);
+    }
+
+    SECTION("a policy write that fails is reported")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        rig.executionPolicy.policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::Default };
+        rig.executionPolicy.writes = PolicyWrites::Fail;
+        CHECK(rig.editor
+                  .install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+                  .error()
+              == ShellRcError::PolicyUnchanged);
+        CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+    }
+
+    SECTION("group policy, or signed scripts only, blocks it")
+    {
+        for (auto const policy: { contour::config::EffectivePolicy { .policy = ExecutionPolicy::Restricted,
+                                                                     .scope = PolicyScope::GroupPolicy },
+                                  contour::config::EffectivePolicy { .policy = ExecutionPolicy::AllSigned,
+                                                                     .scope = PolicyScope::CurrentUser } })
+        {
+            auto rig = ProfileRig { documents() };
+            rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+            rig.executionPolicy.policy = policy;
+            CHECK(
+                rig.editor
+                    .install(ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+                    .error()
+                == ShellRcError::PolicyBlocked);
+            CHECK(rig.executionPolicy.attempts.empty());
+            CHECK(rig.disk.text(windowsPowerShellProfile()) == installed);
+        }
+    }
+
+    SECTION("a policy that lets it run changes nothing")
+    {
+        auto rig = ProfileRig { documents() };
+        rig.disk.files.addFile(windowsPowerShellProfile(), installed);
+        CHECK(rig.editor.install(
+                  ShellKind::WindowsPowerShell, asciiLine(ShellKind::WindowsPowerShell), noSession)
+              == RcInstall::AlreadyInstalled);
+        CHECK(rig.executionPolicy.attempts.empty());
+    }
+}

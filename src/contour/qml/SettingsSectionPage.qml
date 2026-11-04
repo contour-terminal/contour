@@ -64,10 +64,11 @@ SettingsGroupsPage {
         onAccepted: if (root.controller) root.controller.installShellIntegration(installDialog.shell)
         bodyData: [
             // The line itself, as it will be written, in the terminal's font: what is added is read before it
-            // is.
+            // is. None when only the execution policy changes.
             Label {
                 objectName: "shellInstallLine"
                 Layout.fillWidth: true
+                visible: text.length > 0
                 text: installDialog.confirm.line !== undefined ? installDialog.confirm.line : ""
                 font.family: root.controller && root.controller.fontFamilies.length > 0
                              ? root.controller.fontFamilies[0] : chromeStyle.type.body.family

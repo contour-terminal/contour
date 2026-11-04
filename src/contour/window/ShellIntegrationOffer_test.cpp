@@ -335,6 +335,34 @@ TEST_CASE("ShellIntegrationOffer.policyWords", "[shellintegration]")
     CHECK(confirmPrimaryFor(ProfileScripts::Run) == "Add Line");
 }
 
+TEST_CASE("ShellIntegrationOffer.confirmWordsFor", "[shellintegration]")
+{
+    auto const& confirm = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    CHECK(confirmWordsFor(RcState::Absent, ProfileScripts::Run)
+          == ConfirmWords { .title = confirm.title,
+                            .line = confirm.body,
+                            .note = "",
+                            .primary = "Add Line",
+                            .secondary = "Cancel" });
+    CHECK(confirmWordsFor(RcState::Absent, ProfileScripts::NeedUserPolicy)
+          == ConfirmWords { .title = confirm.title,
+                            .line = confirm.body,
+                            .note = PolicyFixNote,
+                            .primary = "Allow Scripts and Add Line",
+                            .secondary = "Cancel" });
+    // A file that loads Contour already only needs the policy: no line is shown, as none is added.
+    auto const policyOnly = confirmWordsFor(RcState::Installed, ProfileScripts::NeedUserPolicy);
+    CHECK(policyOnly == PolicyOnlyConfirm);
+    CHECK(cardText(policyOnly.title, "Windows PowerShell", "~/x", "L")
+          == "Allow scripts in Windows PowerShell?");
+    CHECK(policyOnly.line.empty());
+    CHECK(cardText(policyOnly.note, "Windows PowerShell", "~/x", "L")
+          == "This also lets your own scripts run in Windows PowerShell, for your user only "
+             "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned).");
+    CHECK(policyOnly.primary == "Allow Scripts");
+    CHECK(policyOnly.secondary == "Cancel");
+}
+
 TEST_CASE("shellRcLine.refusesWhatItCannotWriteSafely", "[shellintegration]")
 {
     CHECK(shellRcLine(ShellKind::Zsh, "contour").error() == ShellRcLineError::RelativePath);

@@ -250,15 +250,17 @@ class NullShellRcEditor final: public IShellRcEditor
 /// its own encoding (UTF-8 with or without a byte order mark, UTF-16LE with one) and appended to in it; a new
 /// PowerShell profile starts with a UTF-8 byte order mark, which every PowerShell reads. When the shell's
 /// execution policy keeps the profile from running and the user may change it, install() allows the user's
-/// own scripts first and appends only once that succeeded. It never runs the shell to ask: a `ZDOTDIR` that
-/// only `~/.zshenv` sets is therefore not seen, and zsh then reads a `.zshrc` elsewhere than the one this
-/// appends to (the line is harmless but does not load; the card names the file it wrote, so the user can move
-/// the line). A superuser's Contour touches nothing: it would leave root-owned files in a user's home.
-/// Appending reads the file again right before writing and refuses when it changed meanwhile, and reads it
-/// once more afterwards: the file system's append may report success for a write that was cut short (a close
-/// error nobody checked), so the file itself decides. What Contour appends always starts with a line ending
-/// (at worst one blank line), so a save that lands between the re-read and the append, leaving the user's
-/// last line unterminated, cannot glue Contour's line onto it.
+/// own scripts first and appends only once that succeeded; it does so for a profile that loads Contour
+/// already, too, and then appends nothing. A policy write that succeeded stays when the append after it
+/// fails: the user consented to it, and the retry then finds the policy fixed and only appends. It never runs
+/// the shell to ask: a `ZDOTDIR` that only `~/.zshenv` sets is therefore not seen, and zsh then reads a
+/// `.zshrc` elsewhere than the one this appends to (the line is harmless but does not load; the card names
+/// the file it wrote, so the user can move the line). A superuser's Contour touches nothing: it would leave
+/// root-owned files in a user's home. Appending reads the file again right before writing and refuses when it
+/// changed meanwhile, and reads it once more afterwards: the file system's append may report success for a
+/// write that was cut short (a close error nobody checked), so the file itself decides. What Contour appends
+/// always starts with a line ending (at worst one blank line), so a save that lands between the re-read and
+/// the append, leaving the user's last line unterminated, cannot glue Contour's line onto it.
 class FileShellRcEditor final: public IShellRcEditor
 {
   public:

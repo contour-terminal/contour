@@ -150,11 +150,44 @@ TEST_CASE("shellInstall.aBlockReplacesTheStatusOfAnInstallableRowOnly", "[shelli
         auto const absent = shellInstallRowOf(c.shell, absentFile, home(), c.host, c.binary);
         CHECK(absent.status == InstallBlockRows[std::to_underlying(c.block)].text);
         CHECK(absent.install == InstallOffer::No);
-        // A file that is already done says so, whatever blocks a new install.
+        // A file that is already done says so, whatever blocks a new install, unless the policy stops it
+        // from running: then the policy's words say why it does not.
         auto installedFile = inspected(RcState::Installed);
         installedFile.scripts = c.scripts;
         auto const installed = shellInstallRowOf(c.shell, installedFile, home(), c.host, c.binary);
-        CHECK(installed.status == "Installed in ~/.zshrc");
+        CHECK(installed.status
+              == (c.scripts == ProfileScripts::Run ? std::string_view { "Installed in ~/.zshrc" }
+                                                   : InstallBlockRows[std::to_underlying(c.block)].text));
+        CHECK(installed.install == InstallOffer::No);
+    }
+}
+
+TEST_CASE("ShellInstallRows.installedButStoppedByPolicy", "[shellintegration][settings]")
+{
+    constexpr auto Pwsh = ShellRows[std::to_underlying(ShellKind::Pwsh) - 1];
+    struct Case
+    {
+        ProfileScripts scripts;
+        std::string_view status;
+        InstallOffer install;
+    };
+    for (auto const& c: std::array {
+             Case { ProfileScripts::Run, "Installed in ~/.zshrc", InstallOffer::No },
+             Case { ProfileScripts::NeedUserPolicy,
+                    "Installed in ~/.zshrc, but PowerShell's script policy stops it from running",
+                    InstallOffer::Yes },
+             Case { ProfileScripts::BlockedByGroupPolicy,
+                    "Blocked by your organisation's PowerShell policy",
+                    InstallOffer::No },
+             Case { ProfileScripts::SignedOnly, "PowerShell requires signed scripts here", InstallOffer::No },
+         })
+    {
+        CAPTURE(std::to_underlying(c.scripts));
+        auto file = inspected(RcState::Installed);
+        file.scripts = c.scripts;
+        auto const row = shellInstallRowOf(Pwsh, file, home(), HostPlatform::Windows, BinaryReach::Reachable);
+        CHECK(row.status == c.status);
+        CHECK(row.install == c.install);
     }
 }
 

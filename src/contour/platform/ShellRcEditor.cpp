@@ -397,7 +397,13 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
         return std::unexpected(ShellRcError::PartialWrite); // appending would only make the parse worse
     if (state == config::RcState::Installed
         || hasAlternateInstall(_fileSystem, environment, _knownFolders, *row))
+    {
+        // A profile that loads Contour but is kept from running is not done yet: it gets the policy fix a new
+        // install would, and no line.
+        if (auto const policy = letProfileRun(_executionPolicy, shell); !policy)
+            return std::unexpected(policy.error());
         return RcInstall::AlreadyInstalled;
+    }
 
     // Parent directories first: a fish user may have no config directory yet. Creating a directory
     // changes nothing the user wrote.

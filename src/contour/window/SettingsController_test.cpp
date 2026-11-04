@@ -4994,6 +4994,74 @@ TEST_CASE("SettingsController.shellRows.groupPolicy", "[settings][shellintegrati
     CHECK(fx.errors.front() == QStringLiteral("Blocked by your organisation's PowerShell policy"));
 }
 
+TEST_CASE("SettingsController.shellRows.signedOnly", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent,
+                       .scripts = config::ProfileScripts::SignedOnly };
+    fx.controller->refresh();
+
+    auto const pwsh = shellRowOf(fx, ShellKind::Pwsh);
+    CHECK(pwsh.value(QStringLiteral("status")).toString()
+          == QStringLiteral("PowerShell requires signed scripts here"));
+    CHECK_FALSE(pwsh.value(QStringLiteral("canInstall")).toBool());
+
+    fx.controller->installShellIntegration(std::to_underlying(ShellKind::Pwsh));
+    CHECK(fx.shellEditor.installs.empty());
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front() == QStringLiteral("PowerShell requires signed scripts here"));
+}
+
+TEST_CASE("SettingsController.shellRows.installedButStopped", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    onHost(fx, config::HostPlatform::Windows);
+    fx.shellEditor.inspections[ShellKind::WindowsPowerShell] =
+        RcInspection { .file = home() / "Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Installed,
+                       .scripts = config::ProfileScripts::NeedUserPolicy };
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = home() / "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Installed,
+                       .scripts = config::ProfileScripts::BlockedByGroupPolicy };
+    fx.controller->refresh();
+    auto const windowsPowerShell = std::to_underlying(ShellKind::WindowsPowerShell);
+
+    // A profile the policy stops is not plainly Installed, and the user may let it run.
+    auto const stopped = shellRowOf(fx, ShellKind::WindowsPowerShell);
+    CHECK(
+        stopped.value(QStringLiteral("status")).toString()
+        == QStringLiteral("Installed in ~/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1, but "
+                          "PowerShell's script policy stops it from running"));
+    CHECK(stopped.value(QStringLiteral("canInstall")).toBool());
+
+    // The confirmation asks for the policy alone: no line is added.
+    auto const confirm = fx.controller->shellIntegrationConfirm(windowsPowerShell);
+    CHECK(confirm.value(QStringLiteral("title")).toString()
+          == QStringLiteral("Allow scripts in Windows PowerShell?"));
+    CHECK(confirm.value(QStringLiteral("line")).toString().isEmpty());
+    CHECK(confirm.value(QStringLiteral("note")).toString()
+          == QStringLiteral("This also lets your own scripts run in Windows PowerShell, for your user only "
+                            "(Set-ExecutionPolicy -Scope CurrentUser RemoteSigned)."));
+    CHECK(confirm.value(QStringLiteral("primary")).toString() == QStringLiteral("Allow Scripts"));
+    CHECK(confirm.value(QStringLiteral("secondary")).toString() == QStringLiteral("Cancel"));
+
+    // Accepting goes through the editor, which fixes the policy and appends nothing.
+    fx.controller->installShellIntegration(windowsPowerShell);
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().shell == ShellKind::WindowsPowerShell);
+    CHECK(fx.errors.isEmpty());
+
+    // A policy the organisation enforces says so, and offers nothing.
+    auto const blocked = shellRowOf(fx, ShellKind::Pwsh);
+    CHECK(blocked.value(QStringLiteral("status")).toString()
+          == QStringLiteral("Blocked by your organisation's PowerShell policy"));
+    CHECK_FALSE(blocked.value(QStringLiteral("canInstall")).toBool());
+}
+
 TEST_CASE("SettingsController: setHotkey stages the chord as contour.yml spells it",
           "[settings][quickterminal]")
 {

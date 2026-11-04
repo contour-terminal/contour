@@ -3150,6 +3150,39 @@ TEST_CASE("the install dialog says what else Install changes only when it change
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the install dialog of a profile the policy stops asks for the policy alone",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = shellHome() / ".config/powershell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Installed,
+                       .scripts = config::ProfileScripts::NeedUserPolicy };
+    scriptShells(fx);
+    REQUIRE(fx.open("section:shell-integration"));
+
+    auto* dialog = fx.item()->findChild<QObject*>("shellInstallDialog");
+    REQUIRE(dialog != nullptr);
+    auto const dialogPart = [dialog](char const* name) -> QQuickItem const& {
+        return required(findDescendant(
+            *dialog->property("contentItem").value<QQuickItem*>(),
+            [name](QQuickItem const& item) { return item.objectName() == QLatin1String(name); }));
+    };
+
+    // The line is there already: no line is shown, only what the policy change does.
+    clickButton(fx.byName("shellInstallButton:PowerShell"));
+    fx.settle();
+    REQUIRE(dialog->property("visible").toBool());
+    CHECK(dialog->property("heading").toString() == QStringLiteral("Allow scripts in PowerShell?"));
+    CHECK_FALSE(dialogPart("shellInstallLine").isVisible());
+    CHECK(dialogPart("shellInstallNote").isVisible());
+    CHECK(dialog->property("acceptText").toString() == QStringLiteral("Allow Scripts"));
+    QMetaObject::invokeMethod(dialog, "reject");
+    fx.settle();
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("a refused install is reported and the row stays",
           "[contour][gui][qml][settings][shellintegration]")
 {

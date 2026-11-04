@@ -311,13 +311,14 @@ class SettingsController: public QObject
     /// @return The path; empty for no shell, or when the file cannot be named (its row says why).
     Q_INVOKABLE [[nodiscard]] QString shellIntegrationRcPath(int shell) const;
 
-    /// What the confirmation of an install says, in the words of the card's Confirm stage
-    /// (window::CardStageRows).
+    /// What the confirmation of an install says (window::confirmWordsFor()): the words of the card's Confirm
+    /// stage (window::CardStageRows), or for a startup file that loads Contour already but is kept from
+    /// running by an execution policy the user may change, window::PolicyOnlyConfirm.
     /// @param shell A config::ShellKind.
-    /// @return { title, line, note, primary, secondary }: the question naming the file, the line to add, what
-    ///         else the install changes (window::policyNoteFor(), naming the shell by its display name;
-    ///         empty unless the execution policy must be fixed first), and the labels of the accept
-    ///         (window::confirmPrimaryFor()) and reject buttons; empty for no shell.
+    /// @return { title, line, note, primary, secondary }: the question, the line to add (empty when none is
+    ///         added), what else the install changes (the policy note, naming the shell by its display name;
+    ///         empty unless the execution policy must be fixed first), and the labels of the accept and
+    ///         reject buttons; empty for no shell.
     Q_INVOKABLE [[nodiscard]] QVariantMap shellIntegrationConfirm(int shell) const;
 
     /// Adds the shell integration line to @p shell's startup file, once, through the editor the card uses, so
@@ -637,6 +638,11 @@ class SettingsController: public QObject
     ///         an editor, for a shell the host rules out (whose file is not looked at), and for a file that
     ///         could not be inspected.
     [[nodiscard]] config::ProfileScripts profileScripts(config::ShellRow const& shell) const;
+
+    /// @param shell The shell's row.
+    /// @return What @p shell's startup file holds, as the editor finds it; Unknown without an editor, for a
+    ///         shell the host rules out, and for a file that could not be inspected.
+    [[nodiscard]] config::RcState rcState(config::ShellRow const& shell) const;
 
     /// @param shell The shell's row.
     /// @return Its Install row: the host's block alone, without looking at the file, for a shell the host
