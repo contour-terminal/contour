@@ -1156,7 +1156,11 @@ void NativeController::flushGeometry(GeometryFlush scope)
         _geometryFlushScheduled = false;
 
         auto const composed = composedClientArea();
-        // A reconnect or a departure (onPanesReprojected) re-projected every pane: spent once they compose.
+        // A reconnect or a departure (onPanesReprojected) asks for every pane again: spent once they compose.
+        // Spent then even if the layout is only partly laid out -- some panes not yet in _paneSizes, so not
+        // re-sent below. That relies on an invariant: every pane reports its grid at least once after a
+        // reconcile (the resize sink fires as its display is created), so a pane missing here is covered by
+        // its own first report, which is never filtered as unchanged.
         auto const reassert =
             composed.has_value()
             && std::exchange(_geometryReassert, GeometryReassert::Idle) == GeometryReassert::Pending;
