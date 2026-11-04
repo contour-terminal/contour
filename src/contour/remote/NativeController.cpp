@@ -54,14 +54,16 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
                                    std::optional<vtbackend::ColorPreference> colorPreference,
                                    core::platform::IClock const& clock,
                                    vthost::latency::StartupTimeline& timeline,
-                                   core::platform::ISystemPowerMonitor* powerMonitor):
+                                   core::platform::ISystemPowerMonitor* powerMonitor,
+                                   vthost::client::BackoffSchedule backoff):
     RemoteController(clock),
     _transport(std::move(transport)),
     _intent(std::move(intent)),
     _profileName(std::move(profileName)),
     _attachSettings(std::move(attachSettings)),
     _sessionSettings(std::move(sessionSettings)),
-    _timeline(timeline)
+    _timeline(timeline),
+    _backoff(backoff)
 {
     if (colorPreference)
         _statedColors = wireOf(*colorPreference);
@@ -251,7 +253,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
             return makeClient(*loop, std::move(connection), std::move(intent));
         },
         _intent,
-        vthost::client::BackoffSchedule {},
+        _backoff,
         [this](vthost::client::ConnectionState state, std::string const& reason) {
             onConnectionState(state, reason);
         }

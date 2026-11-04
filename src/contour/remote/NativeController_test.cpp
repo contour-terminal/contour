@@ -109,6 +109,8 @@ struct ControllerOptions
     std::optional<vtbackend::Settings> attachSettings = std::nullopt;
     /// Where it hears of system sleep and wake; null for nowhere. It must outlive the controller.
     core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
+    /// How long its reconnects wait after a loss; the production schedule by default.
+    vthost::client::BackoffSchedule backoff = {};
 };
 
 /// Builds a controller as every test here does: no attach settings of its own, on the steady clock.
@@ -129,7 +131,8 @@ struct ControllerOptions
         options.colorPreference,
         core::platform::defaultSteadyClock(),
         timeline.timeline,
-        options.powerMonitor);
+        options.powerMonitor,
+        options.backoff);
 }
 
 /// Captures every log category into one buffer that several threads may write while another
@@ -5110,6 +5113,33 @@ TEST_CASE("a wake while reconnecting retries without ending the reconnect",
 
     daemon.serveAgain();
     CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+
+    controller.stop();
+}
+
+// The reconnect wait is long enough that only a wake can explain a quick reconnect: the negative holds the
+// daemon reachable and sees the controller still waiting, the positive delivers the wake and sees it connect.
+TEST_CASE("a system wake cuts the reconnect backoff short", "[attach][controller][reconnect][power]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto power = core::platform::testing::FakeSystemPowerMonitor {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, { .powerMonitor = &power, .backoff = { .first = 60s, .ceiling = 60s } });
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    daemon.serveAgain(); // reachable again, but the controller is in its 60 s wait
+
+    // Negative: without a wake it keeps waiting.
+    CHECK_FALSE(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 100));
+
+    power.deliver(core::platform::SystemPowerEvent::DidWake);
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 1000));
 
     controller.stop();
 }

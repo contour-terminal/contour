@@ -137,6 +137,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param powerMonitor Where the system's sleep and wake are heard of, so a wake has the daemon probed
     ///        rather than the connection given up; null where nothing reports them. Subscribed to for the
     ///        controller's lifetime. Borrowed: it must outlive the controller.
+    /// @param backoff How long each reconnect waits after a loss; a seam for tests, the production schedule
+    ///        by default.
     NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
                      vthost::proto::AttachIntent intent,
                      std::string profileName,
@@ -145,7 +147,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
                      std::optional<vtbackend::ColorPreference> colorPreference,
                      core::platform::IClock const& clock,
                      vthost::latency::StartupTimeline& timeline,
-                     core::platform::ISystemPowerMonitor* powerMonitor);
+                     core::platform::ISystemPowerMonitor* powerMonitor,
+                     vthost::client::BackoffSchedule backoff = {});
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~NativeController() override;
@@ -764,6 +767,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// This client's profile as it is now, restated before every session this connection creates.
     SessionSettingsSource _sessionSettings;
     vthost::latency::StartupTimeline& _timeline;
+    vthost::client::BackoffSchedule _backoff;
     /// Filled, under _mutex, by the first callback after each accepted connection's ServerHello. @see
     /// negotiated()
     std::optional<vthost::proto::Negotiated> _negotiated;
