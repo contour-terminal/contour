@@ -2357,6 +2357,12 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
     auto departs = std::make_unique<AttachedGui>(daemon);
     for (auto* gui: { &stays, departs.get() })
         requireRealizedSplit(*gui);
+    // Both clients show the same two panes, and the daemon keeps whichever client's grid for one arrived
+    // last: each client's first report (sent as its displays were created) must have landed before the panes
+    // are sized below, or a late one undoes them.
+    drainGuiEvents();
+    for (auto* gui: { &stays, departs.get() })
+        requireDelivered(daemon, *gui, "realized");
 
     // Sizes the panes of @p gui, as its SplitView would, and @return the daemon's sessions behind them.
     auto const showPanes = [](AttachedGui& gui, vtpty::PageSize left, vtpty::PageSize right) {
