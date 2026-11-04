@@ -815,9 +815,14 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     }
     if (handleNotice(frame))
         return;
-    // A probe's echo: noted as life above, which is all it is for.
-    if (std::holds_alternative<proto::Heartbeat>(pdu))
+    // A probe's echo: noted as life above. The latest probe's echo also ends a wake, which a frame
+    // buffered before the sleep must not; an earlier probe's echo may be such a frame.
+    if (auto const* echo = std::get_if<proto::Heartbeat>(&pdu))
+    {
+        if (echo->nonce + 1 == _nextHeartbeatNonce)
+            _liveness.noteProbeAnswered(_loop.clock().now());
         return;
+    }
     // Unknown PDUs are ignored for forward compatibility — but recorded, so a mirror that is
     // quietly missing an update is distinguishable from one that never received it.
     errorLog()(

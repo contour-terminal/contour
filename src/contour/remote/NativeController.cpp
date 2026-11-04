@@ -69,7 +69,8 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
     if (powerMonitor != nullptr)
         _powerSubscription = powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
             // The monitor's dispatch is noexcept, so a throw here would terminate; a hint lost to a failed
-            // post is harmless, since the late-tick check still notices the sleep.
+            // post costs only the hint: on macOS the late liveness tick still reveals the sleep, and where
+            // the steady clock stops during suspend there is no silence to mistake for a loss.
             try
             {
                 _reactor.post([this, event] { notePowerEvent(event); });

@@ -149,8 +149,11 @@ In `vthost::client` (Contour-owned), independent of Part A so it covers the no-n
   was frozen, not that the daemon was silent: it restarts the silence count from `now`, and asks for a
   probe at once (`SendHeartbeat`) instead of `DeclareLost`.
 - **Wake deadline.** While that wake probe is out, the connection is declared lost after
-  `LivenessPolicy::wakeDeadline` (5 s) of further silence, rather than `deadAfter` (15 s). Any inbound
-  frame ends the wake state.
+  `LivenessPolicy::wakeDeadline` (5 s), measured from the wake, rather than `deadAfter` (15 s). Only the
+  wake probe's echo ends the wake state: a frame buffered before the sleep proves nothing.
+- **Which clocks reveal a sleep.** On macOS the steady clock counts the sleep (libc++ reads
+  `CLOCK_MONOTONIC_RAW`), so a late tick reveals it; on Linux and the BSDs it excludes suspend, so there
+  is nothing to detect and no false loss either. A late tick otherwise catches `SIGSTOP` or a VM pause.
 - **The OS hint**, from Part A: `NativeClient` gains `noteSystemSleep()` / `noteSystemWake()`, reactor
   thread only. Sleep stops the liveness tick from deciding (so no verdict can race the wake); wake
   enters the same wake state as a detected late tick and sends the probe immediately. The late-tick

@@ -30,10 +30,18 @@ struct LivenessPolicy
     /// How long it may take to answer the ClientHello. Applies to every daemon, whether or not it shares
     /// Capability::Heartbeat: an old daemon answers the hello too.
     std::chrono::milliseconds handshakeDeadline { DefaultHandshakeDeadline };
-    /// A tick this much later than due means the process was frozen (sleep, VM pause, SIGSTOP).
+    /// A tick this much later than due means the process was frozen. Which freezes that reveals depends on
+    /// the steady clock: on macOS it counts the time the system slept (libc++ reads CLOCK_MONOTONIC_RAW), so
+    /// a sleep shows up as a late tick; on Linux and the BSDs it stops while the system is suspended, so a
+    /// sleep leaves no gap to see -- and no false loss either, the silence not having grown. Everywhere it
+    /// catches a SIGSTOP or a paused VM.
     std::chrono::milliseconds awakeGap { 5000 };
-    /// After a wake, how long the probe may go unanswered before the connection is lost.
+    /// After a wake, how long the wake's probe may go unanswered before the connection is lost.
     std::chrono::milliseconds wakeDeadline { 5000 };
+    /// How long an announced sleep may stay untaken before liveness resumes as if it never came. Beyond the
+    /// 30 s macOS (IOKit) gives an application to acknowledge a sleep, so a system still legitimately going
+    /// to sleep is not mistaken for one that changed its mind.
+    std::chrono::milliseconds announcedSleepGrace { 35000 };
 };
 
 /// What the connection should do now.
@@ -52,32 +60,44 @@ class LivenessTracker
     /// @param policy The thresholds.
     explicit LivenessTracker(LivenessPolicy policy) noexcept: _policy { policy } {}
 
-    /// Any frame from the daemon counts as life, an echo or not, and answers the probe out. It ends a wake
-    /// state; it does not end a sleep.
+    /// Any frame from the daemon counts as life, an echo or not, and answers the probe out -- except while
+    /// waking: a frame read then may have been buffered before the sleep and says nothing about the
+    /// connection now, so only noteProbeAnswered() ends a wake. It does not end a sleep either.
     /// @param at When it arrived.
     void noteInbound(core::platform::SteadyTimePoint at) noexcept
     {
+        if (_phase == Phase::Waking)
+            return;
         _lastInbound = at;
         _probeOutstanding = ProbeState::None;
+    }
+
+    /// The echo of the latest probe arrived: proof the connection carries traffic now, so it ends a wake
+    /// state, and otherwise counts as any inbound frame does.
+    /// @param at When it arrived.
+    void noteProbeAnswered(core::platform::SteadyTimePoint at) noexcept
+    {
         if (_phase == Phase::Waking)
             _phase = Phase::Awake;
+        noteInbound(at);
     }
 
     /// @param at When a Heartbeat was sent (unused but for symmetry with noteInbound: the silence is
-    ///        measured from the last inbound frame, not from the probe).
+    ///        measured from the last inbound frame, or from the wake while waking -- not from the probe).
     void noteProbeSent([[maybe_unused]] core::platform::SteadyTimePoint at) noexcept
     {
         _probeOutstanding = ProbeState::Outstanding;
     }
 
-    /// The tick due at @p due ran at @p now: a late tick enters the wake state; an on-time tick
-    /// awakeGap after noteSleep() leaves the sleep state (a sleep that was announced and never came).
+    /// The tick due at @p due ran at @p now: a tick awakeGap late enters the wake state (@see
+    /// LivenessPolicy::awakeGap for which freezes that reveals); an on-time tick announcedSleepGrace after
+    /// noteSleep() leaves the sleep state (a sleep that was announced and never came).
     /// @param due When the tick was due.
     /// @param now When it ran.
     void noteTick(core::platform::SteadyTimePoint due, core::platform::SteadyTimePoint now) noexcept
     {
         if (now - due >= _policy.awakeGap
-            || (_phase == Phase::Asleep && now - _asleepSince >= _policy.awakeGap))
+            || (_phase == Phase::Asleep && now - _asleepSince >= _policy.announcedSleepGrace))
             noteWake(now);
     }
 
@@ -90,7 +110,7 @@ class LivenessTracker
     }
 
     /// The OS announced a wake, or a late tick showed one: silence restarts at @p at, a probe is due at
-    /// once, and wakeDeadline applies until the daemon speaks.
+    /// once, and wakeDeadline applies, measured from @p at, until noteProbeAnswered().
     /// @param at When the wake happened.
     void noteWake(core::platform::SteadyTimePoint at) noexcept
     {
@@ -138,7 +158,7 @@ class LivenessTracker
     {
         Awake = 0,  ///< Normal operation.
         Asleep = 1, ///< The OS announced a sleep; no verdict until a wake.
-        Waking = 2, ///< A wake was seen; the daemon has yet to speak.
+        Waking = 2, ///< A wake was seen; the daemon has yet to answer the wake's probe.
     };
 
     LivenessPolicy _policy;

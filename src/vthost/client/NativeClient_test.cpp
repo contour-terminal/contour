@@ -2981,6 +2981,20 @@ struct ManualClockAttach
     };
 }
 
+/// @return A script answering the hello with one that shares Heartbeat, then answering every Heartbeat with
+///         an echo of another nonce -- a frame, but not the answer to the probe just sent.
+[[nodiscard]] ScriptFor misechoingAfterHello()
+{
+    return [](proto::DecodedFrame const& frame) -> Script {
+        if (carries<proto::ClientHello>(frame))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
+        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+            return Script { { std::nullopt, proto::Heartbeat { .nonce = heartbeat->nonce + 100 } } };
+        return Script {};
+    };
+}
+
 } // namespace
 
 TEST_CASE("a client whose daemon stops answering ends with a loss reason", "[vthost][attach][liveness]")
@@ -3051,13 +3065,26 @@ TEST_CASE("a daemon gone during a sleep is given up on within the wake deadline"
     h.settle();
 }
 
+TEST_CASE("after a wake only the probe's own echo keeps the connection", "[vthost][attach][liveness]")
+{
+    // Frames keep coming, but none answers the wake's probe: what was read may predate the sleep.
+    auto h = ManualClockAttach { misechoingAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.clock.advance(1000s);
+    h.letTimePass(6);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK(h.client->lossReason() == "no answer from the daemon for 5 s");
+    h.settle();
+}
+
 TEST_CASE("an announced sleep holds the liveness verdict back", "[vthost][attach][liveness]")
 {
     auto h = ManualClockAttach { silentAfterHello() };
     REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
     h.letTimePass(3); // 3 s of silence: short of idleBeforeProbe (5 s)
     h.client->noteSystemSleep();
-    h.letTimePass(3); // 6 s of silence, 3 s asleep: past idleBeforeProbe, short of awakeGap
+    h.letTimePass(3); // 6 s of silence, 3 s asleep: past idleBeforeProbe, short of announcedSleepGrace
 
     CHECK_FALSE(h.clientEnded);
     CHECK_FALSE(std::ranges::any_of(h.seen, carries<proto::Heartbeat>)); // nothing probed while asleep

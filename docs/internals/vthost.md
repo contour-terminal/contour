@@ -1067,6 +1067,17 @@ sent only to a daemon that shares `Capability::Heartbeat`; the `ClientHello` ans
 `handshakeDeadline` (10 s) that applies to every daemon, so an old one that predates heartbeats is still
 not waited on forever.
 
+A sleep is not a loss. The OS announces it through `core::platform::ISystemPowerMonitor`
+(`NativeClient::noteSystemSleep()`/`noteSystemWake()`): while asleep there is no verdict, and the wake
+probes at once and gives the probe `wakeDeadline` (5 s), measured from the wake, to be answered. Only the
+echo of that probe ends the wake state -- any other frame read then may have been buffered before the sleep
+and proves nothing about the connection now. An announced sleep that is never taken lifts after
+`announcedSleepGrace` (35 s, beyond the 30 s IOKit gives an application to acknowledge one). Without a
+monitor only the steady clock can tell: on macOS it counts the sleep, so the first tick after it runs
+`awakeGap` (5 s) late and enters the same wake state; on Linux and the BSDs it stops while the system is
+suspended, so there is nothing to detect and no false loss either. A late tick otherwise catches a
+`SIGSTOP` or a paused VM.
+
 ### Control channel
 
 The daemon's control API (`src/vtcontrol`: windows, tabs, panes and command blocks, named by UUID,

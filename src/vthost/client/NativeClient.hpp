@@ -503,11 +503,13 @@ class NativeClient final
     /// Closes the connection; run() finishes.
     void detach();
 
-    /// The system is about to sleep: no liveness verdict until it wakes. Ignored unless the connection is
+    /// The system is about to sleep: no liveness verdict until it wakes, or until
+    /// LivenessPolicy::announcedSleepGrace passes without the sleep. Ignored unless the connection is
     /// live, negotiated and shares Capability::Heartbeat. Reactor thread only.
     void noteSystemSleep();
 
-    /// The system woke: the daemon is probed now and must answer within LivenessPolicy::wakeDeadline.
+    /// The system woke: the daemon is probed now and must echo that probe within
+    /// LivenessPolicy::wakeDeadline.
     /// Ignored unless the connection is live, negotiated and shares Capability::Heartbeat. Reactor thread
     /// only.
     void noteSystemWake();
