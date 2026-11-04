@@ -156,6 +156,10 @@ TEST_CASE("offerFor.everyFieldFlippedOnceGivesNone", "[shellintegration]")
     slot.slot = CardSlot::Taken;
     CHECK(offerFor(slot) == ShellIntegrationOffer::None);
 
+    auto scripts = AllYes;
+    scripts.scripts = ProfileScripts::BlockedByGroupPolicy;
+    CHECK(offerFor(scripts) == ShellIntegrationOffer::None);
+
     CHECK(offerFor({}) == ShellIntegrationOffer::None);
 }
 
@@ -221,6 +225,16 @@ TEST_CASE("installBlockOf.windowsThenAnUnreachableBinary", "[shellintegration]")
           == InstallBlock::NotOnWindows);
     for (auto const& row: InstallBlockRows)
         CHECK((row.block == InstallBlock::None) == row.text.empty());
+}
+
+TEST_CASE("installBlockOf.anUnreachableBinaryOutranksThePolicy", "[shellintegration]")
+{
+    auto const& pwsh = *shellRow(ShellKind::Pwsh);
+    CHECK(installBlockOf(
+              pwsh, HostPlatform::Windows, BinaryReach::Unreachable, ProfileScripts::BlockedByGroupPolicy)
+          == InstallBlock::BinaryUnreachable);
+    CHECK(installBlockOf(pwsh, HostPlatform::Windows, BinaryReach::Unreachable, ProfileScripts::SignedOnly)
+          == InstallBlock::BinaryUnreachable);
 }
 
 TEST_CASE("shellRcLine.quotesThePathForTheShellsSyntax", "[shellintegration]")
@@ -399,4 +413,14 @@ TEST_CASE("displayRcPath.abbreviatesHome", "[shellintegration]")
     CHECK(displayRcPath("/etc/zshrc", "/Users/me") == "/etc/zshrc");
     CHECK(displayRcPath("/Users/me2/.zshrc", "/Users/me") == "/Users/me2/.zshrc");
     CHECK(displayRcPath("/Users/me/.zshrc", "") == "/Users/me/.zshrc");
+}
+
+TEST_CASE("displayRcPath.speaksUtf8", "[shellintegration]")
+{
+    auto const home = std::filesystem::path { std::u8string_view { u8"/Users/Müller" } };
+    CHECK(displayRcPath(home / "Documents/PowerShell/profile.ps1", home)
+          == "~/Documents/PowerShell/profile.ps1");
+    CHECK(displayRcPath(home / std::u8string_view { u8"ä.ps1" }, home) == "~/\xC3\xA4.ps1");
+    CHECK(displayRcPath(std::filesystem::path { std::u8string_view { u8"/etc/ärc" } }, home)
+          == "/etc/\xC3\xA4rc");
 }

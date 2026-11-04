@@ -204,6 +204,9 @@ struct ShellLaunch
     std::string probeDirectory = "cd probe* && cd ..";
     /// Variables set for the shell beyond those of isolatedEnvironment(), overriding userShellSettings().
     vtpty::Process::Environment environment {};
+    /// Symbolic links made in HOME before the shell starts: each relative path, and the absolute path it
+    /// points to.
+    std::vector<std::pair<std::string, std::filesystem::path>> homeLinks {};
 };
 
 /// @return Every shell the integration scripts target, and how each is started here.
@@ -497,6 +500,12 @@ class ShellSession
         REQUIRE(script.has_value());
         writeFile(home / launch.scriptFile, *script);
         writeFile(home / launch.startupFile, substitute(launch.startupText));
+        for (auto const& [link, target]: launch.homeLinks)
+        {
+            auto const path = home.path() / core::pathFromTrustedUtf8(link);
+            std::filesystem::create_directories(path.parent_path());
+            std::filesystem::create_symlink(target, path);
+        }
 
         // The path found, as a user's configuration names it -- on Windows a path with a space in it,
         // "C:\Program Files\PowerShell\7\pwsh.exe".
@@ -1271,13 +1280,32 @@ namespace
     return binary;
 }
 
-/// @return @p text with its ASCII letters in lower case.
-[[nodiscard]] std::string asciiLowerCase(std::string_view text)
+/// @return How @p shell is started with @p rcLine as its only start-up line: PSReadLine kept away from the
+///         user's history file, and a prompt short enough for one line, come from the command line.
+[[nodiscard]] ShellLaunch profileLineLaunch(std::string_view shell, std::string const& rcLine)
 {
-    return std::ranges::to<std::string>(text | std::views::transform([](char c) {
-                                            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a')
-                                                                        : c;
-                                        }));
+    auto launch = launchFor(shell);
+    launch.startupText = rcLine + "\n";
+    launch.arguments.back() =
+        "Set-PSReadLineOption -HistorySaveStyle SaveNothing; function prompt { 'PS> ' }; "
+        + launch.arguments.back();
+    return launch;
+}
+
+/// Starts @p launch inside Contour and checks that its profile line loaded the integration once: the
+/// prompt is marked, and a command makes exactly one command block.
+void checkProfileLineInsideContour(ShellLaunch launch)
+{
+    launch.environment = { { "TERM_PROGRAM", "contour" } };
+    auto const session = start(launch);
+    awaitFirstPromptEnd(*session);
+    CHECK(kindsOf(osc133Marks(session->transcript())).contains('A'));
+    launch.command = "Write-Output ok";
+    checkCommandCycle(*session, launch);
+    auto const finished = std::ranges::count(session->terminal().terminal.commandBlocks().records(),
+                                             vtbackend::CommandBlockState::Finished,
+                                             &vtbackend::CommandBlockRecord::state);
+    CHECK(finished == 1);
 }
 
 } // namespace
@@ -1428,24 +1456,11 @@ TEST_CASE("ShellIntegrationShells.profileLine", "[shell-integration][shells][pws
     auto const binary = contourBinary();
     auto const rcLine = contour::window::shellRcLine(powershell.kind, binary);
     REQUIRE(rcLine.has_value());
-
-    auto launch = launchFor(powershell.key);
-    launch.startupText = *rcLine + "\n";
-    // PSReadLine kept away from the user's history file, and a prompt short enough for one line, from the
-    // command line: the file holds the line only.
-    launch.arguments.back() =
-        "Set-PSReadLineOption -HistorySaveStyle SaveNothing; function prompt { 'PS> ' }; "
-        + launch.arguments.back();
+    auto launch = profileLineLaunch(powershell.key, *rcLine);
 
     SECTION("inside Contour")
     {
-        launch.environment = { { "TERM_PROGRAM", "contour" } };
-        auto const session = start(launch);
-        awaitFirstPromptEnd(*session);
-        CHECK(kindsOf(osc133Marks(session->transcript())).contains('A'));
-        auto echo = launch;
-        echo.command = "Write-Output ok";
-        checkCommandCycle(*session, echo);
+        checkProfileLineInsideContour(launch);
     }
 
     SECTION("outside Contour")
@@ -1460,8 +1475,33 @@ TEST_CASE("ShellIntegrationShells.profileLine", "[shell-integration][shells][pws
         auto const& transcript = session->transcript();
         INFO("what the shell wrote: " << core::escape(transcript));
         CHECK(osc133Marks(transcript).empty());
-        auto const lowered = asciiLowerCase(transcript);
-        CHECK_FALSE(lowered.contains("exception"));
-        CHECK_FALSE(lowered.contains("error"));
+        // What PowerShell says when a profile line fails: a script it may not load, a command it does not
+        // know, the record under every error it prints, and a line it cannot parse.
+        for (auto const failure:
+             { "cannot be loaded"sv, "is not recognized"sv, "CategoryInfo"sv, "ParserError"sv })
+            CHECK_FALSE(transcript.contains(failure));
     }
 }
+
+#ifndef _WIN32
+TEST_CASE("ShellIntegrationShells.profileLine.apostrophe", "[shell-integration][shells][pwsh]")
+{
+    // The line quotes the binary's path for PowerShell, so it runs from a directory whose name has an
+    // apostrophe in it, as one named after its owner may. Reached through a symbolic link in such a
+    // directory under the shell's HOME, which is not known before the shell starts: the line is made for a
+    // stand-in HOME, which ${HOME} then replaces.
+    auto const powershell = GENERATE(Catch::Generators::from_range(PowerShellRows));
+    INFO("PowerShell: " << powershell.key);
+    auto const binary = contourBinary();
+    constexpr auto StandInHome = "/contour-stand-in-home"sv;
+    auto rcLine =
+        contour::window::shellRcLine(powershell.kind, std::format("{}/O'Brien/contour", StandInHome));
+    REQUIRE(rcLine.has_value());
+    REQUIRE(rcLine->contains("O''Brien"));
+    rcLine->replace(rcLine->find(StandInHome), StandInHome.size(), "${HOME}");
+
+    auto launch = profileLineLaunch(powershell.key, *rcLine);
+    launch.homeLinks = { { "O'Brien/contour", std::filesystem::absolute(binary) } };
+    checkProfileLineInsideContour(launch);
+}
+#endif

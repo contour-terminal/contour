@@ -4096,7 +4096,10 @@ void TerminalSession::showShellIntegrationCard(config::ShellKind shell,
     _shellCard = ShellIntegrationCardState {
         .stage = window::CardStage::Offer,
         .shell = shell,
-        .rcDisplay = window::displayRcPath(rcFile, _manager != nullptr ? _manager->homeDirectory() : ""),
+        .rcDisplay =
+            window::displayRcPath(rcFile,
+                                  _manager != nullptr ? core::pathFromTrustedUtf8(_manager->homeDirectory())
+                                                      : std::filesystem::path {}),
         .line = std::move(line),
         .error = {},
         .scripts = scripts,

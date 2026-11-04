@@ -997,7 +997,7 @@ std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManage
     auto const shellName = row != nullptr ? row->displayName : std::string_view {};
     auto rc = std::string { shellName };
     if (auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session)))
-        rc = window::displayRcPath(inspection->file, _homeDirectory);
+        rc = window::displayRcPath(inspection->file, core::pathFromTrustedUtf8(_homeDirectory));
 
     if (installed)
         postNotice(

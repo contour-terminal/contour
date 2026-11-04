@@ -34,6 +34,9 @@ TEST_CASE("RcText.decode", "[shellrc]")
                         "a\0b\0"sv,
                .encoding = RcEncoding::Utf16LeBom,
                .utf8 = "ab"sv },
+        // A byte order mark alone: an empty file that still says how it is encoded.
+        Case { .bytes = "\xEF\xBB\xBF"sv, .encoding = RcEncoding::Utf8Bom, .utf8 = ""sv },
+        Case { .bytes = "\xFF\xFE"sv, .encoding = RcEncoding::Utf16LeBom, .utf8 = ""sv },
         Case { .bytes = "\xFF\xFE\xFC\x00"sv, .encoding = RcEncoding::Utf16LeBom, .utf8 = "\xC3\xBC"sv },
         Case { .bytes = "\xFF\xFE\xAC\x20"sv, .encoding = RcEncoding::Utf16LeBom, .utf8 = "\xE2\x82\xAC"sv },
         // U+1F600 as the surrogate pair D83D DE00.

@@ -471,9 +471,16 @@ namespace detail
     {
         auto const relative = rc.lexically_relative(home);
         if (!relative.empty() && *relative.begin() != "..")
-            return "~/" + relative.generic_string();
+        {
+            // The generic form, in UTF-8: `~/` reads with forward slashes on every host.
+            auto text = core::pathToUtf8(relative);
+            if constexpr (std::filesystem::path::preferred_separator != '/')
+                std::ranges::replace(
+                    text, static_cast<char>(std::filesystem::path::preferred_separator), '/');
+            return "~/" + text;
+        }
     }
-    return rc.string();
+    return core::pathToUtf8(rc);
 }
 
 } // namespace contour::window

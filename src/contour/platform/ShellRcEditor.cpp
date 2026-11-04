@@ -2,6 +2,8 @@
 #include <contour/platform/RcText.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 
+#include <core/log/LogStore.hpp>
+
 #ifndef _WIN32
     #include <unistd.h>
 #endif
@@ -224,7 +226,14 @@ namespace
             case config::ProfileScripts::Run: return {};
             case config::ProfileScripts::NeedUserPolicy:
                 return executionPolicy.allowUserScripts(shell).transform_error(
-                    [](std::string const& /*reason*/) { return ShellRcError::PolicyUnchanged; });
+                    [shell](std::string const& reason) {
+                        // The error names no reason, so the user's words stay short; the log keeps it.
+                        auto const* const row = config::shellRow(shell);
+                        errorLog()("Could not let {}'s profile run: {}",
+                                   row != nullptr ? row->displayName : std::string_view { "the shell" },
+                                   reason);
+                        return ShellRcError::PolicyUnchanged;
+                    });
             case config::ProfileScripts::BlockedByGroupPolicy:
             case config::ProfileScripts::SignedOnly: break;
         }

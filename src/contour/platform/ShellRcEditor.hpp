@@ -51,7 +51,7 @@ enum class ShellRcError : uint8_t
                  ///< the non-ASCII characters of Contour's line.
     PolicyUnchanged, ///< The execution policy that keeps the profile from running could not be changed; the
                      ///< file is as it was.
-    PolicyBlocked, ///< The execution policy keeps the profile from running and Contour may not change it.
+    PolicyBlocked,   ///< The execution policy keeps the profile from running and Contour may not change it.
 };
 
 /// @param error The failure.
@@ -238,8 +238,9 @@ class NullShellRcEditor final: public IShellRcEditor
 ///         config::ShellRcMarker, which is what an append cut short by a full disk leaves behind; a user's
 ///         own unterminated last line is never that, not even one that opens with the same guard.
 ///         Else Installed when the file holds config::ShellRcMarker, or a line that is not a comment and
-///         either runs `generate integration shell <name>` or sources `shell-integration.<name>`;
-///         else Absent.
+///         either runs `generate integration shell <name>` or sources `shell-integration.<name>`, or, for
+///         either PowerShell, dot-sources one of its manual installs: `shell-integration.pwsh`,
+///         `shell-integration.ps1` or `contour-integration.ps1`; else Absent.
 [[nodiscard]] config::RcState rcStateOf(config::ShellKind shell, std::string_view content);
 
 /// The editor over a real (or injected) file system.

@@ -3511,7 +3511,7 @@ window::SettingsController& ContourGuiApp::settingsController()
                 .shell = { .editor = _shellRcEditor.get(),
                            .contourBinary = [this] { return locatedContourBinary(); },
                            .host = _shellHostPlatform,
-                           .homeDirectory = std::filesystem::path { QDir::homePath().toStdString() } },
+                           .homeDirectory = core::pathFromTrustedUtf8(QDir::homePath().toStdString()) },
                 .menuBar = _menuBarPlacement,
                 // A host page's Attach runs as the menu bar's commands do: in the window the app would use.
                 .runAction =
