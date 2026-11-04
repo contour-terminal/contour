@@ -47,7 +47,8 @@ uint64_t ImageTableBuilder::rasterizedIndexOf(RasterizedImage const& raster)
                                       .cellSize = raster.cellSize(),
                                       .layer = raster.layer(),
                                       .offset = raster.imageOffset(),
-                                      .subSize = raster.imageSubSize() });
+                                      .subSize = raster.imageSubSize(),
+                                      .kittyPlacementId = raster.kittyPlacementId() });
     return it->second;
 }
 
@@ -103,7 +104,8 @@ std::expected<RestoredImageTable, StateDecodeError> RestoredImageTable::build(Im
                                                                raster.cellSize,
                                                                raster.layer,
                                                                raster.offset,
-                                                               raster.subSize));
+                                                               raster.subSize,
+                                                               raster.kittyPlacementId));
 
     auto fragments = std::vector<std::shared_ptr<ImageFragment>> {};
     fragments.reserve(table.fragments.size());

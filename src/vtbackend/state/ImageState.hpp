@@ -55,6 +55,7 @@ struct RasterizedImageState
     ImageLayer layer = ImageLayer::Replace;              ///< @see RasterizedImage::layer
     PixelCoordinate offset {};                           ///< @see RasterizedImage::imageOffset
     ImageSize subSize {};                                ///< @see RasterizedImage::imageSubSize
+    KittyPlacementId kittyPlacementId {};                ///< @see RasterizedImage::kittyPlacementId
 
     [[nodiscard]] bool operator==(RasterizedImageState const& other) const noexcept
     {
@@ -62,7 +63,8 @@ struct RasterizedImageState
                && defaultColor.value == other.defaultColor.value && cellSpan.lines == other.cellSpan.lines
                && cellSpan.columns == other.cellSpan.columns && cellSize == other.cellSize
                && layer == other.layer && offset.x.value == other.offset.x.value
-               && offset.y.value == other.offset.y.value && subSize == other.subSize;
+               && offset.y.value == other.offset.y.value && subSize == other.subSize
+               && kittyPlacementId == other.kittyPlacementId;
     }
 
     /// Lists the fields for the state codec.
@@ -79,6 +81,7 @@ struct RasterizedImageState
         visitor(9, self.offset.x.value);
         visitor(10, self.offset.y.value);
         visitor(11, self.subSize);
+        visitor(12, self.kittyPlacementId);
     }
 };
 

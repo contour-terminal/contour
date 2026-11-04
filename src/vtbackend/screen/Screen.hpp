@@ -413,8 +413,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return decoded bytes held by the kitty image stored under @p imageId and its animation frames.
     [[nodiscard]] size_t storedKittyBytesOf(uint32_t imageId) const;
 
-    /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold.
+    /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold. Walks
+    /// the page only.
     void removeKittyPlacementsOf(uint32_t imageId);
+
+    /// Clears the fragments of the one placement of @p imageId made with @p placementId, page and
+    /// scrollback alike, whichever of the image's frames the cells hold.
+    void removeKittyPlacementOf(uint32_t imageId, KittyPlacementId placementId);
+
+    /// @return whether any fragment of @p imageId, whichever of its frames, is left on the page or in
+    ///         the scrollback. Stops at the first one; it is no walk in the sense of kittyFragmentWalks().
+    [[nodiscard]] bool hasKittyPlacementOf(uint32_t imageId);
 
     /// Validates the transmission parameters of @p command against what this terminal implements.
     /// @return the wire status to answer with, or nullopt when the command is acceptable.
@@ -436,13 +445,21 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// always has.
     void removeAllKittyPlacements();
 
-    /// Calls @p update on every cell of the page holding an image fragment that @p selects, and
+    /// How much of the grid a walk for image fragments covers.
+    enum class KittyScan : uint8_t
+    {
+        PageOnly,       ///< The visible page: what every walk costs unless a placement id asks for more.
+        PageAndHistory, ///< The scrollback as well, where a placement scrolled off still lives.
+    };
+
+    /// Calls @p update on every cell of @p scan holding an image fragment that @p selects, and
     /// marks the cell dirty.
     ///
     /// Placements are not tracked separately: a placement IS the image fragments in the cells it
-    /// covers, so every operation on one is a walk of the page.
+    /// covers, so every operation on one is a walk of the grid.
     void updateKittyFragments(std::predicate<ImageFragment const&> auto const& selects,
-                              std::invocable<CellProxy&, ImageFragment const&> auto const& update);
+                              std::invocable<CellProxy&, ImageFragment const&> auto const& update,
+                              KittyScan scan);
 
     /// Drops all kitty graphics and clipboard protocol state. Called on RIS, which must not leave a
     /// half-open transmission for the next application to inherit.
@@ -764,6 +781,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
      * the page's last line), and only the final placement of the cursor depends on the policy.
      * @p cursorPolicy where the text cursor goes once the image is placed.
      * @p layer whether the image is drawn below, above, or in place of the cells' text.
+     * @p kittyPlacementId the kitty placement id (`p=`) to stamp on the placement; zero for none.
      */
     void renderImage(std::shared_ptr<Image const> image,
                      CellLocation topLeft,
@@ -774,7 +792,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                      ImageResize resizePolicy,
                      bool autoScroll,
                      ImageCursorPolicy cursorPolicy,
-                     ImageLayer layer = ImageLayer::Replace);
+                     ImageLayer layer = ImageLayer::Replace,
+                     KittyPlacementId kittyPlacementId = {});
 
     /// Renders a previously uploaded named image onto the grid at the current cursor position.
     void renderImageByName(std::string const& name,
