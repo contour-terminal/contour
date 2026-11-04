@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <format>
 #include <functional>
 #include <future>
@@ -30,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -46,6 +48,7 @@
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vthost/CommandBlockWire.hpp>
+#include <vthost/DaemonControlWire.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/HostIdentity.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -76,6 +79,7 @@ using vtbackend::test::recordIds;
 using vtbackend::test::reportedOutputStart;
 using vthost::NativeSession;
 using vthost::SessionHost;
+using vthost::testing::eventually;
 using vthost::testing::newSession;
 namespace proto = vthost::proto;
 
@@ -336,6 +340,9 @@ struct HarnessOptions
     ControlServing control = ControlServing::Null;
     /// The ControlService's reply cap, when it serves one.
     std::size_t maxReplyBytes = std::size_t { 1 } * 1024 * 1024;
+    /// The endpoint the connection was accepted on, as its ConnectionId says ("native-tcp" for a network
+    /// one).
+    std::string endpoint = "test";
 };
 
 /// @param options What the harness is built with.
@@ -417,7 +424,7 @@ struct NativeHarness
                                                           .maxReplyBytes = options.maxReplyBytes })
             : nullptr;
     std::unique_ptr<NativeSession> session =
-        makeSession(pair, vthost::ConnectionId { .endpoint = "test", .index = 1 });
+        makeSession(pair, vthost::ConnectionId { .endpoint = options.endpoint, .index = 1 });
 
     /// @return A connection of this harness's host over @p connection, with its services and its control API.
     [[nodiscard]] std::unique_ptr<NativeSession> makeSession(core::net::testing::SocketPair& connection,
@@ -561,19 +568,6 @@ struct StalledExchange
     exchanged.set_value();
     watchdog.join();
     return { .answered = answered, .received = std::move(received) };
-}
-
-/// Waits up to five seconds for @p done to hold, as what a pump does on its own thread comes to pass.
-/// @return Whether it held by then.
-[[nodiscard]] bool eventually(std::function<bool()> const& done)
-{
-    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
-    {
-        if (done())
-            return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
-    }
-    return done();
 }
 
 /// Waits up to five seconds for what @p pty was written to satisfy @p done, as a pump writes it on its own
@@ -7012,4 +7006,199 @@ TEST_CASE("a MoveNode the model refuses answers with the model's reason too",
     auto const& refused = std::get<proto::MoveNodeRefused>(refusal->pdu);
     CHECK(refused.reason == std::to_underlying(vthost::NodeMoveError::Model));
     CHECK(refused.modelReason == std::to_underlying(vtworkspace::MoveError::SelfTarget));
+}
+
+namespace
+{
+
+/// @return Options whose daemon offers Capability::LiveUpgrade, on the local "control" endpoint.
+[[nodiscard]] HarnessOptions upgradeOptions(vthost::testing::FakeDaemonControl& daemon)
+{
+    auto options = HarnessOptions { .services = { .daemon = daemon }, .endpoint = "control" };
+    options.services.handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::LiveUpgrade });
+    return options;
+}
+
+/// @param role What the connection is for.
+/// @return A hello offering Capability::LiveUpgrade.
+[[nodiscard]] proto::ClientHello upgradeHello(proto::ConnectionRole role = proto::ConnectionRole::Control)
+{
+    return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::LiveUpgrade }),
+                                .role = role };
+}
+
+/// @return Whether @p frame is an UpgradeDaemonReply.
+[[nodiscard]] bool isUpgradeReply(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::UpgradeDaemonReply>(frame.pdu);
+}
+
+/// @return Whether @p got holds a DaemonUpgrading.
+[[nodiscard]] bool upgradeAnnounced(std::vector<proto::DecodedFrame> const& got)
+{
+    return std::ranges::any_of(
+        got, [](auto const& frame) { return std::holds_alternative<proto::DaemonUpgrading>(frame.pdu); });
+}
+
+} // namespace
+
+TEST_CASE("UpgradeDaemon over TCP is refused", "[vthost][native][upgrade]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome = {};
+    auto options = upgradeOptions(daemon);
+    options.endpoint = "native-tcp";
+    auto h = NativeHarness { options };
+    auto const got = h.exchange({ upgradeHello(), proto::UpgradeDaemon { .imageId = "x" } }, 2);
+    REQUIRE(got.size() == 2);
+    REQUIRE(isUpgradeReply(got[1]));
+    CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu)
+          == proto::UpgradeDaemonReply {
+              .result =
+                  static_cast<uint8_t>(std::to_underlying(vthost::handover::UpgradeRefusal::LocalOnly) + 1),
+              .detail = "live upgrade is local only" });
+    CHECK(daemon.upgrades.empty());
+}
+
+TEST_CASE("UpgradeDaemon needs the capability and the write grant", "[vthost][native][upgrade]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome = {};
+    SECTION("a peer that did not negotiate it is answered Unsupported")
+    {
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchange(
+            { proto::ClientHello { .role = proto::ConnectionRole::Control }, proto::UpgradeDaemon {} }, 2);
+        REQUIRE(got.size() == 2);
+        CHECK(std::get<proto::Unsupported>(got[1].pdu).ident
+              == std::to_underlying(proto::PduType::UpgradeDaemon));
+        CHECK(daemon.upgrades.empty());
+    }
+    SECTION("a token without write is answered Unsupported")
+    {
+        auto options = narrowTokenOptions();
+        options.services.daemon = daemon;
+        options.services.handshake.capabilities =
+            proto::CapabilitySet::of({ proto::Capability::LiveUpgrade, proto::Capability::ControlApi });
+        options.endpoint = "control";
+        auto h = NativeHarness { options };
+        auto hello = upgradeHello();
+        hello.token = "ro";
+        hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::ControlApi));
+        auto const got = h.exchange({ hello, proto::UpgradeDaemon {} }, 2);
+        REQUIRE(got.size() == 2);
+        CHECK(std::get<proto::Unsupported>(got[1].pdu).ident
+              == std::to_underlying(proto::PduType::UpgradeDaemon));
+        CHECK(daemon.upgrades.empty());
+    }
+}
+
+TEST_CASE("a refused UpgradeDaemon is answered with the refusal", "[vthost][native][upgrade]")
+{
+    using vthost::handover::ExecFailure;
+    using vthost::handover::UpgradeError;
+    using vthost::handover::UpgradeRefusal;
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    SECTION("a second request during an upgrade is refused with InProgress")
+    {
+        daemon.upgradeOutcome = std::unexpected(UpgradeError { UpgradeRefusal::InProgress });
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchange({ upgradeHello(), proto::UpgradeDaemon { .imageId = "0.9.0-a" } }, 2);
+        REQUIRE(got.size() == 2);
+        REQUIRE(isUpgradeReply(got[1]));
+        CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu).result == 1);
+        CHECK(vthost::upgradeRefusalFrom(std::get<proto::UpgradeDaemonReply>(got[1].pdu).result)
+              == UpgradeRefusal::InProgress);
+        CHECK(daemon.upgrades == std::vector<std::string> { "0.9.0-a" });
+    }
+    SECTION("an exec failure is told apart from a refusal")
+    {
+        daemon.upgradeOutcome = std::unexpected(UpgradeError {
+            ExecFailure { .cause = std::make_error_code(std::errc::no_such_file_or_directory) } });
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchange({ upgradeHello(), proto::UpgradeDaemon {} }, 2);
+        REQUIRE(got.size() == 2);
+        REQUIRE(isUpgradeReply(got[1]));
+        CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu).result
+              == proto::UpgradeDaemonReply::ExecFailedResult);
+        CHECK_FALSE(std::get<proto::UpgradeDaemonReply>(got[1].pdu).detail.empty());
+    }
+    SECTION("an upgrade that failed by an exception is answered as an exec failure")
+    {
+        daemon.upgradeThrows = std::make_exception_ptr(std::bad_alloc {});
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchange({ upgradeHello(), proto::UpgradeDaemon {} }, 2);
+        REQUIRE(got.size() == 2);
+        REQUIRE(isUpgradeReply(got[1]));
+        CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu)
+              == proto::UpgradeDaemonReply {
+                  .result = proto::UpgradeDaemonReply::ExecFailedResult,
+                  .detail = std::make_error_code(std::errc::not_enough_memory).message() });
+    }
+    SECTION("an upgrade that failed by a non-std exception is answered as an exec failure too")
+    {
+        daemon.upgradeThrows = std::make_exception_ptr(42);
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchange({ upgradeHello(), proto::UpgradeDaemon {} }, 2);
+        REQUIRE(got.size() == 2);
+        REQUIRE(isUpgradeReply(got[1]));
+        CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu).result
+              == proto::UpgradeDaemonReply::ExecFailedResult);
+    }
+}
+
+namespace
+{
+/// Once the hello is answered: closes every upgrade observer's connection at once.
+Task<void> abortOnceHello(NativeHarness* h, vthost::testing::FakeDaemonControl* daemon)
+{
+    co_await awaitGate(&h->loop, holdsFrames(&h->received, 1));
+    daemon->abortObservers();
+}
+} // namespace
+
+TEST_CASE("an upgrade's abort ends a connection at once", "[vthost][native][upgrade]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { upgradeOptions(daemon) };
+    // Collects until the connection ends; run() ends with it, or this never returns.
+    auto const got = h.exchangeUntil(
+        { upgradeHello(proto::ConnectionRole::Attach) },
+        [](auto const&) { return false; },
+        abortOnceHello(&h, &daemon));
+    REQUIRE_FALSE(got.empty());
+    CHECK(std::holds_alternative<proto::ServerHello>(got.front().pdu));
+    // run() ended: it no longer observes the daemon's upgrades.
+    CHECK(daemon.observers.empty());
+}
+
+TEST_CASE("every client receives DaemonUpgrading before its connection closes", "[vthost][native][upgrade]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    daemon.upgradeOutcome = {};
+    SECTION("the requester is answered first, then told, then closed")
+    {
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        // run() ends with the connection: the exchange returning is the close.
+        auto const got = h.exchangeUntil({ upgradeHello(), proto::UpgradeDaemon { .imageId = "0.9.0-a" } },
+                                         upgradeAnnounced);
+        REQUIRE(got.size() == 3);
+        CHECK(std::holds_alternative<proto::ServerHello>(got[0].pdu));
+        REQUIRE(isUpgradeReply(got[1]));
+        CHECK(std::get<proto::UpgradeDaemonReply>(got[1].pdu).result == 0);
+        CHECK(got[1].serial == 2);
+        REQUIRE(std::holds_alternative<proto::DaemonUpgrading>(got[2].pdu));
+        CHECK(std::get<proto::DaemonUpgrading>(got[2].pdu).toRelease == "9.9.10");
+        CHECK(h.session->phase() == NativeSession::ConnectionPhase::Controlling);
+    }
+    SECTION("an attached client is told as well, and its connection ends")
+    {
+        auto h = NativeHarness { upgradeOptions(daemon) };
+        auto const got = h.exchangeUntil(
+            { upgradeHello(proto::ConnectionRole::Attach), proto::UpgradeDaemon {} }, upgradeAnnounced);
+        CHECK(upgradeAnnounced(got));
+        // run() ended with the connection: the session is the host's client no longer once it is let go.
+        h.session.reset();
+        CHECK(h.host.connectedClients() == 0);
+    }
 }

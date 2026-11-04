@@ -171,6 +171,11 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
     /// @param disposition What the last snapshot holds.
     void finalize(ShutdownWorkspace disposition);
 
+    /// Writes the live workspace now and blocks until it is on disk, whatever the schedule says. Unlike
+    /// finalize() it seals nothing: later events keep being written, which is what a daemon whose live
+    /// upgrade failed needs. Loop thread only. Ignored once finalize() ran.
+    void writeNow();
+
     // SessionStreamEvents
     [[nodiscard]] bool mirrorsScreens() const noexcept override { return false; }
     void sessionScreenUpdated(vtworkspace::SessionId session) override;
@@ -289,6 +294,10 @@ class DaemonPersistence
     /// thread only; a second call does nothing.
     /// @param cause What ends the daemon.
     void finalize(ShutdownCause cause) { _persistence.finalize(workspaceFor(cause)); }
+
+    /// Writes the live workspace now and blocks until it is on disk, sealing nothing (@see
+    /// WorkspacePersistence::writeNow). Loop thread only.
+    void writeNow() { _persistence.writeNow(); }
 
   private:
     SnapshotWriter _writer;

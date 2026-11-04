@@ -161,8 +161,18 @@ class Pty
     ///
     /// @param buf      Buffer of data to be written.
     ///
-    /// @returns Number of bytes written or -1 on error.
+    /// @returns Number of bytes written or -1 on error. Less than asked, with `errno` EINTR, where
+    ///          interruptWrites() had the write stop rather than wait for the other end to read.
     [[nodiscard]] virtual int write(std::string_view buf) = 0;
+
+    /// Has a write() in progress, and every later one until allowWrites(), return what it wrote so far
+    /// rather than wait for the other end to read: a live upgrade stops the writer of a program that reads
+    /// nothing this way. Any thread. A device whose writes never wait for the other end does nothing.
+    virtual void interruptWrites() {}
+
+    /// Ends interruptWrites(): writes wait for the other end to read again. Called with no write in
+    /// progress.
+    virtual void allowWrites() {}
 
     /// @returns current underlying window size in characters width and height.
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;

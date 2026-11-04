@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/ContextId.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 
 #include <core/Flags.hpp>
 
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <format>
 #include <memory>
 #include <optional>
@@ -737,9 +739,24 @@ struct EffectiveWorkingDirectory
 /// ancestry may be EMPTY: before the first `start=`, and after the last context is ended. There is no
 /// terminal-owned bottom entry, because unlike a pointer shape there is nothing the terminal could
 /// truthfully say about the application's process tree on its own.
+struct ContextStackState;
+
 class ContextStack
 {
   public:
+    /// @return The ancestry, every retained record and the counters. Defined in state/ShellState.cpp.
+    [[nodiscard]] ContextStackState captureState() const;
+
+    /// Replaces the stack's contents with @p state; the limits are the configured ones. Defined in
+    /// state/ShellState.cpp.
+    /// @return Nothing, or InvalidValue when the ancestry or the creation order names a record the state
+    ///         does not hold, or one twice.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(ContextStackState const& state);
+
+    /// @return Nothing, or InvalidValue when @p state is not a stack this one can be: a null or repeated id,
+    ///         a chain naming a context it lacks, more contexts than the limits keep.
+    [[nodiscard]] std::expected<void, StateDecodeError> validateState(ContextStackState const& state) const;
+
     /// One level of the ancestry.
     struct Entry
     {

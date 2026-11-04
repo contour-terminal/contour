@@ -1,0 +1,145 @@
+line 01 of the golden session           
+line 02 of the golden session           
+line 03 of the golden session           
+line 04 of the golden session           
+line 05 of the golden session           
+line 06 of the golden session           
+line 07 of the golden session           
+line 08 of the golden session           
+line 09 of the golden session           
+line 10 of the golden session           
+----
+line 11 of the golden session           
+line 12 of the golden session           
+                                        
+                                        
+a link and text                         
+last line, then a CSI left open         
+---- probes
+\x1B[c -> \x1B[?65;1;3;4;7;9;18;21;22;29;52;90;314c
+\x1B[>c -> \x1B[>65;900;0c
+\x1B[=c -> \x1BP!|C0000000\x1B\
+\x1B[6n -> \x1B[6;32R
+\x1B[?6n -> \x1B[?6;32;1R
+\x1BP$qr\x1B\ -> \x1BP1$r1;6r\x1B\
+\x1BP$qs\x1B\ -> \x1BP1$r1;40s\x1B\
+\x1BP$qm\x1B\ -> \x1BP1$r0m\x1B\
+\x1BP$q q\x1B\ -> \x1BP1$r2 q\x1B\
+\x1BP$q"p\x1B\ -> \x1BP1$r65;1"p\x1B\
+\x1BP$q"q\x1B\ -> \x1BP1$r2"q\x1B\
+\x1BP$q*x\x1B\ -> \x1BP1$r2*x\x1B\
+\x1B[1$w -> \x1BP1$u6;32;1;@;@;@;0;2;@;BBBB\x1B\
+\x1B[2$w -> \x1BP2$u1/9/17/25/33\x1B\
+\x1B[#R -> \x1B[0;0#Q
+\x1B]4;1;?\x1B\ -> \x1B]4;1;rgb:c6c6/3939/3939\x1B\
+\x1B]4;200;?\x1B\ -> \x1B]4;200;rgb:ffff/0000/d7d7\x1B\
+\x1B]10;?\x1B\ -> \x1B]10;rgb:d0d0/d0d0/d0d0\x1B\
+\x1B]11;?\x1B\ -> \x1B]11;rgb:1a1a/1717/1616\x1B\
+\x1B]12;?\x1B\ -> \x1B]12;rgb:d0d0/d0d0/d0d0\x1B\
+\x1B[?u -> \x1B[?0u
+\x1B[14t -> \x1B[4;120;400t
+\x1B[16t -> \x1B[6;20;10t
+\x1B[18t -> \x1B[8;6;40t
+\x1B[21t -> \x1B]lgolden session\x1B\
+\x1B]99;i=probe:p=alive;\x1B\ -> \x1B]99;i=probe:p=alive;\x1B\
+\x1B_Ga=q,i=7;\x1B\ -> \x1B_Gi=7;EINVAL:missing image dimensions\x1B\
+\x1B[&u -> \x1BP0!u%5\x1B\
+\x1B["v -> \x1B[6;40;1;1;1"w
+\x1B[?15n -> \x1B[?13n
+\x1B[?26n -> \x1B[?27;0;0;5n
+\x1B[1;1;1;1;30;100*y -> \x1BP1!~DB8A\x1B\
+\x1B[2$p -> \x1B[2;2$y
+\x1B[4$p -> \x1B[4;2$y
+\x1B[12$p -> \x1B[12;1$y
+\x1B[20$p -> \x1B[20;2$y
+\x1B[1$p -> \x1B[1;4$y
+\x1B[5$p -> \x1B[5;4$y
+\x1B[7$p -> \x1B[7;4$y
+\x1B[10$p -> \x1B[10;4$y
+\x1B[11$p -> \x1B[11;4$y
+\x1B[13$p -> \x1B[13;4$y
+\x1B[14$p -> \x1B[14;4$y
+\x1B[15$p -> \x1B[15;4$y
+\x1B[16$p -> \x1B[16;4$y
+\x1B[17$p -> \x1B[17;4$y
+\x1B[18$p -> \x1B[18;4$y
+\x1B[19$p -> \x1B[19;4$y
+\x1B[?1$p -> \x1B[?1;2$y
+\x1B[?2$p -> \x1B[?2;2$y
+\x1B[?3$p -> \x1B[?3;2$y
+\x1B[?95$p -> \x1B[?95;2$y
+\x1B[?4$p -> \x1B[?4;2$y
+\x1B[?5$p -> \x1B[?5;2$y
+\x1B[?6$p -> \x1B[?6;2$y
+\x1B[?7$p -> \x1B[?7;1$y
+\x1B[?8$p -> \x1B[?8;1$y
+\x1B[?9$p -> \x1B[?9;2$y
+\x1B[?10$p -> \x1B[?10;2$y
+\x1B[?12$p -> \x1B[?12;2$y
+\x1B[?19$p -> \x1B[?19;2$y
+\x1B[?25$p -> \x1B[?25;1$y
+\x1B[?30$p -> \x1B[?30;2$y
+\x1B[?40$p -> \x1B[?40;2$y
+\x1B[?46$p -> \x1B[?46;2$y
+\x1B[?47$p -> \x1B[?47;2$y
+\x1B[?1047$p -> \x1B[?1047;2$y
+\x1B[?41$p -> \x1B[?41;2$y
+\x1B[?64$p -> \x1B[?64;1$y
+\x1B[?66$p -> \x1B[?66;2$y
+\x1B[?67$p -> \x1B[?67;2$y
+\x1B[?69$p -> \x1B[?69;2$y
+\x1B[?1000$p -> \x1B[?1000;2$y
+\x1B[?1001$p -> \x1B[?1001;2$y
+\x1B[?1002$p -> \x1B[?1002;2$y
+\x1B[?1003$p -> \x1B[?1003;2$y
+\x1B[?1048$p -> \x1B[?1048;2$y
+\x1B[?1049$p -> \x1B[?1049;2$y
+\x1B[?2004$p -> \x1B[?2004;2$y
+\x1B[?1004$p -> \x1B[?1004;2$y
+\x1B[?80$p -> \x1B[?80;2$y
+\x1B[?1070$p -> \x1B[?1070;2$y
+\x1B[?1005$p -> \x1B[?1005;2$y
+\x1B[?1006$p -> \x1B[?1006;2$y
+\x1B[?1015$p -> \x1B[?1015;2$y
+\x1B[?1016$p -> \x1B[?1016;2$y
+\x1B[?1007$p -> \x1B[?1007;1$y
+\x1B[?2029$p -> \x1B[?2029;2$y
+\x1B[?2030$p -> \x1B[?2030;2$y
+\x1B[?2031$p -> \x1B[?2031;2$y
+\x1B[?2034$p -> \x1B[?2034;2$y
+\x1B[?2048$p -> \x1B[?2048;2$y
+\x1B[?5522$p -> \x1B[?5522;2$y
+\x1B[?18$p -> \x1B[?18;2$y
+\x1B[?35$p -> \x1B[?35;2$y
+\x1B[?42$p -> \x1B[?42;2$y
+\x1B[?60$p -> \x1B[?60;4$y
+\x1B[?34$p -> \x1B[?34;2$y
+\x1B[?36$p -> \x1B[?36;2$y
+\x1B[?57$p -> \x1B[?57;2$y
+\x1B[?61$p -> \x1B[?61;2$y
+\x1B[?68$p -> \x1B[?68;2$y
+\x1B[?73$p -> \x1B[?73;2$y
+\x1B[?81$p -> \x1B[?81;2$y
+\x1B[?96$p -> \x1B[?96;2$y
+\x1B[?97$p -> \x1B[?97;2$y
+\x1B[?98$p -> \x1B[?98;2$y
+\x1B[?99$p -> \x1B[?99;2$y
+\x1B[?100$p -> \x1B[?100;2$y
+\x1B[?101$p -> \x1B[?101;2$y
+\x1B[?102$p -> \x1B[?102;2$y
+\x1B[?103$p -> \x1B[?103;2$y
+\x1B[?104$p -> \x1B[?104;2$y
+\x1B[?106$p -> \x1B[?106;2$y
+\x1B[?45$p -> \x1B[?45;2$y
+\x1B[?1045$p -> \x1B[?1045;2$y
+\x1B[?2026$p -> \x1B[?2026;2$y
+\x1B[?2027$p -> \x1B[?2027;1$y
+\x1B[?2028$p -> \x1B[?2028;1$y
+\x1B[?8452$p -> \x1B[?8452;1$y
+\x1B[?9001$p -> \x1B[?9001;2$y
+key 42 -> \x1B[A
+key 0 -> \x1BOP
+key 45 -> \x1B[H
+key 90 -> 5
+paste -> pasted
+click -> 

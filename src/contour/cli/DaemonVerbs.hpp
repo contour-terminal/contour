@@ -2,9 +2,9 @@
 #pragma once
 
 /// @file
-/// `contour daemon status | logs | stop`: the verbs that talk to a running daemon instead of becoming one.
-/// Each takes its collaborators (the control port, the prompt, the file system, the output streams) so the
-/// decisions are testable without a daemon, a terminal or a clock.
+/// `contour daemon status | logs | stop | handover-info`: the verbs that talk to a running daemon instead of
+/// becoming one. Each takes its collaborators (the control port, the prompt, the file system, the output
+/// streams) so the decisions are testable without a daemon, a terminal or a clock.
 
 #include <contour/cli/ExitStatus.hpp>
 
@@ -45,6 +45,8 @@ enum class DaemonVerb : uint8_t
     Status,  ///< Report on the running daemon.
     Logs,    ///< Print the running daemon's log.
     Stop,    ///< Stop the running daemon.
+    /// Print what this binary reads of a live upgrade's handover, for the daemon that would exec it.
+    HandoverInfo,
 };
 
 /// One row per `contour daemon` sub-verb: the command list, the dispatch and the help read this table.
@@ -67,6 +69,12 @@ inline constexpr auto DaemonSubVerbs = std::array {
         "Stops the daemon, ending every session it hosts; asks first when sessions exist. The next "
         "daemon starts afresh, unless --keep-snapshot keeps the workspace for it.",
         DaemonVerb::Stop },
+    DaemonVerbRow {
+        "handover-info",
+        "Internal: prints, as one line of JSON, this binary's release and the handover and terminal "
+        "state formats it reads -- what a daemon asks of a new release before it upgrades onto it "
+        "live.",
+        DaemonVerb::HandoverInfo },
 };
 
 /// Whether `daemon stop` may end sessions without asking (`--yes`).

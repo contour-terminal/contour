@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/proto/PduTrace.hpp>
 
+#include <core/Escape.hpp>
+
 #include <algorithm>
 #include <array>
 #include <format>
@@ -482,6 +484,24 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SetSplitOrientation>(pdu);
                        return std::format("anchor={} state={}", value.anchorSession, value.state);
+                   } },
+        TraceRow { PduType::UpgradeDaemon,
+                   "UpgradeDaemon",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("image=\"{}\"", core::escape(std::get<UpgradeDaemon>(pdu).imageId));
+                   } },
+        TraceRow { PduType::UpgradeDaemonReply,
+                   "UpgradeDaemonReply",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<UpgradeDaemonReply>(pdu);
+                       return std::format(
+                           "result={} detail=\"{}\"", value.result, core::escape(value.detail));
+                   } },
+        TraceRow { PduType::DaemonUpgrading,
+                   "DaemonUpgrading",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("to=\"{}\"",
+                                          core::escape(std::get<DaemonUpgrading>(pdu).toRelease));
                    } },
     };
 

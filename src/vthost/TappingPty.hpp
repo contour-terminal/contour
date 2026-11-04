@@ -52,6 +52,8 @@ class TappingPty final: public vtpty::Pty
 
     void wakeupReader() override { _inner->wakeupReader(); }
     [[nodiscard]] int write(std::string_view buf) override { return _inner->write(buf); }
+    void interruptWrites() override { _inner->interruptWrites(); }
+    void allowWrites() override { _inner->allowWrites(); }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _inner->pageSize(); }
 
     void resizeScreen(vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels = std::nullopt) override

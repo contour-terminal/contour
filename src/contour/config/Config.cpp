@@ -861,18 +861,12 @@ std::string spelledWorkingDirectory(fs::path const& workingDirectory)
     return core::pathToUtf8(workingDirectory);
 }
 
-namespace
+fs::path configFileNamed(std::string_view configPath)
 {
-    /// The configuration file a command line names, or the default one when it names none.
-    /// @param configPath The file, UTF-8 as the command line is read; empty for the default one.
-    /// @return The file to load.
-    [[nodiscard]] fs::path configFileNamed(std::string_view configPath)
-    {
-        if (configPath.empty())
-            return configHome() / "contour.yml";
-        return core::pathFromUtf8(configPath).value_or(fs::path {});
-    }
-} // namespace
+    if (configPath.empty())
+        return configHome() / "contour.yml";
+    return core::pathFromUtf8(configPath).value_or(fs::path {});
+}
 
 Config loadConfigNamed(std::string_view configPath)
 {

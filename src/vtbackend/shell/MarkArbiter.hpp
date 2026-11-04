@@ -68,9 +68,18 @@ constexpr inline uint8_t ContextMarkDecisionCycles = 1;
 /// property of the shells attached to the pty rather than of the screen; a program that emits RIS must
 /// not be able to flip which protocol owns the user's markers. A vhangup -- a new pty, and so a new
 /// Terminal -- starts a fresh arbiter, which is the only reset there is.
+struct MarkArbiterState;
+
 class MarkArbiter
 {
   public:
+    /// @return Who owns the marks and how far the claim has got. Defined in state/ShellState.cpp.
+    [[nodiscard]] MarkArbiterState captureState() const noexcept;
+
+    /// Resumes the claim @p state describes; the policy is the configured one, not the captured.
+    /// Defined in state/ShellState.cpp.
+    void restoreState(MarkArbiterState const& state) noexcept;
+
     /// @param policy Whether OSC 3008 may stand in for OSC 133 at all.
     explicit constexpr MarkArbiter(ContextMarkPolicy policy = ContextMarkPolicy::WhenAlone) noexcept:
         _policy { policy }

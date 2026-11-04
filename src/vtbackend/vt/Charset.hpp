@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <optional>
 
 namespace vtbackend
@@ -155,6 +157,32 @@ constexpr char charsetDesignation(CharsetId id) noexcept
     }
     return 'B'; // fallback to USASCII
 }
+
+/// Everything a CharsetMapping holds, as plain data.
+struct CharsetState
+{
+    std::array<CharsetId, 4> charsetIds {};              ///< The set designated into each G-set.
+    std::array<bool, 4> is96Charset {};                  ///< Whether each G-set holds a 96-character set.
+    std::array<bool, 4> isUpss {};                       ///< Whether each G-set was designated as UPSS.
+    std::array<std::optional<int>, 4> drcsFontNumber {}; ///< The DRCS font designated into each G-set.
+    CharsetTable tableForNextGraphic = CharsetTable::G0; ///< The G-set used for the next graphic.
+    CharsetTable selectedTable = CharsetTable::G0;       ///< The G-set mapped to GL.
+    CharsetTable selectedTableGR = CharsetTable::G2;     ///< The G-set mapped to GR.
+
+    bool operator==(CharsetState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.charsetIds);
+        visitor(2, self.is96Charset);
+        visitor(3, self.isUpss);
+        visitor(4, self.drcsFontNumber);
+        visitor(5, self.tableForNextGraphic);
+        visitor(6, self.selectedTable);
+        visitor(7, self.selectedTableGR);
+    }
+};
 
 /// Charset mapping API for tables G0, G1, G2, and G3.
 ///
@@ -340,6 +368,15 @@ class CharsetMapping
     {
         return _charsetIds[static_cast<std::size_t>(table)];
     }
+
+    /// @return Every designation and shift, for a restore to rebuild this mapping from.
+    [[nodiscard]] CharsetState captureState() const noexcept;
+
+    /// Rebuilds the mapping from @p state, deriving the lookup tables from the designated sets.
+    /// @param state A captured mapping.
+    /// @return Nothing, or InvalidValue when @p state names a set or table that does not exist; the mapping
+    ///         is untouched then. Defined in state/ScreenState.cpp.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(CharsetState const& state) noexcept;
 
   private:
     CharsetTable _tableForNextGraphic = CharsetTable::G0;

@@ -87,6 +87,10 @@ class FakeImageLeases final: public ImageLeases
     /// @return How many leases are held, on any lease file.
     [[nodiscard]] std::size_t heldCount() const noexcept { return _held.size(); }
 
+    /// The descriptor number the first lease names (ImageLease::descriptor()); each later one names the next.
+    /// Made up, above any this process opens in a test: nothing is ever done to it but recording it.
+    static constexpr int FirstDescriptor = 200000;
+
     /// How many times a lease was made to survive an exec (ImageLease::keepAcrossExec).
     std::size_t handOvers = 0;
 
@@ -100,7 +104,10 @@ class FakeImageLeases final: public ImageLeases
     class Lease final: public ImageLease
     {
       public:
-        Lease(FakeImageLeases& leases, Held::iterator entry): _leases { leases }, _entry { entry } {}
+        Lease(FakeImageLeases& leases, Held::iterator entry, int descriptor):
+            _leases { leases }, _entry { entry }, _descriptor { descriptor }
+        {
+        }
         Lease(Lease const&) = delete;
         Lease& operator=(Lease const&) = delete;
         Lease(Lease&&) = delete;
@@ -113,19 +120,23 @@ class FakeImageLeases final: public ImageLeases
             return {};
         }
 
+        [[nodiscard]] int descriptor() const noexcept override { return _descriptor; }
+
       private:
         FakeImageLeases& _leases;
         Held::iterator _entry;
+        int _descriptor;
     };
 
     /// @return A new recorded hold of @p leaseFile.
     [[nodiscard]] std::unique_ptr<ImageLease> record(std::filesystem::path const& leaseFile)
     {
-        return std::make_unique<Lease>(*this, _held.insert(leaseFile.lexically_normal()));
+        return std::make_unique<Lease>(*this, _held.insert(leaseFile.lexically_normal()), _nextDescriptor++);
     }
 
     Held _held;
     Held _inherited;
+    int _nextDescriptor = FirstDescriptor;
 };
 
 /// SymbolicLinks that record each copy instead of creating it.

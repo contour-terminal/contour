@@ -77,6 +77,18 @@ class StoppableDaemon final: public vthost::DaemonControl
 
     [[nodiscard]] vthost::ClientCensus::Ticket admitClient() override { return _inner.admitClient(); }
 
+    [[nodiscard]] core::async::Task<std::expected<void, vthost::handover::UpgradeError>> requestUpgrade(
+        vthost::handover::UpgradeTarget target, std::function<void()> onStarted) override
+    {
+        return _inner.requestUpgrade(std::move(target), std::move(onStarted));
+    }
+
+    void subscribeUpgrade(vthost::UpgradeObserver& observer) override { _inner.subscribeUpgrade(observer); }
+    void unsubscribeUpgrade(vthost::UpgradeObserver& observer) override
+    {
+        _inner.unsubscribeUpgrade(observer);
+    }
+
     /// @return Whether it refuses new connections.
     [[nodiscard]] bool gone() const noexcept { return _gone; }
     /// @return Whether it was asked to stop, which makes it hang up on the connections it has.

@@ -433,6 +433,23 @@ StagedImage DaemonImageStore::imageAt(fs::path const& target, std::unique_ptr<Im
     return StagedImage { .executable = target / _plan.executable, .lease = std::move(lease) };
 }
 
+std::optional<fs::path> DaemonImageStore::executableOfImage(std::string_view imageId) const
+{
+    // The very alphabet imageDirectoryName() writes, so no separator, drive or `..` can name a way out.
+    auto const isImageNameByte = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.'
+               || c == '_' || c == '-';
+    };
+    if (_plan.layout == StagingLayout::InPlace || imageId.empty() || imageId.starts_with('.')
+        || imageId.contains(PartialInfix) || imageId.ends_with(LeaseExtension)
+        || !std::ranges::all_of(imageId, isImageNameByte))
+        return std::nullopt;
+    auto const imageDir = _config.imagesRoot / fs::path { imageId };
+    if (!isComplete(imageDir))
+        return std::nullopt;
+    return imageDir / _plan.executable;
+}
+
 bool DaemonImageStore::isComplete(fs::path const& imageDir) const
 {
     return _fs.isRegularFile(imageDir / CompletionMarker);

@@ -4,6 +4,7 @@
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/core/SteadyClockRef.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/CommandBlockAddress.hpp>
@@ -16,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -406,9 +408,26 @@ using CommandBlockChangeListener = std::function<void(CommandBlockChange const&)
 ///
 /// Every transition is TOTAL: the protocol is lenient, so a malformed order (a ;D with nothing running, a
 /// ;C with no ;A) is an outcome, never an error.
+struct CommandBlockStoreState;
+
 class CommandBlockStore
 {
   public:
+    /// @return Every record, the counters and how long the running command has run so far. Defined in
+    ///         state/ShellState.cpp.
+    [[nodiscard]] CommandBlockStoreState captureState() const;
+
+    /// Replaces the store's records and counters with @p state, relative to the clock this store reads.
+    /// Defined in state/ShellState.cpp.
+    /// @return Nothing, or InvalidValue when @p state holds more records than the limits allow, or ids
+    ///         that are not ascending and non-zero.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(CommandBlockStoreState const& state);
+
+    /// @return Nothing, or InvalidValue when @p state is not one this store can hold: more records than its
+    ///         limits keep, ids out of order, a change stamp per record missing.
+    [[nodiscard]] std::expected<void, StateDecodeError> validateState(
+        CommandBlockStoreState const& state) const;
+
     /// @param limits How many records to keep. Fixed for the store's life; a maxRecords of zero is raised
     ///        to one, because the block rows are being stamped with must always resolve.
     /// @param steadyClock Measures how long commands run. Borrowed: it must outlive the store, and a

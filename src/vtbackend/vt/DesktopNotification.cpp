@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+#include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -311,6 +313,45 @@ std::vector<string> DesktopNotificationManager::activeNotifications() const
 std::vector<string> DesktopNotificationManager::pendingNotifications() const
 {
     return _pendingNotifications.keys();
+}
+
+DesktopNotificationsState DesktopNotificationManager::captureState() const
+{
+    auto state = DesktopNotificationsState {};
+    for (auto const& item: _pendingNotifications)
+        state.pending.push_back(item.value);
+    state.active = _activeNotifications.keys();
+    return state;
+}
+
+std::expected<void, StateDecodeError> DesktopNotificationManager::validateState(
+    DesktopNotificationsState const& state)
+{
+    auto const isUnique = [](auto&& identifiers) {
+        auto seen = std::set<std::string_view> {};
+        return std::ranges::all_of(identifiers,
+                                   [&](std::string const& id) { return seen.insert(id).second; });
+    };
+    if (state.pending.size() > NotificationLimits.pending || state.active.size() > NotificationLimits.live
+        || !isUnique(state.pending | std::views::transform(&DesktopNotification::identifier))
+        || !isUnique(state.active))
+        return std::unexpected { StateDecodeError::InvalidValue };
+    return {};
+}
+
+std::expected<void, StateDecodeError> DesktopNotificationManager::restoreState(
+    DesktopNotificationsState const& state)
+{
+    if (auto const valid = validateState(state); !valid)
+        return valid;
+    // Newest first in the state: relink from the other end, each emplace going to the front.
+    _pendingNotifications.clear();
+    for (auto const& notification: state.pending | std::views::reverse)
+        _pendingNotifications.emplace(notification.identifier, DesktopNotification { notification });
+    _activeNotifications.clear();
+    for (auto const& identifier: state.active | std::views::reverse)
+        _activeNotifications.emplace(identifier, Live {});
+    return {};
 }
 
 } // namespace vtbackend

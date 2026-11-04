@@ -142,6 +142,9 @@ class FoldState
 
     void collapse(int64_t headStableId) { _collapsed.insert(headStableId); }
 
+    /// @return The head ids of every collapsed fold, ascending.
+    [[nodiscard]] std::set<int64_t> const& collapsedIds() const noexcept { return _collapsed.ids(); }
+
     void expand(int64_t headStableId) { _collapsed.erase(headStableId); }
 
     /// Collapses @p headStableId if it is expanded, expands it otherwise.

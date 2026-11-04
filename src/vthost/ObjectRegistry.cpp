@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/ObjectRegistry.hpp>
 
+#include <algorithm>
+#include <ranges>
 #include <utility>
 
 namespace vthost
@@ -132,6 +134,50 @@ std::string_view ObjectRegistry::labelOf(ObjectRef const& ref) const
     if (auto const known = _labels.find(ref); known != _labels.end())
         return known->second;
     return {};
+}
+
+namespace
+{
+    /// @return Every object @p byId binds, by id ascending.
+    [[nodiscard]] std::vector<BoundObject> boundIn(std::unordered_map<uint64_t, Uuid> const& byId)
+    {
+        auto bound =
+            std::ranges::to<std::vector>(byId | std::views::transform([](auto const& entry) {
+                                             return BoundObject { .id = entry.first, .uuid = entry.second };
+                                         }));
+        std::ranges::sort(bound, {}, &BoundObject::id);
+        return bound;
+    }
+} // namespace
+
+ObjectRegistrySnapshot ObjectRegistry::snapshot() const
+{
+    return ObjectRegistrySnapshot {
+        .windows = boundIn(_windows.byId),
+        .tabs = boundIn(_tabs.byId),
+        .panes = boundIn(_panes.byId),
+        .labels = std::ranges::to<std::vector>(_labels | std::views::transform([](auto const& entry) {
+                                                   return LabeledObject { .ref = entry.first,
+                                                                          .label = entry.second };
+                                               })),
+    };
+}
+
+void ObjectRegistry::restore(ObjectRegistrySnapshot const& snapshot)
+{
+    _windows = {};
+    _tabs = {};
+    _panes = {};
+    _labels.clear();
+    for (auto const& window: snapshot.windows)
+        bind(vtworkspace::WindowId { window.id }, window.uuid);
+    for (auto const& tab: snapshot.tabs)
+        bind(vtworkspace::TabId { tab.id }, tab.uuid);
+    for (auto const& pane: snapshot.panes)
+        bind(vtworkspace::SessionId { pane.id }, pane.uuid);
+    // After the binds: a label of an object not bound is ignored.
+    for (auto const& labeled: snapshot.labels)
+        setLabel(labeled.ref, labeled.label);
 }
 
 } // namespace vthost

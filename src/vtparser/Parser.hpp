@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtparser/BulkScan.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
@@ -734,6 +735,42 @@ class Parser
 
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
 
+    /// Puts back the character REP repeats, as the parser that printed it last had it: a parser that takes
+    /// over another's input carries it over, as nothing it parses could tell it.
+    /// @param codepoint The last graphic character printed; zero for none.
+    void setPrecedingGraphicCharacter(char32_t codepoint) noexcept
+    {
+        _scanState.lastCodepointHint = codepoint;
+    }
+
+    /// Whether nothing the parser has consumed is still waiting for bytes to complete it: the state machine
+    /// in Ground, no VT52 command half-read, and no UTF-8 character half-decoded. Only at rest does the
+    /// state of the parser follow from the bytes it consumed before; elsewhere those bytes are in flight.
+    [[nodiscard]] bool isAtRest() const noexcept
+    {
+        return isStateMachineAtRest() && isDecoderIdle(_scanState.utf8);
+    }
+
+    /// How many of the bytes consumed last are the escape sequence in flight: those taken since the state
+    /// machine last stood in Ground with no VT52 command half-read, or entered Escape. Zero there.
+    ///
+    /// Fed to a parser in Ground, these bytes -- after pendingCharacterBytes() -- bring it to the state this
+    /// one is in. Nothing the state machine does before a sequence ends changes the decoder, so the two
+    /// make up everything in flight.
+    ///
+    /// An ESC begins a sequence anew wherever the state machine was: it leaves every state for Escape, whose
+    /// entry clears the sequence -- after a string state's exit action has ended the string, which is how
+    /// ESC \ dispatches an OSC or unhooks a DCS before the state machine is back in Ground. Counting from
+    /// there, a replay of the bytes in flight never ends that string again.
+    ///
+    /// Worked out once per parseFragment(), from where the last sequence began: no byte is counted.
+    [[nodiscard]] size_t inFlightSequenceLength() const noexcept { return _inFlightSequenceLength; }
+
+    /// @return The bytes that bring an idle UTF-8 decoder to the character this one has half-decoded; empty
+    ///         when it has none. They reproduce the decoder exactly, not necessarily the bytes it was fed:
+    ///         a continuation byte contributes only its payload bits.
+    [[nodiscard]] std::string pendingCharacterBytes() const;
+
     /// Returns a mutable reference to the grapheme segmenter state maintained by the parser's scan state.
     /// This is used by Screen to properly detect grapheme cluster boundaries across both
     /// the bulk text path (scan_text) and the character-by-character path (printUtf8Byte).
@@ -830,6 +867,43 @@ class Parser
 
     void handle(ActionClass actionClass, Action action, uint8_t codepoint);
 
+    /// Whether the state machine stands in Ground with no VT52 command half-read: what ends a sequence in
+    /// flight. @see inFlightSequenceLength
+    [[nodiscard]] bool isStateMachineAtRest() const noexcept
+    {
+        return _state == State::Ground && _vt52State == Vt52State::Ground;
+    }
+
+    /// Records that the byte the state machine just took, at @p byte, began a sequence, if it did.
+    void noteSequenceStart(char const* byte) noexcept
+    {
+        // No branch hint: on SGR-dense output an Escape arrives every eight to fifteen bytes.
+        if (_sequenceStart == SequenceStart::AtLastByte)
+        {
+            _lastSequenceStart = byte;
+            _sequenceStart = SequenceStart::None;
+        }
+    }
+
+    /// Works out inFlightSequenceLength() once parseFragment() has consumed up to @p consumedEnd.
+    void finishInFlightSequence(char const* consumedEnd) noexcept
+    {
+        if (isStateMachineAtRest())
+            _inFlightSequenceLength = 0;
+        else if (_lastSequenceStart)
+            _inFlightSequenceLength = static_cast<size_t>(consumedEnd - _lastSequenceStart);
+        else
+            _inFlightSequenceLength += static_cast<size_t>(consumedEnd - _fragmentBegin);
+        _lastSequenceStart = nullptr;
+    }
+
+    /// Whether the byte being handled began a sequence. @see noteSequenceStart
+    enum class SequenceStart : uint8_t
+    {
+        None = 0,   ///< It did not.
+        AtLastByte, ///< It entered Escape, or VT52's escape.
+    };
+
     /// The VT52 escape sub-state. Independent of @c _state (which stays Ground while printing in VT52),
     /// so the VT52 grammar does not disturb the ANSI state table.
     enum class Vt52State : uint8_t
@@ -850,6 +924,15 @@ class Parser
     EventListener& _eventListener;
     BulkScan _bulkScan = BulkScan::Enabled;
     unicode::scan_state _scanState {};
+
+    /// @see inFlightSequenceLength
+    size_t _inFlightSequenceLength = 0;
+
+    /// Set as the state machine enters Escape, and taken by noteSequenceStart().
+    SequenceStart _sequenceStart = SequenceStart::None;
+
+    /// Where in the fragment being parsed the last sequence began; none when none began in it.
+    char const* _lastSequenceStart = nullptr;
 
     /// The UTF-8 character being collected while collecting a string (OSC/APC/PM/DCS/SOS). String
     /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is idle -- at a

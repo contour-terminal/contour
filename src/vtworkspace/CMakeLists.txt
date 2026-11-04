@@ -13,6 +13,7 @@ add_library(vtworkspace STATIC
     SessionModel.hpp
     ModelEvents.hpp
     Primitives.hpp
+    WorkspaceState.hpp
 )
 target_link_libraries(vtworkspace PUBLIC
     boxed-cpp::boxed-cpp

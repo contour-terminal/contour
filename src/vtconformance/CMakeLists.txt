@@ -56,8 +56,24 @@ if(VTCONFORMANCE_TESTING)
         TerminalEngine_test.cpp
         TerminalHarness_test.cpp
         VtTestLog_test.cpp
+        StateHandover_test.cpp
     )
     target_link_libraries(vtconformance_test vtconformance core::testing Catch2::Catch2 contour_test_trace)
+
+    # The recorded vttest transcripts, compiled in as string literals: StateHandover_test.cpp hands a
+    # terminal over at every byte offset of what they send, and a unit test reads no files.
+    file(GLOB vttestTranscripts CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/cmd/*.cmd")
+    set(vttestTranscriptEntries "")
+    foreach(transcript IN LISTS vttestTranscripts)
+        get_filename_component(transcriptName "${transcript}" NAME)
+        file(READ "${transcript}" transcriptContent)
+        string(APPEND vttestTranscriptEntries
+               "VtTestTranscript { .name = \"${transcriptName}\", .text = R\"vttest(${transcriptContent})vttest\" },\n")
+    endforeach()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/VtTestTranscripts.inc.new" "${vttestTranscriptEntries}")
+    configure_file("${CMAKE_CURRENT_BINARY_DIR}/VtTestTranscripts.inc.new"
+                   "${CMAKE_CURRENT_BINARY_DIR}/generated/VtTestTranscripts.inc" COPYONLY)
+    target_include_directories(vtconformance_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     add_test(NAME vtconformance_test COMMAND $<TARGET_FILE:vtconformance_test>)
 
     if(NOT WIN32)

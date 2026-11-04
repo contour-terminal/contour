@@ -42,18 +42,22 @@ class PosixReadSelector
   public:
     PosixReadSelector()
     {
-        int pfd[2];
-        int const rv = pipe(pfd);
-        Require(rv == 0);
-        _breakPipeReader = FileDescriptor::fromNative(pfd[0]);
-        _breakPipeWriter = FileDescriptor::fromNative(pfd[1]);
-
-        int currentFlags = 0;
+        // Close-on-exec: a daemon's live upgrade execs itself, and a break pipe that crossed would leak into
+        // the new image, two descriptors per session per upgrade.
+        auto pfd = std::array<int, 2> {};
+#ifdef __APPLE__
+        // No pipe2() on macOS: the flags follow the pipe, which leaves a window for a concurrent fork.
+        Require(::pipe(pfd.data()) == 0);
         for (int const fd: pfd)
         {
-            fcntl(fd, F_GETFL, &currentFlags);
-            fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK);
+            ::fcntl(fd, F_SETFD, ::fcntl(fd, F_GETFD) | FD_CLOEXEC);
+            ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
         }
+#else
+        Require(::pipe2(pfd.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+#endif
+        _breakPipeReader = FileDescriptor::fromNative(pfd[0]);
+        _breakPipeWriter = FileDescriptor::fromNative(pfd[1]);
     }
 
     void wantRead(int fd) noexcept

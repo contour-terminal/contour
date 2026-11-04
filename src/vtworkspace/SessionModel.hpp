@@ -18,6 +18,7 @@
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
 #include <vtworkspace/Tab.hpp>
+#include <vtworkspace/WorkspaceState.hpp>
 
 namespace vtworkspace
 {
@@ -71,6 +72,12 @@ class Window
     int _previousActiveTabIndex = -1;
 };
 
+/// The session id a host restoring @p tree mints first, so that no new session is named as a restored one.
+/// @param tree A captured workspace tree (SessionModel::captureTree()).
+/// @return One above the highest session a leaf of @p tree carries; 1 for a tree without leaves, as
+///         SessionId{} is the sentinel for none.
+[[nodiscard]] SessionId firstUnusedSessionId(WorkspaceTreeState const& tree);
+
 /// The single source of truth for all windows, tabs and panes.
 ///
 /// SessionModel is deliberately free of Qt and of any transport. Every mutation is performed through
@@ -99,6 +106,29 @@ class SessionModel
     SessionModel& operator=(SessionModel&&) = delete;
     ~SessionModel() = default;
 
+    // {{{ Snapshot & restore (daemon live upgrade)
+
+    /// @return Every window, tab and pane, with the ids and session ids they have now.
+    [[nodiscard]] WorkspaceTreeState captureTree() const;
+
+    /// @return The counters the next window, tab and pane are minted from.
+    [[nodiscard]] ModelIdState idState() const noexcept;
+
+    /// Rebuilds the tree of a model that a previous process held, with the very ids it had, so that
+    /// reconnecting clients map onto the same objects. Fires no event: nothing observes a model being
+    /// rebuilt, and the host that restores it announces what it must itself.
+    ///
+    /// A model that holds a window already is a contract violation (Require), not an error: restoring is
+    /// done once, into a fresh model. Session ids are taken as given; the SessionAllocator is not called,
+    /// so the host must seed its own counter above every restored session id (firstUnusedSessionId()). A
+    /// leaf carrying SessionId{} is refused.
+    /// @param tree The windows, tabs and panes to rebuild.
+    /// @param ids  The counters to mint from afterwards; every id in @p tree must be below its counter.
+    /// @return Nothing; or why @p tree cannot be a model. On error the model is still empty.
+    [[nodiscard]] std::expected<void, ModelRestoreError> restore(WorkspaceTreeState const& tree,
+                                                                 ModelIdState const& ids);
+
+    // }}}
     // {{{ Windows
 
     /// Creates a new, empty window and returns it.

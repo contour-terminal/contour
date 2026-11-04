@@ -85,6 +85,9 @@ enum class PduType : uint8_t
     MoveNodeRefused = 38,
     LayoutBatchEnd = 39,
     SetSplitOrientation = 40,
+    UpgradeDaemon = 41,
+    UpgradeDaemonReply = 42,
+    DaemonUpgrading = 43,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1278,6 +1281,41 @@ struct StopDaemon
     bool operator==(StopDaemon const&) const = default;
 };
 
+/// Client→server: asks the daemon to upgrade itself in place to another release (live upgrade), keeping every
+/// session running. Served only on a connection accepted on a local (Unix-socket) listener, to a token that
+/// grants `write`; gated on Capability::LiveUpgrade. Answered by one UpgradeDaemonReply.
+struct UpgradeDaemon
+{
+    /// The image of the daemon's store to upgrade to, by name (`<release>-<fingerprint>`); empty for the
+    /// daemon's own installed executable. Never a path.
+    std::string imageId;
+    bool operator==(UpgradeDaemon const&) const = default;
+};
+
+/// Server→client: the outcome of an UpgradeDaemon, in `result`:
+///  - `0`: the upgrade started. Sent just before DaemonUpgrading and the closing of every connection;
+///  - `1..N`: refused, as `UpgradeRefusal + 1` (so the enumerator zero, InProgress, is `1`);
+///  - `255` (ExecFailedResult): the daemon stopped its sessions, but the exec into the new image failed and
+///    it serves on as before; `detail` states why.
+/// A `result` between the last refusal and 255 is a refusal a newer daemon knows and this build does not.
+struct UpgradeDaemonReply
+{
+    /// The `result` that reports an exec failure rather than a refusal.
+    static constexpr uint8_t ExecFailedResult = 255;
+
+    uint8_t result = 0;      ///< As described above.
+    std::string detail = {}; ///< A sentence for the user; empty when the upgrade started.
+    bool operator==(UpgradeDaemonReply const&) const = default;
+};
+
+/// Server→client, to every client just before the daemon replaces itself and closes every connection: the
+/// daemon comes back as the same daemon, so the client waits for it and reconnects rather than starting one.
+struct DaemonUpgrading
+{
+    std::string toRelease; ///< The release the daemon becomes.
+    bool operator==(DaemonUpgrading const&) const = default;
+};
+
 /// What an EditTab changes. The codec carries any byte; the host refuses one it does not know.
 enum class TabEditKind : uint8_t
 {
@@ -1471,7 +1509,10 @@ using DecodedPdu = std::variant<Invalid,
                                 MoveNode,
                                 MoveNodeRefused,
                                 LayoutBatchEnd,
-                                SetSplitOrientation>;
+                                SetSplitOrientation,
+                                UpgradeDaemon,
+                                UpgradeDaemonReply,
+                                DaemonUpgrading>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

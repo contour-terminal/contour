@@ -10,14 +10,19 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Assert.hpp>
+
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 
@@ -158,6 +163,22 @@ class StallingPty final: public vtpty::MockPty
     int _parkedWrites = 0;
 };
 
+/// Waits for @p condition to hold, asking every few milliseconds, as what another thread does comes to pass.
+/// @param condition Asked until it holds.
+/// @return Whether it held within ten seconds.
+template <typename Condition>
+[[nodiscard]] bool eventually(Condition const& condition)
+{
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    while (!condition())
+    {
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
+    }
+    return true;
+}
+
 /// Opens a tab in @p host's window.
 /// @param host The host to open it in.
 /// @return The session of the tab's one pane.
@@ -213,6 +234,18 @@ constexpr auto PromptedAt = int64_t { 1'700'000'000'000'000'000 };
     block.exitCode = exitCode;
     block.duration = 2'000'000'000;
     return block;
+}
+
+/// @param text Where to count.
+/// @param needle What to count; never empty.
+/// @return How often @p needle occurs in @p text, the occurrences not overlapping.
+[[nodiscard]] inline std::size_t occurrences(std::string_view text, std::string_view needle)
+{
+    Require(!needle.empty());
+    // Split at each occurrence: one piece more than there are occurrences -- and none of an empty text.
+    if (text.empty())
+        return 0;
+    return static_cast<std::size_t>(std::ranges::distance(text | std::views::split(needle))) - 1;
 }
 
 } // namespace vthost::testing

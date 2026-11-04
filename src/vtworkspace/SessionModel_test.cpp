@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -2287,6 +2289,217 @@ TEST_CASE("SessionModel: mergeTabIntoSplit within a window keeps the active book
     CHECK(win->activeTabIndex() == 1);
     CHECK(win->tabAt(0)->id() == middleId);
     CHECK(win->activeTab()->rootPane()->splitState() == SplitState::Horizontal);
+}
+
+// }}}
+
+// {{{ Snapshot & restore
+
+namespace
+{
+/// A model with two windows: one of two tabs (the first split twice, zoomed, coloured and titled), one empty.
+void populate(Fixture& fixture)
+{
+    auto* const window = fixture.model.createWindow();
+    auto* const first = fixture.model.createTab(window->id());
+    auto* const second = fixture.model.createTab(window->id());
+    (void) second;
+    (void) fixture.model.splitActivePane(first->id(), SplitState::Vertical, 0.3);
+    (void) fixture.model.splitActivePane(first->id(), SplitState::Horizontal, 0.7);
+    fixture.model.toggleActivePaneZoom(first->id());
+    fixture.model.setTabTitle(first->id(), "build");
+    fixture.model.setTabColor(first->id(), TabColorSource::User, vtbackend::RGBColor { 1, 2, 3 });
+    fixture.model.activateTab(window->id(), first->id());
+    (void) fixture.model.createWindow();
+}
+} // namespace
+
+TEST_CASE("SessionModel: restored model has the same ids and tree", "[vtworkspace][model][restore]")
+{
+    auto original = Fixture {};
+    populate(original);
+    auto const tree = original.model.captureTree();
+    auto const ids = original.model.idState();
+
+    auto restored = Fixture {};
+    REQUIRE(restored.model.restore(tree, ids).has_value());
+
+    auto const again = restored.model.captureTree();
+    REQUIRE(again.windows.size() == tree.windows.size());
+    CHECK(restored.model.idState().nextWindow == ids.nextWindow);
+    CHECK(restored.model.idState().nextTab == ids.nextTab);
+    CHECK(restored.model.idState().nextPane == ids.nextPane);
+    CHECK(restored.events.log.empty());
+
+    auto const* const window = restored.model.windowAt(0);
+    REQUIRE(window != nullptr);
+    CHECK(window->id() == tree.windows[0].id);
+    CHECK(window->activeTabIndex() == tree.windows[0].activeTabIndex);
+    CHECK(window->tabCount() == 2);
+    auto const* const tab = window->tabAt(0);
+    REQUIRE(tab != nullptr);
+    CHECK(tab->id() == tree.windows[0].tabs[0].id);
+    CHECK(tab->paneCount() == 3);
+    CHECK(tab->isZoomed());
+    CHECK(tab->runtimeTitle() == std::optional<std::string> { "build" });
+    CHECK(tab->color(TabColorSource::User) == std::optional { vtbackend::RGBColor { 1, 2, 3 } });
+    CHECK(tab->activePane()->id() == tree.windows[0].tabs[0].view.activePane);
+    CHECK(tab->leafSessions() == original.model.windowAt(0)->tabAt(0)->leafSessions());
+    CHECK(tab->rootPane()->ratio()
+          == Catch::Approx(original.model.windowAt(0)->tabAt(0)->rootPane()->ratio()));
+
+    // Captured again, the restored model is the original, id for id.
+    auto const equalPane = [](this auto const& self, PaneTreeState const& a, PaneTreeState const& b) -> bool {
+        return a.id == b.id && a.split == b.split && a.ratio == b.ratio && a.session == b.session
+               && a.children.size() == b.children.size()
+               && std::ranges::equal(
+                   a.children, b.children, [&](auto const& x, auto const& y) { return self(x, y); });
+    };
+    for (auto const& [expectedTab, actualTab]: std::views::zip(tree.windows[0].tabs, again.windows[0].tabs))
+    {
+        CHECK(expectedTab.id == actualTab.id);
+        CHECK(equalPane(expectedTab.root, actualTab.root));
+        CHECK(expectedTab.view.recentPanes == actualTab.view.recentPanes);
+    }
+}
+
+TEST_CASE("SessionModel: a pane split after restore gets an id above every restored one",
+          "[vtworkspace][model][restore]")
+{
+    auto original = Fixture {};
+    populate(original);
+    auto const tree = original.model.captureTree();
+    auto const ids = original.model.idState();
+
+    auto restored = Fixture {};
+    restored.nextSession = 5000;
+    REQUIRE(restored.model.restore(tree, ids).has_value());
+
+    auto const highest = [&] {
+        auto highestId = uint64_t { 0 };
+        restored.model.forEachTab([&](Window&, Tab& tab) {
+            tab.rootPane()->walkTree(
+                [&](Pane const& pane) { highestId = std::max(highestId, pane.id().value); });
+        });
+        return highestId;
+    }();
+    auto* const tab = restored.model.windowAt(0)->tabAt(1);
+    auto* const leaf = restored.model.splitActivePane(tab->id(), SplitState::Vertical);
+    REQUIRE(leaf != nullptr);
+    CHECK(leaf->id().value > highest);
+    CHECK(leaf->parent()->id().value > highest);
+    CHECK(restored.model.createTab(restored.model.windowAt(0)->id())->id().value >= ids.nextTab.value);
+    CHECK(restored.model.createWindow()->id().value == ids.nextWindow.value);
+}
+
+TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][model][restore]")
+{
+    auto original = Fixture {};
+    populate(original);
+    auto const tree = original.model.captureTree();
+    auto const ids = original.model.idState();
+
+    SECTION("duplicate pane id is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].tabs[1].root.id = broken.windows[0].tabs[0].root.children[0].id;
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::DuplicateId);
+        CHECK(restored.model.windowCount() == 0);
+    }
+
+    SECTION("an id at the counter is refused")
+    {
+        auto restored = Fixture {};
+        auto lowered = ids;
+        lowered.nextPane = PaneId { 1 };
+        auto const result = restored.model.restore(tree, lowered);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::IdBeyondCounter);
+    }
+
+    SECTION("a split without two children is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].tabs[0].root.children.pop_back();
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::MalformedTree);
+    }
+
+    SECTION("a split whose ratio is not a number is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].tabs[0].root.ratio = std::numeric_limits<double>::quiet_NaN();
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::MalformedTree);
+    }
+
+    SECTION("a split whose ratio is infinite is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].tabs[0].root.ratio = std::numeric_limits<double>::infinity();
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::MalformedTree);
+    }
+
+    SECTION("a leaf without a session is refused")
+    {
+        // SessionId{} is the sentinel for none: a leaf naming it would map to no hosted session.
+        auto broken = tree;
+        broken.windows[0].tabs[1].root.session = SessionId {};
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::MissingSession);
+    }
+
+    SECTION("an active pane that is no leaf is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].tabs[0].view.activePane = PaneId { 9999 };
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::UnknownActivePane);
+    }
+
+    SECTION("a window's tab index out of range is refused")
+    {
+        auto broken = tree;
+        broken.windows[0].activeTabIndex = 7;
+        auto restored = Fixture {};
+        auto const result = restored.model.restore(broken, ids);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == ModelRestoreError::BadTabIndex);
+    }
+}
+
+TEST_CASE("SessionModel: the first unused session id is above every restored leaf's",
+          "[vtworkspace][model][restore]")
+{
+    auto original = Fixture {};
+    original.nextSession = 41;
+    populate(original);
+    auto const tree = original.model.captureTree();
+
+    auto highest = uint64_t { 0 };
+    original.model.forEachTab([&](Window&, Tab& tab) {
+        for (auto const session: tab.leafSessions())
+            highest = std::max(highest, session.value);
+    });
+    REQUIRE(highest > 41);
+    CHECK(firstUnusedSessionId(tree).value == highest + 1);
+
+    // With no leaf at all, the first id that is not the sentinel.
+    CHECK(firstUnusedSessionId(WorkspaceTreeState {}).value == 1);
 }
 
 // }}}

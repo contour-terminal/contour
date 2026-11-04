@@ -13,7 +13,10 @@
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/Pty.hpp>
     #include <vtpty/UnixPty.hpp>
+    #include <vtpty/test/ProcessTesting.hpp>
     #include <vtpty/test/PtyReading.hpp>
+
+    #include <unistd.h>
 #endif
 
 #include <crispy/BufferObject.hpp>
@@ -78,6 +81,8 @@
 #include <vtworkspace/Tab.hpp>
 
 using vthost::SessionHost;
+using vthost::testing::eventually;
+using vthost::testing::occurrences;
 using vtworkspace::SplitState;
 
 namespace
@@ -169,6 +174,7 @@ class BlockingPty final: public vtpty::Pty
         {
             auto const lock = std::lock_guard { _mutex };
             _wakeups += 1;
+            _wakeupCalls += 1;
         }
         _wake.notify_all();
     }
@@ -208,6 +214,13 @@ class BlockingPty final: public vtpty::Pty
         return _reads;
     }
 
+    /// How often wakeupReader() was called, consumed or not.
+    [[nodiscard]] int wakeupCalls() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _wakeupCalls;
+    }
+
   private:
     mutable std::mutex _mutex;
     std::condition_variable _wake;
@@ -215,6 +228,7 @@ class BlockingPty final: public vtpty::Pty
     vtpty::PageSize _size;
     bool _closed = false;
     int _wakeups = 0;
+    int _wakeupCalls = 0;
     int _reads = 0;
 };
 
@@ -242,7 +256,16 @@ class ExitingPty final: public vtpty::Pty
         auto const lock = std::lock_guard { _mutex };
         return _closed;
     }
-    void wakeupReader() override { _wake.notify_all(); }
+    /// Kept until a read consumes it, as a real PTY's wakeup is: one that arrives before the read waits is
+    /// not lost.
+    void wakeupReader() override
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _wakeups += 1;
+        }
+        _wake.notify_all();
+    }
 
     /// The program exits: the next read reports EOF.
     void exitProcess()
@@ -269,12 +292,14 @@ class ExitingPty final: public vtpty::Pty
         // The timeout is honoured: the parser reads ahead with a zero one while another thread holds
         // the terminal, and a read that blocked there would park the pump before it parsed anything.
         auto const ended = [this] {
-            return _exited || _closed;
+            return _exited || _closed || _wakeups > 0;
         };
         if (timeout)
             std::ignore = _wake.wait_for(lock, *timeout, ended);
         else
             _wake.wait(lock, ended);
+        if (_wakeups > 0)
+            _wakeups -= 1;
         errno = _exited ? EIO : EAGAIN;
         return std::nullopt;
     }
@@ -309,6 +334,7 @@ class ExitingPty final: public vtpty::Pty
     std::string _written;
     bool _closed = false;
     bool _exited = false;
+    int _wakeups = 0;
 };
 
 /// Stands in for one attached client. The client-area registry is keyed by stream observer, so a
@@ -947,7 +973,8 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
     // The pump takes the input at once; the wait makes sure its write is parked before the close.
     std::this_thread::sleep_for(std::chrono::milliseconds { 300 });
 
-    auto terminating = std::async(std::launch::async, [&session] { session.terminate(); });
+    auto terminating = std::async(std::launch::async,
+                                  [&session] { session.terminate(vthost::TerminationReason::Requested); });
     auto const terminated = terminating.wait_for(std::chrono::seconds { 5 });
     // Where it waits, a reader on the slave side lets the parked write through, and it after that.
     if (terminated != std::future_status::ready)
@@ -1016,7 +1043,7 @@ TEST_CASE("a hosted session's process exit drops its working program status befo
     }
     SECTION("the host closes the session: nothing is dropped, the records go with it")
     {
-        hosted.terminate();
+        hosted.terminate(vthost::TerminationReason::Requested);
         REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
         CHECK(announced.get() == std::vector<std::string> { "", "lint" });
     }
@@ -3560,3 +3587,805 @@ TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost]
     CHECK(h.shownFrame().has_value());
     CHECK(h.host.ticksKittyAnimations(h.session));
 }
+
+TEST_CASE("the first session id a host mints is the one its config seeds", "[vthost][host]")
+{
+    // A host that adopts a previous run's sessions starts above every id it took over.
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig {
+                                  .pumping = vthost::SessionPumping::Manual,
+                                  .firstSessionId = 4242,
+                                  .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() } };
+
+    auto* const tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(tab->rootPane()->session().value == 4242);
+}
+
+// {{{ Quiescing a hosted session for a live upgrade
+namespace
+{
+
+/// @return Whether @p future is ready within five seconds.
+template <typename T>
+[[nodiscard]] bool readyPromptly(std::future<T> const& future)
+{
+    return future.wait_for(std::chrono::seconds { 5 }) == std::future_status::ready;
+}
+
+/// @return The main page of @p session's primary screen, as text.
+[[nodiscard]] std::string pageText(vthost::HostedSession& session)
+{
+    auto& terminal = session.terminal();
+    auto const _ = std::lock_guard { terminal };
+    return terminal.primaryScreen().renderMainPageText();
+}
+
+/// @return How many lines @p session's primary screen has scrolled into its history: cheap to ask while a
+///         pump fills it, unlike nonEmptyLines().
+[[nodiscard]] std::size_t historyLines(vthost::HostedSession& session)
+{
+    auto& terminal = session.terminal();
+    auto const _ = std::lock_guard { terminal };
+    return unbox<std::size_t>(terminal.primaryScreen().historyLineCount());
+}
+
+/// @return Every non-empty line of @p session's primary screen, its history included, oldest first.
+[[nodiscard]] std::vector<std::string> nonEmptyLines(vthost::HostedSession& session)
+{
+    auto& terminal = session.terminal();
+    auto const _ = std::lock_guard { terminal };
+    auto const& grid = terminal.primaryScreen().grid();
+    auto const history = unbox<int>(grid.historyLineCount());
+    auto const pageLines = unbox<int>(grid.pageSize().lines);
+    auto lines = std::vector<std::string> {};
+    for (auto const offset: std::views::iota(-history, pageLines))
+        if (auto text = grid.lineTextTrimmed(vtbackend::LineOffset(offset)); !text.empty())
+            lines.push_back(std::move(text));
+    return lines;
+}
+
+#ifndef _WIN32
+/// @return A hosted session running `/bin/sh -c @p script` on a PTY of its own, not yet started.
+/// @param onClosed Invoked on the pump thread once the session's close is announced.
+/// @param placement Where its child is placed.
+/// @param settings The terminal's settings, before the host normalizes them.
+[[nodiscard]] std::unique_ptr<vthost::HostedSession> liveSession(
+    std::string script,
+    std::function<void()> onClosed = {},
+    std::shared_ptr<vtpty::ProcessPlacement> placement = std::make_shared<vtpty::NoPlacement>(),
+    vtbackend::Settings settings = {})
+{
+    auto const size = vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) };
+    auto process =
+        std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", std::move(script) }),
+                                         vtpty::createPty(size, std::nullopt),
+                                         /*escapeSandbox=*/false,
+                                         std::move(placement));
+    settings.pageSize = size;
+    return std::make_unique<vthost::HostedSession>(vtworkspace::SessionId { 1 },
+                                                   core::defaultEnvironment(),
+                                                   std::move(process),
+                                                   vthost::hostedSessionSettings(std::move(settings)),
+                                                   vtbackend::HostIdentity {},
+                                                   vtbackend::TerminalClocks::system(),
+                                                   core::platform::NativeFileSystem::instance(),
+                                                   std::function<void()> {},
+                                                   std::function<void()> {},
+                                                   std::function<void()> {},
+                                                   vthost::SessionNotifyCallback {},
+                                                   std::function<void(std::string)> {},
+                                                   std::move(onClosed),
+                                                   vthost::SessionSignalCallback {});
+}
+#endif
+
+} // namespace
+
+#ifndef _WIN32
+TEST_CASE("quiesce leaves the child alive and the pty open", "[vthost][host][upgrade][threading]")
+{
+    auto closes = std::atomic<int> { 0 };
+    auto session = liveSession("printf ready; exec cat", [&closes] { ++closes; });
+    session->start();
+    REQUIRE(eventually([&] { return pageText(*session).contains("ready"); }));
+
+    auto const quiesced = session->quiesce();
+    REQUIRE(quiesced.has_value());
+    CHECK_FALSE(quiesced->terminal.pages.empty());
+    auto const* const child = session->process();
+    REQUIRE(child != nullptr);
+    CHECK(child->alive());
+    CHECK_FALSE(session->terminal().device().isClosed());
+    CHECK(closes.load() == 0);
+
+    // The same PTY carries input to the same child, and its output back, once the pump runs again.
+    session->resume();
+    session->writeInput("ping\n");
+    CHECK(eventually([&] { return pageText(*session).contains("ping"); }));
+    CHECK(closes.load() == 0);
+}
+
+TEST_CASE("input delivered while quiesced is carried, not lost", "[vthost][host][upgrade][threading]")
+{
+    // No echo by the line discipline, and cat -v makes the terminal's reply visible: each byte that reaches
+    // the child is shown exactly once, in the order it arrived.
+    auto session = liveSession("stty -echo; printf ready; exec cat -v");
+    session->start();
+    REQUIRE(eventually([&] { return pageText(*session).contains("ready"); }));
+    REQUIRE(session->quiesce().has_value());
+
+    // A client's input, then text for the screen whose parse replies (DA1): neither is delivered while
+    // quiesced, nor parsed by the capture.
+    session->writeInput("abc\n");
+    session->deliverOnPump(vthost::DeliveryKind::Screen, "\033[c");
+
+    auto const carried = session->quiesce();
+    REQUIRE(carried.has_value());
+    CHECK(carried->carried
+          == std::vector<vthost::CarriedDelivery> {
+              { .kind = vthost::DeliveryKind::Pty, .bytes = "abc\n" },
+              { .kind = vthost::DeliveryKind::Screen, .bytes = "\033[c" },
+          });
+    CHECK(carried->terminal.input.pendingSequence.empty());
+    CHECK_FALSE(pageText(*session).contains("abc"));
+
+    // Rolled back, the session delivers both, each once and in the order handed over: the input, then the
+    // reply the parse queues -- which the line discipline hands cat once a newline follows it.
+    session->resume();
+    session->writeInput("\n");
+    REQUIRE(eventually([&] { return pageText(*session).contains("^[[?"); }));
+    auto const text = pageText(*session);
+    CHECK(occurrences(text, "abc") == 1);
+    CHECK(occurrences(text, "^[[?") == 1);
+    CHECK(text.find("abc") < text.find("^[[?"));
+}
+
+TEST_CASE("a pump stopped for a capture queues input, which the capture carries once",
+          "[vthost][host][upgrade][threading]")
+{
+    auto session = liveSession("stty -echo; printf ready; exec cat -v");
+    session->start();
+    REQUIRE(eventually([&] { return pageText(*session).contains("ready"); }));
+    REQUIRE(session->stopForCapture().has_value());
+
+    // Stopped as quiesce() stops it: nothing handed over reaches the child, and nothing is lost.
+    session->writeInput("abc\n");
+    auto const quiesced = session->quiesce();
+    REQUIRE(quiesced.has_value());
+    CHECK(
+        quiesced->carried
+        == std::vector<vthost::CarriedDelivery> { { .kind = vthost::DeliveryKind::Pty, .bytes = "abc\n" } });
+    CHECK_FALSE(pageText(*session).contains("abc"));
+
+    session->resume();
+    REQUIRE(eventually([&] { return pageText(*session).contains("abc"); }));
+    CHECK(occurrences(pageText(*session), "abc") == 1);
+}
+
+TEST_CASE("occurrences counts each occurrence once, none overlapping", "[vthost][testing]")
+{
+    CHECK(occurrences("", "a") == 0);
+    CHECK(occurrences("xyz", "a") == 0);
+    CHECK(occurrences("abab", "ab") == 2);
+    CHECK(occurrences("aaa", "aa") == 1);
+    CHECK(occurrences("xaby", "ab") == 1);
+}
+
+TEST_CASE("resume after quiesce continues output with no gap", "[vthost][host][upgrade][threading]")
+{
+    // Far more than a PTY buffers, so that the program is still printing, or blocked on the full PTY, as each
+    // capture is taken.
+    constexpr auto LineTotal = 20000;
+    auto settings = vtbackend::Settings {};
+    settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(LineTotal + 1000));
+    auto session = liveSession(
+        std::format("i=1; while [ $i -le {} ]; do echo $i; i=$((i + 1)); done; printf done", LineTotal),
+        {},
+        std::make_shared<vtpty::NoPlacement>(),
+        settings);
+    session->start();
+
+    // Stopped and restarted while the program prints, each time once more of it arrived.
+    auto const finished = [&] {
+        return pageText(*session).contains("done");
+    };
+    // Once the program printed its last line it exits, and the pump ends at the PTY's end: from then on a
+    // quiesce() correctly answers that the session ended, so no capture is taken past that point.
+    auto midStream = 0;
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 5))
+    {
+        auto const before = historyLines(*session);
+        REQUIRE(eventually([&] { return historyLines(*session) > before || finished(); }));
+        if (finished())
+            break;
+        auto const quiesced = session->quiesce();
+        if (!quiesced)
+        {
+            // The rest arrived, and the program exited, between the look above and the capture.
+            REQUIRE(quiesced.error() == vthost::QuiesceError::Ended);
+            REQUIRE(finished());
+            break;
+        }
+        // The screen holds still while quiesced: what it shows is what the capture holds.
+        if (!finished())
+            ++midStream;
+        session->resume();
+    }
+    // At least one capture was taken with output still to come: that is the gap this proves absent.
+    CHECK(midStream > 0);
+    REQUIRE(eventually(finished));
+
+    auto expected = std::vector<std::string> {};
+    for (auto const number: std::views::iota(1, LineTotal + 1))
+        expected.push_back(std::to_string(number));
+    expected.emplace_back("done");
+    CHECK(nonEmptyLines(*session) == expected);
+}
+
+TEST_CASE("quiesce of a session whose child is blocked on output returns promptly",
+          "[vthost][host][upgrade][threading]")
+{
+    auto placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    auto session = liveSession("exec yes", {}, placement);
+    session->start();
+    REQUIRE(eventually([&] { return pageText(*session).contains("y"); }));
+
+    auto first = std::async(std::launch::async, [&session] { return session->quiesce().has_value(); });
+    REQUIRE(readyPromptly(first));
+    CHECK(first.get());
+
+    #ifdef __linux__
+    // Nobody reads the PTY now: the child fills it and sleeps in its write, as `yes` sleeps nowhere else.
+    REQUIRE(placement->pids().size() == 1);
+    auto const blocked = [pid = placement->pids().front()] {
+        auto stat = std::ifstream { std::format("/proc/{}/stat", pid) };
+        auto line = std::string {};
+        std::getline(stat, line);
+        auto const end = line.rfind(')');
+        return end != std::string::npos && end + 2 < line.size() && line[end + 2] == 'S';
+    };
+    REQUIRE(eventually(blocked));
+    #endif
+
+    // Rolled back and quiesced again with the child parked on a full PTY: the stop waits for no progress of
+    // the child's.
+    session->resume();
+    auto second = std::async(std::launch::async, [&session] { return session->quiesce().has_value(); });
+    REQUIRE(readyPromptly(second));
+    CHECK(second.get());
+}
+
+TEST_CASE("quiesce refuses a session whose child is still spawning", "[vthost][host][upgrade][threading]")
+{
+    auto placement = std::make_shared<vtpty::testing::HoldingPlacement>();
+    auto session = liveSession("printf ready; exec cat", {}, placement);
+    session->start();
+
+    // Parked before its terminal is set up: input written now is flushed away by the child.
+    auto const refused = session->quiesce();
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == vthost::QuiesceError::SpawnInProgress);
+
+    // The session ran on all along.
+    placement->releaseAll();
+    REQUIRE(eventually([&] { return pageText(*session).contains("ready"); }));
+    CHECK(session->quiesce().has_value());
+}
+
+TEST_CASE("quiesce refuses a session whose escape sequence in flight overflowed",
+          "[vthost][host][upgrade][threading]")
+{
+    auto settings = vtbackend::Settings {};
+    settings.inFlightTailLimit = 16;
+    auto session =
+        liveSession("stty -echo; printf '\\033]2;0123456789012345678901234567890123456789'; exec cat",
+                    {},
+                    std::make_shared<vtpty::NoPlacement>(),
+                    settings);
+    session->start();
+    auto const overflowed = [&] {
+        auto& terminal = session->terminal();
+        auto const _ = std::lock_guard { terminal };
+        return terminal.inFlightTailCompleteness() == vtbackend::TailCompleteness::Overflowed;
+    };
+    REQUIRE(eventually(overflowed));
+
+    auto const refused = session->quiesce();
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == vthost::QuiesceError::InFlightTailOverflowed);
+
+    // The session runs on: the sequence ends, and a capture is complete again.
+    session->writeInput("\033\\ok\n");
+    REQUIRE(eventually([&] { return pageText(*session).contains("ok"); }));
+    CHECK(session->quiesce().has_value());
+}
+#endif
+
+namespace
+{
+/// @return A hosted session over @p pty, with no callbacks but @p onClosed.
+[[nodiscard]] std::unique_ptr<vthost::HostedSession> mockSession(std::unique_ptr<vtpty::Pty> pty,
+                                                                 std::function<void()> onClosed = {})
+{
+    return std::make_unique<vthost::HostedSession>(vtworkspace::SessionId { 1 },
+                                                   core::defaultEnvironment(),
+                                                   std::move(pty),
+                                                   vtbackend::Settings {},
+                                                   vtbackend::HostIdentity {},
+                                                   vtbackend::TerminalClocks::system(),
+                                                   core::platform::NativeFileSystem::instance(),
+                                                   std::function<void()> {},
+                                                   std::function<void()> {},
+                                                   std::function<void()> {},
+                                                   vthost::SessionNotifyCallback {},
+                                                   std::function<void(std::string)> {},
+                                                   std::move(onClosed),
+                                                   vthost::SessionSignalCallback {});
+}
+
+/// Restores into @p session's fresh terminal a state whose queue for the PTY holds @p replies, as a terminal
+/// captured with replies it had not written yet.
+void restoreWithQueuedReplies(vthost::HostedSession& session, std::string replies)
+{
+    auto& terminal = session.terminal();
+    auto const _ = std::lock_guard { terminal };
+    auto state = terminal.captureState();
+    state.input.pendingSequence = std::move(replies);
+    state.input.consumedBytes = 0;
+    REQUIRE(terminal.restoreState(state).has_value());
+}
+
+} // namespace
+
+TEST_CASE("carried replies and input reach the pty ahead of new input", "[vthost][host][upgrade][threading]")
+{
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) }, "");
+    auto* const pty = ownedPty.get();
+    auto closed = std::promise<void> {};
+    auto hosted = mockSession(std::move(ownedPty), [&] { closed.set_value(); });
+
+    // As a new process restores a session: the terminal's queued replies, what the old one carried, then a
+    // client's input arriving once the pump runs.
+    restoreWithQueuedReplies(*hosted, "one");
+    hosted->replayCarried({ { .kind = vthost::DeliveryKind::Pty, .bytes = "two" },
+                            { .kind = vthost::DeliveryKind::Pty, .bytes = "" },
+                            { .kind = vthost::DeliveryKind::Pty, .bytes = "three" } });
+    // The restore's release of the terminal lock sends the replies already; what was carried waits.
+    CHECK(pty->written() == "one");
+    CHECK(hosted->inputBacklog() == 8);
+    hosted->start();
+    hosted->writeInput("four");
+    CHECK(eventually([&] { return pty->written() == "onetwothreefour"; }));
+    CHECK(eventually([&] { return hosted->inputBacklog() == 0; }));
+
+    pty->exitProcess();
+    REQUIRE(closed.get_future().wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+}
+
+TEST_CASE("without a pump, carried input goes out ahead of the input that follows it",
+          "[vthost][host][upgrade]")
+{
+    // SessionPumping::Manual: nobody ever starts a pump, so the caller stands in for it -- for what was
+    // carried over too, which would otherwise wait forever, and everything behind it with it.
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) }, "");
+    auto* const pty = ownedPty.get();
+    auto hosted = mockSession(std::move(ownedPty));
+
+    restoreWithQueuedReplies(*hosted, "one");
+    hosted->replayCarried({ { .kind = vthost::DeliveryKind::Pty, .bytes = "two" },
+                            { .kind = vthost::DeliveryKind::Screen, .bytes = "seen" } });
+    hosted->writeInput("three");
+    CHECK(pty->written() == "onetwothree");
+    CHECK(hosted->inputBacklog() == 0);
+    CHECK(pageText(*hosted).contains("seen"));
+
+    hosted->writeInput("four");
+    CHECK(pty->written() == "onetwothreefour");
+}
+
+TEST_CASE("quiesce reports a session whose program ended", "[vthost][host][upgrade][threading]")
+{
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) }, "");
+    auto* const pty = ownedPty.get();
+    auto closes = std::atomic<int> { 0 };
+    auto hosted = mockSession(std::move(ownedPty), [&] { ++closes; });
+    hosted->start();
+
+    // At the PTY's end the pump closes it, then announces the close: a capture in between, or after, holds a
+    // session nobody can adopt.
+    pty->exitProcess();
+    REQUIRE(eventually([&] { return hosted->terminal().device().isClosed(); }));
+    auto const quiesced = hosted->quiesce();
+    REQUIRE_FALSE(quiesced.has_value());
+    CHECK(quiesced.error() == vthost::QuiesceError::Ended);
+    REQUIRE(eventually([&] { return closes.load() == 1; }));
+
+    // Not resumed by anyone: it is gone.
+    hosted->resume();
+    CHECK(closes.load() == 1);
+}
+
+#ifndef _WIN32
+TEST_CASE("quiesce reports a session whose child exited", "[vthost][host][upgrade][threading]")
+{
+    auto closes = std::atomic<int> { 0 };
+    auto session = liveSession("printf ready; exit 3", [&closes] { ++closes; });
+    session->start();
+    REQUIRE(eventually([&] { return session->terminal().device().isClosed(); }));
+
+    auto const quiesced = session->quiesce();
+    REQUIRE_FALSE(quiesced.has_value());
+    CHECK(quiesced.error() == vthost::QuiesceError::Ended);
+    REQUIRE(eventually([&] { return closes.load() == 1; }));
+}
+#endif
+
+TEST_CASE("quiesce reports a session the host terminated", "[vthost][host][upgrade][threading]")
+{
+    auto closes = std::atomic<int> { 0 };
+    auto ownedPty = std::make_unique<BlockingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) });
+    auto hosted = mockSession(std::move(ownedPty), [&] { ++closes; });
+    hosted->start();
+
+    // terminate() wins the pump: the quiesce's own exchange fails, and it says so.
+    hosted->terminate(vthost::TerminationReason::Requested);
+    auto const quiesced = hosted->quiesce();
+    REQUIRE_FALSE(quiesced.has_value());
+    CHECK(quiesced.error() == vthost::QuiesceError::Ended);
+    REQUIRE(eventually([&] { return closes.load() == 1; }));
+}
+
+TEST_CASE("terminating a quiesced session announces its close once", "[vthost][host][upgrade][threading]")
+{
+    auto closes = std::atomic<int> { 0 };
+    auto ownedPty = std::make_unique<BlockingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) });
+    auto hosted = mockSession(std::move(ownedPty), [&] { ++closes; });
+    hosted->start();
+    REQUIRE(hosted->quiesce().has_value());
+
+    SECTION("asked by the host: announced, as requested, once")
+    {
+        hosted->terminate(vthost::TerminationReason::Requested);
+        CHECK(closes.load() == 1);
+        CHECK(hosted->endCause() == vthost::SessionEnd::Requested);
+        hosted->terminate(vthost::TerminationReason::Requested);
+        hosted.reset();
+        CHECK(closes.load() == 1);
+    }
+    SECTION("its owner going away: nothing announced")
+    {
+        hosted.reset();
+        CHECK(closes.load() == 0);
+    }
+}
+
+TEST_CASE("input handed to a quiesced session wakes no reader", "[vthost][host][upgrade][threading]")
+{
+    // The pump is stopped: a wakeup per keystroke would only fill the selector's break pipe.
+    auto ownedPty = std::make_unique<BlockingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) });
+    auto* const pty = ownedPty.get();
+    auto hosted = mockSession(std::move(ownedPty));
+    hosted->start();
+    REQUIRE(hosted->quiesce().has_value());
+
+    auto const before = pty->wakeupCalls();
+    for ([[maybe_unused]] auto const key: std::views::iota(0, 3))
+        hosted->writeInput("x");
+    CHECK(pty->wakeupCalls() == before);
+    CHECK(hosted->inputBacklog() == 3);
+    hosted->terminate(vthost::TerminationReason::Requested);
+}
+
+#ifndef _WIN32
+namespace
+{
+/// @return The hosted session behind the tab @p host creates.
+[[nodiscard]] vthost::HostedSession& onlySession(SessionHost& host)
+{
+    auto* const tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto* const session = host.hostedSession(tab->rootPane()->session());
+    REQUIRE(session != nullptr);
+    return *session;
+}
+
+/// @return @p count bytes of lowercase letters, the line discipline's to pass through unchanged.
+[[nodiscard]] std::string letterPayload(std::size_t count)
+{
+    auto text = std::string(count, '\0');
+    for (auto const index: std::views::iota(std::size_t { 0 }, count))
+        text[index] = static_cast<char>('a' + (index % 26));
+    return text;
+}
+
+/// @return The contents of @p path, or empty where it cannot be read.
+[[nodiscard]] std::string fileContents(std::filesystem::path const& path)
+{
+    auto file = std::ifstream { path, std::ios::binary };
+    return std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+}
+} // namespace
+
+TEST_CASE("quiesce interrupts a write the program never reads, and carries exactly what the pty did not take",
+          "[vthost][host][upgrade][threading]")
+{
+    // The program reads nothing until the test lets it, and then copies every byte it reads into a file: what
+    // it got before the capture, and after the resume, is exactly what was handed over -- no byte lost, none
+    // twice, the screen's reply after the input it followed.
+    auto const directory = std::filesystem::temp_directory_path()
+                           / std::format("contour-quiesce-{}-{}",
+                                         ::getpid(),
+                                         std::chrono::steady_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(directory);
+    auto const flag = directory / "go";
+    auto const received = directory / "received";
+    auto const script = std::format("stty raw -echo; printf ready; while [ ! -e '{}' ]; do sleep 0.02; done; "
+                                    "exec cat > '{}'",
+                                    flag.string(),
+                                    received.string());
+
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost {
+        loop,
+        [&script](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+            return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", script }),
+                                                    vtpty::createPty(size, std::nullopt),
+                                                    /*escapeSandbox=*/false,
+                                                    std::make_shared<vtpty::NoPlacement>());
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    auto& session = onlySession(host);
+    auto const id = session.id();
+    REQUIRE(eventually([&] { return pageText(session).contains("ready"); }));
+
+    // A megabyte: the pump writes what the PTY takes, then waits for a program that reads nothing. It takes
+    // the input at once; the wait makes sure its write is parked. Text for the screen queues behind it while
+    // it waits, as an engine operation hands it over: what the write did not get to the PTY must go back
+    // ahead of that.
+    auto const payload = letterPayload(std::size_t { 1024 } * 1024);
+    session.writeInput(payload);
+    std::this_thread::sleep_for(std::chrono::milliseconds { 300 });
+    REQUIRE(host.performOperation(vthost::proto::PerformOperation {
+                                      .session = id.value,
+                                      .operation = vthost::proto::EngineOperation::WriteScreen,
+                                      .text = "\033[c" })
+                .has_value());
+
+    auto capture = std::async(std::launch::async, [&session] { return session.quiesce(); });
+    REQUIRE(readyPromptly(capture));
+    auto const quiesced = capture.get();
+    REQUIRE(quiesced.has_value());
+    REQUIRE(quiesced->carried.size() == 2);
+    auto const& rest = quiesced->carried[0];
+    CHECK(rest.kind == vthost::DeliveryKind::Pty);
+    REQUIRE_FALSE(rest.bytes.empty());
+    REQUIRE(rest.bytes.size() < payload.size());
+    CHECK(payload.ends_with(rest.bytes));
+    CHECK(quiesced->carried[1]
+          == vthost::CarriedDelivery { .kind = vthost::DeliveryKind::Screen, .bytes = "\033[c" });
+    CHECK(session.inputBacklog() == rest.bytes.size() + 3);
+
+    // Text for the screen handed over while quiesced is carried too, behind what waited already.
+    REQUIRE(host.performOperation(vthost::proto::PerformOperation {
+                                      .session = id.value,
+                                      .operation = vthost::proto::EngineOperation::WriteScreen,
+                                      .text = "seen" })
+                .has_value());
+    auto const again = session.quiesce();
+    REQUIRE(again.has_value());
+    REQUIRE(again->carried.size() == 2);
+    CHECK(again->carried[0] == rest);
+    CHECK(again->carried[1]
+          == vthost::CarriedDelivery { .kind = vthost::DeliveryKind::Screen, .bytes = "\033[cseen" });
+
+    // What the PTY took is everything before the carried rest, exactly.
+    auto const taken = payload.size() - rest.bytes.size();
+    std::ofstream { flag }.put('\n');
+    REQUIRE(eventually([&] { return fileContents(received).size() >= taken; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+    CHECK(fileContents(received) == payload.substr(0, taken));
+
+    // Rolled back: the rest, then the parse and its reply, each once.
+    session.resume();
+    REQUIRE(eventually([&] { return fileContents(received).size() > payload.size(); }));
+    REQUIRE(eventually([&] { return pageText(session).contains("seen"); }));
+    std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+    auto const all = fileContents(received);
+    CHECK(all.starts_with(payload));
+    CHECK(all.substr(payload.size()).starts_with("\033[?"));
+    CHECK(occurrences(all, "\033[?") == 1);
+    CHECK(session.inputBacklog() == 0);
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a reply queued while a write was interrupted goes out after the write's rest, not inside it",
+          "[vthost][host][upgrade][threading]")
+{
+    // The program reads nothing until the test lets it, then copies what it reads into a file. A megabyte is
+    // pasted; the capture interrupts the write. A reply the terminal queues meanwhile (a focus report, here
+    // any reply) must reach the program after the paste, as it would have without the capture.
+    auto const directory = std::filesystem::temp_directory_path()
+                           / std::format("contour-rest-{}-{}",
+                                         ::getpid(),
+                                         std::chrono::steady_clock::now().time_since_epoch().count());
+    std::filesystem::create_directories(directory);
+    auto const flag = directory / "go";
+    auto const received = directory / "received";
+    auto const script = std::format("stty raw -echo; printf ready; while [ ! -e '{}' ]; do sleep 0.02; done; "
+                                    "exec cat > '{}'",
+                                    flag.string(),
+                                    received.string());
+
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost {
+        loop,
+        [&script](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+            return std::make_unique<vtpty::Process>(vtpty::testing::execInfo("/bin/sh", { "-c", script }),
+                                                    vtpty::createPty(size, std::nullopt),
+                                                    /*escapeSandbox=*/false,
+                                                    std::make_shared<vtpty::NoPlacement>());
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    auto& session = onlySession(host);
+    REQUIRE(eventually([&] { return pageText(session).contains("ready"); }));
+
+    auto const payload = letterPayload(std::size_t { 1024 } * 1024);
+    session.writeInput(payload);
+    std::this_thread::sleep_for(std::chrono::milliseconds { 300 });
+    auto capture = std::async(std::launch::async, [&session] { return session.quiesce(); });
+    REQUIRE(readyPromptly(capture));
+    auto const quiesced = capture.get();
+    REQUIRE(quiesced.has_value());
+    REQUIRE_FALSE(quiesced->carried.empty());
+    CHECK(quiesced->carried.front().progress == vthost::DeliveryProgress::InterruptedRest);
+
+    // Queued by the terminal while the write waited.
+    {
+        auto& terminal = session.terminal();
+        auto const _ = std::lock_guard { terminal };
+        terminal.reply("<REPLY>");
+    }
+
+    // Rolled back: the rest of the paste, then the reply.
+    session.resume();
+    std::ofstream { flag }.put('\n');
+    REQUIRE(eventually([&] { return fileContents(received).size() >= payload.size() + 7; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+    auto const all = fileContents(received);
+    CHECK(all.size() == payload.size() + 7);
+    CHECK(all.starts_with(payload));
+    CHECK(all.ends_with("<REPLY>"));
+
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a quiesced session crosses into an adopted one, every byte exactly once",
+          "[vthost][host][upgrade][threading]")
+{
+    // The whole hand-over in one process: the old session is quiesced and gives up its PTY and child; a new
+    // one adopts them, restores the terminal, replays what was carried, and runs on. The program prints
+    // numbered lines throughout and echoes what it is sent, so both directions are checked.
+    constexpr auto LineTotal = 300;
+    auto settings = vtbackend::Settings {};
+    settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(LineTotal + 100));
+    auto old = liveSession(
+        // Paced in blocks of ten: a `sleep` process per line made the stream outlast the ten seconds the
+        // test waits for it on a slow macOS runner, while a block still leaves it running when quiesced.
+        std::format("stty -echo; (i=1; while [ $i -le {} ]; do echo n$i; i=$((i + 1)); "
+                    "[ $((i % 10)) -eq 0 ] && sleep 0.05; done) & exec cat -v",
+                    LineTotal),
+        {},
+        std::make_shared<vtpty::NoPlacement>(),
+        settings);
+    old->start();
+    REQUIRE(eventually([&] { return pageText(*old).contains("n2"); }));
+
+    // Captured mid-stream, with input and a reply-raising parse waiting.
+    REQUIRE(old->quiesce().has_value());
+    old->writeInput("abc\n");
+    old->deliverOnPump(vthost::DeliveryKind::Screen, "\033[c");
+    auto captured = old->quiesce();
+    REQUIRE(captured.has_value());
+    auto const lastNumbered = [](std::vector<std::string> const& lines) {
+        auto last = 0;
+        for (auto const& line: lines)
+            if (line.starts_with("n"))
+                last = std::max(last, std::stoi(line.substr(1)));
+        return last;
+    };
+    CHECK(lastNumbered(nonEmptyLines(*old)) < LineTotal);
+
+    // The old process lets go of the PTY and the child, and goes; neither closes nor dies with it.
+    auto& oldProcess = dynamic_cast<vtpty::Process&>(old->terminal().device());
+    auto const inherited = dynamic_cast<vtpty::UnixPty&>(oldProcess.pty()).releaseDescriptors();
+    auto child = oldProcess.releaseChild();
+    REQUIRE(child.has_value());
+    old.reset();
+
+    auto pty = vtpty::UnixPty::adopt(inherited);
+    REQUIRE(pty.has_value());
+    auto process = vtpty::Process::adopt(*child, std::move(*pty));
+    REQUIRE(process.has_value());
+    auto restoredSettings =
+        vtbackend::settingsFor(captured->terminal, vthost::hostedSessionSettings(settings));
+    REQUIRE(restoredSettings.has_value());
+    auto closes = std::atomic<int> { 0 };
+    auto adopted = std::make_unique<vthost::HostedSession>(
+        vtworkspace::SessionId { 1 },
+        core::defaultEnvironment(),
+        std::move(*process),
+        std::move(*restoredSettings),
+        vtbackend::HostIdentity {},
+        vtbackend::TerminalClocks::system(),
+        core::platform::NativeFileSystem::instance(),
+        std::function<void()> {},
+        std::function<void()> {},
+        std::function<void()> {},
+        vthost::SessionNotifyCallback {},
+        std::function<void(std::string)> {},
+        [&closes] { ++closes; },
+        vthost::SessionSignalCallback {});
+    {
+        auto& terminal = adopted->terminal();
+        auto const _ = std::lock_guard { terminal };
+        REQUIRE(terminal.restoreState(captured->terminal).has_value());
+    }
+    adopted->replayCarried(std::move(captured->carried));
+    adopted->start();
+    adopted->writeInput("xyz\n");
+
+    // Output: every numbered line once, in order, across the hand-over.
+    auto const allText = [&] {
+        return std::ranges::fold_left(
+            nonEmptyLines(*adopted), std::string {}, [](std::string all, std::string const& line) {
+                return std::move(all) + line + "\n";
+            });
+    };
+    REQUIRE(eventually([&] { return allText().contains("xyz"); }));
+    REQUIRE(eventually([&] { return allText().contains(std::format("n{}\n", LineTotal)); }));
+    auto numbered = std::vector<std::string> {};
+    for (auto const& line: nonEmptyLines(*adopted))
+        if (line.starts_with("n"))
+            numbered.push_back(line);
+    auto expected = std::vector<std::string> {};
+    for (auto const number: std::views::iota(1, LineTotal + 1))
+        expected.push_back(std::format("n{}", number));
+    CHECK(numbered == expected);
+
+    // Input: what was carried, then the reply its parse queued, then what came after, each once.
+    auto const text = allText();
+    CHECK(occurrences(text, "abc") == 1);
+    CHECK(occurrences(text, "^[[?") == 1);
+    CHECK(occurrences(text, "xyz") == 1);
+    CHECK(text.find("abc") < text.find("^[[?"));
+    CHECK(text.find("^[[?") < text.find("xyz"));
+    CHECK(closes.load() == 0);
+}
+#endif
+
+// }}}

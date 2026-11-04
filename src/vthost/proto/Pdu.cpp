@@ -281,6 +281,18 @@ namespace
     {
         return std::to_underlying(PduType::LayoutBatchEnd);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(UpgradeDaemon const&) noexcept
+    {
+        return std::to_underlying(PduType::UpgradeDaemon);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(UpgradeDaemonReply const&) noexcept
+    {
+        return std::to_underlying(PduType::UpgradeDaemonReply);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(DaemonUpgrading const&) noexcept
+    {
+        return std::to_underlying(PduType::DaemonUpgrading);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -859,6 +871,22 @@ namespace
     void encodeBody(Writer& out, LayoutBatchEnd const& pdu)
     {
         out.varint(pdu.causeSerial);
+    }
+
+    void encodeBody(Writer& out, UpgradeDaemon const& pdu)
+    {
+        out.string(pdu.imageId);
+    }
+
+    void encodeBody(Writer& out, UpgradeDaemonReply const& pdu)
+    {
+        out.u8(pdu.result);
+        out.string(pdu.detail);
+    }
+
+    void encodeBody(Writer& out, DaemonUpgrading const& pdu)
+    {
+        out.string(pdu.toRelease);
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1784,6 +1812,34 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeUpgradeDaemon(Reader& in)
+    {
+        auto pdu = UpgradeDaemon {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.imageId, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeUpgradeDaemonReply(Reader& in)
+    {
+        auto pdu = UpgradeDaemonReply {};
+        auto error = DecodeError {};
+        // The result is carried, not judged: a newer daemon may know refusals this build does not.
+        if (!assign(in.u8(), pdu.result, error) || !assign(in.string(), pdu.detail, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeDaemonUpgrading(Reader& in)
+    {
+        auto pdu = DaemonUpgrading {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.toRelease, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -1990,6 +2046,9 @@ namespace
         DecodeRow { PduType::MoveNodeRefused, decodeMoveNodeRefused },
         DecodeRow { PduType::LayoutBatchEnd, decodeLayoutBatchEnd },
         DecodeRow { PduType::SetSplitOrientation, decodeSetSplitOrientation },
+        DecodeRow { PduType::UpgradeDaemon, decodeUpgradeDaemon },
+        DecodeRow { PduType::UpgradeDaemonReply, decodeUpgradeDaemonReply },
+        DecodeRow { PduType::DaemonUpgrading, decodeDaemonUpgrading },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

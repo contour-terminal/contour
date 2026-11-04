@@ -198,6 +198,8 @@ struct Command
 
     /// @return the pixel format of a transmission: `f=` if given, else the protocol's RGBA default.
     [[nodiscard]] Format transmissionFormat() const noexcept { return format.value_or(Format::Rgba); }
+
+    bool operator==(Command const&) const = default;
 };
 
 /// Why a command could not be decoded. The strings are the ones kitty puts on the wire, so that an

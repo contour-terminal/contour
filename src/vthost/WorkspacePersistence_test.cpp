@@ -247,6 +247,27 @@ TEST_CASE("events after finalize write nothing", "[vthost][snapshot][persistence
     CHECK(h.files.readFile(SnapshotFile) == written);
 }
 
+TEST_CASE("writeNow writes the live workspace and keeps writing after it", "[vthost][snapshot][persistence]")
+{
+    auto h = PersistenceHarness {};
+    auto const [a, b] = h.twoPanes();
+    h.persist();
+
+    h.persistence->writeNow();
+    CHECK(h.writes == 1);
+    CHECK(h.leavesOnFile() == 2);
+
+    // Unlike finalize(), it seals nothing: the workspace goes on being written, as after a failed upgrade.
+    h.host->closeSession(b);
+    std::ignore = h.loop.runOnce(0ms);
+    CHECK(h.writes == 2);
+    CHECK(h.leavesOnFile() == 1);
+    h.persistence->writeNow();
+    CHECK(h.writes == 3);
+    h.persistence->finalize(ShutdownWorkspace::Keep);
+    CHECK(h.writes == 4);
+}
+
 TEST_CASE("the persistence observer does not keep an idle daemon alive", "[vthost][snapshot][persistence]")
 {
     auto h = PersistenceHarness {};

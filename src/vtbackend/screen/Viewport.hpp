@@ -36,6 +36,16 @@ class Viewport
 
     [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return _scrollOffset; }
 
+    /// Puts the view back at @p offset without announcing the move, with no part-row offset: what a restore
+    /// of a captured terminal does, the frontend asking for the view as it paints.
+    /// @param offset How far the view is scrolled into the history; the caller checked it is in range.
+    void restoreScrollOffset(ScrollOffset offset) noexcept
+    {
+        _scrollOffset = offset;
+        _pixelOffset.store(0.0f, std::memory_order_relaxed);
+        _isAwayFromBottom.store(offset.value != 0, std::memory_order_relaxed);
+    }
+
     /// Tests if the viewport has been moved(/scrolled) off its main view position.
     ///
     /// @retval true viewport has been moved/scrolled off its main view position.

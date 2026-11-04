@@ -8,6 +8,7 @@
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/LineSoA.hpp>
@@ -24,11 +25,19 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 
 namespace vtbackend
 {
+
+// Declared here, defined in state/: the captured form of a line sits above this layer, and a Line only
+// has to be able to produce and consume it.
+struct LineEncodeContext;
+struct LineDecodeContext;
+class StateWriter;
+class StateReader;
 
 /// How @ref Line::toUtf8 renders the cells with no text of their own (NoTextCellFlags): the continuation
 /// cell(s) of a wide (double-width) character, the padding (CellFlag::WrapPadding) one leaves at the end of a
@@ -86,6 +95,14 @@ struct LineProvenance
     uint32_t bornAt = 0;       ///< When the cursor first reached the row. @see Line::bornAt
 
     bool operator==(LineProvenance const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.contextId);
+        visitor(2, self.blockId);
+        visitor(3, self.bornAt);
+    }
 };
 
 /**
@@ -152,6 +169,21 @@ class Line
         assignScalarsFrom(other);
         return *this;
     }
+
+    // --- Captured state (the daemon's live upgrade) -----------------------------------------
+
+    /// Appends everything this line holds to @p out as one frame of the compact line encoding; a blank
+    /// line stays blank. Defined in state/GridState.cpp.
+    /// @param out     The stream.
+    /// @param context Files the renditions and the image fragments the cells wear.
+    void encodeState(StateWriter& out, LineEncodeContext& context) const;
+
+    /// Rebuilds a line from one frame of the compact line encoding.
+    /// @param in      The stream, positioned at the frame.
+    /// @param context The grid's rendition table and the resolver of its image fragments.
+    /// @return The line, or why the frame is not one a line can have. Defined in state/GridState.cpp.
+    [[nodiscard]] static std::expected<Line, StateDecodeError> decodeState(StateReader& in,
+                                                                           LineDecodeContext const& context);
 
     // --- Change tracking (the daemon's per-line delta source) -------------------------------
     //

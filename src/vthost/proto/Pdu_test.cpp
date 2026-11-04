@@ -861,6 +861,23 @@ TEST_CASE("the daemon-control tags are pinned", "[vthost][proto]")
     STATIC_CHECK(std::to_underlying(PduType::StopDaemon) == 27);
 }
 
+TEST_CASE("the upgrade PDUs round-trip and keep their tags", "[vthost][proto][upgrade]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::UpgradeDaemon) == 41);
+    STATIC_CHECK(std::to_underlying(PduType::UpgradeDaemonReply) == 42);
+    STATIC_CHECK(std::to_underlying(PduType::DaemonUpgrading) == 43);
+    auto const request = DecodedPdu { UpgradeDaemon { .imageId = "0.9.0-0123abcd" } };
+    CHECK(roundTrip(request) == request);
+    auto const bare = DecodedPdu { UpgradeDaemon {} };
+    CHECK(roundTrip(bare) == bare);
+    auto const reply = DecodedPdu { UpgradeDaemonReply { .result = 6, .detail = "a session is starting" } };
+    CHECK(roundTrip(reply) == reply);
+    auto const started = DecodedPdu { UpgradeDaemonReply {} };
+    CHECK(roundTrip(started) == started);
+    auto const announce = DecodedPdu { DaemonUpgrading { .toRelease = "0.9.0" } };
+    CHECK(roundTrip(announce) == announce);
+}
+
 TEST_CASE("a known PDU with bytes appended by a newer peer decodes as the PDU",
           "[vthost][proto][negotiation]")
 {

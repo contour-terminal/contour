@@ -23,6 +23,7 @@
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/WideString.hpp>
+#include <core/async/Cancellation.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -32,6 +33,7 @@
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/SystemInfo.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
@@ -41,6 +43,7 @@
 #include <functional>
 #include <future>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <random>
@@ -54,10 +57,12 @@
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/ConnectionRegistry.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/DaemonRuntime.hpp>
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/DaemonUpgradeHooks.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/IdleExitWatcher.hpp>
@@ -72,6 +77,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/WorkspacePersistence.hpp>
 #include <vthost/control/ControlService.hpp>
+#include <vthost/handover/LiveUpgrade.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 
@@ -174,23 +180,55 @@ namespace
         return core::readFileAsString(*file);
     }
 
-    /// Builds the TLS server context for the native TCP listener: an ephemeral
-    /// self-signed certificate when none is configured (the TOFU default), else
-    /// the configured PEM cert + key. The TCP transport is always encrypted.
-    /// @return The context, or nullptr after printing why it could not be built.
-    [[nodiscard]] std::shared_ptr<core::net::ITlsContext> makeNativeTcpTls(
-        NativeTcpListenerConfig const& config)
+    /// The TLS a native TCP listener serves with.
+    struct NativeTcpTls
+    {
+        std::shared_ptr<core::net::ITlsContext> context; ///< What encrypts each connection.
+        /// The certificate and key the daemon made up for it, which a live upgrade carries so that the new
+        /// image presents the very same one; nullopt for a configured certificate, which it reads again.
+        std::optional<handover::TlsIdentity> generated;
+    };
+
+    /// Builds the TLS server context for the native TCP listener: the configured PEM cert + key; else the
+    /// self-signed identity a live upgrade carried over, so that a client that trusted it on first use goes
+    /// on trusting it; else an ephemeral self-signed one, made up now (the TOFU default). The TCP transport
+    /// is always encrypted.
+    /// @param config The listener's configuration.
+    /// @param carried The identity the previous image of this daemon presented on it; nullopt for none.
+    /// @return The TLS, or nullopt after logging why it could not be built.
+    [[nodiscard]] std::optional<NativeTcpTls> makeNativeTcpTls(NativeTcpListenerConfig const& config,
+                                                               std::optional<handover::TlsIdentity> carried)
     {
         if (config.tlsCertPath.empty() && config.tlsKeyPath.empty())
         {
-            auto context = core::net::makeSelfSignedServerContext({ .commonName = "contour-daemon" });
+            if (carried)
+            {
+                if (auto context = core::net::makeTlsServerContext(carried->certPem, carried->keyPem))
+                {
+                    daemonLog()(
+                        "native TCP keeps the self-signed certificate it presented before the upgrade");
+                    return NativeTcpTls { .context = *std::move(context), .generated = std::move(carried) };
+                }
+                else
+                    errorLog()("cannot present the carried TLS certificate again ({}); clients that trusted "
+                               "it will be asked to trust a new one",
+                               context.error());
+            }
+            auto material = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
+            auto context = material.and_then([](core::net::CertKeyPem const& pem) {
+                return core::net::makeTlsServerContext(pem.certPem, pem.keyPem);
+            });
             if (!context)
             {
                 errorLog()("cannot build an ephemeral TLS certificate: {}", context.error());
-                return nullptr;
+                return std::nullopt;
             }
             daemonLog()("native TCP is using an ephemeral self-signed certificate (TOFU)");
-            return *context;
+            return NativeTcpTls {
+                .context = *std::move(context),
+                .generated = handover::TlsIdentity { .certPem = std::move(material->certPem),
+                                                     .keyPem = std::move(material->keyPem) },
+            };
         }
         auto const cert = readFileToString(config.tlsCertPath);
         auto const key = readFileToString(config.tlsKeyPath);
@@ -202,15 +240,15 @@ namespace
                 errorLog()("cannot read the TLS certificate '{}'", config.tlsCertPath);
             if (!key)
                 errorLog()("cannot read the TLS key '{}'", config.tlsKeyPath);
-            return nullptr;
+            return std::nullopt;
         }
         auto context = core::net::makeTlsServerContext(*cert, *key);
         if (!context)
         {
             errorLog()("cannot build the TLS server context: {}", context.error());
-            return nullptr;
+            return std::nullopt;
         }
-        return *context;
+        return NativeTcpTls { .context = *std::move(context), .generated = std::nullopt };
     }
 
     /// Composes a native connection handler that FIRST encrypts each accepted
@@ -254,6 +292,152 @@ namespace
         return std::move(*listener);
     }
 
+#ifndef _WIN32
+    /// @param endpoint The endpoint's name ("control", "native", ...).
+    /// @return What the first client is told of an endpoint a daemon serves on without after an upgrade.
+    [[nodiscard]] std::string unservedEndpointNotice(std::string_view endpoint)
+    {
+        return std::format(
+            "Contour could not serve its {} endpoint after the upgrade, and runs on without it; "
+            "the daemon's log says why",
+            endpoint);
+    }
+
+    /// Waits until the daemon is asked to end: what a daemon that took over hosted programs but serves no
+    /// endpoint at all does, rather than ending at once and hanging them up. The shutdown cancels every flow
+    /// of the loop (ShutdownFunnel::request()), this wait among them, which is how it ends.
+    /// @param loop The daemon's loop (not owned; outlives the wait).
+    core::async::Task<void> awaitShutdown(core::net::EventLoop* loop)
+    {
+        try
+        {
+            while (true)
+                co_await loop->delay(std::chrono::hours { 1 });
+        }
+        catch (core::async::OperationCancelled const&)
+        {
+            co_return;
+        }
+    }
+
+    /// The listening sockets a handover image hands this process, each taken at most once, by name; what is
+    /// not taken is closed (closeUnclaimed(), or at the latest with this), so that no endpoint the new
+    /// configuration dropped stays bound unserved.
+    class InheritedListeners
+    {
+      public:
+        /// @param listeners The listeners the handover image names, taken from it; none for a daemon that
+        ///        starts afresh.
+        explicit InheritedListeners(std::vector<handover::InheritedListener> listeners):
+            _pending { std::move(listeners) }
+        {
+        }
+        InheritedListeners(InheritedListeners const&) = delete;
+        InheritedListeners& operator=(InheritedListeners const&) = delete;
+        InheritedListeners(InheritedListeners&&) = delete;
+        InheritedListeners& operator=(InheritedListeners&&) = delete;
+        ~InheritedListeners() { closeUnclaimed(); }
+
+        /// Adopts the listener inherited as @p name.
+        /// @return It; or nullopt when none was, or when it could not be adopted, which closes it.
+        [[nodiscard]] std::optional<std::unique_ptr<core::net::IListener>> take(core::net::EventLoop& loop,
+                                                                                std::string_view name)
+        {
+            auto const found = std::ranges::find(_pending, name, &handover::InheritedListener::name);
+            if (found == _pending.end())
+                return std::nullopt;
+            auto const fd = found->fd;
+            _pending.erase(found);
+            auto adopted = core::net::adoptListener(loop, fd);
+            if (!adopted)
+            {
+                errorLog()("cannot serve the inherited {} listener: {}", name, adopted.error().toString());
+                ::close(fd);
+                return std::nullopt;
+            }
+            daemonLog()("serving the inherited {} listener", name);
+            return std::move(*adopted);
+        }
+
+        /// Takes the TLS identity the listener inherited as @p name presented, so that it presents the very
+        /// same one again; the listener itself stays to be taken.
+        /// @return It; or nullopt for none, or when it was taken already.
+        [[nodiscard]] std::optional<handover::TlsIdentity> takeTlsIdentity(std::string_view name)
+        {
+            auto const found = std::ranges::find(_pending, name, &handover::InheritedListener::name);
+            if (found == _pending.end())
+                return std::nullopt;
+            return std::exchange(found->tlsIdentity, std::nullopt);
+        }
+
+        /// Closes every listener not taken.
+        void closeUnclaimed()
+        {
+            for (auto const& listener: std::exchange(_pending, {}))
+            {
+                daemonLog()("closing the inherited {} listener, which this configuration does not serve",
+                            listener.name);
+                ::close(listener.fd);
+            }
+        }
+
+      private:
+        std::vector<handover::InheritedListener> _pending;
+    };
+
+    /// Serves @p path on the listener inherited as @p name, else binds it.
+    /// @return The listener, or the exit code a bind failure ends the daemon with.
+    [[nodiscard]] std::expected<std::unique_ptr<core::net::IListener>, int> adoptOrBindEndpoint(
+        core::net::EventLoop& loop,
+        InheritedListeners& inherited,
+        std::string_view name,
+        std::string const& path)
+    {
+        if (auto adopted = inherited.take(loop, name))
+            return std::move(*adopted);
+        return bindDaemonEndpoint(loop, path);
+    }
+
+    /// @param config The daemon's configuration.
+    /// @param services What it upgrades itself with.
+    /// @param instance The run of the daemon it serves as, which the upgrade carries on.
+    /// @param tlsIdentities The TLS identities it made up for its listeners, by listener name.
+    /// @return How its live upgrade runs: as this release, of this run, repeating this command line.
+    [[nodiscard]] handover::LiveUpgradeConfig liveUpgradeConfigOf(
+        DaemonConfig const& config,
+        LiveUpgradeServices const& services,
+        uint64_t instance,
+        std::map<std::string, handover::TlsIdentity, std::less<>> tlsIdentities)
+    {
+        return handover::LiveUpgradeConfig { .release = config.releaseVersion,
+                                             .daemonInstance = instance,
+                                             .argv = services.argv,
+                                             .installedExecutable = services.installedExecutable,
+                                             .sandbox = services.sandbox,
+                                             .configFile = services.configFile,
+                                             .profile = services.profile,
+                                             .runningConfig = services.runningConfig,
+                                             .tlsIdentities = std::move(tlsIdentities) };
+    }
+
+    /// @param config The daemon's configuration.
+    /// @param hooks The daemon's upgrade hooks (not owned; outlives the port).
+    /// @param upgrade Where the daemon's LiveUpgrade is built once its listeners are (not owned; outlives the
+    ///        port, and holds one before any connection can ask for it).
+    /// @return The port its runtime upgrades it through; nullopt for a daemon given nothing to upgrade with.
+    [[nodiscard]] std::optional<DaemonUpgradePort> upgradePortOf(
+        DaemonConfig const& config, DaemonUpgradeHooks& hooks, std::optional<handover::LiveUpgrade>& upgrade)
+    {
+        if (!config.liveUpgrade)
+            return std::nullopt;
+        return DaemonUpgradePort {
+            .hooks = hooks,
+            .run = [&upgrade](handover::UpgradeTarget target) { return upgrade->run(std::move(target)); },
+            .state = [&upgrade] { return upgrade ? upgrade->state() : handover::UpgradeState::Idle; },
+        };
+    }
+#endif
+
     /// The watcher a daemon's lifecycle calls for, if any. Holds at most one, because a lifecycle is one
     /// rule; the watchers hold non-movable subscriptions, so they are emplaced rather than returned.
     struct LifecycleWatchers
@@ -269,12 +453,14 @@ namespace
     /// that would decline for the process's life.
     /// @param watchers The watchers' storage; left empty for a Persistent daemon.
     /// @param config The daemon's configuration: its lifecycle and idle grace.
+    /// @param continuity Whether the daemon took over from a handover, or started afresh.
     /// @param host The host whose sessions are observed.
     /// @param census The daemon's client count.
     /// @param loop The loop the deferred shutdown is posted onto.
     /// @param funnel The daemon's shutdown (not owned; must outlive @p watchers).
     void installLifecycleWatchers(LifecycleWatchers& watchers,
                                   DaemonConfig const& config,
+                                  StartContinuity continuity,
                                   SessionHost& host,
                                   ClientCensus& census,
                                   core::net::EventLoop& loop,
@@ -289,6 +475,14 @@ namespace
                 daemonLog()("this daemon terminates with its last hosted session");
                 watchers.lastSession.emplace(
                     host, loop, [&funnel] { funnel.request(ShutdownCause::LastSessionClosed); });
+                // The watcher sees a last session close, which a daemon that took over from a handover may
+                // have seen already: the previous image's own shutdown was lost to the exec, or no session
+                // could be adopted. Looked at once, as the start's own last close.
+                if (continuity == StartContinuity::HandedOver && host.sessionCount() == 0)
+                {
+                    daemonLog()("taken over from a handover with no session left; terminating");
+                    loop.post([&funnel] { funnel.request(ShutdownCause::LastSessionClosed); });
+                }
                 return;
             case DaemonLifecycle::ExitWhenIdle:
                 daemonLog()("this daemon terminates after {} s with no session and no client",
@@ -421,6 +615,10 @@ namespace
 
         ~BoundPersistence() { _sequence._persistence = nullptr; }
 
+        /// Writes the workspace now and blocks until it is on disk, sealing nothing (@see
+        /// DaemonPersistence::writeNow). Loop thread only.
+        void writeNow() { _persistence.writeNow(); }
+
       private:
         DaemonPersistence _persistence;
         ShutdownSequence& _sequence;
@@ -473,6 +671,9 @@ namespace
         // Only a daemon that keeps its workspace brings it back after a restart.
         if (!config.persistence.snapshotPath.empty())
             capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceRestore));
+        // Only a daemon wired to upgrade itself in place announces it, and takes the request.
+        if (runtime.canUpgrade())
+            capabilities.idents.push_back(std::to_underlying(proto::Capability::LiveUpgrade));
         return NativeSessionServices {
             .handshake = { .acceptedTokens = std::move(acceptedTokens),
                            .capabilities = std::move(capabilities) },
@@ -781,7 +982,7 @@ std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_v
 
 #ifndef _WIN32
 
-int runDaemon(DaemonConfig const& config)
+int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> image)
 {
     Require(config.shutdownSignals != nullptr);
     auto const source = core::net::makeDefaultBackend();
@@ -803,17 +1004,32 @@ int runDaemon(DaemonConfig const& config)
     auto const signals = config.shutdownSignals->watch(
         [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); }, sequence.lastWrite());
 
+    // What a previous image of this daemon handed over is consumed as it is taken over, part by part, and
+    // kept nowhere beside: its listening sockets first, served on rather than bound again, which a client
+    // reconnecting finds without a gap; the rest by the host.
+    auto const continuity = image ? StartContinuity::HandedOver : StartContinuity::Fresh;
+    auto inherited = InheritedListeners { image ? std::exchange(image->listeners, {})
+                                                : std::vector<handover::InheritedListener> {} };
+    // What the daemon could not start as configured, for the first client to be told. Only a daemon that took
+    // over from a handover ever serves on so: ending would hang up every program it adopted.
+    auto degradations = config.degradations;
+
     // The control socket is bound before the snapshot is touched: a second daemon on the same label fails
     // here, rather than after moving aside the file the serving one keeps writing.
-    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
-    if (!listener)
+    auto listener = adoptOrBindEndpoint(loop, inherited, "control", core::pathToUtf8(config.socketPath));
+    if (!listener && continuity == StartContinuity::Fresh)
         return listener.error();
+    if (!listener)
+        degradations.push_back(unservedEndpointNotice("control"));
 
     // Read before the host, which realizes it in its constructor; the store outlives the persistence below.
     auto const store = snapshotStoreOf(config.persistence);
-    auto restore = restoreOf(store, config.persistence, wallClock);
+    // A handover carries the workspace itself: the snapshot stays where it is, for a restart after this run.
+    auto restore = image ? std::nullopt : restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
+    // The same run of the daemon goes on across a live upgrade.
+    auto const instance = image ? image->daemonInstance : config.instance;
 
     auto host = SessionHost {
         loop,
@@ -830,13 +1046,50 @@ int runDaemon(DaemonConfig const& config)
                                 config.profiles
                                     ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
                                     : ProfilePtyFactory {},
-                            .instance = config.instance,
-                            .restore = std::move(restore) }
+                            .instance = instance,
+                            .restore = std::move(restore),
+                            .handover = std::exchange(image, std::nullopt) }
     };
+    if (auto const outcome = host.handoverOutcome(); !outcome)
+        errorLog()("the handover was taken over in part (error {})", std::to_underlying(outcome.error()));
+    // Every endpoint below that cannot be served is skipped, and said so; the host keeps what is to be told.
+    auto const unserved = [&host](std::string_view endpoint) {
+        host.announceDegradation(unservedEndpointNotice(endpoint));
+    };
+    for (auto& notice: std::exchange(degradations, {}))
+        host.announceDegradation(std::move(notice));
+    // After the host, so its timer is disarmed before the host it hands catalogs to goes.
+    auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
+    if (config.configReload)
+        reloadWatcher.emplace(loop, host, *config.configReload);
+    // After the host, which it watches and must go first, and before the drain, which may still run the
+    // shutdown it finalizes in; before any listener serves, so no client changes what it has not seen.
+    // Before the upgrade hooks, which write the workspace through it.
+    auto persistence = std::optional<BoundPersistence> {};
+    if (store)
+        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
+    // The live upgrade's side of the daemon: the connections that are not the native protocol's (tmux control
+    // mode, imsg, tmux-compat), which it closes outright, and the hooks that tell, write and close. Declared
+    // before the runtime that holds the hooks and the drain that unwinds the tracked connections.
+    auto const connections = ConnectionRegistry {};
+    auto upgradeHooks =
+        DaemonUpgradeHooks { connections,
+                             persistence
+                                 ? std::function<void()> { [&persistence] { persistence->writeNow(); } }
+                                 : std::function<void()> {} };
+    // Built only once every listener below is, which it holds while it captures: the runtime it is reached
+    // through serves the connections those listeners accept, so the three wire in a cycle that only this
+    // late emplacement breaks. Nothing reaches it before then, as nothing is accepted before then. Declared
+    // before the drain, which may still unwind an upgrade under way.
+    auto liveUpgrade = std::optional<handover::LiveUpgrade> {};
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
     // the funnel.
-    auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
+    auto runtime = DaemonRuntime { runtimeConfigOf(config),
+                                   host,
+                                   clock,
+                                   postedShutdown(loop, funnel),
+                                   upgradePortOf(config, upgradeHooks, liveUpgrade) };
     // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
@@ -847,49 +1100,65 @@ int runDaemon(DaemonConfig const& config)
     // and the drain runs it. A shutdown request it makes then is harmless: the funnel has shut down
     // already, or every listener died on its own and servers.clear() left it nothing to close.
     auto lifecycleWatchers = LifecycleWatchers {};
-    installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
-    // After the host, so its timer is disarmed before the host it hands catalogs to goes.
-    auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
-    if (config.configReload)
-        reloadWatcher.emplace(loop, host, *config.configReload);
-    // After the host, which it watches and must go first, and before the drain, which may still run the
-    // shutdown it finalizes in; before any listener serves, so no client changes what it has not seen.
-    auto persistence = std::optional<BoundPersistence> {};
-    if (store)
-        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
+    installLifecycleWatchers(lifecycleWatchers, config, continuity, host, runtime.census(), loop, funnel);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
 
-    auto server = ConnectionAcceptor { loop,
-                                       "control",
-                                       std::move(*listener),
-                                       countedHandler(runtime, tmux::makeControlModeHandler(loop, host)) };
+    // Serves the endpoint @p name at @p path, adopted or bound, with the handler @p makeHandler makes. One
+    // that cannot be served fails a fresh daemon (the exit code returned), and is skipped by a handed-over
+    // one, which says so.
+    auto const serveEndpoint = [&](std::optional<ConnectionAcceptor>& acceptor,
+                                   std::string_view name,
+                                   std::string const& path,
+                                   auto const& makeHandler) -> std::expected<void, int> {
+        auto bound = adoptOrBindEndpoint(loop, inherited, name, path);
+        if (!bound)
+        {
+            if (continuity == StartContinuity::Fresh)
+                return std::unexpected { bound.error() };
+            unserved(name);
+            return {};
+        }
+        acceptor.emplace(loop, std::string { name }, std::move(*bound), makeHandler());
+        servers.push_back(&*acceptor);
+        return {};
+    };
+
+    auto server = std::optional<ConnectionAcceptor> {};
+    if (listener)
+    {
+        server.emplace(
+            loop,
+            "control",
+            std::move(*listener),
+            countedHandler(runtime, connections.tracked(tmux::makeControlModeHandler(loop, host))));
+        servers.push_back(&*server);
+    }
 
     // The native cells+deltas protocol listens beside the control-mode socket. Its connections count
     // themselves, as only an Attach connection is a client.
     auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
-    auto nativeListener = bindDaemonEndpoint(loop, nativePath);
-    if (!nativeListener)
-        return nativeListener.error();
-    auto nativeServer = ConnectionAcceptor {
-        loop,
-        "native",
-        std::move(*nativeListener),
-        makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config))
-    };
+    auto nativeServer = std::optional<ConnectionAcceptor> {};
+    if (auto const served = serveEndpoint(
+            nativeServer,
+            "native",
+            nativePath,
+            [&] {
+                return makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config));
+            });
+        !served)
+        return served.error();
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
-    auto const imsgPath = core::pathToUtf8(tmuxSocketPath(config.socketPath));
-    auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
-    if (!imsgListener)
-        return imsgListener.error();
-    auto imsgServer = ConnectionAcceptor {
-        loop, "imsg", std::move(*imsgListener), countedHandler(runtime, tmux::makeTmuxImsgHandler(loop, host))
+    auto const makeImsgHandler = [&] {
+        return countedHandler(runtime, connections.tracked(tmux::makeTmuxImsgHandler(loop, host)));
     };
-
-    servers = { &server, &nativeServer, &imsgServer };
+    auto const imsgPath = core::pathToUtf8(tmuxSocketPath(config.socketPath));
+    auto imsgServer = std::optional<ConnectionAcceptor> {};
+    if (auto const served = serveEndpoint(imsgServer, "imsg", imsgPath, makeImsgHandler); !served)
+        return served.error();
 
     // Opt-in: ALSO bind tmux's own discovery path, so a plain
     // `tmux -L <label> -C attach-session` finds this daemon. Opt-in only —
@@ -899,56 +1168,98 @@ int runDaemon(DaemonConfig const& config)
     if (config.tmuxCompatLabel)
     {
         auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
-        auto compatListener = bindDaemonEndpoint(loop, compatPath);
-        if (!compatListener)
-            return compatListener.error();
-        compatServer.emplace(loop,
-                             "tmux-compat",
-                             std::move(*compatListener),
-                             countedHandler(runtime, tmux::makeTmuxImsgHandler(loop, host)));
-        servers.push_back(&*compatServer);
-        daemonLog()("tmux-compat socket bound at {}", compatPath);
+        if (auto const served = serveEndpoint(compatServer, "tmux-compat", compatPath, makeImsgHandler);
+            !served)
+            return served.error();
+        if (compatServer)
+            daemonLog()("tmux-compat socket bound at {}", compatPath);
     }
 
     // Opt-in: ALSO serve the native protocol over TCP (loopback by default). The
     // transport is protocol-agnostic, so the same native handler serves it — with
     // the preshared token as the authentication the filesystem gate can't provide.
     auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
+    // The identities the daemon made up for its listeners, which cross an upgrade with them.
+    auto tlsIdentities = std::map<std::string, handover::TlsIdentity, std::less<>> {};
     if (config.nativeTcp)
     {
-        auto tcpListener = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
-        if (!tcpListener)
+        // Built before the listener is taken, so that a listener it cannot encrypt is closed, unserved.
+        auto tls = makeNativeTcpTls(*config.nativeTcp, inherited.takeTlsIdentity("native-tcp"));
+        auto listened = std::optional<std::unique_ptr<core::net::IListener>> {};
+        if (tls)
         {
-            errorLog()("cannot listen on {}:{}: {}",
-                       config.nativeTcp->host,
-                       config.nativeTcp->port,
-                       tcpListener.error().toString());
-            return EXIT_FAILURE;
+            if (auto adopted = inherited.take(loop, "native-tcp"))
+                listened = std::move(*adopted);
+            else if (auto bound = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port))
+                listened = std::move(*bound);
+            else
+                errorLog()("cannot listen on {}:{}: {}",
+                           config.nativeTcp->host,
+                           config.nativeTcp->port,
+                           bound.error().toString());
         }
-        auto tls = makeNativeTcpTls(*config.nativeTcp);
-        if (!tls)
+        if (!listened && continuity == StartContinuity::Fresh)
             return EXIT_FAILURE;
-        auto const boundPort = (*tcpListener)->boundPort();
-        nativeTcpServer.emplace(
-            loop,
-            "native-tcp",
-            std::move(*tcpListener),
-            makeTlsNativeHandler(
+        if (listened && tls)
+        {
+            auto const boundPort = (*listened)->boundPort();
+            nativeTcpServer.emplace(
                 loop,
-                host,
-                std::move(tls),
-                daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
-        servers.push_back(&*nativeTcpServer);
-        daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
+                "native-tcp",
+                std::move(*listened),
+                makeTlsNativeHandler(
+                    loop,
+                    host,
+                    std::move(tls->context),
+                    daemonNativeServices(
+                        runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
+            servers.push_back(&*nativeTcpServer);
+            if (tls->generated)
+                tlsIdentities.insert_or_assign("native-tcp", *std::move(tls->generated));
+            daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
+        }
+        else
+            unserved("native-tcp");
     }
+
+    inherited.closeUnclaimed();
+
+    // Every listener is bound: each crosses an upgrade under its name, with the identity the daemon made up
+    // for it. Kept only by an upgrade, which hands it on; otherwise nothing keeps a private key past this
+    // point.
+    if (!config.liveUpgrade)
+        tlsIdentities.clear();
+    else
+        liveUpgrade.emplace(
+            loop,
+            host,
+            config.liveUpgrade->store,
+            config.liveUpgrade->leases,
+            config.liveUpgrade->replacer,
+            config.liveUpgrade->memory,
+            config.liveUpgrade->probe,
+            upgradeHooks,
+            servers,
+            liveUpgradeConfigOf(config, *config.liveUpgrade, instance, std::move(tlsIdentities)));
 
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
-    loop.blockOn(serveAll(servers));
+    if (servers.empty())
+    {
+        // Only a daemon that took over hosted programs gets here: they run on, unreachable, until it is
+        // asked to end.
+        errorLog()("no endpoint could be served; the adopted programs run on until the daemon is stopped");
+        loop.blockOn(awaitShutdown(&loop));
+    }
+    else
+        loop.blockOn(serveAll(servers));
     // The acceptors are destroyed before the drain below turns the loop again, and a shutdown request
     // still queued may run in it — one that finds the funnel Serving when every listener died on its own.
-    // Emptied, the list lets such a request close nothing that is gone.
+    // Emptied, the list lets such a request close nothing that is gone. So does an upgrade under way, which
+    // the drain unwinds: its rollback must resume no listener that is gone.
     servers.clear();
+    if (liveUpgrade)
+        liveUpgrade->forgetListeners();
 
     daemonLog()("shut down");
     return EXIT_SUCCESS;
@@ -1025,7 +1336,8 @@ int runDaemonDetached(std::vector<std::string> commandLine,
 
 #ifdef _WIN32
 
-int runDaemon(DaemonConfig const& config)
+// No image is ever handed over here: a Windows daemon has no in-place upgrade (HasInPlaceExec).
+int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> /*image*/)
 {
     Require(config.shutdownSignals != nullptr);
     auto const source = core::net::makeDefaultBackend();
@@ -1079,7 +1391,8 @@ int runDaemon(DaemonConfig const& config)
     auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
     // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
     auto lifecycleWatchers = LifecycleWatchers {};
-    installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
+    installLifecycleWatchers(
+        lifecycleWatchers, config, StartContinuity::Fresh, host, runtime.census(), loop, funnel);
     // After the host, so its timer is disarmed before the host it hands catalogs to goes.
     auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
     if (config.configReload)
@@ -1124,7 +1437,7 @@ int runDaemon(DaemonConfig const& config)
                        tcpListener.error().toString());
             return EXIT_FAILURE;
         }
-        auto tls = makeNativeTcpTls(*config.nativeTcp);
+        auto tls = makeNativeTcpTls(*config.nativeTcp, std::nullopt);
         if (!tls)
             return EXIT_FAILURE;
         auto const boundPort = (*tcpListener)->boundPort();
@@ -1135,7 +1448,7 @@ int runDaemon(DaemonConfig const& config)
             makeTlsNativeHandler(
                 loop,
                 host,
-                std::move(tls),
+                std::move(tls->context),
                 daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);

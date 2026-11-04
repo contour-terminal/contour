@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
 
@@ -10,6 +11,8 @@
 #include <core/platform/Clock.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -38,6 +41,20 @@ struct HangupGrace
 
     /// The clock the grace is measured on. It must outlive the Process.
     std::reference_wrapper<core::platform::IClock const> clock = core::platform::defaultSteadyClock();
+};
+
+/// A running child process a previous image of this process left behind across an exec (live upgrade).
+///
+/// Plain data, compiled on every platform so a handover image can carry it anywhere; only
+/// Process::adopt() turns it back into a Process, and that is POSIX-only. The child stays a child of this
+/// process across exec (the process id is kept), so waiting for it works as for a spawned one.
+struct AdoptedChild
+{
+    std::int64_t pid = -1;         ///< The child's process id.
+    std::string executable;        ///< The program it runs, as spawned.
+    std::vector<std::string> args; ///< Its arguments, as spawned.
+    std::filesystem::path cwd;     ///< Its working directory, as spawned.
+    HangupGrace hangupGrace;       ///< The grace close() gives it.
 };
 
 /**
@@ -134,6 +151,34 @@ class [[nodiscard]] Process: public Pty
 
     ~Process() override;
 
+#ifndef _WIN32
+    /// Takes over a running child a previous image left behind: no fork, no placement (it was placed when
+    /// spawned). It is started already, and exit detection is as for a spawned child.
+    /// @param child The child, from releaseChild() or a handover image.
+    /// @param pty The PTY it runs on, usually from UnixPty::adopt().
+    /// @return The process; or AdoptError::NoSuchChild where @p child.pid is no child of this process, @p pty
+    ///         then destroyed with the call (@see canAdopt(), which asks first).
+    [[nodiscard]] static std::expected<std::unique_ptr<Process>, AdoptError> adopt(AdoptedChild const& child,
+                                                                                   std::unique_ptr<Pty> pty);
+
+    /// Asks whether adopt() would take @p child, without taking anything: for an adopter that keeps the PTY
+    /// whichever way it goes.
+    /// @param child The child, from releaseChild() or a handover image.
+    /// @return Nothing; or AdoptError::NoSuchChild where @p child.pid is no child of this process (dead and
+    ///         reaped, or foreign). A child that exited but is not reaped yet is still one.
+    [[nodiscard]] static std::expected<void, AdoptError> canAdopt(AdoptedChild const& child);
+
+    /// The child as releaseChild() gives it up, while this Process keeps it: for a capture that may yet roll
+    /// back, which must not have to undo anything.
+    /// @return The child, or nullopt where there is none running.
+    [[nodiscard]] std::optional<AdoptedChild> handoverChild() const;
+
+    /// Gives up the child without signalling or reaping it, leaving this Process without one, so that
+    /// destroying it neither kills nor waits for it; for an adopter in the same process.
+    /// @return The child, or nullopt where there is none running.
+    [[nodiscard]] std::optional<AdoptedChild> releaseChild();
+#endif
+
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();
 
@@ -143,6 +188,22 @@ class [[nodiscard]] Process: public Pty
 
     /// @return Whether the child is running: false before start() spawned one, and after it exited.
     [[nodiscard]] bool alive() const noexcept;
+
+    /// How far start() has brought the child towards running its program.
+    enum class SpawnProgress : uint8_t
+    {
+        Settled = 0, ///< No start in flight: the child has set its terminal up, or there is no child.
+        InProgress, ///< Forked, but its terminal not yet set up: input written now is discarded by its flush.
+    };
+
+    /// Whether the child has yet to set its terminal up. On POSIX the child flushes its terminal's queues as
+    /// it takes the terminal on, between fork() and exec() -- and a placement can park it before that for
+    /// as long as placing it takes -- so input written to the PTY before then is lost, and a capture of the
+    /// session taken then cannot promise to carry it. Settles for good once observed settled.
+    /// @return InProgress from fork() until the child signalled settling (one byte), right after the
+    ///         flush (or as it exits); Settled before start(), for an adopted child, and on Windows, where
+    ///         the console is the child's from CreateProcess() on.
+    [[nodiscard]] SpawnProgress spawnProgress() const;
 
     /// @return The child's exit status once it has exited; nullopt while it runs, or when there is none.
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
@@ -186,6 +247,8 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
+    void interruptWrites() override { pty().interruptWrites(); }
+    void allowWrites() override { pty().allowWrites(); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     [[nodiscard]] InputEcho inputEcho() const noexcept override { return pty().inputEcho(); }

@@ -51,6 +51,8 @@ namespace
             return {};
         }
 
+        [[nodiscard]] int descriptor() const noexcept override { return _fd; }
+
       private:
         int _fd;
     };

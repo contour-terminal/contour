@@ -416,6 +416,11 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = _nextImageId++;
+    return adopt(id, format, size, std::move(data));
+}
+
+shared_ptr<Image const> ImagePool::adopt(ImageId id, ImageFormat format, ImageSize size, Image::Data&& data)
+{
     // The remover prunes the id index before the user's callback runs. It captures the
     // index by shared_ptr, never the pool: an image's last reference may outlive the
     // pool member order-wise, and it may drop on any thread.
@@ -446,6 +451,16 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
         _idIndex->images.insert_or_assign(id.value, image);
     }
     return image;
+}
+
+std::vector<std::pair<std::string, shared_ptr<Image const>>> ImagePool::linkedImages() const
+{
+    auto linked = std::vector<std::pair<std::string, shared_ptr<Image const>>> {};
+    // keys() lists the most recently used first.
+    for (auto const& name: _imageNameToImageCache.keys() | std::views::reverse)
+        if (auto const* image = std::as_const(_imageNameToImageCache).tryGet(name))
+            linked.emplace_back(name, *image);
+    return linked;
 }
 
 shared_ptr<Image const> ImagePool::findImageById(ImageId id) const

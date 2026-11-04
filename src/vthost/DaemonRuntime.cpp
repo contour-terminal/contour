@@ -41,12 +41,14 @@ namespace
 DaemonRuntime::DaemonRuntime(DaemonRuntimeConfig config,
                              SessionHost const& host,
                              core::platform::IClock const& clock,
-                             std::function<void(ShutdownCause)> requestShutdown):
+                             std::function<void(ShutdownCause)> requestShutdown,
+                             std::optional<DaemonUpgradePort> upgrade):
     _config(std::move(config)),
     _host(host),
     _clock(clock),
     _startedAt(clock.now()),
-    _requestShutdown(std::move(requestShutdown))
+    _requestShutdown(std::move(requestShutdown)),
+    _upgrade(std::move(upgrade))
 {
 }
 
@@ -81,6 +83,31 @@ std::expected<void, DaemonControlError> DaemonRuntime::requestStop(proto::StopRe
 ClientCensus::Ticket DaemonRuntime::admitClient()
 {
     return _census.admit();
+}
+
+core::async::Task<std::expected<void, handover::UpgradeError>> DaemonRuntime::requestUpgrade(
+    handover::UpgradeTarget target, std::function<void()> onStarted)
+{
+    if (!_upgrade)
+        co_return std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::NotSupported });
+    if (_upgrade->state() == handover::UpgradeState::Running)
+        co_return std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::InProgress });
+    _upgrade->hooks.setRequester(std::move(onStarted));
+    auto result = co_await _upgrade->run(std::move(target));
+    _upgrade->hooks.clearRequester();
+    co_return result;
+}
+
+void DaemonRuntime::subscribeUpgrade(UpgradeObserver& observer)
+{
+    if (_upgrade)
+        _upgrade->hooks.subscribe(observer);
+}
+
+void DaemonRuntime::unsubscribeUpgrade(UpgradeObserver& observer)
+{
+    if (_upgrade)
+        _upgrade->hooks.unsubscribe(observer);
 }
 
 } // namespace vthost

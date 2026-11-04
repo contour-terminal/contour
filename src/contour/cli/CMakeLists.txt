@@ -39,6 +39,7 @@ add_custom_command(
 # that produces it; nothing compiles it on its own.
 add_library(contour_cli STATIC
     AgentSkill.cpp AgentSkill.hpp
+    BackgroundExecutor.cpp BackgroundExecutor.hpp
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
     ConnectList.cpp ConnectList.hpp
@@ -47,6 +48,7 @@ add_library(contour_cli STATIC
     ConfigReloadPoller.cpp ConfigReloadPoller.hpp
     ContourApp.cpp ContourApp.hpp
     ControlVerbs.cpp ControlVerbs.hpp
+    DaemonStart.cpp DaemonStart.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     McpCommand.cpp McpCommand.hpp
     McpScope.cpp McpScope.hpp

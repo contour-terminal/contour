@@ -26,6 +26,20 @@ ClientCensus::Ticket NullDaemonControl::admitClient()
     return {};
 }
 
+core::async::Task<std::expected<void, handover::UpgradeError>> NullDaemonControl::requestUpgrade(
+    handover::UpgradeTarget /*target*/, std::function<void()> /*onStarted*/)
+{
+    co_return std::unexpected(handover::UpgradeError { handover::UpgradeRefusal::NotSupported });
+}
+
+void NullDaemonControl::subscribeUpgrade(UpgradeObserver& /*observer*/)
+{
+}
+
+void NullDaemonControl::unsubscribeUpgrade(UpgradeObserver& /*observer*/)
+{
+}
+
 DaemonControl& nullDaemonControl() noexcept
 {
     static auto instance = NullDaemonControl {};

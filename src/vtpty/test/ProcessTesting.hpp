@@ -45,6 +45,24 @@ class ReleasingPlacement final: public ProcessPlacement
     std::vector<int> _pids;
 };
 
+/// Holds every child it is handed parked, between fork() and exec(), until the test lets it go.
+class HoldingPlacement final: public ProcessPlacement
+{
+  public:
+    void placeThenRelease(ParkedChild child) noexcept override { _parked.push_back(std::move(child)); }
+    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override { return std::nullopt; }
+
+    /// Lets every child held go on to exec().
+    void releaseAll()
+    {
+        for (auto& child: _parked)
+            child.release();
+    }
+
+  private:
+    std::vector<ParkedChild> _parked;
+};
+
 /// @return A Process running @p exec on a PTY of its own, @p pageSize large, placed nowhere; not yet
 ///         started.
 inline Process unplacedProcess(Process::ExecInfo const& exec, PageSize pageSize)

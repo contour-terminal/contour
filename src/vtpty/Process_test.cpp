@@ -33,6 +33,8 @@
 #include <vector>
 
 #ifndef _WIN32
+    #include <vtpty/UnixPty.hpp>
+
     #include <sys/wait.h>
 
     #include <unistd.h>
@@ -423,6 +425,27 @@ TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]"
     }
 }
 
+TEST_CASE("Process.spawnSettlesOnceTheChildHasItsTerminal", "[process][placement]")
+{
+    // Parked between fork() and exec(), the child has not flushed its terminal yet: what is written to it now
+    // is discarded, which a live upgrade's capture must not promise to carry.
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled); // no child yet
+    auto const dropOnExit = DropOnExit { *placement };
+    REQUIRE(process.start().has_value());
+    REQUIRE(placement->pids().size() == 1);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::InProgress);
+
+    placement->release(placement->pids().front());
+    // The program prints only after its terminal is set up, so by then the spawn has settled, and stays so.
+    REQUIRE(printed(process, "ready"));
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled);
+    CHECK(process.spawnProgress() == vtpty::Process::SpawnProgress::Settled);
+
+    (void) hangUp(process);
+}
+
 TEST_CASE("Process.terminateWhileParked", "[process][placement]")
 {
     // A tab closed before its shell was released: the parked child dies, wait() returns, and the
@@ -726,4 +749,83 @@ TEST_CASE("startDetached.sets the oom_score_adj its placement supplies", "[proce
     ::kill(*pid, SIGKILL); // started by this test, and nobody's child here: nothing else ends it
 }
     #endif
+#endif
+
+#ifndef _WIN32
+TEST_CASE("Process.adopt.reportsTheExitStatusOfItsChild", "[process][handover]")
+{
+    // The child survives its parent object, and the process id stays ours across an exec: the adopted
+    // Process reaps it exactly as a spawned one does.
+    auto original =
+        vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "sleep 0.2; exit 7" }), PageSize);
+    REQUIRE(original.start().has_value());
+    auto* const unixPty = dynamic_cast<vtpty::UnixPty*>(&original.pty());
+    REQUIRE(unixPty != nullptr);
+    auto const inherited = unixPty->releaseDescriptors();
+    auto child = original.releaseChild();
+    REQUIRE(child.has_value());
+    CHECK_FALSE(original.alive());
+
+    auto pty = vtpty::UnixPty::adopt(inherited);
+    REQUIRE(pty.has_value());
+    auto adopted = vtpty::Process::adopt(*child, std::move(*pty));
+    REQUIRE(adopted.has_value());
+    CHECK((*adopted)->alive());
+    CHECK((*adopted)->start().has_value()); // already running: starting is a no-op
+
+    auto const status = (*adopted)->wait();
+    REQUIRE(status.has_value());
+    auto const* const normal = std::get_if<vtpty::Process::NormalExit>(&*status);
+    REQUIRE(normal != nullptr);
+    CHECK(normal->exitCode == 7);
+    CHECK_FALSE((*adopted)->alive());
+}
+
+TEST_CASE("Process.handoverChild.readsTheChildAndKeepsIt", "[process][handover]")
+{
+    auto process = vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "exit 5" }), PageSize);
+    CHECK_FALSE(process.handoverChild().has_value()); // none spawned yet
+    REQUIRE(process.start().has_value());
+
+    // What releaseChild() would give up, read while the process keeps it: it still reaps its child.
+    auto const child = process.handoverChild();
+    REQUIRE(child.has_value());
+    CHECK(child->pid > 0);
+    CHECK(child->executable == "/bin/sh");
+    auto const status = process.wait();
+    REQUIRE(status.has_value());
+    auto const* const normal = std::get_if<vtpty::Process::NormalExit>(&*status);
+    REQUIRE(normal != nullptr);
+    CHECK(normal->exitCode == 5);
+    CHECK_FALSE(process.handoverChild().has_value()); // reaped
+}
+
+TEST_CASE("Process.adopt.refusesAProcessThatIsNotOurChild", "[process][handover]")
+{
+    auto pty = std::make_unique<vtpty::MockPty>(PageSize);
+    auto const result = vtpty::Process::adopt(
+        vtpty::AdoptedChild {
+            .pid = ::getppid(), .executable = "x", .args = {}, .cwd = {}, .hangupGrace = {} },
+        std::move(pty));
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == vtpty::AdoptError::NoSuchChild);
+}
+
+TEST_CASE("Process.canAdopt.asksWithoutTakingAnything", "[process][handover]")
+{
+    auto const foreign = vtpty::AdoptedChild {
+        .pid = ::getppid(), .executable = "x", .args = {}, .cwd = {}, .hangupGrace = {}
+    };
+    REQUIRE_FALSE(vtpty::Process::canAdopt(foreign).has_value());
+    CHECK(vtpty::Process::canAdopt(foreign).error() == vtpty::AdoptError::NoSuchChild);
+
+    // A child of ours can be adopted until it is reaped, and not after.
+    auto process = vtpty::testing::unplacedProcess(execInfo("/bin/sh", { "-c", "exit 3" }), PageSize);
+    REQUIRE(process.start().has_value());
+    auto const child = process.handoverChild();
+    REQUIRE(child.has_value());
+    CHECK(vtpty::Process::canAdopt(*child).has_value());
+    REQUIRE(process.wait().has_value());
+    CHECK_FALSE(vtpty::Process::canAdopt(*child).has_value());
+}
 #endif

@@ -214,6 +214,17 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
           == "refused=9 ident=200");
 }
 
+TEST_CASE("the upgrade PDUs are named and summarized", "[vthost][proto][upgrade]")
+{
+    CHECK(toString(PduType::UpgradeDaemon) == "UpgradeDaemon");
+    CHECK(toString(PduType::UpgradeDaemonReply) == "UpgradeDaemonReply");
+    CHECK(toString(PduType::DaemonUpgrading) == "DaemonUpgrading");
+    CHECK(summarize(DecodedPdu { UpgradeDaemon { .imageId = "0.9.0-a" } }) == "image=\"0.9.0-a\"");
+    CHECK(summarize(DecodedPdu { UpgradeDaemonReply { .result = 2, .detail = "no" } })
+          == "result=2 detail=\"no\"");
+    CHECK(summarize(DecodedPdu { DaemonUpgrading { .toRelease = "0.9.0" } }) == "to=\"0.9.0\"");
+}
+
 TEST_CASE("the daemon-control PDUs are named, and a status reply never shows a path", "[vthost][proto]")
 {
     CHECK(toString(PduType::StopDaemon) == "StopDaemon");

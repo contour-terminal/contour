@@ -11,12 +11,15 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include <vthost/ClientCensus.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/DaemonUpgradeHooks.hpp>
+#include <vthost/handover/LiveUpgrade.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
@@ -35,6 +38,19 @@ struct DaemonRuntimeConfig
     DaemonLifecycle lifecycle = DaemonLifecycle::Persistent; ///< When it ends without being asked to.
 };
 
+/// What a daemon needs to upgrade itself, wired by whoever builds its handover::LiveUpgrade.
+struct DaemonUpgradePort
+{
+    /// The hooks the LiveUpgrade was built with: where the requester is told, and the observers subscribe.
+    /// Not owned; outlives the runtime.
+    DaemonUpgradeHooks& hooks;
+    /// Runs the upgrade (handover::LiveUpgrade::run).
+    std::function<core::async::Task<std::expected<void, handover::UpgradeError>>(handover::UpgradeTarget)>
+        run;
+    /// Whether one is under way (handover::LiveUpgrade::state).
+    std::function<handover::UpgradeState()> state;
+};
+
 /// The DaemonControl of a running daemon. Loop-thread only, like the connections that ask it.
 class DaemonRuntime final: public DaemonControl
 {
@@ -44,10 +60,13 @@ class DaemonRuntime final: public DaemonControl
     /// @param clock What its uptime is measured against, from now (not owned; outlives this).
     /// @param requestShutdown Asked for the daemon's shutdown on a stop request. Called from inside the
     ///        asking connection's PDU handler, so it must only post the shutdown, never run it there.
+    /// @param upgrade What upgrades the daemon in place; nullopt for a daemon that cannot (an upgrade request
+    ///        is then refused NotSupported).
     DaemonRuntime(DaemonRuntimeConfig config,
                   SessionHost const& host,
                   core::platform::IClock const& clock,
-                  std::function<void(ShutdownCause)> requestShutdown);
+                  std::function<void(ShutdownCause)> requestShutdown,
+                  std::optional<DaemonUpgradePort> upgrade = std::nullopt);
 
     /// @return Every field of the reply, always: a running daemon has a status to state.
     [[nodiscard]] std::expected<proto::DaemonStatusReply, DaemonControlError> status() const override;
@@ -55,6 +74,15 @@ class DaemonRuntime final: public DaemonControl
     /// Asks for the shutdown whose cause @p reason names; always under way once asked.
     [[nodiscard]] std::expected<void, DaemonControlError> requestStop(proto::StopReason reason) override;
     [[nodiscard]] ClientCensus::Ticket admitClient() override;
+    /// Refuses InProgress while an upgrade runs, NotSupported without a DaemonUpgradePort; otherwise runs it
+    /// with @p onStarted as the requester's answer (@see DaemonUpgradeHooks::setRequester).
+    [[nodiscard]] core::async::Task<std::expected<void, handover::UpgradeError>> requestUpgrade(
+        handover::UpgradeTarget target, std::function<void()> onStarted) override;
+    void subscribeUpgrade(UpgradeObserver& observer) override;
+    void unsubscribeUpgrade(UpgradeObserver& observer) override;
+
+    /// @return Whether it upgrades its daemon in place when asked: whether it was given a DaemonUpgradePort.
+    [[nodiscard]] bool canUpgrade() const noexcept { return _upgrade.has_value(); }
 
     /// @return The census its tickets count in.
     [[nodiscard]] ClientCensus& census() noexcept { return _census; }
@@ -65,6 +93,7 @@ class DaemonRuntime final: public DaemonControl
     core::platform::IClock const& _clock;
     core::platform::SteadyTimePoint _startedAt;
     std::function<void(ShutdownCause)> _requestShutdown;
+    std::optional<DaemonUpgradePort> _upgrade;
     ClientCensus _census;
 };
 

@@ -5,6 +5,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/Line.hpp>
 
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <optional>
 #include <span>
@@ -144,6 +146,13 @@ constexpr bool operator!=(Margin const& a, PageSize b) noexcept
     return !(a == b);
 }
 // }}}
+
+// Declared here, defined in state/: the captured form of a grid sits above this layer, and a Grid only
+// has to be able to produce and consume it.
+struct GridState;
+struct StagedGrid;
+class ImageFragmentNamer;
+class ImageFragmentResolver;
 
 using Lines = crispy::Ring<Line>;
 
@@ -421,6 +430,30 @@ class Grid
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
     void reset();
+
+    /// @return Everything this grid holds as plain data, history oldest first, its lines in the compact line
+    ///         encoding. Defined in state/GridState.cpp.
+    /// @param images Files the image fragments the lines show.
+    [[nodiscard]] GridState captureState(ImageFragmentNamer& images) const;
+
+    /// Builds the grid a captured state describes, without changing this one: everything a restore can
+    /// refuse is refused here. The scrollback limits are how the grid was constructed, not state: @p state
+    /// must have this grid's. Defined in state/GridState.cpp.
+    /// @param state    The captured grid; must outlive the result.
+    /// @param resolver Resolves the image fragments' ids to the shared objects they name.
+    /// @return The grid to commit, or why @p state is not one this grid can have.
+    [[nodiscard]] std::expected<StagedGrid, StateDecodeError> stageRestore(
+        GridState const& state, ImageFragmentResolver const& resolver) const;
+
+    /// Replaces this grid with a staged one, rebuilding the ring so that offset 0 is the first page line and
+    /// the history sits at the negative offsets. Cannot fail. Defined in state/GridState.cpp.
+    /// @param staged What stageRestore() built.
+    void commitRestore(StagedGrid staged);
+
+    /// stageRestore() then commitRestore(). Defined in state/GridState.cpp.
+    /// @return Nothing, or why @p state is not one a grid can have; the grid is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(GridState const& state,
+                                                                     ImageFragmentResolver const& resolver);
 
     // {{{ grid global properties
     /// @return The ring's history capacity -- the depth beyond which rows are dropped no matter what.
@@ -1234,6 +1267,7 @@ class Grid
     };
 
     /// Nullopt until the first examination, which is the one case that has to sweep the window whole.
+    /// A cache of what the rows already say, so captureState() leaves it out and a restored grid re-examines.
     std::optional<EvictionScan> _evictionScan;
     Lines _lines;
     LineCount _linesUsed;

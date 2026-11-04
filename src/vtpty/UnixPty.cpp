@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/UnixPty.hpp>
 
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Deferred.hpp>
 #include <core/Environment.hpp>
 #include <core/Escape.hpp>
@@ -103,42 +105,6 @@ namespace
 
         return { .master = PtyMasterHandle::cast_from(masterFd),
                  .slave = PtySlaveHandle::cast_from(slaveFd) };
-    }
-
-    /// Waits until @p fd takes a write, or @p closeSignal turns readable.
-    /// @param fd The master descriptor, as it was when the caller last held the lock close() takes: if it
-    ///        has been closed since, @p closeSignal is readable already.
-    /// @param closeSignal What close() writes to.
-    /// @return False once @p closeSignal is readable, or the wait failed.
-    [[nodiscard]] bool waitWritable(int fd, int closeSignal) noexcept
-    {
-#ifdef __APPLE__
-        // macOS's poll() reports a terminal device invalid, so select() waits here, as the read
-        // selector's does.
-        while (true)
-        {
-            auto writers = fd_set {};
-            auto readers = fd_set {};
-            FD_ZERO(&writers);
-            FD_ZERO(&readers);
-            FD_SET(fd, &writers);
-            FD_SET(closeSignal, &readers);
-            auto const rv = ::select(std::max(fd, closeSignal) + 1, &readers, &writers, nullptr, nullptr);
-            if (rv < 0 && errno == EINTR)
-                continue;
-            return rv > 0 && !FD_ISSET(closeSignal, &readers);
-        }
-#else
-        auto fds = std::array { pollfd { .fd = fd, .events = POLLOUT, .revents = 0 },
-                                pollfd { .fd = closeSignal, .events = POLLIN, .revents = 0 } };
-        while (true)
-        {
-            auto const rv = ::poll(fds.data(), fds.size(), -1);
-            if (rv < 0 && errno == EINTR)
-                continue;
-            return rv > 0 && (fds[1].revents & POLLIN) == 0;
-        }
-#endif
     }
 
 #if defined(__linux__) && defined(UTEMPTER)
@@ -267,6 +233,10 @@ UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pag
 
 StartResult UnixPty::start()
 {
+    // Running already: an adopted PTY, or a second call. Another openpty() would replace the master.
+    if (started())
+        return {};
+
     auto const handles = createUnixPty(_pageSize, _pixels);
     _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
     _masterState.store(MasterState::Open, std::memory_order_release);
@@ -307,6 +277,68 @@ PtySlave& UnixPty::slave() noexcept
 {
     assert(started());
     return *_slave;
+}
+
+InheritedPty UnixPty::handoverDescriptors() const
+{
+    auto inherited = InheritedPty {
+        .masterFd = _masterFd.get(), .stdoutFastPipe = std::nullopt, .pageSize = _pageSize, .pixels = _pixels
+    };
+    if (_stdoutFastPipe.reader() != -1)
+        inherited.stdoutFastPipe = std::pair { _stdoutFastPipe.reader(), _stdoutFastPipe.writer() };
+    return inherited;
+}
+
+InheritedPty UnixPty::releaseDescriptors()
+{
+    auto const _ = std::scoped_lock { _mutex };
+    Require(started());
+    auto inherited = handoverDescriptors();
+    _readSelector.cancelRead(_masterFd);
+    if (inherited.stdoutFastPipe)
+        _readSelector.cancelRead(inherited.stdoutFastPipe->first);
+    std::ignore = _masterFd.release();
+    _stdoutFastPipe.pfd = { -1, -1 };
+    _masterState.store(MasterState::Closed, std::memory_order_release);
+    wakeupReader();
+    return inherited;
+}
+
+std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty inherited)
+{
+    auto const isOpen = [](int fd) {
+        return fd >= 0 && ::fcntl(fd, F_GETFD) >= 0;
+    };
+    if (!isOpen(inherited.masterFd) || !::isatty(inherited.masterFd))
+        return std::unexpected(AdoptError::BadDescriptor);
+    if (inherited.stdoutFastPipe && !isOpen(inherited.stdoutFastPipe->first))
+        return std::unexpected(AdoptError::BadDescriptor);
+
+    auto pty = std::make_unique<UnixPty>(inherited.pageSize, inherited.pixels);
+    // The constructor made a pipe of its own; an adopted PTY has the inherited one, or none.
+    pty->_stdoutFastPipe.close();
+    if (inherited.stdoutFastPipe)
+        pty->_stdoutFastPipe.pfd = { inherited.stdoutFastPipe->first,
+                                     isOpen(inherited.stdoutFastPipe->second)
+                                         ? inherited.stdoutFastPipe->second
+                                         : -1 };
+    pty->_masterFd = crispy::FileDescriptor::fromNative(inherited.masterFd);
+    pty->_slave = make_unique<Slave>();
+
+    // Close-on-exec again: only a hand-off keeps these across an exec. The reader of the fast pipe is
+    // non-blocking, as start() makes it.
+    for (auto const fd: inherited.descriptors())
+        if (fd >= 0)
+            std::ignore = util::setExecInheritance(fd, util::ExecInheritance::CloseOnExec);
+    std::ignore = util::setNonBlocking(pty->_masterFd);
+    if (pty->_stdoutFastPipe.reader() != -1)
+        std::ignore = util::setNonBlocking(pty->_stdoutFastPipe.reader());
+
+    pty->_masterState.store(MasterState::Open, std::memory_order_release);
+    pty->_readSelector.wantRead(pty->_masterFd);
+    if (pty->_stdoutFastPipe.reader() != -1)
+        pty->_readSelector.wantRead(pty->_stdoutFastPipe.reader());
+    return pty;
 }
 
 PtyMasterHandle UnixPty::handle() const noexcept
@@ -446,16 +478,28 @@ int UnixPty::write(std::string_view data)
     // One write at a time, from its first byte to its last, so that two never interleave.
     auto const writing = std::scoped_lock { _writeMutex };
 
+    // A full PTY (EAGAIN) takes nothing yet, which is no failure: the rest waits as for a short write.
     auto const rv = writeAvailable(data);
-    if (rv < 0 || std::cmp_equal(rv, data.size()))
+    if ((rv < 0 && errno != EAGAIN && errno != EINTR) || std::cmp_equal(rv, data.size()))
         return rv;
 
-    // A short write: the rest goes as the application reads, until all of it has or the PTY closes. The
-    // waits release _mutex, so that close() -- the way to be rid of a program that reads nothing -- and
-    // isClosed() never wait for that program; close() wakes them instead.
-    auto written = static_cast<size_t>(rv);
-    while (written < data.size() && awaitWritable())
+    // A short write: the rest goes as the application reads, until all of it has, the PTY closes, or writes
+    // are interrupted. The waits release _mutex, so that close() -- the way to be rid of a program that reads
+    // nothing -- and isClosed() never wait for that program; close() wakes them instead, as
+    // interruptWrites() does.
+    auto written = static_cast<size_t>(std::max(rv, 0));
+    while (written < data.size())
     {
+        switch (awaitWritable())
+        {
+            case WriteWait::Writable: break;
+            case WriteWait::Interrupted: errno = EINTR; return static_cast<int>(written);
+            case WriteWait::Closed:
+                if (written > 0)
+                    return static_cast<int>(written);
+                errno = EPIPE;
+                return -1;
+        }
         auto const more = writeAvailable(data.substr(written));
         if (more > 0)
             written += static_cast<size_t>(more);
@@ -493,13 +537,75 @@ int UnixPty::writeAvailable(std::string_view data)
     return static_cast<int>(rv);
 }
 
-bool UnixPty::awaitWritable()
+UnixPty::WriteWait UnixPty::awaitWritable()
 {
+    // The master descriptor as it is now: if close() closes it after this, the close signal is readable.
     auto const fd = [this] {
         auto const _ = std::scoped_lock { _mutex };
         return _masterFd.get();
     }();
-    return fd >= 0 && waitWritable(fd, _closeSignal.reader());
+    if (fd < 0)
+        return WriteWait::Closed;
+    auto const closeSignal = _closeSignal.reader();
+    auto const interruptSignal = _interruptSignal.reader();
+
+    // A signal outranks the descriptor's readiness, and closing outranks interrupting.
+#ifdef __APPLE__
+    // macOS's poll() reports a terminal device invalid, so select() waits here, as the read selector's does.
+    while (true)
+    {
+        auto writers = fd_set {};
+        auto readers = fd_set {};
+        FD_ZERO(&writers);
+        FD_ZERO(&readers);
+        FD_SET(fd, &writers);
+        FD_SET(closeSignal, &readers);
+        FD_SET(interruptSignal, &readers);
+        auto const rv = ::select(
+            std::max({ fd, closeSignal, interruptSignal }) + 1, &readers, &writers, nullptr, nullptr);
+        if (rv < 0 && errno == EINTR)
+            continue;
+        if (rv <= 0 || FD_ISSET(closeSignal, &readers))
+            return WriteWait::Closed;
+        if (FD_ISSET(interruptSignal, &readers))
+            return WriteWait::Interrupted;
+        return WriteWait::Writable;
+    }
+#else
+    auto fds = std::array { pollfd { .fd = fd, .events = POLLOUT, .revents = 0 },
+                            pollfd { .fd = closeSignal, .events = POLLIN, .revents = 0 },
+                            pollfd { .fd = interruptSignal, .events = POLLIN, .revents = 0 } };
+    while (true)
+    {
+        auto const rv = ::poll(fds.data(), fds.size(), -1);
+        if (rv < 0 && errno == EINTR)
+            continue;
+        if (rv <= 0 || (fds[1].revents & POLLIN) != 0)
+            return WriteWait::Closed;
+        if ((fds[2].revents & POLLIN) != 0)
+            return WriteWait::Interrupted;
+        return WriteWait::Writable;
+    }
+#endif
+}
+
+void UnixPty::interruptWrites()
+{
+    // One byte at most: the signal is a level, which only allowWrites() lowers.
+    auto expected = WriteInterruption::Allowed;
+    if (_writeInterruption.compare_exchange_strong(
+            expected, WriteInterruption::Interrupted, std::memory_order_acq_rel))
+        std::ignore = ::write(_interruptSignal.writer(), "x", 1);
+}
+
+void UnixPty::allowWrites()
+{
+    auto expected = WriteInterruption::Interrupted;
+    if (!_writeInterruption.compare_exchange_strong(
+            expected, WriteInterruption::Allowed, std::memory_order_acq_rel))
+        return;
+    auto drained = char {};
+    std::ignore = ::read(_interruptSignal.reader(), &drained, 1);
 }
 
 PageSize UnixPty::pageSize() const noexcept

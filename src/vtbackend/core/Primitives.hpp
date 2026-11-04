@@ -783,6 +783,11 @@ enum class AnsiMode : uint8_t
     AutomaticNewLine = 20, // LNM
 };
 
+/// Every AnsiMode, for what walks them all (a state capture). Adding a mode is adding a row here too.
+inline constexpr auto AnsiModes = std::array {
+    AnsiMode::KeyboardAction, AnsiMode::Insert, AnsiMode::SendReceive, AnsiMode::AutomaticNewLine
+};
+
 /// The ANSI modes ECMA-48 defines that this terminal recognizes but has hard-wired *off*.
 ///
 /// DECRQM must answer 4 (permanently reset) for these, and not 0 (not recognized). The two are

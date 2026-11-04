@@ -12,7 +12,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -172,6 +174,14 @@ enum class ImageAlignment : uint8_t
     BottomStart,
     BottomCenter,
     BottomEnd
+};
+
+/// Whether a screen has logged dropping an image for want of a cell size in pixels: a stream of images (a
+/// sixel video) would otherwise write a line for every frame.
+enum class CellSizeDropLog : uint8_t
+{
+    NotYetLogged, ///< No image was dropped yet, or none was logged.
+    Logged,       ///< The drop was logged, and later ones are not.
 };
 
 /// Where one grid cell's image content lies, expressed as geometry.
@@ -369,6 +379,32 @@ class ImagePool
 
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
+
+    /// Inserts an image under an id the caller chose, rather than the next one the pool would issue.
+    ///
+    /// For restoring a captured pool: the image is indexed (so findImageById finds it) and its removal is
+    /// reported exactly as a created image's is, but the pool's own numbering does not move.
+    /// @param id        The id the image keeps.
+    /// @param format    The pixel format.
+    /// @param pixelSize The image's size in pixels.
+    /// @param data      The pixels.
+    /// @return The image.
+    [[nodiscard]] std::shared_ptr<Image const> adopt(ImageId id,
+                                                     ImageFormat format,
+                                                     ImageSize pixelSize,
+                                                     Image::Data&& data);
+
+    /// @return The id the next created image receives.
+    [[nodiscard]] ImageId nextImageId() const noexcept { return _nextImageId; }
+
+    /// Makes the next created image receive @p next, which a restored pool needs so that it goes on
+    /// numbering where the captured one stopped, never reusing an id a restored image holds.
+    /// @param next The id the next created image receives.
+    void continueNumberingAt(ImageId next) noexcept { _nextImageId = next; }
+
+    /// @return The names images are linked under with the images they name, least recently used first, so
+    ///         that linking them in this order reproduces the cache's recency.
+    [[nodiscard]] std::vector<std::pair<std::string, std::shared_ptr<Image const>>> linkedImages() const;
 
     // named image access
     //

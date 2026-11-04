@@ -20,6 +20,7 @@ namespace vthost
 enum class DaemonLaunchStyle : std::uint8_t;
 enum class ClientSizePolicy : std::uint8_t;
 class IByteStream;
+struct NativeTcpListenerConfig;
 } // namespace vthost
 
 namespace contour::cli
@@ -104,6 +105,10 @@ class ContourApp: public core::cli::App
     /// @param prefix That sub-verb's dotted flag prefix, e.g. "contour.daemon.status".
     /// @return The process exit code.
     int daemonVerbAction(DaemonVerb verb, std::string const& prefix);
+    /// Reads `contour daemon --listen-tcp` and the options that go with it.
+    /// @return The TCP listener to serve, nullopt for none; or why the options cannot be served.
+    [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string>
+    nativeTcpOption();
     /// Checks that `contour daemon --stdio` names no option only a daemon this process becomes can honour.
     /// @return The refusal, naming the option, when one is given.
     [[nodiscard]] std::expected<void, std::string> checkStdioCombinations();

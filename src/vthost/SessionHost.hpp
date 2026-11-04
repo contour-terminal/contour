@@ -18,6 +18,7 @@
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
+#include <vtbackend/state/TerminalState.hpp>
 
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
@@ -52,7 +53,9 @@
 #include <vtcontrol/Uuid.hpp>
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
+#include <vthost/CarriedDelivery.hpp>
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/CommandInterruption.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -63,6 +66,8 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/handover/HandoverCodec.hpp>
+#include <vthost/handover/HandoverImage.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
@@ -277,12 +282,41 @@ struct HostedSessionExtensions
     std::function<void()> onForegroundFollowingChanged {};
 };
 
-/// Where a hosted session's emulation settings came from, which decides whether a profile reload reaches it.
-enum class SettingsOrigin : uint8_t
+/// Why a hosted session could not be quiesced.
+enum class QuiesceError : uint8_t
 {
-    Profile =
-        0, ///< The host's own: a profile it resolved, or its factory settings. A reload re-resolves them.
-    Client = 1, ///< Stated by a client that named no profile: a reload leaves them as the client stated.
+    /// Its child has not set its terminal up yet, which flushes away input written before it: nothing written
+    /// in that window could be carried. @see vtpty::Process::spawnProgress(). The session is left as it was,
+    /// and a later quiesce() can succeed.
+    SpawnInProgress,
+    /// The escape sequence in flight outgrew what a capture keeps of it (Settings::inFlightTailLimit). The
+    /// session is left as it was, and a later quiesce() can succeed.
+    InFlightTailOverflowed,
+    /// The session ended: its program exited, or the host terminated it. Its PTY is closed and its close
+    /// announced (or about to be), so there is nothing to carry, and it never resumes.
+    Ended,
+};
+
+/// A hosted session stopped between two batches, everything a new process needs to carry it on: its PTY and
+/// child stay as they are, owned by the old one until it execs.
+struct QuiescedSession
+{
+    /// The terminal, its queue for the PTY (the replies it has not written: DA, DSR, ...) included: a
+    /// terminal restored from it writes them first, as its pump starts, ahead of @ref carried.
+    vtbackend::TerminalState terminal;
+    /// What clients handed over and the pump has not delivered, oldest first: what is left of a PTY write the
+    /// capture interrupted comes first.
+    std::vector<CarriedDelivery> carried;
+};
+
+/// Why a hosted session is terminated, which decides whether a quiesced one announces its close.
+enum class TerminationReason : uint8_t
+{
+    /// The host ends the session: a quiesced one announces its close (onClosed), as its pump would have.
+    Requested = 0,
+    /// The session's owner is being destroyed: nothing is announced of a quiesced one, whose announcement
+    /// would reach an owner already gone.
+    Teardown,
 };
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
@@ -331,7 +365,7 @@ class HostedSession
                   SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
                   std::optional<vtbackend::GitHeadServices> git = std::nullopt);
 
-    /// Joins the pump thread; the PTY must have been closed first (terminate()).
+    /// Closes the PTY, as terminate(TerminationReason::Teardown) does, and joins the pump thread.
     ~HostedSession();
 
     HostedSession(HostedSession const&) = delete;
@@ -343,19 +377,57 @@ class HostedSession
     /// drive the terminal directly via writeToScreen.
     void start();
 
-    /// Closes the PTY device, which ends the pump loop.
-    void terminate();
+    /// Closes the PTY device, which ends the pump loop, whose end announces the close (onClosed). A quiesced
+    /// session has no pump to announce it: terminate() does, exactly once and with SessionEnd::Requested,
+    /// unless @p reason is Teardown. Any thread, but never beside quiesce() or resume(), which restart the
+    /// pump thread it asks about.
+    /// @param reason Why the session is terminated.
+    void terminate(TerminationReason reason);
 
-    /// What the pump does with what a client handed a session: writes it to the PTY, or parses it.
-    using Delivery = void (*)(vtbackend::Terminal& terminal, std::string_view bytes);
+    /// Stops the pump between two batches -- after a read and its parse, or between two deliveries -- and
+    /// captures the session, for a live upgrade. The PTY stays open and the child runs on; the close is not
+    /// announced (onClosed). Needs no progress of the child's: a pump blocked on a full PTY, in either
+    /// direction, does not hold it up; what a write it interrupts did not get to the PTY is carried. Leaves
+    /// everything in place, so that resume() carries on as if nothing happened; until then what clients hand
+    /// over queues, and a second call captures that too. Parses nothing: what a client handed over for the
+    /// screen is carried as it is, in its place among the rest.
+    /// @return The session as captured; or why it cannot be: its child is still spawning, or its escape
+    ///         sequence in flight outgrew the capture (the session left as it was, running or quiesced by an
+    ///         earlier call); or it ended.
+    [[nodiscard]] std::expected<QuiescedSession, QuiesceError> quiesce();
 
-    /// Hands @p bytes to the pump thread, which delivers them with @p deliver between two reads, after
+    /// Stops the pump as quiesce() does, and refuses as it does, but captures nothing: for the settle ahead
+    /// of a capture, which quiesce() takes once the loop worked off what the pump posted. What clients hand
+    /// over meanwhile queues, as for a quiesced session; resume() or a later quiesce() carries on.
+    /// @return Nothing; or why the pump cannot be stopped for a capture, as quiesce() says.
+    [[nodiscard]] std::expected<void, QuiesceError> stopForCapture();
+
+    /// Captures a session whose pump stopForCapture() stopped, as quiesce() does: its terminal, and a copy of
+    /// what clients handed over and the pump has not delivered. Loop thread.
+    /// @pre stopForCapture() succeeded, and nothing resumed or terminated the session since.
+    /// @return The session as captured.
+    [[nodiscard]] QuiescedSession captureStopped();
+
+    /// Restarts the pump of a quiesced session, as a failed upgrade rolls back: it writes the terminal's
+    /// queued replies and delivers what queued meanwhile first, each once, then reads on. Nothing for a
+    /// session that is not quiesced, or whose PTY closed meanwhile.
+    void resume();
+
+    /// Queues what a quiesced session carried over ahead of everything else, for the pump to deliver before
+    /// its first read, after the terminal's queued replies; whatever clients hand over follows. On a session
+    /// restored from the capture, before start() in the same turn of the loop.
+    /// @param carried QuiescedSession::carried.
+    void replayCarried(std::vector<CarriedDelivery> carried);
+
+    /// Hands @p bytes to the pump thread, which delivers them as @p kind says between two reads, after
     /// everything handed over before them. The loop thread handing them over must neither park on a PTY write
     /// while the application leaves its input unread nor sleep in a parse (DECSCLM). Without a pump (not
-    /// started), delivered at once, the caller standing in for it.
-    /// @param deliver What the pump does with @p bytes.
+    /// started), delivered at once, the caller standing in for it: after the terminal's queued replies and
+    /// whatever was carried over (@see replayCarried()). A quiesced session's are queued for resume() or a
+    /// capture.
+    /// @param kind What the pump does with @p bytes.
     /// @param bytes What a client handed over.
-    void deliverOnPump(Delivery deliver, std::string_view bytes);
+    void deliverOnPump(DeliveryKind kind, std::string_view bytes);
 
     /// Writes @p bytes, a client's input, to the PTY, through deliverOnPump().
     /// @param bytes The input, as the client encoded it.
@@ -377,6 +449,9 @@ class HostedSession
     /// @return The child process behind the session's PTY; nullptr for a PTY that is no process (a test's
     ///         MockPty).
     [[nodiscard]] vtpty::Process const* process() const noexcept;
+
+    /// @return The PTY the session runs on: its process's, or the device itself where no process runs on it.
+    [[nodiscard]] vtpty::Pty const& pty() const noexcept;
 
     /// @return Why the session ended, as the pump saw it once its PTY closed: valid from the moment the
     ///         onClosed callback runs, Exited before.
@@ -569,16 +644,39 @@ class HostedSession
     {
         return _pumpEnd.load(std::memory_order_acquire) == PumpEnd::Terminated;
     }
-
-    /// What a client handed over, waiting for the pump. @see deliverOnPump()
-    struct PendingDelivery
+    /// @return Whether quiesce() asked the pump to stop.
+    [[nodiscard]] bool quiesceRequested() const noexcept
     {
-        Delivery deliver;  ///< What the pump does with @ref bytes.
-        std::string bytes; ///< What it does it with.
+        return _pumpEnd.load(std::memory_order_acquire) == PumpEnd::Quiesced;
+    }
+
+    /// Asks a running pump to stop between two batches, interrupting a PTY write it waits in, and waits for
+    /// it. Nothing when it is not running.
+    void stopPump();
+
+    /// Announces the close (onClosed), at most once whoever asks: the pump as it ends, or terminate() of a
+    /// quiesced session.
+    void announceClosed();
+
+    /// Whether deliverPending() delivered everything, or stopped for a capture.
+    enum class DeliveryOutcome : uint8_t
+    {
+        Delivered = 0, ///< Everything queued was delivered (or dropped by a device that failed).
+        Stopped,       ///< quiesce() asked: what was not delivered is queued again, at the front.
     };
 
-    /// Delivers what deliverOnPump() queued, oldest first, on the pump thread.
-    void deliverPending();
+    /// What of the queue deliverPending() delivers.
+    enum class PendingScope : uint8_t
+    {
+        All = 0,         ///< Everything queued.
+        InterruptedRest, ///< Only the rest of an interrupted write at its front, if there is one.
+    };
+
+    /// Delivers what deliverOnPump() queued, oldest first, on the pump thread (or the caller standing in for
+    /// it), each followed by the terminal's queued replies.
+    /// @param scope What of it.
+    /// @return Whether it stopped for a capture.
+    DeliveryOutcome deliverPending(PendingScope scope);
 
     vtworkspace::SessionId _id;
     std::string _profileName;       ///< @see profileName
@@ -597,22 +695,30 @@ class HostedSession
     /// load or subscribe later hear it from the terminal, which remembers it. Loop thread only.
     std::string _foregroundProcessName;
     std::function<void()> _onClosed;
-    /// Why the pump loop ends: the process exiting by itself, or terminate().
+    /// Why the pump loop ends: the process exiting by itself, terminate(), or quiesce().
     enum class PumpEnd : uint8_t
     {
-        ProcessExited = 0, ///< The PTY reached its end: the process exited.
+        ProcessExited = 0, ///< Running, or the PTY reached its end: the process exited.
         Terminated,        ///< The host closed the PTY on purpose.
+        Quiesced,          ///< The host stopped the pump, the PTY open; resume() starts it again.
+        Ended, ///< The pump left its loop on its own, at the PTY's end: no quiesce() can stop it any more.
     };
-    /// Written by terminate() on any thread, read by the pump thread. Terminated says the host closing the
-    /// PTY is not the program ending, so the pump neither waits for an exit status nor drops program status.
+    /// Written by terminate(), by quiesce() and resume() on the loop thread, and by the pump
+    /// as it leaves its loop (ProcessExited to Ended, so that a quiesce() racing that end fails its own
+    /// exchange); read by the pump thread. Terminated says the host closing the PTY is not the program
+    /// ending, so the pump neither waits for an exit status nor drops program status. Quiesced has the pump
+    /// return between two batches, leaving the PTY open and its close unannounced.
     std::atomic<PumpEnd> _pumpEnd { PumpEnd::ProcessExited };
+    /// Set by the first announceClosed(): the close is announced once, by the pump or by terminate().
+    std::atomic_flag _closeAnnounced {};
     std::atomic<SessionEnd> _endCause { SessionEnd::Exited }; ///< @see endCause
+    /// Null until start(); joined, not reset, while quiesced, so that input keeps queueing for the pump.
     std::unique_ptr<std::thread> _pumpThread;
     /// Guards _pending and _pendingBytes: the loop thread queues, the pump thread delivers.
     mutable std::mutex _pendingMutex;
     /// What clients handed over and the pump has not taken yet, oldest first; consecutive bytes delivered
     /// alike share an entry.
-    std::vector<PendingDelivery> _pending;
+    std::vector<CarriedDelivery> _pending;
     std::size_t _pendingBytes = 0; ///< What _pending holds, and what the pump took off it and is delivering.
 };
 
@@ -766,11 +872,52 @@ struct SessionHostConfig
     /// (proto::ServerHello::daemonInstance): the daemon draws it at random as it starts. 0 states none, as an
     /// embedded host or a test does.
     uint64_t instance = 0;
+    /// The id the first session this host mints gets; never 0, which is SessionId{}, the sentinel for none
+    /// (Require). A host that takes over a previous run's sessions (a live upgrade) starts above every
+    /// session id it adopted -- vtworkspace::firstUnusedSessionId() of the restored tree -- so that no new
+    /// session is named as an old one.
+    uint64_t firstSessionId = 1;
     /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
     /// startup layout is realized only when it realizes none (or none is given).
     std::optional<WorkspaceRestore> restore {};
+    /// What the previous image of this daemon handed over as it exec'd this one in place (a live upgrade):
+    /// the host adopts every session's PTY and child, rebuilds each terminal from its captured state, and
+    /// restores the model and the object registry with the very ids they had; then applies @ref profiles to
+    /// every session as a configuration reload would (replaceProfiles()). Wins over @ref restore and
+    /// @ref startupLayout, neither of which is realized, and over @ref firstSessionId. Nothing in it is
+    /// refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
+    std::optional<handover::HandoverImage> handover {};
     /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+};
+
+/// One session of a quiesced host.
+struct QuiescedHostSession
+{
+    vtworkspace::SessionId id {}; ///< The session.
+    QuiescedSession state;        ///< As HostedSession::quiesce() captured it.
+};
+
+/// Every session of a host stopped between two batches, and the model they are laid out in, as of the same
+/// moment.
+struct QuiescedHost
+{
+    vtworkspace::WorkspaceTreeState tree {};    ///< The windows, tabs and panes.
+    vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
+    vtworkspace::SessionId nextSessionId { 1 }; ///< The id the host mints its next session with.
+    std::vector<QuiescedHostSession> sessions;  ///< Every session still running, by id ascending.
+};
+
+/// Why a host's sessions could not all be quiesced. Every session runs on as before.
+enum class HostQuiesceError : uint8_t
+{
+    /// A session is still starting: its child has not set its terminal up yet
+    /// (QuiesceError::SpawnInProgress), or the input it was spawned with waits for its prompt. Passes within
+    /// moments: asking again succeeds.
+    SessionStarting = 0,
+    /// A session's escape sequence in flight outgrew what a capture keeps
+    /// (QuiesceError::InFlightTailOverflowed).
+    InFlightTailOverflowed,
 };
 
 /// Where a host's sessions look up their `{Git}` branch: the services it was given, or its own.
@@ -973,6 +1120,8 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The hosted session @p session, or nullptr if unknown.
     [[nodiscard]] HostedSession const* hostedSession(vtworkspace::SessionId session) const noexcept;
+    /// @return The hosted session @p session, or nullptr if unknown.
+    [[nodiscard]] HostedSession* hostedSession(vtworkspace::SessionId session) noexcept;
 
     /// Swaps the host's profile catalog for @p profiles, as the host's configuration was reloaded.
     ///
@@ -994,6 +1143,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The command line a restart stopped in @p session, held until its next command starts; empty
     ///         for none, or for an unknown session. Untrusted text (it came from a snapshot).
     [[nodiscard]] std::string interruptedCommandOf(vtworkspace::SessionId session) const;
+
+    /// @param session The session asked about.
+    /// @return The command a restart stopped in @p session and the block it was restored behind, held until
+    ///         its next command starts; nullopt for none, or for an unknown session. What a live upgrade
+    ///         carries.
+    [[nodiscard]] std::optional<CommandInterruption> interruptionOf(vtworkspace::SessionId session) const;
 
     /// When a client last handed @p session input, on the host loop's clock. Loop thread only.
     ///
@@ -1036,6 +1191,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param preference The light/dark preference a client stated for it.
     void applyColorPreference(vtworkspace::SessionId session, vtbackend::ColorPreference preference);
 
+    /// @param session The session asked about.
+    /// @return The light/dark preference @p session's palette was last seeded under, where that is not
+    ///         HostedColorPreference; nullopt otherwise, and for an unknown session. What a live upgrade
+    ///         carries.
+    [[nodiscard]] std::optional<vtbackend::ColorPreference> colorPreferenceOf(
+        vtworkspace::SessionId session) const;
+
+    /// @return The light/dark preference sessions spawned from now on are built under.
+    [[nodiscard]] vtbackend::ColorPreference defaultColorPreference() const noexcept
+    {
+        return _defaultColorPreference;
+    }
+
     /// Closes an open status-line extension's permission request with a client's answer, which is recorded
     /// for every session: from now on the extension's commands run, or are refused. A dismissed prompt
     /// (Pending) closes it and records nothing; the question is asked again when an extension next asks. An
@@ -1064,6 +1232,31 @@ class SessionHost final: public vtworkspace::ModelEvents
         return _pendingPermissions;
     }
 
+    /// @return How SessionHostConfig::handover was taken over: nothing when no image was given, or when every
+    ///         part of it was; Malformed when its workspace tree was refused, every adopted session then laid
+    ///         out in a tab of its own.
+    [[nodiscard]] std::expected<void, handover::HandoverError> handoverOutcome() const noexcept
+    {
+        return _handoverOutcome;
+    }
+
+    /// Hands over, once, the sessions SessionHostConfig::handover brought back without their screen, whose
+    /// clients are to be told so (UnrestoredScreenNotice).
+    /// @param follows Whether the asking client follows a session: only those are handed over.
+    /// @return The sessions @p follows names, each handed over to no later call.
+    [[nodiscard]] std::vector<vtworkspace::SessionId> takeUnrestoredScreens(
+        std::function<bool(vtworkspace::SessionId)> const& follows);
+
+    /// Keeps @p notice for the first client that attaches: what a daemon that took over from a handover but
+    /// could not start as configured -- a configuration that no longer loads, an endpoint it cannot serve --
+    /// serves on without, and says so. Loop thread.
+    /// @param notice One sentence, for a person.
+    void announceDegradation(std::string notice);
+
+    /// Hands over, once, every notice announceDegradation() kept. Loop thread.
+    /// @return The notices, oldest first; empty every time after.
+    [[nodiscard]] std::vector<std::string> takeDegradations() { return std::exchange(_degradations, {}); }
+
     /// @return Whether SessionHostConfig::restore realized at least one pane; NothingRealized when no restore
     ///         was given.
     [[nodiscard]] RestoreOutcome restoreOutcome() const noexcept { return _restoreOutcome; }
@@ -1078,6 +1271,41 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
+
+    /// @return The id of every live hosted session, ascending.
+    [[nodiscard]] std::vector<vtworkspace::SessionId> sessionIds() const;
+
+    /// @return Whether a session is still starting: holding its initial input for a prompt, or with a child
+    ///         that has not set its terminal up yet. A capture can carry no such session; quiesceAll()
+    ///         refuses it (HostQuiesceError::SessionStarting). Loop thread.
+    [[nodiscard]] bool isAnySessionStarting() const;
+
+    /// Quiesces every session (HostedSession::quiesce()), for a live upgrade; again for sessions quiesced
+    /// already, which captures what was handed to them since. A session that ended is ended here and now
+    /// (endSession()), ahead of the close its pump posted, so that it is neither in the model nor among the
+    /// sessions returned. Loop thread.
+    /// @return Every session and the model, captured; or why not, every session then resumed
+    ///         (resumeAll()), those quiesced before the call included.
+    [[nodiscard]] std::expected<QuiescedHost, HostQuiesceError> quiesceAll();
+
+    /// Stops every session's pump as quiesceAll() does (HostedSession::stopForCapture()), refusing and ending
+    /// sessions as it does, but captures nothing: what a live upgrade does ahead of its capture, so that the
+    /// loop can work off what the pumps posted, and each terminal is captured once. Loop thread.
+    /// @return Nothing; or why not, every session then resumed (resumeAll()).
+    [[nodiscard]] std::expected<void, HostQuiesceError> stopAllPumps();
+
+    /// Resumes every quiesced session (HostedSession::resume()): the rollback of a live upgrade. Nothing for
+    /// a session that is not quiesced. Loop thread.
+    void resumeAll();
+
+    /// @return How many events the sessions' pumps posted to the loop that it has not handled yet: their
+    ///         screen updates, closes and stream events. Zero once every pump is stopped (quiesceAll()) and
+    ///         the loop has turned since: nothing a pump saw is left to change the host after that. Any
+    ///         thread.
+    [[nodiscard]] std::size_t pumpEventsInFlight() const noexcept
+    {
+        return _pumpEventsInFlight.load(std::memory_order_acquire);
+    }
 
     /// @return Whether a subscribed observer shows sessions' screens (@see
     /// SessionStreamEvents::mirrorsScreens):
@@ -1196,6 +1424,61 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession(SessionSpawnRequest const& incoming,
                                                                     SpawnIds const& ids);
 
+    /// Builds the hosted session for @p device, wired to this host: its output tapped for the control-mode
+    /// streams, its events posted to the loop. Neither started nor registered (@see installSession()).
+    /// @param id The session's id.
+    /// @param device Its PTY, or the process on it.
+    /// @param settings Its terminal's settings, normalized already.
+    /// @param profileName The profile it runs under; empty for none.
+    /// @param origin Where @p settings came from.
+    /// @return The session.
+    [[nodiscard]] std::unique_ptr<HostedSession> makeHostedSession(vtworkspace::SessionId id,
+                                                                   std::unique_ptr<vtpty::Pty> device,
+                                                                   vtbackend::Settings settings,
+                                                                   std::string profileName,
+                                                                   SettingsOrigin origin);
+
+    /// Starts @p session's pump (unless the host pumps none), paints the indicator row its clients mirror,
+    /// and registers it.
+    /// @param session A session makeHostedSession() built, its terminal set up.
+    void installSession(std::unique_ptr<HostedSession> session);
+
+    /// Takes over what a previous image of this daemon handed over (SessionHostConfig::handover): the object
+    /// registry, the model with its ids, then every session (adoptHandoverSession()), and last the host's
+    /// profiles, as a configuration reload applies them (replaceProfiles()). Called once, from the
+    /// constructor body, into a model holding no window. Defined in handover/HandoverRestore.cpp.
+    /// @param image The image.
+    /// @return Nothing; or Malformed when the workspace tree was refused, every session then laid out in a
+    ///         tab of its own.
+    [[nodiscard]] std::expected<void, handover::HandoverError> restoreHandover(handover::HandoverImage image);
+
+    /// Adopts one session of a handover image: its PTY and child, its terminal rebuilt from the captured
+    /// state over settings its profile makes up afresh, what was carried queued ahead of everything, its pump
+    /// started. Never closes the PTY: a terminal state that is refused leaves the session a fresh terminal,
+    /// and is announced (takeUnrestoredScreens()). A session the restored tree has no leaf for gets a tab of
+    /// its own in the host's window. Defined in handover/HandoverRestore.cpp.
+    /// @param session The session as it crossed the exec.
+    void adoptHandoverSession(handover::HandoverSession& session);
+
+    /// Waits for the child @p pid of a session a handover could not adopt, which nothing else waits for:
+    /// reaped once it exits (reapOrphans()), so that it stays no zombie for the daemon's lifetime. Never
+    /// blocks the loop. Loop thread. Defined in handover/HandoverRestore.cpp.
+    /// @param pid The child's process id.
+    void reapWhenExited(int64_t pid);
+
+    /// Arms the poll that reaps the children reapWhenExited() was handed, unless it is armed or none is left.
+    void armOrphanReap();
+
+    /// What the poll does: reaps every child handed to reapWhenExited() that exited, forgets one that is no
+    /// child of this process any more, and re-arms while any is left. @param host The SessionHost.
+    static void reapOrphans(void* host);
+
+    /// @param session A session of a handover image.
+    /// @return The settings its terminal is built on: the profile it runs under, resolved in this image's
+    ///         configuration (else the host's factory settings), or what its client stated for a session
+    ///         whose settings are a client's own. Defined in handover/HandoverRestore.cpp.
+    [[nodiscard]] vtbackend::Settings handoverBaseSettings(handover::HandoverSession const& session) const;
+
     /// @param request A spawn request.
     /// @return The pane's UUID: the preset one, or a fresh one.
     [[nodiscard]] vtcontrol::Uuid paneUuidFor(SessionSpawnRequest const& request);
@@ -1300,11 +1583,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     };
 
     /// A restored session's interrupted command, with the newest command-block id it was restored behind.
-    struct Interruption
-    {
-        std::string commandLine;         ///< What the restart stopped.
-        vtbackend::CommandBlockId after; ///< A block newer than this that left its prompt ends it.
-    };
+    using Interruption = CommandInterruption;
 
     /// Forgets @p session's interruption once its terminal holds a command of its own: a record newer than
     /// the restored ones that is no longer at its prompt. Loop thread, after a screen update.
@@ -1403,6 +1682,21 @@ class SessionHost final: public vtworkspace::ModelEvents
             (observer->*method)(args...);
     }
 
+    /// Posts @p job, an event of a session's pump, to the loop, counted in pumpEventsInFlight() until it
+    /// runs.
+    /// @param job What the loop does.
+    template <typename Job>
+    void postFromPump(Job job)
+    {
+        _pumpEventsInFlight.fetch_add(1, std::memory_order_acq_rel);
+        _loop.post([this, job = std::move(job)] {
+            // Before the job: the loop thread, the one reader that acts on the count, cannot tell the
+            // difference, and a job that throws is not counted for good.
+            _pumpEventsInFlight.fetch_sub(1, std::memory_order_acq_rel);
+            job();
+        });
+    }
+
     /// Posts a stream event of a session to the loop, fanned out there unless the session ended meanwhile:
     /// a session's callbacks fire on its pump thread.
     /// @param session The session the event is of, passed to each observer first.
@@ -1411,7 +1705,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     template <typename Method, typename... Args>
     void postStreamEvent(vtworkspace::SessionId session, Method method, Args... args)
     {
-        _loop.post([this, session, method, ... args = std::move(args)] {
+        postFromPump([this, session, method, ... args = std::move(args)] {
             if (!_sessions.contains(session.value))
                 return;
             for (auto* observer: _streamSubscribers)
@@ -1517,12 +1811,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// clock, so a test can reproduce an ordering exactly.
     uint64_t _nextAreaSequence = 1;
 
-    uint64_t _nextSessionId = 1;
+    uint64_t _nextSessionId;
     std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
     /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
+    /// @see pumpEventsInFlight()
+    std::atomic<std::size_t> _pumpEventsInFlight { 0 };
     /// When each session last got client input, on `_loop`'s clock (@see lastInputAt). Erased with the
     /// session's `_sessions` entry, by eraseSession().
     std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _lastInput;
@@ -1541,6 +1837,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Releases what runners retired, a while after a session with extensions went. @see
     /// scheduleRetiredRelease
     std::optional<core::net::DeadlineTimer> _retiredRelease;
+    /// The children of sessions a handover could not adopt, not reaped yet. Loop thread. @see reapWhenExited
+    std::vector<int64_t> _orphans;
+    /// Reaps _orphans as they exit; armed only while one is left. @see armOrphanReap
+    std::optional<core::net::DeadlineTimer> _orphanReap;
     std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
     /// The handshaken native Attach connections. @see connectedClients
@@ -1562,6 +1862,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The restored sessions whose command the restart stopped and that have run nothing since. Loop thread.
     std::unordered_map<uint64_t, Interruption> _interruptions;
     RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome
+    std::expected<void, handover::HandoverError> _handoverOutcome {}; ///< @see handoverOutcome
+    /// The sessions a handover brought back without their screen, not yet told to a client. Loop thread.
+    std::vector<vtworkspace::SessionId> _unrestoredScreens;
+    /// What the daemon could not start as configured, not yet told to a client. Loop thread.
+    std::vector<std::string> _degradations;
     std::vector<RestoredWindow>
         _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
 

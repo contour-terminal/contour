@@ -9,14 +9,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/ConnectionRegistry.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/DaemonRuntime.hpp>
+#include <vthost/DaemonUpgradeHooks.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/ShutdownFunnel.hpp>
 
@@ -58,6 +62,24 @@ struct RecordingListener final: core::net::IListener
   protected:
     void doClose() noexcept override { events->emplace_back("listener closed"); }
 };
+
+/// An upgrade orchestrator that records its target, announces the upgrade and then refuses it. A free
+/// function taking pointers, not a capturing lambda: a lambda coroutine's closure dies at the end of
+/// the full-expression that created it, while the coroutine frame lives on (clang-tidy's
+/// avoid-capturing-lambda-coroutines).
+core::async::Task<std::expected<void, vthost::handover::UpgradeError>> refuseUpgradeAfterAnnouncing(
+    vthost::DaemonUpgradeHooks* hooks,
+    std::vector<std::string>* targets,
+    vthost::handover::UpgradeState* state,
+    vthost::handover::UpgradeTarget target)
+{
+    targets->push_back(target.imageId);
+    *state = vthost::handover::UpgradeState::Running;
+    // The orchestrator announces once it is certain to proceed.
+    hooks->announceUpgrade("1.2.3");
+    co_return std::unexpected(
+        vthost::handover::UpgradeError { vthost::handover::UpgradeRefusal::QuiesceTimedOut });
+}
 
 } // namespace
 
@@ -193,4 +215,65 @@ TEST_CASE("a shutdown requested after the endpoints are gone closes none of them
     funnel.request(vthost::ShutdownCause::Signal);
 
     CHECK(events == std::vector<std::string> { "signal received" });
+}
+
+TEST_CASE("an upgrade request without a port is refused NotSupported", "[vthost][runtime][upgrade]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto runtime = vthost::DaemonRuntime { {}, h.host, clock, [](vthost::ShutdownCause) {} };
+    auto result = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
+    h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out) -> core::async::Task<void> {
+        *out = co_await daemon->requestUpgrade({}, {});
+    }(&runtime, &result));
+    std::ignore = h.loop.runUntilIdle();
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result->has_value());
+    CHECK(std::get<vthost::handover::UpgradeRefusal>(result->error())
+          == vthost::handover::UpgradeRefusal::NotSupported);
+}
+
+TEST_CASE("a second upgrade request while one runs is refused InProgress", "[vthost][runtime][upgrade]")
+{
+    using vthost::handover::UpgradeRefusal;
+    using vthost::handover::UpgradeState;
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const connections = vthost::ConnectionRegistry {};
+    auto hooks = vthost::DaemonUpgradeHooks { connections, {} };
+    auto state = UpgradeState::Idle;
+    auto targets = std::vector<std::string> {};
+    auto runtime = vthost::DaemonRuntime { {},
+                                           h.host,
+                                           clock,
+                                           [](vthost::ShutdownCause) {},
+                                           vthost::DaemonUpgradePort {
+                                               .hooks = hooks,
+                                               .run =
+                                                   [&](vthost::handover::UpgradeTarget target) {
+                                                       return refuseUpgradeAfterAnnouncing(
+                                                           &hooks, &targets, &state, std::move(target));
+                                                   },
+                                               .state = [&] { return state; } } };
+    auto answered = 0;
+    auto first = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
+    h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out, int* count) -> core::async::Task<void> {
+        *out = co_await daemon->requestUpgrade({ .imageId = "a" }, [count] { ++*count; });
+    }(&runtime, &first, &answered));
+    std::ignore = h.loop.runUntilIdle();
+    REQUIRE(first.has_value());
+    CHECK(answered == 1);
+    CHECK(targets == std::vector<std::string> { "a" });
+
+    // The upgrade is under way (state stays Running as it would until the exec), so a second asker is
+    // refused.
+    auto second = std::optional<std::expected<void, vthost::handover::UpgradeError>> {};
+    h.loop.spawn([](vthost::DaemonRuntime* daemon, auto* out) -> core::async::Task<void> {
+        *out = co_await daemon->requestUpgrade({ .imageId = "b" }, {});
+    }(&runtime, &second));
+    std::ignore = h.loop.runUntilIdle();
+    REQUIRE(second.has_value());
+    REQUIRE_FALSE(second->has_value());
+    CHECK(std::get<UpgradeRefusal>(second->error()) == UpgradeRefusal::InProgress);
+    CHECK(targets == std::vector<std::string> { "a" });
 }

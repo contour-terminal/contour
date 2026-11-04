@@ -67,6 +67,20 @@ class ReGISRasterizer
     /// first bit. Called at the start of a new drawing path.
     void resetPattern() noexcept { _patternPhase = 0; }
 
+    /// @return The index of the next pattern step, in pen pixels.
+    [[nodiscard]] unsigned patternPhase() const noexcept { return _patternPhase; }
+
+    /// Replaces the canvas wholesale.
+    /// @param size    The canvas size.
+    /// @param pixels  RGBA pixels, `size.area() * 4` bytes; the caller checked.
+    /// @param phase   The index of the next pattern step.
+    void restore(ImageSize size, Image::Data pixels, unsigned phase) noexcept
+    {
+        _size = size;
+        _buffer = std::move(pixels);
+        _patternPhase = phase;
+    }
+
     /// Plots a single point (the @c V[] dot), honouring the pen's colour, mode and line width.
     void plotDot(Pen const& pen, crispy::Point p) noexcept;
 

@@ -11,6 +11,7 @@
 /// are handled CONCURRENTLY: each one runs as its own spawned flow, with the
 /// socket's ownership moved into that flow's frame.
 
+#include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IListener.hpp>
@@ -19,8 +20,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <vthost/ConnectionId.hpp>
@@ -67,6 +70,15 @@ class AcceptFailureThrottle
     std::size_t _consecutive = 0;
 };
 
+/// Whether a ConnectionAcceptor takes connections off its listener.
+enum class Admission : std::uint8_t
+{
+    Accepting = 0, ///< Every connection is accepted and handed to the handler.
+    /// None is: the listener stays open and bound, and connections wait in its backlog for whoever accepts
+    /// next -- this acceptor once resumed, or the new image of a daemon upgraded live, which inherits it.
+    Holding,
+};
+
 /// Accepts connections on an injected listener and spawns one handler flow per
 /// connection.
 class ConnectionAcceptor
@@ -99,7 +111,26 @@ class ConnectionAcceptor
     [[nodiscard]] core::async::Task<void> serve();
 
     /// Stops accepting; a parked accept resolves as cancelled.
-    void close() noexcept { _listener->close(); }
+    void close() noexcept;
+
+    /// Stops taking connections off the listener without closing it: a parked accept is withdrawn, and
+    /// connections wait in the backlog until resumeAccepting(). What a live upgrade does before it hands the
+    /// listener to the new image. Idempotent. Loop thread.
+    void holdAccepting();
+
+    /// Takes connections off the listener again after holdAccepting(). Idempotent. Loop thread.
+    void resumeAccepting();
+
+    /// @return Whether connections are taken off the listener.
+    [[nodiscard]] Admission admission() const noexcept { return _admission; }
+
+    /// @return This endpoint's name, as the constructor was given it.
+    [[nodiscard]] std::string const& name() const noexcept { return _name; }
+
+    /// @return The listener's operating-system descriptor, which a live upgrade hands to the new image;
+    /// nullopt
+    ///         where it has none, or it cannot be told (Windows, an in-memory listener).
+    [[nodiscard]] std::optional<int> listeningDescriptor() const;
 
     /// @return The number of connections accepted so far (tests/diagnostics).
     [[nodiscard]] std::size_t acceptedCount() const noexcept { return _acceptedCount; }
@@ -111,5 +142,10 @@ class ConnectionAcceptor
     ConnectionHandler _handler;
     std::size_t _acceptedCount = 0;
     AcceptFailureThrottle _failureThrottle;
+    Admission _admission = Admission::Accepting;
+    /// Stopped by holdAccepting(), which withdraws a parked accept; renewed by resumeAccepting().
+    core::async::StopSource _hold;
+    /// Stopped by resumeAccepting() and close(), either of which ends a hold; renewed by holdAccepting().
+    core::async::StopSource _release;
 };
 } // namespace vthost

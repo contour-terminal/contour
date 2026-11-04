@@ -3,6 +3,7 @@
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/state/TerminalStateCodec.hpp>
 #include <vtbackend/testing/CounterColumns.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/Workloads.hpp>
@@ -2322,6 +2323,111 @@ int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
     return EXIT_SUCCESS;
 }
 
+/// How the handover benchmark runs. Its defaults are the command line's.
+/// The page a handover is measured on: 200 columns by 60 lines.
+constexpr auto HandoverPageSize =
+    vtbackend::PageSize { .lines = vtbackend::LineCount(60), .columns = vtbackend::ColumnCount(200) };
+
+struct HandoverOptions
+{
+    unsigned lines = 100000; ///< Lines of scrollback the terminal holds when its state is captured.
+    unsigned runs = 3;       ///< Runs; the fastest of each phase counts.
+};
+
+/// What one handover costs.
+struct HandoverCost
+{
+    std::chrono::duration<double, std::milli> encode {};  ///< captureState() and the byte encoding.
+    std::chrono::duration<double, std::milli> decode {};  ///< The byte decoding.
+    std::chrono::duration<double, std::milli> restore {}; ///< restoreState() into a fresh terminal.
+    size_t bytes = 0;                                     ///< The size of the stream.
+};
+
+/// Fills a terminal with @p lines of scrollback and images, then hands its state over once.
+/// @return What the handover cost, or why it failed.
+[[nodiscard]] std::expected<HandoverCost, std::string> measureHandover(std::string_view fill, unsigned lines)
+{
+    using Clock = std::chrono::steady_clock;
+    auto const elapsed = [](Clock::time_point since) {
+        return std::chrono::duration<double, std::milli>(Clock::now() - since);
+    };
+    auto const history = vtbackend::LineCount::cast_from(lines);
+    auto source = vtbackend::MockTerm<vtpty::MockViewPty>(HandoverPageSize, history, ContourPtyReadSize);
+    source.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
+    source.terminal.setCellPixelSize(vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+    feed(source, fill);
+
+    auto cost = HandoverCost {};
+    auto start = Clock::now();
+    auto const bytes = vtbackend::encodeTerminalState(source.terminal.captureState());
+    cost.encode = elapsed(start);
+    cost.bytes = bytes.size();
+
+    start = Clock::now();
+    auto decoded = vtbackend::decodeTerminalState(bytes);
+    cost.decode = elapsed(start);
+    if (!decoded)
+        return std::unexpected(std::format("decoding failed ({})", static_cast<int>(decoded.error())));
+
+    // Built as a restoring daemon builds it: from the construction settings the state carries.
+    auto settings = vtbackend::settingsFor(
+        *decoded,
+        vtbackend::MockTerm<vtpty::MockViewPty>::createSettings(
+            HandoverPageSize, vtbackend::HistoryLimits::plain(history), ContourPtyReadSize));
+    if (!settings)
+        return std::unexpected(
+            std::format("no settings to build from ({})", static_cast<int>(settings.error())));
+    auto target = vtbackend::MockTerm<vtpty::MockViewPty>(*std::move(settings));
+    target.terminal.setCellPixelSize(vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+    start = Clock::now();
+    auto const restored = target.terminal.restoreState(*decoded);
+    cost.restore = elapsed(start);
+    if (!restored)
+        return std::unexpected(std::format("restoring failed ({})", static_cast<int>(restored.error())));
+    return cost;
+}
+
+/// Measures a state handover of a terminal holding scrollback and images, and prints the fastest of each
+/// phase and the size of the stream.
+int runHandoverBenchmark(HandoverOptions const& options)
+{
+    auto const fill = vtbackend::test::makeHandoverWorkload(options.lines);
+    cout << std::format(
+        "State handover: {} lines of scrollback with a Sixel image every {} lines, page {}x{}, "
+        "fastest of {} runs\n",
+        options.lines,
+        vtbackend::test::HandoverLinesPerImage,
+        HandoverPageSize.columns.value,
+        HandoverPageSize.lines.value,
+        options.runs);
+    auto best = std::optional<HandoverCost> {};
+    for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
+    {
+        auto const cost = measureHandover(fill, options.lines);
+        if (!cost)
+        {
+            cerr << cost.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        if (!best)
+            best = *cost;
+        else
+        {
+            best->encode = std::min(best->encode, cost->encode);
+            best->decode = std::min(best->decode, cost->decode);
+            best->restore = std::min(best->restore, cost->restore);
+        }
+    }
+    cout << std::format(
+        "encode {:9.1f} ms\ndecode {:9.1f} ms\nrestore {:8.1f} ms\nstream {:9.1f} MiB ({} bytes)\n",
+        best->encode.count(),
+        best->decode.count(),
+        best->restore.count(),
+        static_cast<double>(best->bytes) / (1024.0 * 1024.0),
+        best->bytes);
+    return EXIT_SUCCESS;
+}
+
 } // namespace
 
 namespace CLI = core::cli;
@@ -2352,6 +2458,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
         link("bench-headless.throughput", bind(&ContourHeadlessBench::benchThroughput, this));
         link("bench-headless.snapshot", bind(&ContourHeadlessBench::benchSnapshot, this));
+        link("bench-headless.handover", bind(&ContourHeadlessBench::benchHandover, this));
         link("bench-headless.memory", bind(&ContourHeadlessBench::benchMemory, this));
         link("bench-headless.pty-child", bind(&ContourHeadlessBench::playPtyChild, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
@@ -2368,6 +2475,7 @@ class ContourHeadlessBench: public core::cli::App
         auto constexpr KeyPressDefaults = KeyPressBenchOptions {};
         auto constexpr ThroughputDefaults = ThroughputOptions {};
         auto constexpr SnapshotDefaults = SnapshotOptions {};
+        auto constexpr HandoverDefaults = HandoverOptions {};
 
         // What the throughput and snapshot benchmarks cover, which both pick alike: @see selectionFor().
         // Throughput knows the link workloads as well. Static: an option holds a view of its help text.
@@ -2539,6 +2647,20 @@ class ContourHeadlessBench: public core::cli::App
                             "filled the page, with no status line and with the indicator.",
                         .options = snapshotOptions },
                     CLI::Command {
+                        .name = "handover",
+                        .helpText = "Measures what handing a terminal's state over costs -- capture and "
+                                    "encode, decode, restore -- with scrollback and images, and the size of "
+                                    "the stream.",
+                        .options =
+                            CLI::OptionList {
+                                CLI::Option { .name = "lines",
+                                              .v = CLI::Value { HandoverDefaults.lines },
+                                              .helpText = "Lines of scrollback to hand over." },
+                                CLI::Option { .name = "runs",
+                                              .v = CLI::Value { HandoverDefaults.runs },
+                                              .helpText = "Runs; the fastest of each phase counts." },
+                            } },
+                    CLI::Command {
                         .name = "memory",
                         .helpText =
                             "Measures what panes cost in resident memory: opens them, each showing the "
@@ -2554,8 +2676,8 @@ class ContourHeadlessBench: public core::cli::App
                             CLI::OptionList {
                                 CLI::Option { .name = "seconds",
                                               .v =
-                                                  CLI::Value { static_cast<unsigned>(KeyPressDefaults.duration
-                                                                                         .count()) },
+                                                  CLI::Value { static_cast<unsigned>(KeyPressDefaults
+                                                                                         .duration.count()) },
                                               .helpText = "How long to press keys for." },
                                 CLI::Option { .name = "rate",
                                               .v = CLI::Value { KeyPressDefaults.keyPressesPerSecond },
@@ -2831,6 +2953,22 @@ class ContourHeadlessBench: public core::cli::App
             return EXIT_FAILURE;
         }
         return runSnapshotBenchmark(selection->workloads, selection->screens, options, _counters);
+    }
+
+    /// Runs `bench-headless handover`: the cost of handing a terminal's state over.
+    /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid or the handover fails.
+    int benchHandover()
+    {
+        auto const options = HandoverOptions {
+            .lines = parameters().uint("bench-headless.handover.lines"),
+            .runs = parameters().uint("bench-headless.handover.runs"),
+        };
+        if (options.lines == 0 || options.runs == 0)
+        {
+            cerr << "lines and runs must each be at least 1.\n";
+            return EXIT_FAILURE;
+        }
+        return runHandoverBenchmark(options);
     }
 
     /// Runs `bench-headless pty-child`: the application on the other end of a PTY benchmark's PTY.

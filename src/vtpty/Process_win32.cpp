@@ -373,6 +373,12 @@ bool Process::alive() const noexcept
     return _d->processInfo.hProcess != nullptr && !_d->checkStatus(false).has_value();
 }
 
+Process::SpawnProgress Process::spawnProgress() const
+{
+    // CreateProcess() returns with the child attached to its pseudo console, which flushes nothing later.
+    return SpawnProgress::Settled;
+}
+
 void Process::terminate(TerminationHint terminationHint)
 {
     // Windows has no hangup to send: either way the process is ended outright.

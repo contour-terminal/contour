@@ -131,12 +131,33 @@ inline termios constructTerminalSettings(int fd) noexcept
     return std::error_code { errno, std::generic_category() };
 }
 
-inline std::expected<void, std::error_code> setCloseOnExec(int fd) noexcept
+/// Whether a descriptor survives an exec.
+enum class ExecInheritance : std::uint8_t
+{
+    CloseOnExec = 0, ///< FD_CLOEXEC set: the exec closes it.
+    KeepOnExec,      ///< FD_CLOEXEC clear: the exec keeps it.
+};
+
+/// Sets or clears @p fd's FD_CLOEXEC flag, leaving its other descriptor flags as they are.
+/// @param fd The descriptor.
+/// @param inheritance Whether an exec closes or keeps it.
+/// @return Nothing, or why fcntl() refused.
+[[nodiscard]] inline std::expected<void, std::error_code> setExecInheritance(
+    int fd, ExecInheritance inheritance) noexcept
 {
     auto const flags = fcntl(fd, F_GETFD);
-    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0)
+    if (flags < 0)
+        return std::unexpected(lastError());
+    auto const updated =
+        inheritance == ExecInheritance::CloseOnExec ? (flags | FD_CLOEXEC) : (flags & ~FD_CLOEXEC);
+    if (fcntl(fd, F_SETFD, updated) < 0)
         return std::unexpected(lastError());
     return {};
+}
+
+inline std::expected<void, std::error_code> setCloseOnExec(int fd) noexcept
+{
+    return setExecInheritance(fd, ExecInheritance::CloseOnExec);
 }
 
 inline std::expected<void, std::error_code> setNonBlocking(int fd) noexcept

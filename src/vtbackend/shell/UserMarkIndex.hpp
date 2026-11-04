@@ -116,6 +116,9 @@ class UserMarkIndex
     /// Bumped by every change to ids(); what a cache of anything derived from them keys on.
     [[nodiscard]] uint64_t revision() const noexcept { return _ids.revision(); }
 
+    /// @return The stable-id generation the ids were minted in. @see isCurrentFor
+    [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
   private:
     StableIdSet _ids;
     uint64_t _generation = 0;
