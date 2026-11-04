@@ -16,6 +16,8 @@
     #include <vtpty/test/ProcessTesting.hpp>
     #include <vtpty/test/PtyReading.hpp>
 
+    #include <sys/stat.h>
+
     #include <unistd.h>
 #endif
 
@@ -3856,15 +3858,6 @@ template <typename T>
     return terminal.primaryScreen().renderMainPageText();
 }
 
-/// @return How many lines @p session's primary screen has scrolled into its history: cheap to ask while a
-///         pump fills it, unlike nonEmptyLines().
-[[nodiscard]] std::size_t historyLines(vthost::HostedSession& session)
-{
-    auto& terminal = session.terminal();
-    auto const _ = std::lock_guard { terminal };
-    return unbox<std::size_t>(terminal.primaryScreen().historyLineCount());
-}
-
 /// @return Every non-empty line of @p session's primary screen, its history included, oldest first.
 [[nodiscard]] std::vector<std::string> nonEmptyLines(vthost::HostedSession& session)
 {
@@ -4009,53 +4002,45 @@ TEST_CASE("occurrences counts each occurrence once, none overlapping", "[vthost]
 
 TEST_CASE("resume after quiesce continues output with no gap", "[vthost][host][upgrade][threading]")
 {
-    // Far more than a PTY buffers, so that the program is still printing, or blocked on the full PTY, as each
-    // capture is taken.
+    // Far more than a PTY buffers, so that the program is still printing, or blocked on the full PTY, while
+    // the pump is stopped.
     constexpr auto LineTotal = 20000;
+    // Where the program waits on a fifo the test writes to: released while the pump is stopped, it fills the
+    // PTY the pump no longer reads, so the stop carries bytes in flight for certain.
+    constexpr auto PauseAt = LineTotal / 2;
+    auto const directory =
+        std::filesystem::temp_directory_path() / std::format("contour-quiesce-{}", ::getpid());
+    std::filesystem::create_directories(directory);
+    auto const fifo = directory / "go";
+    REQUIRE(::mkfifo(fifo.c_str(), 0600) == 0);
     auto settings = vtbackend::Settings {};
     settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(LineTotal + 1000));
-    auto session = liveSession(
-        std::format("i=1; while [ $i -le {} ]; do echo $i; i=$((i + 1)); done; printf done", LineTotal),
-        {},
-        std::make_shared<vtpty::NoPlacement>(),
-        settings);
+    auto session = liveSession(std::format("i=1; while [ $i -le {} ]; do echo $i; "
+                                           "if [ $i -eq {} ]; then read go < '{}'; fi; i=$((i + 1)); done; "
+                                           "printf done",
+                                           LineTotal,
+                                           PauseAt,
+                                           fifo.string()),
+                               {},
+                               std::make_shared<vtpty::NoPlacement>(),
+                               settings);
     session->start();
 
-    // Stopped and restarted while the program prints, each time once more of it arrived.
-    auto const finished = [&] {
-        return pageText(*session).contains("done");
-    };
-    // Once the program printed its last line it exits, and the pump ends at the PTY's end: from then on a
-    // quiesce() correctly answers that the session ended, so no capture is taken past that point.
-    auto midStream = 0;
-    for ([[maybe_unused]] auto const round: std::views::iota(0, 5))
-    {
-        auto const before = historyLines(*session);
-        REQUIRE(eventually([&] { return historyLines(*session) > before || finished(); }));
-        if (finished())
-            break;
-        auto const quiesced = session->quiesce();
-        if (!quiesced)
-        {
-            // The rest arrived, and the program exited, between the look above and the capture.
-            REQUIRE(quiesced.error() == vthost::QuiesceError::Ended);
-            REQUIRE(finished());
-            break;
-        }
-        // The screen holds still while quiesced: what it shows is what the capture holds.
-        if (!finished())
-            ++midStream;
-        session->resume();
-    }
-    // At least one capture was taken with output still to come: that is the gap this proves absent.
-    CHECK(midStream > 0);
-    REQUIRE(eventually(finished));
+    REQUIRE(eventually([&] { return pageText(*session).contains(std::to_string(PauseAt)); }));
+    REQUIRE(session->quiesce().has_value());
+    // Opening blocks until the program opened its end; closing at the end of the statement releases it.
+    std::ofstream { fifo } << "go\n";
+    // Not asserted on: time for the program to fill the PTY while nobody reads it.
+    std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+    session->resume();
 
+    REQUIRE(eventually([&] { return pageText(*session).contains("done"); }));
     auto expected = std::vector<std::string> {};
     for (auto const number: std::views::iota(1, LineTotal + 1))
         expected.push_back(std::to_string(number));
     expected.emplace_back("done");
     CHECK(nonEmptyLines(*session) == expected);
+    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("quiesce of a session whose child is blocked on output returns promptly",
