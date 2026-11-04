@@ -578,14 +578,17 @@ TEST_CASE("applyPaneSize resizes one pane without disturbing the rest", "[vthost
 
     // A client whose divider sits elsewhere than the 0.5 ratio reports what it renders.
     h.host.applyPaneSize(
-        firstSession, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
+        &h.client,
+        firstSession,
+        vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
 
     CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
     CHECK(h.host.terminal(secondSession)->totalPageSize().columns.value == 49); // untouched
     CHECK(h.host.pageSize().columns.value == 100);                              // the client area stands
 
     // An unknown session is ignored rather than fatal (a race with a session exit).
-    h.host.applyPaneSize(vtworkspace::SessionId { 987654 },
+    h.host.applyPaneSize(&h.client,
+                         vtworkspace::SessionId { 987654 },
                          vtpty::PageSize { .lines = vtpty::LineCount(1), .columns = vtpty::ColumnCount(1) });
     CHECK(h.host.sessionCount() == 2);
 }
@@ -602,7 +605,9 @@ TEST_CASE("a re-projection discards per-pane refinements", "[vthost][host]")
     h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
     h.host.applyPaneSize(
-        firstSession, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
+        &h.client,
+        firstSession,
+        vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
     REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
 
     // A different area re-projects; an unchanged one would not (see the 2227 test below).
@@ -711,7 +716,9 @@ TEST_CASE("a detaching client that leaves the client area unchanged keeps the pe
     h.host.subscribeStream(&h.otherClient);
     std::ignore = h.host.applyClientSize(&h.otherClient, area);
     std::ignore = h.host.applyPaneSize(
-        firstSession, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
+        &h.otherClient,
+        firstSession,
+        vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
     REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
 
     h.host.unsubscribeStream(&h.client);
@@ -727,8 +734,8 @@ TEST_CASE("a detaching client that leaves the client area unchanged keeps the pe
 TEST_CASE("a detaching client's pane refinements give way to the survivor's own", "[vthost][host][size]")
 {
     // Both clients state the same area, but the departing one refined a pane last: the area does not
-    // move, so nothing is re-projected, yet the pane stays at the departed client's size unless the
-    // survivor is told to re-assert its own.
+    // move, so the pane would stay at the departed client's size -- unless the host itself hands it
+    // to the survivor's remembered refinement, without waiting for the survivor to re-assert.
     auto const area = vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) };
     auto const pane = [](int columns) {
         return vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(columns) };
@@ -741,13 +748,10 @@ TEST_CASE("a detaching client's pane refinements give way to the survivor's own"
     std::ignore = h.host.applyClientSize(&h.otherClient, area);
     h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const firstSession = tab->rootPane()->first()->session();
-    std::ignore = h.host.applyPaneSize(firstSession, pane(60)); // the survivor's divider
+    std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, pane(60)); // the survivor's divider
     std::ignore = h.host.applyClientSize(&h.client, area);
-    std::ignore = h.host.applyPaneSize(firstSession, pane(70)); // the departing client's divider
+    std::ignore = h.host.applyPaneSize(&h.client, firstSession, pane(70)); // the departing client's divider
     REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
-    h.otherClient.onDeparture = [&h, &pane, firstSession] {
-        std::ignore = h.host.applyPaneSize(firstSession, pane(60));
-    };
 
     h.host.unsubscribeStream(&h.client);
 
@@ -756,6 +760,118 @@ TEST_CASE("a detaching client's pane refinements give way to the survivor's own"
     CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 60);
 
     h.host.unsubscribeStream(&h.otherClient);
+}
+
+TEST_CASE("a client area report that leaves the resolved area unchanged keeps every pane refinement",
+          "[vthost][host][size]")
+{
+    // Three clients under `smallest`: the third states a larger area than the smallest, so the resolved
+    // one stays. The refinement of another client is not told about the report, so a re-projection
+    // would silently put its split pane back on the ratio estimate.
+    auto const small = vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) };
+    auto const larger = vtpty::PageSize { .lines = vtpty::LineCount(40), .columns = vtpty::ColumnCount(140) };
+    auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
+    auto third = StubClient {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.subscribeStream(&h.client);
+    h.host.subscribeStream(&h.otherClient);
+    h.host.subscribeStream(&third);
+    std::ignore = h.host.applyClientSize(&h.client, small);
+    std::ignore = h.host.applyClientSize(&h.otherClient, small);
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    auto const firstSession = tab->rootPane()->first()->session();
+    std::ignore = h.host.applyPaneSize(
+        &h.otherClient,
+        firstSession,
+        vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
+    REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+    h.client.resizesHeard.clear();
+
+    auto const change = h.host.applyClientSize(&third, larger);
+
+    CHECK(change == vthost::SizeChange::Unchanged);
+    CHECK(unbox<int>(h.host.pageSize().columns) == 100);
+    CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+    CHECK(h.client.resizesHeard.empty());
+
+    h.host.unsubscribeStream(&third);
+    h.host.unsubscribeStream(&h.otherClient);
+    h.host.unsubscribeStream(&h.client);
+}
+
+TEST_CASE("a departure that moves the area resizes each refined pane once, to the survivor's size",
+          "[vthost][host][size]")
+{
+    // The reprojection used to resize every pane to the ratio estimate, and the survivors' re-sent
+    // pane sizes resized them again: two snapshots and two SIGWINCHes per pane. The host now keeps
+    // each client's latest pane refinement and lands the surviving one in the re-projection itself.
+    auto const pane = [](int columns) {
+        return vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(columns) };
+    };
+    auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.subscribeStream(&h.client);
+    h.host.subscribeStream(&h.otherClient);
+    std::ignore = h.host.applyClientSize(&h.client, pane(100));
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    auto const firstSession = tab->rootPane()->first()->session();
+    auto const secondSession = tab->rootPane()->second()->session();
+    std::ignore = h.host.applyClientSize(&h.otherClient, pane(80)); // the small client moves the area
+    REQUIRE(unbox<int>(h.host.pageSize().columns) == 80);
+
+    SECTION("a pane both clients refined takes the survivor's, one resize")
+    {
+        std::ignore = h.host.applyPaneSize(&h.client, firstSession, pane(65));
+        std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, pane(45)); // the later word
+        h.client.resizesHeard.clear();
+
+        h.host.unsubscribeStream(&h.otherClient);
+
+        CHECK(unbox<int>(h.host.pageSize().columns) == 100);
+        CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 65);
+        CHECK(h.client.resizesHeard[firstSession.value] == 1);
+
+        // The survivor's re-assert finds the size in place: nothing is resized or announced.
+        auto const again = h.host.applyPaneSize(&h.client, firstSession, pane(65));
+        CHECK(again == vthost::SizeChange::Unchanged);
+        CHECK(h.client.resizesHeard[firstSession.value] == 1);
+    }
+
+    SECTION("a pane only the departed client refined goes back to the projection, once")
+    {
+        std::ignore = h.host.applyPaneSize(&h.otherClient, secondSession, pane(30));
+        REQUIRE(h.host.terminal(secondSession)->totalPageSize().columns.value == 30);
+        h.client.resizesHeard.clear();
+
+        h.host.unsubscribeStream(&h.otherClient);
+
+        CHECK(h.host.terminal(secondSession)->totalPageSize().columns.value == 49);
+        CHECK(h.client.resizesHeard[secondSession.value] == 1);
+    }
+
+    SECTION("with three clients the most recent surviving refinement wins")
+    {
+        auto third = StubClient {};
+        h.host.subscribeStream(&third);
+        std::ignore = h.host.applyClientSize(&third, pane(90));
+        std::ignore = h.host.applyPaneSize(&h.client, firstSession, pane(66));
+        std::ignore = h.host.applyPaneSize(&third, firstSession, pane(55));
+        std::ignore = h.host.applyPaneSize(&h.otherClient, firstSession, pane(44));
+        h.client.resizesHeard.clear();
+
+        h.host.unsubscribeStream(&h.otherClient);
+
+        CHECK(unbox<int>(h.host.pageSize().columns) == 90);
+        CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 55);
+        CHECK(h.client.resizesHeard[firstSession.value] == 1);
+
+        h.host.unsubscribeStream(&third);
+    }
+
+    h.host.unsubscribeStream(&h.otherClient);
+    h.host.unsubscribeStream(&h.client);
 }
 
 TEST_CASE("a detaching client that moves the client area tells the survivors", "[vthost][host][size]")
@@ -783,42 +899,6 @@ TEST_CASE("a detaching client that moves the client area tells the survivors", "
 
     h.host.unsubscribeStream(&h.client);
     CHECK(h.client.departuresHeard == 1); // nobody left to tell
-}
-
-TEST_CASE("a client area report that leaves the resolved area unchanged keeps every pane refinement",
-          "[vthost][host][size]")
-{
-    // Three clients under `smallest`: the third states a larger area than the smallest, so the resolved
-    // one stays. The refinement of another client is not told about the report, so a re-projection
-    // would silently put its split pane back on the ratio estimate.
-    auto const small = vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) };
-    auto const larger = vtpty::PageSize { .lines = vtpty::LineCount(40), .columns = vtpty::ColumnCount(140) };
-    auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
-    auto third = StubClient {};
-    auto* tab = h.host.createTab();
-    REQUIRE(tab != nullptr);
-    h.host.subscribeStream(&h.client);
-    h.host.subscribeStream(&h.otherClient);
-    h.host.subscribeStream(&third);
-    std::ignore = h.host.applyClientSize(&h.client, small);
-    std::ignore = h.host.applyClientSize(&h.otherClient, small);
-    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
-    auto const firstSession = tab->rootPane()->first()->session();
-    std::ignore = h.host.applyPaneSize(
-        firstSession, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(70) });
-    REQUIRE(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
-    h.client.resizesHeard.clear();
-
-    auto const change = h.host.applyClientSize(&third, larger);
-
-    CHECK(change == vthost::SizeChange::Unchanged);
-    CHECK(unbox<int>(h.host.pageSize().columns) == 100);
-    CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
-    CHECK(h.client.resizesHeard.empty());
-
-    h.host.unsubscribeStream(&third);
-    h.host.unsubscribeStream(&h.otherClient);
-    h.host.unsubscribeStream(&h.client);
 }
 
 TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "[vthost][host][concurrency]")
@@ -1057,6 +1137,7 @@ TEST_CASE("the loop thread leaves a resize's report to the session's reader", "[
     auto* tab = host.createTab();
     REQUIRE(tab != nullptr);
     REQUIRE(pty != nullptr);
+    auto reporter = StubClient {};
     auto const session = tab->rootPane()->session();
     auto* terminal = host.terminal(session);
     REQUIRE(terminal != nullptr);
@@ -1065,7 +1146,9 @@ TEST_CASE("the loop thread leaves a resize's report to the session's reader", "[
 
     auto resize = std::async(std::launch::async, [&] {
         return host.applyPaneSize(
-            session, vtpty::PageSize { .lines = vtpty::LineCount(20), .columns = vtpty::ColumnCount(60) });
+            &reporter,
+            session,
+            vtpty::PageSize { .lines = vtpty::LineCount(20), .columns = vtpty::ColumnCount(60) });
     });
     auto const returned = resize.wait_for(std::chrono::seconds { 5 });
     pty->drain(); // whichever way it went, so that the resize can end
@@ -1230,7 +1313,8 @@ TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
     auto capture = core::log::ScopedCapture {};
     auto h = HostHarness {};
 
-    h.host.applyPaneSize(vtworkspace::SessionId { 9999 },
+    h.host.applyPaneSize(&h.client,
+                         vtworkspace::SessionId { 9999 },
                          vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
 
     CHECK(capture.contains("applyPaneSize: unknown session 9999"));

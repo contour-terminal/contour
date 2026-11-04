@@ -1038,7 +1038,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     SizeChange applyClientSize(SessionStreamEvents* client, vtpty::PageSize size);
 
     /// Resizes ONE session's terminal to the grid a client actually renders that pane at,
-    /// leaving the client area and every other pane alone.
+    /// leaving the client area and every other pane alone. The refinement is remembered per client
+    /// (latest report wins among clients), so a departure can hand the pane to the most recent
+    /// surviving client's size in the same step that re-projects the area.
     ///
     /// The projection `applyClientSize` performs is the host's own estimate — it must exist, since
     /// clients that never report per-pane sizes (tmux control mode) are served from it — but it
@@ -1046,10 +1048,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// divider) knows the real answer. This refines one leaf on top of that estimate. The next
     /// structural change re-projects and thereby discards the refinement, which is correct: those
     /// sizes are stale the moment the tree changes, and the client re-reports.
+    /// @param client The reporting client, identified by its stream observer (as for applyClientSize).
     /// @param session The session whose terminal to resize; unknown ids are ignored.
     /// @param size The pane's grid, in cells.
     /// @return Whether that session's grid actually moved (@c Unchanged for an unknown id).
-    SizeChange applyPaneSize(vtworkspace::SessionId session, vtpty::PageSize size);
+    SizeChange applyPaneSize(SessionStreamEvents* client,
+                             vtworkspace::SessionId session,
+                             vtpty::PageSize size);
 
     /// Creates a tab whose first pane is backed by a freshly spawned session,
     /// using the same pre-mint handshake as the GUI: the backing session is
@@ -1642,17 +1647,28 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param tick The AnimationTick.
     static void animationTickExpired(void* tick);
 
+    /// What a re-projection does with the per-pane refinements clients reported.
+    enum class RefinementPolicy : uint8_t
+    {
+        Discard, ///< Every leaf takes the host's ratio-derived projection (a structural change).
+        Honor,   ///< A leaf some attached client refined takes that client's latest size, in one resize.
+    };
+
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes
     /// never drift from the advertised layout.
+    /// @param refinements Whether leaves that a surviving client refined keep that size.
     /// @return Whether any leaf's grid moved, so callers can skip a resync of mirrors
     ///         whose grids are already correct.
-    SizeChange reprojectLayouts();
+    SizeChange reprojectLayouts(RefinementPolicy refinements = RefinementPolicy::Discard);
 
     /// Resizes the terminals of @p tab's leaves to their projection under the current client area: what
     /// reprojectLayouts() does for every tab, for the one tab an event names.
+    /// @param tab The tab to project.
+    /// @param refinements Whether leaves that a surviving client refined keep that size.
     /// @return Whether any leaf's grid moved.
-    SizeChange reprojectTab(vtworkspace::Tab const& tab);
+    SizeChange reprojectTab(vtworkspace::Tab const& tab,
+                            RefinementPolicy refinements = RefinementPolicy::Discard);
     /// reprojectTab() of the tab @p tab names, if it exists.
     void reprojectTab(vtworkspace::TabId tab);
 
@@ -1823,6 +1839,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Stamps each report so `ClientSizePolicy::Latest` can order them. A counter rather than a
     /// clock, so a test can reproduce an ordering exactly.
     uint64_t _nextAreaSequence = 1;
+    /// One client's latest word on one pane's grid (@see applyPaneSize).
+    struct PaneRefinement
+    {
+        vtpty::PageSize size {};
+        uint64_t sequence = 0; ///< From _nextAreaSequence, so the most recent report can be told apart.
+    };
+    /// Per session, per reporting client: the latest pane refinement. Pruned when the client departs
+    /// (unsubscribeStream) or the session is erased (eraseSession).
+    std::unordered_map<uint64_t, std::unordered_map<SessionStreamEvents*, PaneRefinement>> _paneRefinements;
+
+    /// @param session The pane's session.
+    /// @return The most recent refinement any attached client holds for it, if there is one.
+    [[nodiscard]] std::optional<vtpty::PageSize> latestRefinement(vtworkspace::SessionId session) const;
 
     uint64_t _nextSessionId;
     std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.

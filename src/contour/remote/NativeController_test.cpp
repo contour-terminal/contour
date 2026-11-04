@@ -2383,12 +2383,18 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
     REQUIRE(waitUntil(
         [&] { return daemon.clientArea() == cells(80, 30) && daemon.paneSize(left) == cells(40, 30); }));
 
+    auto const resizePanesBefore = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
     departs.reset();
     REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(100, 30); }));
 
-    // The survivor is told, and re-asserts its panes with no layout push to reconcile first.
+    // The daemon puts back the survivor's own grids itself, as part of the departure.
     CHECK(waitUntil(
         [&] { return daemon.paneSize(left) == cells(70, 30) && daemon.paneSize(right) == cells(29, 30); }));
+    // The survivor is told as well, and re-asserts both panes with no layout push to reconcile first; by then
+    // the daemon already holds those sizes.
+    REQUIRE(waitUntil([&] {
+        return daemon.clientFrames.count(vthost::proto::PduType::ResizePane) >= resizePanesBefore + 2;
+    }));
     CHECK(daemon.paneSize(left) == cells(70, 30));
     CHECK(daemon.paneSize(right) == cells(29, 30));
 

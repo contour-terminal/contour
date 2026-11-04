@@ -1719,7 +1719,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         // As above, the resync rides sessionResized(). A client re-asserts every pane size after a
         // client-area change, so most of these arrive already satisfied by the reprojection that
         // change performed — and SizeChange::Unchanged announces nothing.
-        std::ignore = _host.applyPaneSize(SessionId { resize->session }, *size);
+        std::ignore = _host.applyPaneSize(this, SessionId { resize->session }, *size);
         return;
     }
     if (auto const* fetch = std::get_if<proto::FetchImage>(&frame.pdu))

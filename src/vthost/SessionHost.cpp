@@ -1360,7 +1360,21 @@ SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::Page
     return reprojectLayouts();
 }
 
-SizeChange SessionHost::applyPaneSize(vtworkspace::SessionId session, vtpty::PageSize size)
+std::optional<vtpty::PageSize> SessionHost::latestRefinement(SessionId session) const
+{
+    auto const it = _paneRefinements.find(session.value);
+    if (it == _paneRefinements.end())
+        return std::nullopt;
+    auto const latest =
+        std::ranges::max_element(it->second, {}, [](auto const& entry) { return entry.second.sequence; });
+    if (latest == it->second.end())
+        return std::nullopt;
+    return latest->second.size;
+}
+
+SizeChange SessionHost::applyPaneSize(SessionStreamEvents* client,
+                                      vtworkspace::SessionId session,
+                                      vtpty::PageSize size)
 {
     auto* backing = terminal(session);
     if (backing == nullptr)
@@ -1368,6 +1382,8 @@ SizeChange SessionHost::applyPaneSize(vtworkspace::SessionId session, vtpty::Pag
         errorLog()("applyPaneSize: unknown session {}", session.value);
         return SizeChange::Unchanged;
     }
+    _paneRefinements[session.value].insert_or_assign(
+        client, PaneRefinement { .size = size, .sequence = _nextAreaSequence++ });
     return resizeLocked(session, *backing, size);
 }
 
@@ -1390,7 +1406,7 @@ SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& bac
     return SizeChange::Applied;
 }
 
-SizeChange SessionHost::reprojectLayouts()
+SizeChange SessionHost::reprojectLayouts(RefinementPolicy refinements)
 {
     // `|=` rather than a short-circuiting `||`: every pane must be resized regardless of
     // what the earlier ones reported.
@@ -1400,12 +1416,12 @@ SizeChange SessionHost::reprojectLayouts()
     // must reach the PTYs of secondary windows too, or their apps keep rendering
     // at stale dimensions while the layout advertises the new geometry.
     _model.forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
-        moved |= reprojectTab(tab) == SizeChange::Applied;
+        moved |= reprojectTab(tab, refinements) == SizeChange::Applied;
     });
     return moved ? SizeChange::Applied : SizeChange::Unchanged;
 }
 
-SizeChange SessionHost::reprojectTab(vtworkspace::Tab const& tab)
+SizeChange SessionHost::reprojectTab(vtworkspace::Tab const& tab, RefinementPolicy refinements)
 {
     auto moved = false;
     // The underlying layout's leaves first; a zoomed leaf then overrides to
@@ -1413,11 +1429,14 @@ SizeChange SessionHost::reprojectTab(vtworkspace::Tab const& tab)
     for (auto const& rect: vtworkspace::layoutInCells(*tab.rootPane(), _pageSize))
         if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
             if (auto* backing = terminal(leaf->session()))
-                moved |= resizeLocked(leaf->session(),
-                                      *backing,
-                                      vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
-                                                        .columns = vtpty::ColumnCount(rect.width) })
+            {
+                auto const projected = vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
+                                                         .columns = vtpty::ColumnCount(rect.width) };
+                auto const refined =
+                    refinements == RefinementPolicy::Honor ? latestRefinement(leaf->session()) : std::nullopt;
+                moved |= resizeLocked(leaf->session(), *backing, refined.value_or(projected))
                          == SizeChange::Applied;
+            }
     if (auto const* zoomed = tab.layoutRoot(); zoomed != tab.rootPane())
         if (auto* backing = terminal(zoomed->session()))
             moved |= resizeLocked(zoomed->session(), *backing, _pageSize) == SizeChange::Applied;
@@ -1495,6 +1514,7 @@ std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionI
 
 void SessionHost::eraseSession(uint64_t session)
 {
+    _paneRefinements.erase(session);
     _initialInputs.erase(session);
     _interruptions.erase(session);
     _lastInput.erase(session);
@@ -1703,19 +1723,25 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     // daemon at its dimensions for the daemon's whole life. The reproject is what makes it visible
     // (and, through resizeLocked, announces itself to everyone still attached).
     //
-    // Only when the area actually moved, though. Unlike a report (applyClientSize), a departure
-    // states nothing about the survivors' panes, and re-projecting an unchanged area would discard
-    // the per-pane refinements they made: a half-open connection noticed only after its successor's
-    // hello and pane reports would put every split pane back on the ratio-derived estimate, which
-    // the client — seeing no local geometry change — never corrects.
+    // Only when something is in need of a change, though. Unlike a report (applyClientSize), a departure
+    // states nothing about the survivors' panes, and re-projecting an unchanged area would discard the
+    // per-pane refinements they made: a half-open connection noticed only after its successor's hello
+    // and pane reports would put every split pane back on the ratio-derived estimate, which the client
+    // -- seeing no local geometry change -- never corrects.
     //
-    // Either way the survivors are told to re-assert their pane sizes: a re-projection discarded their
-    // refinements, and without one the departed client's own refinements may still be in force -- the
-    // last pane report wins, and it may have been the departed client's.
+    // The departed client's own refinements go with it, and the re-projection hands every pane the most
+    // recent SURVIVING client's refinement (if any) in the same resize that moves it to the new area.
+    // So a pane is resized, and snapshotted, once -- not once by the projection and again when the
+    // survivors re-assert -- and the re-assert that follows finds the size unchanged. When the area
+    // did not move, this is still where the departed client's last-writer-wins refinement is undone.
+    auto departedRefined = false;
+    for (auto& panes: _paneRefinements | std::views::values)
+        departedRefined |= panes.erase(observer) != 0;
+    std::erase_if(_paneRefinements, [](auto const& entry) { return entry.second.empty(); });
     if (_clientAreas.erase(observer) == 0)
         return;
-    if (resolveAuthoritativeArea() == SizeChange::Applied)
-        std::ignore = reprojectLayouts();
+    if (resolveAuthoritativeArea() == SizeChange::Applied || departedRefined)
+        std::ignore = reprojectLayouts(RefinementPolicy::Honor);
     fanOutStream(&SessionStreamEvents::otherClientDeparted);
 }
 
