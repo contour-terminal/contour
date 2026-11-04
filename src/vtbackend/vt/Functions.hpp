@@ -14,11 +14,14 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <charconv>
+#include <concepts>
 #include <cstdint>
 #include <format>
 #include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace vtbackend
@@ -284,6 +287,31 @@ enum class LevelAvailability : uint8_t
     AtEveryLevel,
 };
 
+namespace detail
+{
+    /// Appends a function parameter to a VT sequence under construction.
+    /// Integers are formatted with std::to_chars, which (unlike std::format) is usable at compile time.
+    /// @param out The sequence to append to.
+    /// @param value The parameter value.
+    template <typename T>
+    constexpr void appendParameter(std::string& out, T&& value)
+    {
+        using U = std::remove_cvref_t<T>;
+        // Character types and bool are integral too, but std::format renders them as text, not numbers.
+        if constexpr (std::integral<U> && !std::same_as<U, bool> && !std::same_as<U, char>
+                      && !std::same_as<U, wchar_t> && !std::same_as<U, char8_t> && !std::same_as<U, char16_t>
+                      && !std::same_as<U, char32_t>)
+        {
+            auto buffer = std::array<char, std::numeric_limits<U>::digits10 + 3> {};
+            auto const converted =
+                std::to_chars(buffer.data(), buffer.data() + buffer.size(), std::forward<T>(value));
+            out.append(buffer.data(), converted.ptr);
+        }
+        else
+            out += std::format("{}", std::forward<T>(value));
+    }
+} // namespace detail
+
 /// Defines a function with all its syntax requirements plus some additional meta information.
 struct Function
 {
@@ -304,8 +332,12 @@ struct Function
 
     FunctionDocumentation documentation;
 
+    /// Builds the sequence invoking this function with the given parameters.
+    /// Evaluates at compile time when all parameters are integers known at compile time.
+    /// @param parameters The parameters, joined by ';'.
+    /// @return The complete VT sequence.
     template <typename... Args>
-    std::string operator()(Args&&... parameters) const
+    [[nodiscard]] constexpr std::string operator()(Args&&... parameters) const
     {
         assert(static_cast<size_t>(minimumParameters) <= sizeof...(Args));
         assert(sizeof...(Args) <= static_cast<size_t>(maximumParameters));
@@ -325,7 +357,7 @@ struct Function
         if constexpr (sizeof...(Args) > 0)
         {
             result.reserve(sizeof...(Args) * 4);
-            ((result += std::format("{};", std::forward<Args>(parameters))), ...);
+            ((detail::appendParameter(result, std::forward<Args>(parameters)), result += ';'), ...);
             result.pop_back(); // remove trailing ';'
         }
         if (intermediate)
