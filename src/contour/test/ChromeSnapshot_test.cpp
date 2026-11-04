@@ -374,8 +374,9 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
                     page,
                     QStringLiteral("shellInstallRow:")
                         + QString::fromUtf8(shell.displayName.data(), shell.displayName.size()));
-                CHECK(rows.size()
-                      == (contour::config::isListedOn(shell, contour::config::HostPlatform::Other) ? 1U : 0U));
+                auto const expectedRowCount =
+                    contour::config::isListedOn(shell, contour::config::HostPlatform::Other) ? 1U : 0U;
+                CHECK(rows.size() == expectedRowCount);
             }
             auto const cut = contour::test::itemsNamed(page, QStringLiteral("shellInstallDeleteLine"));
             CHECK(std::ranges::count_if(cut, [](QQuickItem const* item) { return item->isVisible(); }) == 1);
