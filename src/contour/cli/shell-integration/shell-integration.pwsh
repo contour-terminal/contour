@@ -2,13 +2,22 @@
 #
 #// SPDX-License-Identifier: Apache-2.0
 #
-# Contour shell integration for PowerShell 7 (pwsh).
+# Contour shell integration for PowerShell: PowerShell 7 (pwsh) and Windows PowerShell 5.1 alike.
 #
-# PowerShell runs a script file only when its name ends in .ps1, so write it to one, and dot-source that
-# from your profile ($PROFILE) after anything that sets up your prompt (oh-my-posh, starship):
+# Contour installs it with one click -- from the shell-integration card in a pane, or from Settings -- by
+# appending one line to your profile ($PROFILE), which loads it inside Contour only:
+#
+#     if ($env:TERM_PROGRAM -eq 'contour') { . ([scriptblock]::Create((& 'C:\path\to\contour.exe' generate integration shell pwsh to - | Out-String))) } # Contour shell integration
+#
+# To install it by hand instead: PowerShell runs a script file only when its name ends in .ps1, so write
+# it to one, and dot-source that from your profile after anything that sets up your prompt (oh-my-posh,
+# starship):
 #
 #     contour generate integration shell pwsh to "$(Split-Path $PROFILE)/contour-integration.ps1"
 #     . "$(Split-Path $PROFILE)/contour-integration.ps1"
+#
+# Either way it needs an execution policy that lets your profile run (RemoteSigned, say); Contour offers to
+# set one for your user when it finds Restricted.
 #
 # The prompt reports, in order:
 #   OSC 133;D    -- the command that just ran has finished, with its exit status,
@@ -49,12 +58,18 @@ function Global:__Contour-Osc([string]$payload) {
 
 function Global:__Contour-PercentEncode([string]$text, [int]$maxBytes = [int]::MaxValue) {
     # The first $maxBytes bytes of $text's UTF-8, byte by byte as kitty's cmdline_url= (A-Z a-z 0-9 / . _
-    # ~ - kept). EscapeDataString keeps the same bytes but '/', and spells a lone surrogate as U+FFFD, as
-    # GetBytes does; it is used for all but a text it would have to cut.
-    if ([System.Text.Encoding]::UTF8.GetByteCount($text) -le $maxBytes) {
-        return [Uri]::EscapeDataString($text).Replace('%2F', '/')
+    # ~ - kept). EscapeDataString keeps the same bytes but '/' -- and, in Windows PowerShell's .NET
+    # Framework, ! ' ( ) * too -- and is used for all but a text it would have to cut. It is handed the text
+    # through GetBytes, which spells a lone surrogate as U+FFFD: .NET Framework's refuses one.
+    $utf8 = [System.Text.Encoding]::UTF8
+    if ($utf8.GetByteCount($text) -le $maxBytes) {
+        $encoded = [Uri]::EscapeDataString($utf8.GetString($utf8.GetBytes($text))).Replace('%2F', '/')
+        foreach ($kept in '!', "'", '(', ')', '*') {
+            $encoded = $encoded.Replace($kept, '%{0:X2}' -f [int][char]$kept)
+        }
+        return $encoded
     }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    $bytes = $utf8.GetBytes($text)
     $encoded = [System.Text.StringBuilder]::new()
     foreach ($octet in $bytes[0..($maxBytes - 1)]) {
         if ([string][char]$octet -cmatch '^[A-Za-z0-9/._~-]$') {

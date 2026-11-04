@@ -1579,6 +1579,11 @@ if(CONTOUR_TESTING)
         target_link_libraries(contour_test PRIVATE contour_extensions)
     endif()
     add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
+    # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
+    # for the script, as a user's profile asks the installed one.
+    if(TARGET contour)
+        set_property(TEST contour_test APPEND PROPERTY ENVIRONMENT "CONTOUR_BINARY=$<TARGET_FILE:contour>")
+    endif()
 endif()
 # }}}
 
