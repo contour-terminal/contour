@@ -938,3 +938,19 @@ TEST_CASE("Gutter.foldLabel.isClippedByWidthNotByCodepoints", "[gutter]")
     CHECK(label.back().position.column + ColumnOffset(label.back().width) <= ColumnOffset(40));
 }
 // }}}
+
+TEST_CASE("Gutter.layout.everySegmentAtItsWidestAddsUpToMaxGutterColumns", "[gutter]")
+{
+    // A timestamp format of exactly MaxTimestampColumns columns: four times the default's eight.
+    auto const layout =
+        gutterLayoutFor(GutterSettings { .foldMarkers = true,
+                                         .exitStatus = true,
+                                         .userMarks = true,
+                                         .blockColumnWidth = MaxBlockColumnWidth,
+                                         .lineNumbers = LineNumberMode::Absolute,
+                                         .lineNumberWidth = MaxLineNumberWidth,
+                                         .timestamps = true,
+                                         .timestampFormat = "%H:%M:%S%H:%M:%S%H:%M:%S%H:%M:%S" });
+    CHECK(layout.timestampFormat == "%H:%M:%S%H:%M:%S%H:%M:%S%H:%M:%S");
+    CHECK(layout.totalColumns == MaxGutterColumns);
+}
