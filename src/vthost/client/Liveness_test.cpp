@@ -28,7 +28,7 @@ TEST_CASE("liveness probes an idle connection and gives up on a silent one", "[v
 
 namespace
 {
-auto const wakeT0 = core::platform::SteadyTimePoint {} + 100s;
+constexpr auto wakeT0 = core::platform::SteadyTimePoint {} + 100s;
 
 auto makeWakeTracker() -> LivenessTracker
 {

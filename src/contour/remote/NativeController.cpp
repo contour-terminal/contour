@@ -77,6 +77,7 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
             }
             catch (...)
             {
+                errorLog()("power: dropped a system power event; the hint is lost");
             }
         });
 }
