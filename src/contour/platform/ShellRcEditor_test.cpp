@@ -1184,7 +1184,7 @@ TEST_CASE("ShellRcEditor.powershell.policyBlocked", "[shellrc]")
     struct Case
     {
         EffectivePolicy policy;
-        ProfileScripts scripts;
+        ProfileScripts scripts {};
     };
     constexpr auto Cases = std::array {
         Case { .policy = { .policy = ExecutionPolicy::Restricted, .scope = PolicyScope::GroupPolicy },

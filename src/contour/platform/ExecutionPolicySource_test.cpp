@@ -44,12 +44,12 @@ namespace
 {
 
 constexpr auto ShellIdsKey =
-    std::string_view { "SOFTWARE\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell" };
-constexpr auto WindowsPolicyKey = std::string_view { "SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell" };
-constexpr auto CorePolicyKey = std::string_view { "SOFTWARE\\Policies\\Microsoft\\PowerShellCore" };
-constexpr auto CurrentVersionKey = std::string_view { "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" };
+    std::string_view { R"(SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell)" };
+constexpr auto WindowsPolicyKey = std::string_view { R"(SOFTWARE\Policies\Microsoft\Windows\PowerShell)" };
+constexpr auto CorePolicyKey = std::string_view { R"(SOFTWARE\Policies\Microsoft\PowerShellCore)" };
+constexpr auto CurrentVersionKey = std::string_view { R"(SOFTWARE\Microsoft\Windows NT\CurrentVersion)" };
 constexpr auto InstalledVersionsKey =
-    std::string_view { "SOFTWARE\\Microsoft\\PowerShellCore\\InstalledVersions" };
+    std::string_view { R"(SOFTWARE\Microsoft\PowerShellCore\InstalledVersions)" };
 constexpr auto ConfigPolicyKey = std::string_view { "Microsoft.PowerShell:ExecutionPolicy" };
 
 /// Where a value is: its hive, its key and its name.
@@ -194,7 +194,7 @@ struct PolicyRig
     explicit PolicyRig(Writes writes = Writes::Succeed): registry { writes } {}
 
     /// Writes @p content to @p file, creating its folders.
-    void put(std::filesystem::path const& file, std::string_view content)
+    void put(std::filesystem::path const& file, std::string_view content) const
     {
         REQUIRE(disk.createDirectories(file.parent_path()));
         REQUIRE(disk.writeFile(file, content));

@@ -115,10 +115,10 @@ TEST_CASE("shellInstall.aBlockReplacesTheStatusOfAnInstallableRowOnly", "[shelli
     struct Case
     {
         ShellRow shell;
-        HostPlatform host;
-        BinaryReach binary;
-        ProfileScripts scripts;
-        InstallBlock block;
+        HostPlatform host {};
+        BinaryReach binary {};
+        ProfileScripts scripts {};
+        InstallBlock block {};
     };
     constexpr auto Pwsh = ShellRows[std::to_underlying(ShellKind::Pwsh) - 1];
     for (auto const& c: std::array {

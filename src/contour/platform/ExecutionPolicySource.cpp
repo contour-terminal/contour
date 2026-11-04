@@ -70,13 +70,13 @@ namespace
     constexpr auto ExecutionPolicyValue = std::string_view { "ExecutionPolicy" };
     constexpr auto EnableScriptsValue = std::string_view { "EnableScripts" };
     constexpr auto ShellIdsKey =
-        std::string_view { "SOFTWARE\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell" };
+        std::string_view { R"(SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell)" };
     constexpr auto WindowsPolicyKey =
-        std::string_view { "SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell" };
-    constexpr auto CorePolicyKey = std::string_view { "SOFTWARE\\Policies\\Microsoft\\PowerShellCore" };
+        std::string_view { R"(SOFTWARE\Policies\Microsoft\Windows\PowerShell)" };
+    constexpr auto CorePolicyKey = std::string_view { R"(SOFTWARE\Policies\Microsoft\PowerShellCore)" };
     /// One subkey per installed PowerShell 7, each naming the folder it is installed in.
     constexpr auto CoreInstalledVersionsKey =
-        std::string_view { "SOFTWARE\\Microsoft\\PowerShellCore\\InstalledVersions" };
+        std::string_view { R"(SOFTWARE\Microsoft\PowerShellCore\InstalledVersions)" };
     constexpr auto InstallLocationValue = std::string_view { "InstallLocation" };
     /// The setting `Set-ExecutionPolicy` writes to PowerShell 7's configuration files.
     constexpr auto ConfigFilePolicyKey = std::string_view { "Microsoft.PowerShell:ExecutionPolicy" };
@@ -89,7 +89,7 @@ namespace
     /// The edition of Windows: `InstallationType` is `Server` on Windows Server.
     constexpr auto InstallationType = RegistrySetting {
         .root = RegistryRoot::LocalMachine,
-        .key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        .key = R"(SOFTWARE\Microsoft\Windows NT\CurrentVersion)",
         .value = "InstallationType",
         .data = "Server",
     };
@@ -377,9 +377,9 @@ config::EffectivePolicy RegistryExecutionPolicySource::effectivePolicy(config::S
     auto const stores =
         PolicyStores { .registry = _registry, .fileSystem = _fileSystem, .knownFolders = _knownFolders };
     auto const layers =
-        row.layers
-        | std::views::transform([&stores](LayerSource const& source) { return readLayer(stores, source); })
-        | std::ranges::to<std::vector>();
+        std::ranges::to<std::vector>(row.layers | std::views::transform([&stores](LayerSource const& source) {
+                                         return readLayer(stores, source);
+                                     }));
     // Only Windows PowerShell's default depends on the edition; ask the registry only when it matters.
     auto const fallback = row.clientFallback == row.serverFallback || !isServer(_registry)
                               ? row.clientFallback

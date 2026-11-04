@@ -370,10 +370,10 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
             auto const& page = *settingsPage;
             for (auto const& shell: contour::config::ShellRows)
             {
-                auto const rows = contour::test::itemsNamed(
-                    page,
-                    QStringLiteral("shellInstallRow:")
-                        + QString::fromUtf8(shell.displayName.data(), shell.displayName.size()));
+                auto const& displayName = shell.displayName;
+                auto const title =
+                    QString::fromUtf8(displayName.data(), static_cast<qsizetype>(displayName.size()));
+                auto const rows = contour::test::itemsNamed(page, QStringLiteral("shellInstallRow:") + title);
                 auto const expectedRowCount =
                     contour::config::isListedOn(shell, contour::config::HostPlatform::Other) ? 1U : 0U;
                 CHECK(rows.size() == expectedRowCount);
