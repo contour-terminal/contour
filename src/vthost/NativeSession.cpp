@@ -415,6 +415,15 @@ void NativeSession::sessionResized(SessionId session)
     requestSnapshot(session);
 }
 
+void NativeSession::clientAreaReprojected()
+{
+    if (_phase != ConnectionPhase::Viewing || _closed)
+        return;
+    // Marked ahead of the push it qualifies: the client re-sends its pane sizes once it reconciled that push.
+    send(0, proto::DecodedPdu { proto::PanesReprojected {} });
+    pushLayout();
+}
+
 void NativeSession::sessionBell(SessionId session)
 {
     if (!followsSession(session))

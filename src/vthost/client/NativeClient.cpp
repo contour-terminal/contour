@@ -392,7 +392,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            LivenessPolicy liveness,
                            TabMergeRefusedHandler onTabMergeRefused,
                            MoveNodeRefusedHandler onMoveNodeRefused,
-                           LayoutBatchEndHandler onLayoutBatchEnd):
+                           LayoutBatchEndHandler onLayoutBatchEnd,
+                           PanesReprojectedHandler onPanesReprojected):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -407,6 +408,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onTabMergeRefused(std::move(onTabMergeRefused)),
     _onMoveNodeRefused(std::move(onMoveNodeRefused)),
     _onLayoutBatchEnd(std::move(onLayoutBatchEnd)),
+    _onPanesReprojected(std::move(onPanesReprojected)),
     _liveness(liveness)
 {
 }
@@ -828,6 +830,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onLayoutBatchEnd)
             _onLayoutBatchEnd(*end);
+        return true;
+    }
+    if (std::holds_alternative<proto::PanesReprojected>(pdu))
+    {
+        if (_onPanesReprojected)
+            _onPanesReprojected();
         return true;
     }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))

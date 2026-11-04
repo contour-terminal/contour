@@ -290,8 +290,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// setNextBindSession, not the FIFO queue.
     void setRealizingLayout(bool realizing);
 
-    /// GUI thread. After a reconnect, once the GUI reconciled a layout of the new connection: re-sends every
-    /// bound pane's size once, even though no display geometry changed. No-op otherwise.
+    /// GUI thread. Once the GUI reconciled a layout of a reconnect, or the push the daemon marked with
+    /// proto::PanesReprojected: re-sends every bound pane's size once (never the client area), even though no
+    /// display geometry changed. No-op otherwise.
     void reassertGeometryAfterReconcile();
 
     /// @return Whether a layout realization is in progress (so a split it triggers
@@ -680,6 +681,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// the GUI to reconcile the push whole.
     void onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end);
 
+    /// Reactor-side: the daemon re-projected every pane onto an area this client did not ask for
+    /// (proto::PanesReprojected); the panes are re-asserted once the layout push that follows is reconciled.
+    void onPanesReprojected();
+
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
     [[nodiscard]] bool layoutBatchShared() const;
 
@@ -703,9 +708,18 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param cells The pane's new grid.
     void reportPaneGeometry(uint64_t session, uint64_t serial, vtpty::PageSize cells);
 
-    /// Sends the pending geometry report (GUI thread): the composed client area if it moved, plus
-    /// every bound pane whose grid the daemon does not already have.
-    void flushGeometry();
+    /// What a flushGeometry() may state.
+    enum class GeometryFlush : uint8_t
+    {
+        Report = 0, ///< A pane reported a grid: the client area if it moved, and the panes that did.
+        PanesOnly,  ///< A pending re-assertion: every pane, and never the client area.
+    };
+
+    /// Sends the pending geometry report (GUI thread): the composed client area if it moved (unless
+    /// @p scope is PanesOnly), plus every bound pane whose grid the daemon does not already have, or every
+    /// one while a re-assertion is pending and the panes compose to an area.
+    /// @param scope What this flush may state.
+    void flushGeometry(GeometryFlush scope);
 
     /// The client area composed from the pane tree the daemon last pushed and the grids its leaves
     /// are rendered at (@see vthost::client::composeClientArea). Prefers the tab holding the pane
@@ -851,11 +865,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The area this connection's hello stated; consumed by the first flushGeometry(), which then does not
     /// state it again.
     std::optional<vtpty::PageSize> _helloArea;
-    /// Whether every pane's size is yet to be re-asserted after a reconnect.
+    /// Whether every pane's size is yet to be re-asserted after the daemon re-projected them.
     enum class GeometryReassert : uint8_t
     {
         Idle = 0,
-        Pending, ///< Set by a reconnect; the flush that follows the next reconcile sends every pane.
+        Pending, ///< Set by a reconnect or proto::PanesReprojected; spent by the first flush that composes.
     };
     GeometryReassert _geometryReassert = GeometryReassert::Idle;
     /// The session whose pane last reported a grid; anchors which tab the client area is composed

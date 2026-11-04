@@ -298,6 +298,9 @@ class NativeClient final
     /// every window's layout of the change was handed to the LayoutHandler before it, and the PDU names the
     /// MoveNode request whose effects the push completes, if one did.
     using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
+    /// Handler invoked when the daemon re-projected every pane onto an area this client did not ask for
+    /// (proto::PanesReprojected); the layout push it marks follows.
+    using PanesReprojectedHandler = std::function<void()>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -352,6 +355,7 @@ class NativeClient final
     /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
     /// @param onMoveNodeRefused Told when the daemon refuses a moveNode(), so the user can be.
     /// @param onLayoutBatchEnd Told when a daemon sharing Capability::LayoutBatch ends a layout push.
+    /// @param onPanesReprojected Told when the daemon discarded the pane sizes this client reported.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -364,7 +368,8 @@ class NativeClient final
                  LivenessPolicy liveness = {},
                  TabMergeRefusedHandler onTabMergeRefused = {},
                  MoveNodeRefusedHandler onMoveNodeRefused = {},
-                 LayoutBatchEndHandler onLayoutBatchEnd = {});
+                 LayoutBatchEndHandler onLayoutBatchEnd = {},
+                 PanesReprojectedHandler onPanesReprojected = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -660,6 +665,7 @@ class NativeClient final
     TabMergeRefusedHandler _onTabMergeRefused;
     MoveNodeRefusedHandler _onMoveNodeRefused;
     LayoutBatchEndHandler _onLayoutBatchEnd;
+    PanesReprojectedHandler _onPanesReprojected;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply

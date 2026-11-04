@@ -220,6 +220,16 @@ class SessionStreamEvents
     /// Fires with the terminal lock RELEASED, because an observer will take it to snapshot.
     virtual void sessionResized(vtworkspace::SessionId /*session*/) {}
 
+    /// Another client departed and took the authoritative client area with it: every pane was re-projected
+    /// onto the area that is left, discarding the per-pane grids this observer's client refined.
+    ///
+    /// The per-pane sessionResized() that the re-projection raised cannot say so: a client cannot tell a
+    /// grid it must correct from one another client asked for. Nor does this observer's own geometry move,
+    /// so without being told its client never re-asserts its panes (a native connection tells it with
+    /// proto::PanesReprojected). Fires once per such departure, after the re-projection; never for a report,
+    /// which re-projects at the reporting client's own request.
+    virtual void clientAreaReprojected() {}
+
     /// @p session rang the bell (BEL).
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
 

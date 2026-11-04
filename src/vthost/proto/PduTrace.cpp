@@ -503,6 +503,7 @@ namespace
                        return std::format("to=\"{}\"",
                                           core::escape(std::get<DaemonUpgrading>(pdu).toRelease));
                    } },
+        TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

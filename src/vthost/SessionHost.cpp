@@ -1704,8 +1704,13 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     // the per-pane refinements they made: a half-open connection noticed only after its successor's
     // hello and pane reports would put every split pane back on the ratio-derived estimate, which
     // the client — seeing no local geometry change — never corrects.
+    //
+    // And when it did, the survivors are told: the re-projection discarded their refinements too.
     if (_clientAreas.erase(observer) != 0 && resolveAuthoritativeArea() == SizeChange::Applied)
+    {
         std::ignore = reprojectLayouts();
+        fanOutStream(&SessionStreamEvents::clientAreaReprojected);
+    }
 }
 
 std::vector<SessionId> SessionHost::sessionIds() const

@@ -814,7 +814,8 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
     }
 
     controller.setRealizingLayout(false);
-    // After a reconnect the daemon projected every pane onto the hello's area: say what the panes are.
+    // The daemon may have re-projected every pane (onto a reconnect's hello area, or onto the area a departed
+    // client left behind): say what the panes are.
     controller.reassertGeometryAfterReconcile();
 }
 

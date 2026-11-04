@@ -88,6 +88,7 @@ enum class PduType : uint8_t
     UpgradeDaemon = 41,
     UpgradeDaemonReply = 42,
     DaemonUpgrading = 43,
+    PanesReprojected = 44,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1425,6 +1426,15 @@ struct LayoutBatchEnd
     bool operator==(LayoutBatchEnd const&) const = default;
 };
 
+/// Server→client: the daemon re-projected every pane onto a client area this client did not ask for --
+/// another client departed and took the authoritative area with it -- discarding the per-pane grids this
+/// client reported. Sent right before the layout push that follows it, so the client re-sends its pane sizes
+/// once it reconciled that push; no other push asks for that.
+struct PanesReprojected
+{
+    bool operator==(PanesReprojected const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1512,7 +1522,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SetSplitOrientation,
                                 UpgradeDaemon,
                                 UpgradeDaemonReply,
-                                DaemonUpgrading>;
+                                DaemonUpgrading,
+                                PanesReprojected>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

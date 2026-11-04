@@ -342,6 +342,9 @@ class ExitingPty final: public vtpty::Pty
 /// the report, not about who made it.
 struct StubClient final: vthost::SessionStreamEvents
 {
+    void clientAreaReprojected() override { ++reprojections; }
+
+    int reprojections = 0; ///< How often it was told a departure re-projected the panes.
 };
 
 /// A single-pane tab whose leaf runs @p command — the shape most of the new tests build on.
@@ -704,8 +707,37 @@ TEST_CASE("a detaching client that leaves the client area unchanged keeps the pe
 
     CHECK(unbox<int>(h.host.pageSize().columns) == 100);
     CHECK(h.host.terminal(firstSession)->totalPageSize().columns.value == 70);
+    // Nothing was discarded, so the survivor has nothing to re-assert.
+    CHECK(h.otherClient.reprojections == 0);
 
     h.host.unsubscribeStream(&h.otherClient);
+}
+
+TEST_CASE("a detaching client that moves the client area tells the survivors", "[vthost][host][size]")
+{
+    // The departure re-projects every pane onto the area that is left, which discards the survivor's
+    // per-pane refinements -- and the survivor's own geometry did not move, so it must be told.
+    auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.subscribeStream(&h.client);
+    h.host.subscribeStream(&h.otherClient);
+    std::ignore = h.host.applyClientSize(
+        &h.client, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(100) });
+    std::ignore = h.host.applyClientSize(
+        &h.otherClient, vtpty::PageSize { .lines = vtpty::LineCount(30), .columns = vtpty::ColumnCount(80) });
+    REQUIRE(unbox<int>(h.host.pageSize().columns) == 80);
+    // Reports re-project at the reporter's own request: no one is told.
+    REQUIRE(h.client.reprojections == 0);
+
+    h.host.unsubscribeStream(&h.otherClient);
+
+    CHECK(unbox<int>(h.host.pageSize().columns) == 100);
+    CHECK(h.client.reprojections == 1);
+    CHECK(h.otherClient.reprojections == 0); // gone before the fan-out
+
+    h.host.unsubscribeStream(&h.client);
+    CHECK(h.client.reprojections == 1); // nobody left to tell
 }
 
 TEST_CASE("applyClientSize is race-free against a concurrent terminal writer", "[vthost][host][concurrency]")
