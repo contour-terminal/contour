@@ -1553,7 +1553,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The Windows registry, or nothing elsewhere. Declared before the execution policy source, which
     /// borrows it.
     std::unique_ptr<platform::IRegistry> _registry;
-    /// PowerShell's execution policy, read from and written to _registry.
+    /// PowerShell's execution policy, read from and written to _registry and PowerShell 7's configuration
+    /// files on _fileSystem (below _knownFolders' Documents folder).
     std::unique_ptr<platform::IExecutionPolicySource> _executionPolicy;
 
     /// The shells' startup files. Declared after _hostPlatform, _fileSystem, _knownFolders and

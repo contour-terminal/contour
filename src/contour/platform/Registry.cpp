@@ -5,7 +5,11 @@
     #include <core/WideString.hpp>
 
     #include <algorithm>
+    #include <memory>
+    #include <ranges>
+    #include <type_traits>
     #include <utility>
+    #include <vector>
 
     #include <Windows.h>
 #endif
@@ -91,6 +95,46 @@ namespace
                 != ERROR_SUCCESS)
                 return std::nullopt;
             return static_cast<std::uint32_t>(data);
+        }
+
+        [[nodiscard]] std::vector<std::string> subkeys(RegistryRoot root, std::string_view key) const override
+        {
+            auto const wideKey = core::toUtf16(key);
+            if (!wideKey)
+                return {};
+            auto handle = HKEY { nullptr };
+            if (RegOpenKeyExW(hiveOf(root), wideKey->c_str(), 0, KEY_READ, &handle) != ERROR_SUCCESS)
+                return {};
+            auto const owned =
+                std::unique_ptr<std::remove_pointer_t<HKEY>, decltype(&RegCloseKey)> { handle, &RegCloseKey };
+            auto count = DWORD { 0 };
+            auto longestName = DWORD { 0 }; // in characters, without the terminating NUL
+            if (RegQueryInfoKeyW(handle,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 &count,
+                                 &longestName,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr,
+                                 nullptr)
+                != ERROR_SUCCESS)
+                return {};
+            auto names = std::vector<std::string> {};
+            for (auto const index: std::views::iota(DWORD { 0 }, count))
+            {
+                auto name = std::wstring(longestName + 1, L'\0');
+                auto length = static_cast<DWORD>(name.size());
+                if (RegEnumKeyExW(handle, index, name.data(), &length, nullptr, nullptr, nullptr, nullptr)
+                    != ERROR_SUCCESS)
+                    continue; // removed meanwhile, or renamed longer than the key said
+                name.resize(length);
+                names.push_back(core::toUtf8(name));
+            }
+            return names;
         }
 
         [[nodiscard]] std::expected<void, std::string> writeString(RegistryRoot root,

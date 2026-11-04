@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace contour::platform
 {
@@ -47,6 +48,13 @@ class IRegistry
                                                                  std::string_view key,
                                                                  std::string_view value) const = 0;
 
+    /// Lists a key's subkeys.
+    /// @param root The hive @p key is under.
+    /// @param key The key's path below @p root, its parts separated by backslashes.
+    /// @return The names of the key's direct subkeys, in the registry's order; empty when the key is absent
+    ///         or cannot be read.
+    [[nodiscard]] virtual std::vector<std::string> subkeys(RegistryRoot root, std::string_view key) const = 0;
+
     /// Writes a string value, creating the key when it is absent.
     /// @param root The hive @p key is under.
     /// @param key The key's path below @p root, its parts separated by backslashes.
@@ -79,6 +87,13 @@ class NullRegistry final: public IRegistry
         return std::nullopt;
     }
 
+    /// @return Always empty.
+    [[nodiscard]] std::vector<std::string> subkeys(RegistryRoot /*root*/,
+                                                   std::string_view /*key*/) const override
+    {
+        return {};
+    }
+
     /// @return Always the error `no registry`.
     [[nodiscard]] std::expected<void, std::string> writeString(RegistryRoot /*root*/,
                                                                std::string_view /*key*/,
@@ -90,7 +105,8 @@ class NullRegistry final: public IRegistry
 };
 
 /// The platform's registry.
-/// @return On Windows, the system registry (`RegGetValueW`, `RegSetKeyValueW`); elsewhere NullRegistry.
+/// @return On Windows, the system registry (`RegGetValueW`, `RegEnumKeyExW`, `RegSetKeyValueW`); elsewhere
+/// NullRegistry.
 [[nodiscard]] std::unique_ptr<IRegistry> makePlatformRegistry();
 
 } // namespace contour::platform

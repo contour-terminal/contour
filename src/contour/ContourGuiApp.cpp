@@ -470,7 +470,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _menuBarIntegration(appearanceServices.menuBar()),
     _knownFolders(platform::makePlatformKnownFolders()),
     _registry(platform::makePlatformRegistry()),
-    _executionPolicy(platform::makePlatformExecutionPolicySource(*_registry)),
+    _executionPolicy(platform::makePlatformExecutionPolicySource(*_registry, _fileSystem, *_knownFolders)),
     _shellRcEditor(shellIntegration.editor
                        ? std::move(shellIntegration.editor)
                        : std::make_unique<platform::FileShellRcEditor>(_fileSystem,

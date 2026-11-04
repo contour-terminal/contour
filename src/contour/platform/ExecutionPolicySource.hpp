@@ -4,11 +4,15 @@
 /// @file
 /// Where PowerShell's execution policy is read from, and the one change Contour makes to it: allowing
 /// the user's own scripts. Behind an interface so that the decision built on it is testable with any
-/// policy, on any platform. Qt-free.
+/// policy, on any platform. The interface is Qt-free; the implementation reads PowerShell 7's JSON
+/// configuration files with Qt's JSON parser.
 
 #include <contour/config/ExecutionPolicy.hpp>
 #include <contour/config/ShellKind.hpp>
+#include <contour/platform/KnownFolders.hpp>
 #include <contour/platform/Registry.hpp>
+
+#include <core/platform/FileSystem.hpp>
 
 #include <expected>
 #include <memory>
@@ -36,29 +40,44 @@ class IExecutionPolicySource
     [[nodiscard]] virtual std::expected<void, std::string> allowUserScripts(config::ShellKind shell) = 0;
 };
 
-/// PowerShell's execution policy as Windows PowerShell and PowerShell read it from the registry.
+/// PowerShell's execution policy as Windows PowerShell and PowerShell read it: from the registry, and
+/// PowerShell 7's own scopes from its `powershell.config.json` files.
 ///
 /// Windows PowerShell: group policy (machine, then user), then the user's and then the machine's
 /// `ShellIds` setting; failing all, `RemoteSigned` on Windows Server and `Restricted` elsewhere.
-/// PowerShell 7 keeps its non-policy settings in JSON files, not the registry, so only its group policy
-/// is read here; failing that, its default `RemoteSigned` applies.
+/// PowerShell 7: its group policy (machine, then user), then `Microsoft.PowerShell:ExecutionPolicy` in the
+/// user's `Documents\PowerShell\powershell.config.json`, then in the one beside an installed PowerShell 7
+/// (the first `InstallLocation` under `HKLM\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions` that has
+/// a readable one); failing all, `RemoteSigned`. A file that is not a JSON object sets no policy.
 class RegistryExecutionPolicySource final: public IExecutionPolicySource
 {
   public:
     /// @param registry The registry to read and write; it must outlive this source.
-    explicit RegistryExecutionPolicySource(IRegistry& registry) noexcept: _registry { registry } {}
+    /// @param fileSystem Where PowerShell 7's configuration files are read and written; it must outlive
+    ///        this source.
+    /// @param knownFolders Where the user's Documents folder is; it must outlive this source.
+    RegistryExecutionPolicySource(IRegistry& registry,
+                                  core::platform::FileSystem const& fileSystem,
+                                  IKnownFolders const& knownFolders) noexcept:
+        _registry { registry }, _fileSystem { fileSystem }, _knownFolders { knownFolders }
+    {
+    }
 
     /// @copydoc IExecutionPolicySource::effectivePolicy
     [[nodiscard]] config::EffectivePolicy effectivePolicy(config::ShellKind shell) const override;
 
-    /// Writes `RemoteSigned` to Windows PowerShell's user-scope `ExecutionPolicy`.
-    /// @param shell The shell to allow scripts in; only config::ShellKind::WindowsPowerShell has a
-    ///        user-scope policy in the registry.
-    /// @return Nothing on success, else why the value could not be written, or that @p shell has none.
+    /// Sets `RemoteSigned` as the user's own policy: Windows PowerShell's user-scope `ExecutionPolicy` in
+    /// the registry, or `Microsoft.PowerShell:ExecutionPolicy` in PowerShell 7's user
+    /// `powershell.config.json`. That file keeps every other key; it and its folder are created when
+    /// missing, and a file that is not a JSON object is left as it is and reported.
+    /// @param shell The shell to allow scripts in.
+    /// @return Nothing on success, else why the setting could not be written, or that @p shell has none.
     [[nodiscard]] std::expected<void, std::string> allowUserScripts(config::ShellKind shell) override;
 
   private:
     IRegistry& _registry;
+    core::platform::FileSystem const& _fileSystem;
+    IKnownFolders const& _knownFolders;
 };
 
 /// The execution policy of a platform where no shell has one: every script may run.
@@ -80,7 +99,12 @@ class NoExecutionPolicySource final: public IExecutionPolicySource
 
 /// The platform's execution-policy source.
 /// @param registry The registry it reads on Windows; it must outlive the source.
-/// @return On Windows, a RegistryExecutionPolicySource over @p registry; elsewhere a NoExecutionPolicySource.
-[[nodiscard]] std::unique_ptr<IExecutionPolicySource> makePlatformExecutionPolicySource(IRegistry& registry);
+/// @param fileSystem Where it reads PowerShell 7's configuration files on Windows; it must outlive the
+/// source.
+/// @param knownFolders Where it finds the user's Documents folder on Windows; it must outlive the source.
+/// @return On Windows, a RegistryExecutionPolicySource over them; elsewhere a NoExecutionPolicySource, which
+///         reads nothing.
+[[nodiscard]] std::unique_ptr<IExecutionPolicySource> makePlatformExecutionPolicySource(
+    IRegistry& registry, core::platform::FileSystem const& fileSystem, IKnownFolders const& knownFolders);
 
 } // namespace contour::platform
