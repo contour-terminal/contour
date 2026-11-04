@@ -1345,14 +1345,18 @@ SizeChange SessionHost::resolveAuthoritativeArea()
 SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::PageSize size)
 {
     _clientAreas.insert_or_assign(client, ClientArea { .size = size, .sequence = _nextAreaSequence++ });
-    std::ignore = resolveAuthoritativeArea();
-
-    // Whether mirrors must resync is NOT answered by the area alone, in either direction.
-    // An unchanged area still re-projects — that is how a per-pane refinement (applyPaneSize)
-    // gets discarded, and clients re-assert an unchanged area on every attach. A changed area
-    // can still leave a given pane on the size it already had. So let the panes report, and
-    // resync only when a grid genuinely moved: a resync is a full-grid snapshot, and answering
-    // a no-op with one per pane is how a healthy client used to lose its connection.
+    // Re-project only when the resolved area moved, as unsubscribeStream does. An unchanged area
+    // leaves every pane where it is, and in particular keeps the OTHER clients' per-pane refinements
+    // (applyPaneSize): they are not told about this report, so discarding them would drop their split
+    // panes back on the ratio estimate. The reporting client needs no discard to be heard: a new area
+    // makes it re-send all its pane sizes, and an unchanged one changes nothing it laid out.
+    //
+    // Whether mirrors must resync is still not answered by the area alone: a changed area can leave a
+    // given pane on the size it already had. So let the panes report, and resync only when a grid
+    // genuinely moved: a resync is a full-grid snapshot, and answering a no-op with one per pane is
+    // how a healthy client used to lose its connection.
+    if (resolveAuthoritativeArea() == SizeChange::Unchanged)
+        return SizeChange::Unchanged;
     return reprojectLayouts();
 }
 
