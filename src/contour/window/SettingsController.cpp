@@ -2159,11 +2159,28 @@ platform::RcEnvironment SettingsController::rcEnvironment() const
     return platform::rcEnvironmentOf(shell.env, shell.removedEnvironment);
 }
 
-InstallBlock SettingsController::installBlock(config::ShellRow const& shell) const
+BinaryReach SettingsController::binaryReach() const
 {
-    auto const reach =
-        _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
-    return installBlockOf(shell, _services.shell.host, reach, config::ProfileScripts::Run);
+    return _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
+}
+
+config::ProfileScripts SettingsController::profileScripts(config::ShellRow const& shell) const
+{
+    // A shell the host rules out has no file worth looking at.
+    if (_services.shell.editor == nullptr || !config::isInstallableOn(shell, _services.shell.host))
+        return config::ProfileScripts::Run;
+    auto const inspection = inspectShell(shell.kind);
+    return inspection ? inspection->scripts : config::ProfileScripts::Run;
+}
+
+ShellInstallRow SettingsController::shellInstallRow(config::ShellRow const& shell) const
+{
+    auto const host = _services.shell.host;
+    if (!config::isInstallableOn(shell, host))
+        return blockedShellInstallRowOf(
+            shell, installBlockOf(shell, host, binaryReach(), config::ProfileScripts::Run));
+    return shellInstallRowOf(
+        shell, inspectShell(shell.kind), _services.shell.homeDirectory, host, binaryReach());
 }
 
 void SettingsController::listShellRows()
@@ -2171,10 +2188,13 @@ void SettingsController::listShellRows()
     _shellRows.clear();
     if (_services.shell.editor != nullptr)
     {
-        for (auto const& shell: config::ShellRows)
+        auto const host = _services.shell.host;
+        for (auto const& shell:
+             config::ShellRows | std::views::filter([host](config::ShellRow const& candidate) {
+                 return config::isListedOn(candidate, host);
+             }))
         {
-            auto const row = shellInstallRowOf(
-                shell, inspectShell(shell.kind), _services.shell.homeDirectory, installBlock(shell));
+            auto const row = shellInstallRow(shell);
             _shellRows.push_back(QVariantMap {
                 { QStringLiteral("shell"), static_cast<int>(row.shell) },
                 { QStringLiteral("name"), toQString(row.name) },
@@ -2214,11 +2234,16 @@ QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
         return {};
     auto const rc = shellIntegrationRcPath(shell).toStdString();
     auto const line = shellIntegrationLine(shell).toStdString();
+    auto const scripts = profileScripts(*row);
     auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    auto const text = [&](std::string_view pattern) {
+        return toQString(cardText(pattern, row->displayName, rc, line));
+    };
     return QVariantMap {
-        { QStringLiteral("title"), toQString(cardText(words.title, row->name, rc, line)) },
-        { QStringLiteral("line"), toQString(cardText(words.body, row->name, rc, line)) },
-        { QStringLiteral("primary"), toQString(words.primary) },
+        { QStringLiteral("title"), text(words.title) },
+        { QStringLiteral("line"), text(words.body) },
+        { QStringLiteral("note"), text(policyNoteFor(scripts)) },
+        { QStringLiteral("primary"), toQString(confirmPrimaryFor(scripts)) },
         { QStringLiteral("secondary"), toQString(words.secondary) },
     };
 }
@@ -2229,7 +2254,9 @@ void SettingsController::installShellIntegration(int shell)
     auto const* const shellRow = config::shellRow(kind);
     if (_services.shell.editor == nullptr || shellRow == nullptr)
         return;
-    if (auto const block = installBlock(*shellRow); block != InstallBlock::None)
+    if (auto const block =
+            installBlockOf(*shellRow, _services.shell.host, binaryReach(), profileScripts(*shellRow));
+        block != InstallBlock::None)
     {
         emit errorOccurred(toQString(InstallBlockRows[std::to_underlying(block)].text));
         return;

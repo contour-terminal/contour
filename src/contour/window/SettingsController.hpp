@@ -10,6 +10,7 @@
 #include <contour/platform/FontFamilySource.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/window/SettingsSections.hpp>
+#include <contour/window/ShellInstallRows.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <QtCore/QObject>
@@ -143,8 +144,9 @@ class SettingsController: public QObject
     /// kind: "edit", title: "Edit contour.yml…" }.
     Q_PROPERTY(QVariantList sidebar READ sidebar NOTIFY changed)
 
-    /// The Shell Integration page's Install rows, one QVariantMap per shell in config::ShellRows order: {
-    /// shell (a config::ShellKind), name, status (what its startup file is, see window::ShellStatusRows),
+    /// The Shell Integration page's Install rows, one QVariantMap per shell listed on the host
+    /// (config::isListedOn()) in config::ShellRows order: { shell (a config::ShellKind), name (its display
+    /// name), status (what its startup file is, see window::ShellStatusRows, or what blocks Install),
     /// deleteLine (the cut-short line to delete, empty unless the install was cut short), canInstall (a
     /// QML-facing bool: Install... is offered) }. Empty without an editor. Listed by refresh() and after an
     /// install.
@@ -312,8 +314,10 @@ class SettingsController: public QObject
     /// What the confirmation of an install says, in the words of the card's Confirm stage
     /// (window::CardStageRows).
     /// @param shell A config::ShellKind.
-    /// @return { title, line, primary, secondary }: the question naming the file, the line to add, and the
-    ///         labels of the accept and reject buttons; empty for no shell.
+    /// @return { title, line, note, primary, secondary }: the question naming the file, the line to add, what
+    ///         else the install changes (window::policyNoteFor(), naming the shell by its display name;
+    ///         empty unless the execution policy must be fixed first), and the labels of the accept
+    ///         (window::confirmPrimaryFor()) and reject buttons; empty for no shell.
     Q_INVOKABLE [[nodiscard]] QVariantMap shellIntegrationConfirm(int shell) const;
 
     /// Adds the shell integration line to @p shell's startup file, once, through the editor the card uses, so
@@ -624,10 +628,21 @@ class SettingsController: public QObject
     ///         (platform::rcEnvironmentOf()); empty when the profile is not in the configuration.
     [[nodiscard]] platform::RcEnvironment rcEnvironment() const;
 
+    /// @return Whether a later shell finds the running binary; a missing binary source is an unreachable one.
+    [[nodiscard]] BinaryReach binaryReach() const;
+
     /// @param shell The shell's row.
-    /// @return What stops Install of @p shell on this host and binary (installBlockOf()); a missing binary
-    ///         source is an unreachable binary.
-    [[nodiscard]] InstallBlock installBlock(config::ShellRow const& shell) const;
+    /// @return Whether @p shell's profile runs under its execution policy, as the editor finds it; Run
+    /// without
+    ///         an editor, for a shell the host rules out (whose file is not looked at), and for a file that
+    ///         could not be inspected.
+    [[nodiscard]] config::ProfileScripts profileScripts(config::ShellRow const& shell) const;
+
+    /// @param shell The shell's row.
+    /// @return Its Install row: the host's block alone, without looking at the file, for a shell the host
+    ///         rules out; else what the editor finds, blocked as installBlockOf() decides. The editor must be
+    ///         set.
+    [[nodiscard]] ShellInstallRow shellInstallRow(config::ShellRow const& shell) const;
 
     /// The origin of @p name among the current profiles, defaulting to Builtin if unknown.
     [[nodiscard]] config::SettingsOrigin profileOrigin(std::string const& name) const;

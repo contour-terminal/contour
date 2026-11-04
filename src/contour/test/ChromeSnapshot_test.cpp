@@ -362,17 +362,21 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
         case SnapshotSettingsPage::Keyboard: CHECK(shows("settingsSectionPage")); break;
         case SnapshotSettingsPage::ShellIntegration: {
             CHECK(shows("settingsSectionPage"));
-            // The Install group, with a row for each shell, and the cut-short one's line to delete.
+            // The Install group, with a row for each shell the scene's host (the default, a POSIX one) lists,
+            // titled by its display name, and the cut-short one's line to delete.
             auto const* group = scene.subject().findChild<QQuickItem*>(QStringLiteral("shellInstallGroup"));
             REQUIRE(group != nullptr);
             CHECK(group->isVisible());
             auto const& page = *settingsPage;
             for (auto const& shell: contour::config::ShellRows)
-                CHECK(contour::test::itemsNamed(page,
-                                                QStringLiteral("shellInstallRow:")
-                                                    + QString::fromUtf8(shell.name.data(), shell.name.size()))
-                          .size()
-                      == 1);
+            {
+                auto const rows = contour::test::itemsNamed(
+                    page,
+                    QStringLiteral("shellInstallRow:")
+                        + QString::fromUtf8(shell.displayName.data(), shell.displayName.size()));
+                CHECK(rows.size()
+                      == (contour::config::isListedOn(shell, contour::config::HostPlatform::Other) ? 1U : 0U));
+            }
             auto const cut = contour::test::itemsNamed(page, QStringLiteral("shellInstallDeleteLine"));
             CHECK(std::ranges::count_if(cut, [](QQuickItem const* item) { return item->isVisible(); }) == 1);
             break;

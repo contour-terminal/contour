@@ -99,16 +99,20 @@ struct ShellInstallRow
 /// @param shell The shell.
 /// @param inspection What the rc editor found for it.
 /// @param home The home directory, which a startup file under it is shown relative to as `~`.
-/// @param block What installBlockOf() says of this host and binary: the same decision the card asks.
-/// @return The row: its status, the file, the line to delete for a cut-short install, and whether to offer
-///         the install. A block turns an installable row's status into the block's words.
+/// @param host The host, which with @p binary and the inspected execution policy decides what blocks Install
+///        (installBlockOf()): the same decision the card asks.
+/// @param binary Whether the running binary can be named by an rc line.
+/// @return The row, titled with the shell's display name: its status, the file, the line to delete for a
+///         cut-short install, and whether to offer the install. A block turns an installable row's status
+///         into the block's words.
 [[nodiscard]] inline ShellInstallRow shellInstallRowOf(
     config::ShellRow const& shell,
     std::expected<platform::RcInspection, platform::ShellRcError> const& inspection,
     std::filesystem::path const& home,
-    InstallBlock block)
+    config::HostPlatform host,
+    BinaryReach binary)
 {
-    auto row = ShellInstallRow { .shell = shell.kind, .name = std::string { shell.name } };
+    auto row = ShellInstallRow { .shell = shell.kind, .name = std::string { shell.displayName } };
     if (!inspection)
     {
         row.status = statusText(ShellUnknownBecause, "", platform::describe(inspection.error()));
@@ -118,7 +122,8 @@ struct ShellInstallRow
     row.rc = inspection->file.empty() ? std::string {} : displayRcPath(inspection->file, home);
     row.status = statusText(status.text, row.rc, "");
     row.install = status.install;
-    if (row.install == InstallOffer::Yes && block != InstallBlock::None)
+    if (auto const block = installBlockOf(shell, host, binary, inspection->scripts);
+        row.install == InstallOffer::Yes && block != InstallBlock::None)
     {
         row.install = InstallOffer::No;
         row.status = std::string { InstallBlockRows[std::to_underlying(block)].text };
@@ -126,6 +131,19 @@ struct ShellInstallRow
     if (inspection->state == config::RcState::Partial)
         row.deleteLine = inspection->partialLine;
     return row;
+}
+
+/// The row of a shell whose startup file is not looked at, because the host alone rules Install out.
+/// @param shell The shell.
+/// @param block What rules it out.
+/// @return The row, titled with the shell's display name, saying the block's words and offering no install.
+[[nodiscard]] inline ShellInstallRow blockedShellInstallRowOf(config::ShellRow const& shell,
+                                                              InstallBlock block)
+{
+    return ShellInstallRow { .shell = shell.kind,
+                             .name = std::string { shell.displayName },
+                             .status = std::string { InstallBlockRows[std::to_underlying(block)].text },
+                             .install = InstallOffer::No };
 }
 
 } // namespace contour::window

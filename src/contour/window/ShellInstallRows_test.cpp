@@ -59,7 +59,8 @@ TEST_CASE("shellInstall.eachStateIsSaidAndOnlyAnAbsentOneIsOffered", "[shellinte
          })
     {
         CAPTURE(std::to_underlying(expected.state));
-        auto const row = shellInstallRowOf(Zsh, inspected(expected.state), home(), InstallBlock::None);
+        auto const row = shellInstallRowOf(
+            Zsh, inspected(expected.state), home(), HostPlatform::Other, BinaryReach::Reachable);
         CHECK(row.shell == ShellKind::Zsh);
         CHECK(row.name == "zsh");
         CHECK(row.status == expected.status);
@@ -70,12 +71,17 @@ TEST_CASE("shellInstall.eachStateIsSaidAndOnlyAnAbsentOneIsOffered", "[shellinte
 TEST_CASE("shellInstall.aCutShortInstallNamesTheLineToDelete", "[shellintegration][settings]")
 {
     auto const cut = std::string { R"(if [ "$TERM_PROGRAM" = contour ]; then eval "$('/usr/b)" };
-    CHECK(shellInstallRowOf(Zsh, inspected(RcState::Partial, cut), home(), InstallBlock::None).deleteLine
+    CHECK(shellInstallRowOf(
+              Zsh, inspected(RcState::Partial, cut), home(), HostPlatform::Other, BinaryReach::Reachable)
+              .deleteLine
           == cut);
     // Nothing else carries a line to delete.
-    CHECK(shellInstallRowOf(Zsh, inspected(RcState::Absent), home(), InstallBlock::None).deleteLine.empty());
-    CHECK(
-        shellInstallRowOf(Zsh, inspected(RcState::Installed), home(), InstallBlock::None).deleteLine.empty());
+    CHECK(shellInstallRowOf(
+              Zsh, inspected(RcState::Absent), home(), HostPlatform::Other, BinaryReach::Reachable)
+              .deleteLine.empty());
+    CHECK(shellInstallRowOf(
+              Zsh, inspected(RcState::Installed), home(), HostPlatform::Other, BinaryReach::Reachable)
+              .deleteLine.empty());
 }
 
 TEST_CASE("shellInstall.aFileOutsideHomeIsShownWhole", "[shellintegration][settings]")
@@ -84,7 +90,8 @@ TEST_CASE("shellInstall.aFileOutsideHomeIsShownWhole", "[shellintegration][setti
         shellInstallRowOf(Zsh,
                           RcInspection { .file = "/etc/zsh/.zshrc", .state = RcState::Installed },
                           home(),
-                          InstallBlock::None);
+                          HostPlatform::Other,
+                          BinaryReach::Reachable);
     CHECK(row.status == "Installed in /etc/zsh/.zshrc");
 }
 
@@ -95,7 +102,8 @@ TEST_CASE("shellInstall.everyRefusalIsSaidAndNeverOffered", "[shellintegration][
     {
         auto const error = static_cast<ShellRcError>(code);
         CAPTURE(code);
-        auto const row = shellInstallRowOf(Zsh, std::unexpected(error), home(), InstallBlock::None);
+        auto const row = shellInstallRowOf(
+            Zsh, std::unexpected(error), home(), HostPlatform::Other, BinaryReach::Reachable);
         CHECK(row.status == "Unknown: " + std::string { contour::platform::describe(error) });
         CHECK(row.install == InstallOffer::No);
         CHECK(row.rc.empty());
@@ -104,16 +112,82 @@ TEST_CASE("shellInstall.everyRefusalIsSaidAndNeverOffered", "[shellintegration][
 
 TEST_CASE("shellInstall.aBlockReplacesTheStatusOfAnInstallableRowOnly", "[shellintegration][settings]")
 {
-    for (auto const& blockRow: InstallBlockRows)
+    struct Case
     {
-        if (blockRow.block == InstallBlock::None)
-            continue;
-        CAPTURE(std::to_underlying(blockRow.block));
-        auto const absent = shellInstallRowOf(Zsh, inspected(RcState::Absent), home(), blockRow.block);
-        CHECK(absent.status == blockRow.text);
+        ShellRow shell;
+        HostPlatform host;
+        BinaryReach binary;
+        ProfileScripts scripts;
+        InstallBlock block;
+    };
+    constexpr auto Pwsh = ShellRows[std::to_underlying(ShellKind::Pwsh) - 1];
+    for (auto const& c: std::array {
+             Case { Zsh,
+                    HostPlatform::Windows,
+                    BinaryReach::Reachable,
+                    ProfileScripts::Run,
+                    InstallBlock::NotOnWindows },
+             Case { Zsh,
+                    HostPlatform::Other,
+                    BinaryReach::Unreachable,
+                    ProfileScripts::Run,
+                    InstallBlock::BinaryUnreachable },
+             Case { Pwsh,
+                    HostPlatform::Windows,
+                    BinaryReach::Reachable,
+                    ProfileScripts::BlockedByGroupPolicy,
+                    InstallBlock::GroupPolicy },
+             Case { Pwsh,
+                    HostPlatform::Windows,
+                    BinaryReach::Reachable,
+                    ProfileScripts::SignedOnly,
+                    InstallBlock::SignedScriptsOnly },
+         })
+    {
+        CAPTURE(std::to_underlying(c.block));
+        auto absentFile = inspected(RcState::Absent);
+        absentFile.scripts = c.scripts;
+        auto const absent = shellInstallRowOf(c.shell, absentFile, home(), c.host, c.binary);
+        CHECK(absent.status == InstallBlockRows[std::to_underlying(c.block)].text);
         CHECK(absent.install == InstallOffer::No);
         // A file that is already done says so, whatever blocks a new install.
-        auto const installed = shellInstallRowOf(Zsh, inspected(RcState::Installed), home(), blockRow.block);
+        auto installedFile = inspected(RcState::Installed);
+        installedFile.scripts = c.scripts;
+        auto const installed = shellInstallRowOf(c.shell, installedFile, home(), c.host, c.binary);
         CHECK(installed.status == "Installed in ~/.zshrc");
     }
+}
+
+TEST_CASE("shellInstall.aPolicyTheUserCanFixStillOffersTheInstall", "[shellintegration][settings]")
+{
+    constexpr auto Pwsh = ShellRows[std::to_underlying(ShellKind::Pwsh) - 1];
+    auto file = inspected(RcState::Absent);
+    file.scripts = ProfileScripts::NeedUserPolicy;
+    auto const row = shellInstallRowOf(Pwsh, file, home(), HostPlatform::Windows, BinaryReach::Reachable);
+    CHECK(row.status == "Not installed");
+    CHECK(row.install == InstallOffer::Yes);
+}
+
+TEST_CASE("ShellInstallRows.blocked", "[shellintegration][settings]")
+{
+    constexpr auto Bash = ShellRows[std::to_underlying(ShellKind::Bash) - 1];
+    auto const row = blockedShellInstallRowOf(Bash, InstallBlock::NotOnWindows);
+    CHECK(row.shell == ShellKind::Bash);
+    CHECK(row.name == "bash");
+    CHECK(row.status == "Not available on Windows");
+    CHECK(row.install == InstallOffer::No);
+    CHECK(row.rc.empty());
+    CHECK(row.deleteLine.empty());
+}
+
+TEST_CASE("ShellInstallRows.displayName", "[shellintegration][settings]")
+{
+    constexpr auto Pwsh = ShellRows[std::to_underlying(ShellKind::Pwsh) - 1];
+    constexpr auto WindowsPowerShell = ShellRows[std::to_underlying(ShellKind::WindowsPowerShell) - 1];
+    CHECK(shellInstallRowOf(
+              Pwsh, inspected(RcState::Absent), home(), HostPlatform::Windows, BinaryReach::Reachable)
+              .name
+          == "PowerShell");
+    CHECK(blockedShellInstallRowOf(WindowsPowerShell, InstallBlock::WindowsOnly).name
+          == "Windows PowerShell");
 }

@@ -3106,6 +3106,50 @@ TEST_CASE("Install… opens a dialog showing the line, Cancel installs nothing, 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the install dialog says what else Install changes only when it changes the policy",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    fx.shellEditor.inspections[ShellKind::Pwsh] =
+        RcInspection { .file = shellHome() / ".config/powershell/Microsoft.PowerShell_profile.ps1",
+                       .state = RcState::Absent,
+                       .scripts = config::ProfileScripts::NeedUserPolicy };
+    scriptShells(fx);
+    REQUIRE(fx.open("section:shell-integration"));
+
+    auto* dialog = fx.item()->findChild<QObject*>("shellInstallDialog");
+    REQUIRE(dialog != nullptr);
+    auto const dialogPart = [dialog](char const* name) -> QQuickItem const& {
+        return required(findDescendant(
+            *dialog->property("contentItem").value<QQuickItem*>(),
+            [name](QQuickItem const& item) { return item.objectName() == QLatin1String(name); }));
+    };
+
+    // PowerShell's profile cannot run yet: the note says the policy changes too, and the button says so.
+    clickButton(fx.byName("shellInstallButton:PowerShell"));
+    fx.settle();
+    REQUIRE(dialog->property("visible").toBool());
+    CHECK(dialogPart("shellInstallNote").isVisible());
+    CHECK(dialogPart("shellInstallNote")
+              .property("text")
+              .toString()
+              .contains(QStringLiteral("PowerShell, for your user only")));
+    CHECK(dialog->property("acceptText").toString() == QStringLiteral("Allow Scripts and Add Line"));
+    QMetaObject::invokeMethod(dialog, "reject");
+    fx.settle();
+
+    // bash has no policy to change: no note.
+    clickButton(fx.byName("shellInstallButton:bash"));
+    fx.settle();
+    REQUIRE(dialog->property("visible").toBool());
+    CHECK_FALSE(dialogPart("shellInstallNote").isVisible());
+    CHECK(dialog->property("acceptText").toString() == QStringLiteral("Add Line"));
+    QMetaObject::invokeMethod(dialog, "reject");
+    fx.settle();
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("a refused install is reported and the row stays",
           "[contour][gui][qml][settings][shellintegration]")
 {
