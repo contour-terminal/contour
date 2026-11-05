@@ -7,6 +7,7 @@
 
 #include <core/Defines.hpp>
 #include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <gsl/pointers>
 #include <gsl/span>
@@ -298,9 +299,7 @@ namespace detail
     {
         using U = std::remove_cvref_t<T>;
         // Character types and bool are integral too, but std::format renders them as text, not numbers.
-        if constexpr (std::integral<U> && !std::same_as<U, bool> && !std::same_as<U, char>
-                      && !std::same_as<U, wchar_t> && !std::same_as<U, char8_t> && !std::same_as<U, char16_t>
-                      && !std::same_as<U, char32_t>)
+        if constexpr (std::integral<U> && !core::oneOf<U, bool, char, wchar_t, char8_t, char16_t, char32_t>)
         {
             auto buffer = std::array<char, std::numeric_limits<U>::digits10 + 3> {};
             auto const converted =
