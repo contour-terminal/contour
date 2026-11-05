@@ -248,7 +248,7 @@ bool Viewport::scrollMarkUp()
 
     auto const marker = findVisibleMarker(topLine(), VerticalDirection::Up);
     if (!marker)
-        return false;
+        return scrollToTop();
 
     return scrollTo(scrollOffsetForTopLine(*marker));
 }

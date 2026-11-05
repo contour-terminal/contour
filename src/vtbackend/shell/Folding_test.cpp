@@ -2210,6 +2210,7 @@ TEST_CASE("Folding.viewport.scrollMarkUpReachesMarksBehindCollapsedFolds", "[fol
     // Thirty commands ran, each stamping a prompt mark, and collapsing a block keeps its head visible --
     // so the walk crosses many of them rather than stopping at the first refusal.
     CHECK(steps > 5);
+    CHECK(viewport.scrollOffset() == maxOffset);
 }
 
 TEST_CASE("Folding.viewport.scrollMarkDownReachesMarksBehindCollapsedFolds", "[folding][viewport]")

@@ -93,6 +93,8 @@ class Viewport
 
     /// Scrolls to the marked line above the viewport, bringing it to the top row.
     ///
+    /// Falls through to the top of the scrollback when there is no such mark.
+    ///
     /// Skips marks a collapsed fold hides: there is no scroll offset that would show one, so stopping
     /// there would consume the key and move the viewport to whichever row stands in its place.
     ///
