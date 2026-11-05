@@ -17,6 +17,10 @@
 #include <utility>
 
 #ifdef _WIN32
+    #include <vtpty/WindowsCommandLine.hpp>
+
+    #include <vector>
+
     #include <windows.h>
 #else
     #include <csignal>
@@ -28,6 +32,9 @@
 using namespace std::chrono_literals;
 using vtpty::CommandCaptureError;
 using vtpty::SystemCommandCapture;
+#ifdef _WIN32
+using vtpty::ProgramCommandCapture;
+#endif
 
 namespace
 {
@@ -406,5 +413,33 @@ TEST_CASE("SystemCommandCapture.windowsGrandchildrenDie", "[commandcapture]")
     CHECK(result.error().kind == CommandCaptureError::Kind::TimedOut);
     std::this_thread::sleep_for(MarkerWait);
     CHECK_FALSE(std::filesystem::exists(marker));
+}
+
+TEST_CASE("ProgramCommandCapture.readsAGuiSubsystemProgram", "[commandcapture]")
+{
+    // A GUI-subsystem program that attaches to its parent's console, as a release build of contour.exe is:
+    // under cmd.exe it would write to cmd.exe's console. A live upgrade reads the target's readiness answer
+    // so.
+    auto capture = ProgramCommandCapture { core::async::StopToken {} };
+    auto const arguments = std::vector<std::string> { "daemon", "two words", "C:/a b/contour.yml" };
+    CHECK(capture.run(vtpty::buildWindowsCommandLine(VTPTY_GUI_SUBSYSTEM_ECHO, arguments), 10s, {})
+          == "daemon|two words|C:/a b/contour.yml");
+}
+
+TEST_CASE("ProgramCommandCapture.timesOut", "[commandcapture]")
+{
+    auto capture = ProgramCommandCapture { core::async::StopToken {} };
+    auto const result = capture.run("ping -n 30 127.0.0.1", 200ms, {});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().kind == CommandCaptureError::Kind::TimedOut);
+}
+
+TEST_CASE("ProgramCommandCapture.spawnFailure", "[commandcapture]")
+{
+    auto capture = ProgramCommandCapture { core::async::StopToken {} };
+    auto const result = capture.run(R"("C:\this-program-does-not-exist-7f3a.exe" x)", 5s, {});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().kind == CommandCaptureError::Kind::SpawnFailed);
+    CHECK(result.error().cause);
 }
 #endif

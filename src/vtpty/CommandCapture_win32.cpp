@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/CommandCaptureStop.hpp>
+#include <vtpty/WindowsHandle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -29,95 +30,6 @@ namespace
 
     /// Granularity at which waits re-check the stop token and the deadline.
     constexpr auto PollSlice = DWORD { 10 };
-
-    /// Owns a Win32 HANDLE and closes it on destruction.
-    class UniqueHandle
-    {
-      public:
-        UniqueHandle() noexcept = default;
-        explicit UniqueHandle(HANDLE handle) noexcept: _handle { handle } {}
-        UniqueHandle(UniqueHandle const&) = delete;
-        UniqueHandle& operator=(UniqueHandle const&) = delete;
-        UniqueHandle(UniqueHandle&& other) noexcept: _handle { std::exchange(other._handle, nullptr) } {}
-        UniqueHandle& operator=(UniqueHandle&& other) noexcept
-        {
-            if (this != &other)
-            {
-                reset();
-                _handle = std::exchange(other._handle, nullptr);
-            }
-            return *this;
-        }
-        ~UniqueHandle() { reset(); }
-
-        [[nodiscard]] HANDLE get() const noexcept { return _handle; }
-        [[nodiscard]] bool valid() const noexcept
-        {
-            return _handle != nullptr && _handle != INVALID_HANDLE_VALUE;
-        }
-
-        void reset() noexcept
-        {
-            if (valid())
-                CloseHandle(_handle);
-            _handle = nullptr;
-        }
-
-      private:
-        HANDLE _handle = nullptr;
-    };
-
-    [[nodiscard]] std::error_code errorFrom(DWORD code) noexcept
-    {
-        return std::error_code { static_cast<int>(code), std::system_category() };
-    }
-
-    [[nodiscard]] std::error_code lastError() noexcept
-    {
-        return errorFrom(GetLastError());
-    }
-
-    /// Owns an initialized PROC_THREAD_ATTRIBUTE_LIST.
-    class AttributeList
-    {
-      public:
-        /// @param attributeCount Number of attributes the list will hold.
-        /// @return The initialized list, or why it could not be created.
-        [[nodiscard]] static std::expected<AttributeList, std::error_code> create(DWORD attributeCount)
-        {
-            auto size = SIZE_T { 0 };
-            InitializeProcThreadAttributeList(nullptr, attributeCount, 0, &size); // fails, yields size
-            auto storage = std::make_unique<std::byte[]>(size);
-            auto* const list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.get());
-            if (!InitializeProcThreadAttributeList(list, attributeCount, 0, &size))
-                return std::unexpected(lastError());
-            return AttributeList { std::move(storage), list };
-        }
-
-        AttributeList(AttributeList const&) = delete;
-        AttributeList& operator=(AttributeList const&) = delete;
-        AttributeList(AttributeList&& other) noexcept:
-            _storage { std::move(other._storage) }, _list { std::exchange(other._list, nullptr) }
-        {
-        }
-        AttributeList& operator=(AttributeList&&) = delete;
-        ~AttributeList()
-        {
-            if (_list != nullptr)
-                DeleteProcThreadAttributeList(_list);
-        }
-
-        [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() const noexcept { return _list; }
-
-      private:
-        AttributeList(std::unique_ptr<std::byte[]> storage, LPPROC_THREAD_ATTRIBUTE_LIST list) noexcept:
-            _storage { std::move(storage) }, _list { list }
-        {
-        }
-
-        std::unique_ptr<std::byte[]> _storage;
-        LPPROC_THREAD_ATTRIBUTE_LIST _list = nullptr;
-    };
 
     [[nodiscard]] std::unexpected<CommandCaptureError> spawnFailed(std::error_code cause)
     {
@@ -188,14 +100,8 @@ namespace
         auto attributeList = AttributeList::create(1);
         if (!attributeList)
             return std::unexpected(attributeList.error());
-        if (!UpdateProcThreadAttribute(attributeList->get(),
-                                       0,
-                                       PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                       static_cast<void*>(inheritedHandles.data()),
-                                       sizeof(inheritedHandles),
-                                       nullptr,
-                                       nullptr))
-            return std::unexpected(lastError());
+        if (auto const inherited = attributeList->inheritOnly(inheritedHandles); !inherited)
+            return std::unexpected(inherited.error());
 
         auto startupInfo = STARTUPINFOEXW {};
         startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEXW);
@@ -300,37 +206,61 @@ namespace
         }
         return captured;
     }
+
+    /// Runs @p commandLine inside a kill-on-close job and waits for it, at most @p timeout.
+    /// @param commandLine What CreateProcess() runs; nullopt when it could not be spelled in UTF-16.
+    /// @param timeout Upper bound on the run.
+    /// @param stop What cancels the run.
+    /// @return The first line of its standard output, or why there is none.
+    [[nodiscard]] std::expected<std::string, CommandCaptureError> captureOutput(
+        std::optional<std::wstring> commandLine, std::chrono::milliseconds timeout, RunStop const& stop)
+    {
+        // A run after shutdown never spawns anything.
+        if (stop.requested())
+            return std::unexpected(CommandCaptureError { CommandCaptureError::Kind::Cancelled, {} });
+        if (!commandLine)
+            return spawnFailed(std::make_error_code(std::errc::illegal_byte_sequence));
+        auto const deadline = Clock::now() + timeout;
+
+        auto spawned = spawnInJob(*std::move(commandLine));
+        if (!spawned)
+            return spawnFailed(spawned.error());
+
+        auto const captured = drain(*spawned, deadline, stop);
+        if (!captured)
+        {
+            // TerminateJobObject is asynchronous: wait (bounded) so the command is gone when we return.
+            TerminateJobObject(spawned->job.get(), 1);
+            WaitForSingleObject(spawned->process.get(), KillGracePeriod);
+            return std::unexpected(CommandCaptureError { captured.error(), {} });
+        }
+        // Closing the job handle on return kills any surviving grandchildren.
+        return firstLineOf(*captured);
+    }
 } // namespace
 
 std::expected<std::string, CommandCaptureError> SystemCommandCapture::run(std::string_view command,
                                                                           std::chrono::milliseconds timeout,
                                                                           core::async::StopToken stop)
 {
-    auto const runStop = RunStop { std::move(stop), _shutdown };
-    // A run after shutdown never spawns anything.
-    if (runStop.requested())
-        return std::unexpected(CommandCaptureError { CommandCaptureError::Kind::Cancelled, {} });
-    auto const deadline = Clock::now() + timeout;
-
     auto const wideShell = toWide(_shell);
     auto const wideCommand = toWide(command);
-    if (!wideShell || !wideCommand)
-        return spawnFailed(std::make_error_code(std::errc::illegal_byte_sequence));
+    auto commandLine = wideShell && wideCommand
+                           ? std::optional { L"\"" + *wideShell + L"\" /c " + *wideCommand }
+                           : std::nullopt;
+    return captureOutput(std::move(commandLine), timeout, RunStop { std::move(stop), _shutdown });
+}
 
-    auto spawned = spawnInJob(L"\"" + *wideShell + L"\" /c " + *wideCommand);
-    if (!spawned)
-        return spawnFailed(spawned.error());
+ProgramCommandCapture::ProgramCommandCapture(core::async::StopToken shutdown):
+    _shutdown { std::move(shutdown) }
+{
+}
 
-    auto const captured = drain(*spawned, deadline, runStop);
-    if (!captured)
-    {
-        // TerminateJobObject is asynchronous: wait (bounded) so the command is gone when we return.
-        TerminateJobObject(spawned->job.get(), 1);
-        WaitForSingleObject(spawned->process.get(), KillGracePeriod);
-        return std::unexpected(CommandCaptureError { captured.error(), {} });
-    }
-    // Closing the job handle on return kills any surviving grandchildren.
-    return firstLineOf(*captured);
+std::expected<std::string, CommandCaptureError> ProgramCommandCapture::run(std::string_view command,
+                                                                           std::chrono::milliseconds timeout,
+                                                                           core::async::StopToken stop)
+{
+    return captureOutput(toWide(command), timeout, RunStop { std::move(stop), _shutdown });
 }
 
 } // namespace vtpty
