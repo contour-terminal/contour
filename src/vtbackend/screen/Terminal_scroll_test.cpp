@@ -2049,3 +2049,51 @@ TEST_CASE("Terminal.viewport.aPageReflowedOnlyWhenTheCursorReturnsClampsTheView"
     CHECK(unbox(mc.terminal.viewport().scrollOffset()) <= unbox(grid.historyLineCount()));
     (void) mc.terminal.refreshRenderBuffer();
 }
+
+TEST_CASE("Terminal.viewport.scrollMarkUpFallsBackToHistoryStart", "[terminal][viewport][scrollmarks]")
+{
+    using namespace vtbackend;
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    mock.writeToScreen("1abc\r\n2def\r\n3ghi\r\n4jkl\r\n5mno\r\n6pqr");
+    auto& screen = mock.terminal.primaryScreen();
+    auto& viewport = mock.terminal.viewport();
+    REQUIRE(screen.historyLineCount() == LineCount(3));
+    REQUIRE(viewport.scrollOffset() == ScrollOffset(0));
+
+    SECTION("without marks")
+    {
+        REQUIRE(viewport.scrollMarkUp());
+        CHECK(viewport.scrollOffset() == ScrollOffset(3));
+    }
+
+    SECTION("an earlier mark takes priority over the history boundary")
+    {
+        screen.setLogicalLineFlags(LineOffset(-2), LineFlag::UserMark, true);
+        REQUIRE(viewport.scrollMarkUp());
+        CHECK(viewport.scrollOffset() == ScrollOffset(2));
+        REQUIRE(viewport.scrollMarkUp());
+        CHECK(viewport.scrollOffset() == ScrollOffset(3));
+    }
+
+    SECTION("the alternate screen does not scroll into primary history")
+    {
+        mock.writeToScreen("\033[?1049h");
+        CHECK_FALSE(viewport.scrollMarkUp());
+        CHECK(viewport.scrollOffset() == ScrollOffset(0));
+        return;
+    }
+
+    CHECK_FALSE(viewport.scrollMarkUp());
+    CHECK(viewport.scrollOffset() == ScrollOffset(3));
+}
+
+TEST_CASE("Terminal.viewport.scrollMarkUpWithoutHistoryDoesNotMove", "[terminal][viewport][scrollmarks]")
+{
+    using namespace vtbackend;
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    auto& viewport = mock.terminal.viewport();
+    CHECK_FALSE(viewport.scrollMarkUp());
+    CHECK(viewport.scrollOffset() == ScrollOffset(0));
+}
