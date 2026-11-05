@@ -42,27 +42,25 @@ namespace vthost
 
 class DaemonImageStore;
 class ImageLeases;
-class ProcessImageReplacer;
 
 namespace handover
 {
-    class HandoverMemory;
+    class ImageHandoff;
 } // namespace handover
 
-/// What a daemon upgrades itself in place with (a live upgrade, handover::LiveUpgrade): the collaborators
-/// that reach out of the process -- the image store, the exec, the memory the image crosses in, the probe
-/// that runs the target -- made and owned by the composition root, and what of the process the exec repeats.
+/// What a daemon upgrades itself live with (handover::LiveUpgrade): the collaborators that reach out of the
+/// process -- the image store, the handoff that execs the target or starts it as a successor, the probe that
+/// runs the target -- made and owned by the composition root, and what of the process the target repeats.
 ///
 /// Every reference is borrowed, and must outlive runDaemon().
 struct LiveUpgradeServices
 {
-    DaemonImageStore& store;          ///< The daemon's image store, where an upgrade's target lies.
-    ImageLeases& leases;              ///< The leases that guard the store's images.
-    ProcessImageReplacer& replacer;   ///< What execs the target in this process.
-    handover::HandoverMemory& memory; ///< Where the handover image is written for the target to read.
-    handover::ReadinessProbe& probe;  ///< What asks the target whether it can take over.
-    /// This process's command line, which the exec runs again with the target's program and the handover
-    /// argument (`--handover-fd=N`) in place of any it carried.
+    DaemonImageStore& store;         ///< The daemon's image store, where an upgrade's target lies.
+    ImageLeases& leases;             ///< The leases that guard the store's images.
+    handover::ImageHandoff& handoff; ///< What hands the image over to the target, which takes over.
+    handover::ReadinessProbe& probe; ///< What asks the target whether it can take over.
+    /// This process's command line, which the target runs again with its own program and the handover
+    /// argument (handover::HandoverArguments) in place of any it carried.
     std::vector<std::string> argv;
     /// What an upgrade naming no image runs: the daemon's own installed executable, which a package upgrade
     /// replaced; empty for none.
@@ -187,10 +185,9 @@ struct DaemonConfig
     /// and told to the first client that attaches. Empty for none, and always for a daemon that starts
     /// afresh, which refuses to start instead.
     std::vector<std::string> degradations {};
-    /// What the daemon upgrades itself in place with when a client asks (UpgradeDaemon); nullopt for a daemon
+    /// What the daemon upgrades itself live with when a client asks (UpgradeDaemon); nullopt for a daemon
     /// that cannot, which refuses every upgrade NotSupported and offers no Capability::LiveUpgrade. The
-    /// upgrade states this daemon's own release and instance. POSIX only: a Windows daemon ignores it, as its
-    /// in-place upgrade does not exist yet.
+    /// upgrade states this daemon's own release and instance.
     std::optional<LiveUpgradeServices> liveUpgrade {};
 };
 

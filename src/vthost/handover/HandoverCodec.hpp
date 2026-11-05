@@ -20,7 +20,6 @@ enum class HandoverError : uint8_t
     Malformed,            ///< Not a handover image, or a value in it is out of range.
     TerminalState,        ///< A session's terminal state was refused (reported by the adopter).
     MemoryUnavailable,    ///< The handover memory object could not be created, written or read.
-    NotSupported,         ///< This platform has no handover memory, or no in-place exec to capture for.
     /// A session runs on a device that is no child process on a PTY of this one (SSH, a channel): nothing
     /// could adopt it after the exec. Refused before any session was quiesced.
     UnsupportedSession,
@@ -29,6 +28,9 @@ enum class HandoverError : uint8_t
     SessionStarting,
     /// A session's escape sequence in flight outgrew what a capture keeps (HostQuiesceError).
     InFlightTailOverflowed,
+    /// A session's pseudoconsole is not the bundled conpty.dll's (vtpty::ConsoleHost): only that one can be
+    /// rebuilt in the successor process from its handles. Refused before any session was quiesced.
+    ForeignConsoleHost,
 };
 
 /// The page size a session is decoded with whose image names an empty one: its terminal state is refused,

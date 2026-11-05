@@ -196,13 +196,29 @@ TEST_CASE("the readiness probe asks the target's query mode and reads its answer
 TEST_CASE("the readiness probe names the configuration only when there is one", "[vthost][handover][upgrade]")
 {
     auto const bare = readinessCommand(ReadinessQuery { .executable = "/x/contour" });
-    CHECK(bare.ends_with("daemon handover-info"));
+    CHECK(bare.contains("daemon handover-info"));
+    CHECK_FALSE(bare.contains("--config"));
     auto const named = readinessCommand(
         ReadinessQuery { .executable = "/x/contour", .configFile = "/c/contour.yml", .profile = "p" });
-    CHECK(named.starts_with(bare));
     CHECK(named.contains("--config"));
     CHECK(named.contains("--profile"));
 }
+
+#ifdef _WIN32
+// The probe runs the target itself, with no cmd.exe between: its command line is the target's own, each
+// argument as the target's C runtime reads it back.
+TEST_CASE("the readiness probe's command line is the target's own", "[vthost][handover][upgrade]")
+{
+    auto const command =
+        readinessCommand(ReadinessQuery { .executable = "C:/Program Files/contour/contour.exe",
+                                          .configFile = "C:/my files/contour.yml",
+                                          .profile = "work" });
+    CHECK(
+        command
+        == R"("C:/Program Files/contour/contour.exe" daemon handover-info --config "C:/my files/contour.yml")"
+           R"( --profile work)");
+}
+#endif
 
 TEST_CASE("the readiness probe waits off the loop, which serves on, and completes back on it",
           "[vthost][handover][upgrade][threading]")

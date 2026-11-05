@@ -95,7 +95,9 @@
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/handover/HandoverMemory.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
+#include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/Readiness.hpp>
+#include <vthost/handover/SuccessorLaunch.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -1101,6 +1103,7 @@ namespace
                                           fileSystem.weaklyCanonical(vthost::labelSocketPath(label, env)));
     }
 
+#ifndef _WIN32
     /// Takes over what the previous image of this daemon handed over as it exec'd this one in place (a live
     /// upgrade): reads and decodes the image, closes its descriptor, then every descriptor it does not name.
     ///
@@ -1127,6 +1130,7 @@ namespace
         vthost::handover::closeDescriptorsExcept(vthost::handover::descriptorsToKeep(*image));
         return *std::move(image);
     }
+#endif
 
     /// @param handover What a live upgrade handed over; nullopt for a daemon that starts afresh.
     /// @return The run of the daemon this is: the one a live upgrade carries on, else a new one, so that a
@@ -1136,20 +1140,54 @@ namespace
         return handover ? handover->daemonInstance : vthost::drawDaemonInstance();
     }
 
-#ifndef _WIN32
-    /// What a daemon upgrades itself in place with, beside its image store: the operating system's exec, its
-    /// anonymous memory, and the probe that runs the target's query mode. Made before the daemon runs, so
-    /// that it outlives it.
+#ifdef _WIN32
+    /// Takes over from the daemon that started this one as its successor, a live upgrade on Windows: reads
+    /// the image it handed over, says this one is ready, and waits for it to commit and end. Nothing is taken
+    /// over before then: a successor that cannot read the image or run its sessions says nothing, and the
+    /// previous daemon, which never sees it ready, ends it and serves on.
+    /// @param handles What `--handover-handles` names; empty for a daemon that starts afresh.
+    /// @return The image; nullopt for none; or why this daemon may take nothing over, and must end without
+    ///         serving.
+    [[nodiscard]] std::expected<std::optional<vthost::handover::HandoverImage>, std::string>
+    takeOverAsSuccessor(std::string_view handles)
+    {
+        if (handles.empty())
+            return std::nullopt;
+        auto const parsed = vthost::handover::parseHandoverHandles(handles);
+        if (!parsed)
+            return std::unexpected(std::format("--handover-handles names no handles: '{}'", handles));
+        return vthost::handover::receiveHandover(*parsed, *vthost::handover::makeNativeHandoverMemory())
+            .transform(
+                [](vthost::handover::HandoverImage image) { return std::optional { std::move(image) }; });
+    }
+#endif
+
+    /// What a daemon upgrades itself live with, beside its image store: the handoff -- the operating system's
+    /// exec and anonymous memory on POSIX, a successor process and an unnamed mapping on Windows -- and the
+    /// probe that runs the target's query mode. Made before the daemon runs, so that it outlives it.
     struct DaemonUpgradeResources
     {
-        std::unique_ptr<vthost::ProcessImageReplacer> replacer = vthost::makeNativeProcessImageReplacer();
         std::unique_ptr<vthost::handover::HandoverMemory> memory =
             vthost::handover::makeNativeHandoverMemory();
+#ifdef _WIN32
+        std::unique_ptr<vthost::handover::SuccessorLauncher> launcher =
+            vthost::handover::makeNativeSuccessorLauncher();
+        vthost::handover::SuccessorHandoff handoff { *launcher, *memory, {} };
+#else
+        std::unique_ptr<vthost::ProcessImageReplacer> replacer = vthost::makeNativeProcessImageReplacer();
+        vthost::handover::ExecHandoff handoff { *replacer, *memory };
+#endif
         /// Never asked to stop: a probe is bounded by its own timeout.
         core::async::StopSource probeShutdown;
+#ifdef _WIN32
+        /// Runs the target itself: under cmd.exe a release build, which attaches to its parent's console,
+        /// would answer to that console instead.
+        vtpty::ProgramCommandCapture capture { probeShutdown.get_token() };
+#else
         vtpty::SystemCommandCapture capture {
             vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()), probeShutdown.get_token()
         };
+#endif
         /// Where the probe waits for the target, so that the daemon's loop serves on meanwhile. Made before
         /// the daemon blocks SIGTERM for its sigwait thread, so it blocks every signal itself.
         core::async::ThreadPoolExecutor probeWorker = makeBackgroundExecutor(1);
@@ -1159,7 +1197,7 @@ namespace
     /// @param images This process's image store.
     /// @param resources What else the upgrade reaches out of the process with (not owned; outlives the
     ///        daemon).
-    /// @param argv This process's command line, which the exec repeats.
+    /// @param argv This process's command line, which the target repeats.
     /// @param configFile The configuration file the daemon runs on, which a target must load.
     /// @param profile The profile the daemon's sessions run, which a target must resolve.
     /// @param running Whether the daemon loaded its configuration file, or serves on built-in defaults.
@@ -1175,8 +1213,7 @@ namespace
         return vthost::LiveUpgradeServices {
             .store = images.store(),
             .leases = images.leases(),
-            .replacer = *resources.replacer,
-            .memory = *resources.memory,
+            .handoff = resources.handoff,
             .probe = resources.probe,
             .argv = std::move(argv),
             // Only a daemon that runs in place moves onto its installed executable, which a package upgrade
@@ -1190,7 +1227,6 @@ namespace
             .runningConfig = running,
         };
     }
-#endif
 
     /// @return Whether `--in-place` refuses a move onto a staged image.
     [[nodiscard]] vthost::RelocationRequest relocationRequestOf(bool inPlace) noexcept
@@ -1243,9 +1279,24 @@ int ContourApp::daemonAction()
             });
     };
 
+#ifdef _WIN32
+    // First of all: a successor takes over only once its predecessor committed, and ends without serving
+    // anything where it may not.
+    auto received = takeOverAsSuccessor(parameters().get<string>("contour.daemon.handover-handles"));
+    if (!received)
+    {
+        cerr << std::format("contour daemon: {}\n", received.error());
+        return EXIT_FAILURE;
+    }
+    auto handover = *std::move(received);
+    // The lease the previous daemon held on this image, kept until this one holds its own
+    // (settleDaemonImage()). On POSIX it crosses the exec, and is adopted by its descriptor.
+    auto const handedOverLease = vthost::adoptHandedOverLease(handover ? handover->leaseHandle : 0);
+#else
     // First of all, before this process opens a descriptor of its own: what is open now and the image does
     // not name was leaked across the exec, and is closed.
     auto handover = takeHandover(parameters().get<int>("contour.daemon.handover-fd"));
+#endif
     // From here on a handover carries hosted programs, which ending this process would hang up: whatever
     // cannot be started as configured is served on without, logged, and told to the first client.
     auto failures = DaemonStartFailures { handover ? vthost::StartContinuity::HandedOver
@@ -1447,20 +1498,19 @@ int ContourApp::daemonAction()
     // A daemon that could not start as configured (only a handed-over one gets this far) serves on defaults.
     config.degradations = failures.take();
 
-#ifndef _WIN32
-    // What a client's UpgradeDaemon upgrades this daemon in place with; a daemon that cannot locate its own
-    // executable has no store to upgrade from, and refuses. Held until runDaemon returns.
-    auto upgradeResources = DaemonUpgradeResources {};
+    // What a client's UpgradeDaemon upgrades this daemon live with; a daemon that cannot locate its own
+    // executable has no store to upgrade from, and refuses, and makes none of it. Held until runDaemon
+    // returns.
+    auto upgradeResources = std::optional<DaemonUpgradeResources> {};
     if (images)
         config.liveUpgrade.emplace(liveUpgradeServicesOf(
             **images,
-            upgradeResources,
+            upgradeResources.emplace(),
             commandLine(),
             resolved.configFile,
             daemonProfile,
             config.degradations.empty() ? vthost::handover::RunningConfig::LoadedFromFile
                                         : vthost::handover::RunningConfig::BuiltInDefaults));
-#endif
 
     return vthost::runDaemon(config, std::move(handover));
 }
@@ -2274,6 +2324,12 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "the sessions, listeners and instance the previous image of this "
                                   "daemon handed over in the memory object at descriptor FD.",
                                   "FD" },
+                    CLI::Option { "handover-handles",
+                                  CLI::Value { std::string {} },
+                                  "Internal, Windows: what a live upgrade starts the new daemon with. "
+                                  "Takes over the sessions, listeners and instance the previous daemon "
+                                  "handed over, once it has committed and ended.",
+                                  "HANDLES" },
                     CLI::Option {
                         "lifecycle",
                         CLI::Value { std::string { vthost::nameOf(vthost::DaemonLifecycle::Persistent) } },

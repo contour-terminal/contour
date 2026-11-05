@@ -61,6 +61,7 @@ add_library(vthost STATIC
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     ListeningSocket.hpp
+    ListeningSocket_win32.cpp
     NativeSession.cpp
     NodeMove.cpp
     NodeMove.hpp
@@ -184,10 +185,15 @@ add_library(vthost STATIC
     handover/HandoverMemory_win32.cpp
     handover/HandoverRestore.cpp
     handover/HandoverRestore.hpp
+    handover/ImageHandoff.cpp
+    handover/ImageHandoff.hpp
     handover/LiveUpgrade.cpp
     handover/LiveUpgrade.hpp
     handover/Readiness.cpp
     handover/Readiness.hpp
+    handover/SuccessorLaunch.cpp
+    handover/SuccessorLaunch.hpp
+    handover/SuccessorLaunch_win32.cpp
     handover/UpgradeError.hpp
     handover/UpgradeTarget.hpp
     proto/Negotiation.cpp
@@ -365,6 +371,7 @@ if(VTHOST_TESTING)
         handover/HandoverRestore_test.cpp
         handover/LiveUpgrade_test.cpp
         handover/Readiness_test.cpp
+        handover/SuccessorLaunch_test.cpp
         imsg/ImsgCodec_test.cpp
         latency/EchoProtocol_test.cpp
         latency/Gate_test.cpp

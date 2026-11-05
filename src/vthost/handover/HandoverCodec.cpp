@@ -207,6 +207,17 @@ static void visitStateFields(Visitor& visitor, T& wire)
 }
 
 template <typename Visitor, typename T>
+    requires std::same_as<std::remove_const_t<T>, vtpty::InheritedConPty>
+static void visitStateFields(Visitor& visitor, T& conpty)
+{
+    visitor(1, conpty.outputReader);
+    visitor(2, conpty.inputWriter);
+    visitor(3, conpty.signal);
+    visitor(4, conpty.reference);
+    visitor(5, conpty.consoleHost);
+}
+
+template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::InheritedPty>
 static void visitStateFields(Visitor& visitor, T& pty)
 {
@@ -214,6 +225,7 @@ static void visitStateFields(Visitor& visitor, T& pty)
     visitor(2, pty.stdoutFastPipe);
     visitor(3, pty.pageSize);
     visitor(4, pty.pixels);
+    visitor(5, pty.conpty);
 }
 
 template <typename Visitor, typename T>
@@ -225,6 +237,7 @@ static void visitStateFields(Visitor& visitor, T& child)
     visitor(3, child.args);
     // Only the duration of the grace crosses; its clock is the new process's own.
     visitor(5, child.hangupGrace.duration);
+    visitor(6, child.processHandle);
     if constexpr (std::is_same_v<Visitor, FieldDecoder>)
     {
         auto cwd = std::string {};

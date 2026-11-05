@@ -146,7 +146,7 @@ connection meets it.
 
 ## Upgrading the daemon
 
-`daemon.upgrade` replaces the running daemon with a newer release in place, keeping every program running
+`daemon.upgrade` replaces the running daemon with a newer release, keeping every program running
 (see [Live upgrade](persistent-sessions.md#live-upgrade)); `contour daemon upgrade` is its verb.
 
 ```sh

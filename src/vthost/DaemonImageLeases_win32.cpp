@@ -11,6 +11,8 @@
 
 #ifdef _WIN32
 
+    #include <vtpty/WindowsHandle.hpp>
+
     #include <core/Utf8Path.hpp>
 
     #include <chrono>
@@ -18,6 +20,8 @@
     #include <ranges>
     #include <system_error>
     #include <thread>
+
+    #include <vthost/Logging.hpp>
 
 namespace vthost
 {
@@ -41,6 +45,8 @@ namespace
         HandleLease(HandleLease&&) = delete;
         HandleLease& operator=(HandleLease&&) = delete;
         ~HandleLease() override { ::CloseHandle(_handle); }
+
+        [[nodiscard]] uint64_t handle() const noexcept override { return vtpty::valueOf(_handle); }
 
       private:
         HANDLE _handle;
@@ -133,6 +139,17 @@ namespace
 std::unique_ptr<ImageLeases> makeNativeImageLeases()
 {
     return std::make_unique<NativeImageLeases>();
+}
+
+std::unique_ptr<ImageLease> adoptHandedOverLease(uint64_t handle)
+{
+    if (handle == 0)
+        return nullptr;
+    auto* const leaseHandle = vtpty::handleOf(handle);
+    // Crossed for this process alone: no program it starts inherits it.
+    if (auto const set = vtpty::setInheritance(leaseHandle, vtpty::HandleInheritance::NotInherited); !set)
+        errorLog()("the handed-over image lease stays inheritable: {}", set.error().message());
+    return std::make_unique<HandleLease>(leaseHandle);
 }
 
 } // namespace vthost

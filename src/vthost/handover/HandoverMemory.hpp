@@ -22,7 +22,11 @@ inline constexpr uint64_t MaxHandoverImageSize = uint64_t { 4 } << 30;
 /// from. An interface, so the orchestrator is tested without touching the operating system.
 ///
 /// The descriptor write() returns has no name on disk. It is close-on-exec until keepAcrossExec(), so that
-/// it is inherited by the one exec that should and by no child spawned in between.
+/// it is inherited by the one exec that should and by no child spawned in between. On Windows the
+/// "descriptor" is the handle of an unnamed, pagefile-backed file mapping as HandleToLong() narrows it. It is
+/// never inheritable: the successor process the upgrade starts takes it, with every other handle the image
+/// names, through that one launch's handle list (@see SuccessorHandoff), and keepAcrossExec() and
+/// closeOnExecAgain() do nothing there.
 class HandoverMemory
 {
   public:
@@ -102,13 +106,12 @@ struct HandoverMemoryKind
 #endif
 }
 
-/// @return The platform's memory object (nativeHandoverMemoryKind()); on Windows one that refuses everything
-///         with NotSupported.
+/// @return The platform's memory object (nativeHandoverMemoryKind()); on Windows an unnamed file mapping.
 [[nodiscard]] std::unique_ptr<HandoverMemory> makeNativeHandoverMemory();
 
 /// @param kind How the image is stored. A kind the platform lacks (a memfd on macOS) fails every write with
 ///        MemoryUnavailable. What lets the macOS kind be tested where the tests run.
-/// @return A memory object of that kind; on Windows one that refuses everything with NotSupported.
+/// @return A memory object of that kind; on Windows, which has only the one, an unnamed file mapping.
 [[nodiscard]] std::unique_ptr<HandoverMemory> makeHandoverMemory(HandoverMemoryKind kind);
 
 } // namespace vthost::handover

@@ -2,10 +2,13 @@
 #pragma once
 
 /// @file
-/// The live-upgrade handover image: everything that crosses the daemon's in-place `execv`, as plain data.
+/// The live-upgrade handover image: everything that crosses the daemon's in-place `execv` on POSIX, or that
+/// its successor process inherits on Windows, as plain data.
 ///
-/// Nothing here owns a resource. A descriptor is a number the new image inherits; turning it back into a PTY,
-/// a child or a listener is the adopter's job (@see vtpty::UnixPty::adopt, vtpty::Process::adopt).
+/// Nothing here owns a resource. A descriptor or a handle is a number the new image inherits; turning it back
+/// into a PTY, a child or a listener is the adopter's job (@see vtpty::UnixPty::adopt, vtpty::ConPty::adopt,
+/// vtpty::Process::adopt). Windows' handles are carried beside the descriptors, as vtpty::HandleValue, 0 for
+/// none; each platform reads only its own.
 
 #include <vtbackend/core/ColorPalette.hpp>
 
@@ -62,8 +65,9 @@ struct TlsIdentity
 /// A listener socket the new image inherits.
 struct InheritedListener
 {
-    std::string name; ///< "control", "native", "imsg", "tmux-compat" or "native-tcp".
-    int fd = -1;      ///< The descriptor.
+    std::string name;              ///< "control", "native", "imsg", "tmux-compat" or "native-tcp".
+    int fd = -1;                   ///< The descriptor; -1 on Windows.
+    vtpty::HandleValue socket = 0; ///< On Windows, the listening socket's handle; 0 elsewhere.
     /// The identity the listener presents where the daemon made it up itself (a self-signed certificate):
     /// presented again by the new image, so that a client that trusted it on first use goes on trusting it.
     /// nullopt for a listener without TLS, or with a configured certificate, which the new image reads again.
@@ -75,6 +79,7 @@ struct InheritedListener
         visitor(1, self.name);
         visitor(2, self.fd);
         visitor(3, self.tlsIdentity);
+        visitor(4, self.socket);
     }
 };
 
@@ -147,6 +152,7 @@ struct HandoverImage
     std::vector<HandoverSession> sessions;      ///< Every hosted session.
     std::vector<InheritedListener> listeners;   ///< The listeners to keep serving on.
     int leaseFd = -1;                           ///< The descriptor of the daemon image lease; -1 for none.
+    vtpty::HandleValue leaseHandle = 0; ///< On Windows, the handle the lease is held through; 0 for none.
     /// The light/dark preference the latest client stated, which new sessions are built under.
     vtbackend::ColorPreference defaultColorPreference = HostedColorPreference;
     /// How many live upgrades the daemon that wrote it had completed
@@ -168,6 +174,7 @@ struct HandoverImage
         visitor(9, self.leaseFd);
         visitor(10, self.defaultColorPreference);
         visitor(11, self.upgradeGeneration);
+        visitor(12, self.leaseHandle);
     }
 };
 

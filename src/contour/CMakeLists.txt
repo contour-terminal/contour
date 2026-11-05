@@ -1434,6 +1434,19 @@ if(CONTOUR_FRONTEND_GUI)
                 set_property(TEST contour_e2e_daemon_live_upgrade
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
+        elseif(WIN32)
+            # The same upgrade on Windows, where the daemon hands itself over to a successor process rather
+            # than exec'ing in place: the daemon's pid changes and the program's does not. Windows PowerShell,
+            # which every Windows has.
+            add_test(NAME contour_e2e_daemon_live_upgrade
+                COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                        -File ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-live-upgrade.ps1 $<TARGET_FILE:contour>)
+            set_tests_properties(contour_e2e_daemon_live_upgrade
+                PROPERTIES
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+                    TIMEOUT 180
+                    RUN_SERIAL TRUE
+                    LABELS "e2e;daemon")
         endif()
         # }}}
     endif()

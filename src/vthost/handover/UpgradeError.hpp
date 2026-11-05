@@ -30,7 +30,7 @@ enum class UpgradeRefusal : uint8_t
     FormatUnreadable, ///< The target cannot read the handover or terminal state formats this daemon writes.
     InFlightTailTooLarge, ///< A session's escape sequence in flight outgrew what a capture keeps.
     TargetUnresponsive,   ///< The target did not answer its readiness probe in time, or could not be started.
-    NotSupported,         ///< This platform cannot replace a process image in place.
+    NotSupported,         ///< This daemon cannot upgrade itself live: it was given nothing to upgrade with.
     UnsupportedSession,   ///< A session runs on a device nothing could adopt after the exec (SSH, a channel).
     SessionStarting,      ///< A session kept starting through every retry: its input could not be carried.
     QuiesceTimedOut,      ///< The clients did not go, or the sessions' pumps did not settle, in time.
@@ -39,12 +39,17 @@ enum class UpgradeRefusal : uint8_t
     /// The target cannot load the daemon's configuration file, or it no longer names the daemon's profile.
     ConfigUnreadable,
     LocalOnly, ///< Asked over the network: only a peer on the daemon's machine may replace its binary.
+    /// A session runs on Windows' own console host rather than the conpty.dll Contour ships: only that one's
+    /// pseudoconsole can be rebuilt from its handles in the daemon that takes over.
+    ForeignConsoleHost,
 };
 
-/// The exec into the new image failed after everything was stopped; the daemon resumed, and serves on.
+/// The new image could not take over after everything was stopped -- the exec failed (POSIX), or the
+/// successor could not be started, ended or was not ready in time (Windows); the daemon resumed, and serves
+/// on.
 struct ExecFailure
 {
-    std::error_code cause; ///< Why: the exec's own error, or what preparing the descriptors for it failed on.
+    std::error_code cause; ///< Why: the handoff's own error, or what preparing for it failed on.
 
     bool operator==(ExecFailure const&) const = default;
 };
@@ -79,7 +84,7 @@ inline constexpr auto UpgradeRefusalRows = std::array {
                         "targetUnresponsive",
                         "the new release did not answer its readiness check" },
     UpgradeRefusalRow {
-        UpgradeRefusal::NotSupported, "notSupported", "live upgrade is not supported on this platform" },
+        UpgradeRefusal::NotSupported, "notSupported", "this daemon cannot upgrade itself live" },
     UpgradeRefusalRow { UpgradeRefusal::UnsupportedSession,
                         "unsupportedSession",
                         "a session runs on a connection that cannot be carried over (SSH or a channel)" },
@@ -94,6 +99,9 @@ inline constexpr auto UpgradeRefusalRows = std::array {
                         "configUnreadable",
                         "the new release cannot load the daemon's configuration or profile" },
     UpgradeRefusalRow { UpgradeRefusal::LocalOnly, "localOnly", "live upgrade is local only" },
+    UpgradeRefusalRow { UpgradeRefusal::ForeignConsoleHost,
+                        "foreignConsoleHost",
+                        "a session runs on Windows' own console host, which cannot be carried over" },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRefusalRows.size()),

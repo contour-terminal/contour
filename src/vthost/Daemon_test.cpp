@@ -59,6 +59,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/WorkspaceCapture.hpp>
 #include <vthost/WorkspacePersistence.hpp>
+#include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
 #include <vthost/testing/FakeHandoverMemory.hpp>
@@ -1377,6 +1378,7 @@ struct UpgradableDaemon
     };
     vthost::testing::FakeProcessImageReplacer replacer;
     vthost::testing::FakeHandoverMemory memory;
+    vthost::handover::ExecHandoff handoff { replacer, memory };
     vthost::testing::FakeReadinessProbe probe { "0.9.1" };
     /// The command line the exec was asked to run, fulfilled where the exec would replace the process.
     std::promise<std::vector<std::string>> replaced;
@@ -1392,8 +1394,7 @@ struct UpgradableDaemon
         config.liveUpgrade.emplace(vthost::LiveUpgradeServices {
             .store = store,
             .leases = leases,
-            .replacer = replacer,
-            .memory = memory,
+            .handoff = handoff,
             .probe = probe,
             .argv = commandLine(),
             .installedExecutable = "/usr/bin/contour",

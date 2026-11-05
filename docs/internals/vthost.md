@@ -1583,7 +1583,82 @@ offers from facts alone: nothing for a remote daemon or matching releases, a res
 without `Capability::LiveUpgrade` or newer than the client (a downgrade), an upgrade (with the restart as the fallback after a refusal) for one
 that has it. `DaemonDriftModel` holds the outcome for QML; `ContourGuiApp` runs the call off the GUI thread.
 
-**Windows.** There is no `exec`; the daemon declines `NotSupported` and the restart stays.
+**The handoff is the platform's.** Everything up to the encoded image is one code path; the step that hands
+it over is an `handover::ImageHandoff`. `ExecHandoff` is the POSIX one above: keep the descriptors, write the
+memory object, `exec` with `--handover-fd`. `SuccessorHandoff` is Windows'.
+
+**Windows.** There is no `exec` that keeps the process, so the old daemon starts the target as a *successor
+process* and hands it over at one **commit point**:
+
+1. The image goes into an unnamed, pagefile-backed file mapping (`HandoverMemory_win32.cpp`), never a file.
+   The successor is started detached (`SuccessorLauncher`), inheriting through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`
+   exactly the handles the image names (`handlesNamedBy()`: each pseudoconsole's five, each shell's process
+   handle, each listening socket, the image lease) and four more, named by `--handover-handles=M,R,C,P`:
+   the mapping, a `ready` and a `commit` event, and the old daemon's own process handle.
+2. The successor reads the image, checks it can run the sessions' pseudoconsoles here, and sets `ready`
+   (`receiveHandover()`). Until then it has touched no PTY and no listener.
+3. The old daemon, seeing it ready and still running, sets `commit` and ends with `TerminateProcess` on itself:
+   no destructor and no library detach handler runs, so nothing it owned is closed, and no lock a killed
+   thread held can keep it alive holding a pseudoconsole's handles.
+4. The successor, having seen `commit` (or the old daemon end without it, which can then resume nothing),
+   waits for the old daemon to have ended and only then serves: replays the carried input, starts the pumps,
+   accepts. Before this point a rollback could duplicate input the successor had already written. It waits
+   for either only `SuccessorTakeoverConfig::commitWait` (5 s) after saying it is ready: an old daemon that
+   neither committed nor ended by then gave up on it and serves on, and a successor that could not be ended
+   must not take over later, from an old daemon that ends for another reason.
+
+A successor that ends, or is not ready within `SuccessorHandoffConfig::readyTimeout` (8 s), is ended
+(`SuccessorTerminateWait`, 2 s) and `handOver()` returns an `ExecFailure`; `LiveUpgrade` then rolls back as
+after a failed `exec`. Both waits together stay well within `client::UpgradeHold` (15 s), the time clients hold
+on for an upgrade, during which the old daemon's loop answers nothing. The daemon's PID changes; the shells',
+their consoles' and their scrollback's do not.
+
+The readiness probe, which runs before any of this, starts the target itself (`vtpty::ProgramCommandCapture`),
+not through `cmd.exe`. A release build is a GUI-subsystem program that attaches to its parent's console at
+start, which replaces each standard handle it was not started with as such (`STARTF_USESTDHANDLES`).
+`cmd.exe` hands its children its own handles by inheritance alone, so under it every target would answer to
+`cmd.exe`'s console and seem to say nothing.
+
+Between the capture and the commit, a program may exit. Its exit watcher would close its pseudoconsole and
+free handles the image names by value, for the next handle the daemon makes -- the mapping, the handshake's
+events -- to take their numbers. While a session is quiesced (`interruptWrites()`) `ConPty::close()` is
+therefore held until the upgrade rolls back (`allowWrites()`), and dropped once the handles are handed on
+(`releaseHandles()`); an exited program is handed over like a running one, and the successor sees it exit.
+
+What makes the handles adoptable:
+
+- **The pseudoconsole.** An `HPCON` is a heap struct `{signal, reference, process}` in the `conpty.dll`
+  Contour ships (OpenConsole's `winconpty.h`), freed by `ClosePseudoConsole` from the process heap. The old
+  daemon reads the three handles out of it; `vtpty::ConPty::adopt()` builds the successor's own with the
+  DLL's `ConptyPackPseudoConsole()`, as Windows Terminal's handoff does. Only that layout is known, so a
+  session on Windows' own console host (kernel32, `vtpty::ConsoleHost::System`) or a `conpty.dll` from the
+  PATH refuses the upgrade (`UpgradeRefusal::ForeignConsoleHost`) before anything is stopped. The cell size in
+  pixels, which a pseudoconsole is never told, is kept by `ConPty` (`pixelSize()`) to cross with it.
+- **The listeners.** A socket is bound to one I/O completion port for as long as it is open, in every process
+  that holds it; the successor's loop cannot bind an inherited listener until `releaseCompletionPort()`
+  (`FileReplaceCompletionInformation`, Windows 8.1+) lets it go. It does so after the commit point, never
+  before: the old daemon still accepts through that port if it rolls back.
+- **The image lease** crosses as `HandoverImage::leaseHandle`, kept by the successor until it holds a lease of
+  its own (`adoptHandedOverLease()`), so a prune cannot remove the image in between.
+- **A quiesce never blocks on a program that reads nothing.** `ConPty::interruptWrites()` ends a write the
+  pseudoconsole is not reading. The input pipe's end is overlapped, and a write never asks for more than the
+  pipe has room for (`FilePipeLocalInformation`'s `WriteQuotaAvailable`); only a full pipe gets a one-byte
+  write that waits and can be cancelled. A cancelled write of more than one byte that the reader has started
+  reading reports *none* of it written (measured), which would replay the part that was read.
+
+The design was proven by a throwaway spike before any of this was built, on Windows 11 (26200), against both
+Windows' built-in ConPTY and the bundled `conpty.dll` with `OpenConsole.exe`:
+
+| Check | Built-in | Bundled |
+| --- | --- | --- |
+| The program is alive after the first process exited, under the same PID | pass | pass |
+| Output reaches the successor, and its input reaches the program | pass | pass |
+| `ResizePseudoConsole` on the rebuilt `HPCON` | pass | pass |
+| The resize reaches the program (`90x30`, then `100x40`) | pass | pass |
+| The program exits on input with its own exit code, seen through the inherited handle | pass | pass |
+| `ClosePseudoConsole` on the rebuilt `HPCON` ends the console host | pass | pass |
+| An AF_UNIX listener accepts in the successor what connected during and after the gap (`WSADuplicateSocketW` and handle inheritance alike) | pass | |
+| The same for a listener bound to the first process's completion port, once released | pass | |
 
 ## Binary imsg IPC (the real tmux binary as a client)
 

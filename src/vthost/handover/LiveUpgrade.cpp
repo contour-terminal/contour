@@ -9,6 +9,7 @@
 #include <exception>
 #include <format>
 #include <ranges>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -28,9 +29,6 @@ namespace vthost::handover
 
 namespace
 {
-    /// The argument that names the handover image's descriptor to the new image (`contour daemon`).
-    constexpr auto HandoverArgument = std::string_view { "--handover-fd=" };
-
     /// @return The refusal a capture's refusal is to the one who asked for the upgrade.
     [[nodiscard]] UpgradeRefusal refusalOf(HandoverError error) noexcept
     {
@@ -39,14 +37,14 @@ namespace
             case HandoverError::UnsupportedSession: return UpgradeRefusal::UnsupportedSession;
             case HandoverError::SessionStarting: return UpgradeRefusal::SessionStarting;
             case HandoverError::InFlightTailOverflowed: return UpgradeRefusal::InFlightTailTooLarge;
+            case HandoverError::ForeignConsoleHost: return UpgradeRefusal::ForeignConsoleHost;
             case HandoverError::Truncated:
             case HandoverError::UnknownFormatVersion:
             case HandoverError::Malformed:
             case HandoverError::TerminalState:
-            case HandoverError::MemoryUnavailable:
-            case HandoverError::NotSupported: break;
+            case HandoverError::MemoryUnavailable: break;
         }
-        // A capture refuses nothing else but on a platform it does not support.
+        // A capture refuses nothing else: these are a reader's.
         return UpgradeRefusal::NotSupported;
     }
 
@@ -104,59 +102,13 @@ namespace
         SessionHost& _host;
         std::vector<ConnectionAcceptor*> const& _listeners;
     };
-
-    /// The descriptors kept across an exec, and the memory object the image is in: made close-on-exec again,
-    /// and the memory object discarded, as it goes. Only an exec that succeeded never lets it go.
-    class KeptAcrossExec
-    {
-      public:
-        /// @param memory What keeps the descriptors, and holds the image.
-        /// @param imageFd The memory object the image was written into, which this discards.
-        /// @param descriptors The descriptors to keep (keepAll()). Not owned; they outlive this.
-        KeptAcrossExec(HandoverMemory& memory, int imageFd, std::span<int const> descriptors) noexcept:
-            _memory { memory }, _imageFd { imageFd }, _descriptors { descriptors }
-        {
-        }
-        KeptAcrossExec(KeptAcrossExec const&) = delete;
-        KeptAcrossExec(KeptAcrossExec&&) = delete;
-        KeptAcrossExec& operator=(KeptAcrossExec const&) = delete;
-        KeptAcrossExec& operator=(KeptAcrossExec&&) = delete;
-        ~KeptAcrossExec()
-        {
-            for (auto const descriptor: _descriptors.first(_keptCount))
-                if (!_memory.closeOnExecAgain(descriptor))
-                    errorLog()("live upgrade: descriptor {} stays inheritable after the failed exec",
-                               descriptor);
-            _memory.discard(_imageFd);
-        }
-
-        /// Keeps every descriptor across the exec, in order, up to the first that cannot be kept.
-        /// @return Nothing, or why one could not be kept.
-        [[nodiscard]] std::expected<void, HandoverError> keepAll()
-        {
-            for (auto const descriptor: _descriptors)
-            {
-                if (auto kept = _memory.keepAcrossExec(descriptor); !kept)
-                    return kept;
-                ++_keptCount;
-            }
-            return {};
-        }
-
-      private:
-        HandoverMemory& _memory;
-        int _imageFd;
-        std::span<int const> _descriptors;
-        std::size_t _keptCount = 0; ///< How many of _descriptors, from the first, are kept.
-    };
 } // namespace
 
 LiveUpgrade::LiveUpgrade(core::net::EventLoop& loop,
                          SessionHost& host,
                          DaemonImageStore& store,
                          ImageLeases& leases,
-                         ProcessImageReplacer& replacer,
-                         HandoverMemory& memory,
+                         ImageHandoff& handoff,
                          ReadinessProbe& probe,
                          UpgradeHooks& hooks,
                          std::span<ConnectionAcceptor* const> listeners,
@@ -165,8 +117,7 @@ LiveUpgrade::LiveUpgrade(core::net::EventLoop& loop,
     _host { host },
     _store { store },
     _leases { leases },
-    _replacer { replacer },
-    _memory { memory },
+    _handoff { handoff },
     _probe { probe },
     _hooks { hooks },
     _listeners { listeners.begin(), listeners.end() },
@@ -184,15 +135,6 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     // Refused before anything is touched: nothing is leased, probed, announced or stopped.
     if (_state == UpgradeState::Running)
         co_return std::unexpected(UpgradeRefusal::InProgress);
-    // The rest in an else: on a platform without an in-place exec it is no reachable code (MSVC C4702).
-    if constexpr (!HasInPlaceExec)
-        co_return std::unexpected(UpgradeRefusal::NotSupported);
-    else
-        co_return co_await upgradeInPlace(std::move(target));
-}
-
-core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::upgradeInPlace(UpgradeTarget target)
-{
     if (_config.sandbox != vtpty::SandboxState::Host)
         co_return std::unexpected(UpgradeRefusal::Sandboxed);
     auto const running = RunningScope { _state };
@@ -231,12 +173,13 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::upgradeInPlace
     _hooks.closeClients();
 
     auto const leaseFd = resolved->lease ? resolved->lease->descriptor() : -1;
-    auto const image = co_await quiesceAndCapture(leaseFd);
+    auto image = co_await quiesceAndCapture(leaseFd);
     if (!image)
     {
         daemonLog()("live upgrade refused: {}", describe(image.error()));
         co_return std::unexpected(image.error());
     }
+    image->leaseHandle = resolved->lease ? resolved->lease->handle() : 0;
 
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
@@ -247,7 +190,8 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::upgradeInPlace
         co_return std::unexpected(UpgradeRefusal::ImageTooLarge);
     }
 
-    auto const failure = execInto(resolved->executable, *image, bytes);
+    auto const failure =
+        _handoff.handOver(resolved->executable, argvFor(resolved->executable), *image, bytes);
     errorLog()("live upgrade: cannot run {}: {}; serving on",
                core::pathToUtf8(resolved->executable),
                failure.cause.message());
@@ -342,7 +286,8 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
     for (auto const* const listener: _listeners)
     {
         auto const fd = listener->listeningDescriptor();
-        if (!fd)
+        auto const socket = listener->listeningSocket();
+        if (!fd && !socket)
         {
             // The new image binds it afresh: a client that connects meanwhile is refused, and retries.
             errorLog()("live upgrade: the {} listener has no descriptor to hand over", listener->name());
@@ -351,7 +296,8 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
         auto const identity = _config.tlsIdentities.find(listener->name());
         crossing.push_back(InheritedListener {
             .name = listener->name(),
-            .fd = *fd,
+            .fd = fd.value_or(-1),
+            .socket = socket.value_or(0),
             .tlsIdentity =
                 identity != _config.tlsIdentities.end() ? std::optional { identity->second } : std::nullopt,
         });
@@ -359,40 +305,19 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
     return crossing;
 }
 
-std::vector<std::string> LiveUpgrade::argvFor(std::filesystem::path const& executable, int handoverFd) const
+std::vector<std::string> LiveUpgrade::argvFor(std::filesystem::path const& executable) const
 {
     // A daemon started from a handover itself carries the argument that named its own image: dropped, so that
-    // the command line names only this one, however many upgrades this daemon has seen.
-    auto argv =
-        std::ranges::to<std::vector>(_config.argv | std::views::filter([](std::string const& argument) {
-                                         return !argument.starts_with(HandoverArgument);
-                                     }));
+    // the command line names only the next one, however many upgrades this daemon has seen.
+    auto argv = std::ranges::to<std::vector>(
+        _config.argv | std::views::filter([](std::string const& argument) {
+            return std::ranges::none_of(
+                HandoverArguments, [&](std::string_view prefix) { return argument.starts_with(prefix); });
+        }));
     if (argv.empty())
         argv.emplace_back();
     argv.front() = core::pathToUtf8(executable);
-    argv.push_back(std::format("{}{}", HandoverArgument, handoverFd));
     return argv;
-}
-
-ExecFailure LiveUpgrade::execInto(std::filesystem::path const& executable,
-                                  HandoverImage const& image,
-                                  std::span<uint8_t const> bytes)
-{
-    // Room for the image's own descriptor made before it exists: nothing between writing the memory object
-    // and handing it to the guard that discards it may throw.
-    auto crossing = descriptorsNamedBy(image);
-    crossing.reserve(crossing.size() + 1);
-    auto const fd = _memory.write(bytes);
-    if (!fd)
-        return ExecFailure { .cause = std::make_error_code(std::errc::not_enough_memory) };
-    crossing.push_back(*fd);
-    auto kept = KeptAcrossExec { _memory, *fd, crossing };
-    if (!kept.keepAll())
-        return ExecFailure { .cause = std::make_error_code(std::errc::bad_file_descriptor) };
-
-    // Returns only on failure.
-    auto const failure = _replacer.replaceWith(executable, argvFor(executable, *fd));
-    return ExecFailure { .cause = failure ? failure : std::make_error_code(std::errc::io_error) };
 }
 
 } // namespace vthost::handover

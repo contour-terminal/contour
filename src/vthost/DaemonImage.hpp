@@ -157,7 +157,21 @@ class ImageLease
     /// @return The descriptor the lease is held through, which a live upgrade names in its handover image so
     ///         that the new image keeps it open; -1 for a lease that is no descriptor (Windows, a fake).
     [[nodiscard]] virtual int descriptor() const noexcept { return -1; }
+
+    /// @return On Windows, the handle the lease is held through, as a successor inherits it (a HANDLE widened
+    ///         to an integer), which a live upgrade names in its handover image so that the image stays
+    ///         leased until the successor holds a lease of its own; 0 elsewhere, and for a fake.
+    [[nodiscard]] virtual uint64_t handle() const noexcept { return 0; }
 };
+
+#ifdef _WIN32
+/// Takes over the lease on an image a Windows daemon handed its successor (HandoverImage::leaseHandle), which
+/// keeps the image leased until the successor has taken its own (leaseRunningImage()). POSIX has none: a
+/// lease crosses the exec there, and is adopted by its descriptor (ImageLeases::adoptInherited()).
+/// @param handle The lease's handle, as ImageLease::handle() gave it; 0 for none.
+/// @return The lease; null for none.
+[[nodiscard]] std::unique_ptr<ImageLease> adoptHandedOverLease(uint64_t handle);
+#endif
 
 /// Takes and inspects image leases.
 ///
