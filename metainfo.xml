@@ -109,6 +109,7 @@
         <p>Contour is now daemon-first: a plain contour shows sessions a daemon hosts, starting it when none runs, so closing the window no longer ends your shells. Reopen Contour, or attach from another machine over ssh or TLS, and they are still there. Set <code>daemon: { mode: in_process }</code> to keep sessions in the window as before.</p>
         <p>Its window and Settings are redesigned to feel native on macOS, Windows 11 and Linux, with a Terminal style of their own, a command palette, command blocks, split panes with cards and a status line.</p>
         <ul>
+          <li>Fixes ScrollMarkUp stopping at the oldest mark instead of continuing to the start of available history (#835)</li>
           <li>Fixes the terminal hanging or crashing on binary or garbage input that happens to start an image (a lone 0x90 is DCS) before the cell size in pixels is known; such images are dropped and logged once (#1062)</li>
           <li>Fixes an incomplete UTF-8 character swallowing the next printable byte after a control function or a reset; it now ends as U+FFFD at the first byte that cannot continue it (#2209)</li>
           <li>Fixes UTF-8 decoding accepting overlong encodings, surrogates and values above U+10FFFF: an overlong ESC (<code>C0 9B</code>) no longer prints as an escape character, and each ill-formed sequence is replaced by U+FFFD per maximal subpart (#2211)</li>
