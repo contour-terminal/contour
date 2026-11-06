@@ -1729,6 +1729,15 @@ if(CONTOUR_TESTING)
         add_dependencies(contour_manifest_test contour)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
+
+        # The Windows installers' scope table: each row's upgrade code, package file and extra source, and
+        # that a misspelt scope stops the packaging. Read off the generated CPack config, so it builds nothing.
+        contour_add_e2e_cmake_test(
+            NAME contour_e2e_wix_scope
+            SCRIPT WixScope.cmake
+            MARKER "wix-scope: OK"
+            ARGS -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+                 -D "SCOPE_SCRIPT=${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     endif()
 endif()
 # }}}
@@ -1857,12 +1866,32 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
 set(CPACK_WIX_VERSION 4)
-# UpgradeCode must stay constant to allow upgrades from previous versions. The ProductCode is deliberately
-# left to CPack, which generates a new one per package: every build, including two of the same release, is
-# then a major upgrade of the installed one. (Windows Installer ignores the fourth field of the version, the
-# CI run number, so the version cannot tell two builds of a release apart.)
-set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
+    # The Windows installers, one per install scope, from one table. CPACK_CONTOUR_WIX_SCOPE (default
+    # perMachine; the package preset msvc-release-user selects perUser) picks the row;
+    # cmake/CPackWixScope.cmake, which CPack runs at package time, copies it into the CPACK_WIX_* variables
+    # CPack reads. A new scope is a new row here and a new SOURCE file, nothing else.
+    #   UPGRADE_GUID  Must stay constant to allow upgrades from previous versions, and differ between scopes:
+    #                 the two installers are different products. The ProductCode is deliberately left to CPack,
+    #                 which generates a new one per package: every build, including two of the same release, is
+    #                 then a major upgrade of the installed one. (Windows Installer ignores the fourth field of
+    #                 the version, the CI run number, so the version cannot tell two builds of a release apart.)
+    #   FILE_SUFFIX   Appended to the package's file name.
+    #   INSTALL_DIRECTORY  Where the installation goes below the scope's base folder (Program Files, or the
+    #                 user's Local AppData): a '/' nests. The per-user one is Programs/Contour, as other
+    #                 per-user applications are, never the Local AppData folder itself, which holds Contour's
+    #                 own state.
+    #   SOURCE        The scope's own WiX source: the components whose registry root and environment scope differ.
+    set(CPACK_CONTOUR_WIX_SCOPES perMachine perUser)
+    set(CPACK_CONTOUR_WIX_perMachine_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
+    set(CPACK_CONTOUR_WIX_perMachine_FILE_SUFFIX "")
+    set(CPACK_CONTOUR_WIX_perMachine_INSTALL_DIRECTORY "Contour")
+    set(CPACK_CONTOUR_WIX_perMachine_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_machine.wxs")
+    set(CPACK_CONTOUR_WIX_perUser_UPGRADE_GUID "AFF353C7-C33A-474C-B9C7-EDD160677BC9")
+    set(CPACK_CONTOUR_WIX_perUser_FILE_SUFFIX "-user")
+    set(CPACK_CONTOUR_WIX_perUser_INSTALL_DIRECTORY "Programs/Contour")
+    set(CPACK_CONTOUR_WIX_perUser_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_user.wxs")
+    set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
@@ -2226,7 +2255,7 @@ include(CPackComponent)
 if(WIN32)
     cpack_add_component(contour_path
         DISPLAY_NAME "Add to PATH"
-        DESCRIPTION "Adds the contour executable to the system PATH."
+        DESCRIPTION "Adds Contour's bin folder to PATH."
     )
     set(CPACK_COMPONENTS_ALL Unspecified contour contour_path)
 

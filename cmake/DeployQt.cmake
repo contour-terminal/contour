@@ -62,6 +62,9 @@ function(windeployqt target)
                 --no-translations
                 --qmldir "${target_source_dir}"
                 \"$<TARGET_FILE:${target}>\"
+        # The directories of the plugins it found nothing to deploy for stay empty, and are packaged as such.
+        COMMAND "${CMAKE_COMMAND}" -D "DIRECTORY=$<TARGET_FILE_DIR:${target}>"
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PruneEmptyDirectories.cmake"
         COMMENT "Deploying Qt for target $<TARGET_FILE:${target}> ..."
     )
 
