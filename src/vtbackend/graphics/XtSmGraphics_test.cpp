@@ -227,3 +227,14 @@ TEST_CASE("XtSmGraphics.ReGISGeometry rejects a set request", "[screen][xtsmgrap
 
     CHECK(mock.terminal.peekInput() == "\033[?3;3;0S"sv);
 }
+
+TEST_CASE("XtSmGraphics.SixelGeometry.Read reports the given cell", "[screen][xtsmgraphics]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.terminal.setImageCanvasCeiling(ImageSize { Width(1920), Height(1080) });
+
+    mock.writeToScreen("\033[?2;1S");
+
+    CHECK(mock.terminal.peekInput() == "\033[?2;0;110;100S"sv);
+}

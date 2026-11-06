@@ -6164,3 +6164,63 @@ TEST_CASE("BulkText.anInvalidByteInsideARunShowsAsAReplacementCharacter", "[scre
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
+
+TEST_CASE("Terminal.changeCellPixelSize.reaches_the_pty_without_resizing", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize };
+    mock.writeToScreen("\033[3;7r");
+    auto const marginBefore = mock.terminal.currentScreen().margin();
+    REQUIRE(marginBefore.vertical == Margin::Vertical { LineOffset(2), LineOffset(6) });
+
+    mock.terminal.changeCellPixelSize(ImageSize { Width(9), Height(18) });
+
+    CHECK(mock.terminal.cellPixelSize() == ImageSize { Width(9), Height(18) });
+    REQUIRE(mock.mockPty().pixelSize().has_value());
+    CHECK(*mock.mockPty().pixelSize() == ImageSize { Width(9 * 20), Height(18 * 10) });
+    CHECK(mock.terminal.pageSize() == pageSize);
+    CHECK(mock.terminal.currentScreen().margin().vertical == marginBefore.vertical);
+}
+
+TEST_CASE("Terminal.resizeScreenKeepingCellSize.keeps_the_cell_with_a_status_line", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    for (auto const columns: { 80, 132, 80 })
+    {
+        mock.terminal.resizeScreenKeepingCellSize(PageSize { LineCount(11), ColumnCount(columns) });
+        CHECK(mock.terminal.cellPixelSize() == ImageSize { Width(10), Height(20) });
+    }
+}
+
+TEST_CASE("Sixel.laid_out_on_the_given_cell", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize, LineCount(10) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+
+    mock.writeToScreen(ChessBoard);
+
+    for (auto const line: std::views::iota(0, unbox<int>(pageSize.lines)))
+        for (auto const column: std::views::iota(0, unbox<int>(pageSize.columns)))
+        {
+            auto const& cell = mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column));
+            CHECK((cell.imageFragment() != nullptr) == (line <= 4 && column <= 9));
+        }
+}
+
+TEST_CASE("XTWINOPS.CellArea.reports_the_given_cell", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize };
+    mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+
+    mock.writeToScreen("\033[16t");
+    CHECK(mock.terminal.peekInput() == "\033[6;16;8t");
+    mock.terminal.flushInput();
+
+    mock.writeToScreen("\033[14t");
+    CHECK(mock.terminal.peekInput() == std::format("\033[4;{};{}t", 16 * 10, 8 * 20));
+}

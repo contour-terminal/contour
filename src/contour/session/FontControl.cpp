@@ -244,6 +244,15 @@ void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, Im
         auto const _ = std::scoped_lock { terminal };
         if (totalPageSize == terminal.totalPageSize())
         {
+            // The grid stays, but a zoom that keeps it still changes the cell, and the child sizes its
+            // images from ws_xpixel/ws_ypixel.
+            auto const cell = viewSize / totalPageSize;
+            if (cell.area() > 0 && cell != terminal.cellPixelSize())
+            {
+                display::displayLog()("Same page size of {}, new cell size {}.", totalPageSize, cell);
+                terminal.changeCellPixelSize(cell);
+                return;
+            }
             display::displayLog()("No resize necessary. New size is same as old size of {}.", totalPageSize);
             return;
         }

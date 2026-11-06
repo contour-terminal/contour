@@ -3603,16 +3603,27 @@ void Terminal::resizeScreenKeepingCellSize(PageSize totalPageSize)
     // Derive the pixel size from the cell size we already have, rather than passing none at all: without
     // a pixel size UnixPty::resizeScreen() leaves ws_xpixel/ws_ypixel at zero, and TIOCSWINSZ hands the
     // child a window with no pixel geometry -- withdrawing what sixel-capable applications size their
-    // images from. resizeScreen() divides this back out by the same main-page size, so the cell size comes
-    // out unchanged, which is what a column-count switch wants: the cells keep their size, the page its
-    // width in cells.
-    auto const pixels = cellPixelSize() * (totalPageSize - statusLineHeight());
+    // images from. resizeScreen() divides the pixels by the TOTAL page (status line included), so this
+    // multiplies by that same total page and the cell size comes out unchanged, which is what a
+    // column-count switch wants: the cells keep their size, the page its width in cells.
+    auto const pixels = cellPixelSize() * totalPageSize;
 
     resizeScreen(totalPageSize, pixels);
 
     // A selection is anchored to columns that a narrower page no longer has; renderSelection() would walk
     // it against the new grid. Every other resizeScreen() caller drops it too (@see contour::applyResize).
     clearSelection();
+}
+
+void Terminal::changeCellPixelSize(ImageSize cell)
+{
+    Require(cell.area() > 0);
+    if (cell == _cellPixelSize)
+        return;
+
+    _cellPixelSize = cell;
+    _pty->resizeScreen(pageSize(), cell * pageSize());
+    reportInBandWindowResize();
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)

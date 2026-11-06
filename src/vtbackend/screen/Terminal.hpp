@@ -1524,6 +1524,15 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
     constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
 
+    /// Changes the cell's pixel size without resizing anything: the grid, margins, selection and
+    /// transitions stay as they are. The PTY is told the new pixel geometry of the main page (so the
+    /// child's ws_xpixel/ws_ypixel follow), and an in-band resize report is sent if requested.
+    /// Does nothing if @p cell is the current cell size.
+    ///
+    /// The caller holds the terminal lock.
+    /// @param cell The new cell size; its area must be positive.
+    void changeCellPixelSize(ImageSize cell);
+
     /// @return Where and how the window sits on the screen, as the frontend last reported it.
     [[nodiscard]] constexpr WindowState const& windowState() const noexcept { return _windowState; }
 

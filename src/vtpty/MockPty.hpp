@@ -95,6 +95,9 @@ class MockPty: public Pty
         }
     }
 
+    /// @return The pixel size the last resizeScreen() was given, if any.
+    [[nodiscard]] std::optional<ImageSize> pixelSize() const noexcept { return _pixelSize; }
+
   private:
     PageSize _pageSize;
     std::optional<ImageSize> _pixelSize;
