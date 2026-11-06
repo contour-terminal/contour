@@ -110,6 +110,7 @@ namespace
     image.lease = vtpty::CrossingHandle { 30 };
     image.defaultColorPreference = vtbackend::ColorPreference::Dark;
     image.upgradeGeneration = 4;
+    image.cellPixelSize = vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) };
     return image;
 }
 
@@ -146,6 +147,7 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.objects.labels.at(0).label == "work");
     CHECK(actual.objects.labels.at(0).ref == expected.objects.labels.at(0).ref);
     CHECK(actual.defaultColorPreference == expected.defaultColorPreference);
+    CHECK(actual.cellPixelSize == expected.cellPixelSize);
     CHECK(actual.listeners.size() == 2);
     CHECK(actual.listeners.at(1).name == "native-tcp");
     CHECK(actual.listeners.at(1).handle == vtpty::CrossingHandle { 21 });

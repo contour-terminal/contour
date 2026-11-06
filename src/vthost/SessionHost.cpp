@@ -21,6 +21,7 @@
 #include <variant>
 
 #include <vtcontrol/ControlApi.hpp>
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/Logging.hpp>
@@ -547,6 +548,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
     // listener, so the layout is in place before a client could possibly attach. A restored workspace
     // replaces the startup layout, unless it brought nothing back.
+    if (config.restore)
+        seedLearnedCellPixelSize(config.restore->snapshot.cellPixelSize, "restore");
     auto const realized = config.restore ? realizeRestoredWorkspace(*config.restore) : RealizedRestore {};
     if (realized.panes > 0)
     {
@@ -1545,6 +1548,22 @@ void SessionHost::reportCellPixelSize(SessionStreamEvents* client, vtpty::ImageS
         previous != _clientCells.end() && previous->second.cell == cell)
         return;
     _clientCells.insert_or_assign(client, ClientCell { .cell = cell, .sequence = _nextAreaSequence++ });
+}
+
+void SessionHost::seedLearnedCellPixelSize(std::optional<vtpty::ImageSize> stored, std::string_view source)
+{
+    if (!stored)
+        return;
+    auto const bounded = sanePixelSize(unbox<uint32_t>(stored->width), unbox<uint32_t>(stored->height));
+    if (!bounded)
+    {
+        errorLog()("{}: a cell size of {}x{} pixels is out of bounds; ignored",
+                   source,
+                   unbox(stored->width),
+                   unbox(stored->height));
+        return;
+    }
+    _learnedCellPixelSize = bounded;
 }
 
 SizeChange SessionHost::resolveCellPixelSize()

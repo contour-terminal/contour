@@ -1913,6 +1913,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// cell at once. Precondition: `_pageSize` is already re-resolved (resolveAuthoritativeArea).
     /// @return SizeChange::Applied when cellPixelSize() moved, SizeChange::Unchanged otherwise.
     [[nodiscard]] SizeChange resolveCellPixelSize();
+    /// Takes a cell size a previous run learned (a snapshot, a handover image) as the one learned here,
+    /// unless it is out of bounds, which is logged and leaves things as they were. Runs before any session
+    /// is spawned or adopted, so each starts on it; only the constructor's restore paths call it.
+    /// @param stored What the snapshot or image held; none for none.
+    /// @param source What it came from, for the log.
+    void seedLearnedCellPixelSize(std::optional<vtpty::ImageSize> stored, std::string_view source);
     /// Pushes cellPixelSize() into every terminal not already at it, when @p cell says it moved: those
     /// resizeLocked() did not reach, since their grid stayed. Announces nothing, as no grid moved. Takes each
     /// terminal's lock in turn and calls nothing that fans out while holding it.

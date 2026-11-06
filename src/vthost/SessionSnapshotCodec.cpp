@@ -363,6 +363,17 @@ namespace
                 return std::unexpected(window.error());
             decoded.snapshot.windows.push_back(*std::move(window));
         }
+        if (in.remaining() > 0)
+        {
+            auto const width = in.varint();
+            auto const height = in.varint();
+            if (!width || !height)
+                return std::unexpected(SnapshotError::Malformed);
+            constexpr auto Largest = std::uint64_t { UINT32_MAX };
+            decoded.snapshot.cellPixelSize =
+                vtpty::ImageSize { .width = vtpty::Width::cast_from(std::min(*width, Largest)),
+                                   .height = vtpty::Height::cast_from(std::min(*height, Largest)) };
+        }
         decoded.droppedHistories = context.droppedHistories;
         return decoded;
     }
@@ -375,6 +386,12 @@ std::vector<std::byte> encodeSnapshot(WorkspaceSnapshot const& snapshot)
     body.varint(snapshot.windows.size());
     for (auto const& window: snapshot.windows)
         writeWindow(body, window);
+    // Appended after the windows, so a file from before the field reads as none.
+    if (snapshot.cellPixelSize)
+    {
+        body.varint(unbox<std::uint64_t>(snapshot.cellPixelSize->width));
+        body.varint(unbox<std::uint64_t>(snapshot.cellPixelSize->height));
+    }
 
     auto file = proto::Writer {};
     file.bytes(Magic);

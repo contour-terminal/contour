@@ -549,3 +549,34 @@ TEST_CASE("a host that restored nothing has nothing to announce", "[vthost][snap
     CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
     CHECK_FALSE(h.makeHost({})->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
 }
+
+TEST_CASE("SessionHost.cellPixelSize.restored_from_a_snapshot", "[vthost][snapshot][restore][cell]")
+{
+    auto h = RestoreHarness {};
+    auto snapshot = workspaceOf({ PaneSnapshot {}, PaneSnapshot {} });
+    snapshot.cellPixelSize = vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) };
+    auto const host = h.restore(WorkspaceRestore { .snapshot = std::move(snapshot) });
+
+    CHECK(host->learnedCellPixelSize() == vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) });
+    for (auto const tabIndex: std::views::iota(0, 2))
+    {
+        auto& terminal = terminalOf(*host, tabIndex);
+        auto const _ = std::lock_guard { terminal };
+        CHECK(terminal.cellPixelSize() == vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) });
+    }
+    // What a restart then writes down is what it learned.
+    CHECK(captureWorkspace(*host, {}, Now).cellPixelSize == host->learnedCellPixelSize());
+}
+
+TEST_CASE("SessionHost.cellPixelSize.a_corrupt_snapshot_value_is_ignored",
+          "[vthost][snapshot][restore][cell]")
+{
+    auto h = RestoreHarness {};
+    auto snapshot = workspaceOf({ PaneSnapshot {} });
+    snapshot.cellPixelSize = vtpty::ImageSize { vtpty::Width(0), vtpty::Height(18) };
+    auto const host = h.restore(WorkspaceRestore { .snapshot = std::move(snapshot) });
+
+    CHECK(host->restoreOutcome() == RestoreOutcome::Realized);
+    CHECK_FALSE(host->learnedCellPixelSize().has_value());
+    CHECK(host->cellPixelSize() == vtpty::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+}

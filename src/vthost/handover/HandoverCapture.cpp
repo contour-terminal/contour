@@ -198,6 +198,7 @@ std::expected<HandoverImage, HandoverError> captureHandover(SessionHost& host,
             .listeners = { listeners.begin(), listeners.end() },
             .lease = lease,
             .defaultColorPreference = host.defaultColorPreference(),
+            .cellPixelSize = host.learnedCellPixelSize(),
         };
         // A session that ended meanwhile is not among the quiesced ones: its crossing is dropped.
         for (auto& session: quiesced.sessions)

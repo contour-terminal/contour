@@ -237,6 +237,33 @@ TEST_CASE("a workspace round-trips through the codec", "[vthost][snapshot]")
     CHECK(pane.history->commandBlocks[0].exitCode == 2);
 }
 
+TEST_CASE("a learned cell size round-trips, and a file without one decodes to none", "[vthost][snapshot]")
+{
+    auto original = sampleWorkspace();
+    REQUIRE_FALSE(original.cellPixelSize);
+
+    SECTION("engaged")
+    {
+        original.cellPixelSize = vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) };
+        auto const decoded = decodeSnapshot(encodeSnapshot(original));
+        REQUIRE(decoded);
+        CHECK(decoded->snapshot == original);
+        CHECK(decoded->snapshot.cellPixelSize == original.cellPixelSize);
+    }
+    SECTION("absent")
+    {
+        auto const decoded = decodeSnapshot(encodeSnapshot(original));
+        REQUIRE(decoded);
+        CHECK_FALSE(decoded->snapshot.cellPixelSize);
+    }
+    SECTION("a file written before the field")
+    {
+        auto const decoded = decodeSnapshot(testing::RecordedSnapshotV1);
+        REQUIRE(decoded);
+        CHECK_FALSE(decoded->snapshot.cellPixelSize);
+    }
+}
+
 TEST_CASE("an empty workspace encodes and decodes as empty", "[vthost][snapshot]")
 {
     auto const decoded = decodeSnapshot(encodeSnapshot({}));

@@ -7,6 +7,8 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <vtpty/ImageSize.hpp>
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -92,6 +94,9 @@ struct WorkspaceSnapshot
 {
     std::chrono::sys_seconds takenAt {};
     std::vector<WindowSnapshot> windows {};
+    /// The cell size in pixels a client last stated (SessionHost::learnedCellPixelSize()); none when no
+    /// client ever did. Never the configured default. Unchecked: whoever applies it bounds it first.
+    std::optional<vtpty::ImageSize> cellPixelSize {};
 
     /// @return Whether the snapshot holds no window, i.e. there is nothing to restore.
     [[nodiscard]] bool empty() const noexcept { return windows.empty(); }
