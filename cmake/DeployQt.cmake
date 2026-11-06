@@ -67,27 +67,6 @@ function(windeployqt target)
             -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PruneEmptyDirectories.cmake"
         COMMENT "Deploying Qt for target $<TARGET_FILE:${target}> ..."
     )
-
-    # windeployqt doesn't work correctly with the system runtime libraries,
-    # so we fall back to one of CMake's own modules for copying them over
-
-    # Doing this with MSVC 2015 requires CMake 3.6+
-    if((MSVC_VERSION VERSION_EQUAL 1900 OR MSVC_VERSION VERSION_GREATER 1900)
-            AND CMAKE_VERSION VERSION_LESS "3.6")
-        message(WARNING "Deploying with MSVC 2015+ requires CMake 3.6+")
-    endif()
-
-    #set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
-    set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
-    # include(InstallRequiredSystemLibraries)
-    # foreach(lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
-    #     get_filename_component(filename "${lib}" NAME)
-    #     add_custom_command(TARGET ${target} POST_BUILD
-    #         COMMAND "${CMAKE_COMMAND}" -E
-    #             copy_if_different "${lib}" \"$<TARGET_FILE_DIR:${target}>\"
-    #         COMMENT "DeployQt: Copying ${filename}..."
-    #     )
-    # endforeach()
 endfunction()
 
 # Add commands that copy the required Qt files to the application bundle

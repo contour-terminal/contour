@@ -1982,6 +1982,15 @@ endif()
 
 if(WIN32)
     install(TARGETS contour DESTINATION bin)
+    if(MSVC)
+        # The toolset's redistributable runtime (vcruntime140, vcruntime140_1, msvcp140), app-local beside
+        # contour.exe, so Contour starts on a machine that never installed the VC++ Redistributable. The
+        # Universal CRT is left out: Windows 10 and later carry it. A GUI-less build needs it too, and the
+        # daemon's staged image copies bin/ whole.
+        set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+        set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
+        include(InstallRequiredSystemLibraries)
+    endif()
     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
         install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "share/contour/fonts")
     endif()
