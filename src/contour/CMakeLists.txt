@@ -421,6 +421,18 @@ if(WIN32)
     # .manifest source is embedded by the linker, and qt_add_executable() then generates none of its own.
     # These sources are the contour executable's alone, so no test binary gets it.
     list(APPEND _main_source_files packaging/contour.rc packaging/contour.manifest)
+
+    # The version resource (Explorer's Details tab, SmartScreen, and the file version Windows Installer
+    # records for contour.exe). The fourth field is the CI run number, empty in a local build.
+    set(CONTOUR_FILE_VERSION_TWEAK 0)
+    if(PROJECT_VERSION_TWEAK)
+        set(CONTOUR_FILE_VERSION_TWEAK ${PROJECT_VERSION_TWEAK})
+    endif()
+    set(CONTOUR_FILE_VERSION
+        "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${CONTOUR_FILE_VERSION_TWEAK}")
+    string(REPLACE "." "," CONTOUR_FILE_VERSION_FIELDS "${CONTOUR_FILE_VERSION}")
+    configure_file(packaging/VersionInfo.rc.in ${CMAKE_CURRENT_BINARY_DIR}/packaging/VersionInfo.rc @ONLY)
+    list(APPEND _main_source_files ${CMAKE_CURRENT_BINARY_DIR}/packaging/VersionInfo.rc)
 endif()
 
 # Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
@@ -1723,9 +1735,14 @@ if(CONTOUR_TESTING)
     # The application manifest (packaging/contour.manifest), read back out of the built contour.exe as
     # Windows reads it. Its own executable, so that building the unit tests does not build the application.
     if(WIN32)
-        add_executable(contour_manifest_test test/core_test_main.cpp test/ApplicationManifest_test.cpp)
+        add_executable(contour_manifest_test
+            test/core_test_main.cpp test/ApplicationManifest_test.cpp test/VersionInfo_test.cpp)
         target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2 contour_test_trace)
-        target_compile_definitions(contour_manifest_test PRIVATE CONTOUR_BINARY="$<TARGET_FILE:contour>")
+        target_link_libraries(contour_manifest_test PRIVATE version)
+        target_compile_definitions(contour_manifest_test PRIVATE
+            CONTOUR_BINARY="$<TARGET_FILE:contour>"
+            CONTOUR_EXPECTED_FILE_VERSION="${CONTOUR_FILE_VERSION}"
+            CONTOUR_EXPECTED_PRODUCT_VERSION="${CONTOUR_VERSION_STRING}")
         add_dependencies(contour_manifest_test contour)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
