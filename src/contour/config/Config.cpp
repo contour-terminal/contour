@@ -3157,7 +3157,7 @@ void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,
                                          vtbackend::ImageSize& where) const
 {
     auto const child = node[entry];
-    if (!child)
+    if (!child || child.IsNull())
         return;
 
     auto const extent = [&](char const* key) -> std::optional<int64_t> {

@@ -138,3 +138,12 @@ TEST_CASE("an invalid daemon.default_cell_pixel_size keeps the default", "[confi
     CHECK(config.daemon.value().defaultCellPixelSize
           == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
 }
+
+TEST_CASE("a null daemon.default_cell_pixel_size keeps the default", "[config][daemon]")
+{
+    auto const* const text = GENERATE(as<char const*>(), "~", "null", "");
+    CAPTURE(text);
+    auto const config = loadConfigFromYaml(std::format("daemon:\n  default_cell_pixel_size: {}\n", text));
+    CHECK(config.daemon.value().defaultCellPixelSize
+          == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+}
