@@ -254,8 +254,8 @@ if(CONTOUR_TESTING)
         # pushed.
         contour_add_lint_gate(check_workflows check-workflows.py)
 
-        # The rule that keeps every required status check runnable on a pull request, tested against
-        # inline fixtures; it needs neither the network nor actionlint.
+        # The workflow rules (required checks stay runnable on pull requests; only release-tag jobs write
+        # releases), tested against inline fixtures; it needs neither the network nor actionlint.
         contour_add_lint_gate(check_workflows_selftest check-workflows.py --self-test)
 
         # The Windows installer's WiX patch file fails only at `cpack` time on a Windows runner, after a
