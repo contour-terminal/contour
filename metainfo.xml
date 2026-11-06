@@ -283,6 +283,7 @@
           <li>Fixes the next character overwriting the last one when narrowing the window while the cursor waited to wrap at the right margin, with text reflow off, on the alternate screen or with mode 2028 reset (#2123)</li>
           <li>Fixes a status-line extension started by a profile switch sometimes drawing at the wrong cell size, and keeping it, when it asked for the cell size (CSI 16 t) in its first frame</li>
           <li>Changing the window width with <code>reflow_on_resize: false</code> no longer walks the whole scrollback buffer, only the lines in use (#2124)</li>
+          <li>Changes release tags to the bare version of the released commit, such as <code>v0.9.0</code>; the packages keep the build number as the fourth version field (<code>0.9.0.9500</code>), and every tag now points at exactly the commit its packages were built from</li>
         </ul>
       </description>
     </release>
