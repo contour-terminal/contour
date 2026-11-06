@@ -1,7 +1,10 @@
 <CPackWiXPatch>
   <!-- The components that differ between the per-machine and the per-user installer (the PATH entry, the
        Connect shortcut) live in wix_machine.wxs and wix_user.wxs; this file refers to them by Id only. -->
+  <!-- The "Add to PATH" feature (keep its Id: an upgrade carries the installed state of a feature over by Id).
+       ADD_TO_PATH=0 on the command line drops it. -->
   <CPackWiXFragment Id="CM_C_contour_path">
+    <Level Value="0" Condition='ADD_TO_PATH = "0"' />
     <ComponentRef Id="ContourPathEnvironment" />
   </CPackWiXFragment>
   <!-- CPack accepts each fragment Id once (scripts/check-wix-patch.py checks it), so everything that goes
@@ -29,6 +32,10 @@
     <SetProperty Id="CONTOUR_PREVIOUS_ROOT" Action="ContourRootRecorded" Value="[CONTOUR_RECORDED_ROOT]" After="ContourRootDefault" Sequence="both" Condition="CONTOUR_RECORDED_ROOT" />
     <SetProperty Id="INSTALL_ROOT" Action="ContourRootPrevious" Value="[CONTOUR_PREVIOUS_ROOT]" After="ContourRootRecorded" Sequence="both" Condition="CONTOUR_PREVIOUS_ROOT AND NOT (CONTOUR_PREVIOUS_ROOT &gt;&lt; &quot;\Contour Terminal Emulator &quot;)" />
     <SetProperty Id="INSTALL_ROOT" Action="ContourRootGivenRestore" Value="[CONTOUR_GIVEN_ROOT]" After="ContourRootPrevious" Sequence="both" Condition="NOT Installed AND CONTOUR_GIVEN_ROOT" />
+    <!-- The switches of an unattended install: both on unless given as 0 (msiexec ... ADD_TO_PATH=0). Secure, so
+         that they reach the elevated install from the unelevated command line. -->
+    <Property Id="ADD_TO_PATH" Value="1" Secure="yes" />
+    <Property Id="DESKTOP_SHORTCUT" Value="1" Secure="yes" />
     <!-- "Launch Contour" on the installer's last page. -->
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>
@@ -36,6 +43,11 @@
     </UI>
   </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCTFEATURE">
+    <Feature Id="ContourDesktopShortcutFeature" Title="Desktop shortcut" Level="1">
+      <Level Value="0" Condition='DESKTOP_SHORTCUT = "0"' />
+      <ComponentRef Id="ContourDesktopShortcut" />
+    </Feature>
+    <ComponentRef Id="ContourStartMenuShortcut" />
     <ComponentRef Id="ContourConnectShortcut" />
     <ComponentRef Id="ContourInstallRoot" />
   </CPackWiXFragment>

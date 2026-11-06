@@ -51,7 +51,7 @@ $RequiredZipEntries = @(
 # The components whose registry root and environment scope depend on the installer's scope (wix_machine.wxs
 # and wix_user.wxs define both).
 $PathComponent = 'ContourPathEnvironment'
-$ScopedComponents = $PathComponent, 'ContourConnectShortcut'
+$ScopedComponents = $PathComponent, 'ContourInstallRoot', 'ContourStartMenuShortcut', 'ContourConnectShortcut', 'ContourDesktopShortcut'
 
 # The SetProperty actions that settle INSTALL_ROOT, in the order they must run: the given folder is noted
 # before AppSearch, the rest follow it (the last that applies wins).
@@ -73,6 +73,14 @@ $RegLocators = @{
         @{ Signature = 'ContourRecordedRoot'; Root = '1'; Key = 'Software\Contour\Contour'; Name = 'InstallRoot' }
         $ArpLocator)
 }
+
+# The command-line switches of an unattended install (ADD_TO_PATH=0, DESKTOP_SHORTCUT=0), and the feature each
+# drops when set to 0.
+$FeatureGates = @(
+    @{ Switch = 'ADD_TO_PATH'; Feature = 'CM_C_contour_path' }
+    @{ Switch = 'DESKTOP_SHORTCUT'; Feature = 'ContourDesktopShortcutFeature' }
+)
+$Switches = $FeatureGates | ForEach-Object { $_.Switch }
 
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
@@ -337,6 +345,44 @@ $Rows = @(
         param($msi)
         $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Condition` FROM `InstallExecuteSequence` WHERE `Action` = ''ContourRootRecorded'''
         Test-Equal 'CONTOUR_RECORDED_ROOT' $(if ($rows.Count -gt 0) { $rows[0][0] } else { 'no such action' })
+    } }
+    @{ Target = 'msi'; Name = 'unattended switches default to on and are public'; Check = {
+        param($msi)
+        $secure = ((Get-MsiProperty -Msi $msi -Name 'SecureCustomProperties') -split ';')
+        $problems = foreach ($switch in $Switches) {
+            $value = Get-MsiProperty -Msi $msi -Name $switch
+            if ($value -ne '1') { "$switch is $(if ($null -eq $value) { 'absent' } else { $value })" }
+            if ($secure -notcontains $switch) { "$switch is not in SecureCustomProperties" }
+        }
+        if (-not $problems) { return $null }
+        "expected $($Switches -join ' and ') = 1 and secure, found $($problems -join '; ')"
+    } }
+    @{ Target = 'msi'; Name = 'a switch of 0 drops its feature'; Check = {
+        param($msi)
+        $problems = foreach ($gate in $FeatureGates) {
+            $rows = Get-MsiRows -Msi $msi -Query ('SELECT `Level`, `Condition` FROM `Condition` WHERE `Feature_` = ''{0}''' -f $gate.Feature)
+            $condition = '{0} = "0"' -f $gate.Switch
+            $found = @($rows | Where-Object { $_[0] -eq '0' -and $_[1] -eq $condition })
+            if ($found.Count -eq 0) { "$($gate.Feature) has no Level 0 condition $condition" }
+        }
+        if (-not $problems) { return $null }
+        "expected a Level 0 condition per switch, found $($problems -join '; ')"
+    } }
+    @{ Target = 'msi'; Name = 'desktop shortcut is ours, not CPack''s'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Shortcut`, `Directory_`, `Component_` FROM `Shortcut`'
+        $ours = @($rows | Where-Object { $_[2] -eq 'ContourDesktopShortcut' -and $_[1] -eq 'DesktopFolder' })
+        $cpacks = @($rows | Where-Object { $_[0].StartsWith('CM_DSP_') } | ForEach-Object { $_[0] })
+        if ($ours.Count -gt 0 -and $cpacks.Count -eq 0) { return $null }
+        "expected one Shortcut in DesktopFolder of ContourDesktopShortcut and none named CM_DSP_*, found $($ours.Count) and $($cpacks -join ', ')"
+    } }
+    @{ Target = 'msi'; Name = 'Start menu shortcut is ours, not CPack''s'; Check = {
+        param($msi)
+        $components = Get-MsiRows -Msi $msi -Query 'SELECT `Component` FROM `Component`'
+        $cpacks = @($components | Where-Object { $_[0].StartsWith('CM_SHORTCUT_') } | ForEach-Object { $_[0] })
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Directory_` FROM `Shortcut` WHERE `Component_` = ''ContourStartMenuShortcut'''
+        if ($rows.Count -eq 1 -and $rows[0][0] -eq 'ProgramMenuFolder' -and $cpacks.Count -eq 0) { return $null }
+        "expected one Shortcut in ProgramMenuFolder of ContourStartMenuShortcut and no CM_SHORTCUT_* component, found $($rows.Count) and $($cpacks -join ', ')"
     } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
