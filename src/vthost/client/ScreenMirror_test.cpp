@@ -1828,7 +1828,7 @@ TEST_CASE("a resize keeps scrollback the server can no longer name", "[vthost][m
         // Resize both ends the way the GUI does: the local terminal first, then the area upstream.
         auto const target = vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(60) };
         h->mirror->resizeScreen(target);
-        h->client->requestResize(60, 25);
+        h->client->requestResize(60, 25, std::nullopt);
         co_await waitUntil(&h->loop,
                            [h, session, target] { return h->serverTerminal(session)->pageSize() == target; });
         // Wait on the snapshot having LANDED rather than on a delay: the reflowed page matching is
@@ -2403,7 +2403,7 @@ TEST_CASE("a resize resyncs the mirror through a full replay", "[vthost][mirror]
                     h->mirror->resizeScreen(size);
                 h->populator->apply(screen, delta);
             });
-        h->client->requestResize(100, 40);
+        h->client->requestResize(100, 40, std::nullopt);
         serverWrites(h, session, "\r\nafter-resize");
         co_await waitUntil(&h->loop, [&] {
             return h->mirror->pageSize().columns == vtbackend::ColumnCount(100)
@@ -3014,7 +3014,7 @@ Task<void> collectGapsAfterResize(MirrorHarness* h,
     auto const target = vtbackend::PageSize { vtbackend::LineCount::cast_from(lines),
                                               vtbackend::ColumnCount::cast_from(columns) };
     h->mirror->resizeScreen(target);
-    h->client->requestResize(columns, lines);
+    h->client->requestResize(columns, lines, std::nullopt);
 
     // Both ends must actually BE at the new size before comparing: an agreement reached before
     // either of them reflowed would read as success while proving nothing.
@@ -5309,7 +5309,7 @@ TEST_CASE("a vi mark on a remote pane stays on its row when the pane is resized"
 
         auto const target = vtbackend::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(60) };
         h->mirror->resizeScreen(target);
-        h->client->requestResize(60, 20);
+        h->client->requestResize(60, 20, std::nullopt);
         // Parity, line flags and all: the mark is the host's, so the two ends agree on it as well.
         co_await waitUntil(&h->loop, [h, session, target] {
             return h->serverTerminal(session)->pageSize() == target
@@ -5491,7 +5491,7 @@ TEST_CASE("a vi mark stays on its row for a client while another client resizes 
 
         h->second.mirror->resizeScreen(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(40) });
-        h->second.client->requestResize(40, 25);
+        h->second.client->requestResize(40, 25, std::nullopt);
         co_await waitUntil(&h->loop, [h, session] {
             auto const& screens = h->first.client->screens();
             return h->host.terminal(session)->pageSize().columns == vtbackend::ColumnCount(40)

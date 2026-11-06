@@ -546,14 +546,21 @@ void NativeClient::sendInput(uint64_t session, std::string_view bytes)
     send(proto::DecodedPdu { input });
 }
 
-void NativeClient::requestResize(uint32_t columns, uint32_t lines)
+void NativeClient::requestResize(uint32_t columns,
+                                 uint32_t lines,
+                                 std::optional<proto::WireCellPixelSize> cell)
 {
-    send(proto::DecodedPdu { proto::ResizeRequest { .columns = columns, .lines = lines } });
+    send(proto::DecodedPdu {
+        proto::ResizeRequest { .columns = columns, .lines = lines, .cellPixelSize = cell } });
 }
 
-void NativeClient::resizePane(uint64_t session, uint32_t columns, uint32_t lines)
+void NativeClient::resizePane(uint64_t session,
+                              uint32_t columns,
+                              uint32_t lines,
+                              std::optional<proto::WireCellPixelSize> cell)
 {
-    send(proto::DecodedPdu { proto::ResizePane { .session = session, .columns = columns, .lines = lines } });
+    send(proto::DecodedPdu { proto::ResizePane {
+        .session = session, .columns = columns, .lines = lines, .cellPixelSize = cell } });
 }
 
 void NativeClient::fetchImage(uint64_t session, uint32_t imageId)
@@ -966,7 +973,8 @@ core::async::Task<void> NativeClient::run()
                                                   .clientArea = _handshake.clientArea,
                                                   .attachIntent = _handshake.attachIntent,
                                                   .profileName = _handshake.profileName,
-                                                  .colorPreference = _handshake.colorPreference } });
+                                                  .colorPreference = _handshake.colorPreference,
+                                                  .cellPixelSize = _handshake.cellPixelSize } });
 
     auto outcome = co_await pumpPdus(
         _connection.get(),

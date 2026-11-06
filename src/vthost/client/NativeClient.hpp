@@ -334,6 +334,9 @@ class NativeClient final
         /// The light/dark preference this client shows: the daemon builds the sessions it follows under it,
         /// before their first snapshot. @see proto::ClientHello::colorPreference.
         proto::WireColorPreference colorPreference = proto::WireColorPreference::Unstated;
+        /// The pixel size of one cell of the client's window, when known (a reconnect repeats the last one).
+        /// @see proto::ClientHello::cellPixelSize.
+        std::optional<proto::WireCellPixelSize> cellPixelSize = std::nullopt;
     };
 
     /// @param loop The event loop everything runs on.
@@ -402,12 +405,18 @@ class NativeClient final
 
     /// Proposes the CLIENT AREA size — the whole content area the layout is rendered into, not any
     /// one pane. The server projects the pane tree into it and answers with fresh snapshots.
-    void requestResize(uint32_t columns, uint32_t lines);
+    /// @param cell The pixel size of one cell of the client's window, when known: the daemon lays images
+    ///             out on it (@see proto::Capability::CellPixelSize).
+    void requestResize(uint32_t columns, uint32_t lines, std::optional<proto::WireCellPixelSize> cell);
 
     /// Reports the grid ONE pane is actually rendered at, refining the server's ratio-driven
     /// projection of the client area. Send it for a pane whose extent the projection cannot derive —
     /// a pixel-driven layout, or a divider the user dragged. @see proto::ResizePane.
-    void resizePane(uint64_t session, uint32_t columns, uint32_t lines);
+    /// @param cell The pixel size of one cell of the pane, when known. @see requestResize.
+    void resizePane(uint64_t session,
+                    uint32_t columns,
+                    uint32_t lines,
+                    std::optional<proto::WireCellPixelSize> cell);
 
     /// Requests an image's pixels: @p session scopes the per-session image pool,
     /// @p imageId is the pool-local id carried by the cell's ImageCellEntry.

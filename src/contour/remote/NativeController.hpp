@@ -709,7 +709,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param session The remote session whose pane resized.
     /// @param serial The binding of that pane; a detached one's report is dropped.
     /// @param cells The pane's new grid.
-    void reportPaneGeometry(uint64_t session, uint64_t serial, vtpty::PageSize cells);
+    void reportPaneGeometry(uint64_t session,
+                            uint64_t serial,
+                            vtpty::PageSize cells,
+                            std::optional<vtpty::ImageSize> pixels);
 
     /// What a flushGeometry() may state.
     enum class GeometryFlush : uint8_t
@@ -863,6 +866,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// sink once per pane, and the daemon answers every accepted client area with a forced full
     /// snapshot per followed session.
     std::optional<vtpty::PageSize> _lastReportedArea;
+    /// The pixel size of one cell, derived from the panes' reports (pixels / cells); the latest wins. What
+    /// every ResizeRequest/ResizePane states and the next hello repeats. Under _geometryMutex.
+    std::optional<vtpty::ImageSize> _cellPixelSize;
+    /// The cell last stated to the daemon (a hello, or a report); a change of _cellPixelSize re-reports.
+    std::optional<vtpty::ImageSize> _lastReportedCell;
     std::unordered_map<uint64_t, vtpty::PageSize> _lastReportedPaneSizes;
     /// The last area stated to any connection (a hello, or a resize request). Never reset, not even for a
     /// restarted daemon: it is what the window is, and the next hello states it while no layout composes one.

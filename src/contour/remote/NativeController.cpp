@@ -32,6 +32,32 @@ namespace
         return state == ConnectionState::Failed || state == ConnectionState::Refused
                || state == ConnectionState::Stopped;
     }
+
+    /// @param cells The grid a pane reports.
+    /// @param pixels The pixels it occupies (cell x grid), when known.
+    /// @return The pixel size of one cell, or nothing when either is empty or absent.
+    [[nodiscard]] std::optional<vtpty::ImageSize> cellOf(vtpty::PageSize cells,
+                                                         std::optional<vtpty::ImageSize> pixels) noexcept
+    {
+        if (!pixels.has_value() || unbox<uint32_t>(cells.columns) == 0 || unbox<uint32_t>(cells.lines) == 0)
+            return std::nullopt;
+        auto const width = unbox<uint32_t>(pixels->width) / unbox<uint32_t>(cells.columns);
+        auto const height = unbox<uint32_t>(pixels->height) / unbox<uint32_t>(cells.lines);
+        if (width == 0 || height == 0)
+            return std::nullopt;
+        return vtpty::ImageSize { vtpty::Width::cast_from(width), vtpty::Height::cast_from(height) };
+    }
+
+    /// @param cell A cell's pixel size, when known.
+    /// @return Its wire form.
+    [[nodiscard]] std::optional<vthost::proto::WireCellPixelSize> toWireCell(
+        std::optional<vtpty::ImageSize> cell) noexcept
+    {
+        return cell.transform([](auto const& c) {
+            return vthost::proto::WireCellPixelSize { .width = unbox<uint32_t>(c.width),
+                                                      .height = unbox<uint32_t>(c.height) };
+        });
+    }
 } // namespace
 
 namespace
@@ -149,6 +175,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
     // The area the hello states: what the window composes to now, else what was last stated, else the
     // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
     // A first connection composes nothing: no layout came in yet.
+    auto helloCell = std::optional<vtpty::ImageSize> {};
     auto const helloArea = [&]() -> std::optional<vtpty::PageSize> {
         auto const lock = std::lock_guard { _mutex };
         auto const geometryLock = std::lock_guard { _geometryMutex };
@@ -158,6 +185,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                   return _attachSettings.transform([](auto const& s) { return s.pageSize; });
                               });
         _helloArea = area;
+        helloCell = _cellPixelSize;
+        _lastReportedCell = _cellPixelSize; // the hello states it
         if (area)
             _lastStatedArea = area;
         return area;
@@ -206,7 +235,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::TabEditAcks,
                                                    vthost::proto::Capability::ColorPreference,
                                                    vthost::proto::Capability::PanesReprojected,
-                                                   vthost::proto::Capability::LiveUpgrade }),
+                                                   vthost::proto::Capability::LiveUpgrade,
+                                                   vthost::proto::Capability::CellPixelSize }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = helloArea.transform([](auto const& size) {
@@ -216,6 +246,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             .attachIntent = std::move(intent),
             .profileName = _profileName,
             .colorPreference = _statedColors.load(),
+            .cellPixelSize = toWireCell(helloCell),
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
@@ -1135,7 +1166,10 @@ void NativeController::answerPermission(std::string hostId, std::string digest, 
     });
 }
 
-void NativeController::reportPaneGeometry(uint64_t session, uint64_t serial, vtpty::PageSize cells)
+void NativeController::reportPaneGeometry(uint64_t session,
+                                          uint64_t serial,
+                                          vtpty::PageSize cells,
+                                          std::optional<vtpty::ImageSize> pixels)
 {
     {
         // _geometryMutex alone: this runs from the pty's resize sink, which the mirror reaches while
@@ -1146,6 +1180,9 @@ void NativeController::reportPaneGeometry(uint64_t session, uint64_t serial, vtp
             owner == _paneSerials.end() || owner->second != serial)
             return;
         _paneSizes.insert_or_assign(session, cells);
+        // The pixels are cell x page, so the division is exact; a report without them keeps the last cell.
+        if (auto const cell = cellOf(cells, pixels); cell.has_value())
+            _cellPixelSize = cell;
         _geometryAnchor = session;
         if (_geometryFlushScheduled)
             return; // a flush is already queued; it will pick this up too
@@ -1160,6 +1197,7 @@ void NativeController::reportPaneGeometry(uint64_t session, uint64_t serial, vtp
 void NativeController::flushGeometry(GeometryFlush scope)
 {
     auto area = std::optional<vtpty::PageSize> {};
+    auto cell = std::optional<vtpty::ImageSize> {};
     auto panes = std::vector<std::pair<uint64_t, vtpty::PageSize>> {};
     {
         // Both, in the documented order: composedClientArea() reads the layouts (_mutex) and the
@@ -1169,6 +1207,7 @@ void NativeController::flushGeometry(GeometryFlush scope)
         _geometryFlushScheduled = false;
 
         auto const composed = composedClientArea();
+        cell = _cellPixelSize;
         // A reconnect or a daemon's PanesReprojected asks for every pane again: spent once they compose.
         // Spent then even if the layout is only partly laid out -- some panes not yet in _paneSizes, so not
         // re-sent below. That relies on an invariant: every pane reports its grid at least once after a
@@ -1192,8 +1231,12 @@ void NativeController::flushGeometry(GeometryFlush scope)
                 _helloArea.reset(); // the window moved on: this report states its own area
         }
         // A new client area re-projects every pane on the daemon: all are re-asserted, not just the moved.
-        if (scope == GeometryFlush::Report && composed.has_value() && _lastReportedArea != composed)
+        // A changed cell is stated like a moved area: the daemon lays images out on it.
+        auto const cellMoved = scope == GeometryFlush::Report && _lastReportedCell != _cellPixelSize;
+        if (scope == GeometryFlush::Report && composed.has_value()
+            && (_lastReportedArea != composed || cellMoved))
         {
+            _lastReportedCell = _cellPixelSize;
             _lastReportedArea = composed;
             _lastStatedArea = composed;
             area = composed;
@@ -1214,14 +1257,16 @@ void NativeController::flushGeometry(GeometryFlush scope)
     if (!area.has_value() && panes.empty())
         return;
 
-    _reactor.post([this, area, panes = std::move(panes)] {
+    _reactor.post([this, area, cell, panes = std::move(panes)] {
         if (_client == nullptr)
             return;
         // The client area first: it re-projects the tree, and the per-pane grids refine THAT.
         if (area.has_value())
-            _client->requestResize(unbox<uint32_t>(area->columns), unbox<uint32_t>(area->lines));
+            _client->requestResize(
+                unbox<uint32_t>(area->columns), unbox<uint32_t>(area->lines), toWireCell(cell));
         for (auto const& [session, size]: panes)
-            _client->resizePane(session, unbox<uint32_t>(size.columns), unbox<uint32_t>(size.lines));
+            _client->resizePane(
+                session, unbox<uint32_t>(size.columns), unbox<uint32_t>(size.lines), toWireCell(cell));
     });
 }
 
@@ -1584,8 +1629,8 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
         // A pane's grid is NOT the client area: reporting it as one made the daemon project the
         // whole tab into a single pane's width, halving every pane on every split. The report is
         // composed from all panes instead — see reportPaneGeometry.
-        [this, session, serial](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
-            reportPaneGeometry(session, serial, cells);
+        [this, session, serial](vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels) {
+            reportPaneGeometry(session, serial, cells, pixels);
         },
         [this, session, serial] { unbind(session, serial); });
     _bindings[session] = Binding { .serial = serial, .pty = pty.get(), .terminal = nullptr, .mirror = {} };

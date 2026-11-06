@@ -262,7 +262,29 @@ class ClientFrameCounts
             _areas.push_back(
                 vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(resize->lines)),
                                   .columns = vtpty::ColumnCount(static_cast<int>(resize->columns)) });
+            _requestCells.push_back(resize->cellPixelSize);
         }
+        if (auto const* hello = std::get_if<vthost::proto::ClientHello>(&pdu))
+        {
+            auto const lock = std::lock_guard { _areasMutex };
+            _helloCells.push_back(hello->cellPixelSize);
+        }
+    }
+
+    /// @return The cell size each ResizeRequest stated so far (nullopt for none), in arrival order.
+    [[nodiscard]] std::vector<std::optional<vthost::proto::WireCellPixelSize>> requestCells() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _requestCells;
+    }
+
+    /// @return The cell size each ClientHello stated so far (nullopt for none), in arrival order.
+    [[nodiscard]] std::vector<std::optional<vthost::proto::WireCellPixelSize>> helloCells() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _helloCells;
     }
 
     /// @return Every client area a ResizeRequest stated so far, in arrival order.
@@ -283,7 +305,9 @@ class ClientFrameCounts
     std::array<std::atomic<uint64_t>, Kinds.size()> _counts {};
     std::atomic<uint64_t> _decodeErrors {};
     mutable std::mutex _areasMutex {};
-    std::vector<vtpty::PageSize> _areas {}; ///< Under _areasMutex.
+    std::vector<vtpty::PageSize> _areas {};                                        ///< Under _areasMutex.
+    std::vector<std::optional<vthost::proto::WireCellPixelSize>> _requestCells {}; ///< Under _areasMutex.
+    std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.
 };
 
 /// A daemon end of a connection that decodes the frames the client sends, keeping partial frames across
@@ -1878,6 +1902,62 @@ TEST_CASE("a reconnect states the window's real size in its hello", "[attach][co
 
     // No layout of the new connection has come in yet: only the hello can have said so.
     CHECK(f.daemon.clientArea() == cells(120, 40));
+    f.daemon.releaseHeld();
+}
+
+TEST_CASE("NativeController.sends_its_cell_size_with_the_client_area", "[attach][controller][cellsize]")
+{
+    auto f = ResizedWindow {};
+    auto const before = f.daemon.clientFrames.requestCells().size();
+
+    f.session->terminal().device().resizeScreen(cells(80, 24),
+                                                vtpty::ImageSize { vtpty::Width(720), vtpty::Height(432) });
+
+    REQUIRE(waitUntil([&] { return f.daemon.clientFrames.requestCells().size() > before; }));
+    CHECK(f.daemon.clientFrames.requestCells().back()
+          == std::optional { vthost::proto::WireCellPixelSize { .width = 9, .height = 18 } });
+}
+
+TEST_CASE("NativeController.sends_a_cell_size_change_with_an_unchanged_grid",
+          "[attach][controller][cellsize]")
+{
+    auto f = ResizedWindow {};
+    f.session->terminal().device().resizeScreen(cells(80, 24),
+                                                vtpty::ImageSize { vtpty::Width(720), vtpty::Height(432) });
+    REQUIRE(waitUntil([&] {
+        return !f.daemon.clientFrames.requestCells().empty()
+               && f.daemon.clientFrames.requestCells().back().has_value();
+    }));
+    auto const before = f.daemon.clientFrames.requestCells().size();
+
+    // The grid is what it was; only the cell (a zoom) differs.
+    f.session->terminal().device().resizeScreen(cells(80, 24),
+                                                vtpty::ImageSize { vtpty::Width(800), vtpty::Height(480) });
+
+    REQUIRE(waitUntil([&] { return f.daemon.clientFrames.requestCells().size() > before; }));
+    CHECK(f.daemon.clientFrames.requestCells().back()
+          == std::optional { vthost::proto::WireCellPixelSize { .width = 10, .height = 20 } });
+}
+
+TEST_CASE("NativeController.states_the_last_cell_size_in_the_hello_on_reconnect",
+          "[attach][controller][cellsize]")
+{
+    auto f = ResizedWindow {};
+    f.session->terminal().device().resizeScreen(cells(80, 24),
+                                                vtpty::ImageSize { vtpty::Width(720), vtpty::Height(432) });
+    REQUIRE(waitUntil([&] {
+        return !f.daemon.clientFrames.requestCells().empty()
+               && f.daemon.clientFrames.requestCells().back().has_value();
+    }));
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+
+    REQUIRE(waitUntil([&] { return f.daemon.clientFrames.helloCells().size() >= 2; }));
+    auto const hellos = f.daemon.clientFrames.helloCells();
+    CHECK_FALSE(hellos.front().has_value());
+    CHECK(hellos.back() == std::optional { vthost::proto::WireCellPixelSize { .width = 9, .height = 18 } });
     f.daemon.releaseHeld();
 }
 
