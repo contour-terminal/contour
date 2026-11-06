@@ -266,6 +266,11 @@ if(CONTOUR_TESTING)
         # The release/tag rules of scripts/check-release.py (CI's check_release job), against inline samples.
         contour_add_lint_gate(check_release_selftest check-release.py --self-test)
 
+        # .github/release.json lists the files a release attaches; its patterns must be well formed, and
+        # the selection rules (one file per pattern, in order) are checked against inline samples.
+        contour_add_lint_gate(check_release_assets release-assets.py)
+        contour_add_lint_gate(check_release_assets_selftest release-assets.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
