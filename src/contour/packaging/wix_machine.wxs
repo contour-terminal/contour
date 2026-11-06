@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The components of the per-machine installer whose registry root and environment scope differ from the
+     per-user one (wix_user.wxs). Both files define the same Ids, which scripts/check-wix-patch.py checks,
+     so wix_patch.xml refers to them without knowing the scope. One Fragment: referencing one Id links all. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- Contour's bin directory at the end of the machine's PATH. -->
+    <Component Id="ContourPathEnvironment" Guid="*" Directory="INSTALL_ROOT">
+      <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="yes" />
+      <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <!-- The Start menu shortcut "Contour (Connect…)": `contour.exe connect`, which asks where the new window's
+         sessions should live (this computer's daemon, this window only, a saved host) before it opens. CPack's
+         own shortcuts take no arguments, hence a component of our own, attached to the main feature. -->
+    <Component Id="ContourConnectShortcut" Guid="*" Directory="ProgramMenuFolder">
+      <Shortcut Id="CM_S_contour_connect" Name="Contour (Connect…)" Description="Choose where a new Contour window's sessions live" Target="[INSTALL_ROOT]bin\contour.exe" Arguments="connect" WorkingDirectory="INSTALL_ROOT" />
+      <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="ConnectShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

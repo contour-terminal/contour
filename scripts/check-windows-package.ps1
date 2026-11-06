@@ -48,6 +48,11 @@ $RequiredZipEntries = @(
     'bin/Qt6Svg.dll'
 ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
 
+# The components whose registry root and environment scope depend on the installer's scope (wix_machine.wxs
+# and wix_user.wxs define both).
+$PathComponent = 'ContourPathEnvironment'
+$ScopedComponents = $PathComponent, 'ContourConnectShortcut'
+
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
 function Invoke-Com {
@@ -147,6 +152,18 @@ function Test-Equal {
     return "expected $Expected, found $shownFound"
 }
 
+function Test-RegistryRoots {
+    <# $null when every Registry row of the scope-dependent components has the given Root. #>
+    param([string]$Msi, [string]$Root)
+    $found = foreach ($component in $ScopedComponents) {
+        $rows = Get-MsiRows -Msi $Msi -Query ('SELECT `Root` FROM `Registry` WHERE `Component_` = ''{0}''' -f $component)
+        if ($rows.Count -eq 0) { "$component has no Registry row" }
+        else { $rows | Where-Object { $_[0] -ne $Root } | ForEach-Object { "$component has Root $($_[0])" } }
+    }
+    if (-not $found) { return $null }
+    "expected Root $Root, found $($found -join '; ')"
+}
+
 # The rows. Target: 'zip' | 'msi' (every MSI given) | 'machine' | 'user'. Check receives the subject (the zip's
 # entry names, or the MSI's path) and returns $null when the row holds, else "expected <x>, found <y>". The
 # first zip row is the vacuity guard: the rows after it would pass on an empty listing.
@@ -189,6 +206,27 @@ $Rows = @(
     @{ Target = 'msi'; Name = 'WixUIRMOption'; Check = {
         param($msi)
         Test-Equal 'UseRM' (Get-MsiProperty -Msi $msi -Name 'WixUIRMOption')
+    } }
+    @{ Target = 'msi'; Name = 'PATH environment entry'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query ('SELECT `Environment` FROM `Environment` WHERE `Component_` = ''{0}''' -f $PathComponent)
+        if ($rows.Count -gt 0) { return $null }
+        "expected an Environment row of $PathComponent, found none"
+    } }
+    @{ Target = 'machine'; Name = 'PATH entry is system-wide (Name holds *)'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query ('SELECT `Name` FROM `Environment` WHERE `Component_` = ''{0}''' -f $PathComponent)
+        $found = if ($rows.Count -gt 0) { $rows[0][0] } else { 'no row' }
+        if ($found.Contains('*')) { return $null }
+        "expected a Name holding *, found $found"
+    } }
+    @{ Target = 'machine'; Name = 'registry roots are HKLM'; Check = {
+        param($msi)
+        Test-RegistryRoots $msi '2'
+    } }
+    @{ Target = 'user'; Name = 'registry roots are HKCU'; Check = {
+        param($msi)
+        Test-RegistryRoots $msi '1'
     } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
