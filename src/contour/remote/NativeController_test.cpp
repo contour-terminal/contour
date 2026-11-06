@@ -1957,6 +1957,7 @@ TEST_CASE("NativeController.sends_a_cell_size_change_with_an_unchanged_grid",
                && f.daemon.clientFrames.requestCells().back().has_value();
     }));
     auto const before = f.daemon.clientFrames.requestCells().size();
+    auto const panesBefore = f.daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
 
     // The grid is what it was; only the cell (a zoom) differs.
     f.session->terminal().device().resizeScreen(cells(80, 24),
@@ -1965,6 +1966,14 @@ TEST_CASE("NativeController.sends_a_cell_size_change_with_an_unchanged_grid",
     REQUIRE(waitUntil([&] { return f.daemon.clientFrames.requestCells().size() > before; }));
     CHECK(f.daemon.clientFrames.requestCells().back()
           == std::optional { vthost::proto::WireCellPixelSize { .width = 10, .height = 20 } });
+
+    // Everything the client sent with that report has landed once input written after it has: the report was
+    // the one ResizeRequest, and no pane was re-asserted, as the area did not move.
+    auto const remote = f.daemon.onDaemon([&] { return f.daemon.host->sessionIds().front(); });
+    std::ignore = f.session->terminal().device().write("cell-only");
+    REQUIRE(waitUntil([&] { return f.daemon.ptyInput(remote).contains("cell-only"); }));
+    CHECK(f.daemon.clientFrames.requestCells().size() == before + 1);
+    CHECK(f.daemon.clientFrames.count(vthost::proto::PduType::ResizePane) == panesBefore);
 }
 
 TEST_CASE("NativeController.states_the_last_cell_size_in_the_hello_on_reconnect",

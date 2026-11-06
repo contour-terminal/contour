@@ -39,13 +39,10 @@ namespace
     [[nodiscard]] std::optional<vtpty::ImageSize> cellOf(vtpty::PageSize cells,
                                                          std::optional<vtpty::ImageSize> pixels) noexcept
     {
-        if (!pixels.has_value() || unbox<uint32_t>(cells.columns) == 0 || unbox<uint32_t>(cells.lines) == 0)
+        if (!pixels.has_value() || cells.area() == 0)
             return std::nullopt;
-        auto const width = unbox<uint32_t>(pixels->width) / unbox<uint32_t>(cells.columns);
-        auto const height = unbox<uint32_t>(pixels->height) / unbox<uint32_t>(cells.lines);
-        if (width == 0 || height == 0)
-            return std::nullopt;
-        return vtpty::ImageSize { vtpty::Width::cast_from(width), vtpty::Height::cast_from(height) };
+        auto const cell = *pixels / cells;
+        return cell.area() > 0 ? std::optional { cell } : std::nullopt;
     }
 
     /// @param cell A cell's pixel size, when known.
@@ -1230,18 +1227,19 @@ void NativeController::flushGeometry(GeometryFlush scope)
             else if (scope == GeometryFlush::Report)
                 _helloArea.reset(); // the window moved on: this report states its own area
         }
-        // A new client area re-projects every pane on the daemon: all are re-asserted, not just the moved.
-        // A changed cell is stated like a moved area: the daemon lays images out on it. cellMoved is
-        // evaluated before composed.has_value(), so a pending cell change simply waits for a composed layout.
-        auto const cellMoved = scope == GeometryFlush::Report && _lastReportedCell != _cellPixelSize;
-        if (scope == GeometryFlush::Report && composed.has_value()
-            && (_lastReportedArea != composed || cellMoved))
+        // A changed cell is stated like a moved area, as the daemon lays images out on it -- but only a new
+        // client area re-projects every pane on the daemon, so only that re-asserts all, not just the moved.
+        if (scope == GeometryFlush::Report && composed.has_value())
         {
-            _lastReportedCell = _cellPixelSize;
-            _lastReportedArea = composed;
-            _lastStatedArea = composed;
-            area = composed;
-            resendAll = true;
+            auto const areaMoved = _lastReportedArea != composed;
+            if (areaMoved || _lastReportedCell != _cellPixelSize)
+            {
+                _lastReportedCell = _cellPixelSize;
+                _lastReportedArea = composed;
+                _lastStatedArea = composed;
+                area = composed;
+                resendAll = resendAll || areaMoved;
+            }
         }
         for (auto const& [session, size]: _paneSizes)
         {
