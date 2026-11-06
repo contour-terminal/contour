@@ -38,6 +38,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -3859,9 +3860,6 @@ struct PlaybackHarness
         session = tab->rootPane()->session();
         terminal = host.terminal(session);
         REQUIRE(terminal != nullptr);
-        // The host sets no cell size itself, and an image without c=/r= is dropped while it is unknown. One
-        // pixel per cell keeps each one-pixel frame to a single cell.
-        terminal->setCellPixelSize(vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) });
         host.subscribeStream(&mirror);
     }
 
@@ -4872,5 +4870,291 @@ TEST_CASE("a quiesced session crosses into an adopted one, every byte exactly on
     CHECK(closes.load() == 0);
 }
 #endif
+
+// }}}
+
+// {{{ cell pixel size: one daemon-wide cell, from the latest client that displays the grid
+
+namespace
+{
+
+/// @return A cell of @p width by @p height pixels.
+[[nodiscard]] vtpty::ImageSize pixels(unsigned width, unsigned height)
+{
+    return vtpty::ImageSize { vtpty::Width(width), vtpty::Height(height) };
+}
+
+/// A host over CountingPty sessions, two clients subscribed to its streams, and helpers that read back
+/// each session's cell and PTY.
+struct CellHarness
+{
+    CellHarness()
+    {
+        host.subscribeStream(&clientA);
+        host.subscribeStream(&clientB);
+    }
+
+    ~CellHarness()
+    {
+        host.unsubscribeStream(&clientB);
+        host.unsubscribeStream(&clientA);
+    }
+
+    CellHarness(CellHarness const&) = delete;
+    CellHarness(CellHarness&&) = delete;
+    CellHarness& operator=(CellHarness const&) = delete;
+    CellHarness& operator=(CellHarness&&) = delete;
+
+    /// Opens one tab and returns its session.
+    vtworkspace::SessionId openTab()
+    {
+        auto const* tab = host.createTab();
+        REQUIRE(tab != nullptr);
+        return tab->rootPane()->session();
+    }
+
+    /// @return @p session's terminal.
+    [[nodiscard]] vtbackend::Terminal& terminal(vtworkspace::SessionId session)
+    {
+        auto* found = host.terminal(session);
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    /// @return The PTY under @p session's terminal.
+    [[nodiscard]] vthost::testing::CountingPty& pty(vtworkspace::SessionId session)
+    {
+        auto& tapped = dynamic_cast<vthost::TappingPty&>(terminal(session).device());
+        return dynamic_cast<vthost::testing::CountingPty&>(tapped.inner());
+    }
+
+    /// @return Whether every session's terminal lays out on @p cell, and its PTY was told @p cell × its page.
+    [[nodiscard]] bool everySessionAt(vtpty::ImageSize cell)
+    {
+        return std::ranges::all_of(host.sessionIds(), [&](vtworkspace::SessionId session) {
+            auto& backing = terminal(session);
+            return backing.cellPixelSize() == cell && pty(session).pixelSize() == cell * backing.pageSize();
+        });
+    }
+
+    /// @return The resizes every session's PTY has been given so far, summed.
+    [[nodiscard]] int resizes()
+    {
+        return std::ranges::fold_left(host.sessionIds(), 0, [&](int sum, vtworkspace::SessionId session) {
+            return sum + pty(session).resizes();
+        });
+    }
+
+    /// @return The sessionResized() announcements both clients heard, summed.
+    [[nodiscard]] int resizesHeard() const
+    {
+        auto sum = 0;
+        for (auto const* client: { &clientA, &clientB })
+            for (auto const count: client->resizesHeard | std::views::values)
+                sum += count;
+        return sum;
+    }
+
+    /// Reports @p cell and then @p area for @p client, as a ResizeRequest carrying both does.
+    void report(StubClient& client, vtpty::ImageSize cell, vtpty::PageSize area)
+    {
+        host.reportCellPixelSize(&client, cell);
+        std::ignore = host.applyClientSize(&client, area);
+    }
+
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    StubClient clientA;
+    StubClient clientB;
+    StubClient tmuxClient; ///< A client that reports areas only, never a cell (tmux control mode).
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vthost::testing::CountingPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig {
+                           .pumping = vthost::SessionPumping::Manual,
+                           .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() } };
+};
+
+/// A 100 pixels wide, 96 pixels tall sixel image: sixteen full bands of one colour.
+[[nodiscard]] std::string sixel100x96()
+{
+    auto image = std::string { "\033Pq\"1;1;100;96#0;2;100;100;100#0" };
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 16))
+        image += "!100~-";
+    image += "\033\\";
+    return image;
+}
+
+/// @return How many lines and columns of @p backing's page image fragments cover, counted from the top left.
+[[nodiscard]] vtpty::PageSize imageExtent(vtbackend::Terminal& backing)
+{
+    auto const _ = std::lock_guard { backing };
+    auto extent = cells(0, 0);
+    auto const page = backing.pageSize();
+    for (auto const line: std::views::iota(0, unbox<int>(page.lines)))
+        for (auto const column: std::views::iota(0, unbox<int>(page.columns)))
+            if (backing.primaryScreen()
+                    .at(vtbackend::LineOffset(line), vtbackend::ColumnOffset(column))
+                    .imageFragment())
+            {
+                extent.lines = std::max(extent.lines, vtpty::LineCount(line + 1));
+                extent.columns = std::max(extent.columns, vtpty::ColumnCount(column + 1));
+            }
+    return extent;
+}
+
+} // namespace
+
+TEST_CASE("SessionHost.cellPixelSize.defaults_before_any_client", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    std::ignore = h.openTab();
+
+    CHECK(h.host.cellPixelSize() == pixels(10, 20));
+    CHECK(h.host.learnedCellPixelSize() == std::nullopt);
+    CHECK(h.everySessionAt(pixels(10, 20)));
+}
+
+TEST_CASE("SessionHost.cellPixelSize.follows_the_latest_client", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    std::ignore = h.openTab();
+
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    CHECK(h.everySessionAt(pixels(9, 18)));
+
+    h.report(h.clientB, pixels(18, 36), cells(80, 24));
+    CHECK(h.host.cellPixelSize() == pixels(18, 36));
+    CHECK(h.host.learnedCellPixelSize() == pixels(18, 36));
+    CHECK(h.everySessionAt(pixels(18, 36)));
+
+    // A's window moves to another screen: its new cell is the latest word again.
+    h.report(h.clientA, pixels(12, 24), cells(80, 24));
+    CHECK(h.everySessionAt(pixels(12, 24)));
+}
+
+TEST_CASE("SessionHost.cellPixelSize.survives_the_client_leaving", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    h.host.unsubscribeStream(&h.clientA);
+
+    CHECK(h.host.learnedCellPixelSize() == pixels(9, 18));
+    CHECK(h.everySessionAt(pixels(9, 18)));
+
+    std::ignore = h.openTab();
+    REQUIRE(h.host.sessionCount() == 2);
+    CHECK(h.everySessionAt(pixels(9, 18)));
+}
+
+TEST_CASE("SessionHost.cellPixelSize.ignores_clients_without_one", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    h.host.subscribeStream(&h.tmuxClient);
+
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    std::ignore = h.host.applyClientSize(&h.tmuxClient, cells(100, 30));
+
+    CHECK(h.host.cellPixelSize() == pixels(9, 18));
+    CHECK(h.everySessionAt(pixels(9, 18)));
+    h.host.unsubscribeStream(&h.tmuxClient);
+    CHECK(h.everySessionAt(pixels(9, 18)));
+}
+
+TEST_CASE("SessionHost.cellPixelSize.changes_without_a_grid_change", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    std::ignore = h.openTab();
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    auto const resizesBefore = h.resizes();
+    auto const heardBefore = h.resizesHeard();
+
+    h.report(h.clientA, pixels(18, 36), cells(80, 24));
+
+    CHECK(h.everySessionAt(pixels(18, 36)));
+    CHECK(h.resizes() == resizesBefore + 2); // one per PTY
+    CHECK(h.resizesHeard() == heardBefore);  // no grid moved, so nothing to resync
+}
+
+TEST_CASE("SessionHost.cellPixelSize.lays_out_a_sixel_after_the_client_left", "[vthost][host][cell][sixel]")
+{
+    SECTION("on the cell the departed client reported")
+    {
+        auto h = CellHarness {};
+        auto const session = h.openTab();
+        h.report(h.clientA, pixels(9, 18), cells(80, 24));
+        h.host.unsubscribeStream(&h.clientA);
+
+        h.terminal(session).writeToScreen(sixel100x96());
+
+        // ceil(96 / 18) lines by ceil(100 / 9) columns.
+        CHECK(imageExtent(h.terminal(session)) == cells(12, 6));
+    }
+    SECTION("on the default cell of a host no client ever touched")
+    {
+        auto h = CellHarness {};
+        auto const session = h.openTab();
+
+        h.terminal(session).writeToScreen(sixel100x96());
+
+        // ceil(96 / 20) lines by ceil(100 / 10) columns.
+        CHECK(imageExtent(h.terminal(session)) == cells(10, 5));
+    }
+}
+
+TEST_CASE("SessionHost.cellPixelSize.an_unchanged_re_report_does_not_take_over", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    h.report(h.clientB, pixels(18, 36), cells(80, 24));
+    REQUIRE(h.everySessionAt(pixels(18, 36)));
+    auto const resizesBefore = h.resizes();
+
+    // Clients re-assert their sizes on every attach and window event: a repeat is no newer word.
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+
+    CHECK(h.everySessionAt(pixels(18, 36)));
+    CHECK(h.resizes() == resizesBefore);
+}
+
+TEST_CASE("SessionHost.cellPixelSize.grid_and_cell_change_resize_once", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    auto const first = h.openTab();
+    auto const second = h.openTab();
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    auto const before = std::array { h.pty(first).resizes(), h.pty(second).resizes() };
+
+    h.report(h.clientA, pixels(18, 36), cells(100, 30));
+
+    CHECK(h.pty(first).resizes() == before[0] + 1);
+    CHECK(h.pty(second).resizes() == before[1] + 1);
+    CHECK(h.everySessionAt(pixels(18, 36)));
+    CHECK(h.terminal(first).totalPageSize().columns == vtpty::ColumnCount(100));
+}
+
+TEST_CASE("SessionHost.grid_resize_keeps_the_cell_size", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    auto const session = h.openTab();
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+
+    std::ignore = h.host.applyClientSize(&h.clientA, cells(120, 40));
+
+    auto& backing = h.terminal(session);
+    CHECK(backing.totalPageSize().columns == vtpty::ColumnCount(120));
+    CHECK(backing.cellPixelSize() == pixels(9, 18));
+    CHECK(h.pty(session).pixelSize() == pixels(9, 18) * backing.pageSize());
+}
 
 // }}}

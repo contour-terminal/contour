@@ -511,6 +511,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _fileSystem(config.fileSystem.get()),
     _git(config.git, config.fileSystem.get()),
     _profiles(std::move(config.profiles)),
+    _defaultCellPixelSize(config.defaultCellPixelSize),
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
     _extensionControl(vtcontrol::nullControlApi()),
@@ -533,6 +534,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
 {
     // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
     Require(config.firstSessionId != 0);
+    Require(_defaultCellPixelSize.area() > 0);
     if (config.handover)
     {
         _handoverOutcome = restoreHandover(*std::move(config.handover));
@@ -689,6 +691,12 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     auto session = makeHostedSession(
         id, std::move(pty), std::move(settings), std::move(profileName), spawn.settingsOrigin);
 
+    // Before the pump starts, so the application's first look at its window already sees the host's cell.
+    {
+        auto& backing = session->terminal();
+        auto const guard = std::lock_guard { backing };
+        backing.changeCellPixelSize(cellPixelSize());
+    }
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
         seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredDivider);
@@ -1371,6 +1379,9 @@ SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::Page
     // genuinely moved: a resync is a full-grid snapshot, and answering a no-op with one per pane is
     // how a healthy client used to lose its connection.
     auto const resolved = resolveAuthoritativeArea();
+    // Decided before the panes are resized, so that resizeLocked() moves each one's grid and cell at once;
+    // applied after to the terminals whose grid stayed.
+    auto const cell = resolveCellPixelSize();
     // When the resolved area moved, every pane is re-projected, and the client's sizes for its old layout
     // must not come back with it: forgotten first. When it did not, they are forgotten only once the panes
     // are settled, and not settled again: settling without them would move a pane the client sized to
@@ -1381,6 +1392,7 @@ SizeChange SessionHost::applyClientSize(SessionStreamEvents* client, vtpty::Page
     auto const change = settlePicks(resolved, before);
     if (areaMoved)
         forgetClientRefinements(client);
+    settleCellPixelSize(cell);
     return change;
 }
 
@@ -1515,9 +1527,64 @@ SizeChange SessionHost::applyPaneSize(SessionStreamEvents* client,
         return SizeChange::Unchanged;
     }
     recordRefinement(client, session, size);
+    // As in applyClientSize: the cell is decided before the pane is resized, and applied to the rest after.
+    auto const cell = resolveCellPixelSize();
     // The pane's pick, not blindly @p size: an ineligible client's report is remembered (it may become the
     // pick later), but resizing to it now would be undone by the next re-projection.
-    return resizeToPick(session, *backing, size);
+    auto const change = resizeToPick(session, *backing, size);
+    settleCellPixelSize(cell);
+    return change;
+}
+
+void SessionHost::reportCellPixelSize(SessionStreamEvents* client, vtpty::ImageSize cell)
+{
+    Require(client != nullptr);
+    Require(cell.area() > 0);
+    // A repeat keeps its old stamp: it is no newer word than the report of another client since.
+    if (auto const previous = _clientCells.find(client);
+        previous != _clientCells.end() && previous->second.cell == cell)
+        return;
+    _clientCells.insert_or_assign(client, ClientCell { .cell = cell, .sequence = _nextAreaSequence++ });
+}
+
+SizeChange SessionHost::resolveCellPixelSize()
+{
+    if (_clientCells.empty())
+        return SizeChange::Unchanged; // every client gone, or none ever reported one: keep what was learned
+    // The eligibility refinedSize() uses: a client that displays the resolved area renders the grid the
+    // terminals hold, so its cell is the one that grid's images are meant for.
+    auto const displaysPageSize = [this](auto const& entry) {
+        auto const area = _clientAreas.find(entry.first);
+        return area != _clientAreas.end() && area->second.size == _pageSize;
+    };
+    auto const bySequence = [](auto const& entry) {
+        return entry.second.sequence;
+    };
+    auto eligible = _clientCells | std::views::filter(displaysPageSize);
+    auto const latest = std::ranges::empty(eligible)
+                            ? std::ranges::max_element(_clientCells, {}, bySequence)
+                            : std::ranges::max_element(eligible, {}, bySequence).base();
+    auto const cell = latest->second.cell;
+    auto const moved = cell != cellPixelSize();
+    _learnedCellPixelSize = cell;
+    if (!moved)
+        return SizeChange::Unchanged;
+    sessionLog()("cell size now {}x{} pixels", unbox(cell.width), unbox(cell.height));
+    return SizeChange::Applied;
+}
+
+void SessionHost::settleCellPixelSize(SizeChange cell)
+{
+    if (cell == SizeChange::Unchanged)
+        return;
+    // changeCellPixelSize() is a no-op for a terminal resizeLocked() already moved along with its grid. No
+    // sessionResized() follows: no grid moved, and a mirror lays images out on its own cell anyway.
+    for (auto const& session: _sessions | std::views::values)
+    {
+        auto& backing = session->terminal();
+        auto const guard = std::lock_guard { backing };
+        backing.changeCellPixelSize(cellPixelSize());
+    }
 }
 
 SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& backing, vtpty::PageSize size)
@@ -1527,9 +1594,12 @@ SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& bac
         // Ask the terminal what this request becomes rather than comparing the raw request:
         // resizeScreen clamps it (a total page must leave room for the status line), so a size
         // that differs from the current one can still be a no-op once clamped.
-        if (backing.clampedTotalPageSize(size) == backing.totalPageSize())
+        auto const total = backing.clampedTotalPageSize(size);
+        if (total == backing.totalPageSize())
             return SizeChange::Unchanged;
-        backing.resizeScreen(size);
+        // The host's cell rides along, on the total-page basis resizeScreen divides by: a report that moves
+        // grid and cell at once resizes the PTY once, and a grid resize alone keeps the cell.
+        backing.resizeScreen(size, cellPixelSize() * total);
     }
 
     // Outside the guard above: an observer resyncs the session, which takes the very lock this
@@ -1879,7 +1949,12 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     auto const before = snapshotPicks(observer);
     forgetClientRefinements(observer);
     _clientAreas.erase(observer);
-    std::ignore = settlePicks(resolveAuthoritativeArea(), before);
+    // The departed client's cell stops counting too; with nobody left, the host keeps the cell it learned.
+    _clientCells.erase(observer);
+    auto const area = resolveAuthoritativeArea();
+    auto const cell = resolveCellPixelSize();
+    std::ignore = settlePicks(area, before);
+    settleCellPixelSize(cell);
 }
 
 std::vector<SessionId> SessionHost::sessionIds() const

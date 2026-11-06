@@ -248,4 +248,23 @@ constexpr auto PromptedAt = int64_t { 1'700'000'000'000'000'000 };
     return static_cast<std::size_t>(std::ranges::distance(text | std::views::split(needle))) - 1;
 }
 
+/// A MockPty that counts how often it was resized, so a case can tell one resize from two.
+class CountingPty final: public vtpty::MockPty
+{
+  public:
+    using MockPty::MockPty;
+
+    void resizeScreen(vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels) override
+    {
+        ++_resizes;
+        MockPty::resizeScreen(cells, pixels);
+    }
+
+    /// @return How many resizes it was given.
+    [[nodiscard]] int resizes() const noexcept { return _resizes; }
+
+  private:
+    int _resizes = 0;
+};
+
 } // namespace vthost::testing

@@ -33,6 +33,7 @@
 
 #include <vtcontrol/Dispatch.hpp>
 #include <vtcontrol/Json.hpp>
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
@@ -1687,6 +1688,8 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             errorLog()("{}: rejecting client area {}x{} (out of range)", _id, resize->columns, resize->lines);
             return;
         }
+        // The cell first: the area report that follows settles it, together with the grid.
+        reportCellPixelSize(resize->cellPixelSize, "client");
         // The resync is not issued here. A client area re-projects every pane of every window, and
         // the resulting grids belong to every attached client — not just this one. SessionHost
         // announces each moved grid through sessionResized(), which lands on all of them.
@@ -1705,6 +1708,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
                        resize->lines);
             return;
         }
+        reportCellPixelSize(resize->cellPixelSize, "pane");
         // As above, the resync rides sessionResized(). A client re-asserts every pane size after a
         // client-area change, so most of these arrive already satisfied by the reprojection that
         // change performed — and SizeChange::Unchanged announces nothing.
@@ -2247,6 +2251,18 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     return true;
 }
 
+void NativeSession::reportCellPixelSize(std::optional<proto::WireCellPixelSize> const& stated,
+                                        std::string_view origin)
+{
+    if (!stated)
+        return;
+    if (auto const cell = sanePixelSize(stated->width, stated->height))
+        _host.reportCellPixelSize(this, *cell);
+    else
+        errorLog()(
+            "{}: rejecting {} cell size {}x{} (out of range)", _id, origin, stated->width, stated->height);
+}
+
 void NativeSession::attachClient(uint64_t serial,
                                  proto::ClientHello const& hello,
                                  proto::ServerHello reply,
@@ -2277,7 +2293,11 @@ void NativeSession::attachClient(uint64_t serial,
     if (hello.clientArea)
     {
         if (auto const size = sanePageSize(hello.clientArea->columns, hello.clientArea->lines))
+        {
+            // The cell rides on the area, so the first session spawns at both.
+            reportCellPixelSize(hello.cellPixelSize, "hello");
             std::ignore = _host.applyClientSize(this, *size);
+        }
         else
             errorLog()("{}: rejecting hello client area {}x{} (out of range)",
                        _id,
