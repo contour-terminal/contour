@@ -3859,6 +3859,9 @@ struct PlaybackHarness
         session = tab->rootPane()->session();
         terminal = host.terminal(session);
         REQUIRE(terminal != nullptr);
+        // The host sets no cell size itself, and an image without c=/r= is dropped while it is unknown. One
+        // pixel per cell keeps each one-pixel frame to a single cell.
+        terminal->setCellPixelSize(vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) });
         host.subscribeStream(&mirror);
     }
 
