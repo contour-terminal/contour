@@ -82,6 +82,13 @@ $FeatureGates = @(
 )
 $Switches = $FeatureGates | ForEach-Object { $_.Switch }
 
+# The links Add/Remove Programs shows next to the entry.
+$ArpLinks = @{
+    ARPURLINFOABOUT  = 'https://contour-terminal.org/'
+    ARPHELPLINK      = 'https://github.com/contour-terminal/contour/issues'
+    ARPURLUPDATEINFO = 'https://github.com/contour-terminal/contour/releases'
+}
+
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
 function Invoke-Com {
@@ -383,6 +390,27 @@ $Rows = @(
         $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Directory_` FROM `Shortcut` WHERE `Component_` = ''ContourStartMenuShortcut'''
         if ($rows.Count -eq 1 -and $rows[0][0] -eq 'ProgramMenuFolder' -and $cpacks.Count -eq 0) { return $null }
         "expected one Shortcut in ProgramMenuFolder of ContourStartMenuShortcut and no CM_SHORTCUT_* component, found $($rows.Count) and $($cpacks -join ', ')"
+    } }
+    @{ Target = 'msi'; Name = 'publisher'; Check = {
+        param($msi)
+        Test-Equal 'Contour Terminal' (Get-MsiProperty -Msi $msi -Name 'Manufacturer')
+    } }
+    @{ Target = 'msi'; Name = 'Add/Remove Programs icon'; Check = {
+        param($msi)
+        $name = Get-MsiProperty -Msi $msi -Name 'ARPPRODUCTICON'
+        if (-not $name) { return 'expected an ARPPRODUCTICON property, found none' }
+        $rows = Get-MsiRows -Msi $msi -Query ('SELECT `Name` FROM `Icon` WHERE `Name` = ''{0}''' -f $name)
+        if ($rows.Count -gt 0) { return $null }
+        "expected an Icon row named $name, found none"
+    } }
+    @{ Target = 'msi'; Name = 'Add/Remove Programs links'; Check = {
+        param($msi)
+        $problems = foreach ($link in $ArpLinks.GetEnumerator()) {
+            $value = Get-MsiProperty -Msi $msi -Name $link.Key
+            if ($value -ne $link.Value) { "$($link.Key) is $(if ($null -eq $value) { 'absent' } else { $value }), not $($link.Value)" }
+        }
+        if (-not $problems) { return $null }
+        "expected the three ARP links, found $($problems -join '; ')"
     } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
