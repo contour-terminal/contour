@@ -157,3 +157,4 @@ nav:
     - internals/text-stack.md
     - internals/vt-conformance.md
     - internals/macos-code-signing.md
+    - internals/releasing.md

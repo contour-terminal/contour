@@ -211,7 +211,7 @@ While that is `LastReleaseBeforeNegotiation`, the only row may be `"unreleased"`
 just before the trailing `"unreleased"` one must name it, and no other `"unreleased"` row may exist,
 or the test fails with `add a ReleasedProtocols
 row for <N> and record its transcripts`. `/draft-release` stamps the date, so the test turns red on the
-release branch exactly when the row is missing.
+release's version-bump pull request exactly when the row is missing.
 
 ### Status-line extensions and the font
 
