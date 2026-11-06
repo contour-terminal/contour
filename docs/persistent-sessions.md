@@ -170,6 +170,7 @@ daemon:
   mode: auto          # auto, in_process or required
   socket: ""          # the daemon's socket path; empty selects the default
   size_policy: latest # whose size wins when clients disagree: latest, smallest or largest
+  default_cell_pixel_size: { width: 10, height: 20 } # cell size images use until a client reports one
   history_limit: 1000 # scrollback lines per session, -1 for unlimited; unset follows the profile
 ```
 

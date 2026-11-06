@@ -816,6 +816,10 @@ struct DaemonSettings
     /// Which attached client's size wins when several disagree (`daemon.size_policy`).
     vthost::ClientSizePolicy sizePolicy { vthost::ClientSizePolicy::Latest };
 
+    /// The cell size in pixels images are laid out on before any client has reported one
+    /// (`daemon.default_cell_pixel_size`); 10x20 is the VT340's text cell.
+    vtbackend::ImageSize defaultCellPixelSize { vtbackend::Width(10), vtbackend::Height(20) };
+
     /// The scrollback the daemon keeps per session; unset means the hosting profile's `history.limit`.
     std::optional<vtbackend::MaxHistoryLineCount> historyLimit {};
 

@@ -424,6 +424,13 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where);
+
+    /// Reads a cell size in pixels, `{ width: W, height: H }`, with both extents required and each
+    /// within `vthost::sanePixelSize`'s bounds. Anything else is reported and leaves @p where as it was.
+    /// @param node  The mapping holding @p entry.
+    /// @param entry The key of the cell size.
+    /// @param where Receives the cell size.
+    void loadCellPixelSize(YAML::Node const& node, std::string const& entry, vtbackend::ImageSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, QuickTerminalConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
@@ -863,6 +870,8 @@ struct Writer
                       nameOf(v.mode),
                       SingleQuoted { v.socket },
                       vthost::nameOf(v.sizePolicy),
+                      *v.defaultCellPixelSize.width,
+                      *v.defaultCellPixelSize.height,
                       historyLimit,
                       v.restore.scrollback,
                       v.restore.scrollbackLines,

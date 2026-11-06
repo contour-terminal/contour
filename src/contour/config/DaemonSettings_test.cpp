@@ -3,6 +3,7 @@
 #include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <chrono>
 #include <format>
@@ -104,4 +105,36 @@ TEST_CASE("Config: a malformed daemon.restore value keeps its default and the ke
     CHECK(c.rerunPrograms.empty());
     CHECK(c.interval == std::chrono::seconds { 30 });
     CHECK(config.daemon.value().sizePolicy == vthost::ClientSizePolicy::Smallest);
+}
+
+TEST_CASE("daemon.default_cell_pixel_size defaults to the VT340 text cell", "[config][daemon]")
+{
+    auto const config = contour::config::Config {};
+    CHECK(config.daemon.value().defaultCellPixelSize
+          == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+    CHECK(loadConfigFromYaml("daemon:\n  mode: auto\n").daemon.value().defaultCellPixelSize
+          == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
+}
+
+TEST_CASE("daemon.default_cell_pixel_size reads width and height", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n  default_cell_pixel_size: { width: 9, height: 18 }\n");
+    CHECK(config.daemon.value().defaultCellPixelSize
+          == vtbackend::ImageSize { vtbackend::Width(9), vtbackend::Height(18) });
+}
+
+TEST_CASE("an invalid daemon.default_cell_pixel_size keeps the default", "[config][daemon]")
+{
+    auto const* const text = GENERATE(as<char const*>(),
+                                      "{ width: 0, height: 18 }",
+                                      "{ width: -1, height: 18 }",
+                                      "{ width: 9 }",
+                                      "{ height: 18 }",
+                                      "{ width: 1025, height: 18 }",
+                                      "{ width: nine, height: 18 }",
+                                      "\"9x18\"");
+    CAPTURE(text);
+    auto const config = loadConfigFromYaml(std::format("daemon:\n  default_cell_pixel_size: {}\n", text));
+    CHECK(config.daemon.value().defaultCellPixelSize
+          == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
 }

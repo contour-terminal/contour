@@ -1084,6 +1084,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
         core::defaultEnvironment(),
         SessionHostConfig { .pumping = SessionPumping::Threaded,
                             .sizePolicy = config.sizePolicy,
+                            .defaultCellPixelSize = config.defaultCellPixelSize,
                             .startupLayout = config.startupLayout,
                             .identity = thisHostIdentity(),
                             .extensions = config.extensions ? config.extensions() : nullptr,
