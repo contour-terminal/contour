@@ -123,6 +123,10 @@ if(CONTOUR_FRONTEND_GUI)
         contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "Linux and Windows only")
     elseif(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         set(CONTOUR_WITH_GPU_SELECTION ON)
+        # ContourGuiApp.hpp adds a member under this definition, and every target in src/contour that
+        # includes it (contour_core, the display library, the tests) must see the same class. Defined here,
+        # where it is decided, for this directory and the ones added after it.
+        add_compile_definitions(CONTOUR_WITH_GPU_SELECTION)
     else()
         contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "requires Qt 6.10")
     endif()
@@ -745,9 +749,6 @@ if(CONTOUR_FRONTEND_GUI)
     set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
     # Disable all deprecated Qt functions prior to Qt 6.0.
     target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
-    if(CONTOUR_WITH_GPU_SELECTION)
-        target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_GPU_SELECTION)
-    endif()
 endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
