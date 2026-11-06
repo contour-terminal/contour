@@ -412,6 +412,17 @@ $Rows = @(
         if (-not $problems) { return $null }
         "expected the three ARP links, found $($problems -join '; ')"
     } }
+    @{ Target = 'msi'; Name = 'contour.exe carries the product version'; Check = {
+        param($msi)
+        # A local build's ProductVersion has three fields where the file version always has four.
+        $asFourFields = { param($v) (($v -split '\.') + '0', '0', '0', '0' | ForEach-Object { $_ })[0..3] -join '.' }
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `FileName`, `Version` FROM `File`'
+        $exe = @($rows | Where-Object { ($_[0] -split '\|')[-1] -eq 'contour.exe' })
+        if ($exe.Count -ne 1) { return "expected one File row named contour.exe, found $($exe.Count)" }
+        $expected = & $asFourFields (Get-MsiProperty -Msi $msi -Name 'ProductVersion')
+        $found = if ($exe[0][1]) { & $asFourFields $exe[0][1] } else { 'no version' }
+        Test-Equal $expected $found
+    } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
         Test-Equal $MachineUpgradeCode (Get-MsiProperty -Msi $msi -Name 'UpgradeCode')
