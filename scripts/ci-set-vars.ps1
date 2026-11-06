@@ -7,27 +7,17 @@ if ("${Env:GITHUB_RUN_NUMBER}" -ne "") {
     $VERSION = "${VERSION}.${Env:GITHUB_RUN_NUMBER}"
 }
 
-switch -Regex ($Env:GITHUB_HEAD_REF) {
-    "^release$" {
-        $IS_PRE = 'false';
-        $SUFFIX = '';
-        $DELIM = '';
-    }
-    Default {
-        $IS_PRE = 'true';
-        $SUFFIX = "prerelease";
-        $DELIM = "-";
-    }
+# CONTOUR_BUILD_CHANNEL is set at workflow level by .github/workflows/build.yml; anything but
+# "release" (or unset, as in a local run) is a prerelease.
+if ($Env:CONTOUR_BUILD_CHANNEL -eq 'release') {
+    $VERSION_STRING = "${VERSION}"
+} else {
+    $VERSION_STRING = "${VERSION}-prerelease"
 }
-
-$VERSION_STRING = "${VERSION}${DELIM}${SUFFIX}"
 
 Set-Content -Path "version.txt" -Value "${VERSION_STRING}"
 echo "version=${VERSION}" >> "${Env:GITHUB_OUTPUT}"
 echo "VERSION_STRING=${VERSION_STRING}" >> "${Env:GITHUB_OUTPUT}"
-echo "RUN_ID=$Env:GITHUB_RUN_NUMBER" >> "${Env:GITHUB_OUTPUT}"
-echo "IS_PRERELEASE=$IS_PRE" >> "${Env:GITHUB_OUTPUT}"
-echo "RELEASENAME_SUFFIX=$SUFFIX" >> "${Env:GITHUB_OUTPUT}"
 
 # debug prints
 Get-Content -Path "${Env:GITHUB_OUTPUT}"
