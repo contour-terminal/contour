@@ -8,7 +8,6 @@
 
 #include <vtpty/UnixUtils.hpp>
 
-#include <cerrno>
 #include <csignal>
 #include <format>
 #include <iostream>
@@ -21,6 +20,8 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+
+#include "WriteToTTY.hpp"
 
 using namespace std;
 
@@ -227,20 +228,6 @@ struct MouseTracker final: public BasicParserEvents
         auto const state = decrpm.value().second;
         auto const supported = state == 1 || state == 2;
         std::cout << std::format("Passive mouse tracking: {}\n", supported ? "supported" : "not supported");
-    }
-
-    /// Writes all of @p s to the terminal, resuming after a partial or interrupted write.
-    /// @param s The bytes to write; given up on when the terminal reports any other error.
-    void writeToTTY(string_view s) noexcept
-    {
-        while (!s.empty())
-        {
-            auto const written = ::write(STDOUT_FILENO, s.data(), s.size());
-            if (written < 0 && errno != EINTR)
-                return;
-            if (written > 0)
-                s.remove_prefix(static_cast<size_t>(written));
-        }
     }
 
     void processInput()

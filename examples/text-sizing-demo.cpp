@@ -40,15 +40,12 @@
 
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
 {
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
-}
 
 /// Emits one OSC 66 request.
 /// @param metadata  the colon-separated key=value pairs, without the surrounding OSC.
