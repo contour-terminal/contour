@@ -63,17 +63,17 @@ it.
 
 ## Decisions (mine — check these)
 
-- **"Latest" follows `daemon.size_policy`, per session.** That setting already decides whose grid
-  size wins (`vthost::ClientSizePolicy`, default `Latest`). A session's cell size comes from the
-  same report that decided *that session's* grid, so a session never mixes one client's
-  rows/columns with another's pixels. There are two such winners today, and the cell size follows
-  whichever applies: the pane's refinement winner (`refinedSize`, the latest eligible `ResizePane`
-  reporter) if the pane has one, otherwise the client-area winner (`resolveAuthoritativeArea`).
-  So the cell size is stored **per session**, next to the refinement, not host-wide. Under the
-  default this is exactly decision 2. Where the resolved grid is an intersection/union that no
-  single client owns (`smallest`/`largest`), take the latest reporter's cell size. If the winning
-  report carries no cell size (a tmux control-mode client, which also calls `applyClientSize`),
-  the session keeps the cell size it has.
+- **One cell size for the whole daemon, from the latest client that displays the grid.** (Revised
+  while planning: an earlier draft tracked it per session, following each pane's grid winner. The
+  plan found that per-session tracking adds a second resolution beside `refinedSize` for a
+  difference that only shows when two clients display the same grid at different DPI.) The
+  daemon's cell size is the one most recently reported by a client that displays the resolved
+  client area (the same eligibility `refinedSize` uses); if no client displays it (a
+  `smallest`/`largest` area of differently shaped clients), the most recent report of any client.
+  Every session gets it. Under the default `daemon.size_policy: latest` this is exactly decision 2,
+  and a session never mixes one client's rows/columns with another's pixels unless those clients
+  display the same grid. A client that sends no cell size (a tmux control-mode client, which also
+  calls `applyClientSize`, or an older peer) does not take part.
 - **Daemon-wide memory, not only per session.** Besides each terminal keeping its own last cell
   size, the daemon remembers the last cell size any client reported. A session created while no
   client is attached (e.g. by a Claude session through the control API) starts from that, and only
@@ -81,17 +81,23 @@ it.
 - **It survives restarts.** The remembered daemon-wide cell size is written with the
   `daemon.restore` snapshot and carried across a live upgrade in its own `HandoverImage` field
   (precedent: `defaultColorPreference`), since a daemon with no sessions at upgrade time has no
-  per-session slot to carry it in. Per session, the handover's existing `pty.pixels` slot
-  (`vtpty::InheritedPty`, filled by `UnixPty::handover()` from the last pixel resize) starts
-  carrying a value by itself once the PTY is resized with pixels.
-- **Fix the restore division while there.** `HandoverRestore.cpp:231` derives the cell size as
-  `pty.pixels / totalPageSize()`, but the PTY is given `cell × mainDisplayPageSize`, so the cell
-  height is wrong whenever a status line is shown. Divide by the main display page size, and make
-  the test at `HandoverRestore_test.cpp:481` check the exact value rather than `height > 0`.
-- **The first session's PTY is honest too.** The client's cell size also rides on the Hello's
-  `clientArea` (`NativeSession.cpp:2278`), which is applied before the first spawn, and the PTY
-  factory (`SessionHost.hpp:91`) takes the pixel size as well as the page size, so a PTY is born
-  with real `TIOCGWINSZ` pixels.
+  per-session slot to carry it in. Only a cell size learned from a client is remembered and
+  persisted; the configured default is not, so changing the setting takes effect on a daemon that
+  never saw a client.
+- **Replace the per-session restore division.** `HandoverRestore.cpp:231` derives each adopted
+  terminal's cell size as `pty.pixels / totalPageSize()`, but the PTY is given
+  `cell × mainDisplayPageSize`, so the cell height is wrong whenever a status line is shown. With
+  one daemon-wide cell size carried in the image, that per-session derivation is redundant: the
+  restored host applies its cell size to every adopted session instead, and the division goes.
+- **Fix the same base mix in `Terminal::resizeScreenKeepingCellSize`.** It passes
+  `cell × (total − statusLineHeight())` to `resizeScreen`, which divides by the *total* page, so
+  each call shrinks the cell height while a status line is shown. The daemon's grid resizes will go
+  through it, so it is fixed here.
+- **The first session's PTY is honest too.** The client's cell size, when it has one, also rides
+  on the ClientHello (`NativeSession.cpp:2278` applies the hello before the first spawn). A new
+  session is given the daemon's cell size right after its PTY is created and before its pump
+  starts. (Revised while planning: passing pixels through the `PtyFactory` signature would touch
+  ~54 test call sites for a window of microseconds between fork and the first `TIOCSWINSZ`.)
 - **Config key:** `daemon.default_cell_pixel_size: { width: 10, height: 20 }` in the global
   `daemon:` section. Both extents must be positive; a zero or negative value is a config error
   reported the way other invalid `daemon:` values are, and the built-in 10×20 is used.
