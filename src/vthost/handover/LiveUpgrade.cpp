@@ -12,6 +12,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonBinary.hpp>
@@ -75,6 +76,24 @@ namespace
                     return {};
                 return std::unexpected(refusal);
             });
+    }
+
+    /// A captured image as a handoff takes it.
+    struct EncodedImage
+    {
+        std::vector<vtpty::CrossingHandle> crossing; ///< Every handle it names (handlesNamedBy()).
+        std::vector<uint8_t> bytes;                  ///< It, encoded (encodeHandover()).
+    };
+
+    /// @param image A captured image, taken: it is gone once this returns.
+    /// @return @p image as a handoff takes it.
+    [[nodiscard]] EncodedImage encodedOf(HandoverImage&& image)
+    {
+        // Moved into this frame, so that it is destroyed as this returns, whatever the caller holds on to.
+        auto const taken = std::move(image);
+        auto crossing = handlesNamedBy(taken);
+        auto bytes = encodeHandover(taken);
+        return EncodedImage { .crossing = std::move(crossing), .bytes = std::move(bytes) };
     }
 
     /// Marks an upgrade under way for as long as it lives.
@@ -212,17 +231,19 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         co_return std::unexpected(image.error());
     }
 
+    // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
+    // in it, is let go of here rather than kept through the wait for the target.
+    auto [crossing, bytes] = encodedOf(*std::move(image));
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
-    auto const bytes = encodeHandover(*image);
     if (std::cmp_greater(bytes.size(), std::min(_config.maxImageSize, MaxHandoverImageSize)))
     {
         errorLog()("live upgrade refused: the handover image has {} bytes", bytes.size());
         co_return std::unexpected(UpgradeRefusal::ImageTooLarge);
     }
 
-    auto const failure =
-        _handoff.handOver(resolved->executable, argvFor(resolved->executable), *image, bytes);
+    auto const failure = _handoff.handOver(
+        resolved->executable, argvFor(resolved->executable), std::move(crossing), std::move(bytes));
     errorLog()("live upgrade: cannot run {}: {}; serving on",
                core::pathToUtf8(resolved->executable),
                failure.cause.message());

@@ -2,13 +2,13 @@
 #include <vthost/handover/ImageHandoff.hpp>
 
 #include <cstddef>
+#include <span>
 #include <system_error>
 #include <utility>
 
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/handover/HandoverMemory.hpp>
-#include <vthost/handover/HandoverRestore.hpp>
 
 namespace vthost::handover
 {
@@ -65,14 +65,15 @@ namespace
 
 ExecFailure ExecHandoff::handOver(std::filesystem::path const& executable,
                                   std::vector<std::string> argv,
-                                  HandoverImage const& image,
-                                  std::span<uint8_t const> bytes)
+                                  std::vector<vtpty::CrossingHandle> crossing,
+                                  std::vector<uint8_t> bytes)
 {
     // Room for the image's own descriptor made before it exists: nothing between writing the memory object
     // and handing it to the guard that discards it may throw.
-    auto crossing = handlesNamedBy(image);
     crossing.reserve(crossing.size() + 1);
-    auto const memoryHandle = _memory.write(bytes);
+    // The encoded image goes as soon as the memory object holds it, as it would otherwise stay on beside it
+    // after an exec that failed.
+    auto const memoryHandle = _memory.write(std::exchange(bytes, {}));
     if (!memoryHandle)
         return ExecFailure { .cause = std::make_error_code(std::errc::not_enough_memory) };
     crossing.push_back(*memoryHandle);

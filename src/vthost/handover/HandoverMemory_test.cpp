@@ -14,6 +14,10 @@
 #include <vthost/handover/HandoverMemory.hpp>
 
 #ifndef _WIN32
+    #include <sys/mman.h>
+
+    #include <cstring>
+
     #include <fcntl.h>
     #include <unistd.h>
 #else
@@ -26,17 +30,10 @@
 
 using namespace vthost::handover;
 
-#ifndef _WIN32
-
 namespace
 {
-[[nodiscard]] bool isCloseOnExec(int fd)
-{
-    auto const flags = ::fcntl(fd, F_GETFD);
-    REQUIRE(flags >= 0);
-    return (flags & FD_CLOEXEC) != 0;
-}
 
+#ifndef _WIN32
 /// @return Every kind of memory object this platform can make: its own, and macOS's mapped shared memory,
 ///         which every POSIX platform has, so that its path is exercised wherever the tests run.
 [[nodiscard]] std::vector<HandoverMemoryKind> availableKinds()
@@ -53,6 +50,109 @@ namespace
     #endif
     return kinds;
 }
+
+/// @return Every kind whose image carries its length ahead of it: the mapped one.
+[[nodiscard]] std::vector<HandoverMemoryKind> lengthPrefixedKinds()
+{
+    return { HandoverMemoryKind { .object = HandoverMemoryObject::SharedMemory,
+                                  .access = HandoverMemoryAccess::Mapped } };
+}
+
+/// Overwrites the length an image's memory object carries ahead of it.
+void forgeLengthPrefix(vtpty::CrossingHandle handle, uint64_t length)
+{
+    auto* const view =
+        ::mmap(nullptr, sizeof(length), PROT_READ | PROT_WRITE, MAP_SHARED, handle.native(), 0);
+    REQUIRE(view != MAP_FAILED);
+    std::memcpy(view, &length, sizeof(length));
+    ::munmap(view, sizeof(length));
+}
+#else
+/// @return The one kind Windows has: an unnamed mapping.
+[[nodiscard]] std::vector<HandoverMemoryKind> availableKinds()
+{
+    return { nativeHandoverMemoryKind() };
+}
+
+/// @return The one kind Windows has, which carries the image's length ahead of it.
+[[nodiscard]] std::vector<HandoverMemoryKind> lengthPrefixedKinds()
+{
+    return availableKinds();
+}
+
+/// Overwrites the length an image's mapping carries ahead of it.
+void forgeLengthPrefix(vtpty::CrossingHandle handle, uint64_t length)
+{
+    auto* const view = MapViewOfFile(handle.native(), FILE_MAP_WRITE, 0, 0, sizeof(length));
+    REQUIRE(view != nullptr);
+    std::memcpy(view, &length, sizeof(length));
+    UnmapViewOfFile(view);
+}
+#endif
+
+/// @return @p size bytes of a pattern that repeats only every 251 bytes, off any page boundary.
+[[nodiscard]] std::vector<uint8_t> patternOf(size_t size)
+{
+    auto bytes = std::vector<uint8_t>(size);
+    std::ranges::generate(bytes, [next = 0U]() mutable { return static_cast<uint8_t>(next++ % 251); });
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("an image is read where it was written", "[handover]")
+{
+    auto const kind = GENERATE(Catch::Generators::from_range(availableKinds()));
+    INFO(std::to_underlying(kind.object) << "/" << std::to_underlying(kind.access));
+    auto memory = makeHandoverMemory(kind);
+    constexpr auto Size = size_t { 1 } << 20;
+    auto const handle = [&] {
+        // The writer's own buffer is gone before anything is read.
+        auto const image = patternOf(Size);
+        return memory->write(image);
+    }();
+    REQUIRE(handle.has_value());
+    auto const view = memory->read(*handle);
+    REQUIRE(view.has_value());
+    CHECK(std::ranges::equal(view->bytes(), patternOf(Size)));
+    // The view holds what it reads by itself: the memory object's handle may go first.
+    memory->discard(*handle);
+    CHECK(std::ranges::equal(view->bytes(), patternOf(Size)));
+}
+
+TEST_CASE("a length prefix longer than the mapping is truncated", "[handover]")
+{
+    auto const kind = GENERATE(Catch::Generators::from_range(lengthPrefixedKinds()));
+    auto memory = makeHandoverMemory(kind);
+    auto const handle = memory->write(std::vector<uint8_t> { 1, 2, 3 });
+    REQUIRE(handle.has_value());
+    forgeLengthPrefix(*handle, uint64_t { 1 } << 20);
+    CHECK(memory->read(*handle) == std::unexpected(HandoverError::Truncated));
+    memory->discard(*handle);
+}
+
+TEST_CASE("a length above the image limit is truncated", "[handover]")
+{
+    auto const kind = GENERATE(Catch::Generators::from_range(lengthPrefixedKinds()));
+    auto memory = makeHandoverMemory(kind);
+    auto const handle = memory->write(std::vector<uint8_t> { 1, 2, 3 });
+    REQUIRE(handle.has_value());
+    forgeLengthPrefix(*handle, MaxHandoverImageSize + 1);
+    CHECK(memory->read(*handle) == std::unexpected(HandoverError::Truncated));
+    memory->discard(*handle);
+}
+
+#ifndef _WIN32
+
+namespace
+{
+[[nodiscard]] bool isCloseOnExec(int fd)
+{
+    auto const flags = ::fcntl(fd, F_GETFD);
+    REQUIRE(flags >= 0);
+    return (flags & FD_CLOEXEC) != 0;
+}
+
 } // namespace
 
 TEST_CASE("every kind of memory object reads back what was written, and nothing past it", "[handover]")
@@ -71,27 +171,13 @@ TEST_CASE("every kind of memory object reads back what was written, and nothing 
         CHECK(isCloseOnExec(fd->native()));
         auto const back = memory->read(*fd);
         REQUIRE(back.has_value());
-        CHECK(*back == image);
-        CHECK(memory->read(*fd) == back);
+        CHECK(std::ranges::equal(back->bytes(), image));
+        auto const again = memory->read(*fd);
+        REQUIRE(again.has_value());
+        CHECK(std::ranges::equal(again->bytes(), image));
         memory->discard(*fd);
     }
 }
-
-    #ifndef __APPLE__
-// Forged with a pwrite, which Darwin's shared memory takes no more than the writer does.
-TEST_CASE("a mapped memory object whose size header lies is refused", "[handover]")
-{
-    auto memory = makeHandoverMemory(HandoverMemoryKind { .object = HandoverMemoryObject::SharedMemory,
-                                                          .access = HandoverMemoryAccess::Mapped });
-    auto const fd = memory->write(std::vector<uint8_t> { 1, 2, 3 });
-    REQUIRE(fd.has_value());
-    // The header claims more than the object holds.
-    auto const claimed = uint64_t { 1 } << 20;
-    REQUIRE(::pwrite(fd->native(), &claimed, sizeof(claimed), 0) == static_cast<ssize_t>(sizeof(claimed)));
-    CHECK(memory->read(*fd) == std::unexpected(HandoverError::MemoryUnavailable));
-    memory->discard(*fd);
-}
-    #endif
 
 TEST_CASE("read returns what write stored", "[handover]")
 {
@@ -102,9 +188,11 @@ TEST_CASE("read returns what write stored", "[handover]")
     REQUIRE(fd.has_value());
     auto const back = memory->read(*fd);
     REQUIRE(back.has_value());
-    CHECK(*back == image);
+    CHECK(std::ranges::equal(back->bytes(), image));
     // Reading does not consume it: the same descriptor reads again.
-    CHECK(memory->read(*fd) == back);
+    auto const again = memory->read(*fd);
+    REQUIRE(again.has_value());
+    CHECK(std::ranges::equal(again->bytes(), image));
     ::close(fd->native());
 }
 
@@ -115,7 +203,7 @@ TEST_CASE("an empty image is stored and read back", "[handover]")
     REQUIRE(fd.has_value());
     auto const back = memory->read(*fd);
     REQUIRE(back.has_value());
-    CHECK(back->empty());
+    CHECK(back->bytes().empty());
     ::close(fd->native());
 }
 
@@ -192,7 +280,7 @@ TEST_CASE("a mapping reads back what was written, and nothing past it", "[handov
     REQUIRE(fd.has_value());
     auto const back = memory->read(*fd);
     REQUIRE(back.has_value());
-    CHECK(*back == image);
+    CHECK(std::ranges::equal(back->bytes(), image));
     memory->discard(*fd);
 }
 
@@ -205,24 +293,6 @@ TEST_CASE("reading a handle that is no mapping is MemoryUnavailable", "[handover
     CloseHandle(event);
     REQUIRE_FALSE(back.has_value());
     CHECK(back.error() == HandoverError::MemoryUnavailable);
-}
-
-TEST_CASE("a mapping whose length lies is refused", "[handover]")
-{
-    // A whole page, its first eight bytes claiming far more.
-    auto* const mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, nullptr);
-    REQUIRE(mapping != nullptr);
-    auto* const view = static_cast<uint8_t*>(MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0));
-    REQUIRE(view != nullptr);
-    auto const lie = uint64_t { 1 } << 20;
-    std::memcpy(view, &lie, sizeof(lie));
-    UnmapViewOfFile(view);
-
-    auto memory = makeNativeHandoverMemory();
-    auto const back = memory->read(vtpty::CrossingHandle::of(mapping));
-    CloseHandle(mapping);
-    REQUIRE_FALSE(back.has_value());
-    CHECK(back.error() == HandoverError::Truncated);
 }
 
 // Only the successor's launch, which names it in its handle list, may take it: no program the daemon starts

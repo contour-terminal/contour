@@ -197,9 +197,9 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
     auto next = std::unique_ptr<LiveHost> {};
     auto image = std::optional<HandoverImage> {};
     u.launcher.onLaunch = [&](SuccessorHandles const& handles) {
-        auto const bytes = u.memory->read(handles.image);
-        REQUIRE(bytes.has_value());
-        auto decoded = decodeHandover(*bytes);
+        auto const view = u.memory->read(handles.image);
+        REQUIRE(view.has_value());
+        auto decoded = decodeHandover(view->bytes());
         REQUIRE(decoded.has_value());
         auto expected = handlesNamedBy(*decoded);
         expected.insert(expected.end(),

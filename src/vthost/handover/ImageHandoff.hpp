@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -40,18 +39,20 @@ class ImageHandoff
     ImageHandoff& operator=(ImageHandoff&&) = delete;
     virtual ~ImageHandoff() = default;
 
-    /// Hands @p image over to @p executable, which takes over as this daemon. Returns or throws only when it
+    /// Hands an image over to @p executable, which takes over as this daemon. Returns or throws only when it
     /// did not, having undone what it did; the caller then resumes the daemon.
     /// @param executable The target.
     /// @param argv The command line the target runs with, its program first; the handover argument is this
     ///        one's to append.
-    /// @param image The image, for the descriptors and handles it names.
-    /// @param bytes The image, encoded.
+    /// @param crossing Every descriptor or handle the image names (handlesNamedBy()): what the target keeps
+    ///        across the exec, or inherits.
+    /// @param bytes The image, encoded. Taken, so that a handoff can let go of it once the memory object
+    ///        holds it, rather than keep it through the wait for the target.
     /// @return Why the target did not take over.
     [[nodiscard]] virtual ExecFailure handOver(std::filesystem::path const& executable,
                                                std::vector<std::string> argv,
-                                               HandoverImage const& image,
-                                               std::span<uint8_t const> bytes) = 0;
+                                               std::vector<vtpty::CrossingHandle> crossing,
+                                               std::vector<uint8_t> bytes) = 0;
 };
 
 /// The POSIX handoff: keeps every descriptor the image names across the exec, writes the image into an
@@ -69,8 +70,8 @@ class ExecHandoff final: public ImageHandoff
 
     [[nodiscard]] ExecFailure handOver(std::filesystem::path const& executable,
                                        std::vector<std::string> argv,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes) override;
+                                       std::vector<vtpty::CrossingHandle> crossing,
+                                       std::vector<uint8_t> bytes) override;
 
   private:
     ProcessImageReplacer& _replacer;

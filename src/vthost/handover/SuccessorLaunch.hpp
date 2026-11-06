@@ -128,8 +128,8 @@ class SuccessorHandoff final: public ImageHandoff
 
     [[nodiscard]] ExecFailure handOver(std::filesystem::path const& executable,
                                        std::vector<std::string> argv,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes) override;
+                                       std::vector<vtpty::CrossingHandle> crossing,
+                                       std::vector<uint8_t> bytes) override;
 
   private:
     SuccessorLauncher& _launcher;

@@ -53,7 +53,10 @@ namespace
         }
         Mapping(Mapping const&) = delete;
         Mapping& operator=(Mapping const&) = delete;
-        Mapping(Mapping&&) = delete;
+        Mapping(Mapping&& other) noexcept:
+            _address { std::exchange(other._address, MAP_FAILED) }, _length { other._length }
+        {
+        }
         Mapping& operator=(Mapping&&) = delete;
         ~Mapping()
         {
@@ -77,6 +80,12 @@ namespace
 
     /// How a mapped memory object starts: the size of the image that follows it.
     using MappedHeader = uint64_t;
+
+    /// @return @p image, read where it was written: a view that holds @p mapping, which @p image lies in.
+    [[nodiscard]] HandoverView viewOf(Mapping mapping, std::span<uint8_t const> image)
+    {
+        return HandoverView { image, std::make_shared<Mapping const>(std::move(mapping)) };
+    }
 
     /// The longest name Darwin gives a POSIX shared memory object (PSHMNAMLEN), the leading slash included.
     constexpr auto MaxSharedMemoryNameLength = size_t { 31 };
@@ -141,23 +150,16 @@ namespace
         return {};
     }
 
-    /// Reads all of an object of @p size bytes through its descriptor.
-    [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> readThroughDescriptor(int fd,
-                                                                                           size_t size)
+    /// Maps all of an object of @p size bytes, which the image fills.
+    [[nodiscard]] std::expected<HandoverView, HandoverError> readWhole(int fd, size_t size)
     {
-        auto bytes = std::vector<uint8_t>(size);
-        auto done = size_t { 0 };
-        while (done < bytes.size())
-        {
-            auto const count =
-                ::pread(fd, bytes.data() + done, bytes.size() - done, static_cast<off_t>(done));
-            if (count < 0 && errno == EINTR)
-                continue;
-            if (count <= 0)
-                return std::unexpected { HandoverError::MemoryUnavailable };
-            done += static_cast<size_t>(count);
-        }
-        return bytes;
+        if (size == 0)
+            return HandoverView {}; // nothing to map
+        auto mapping = Mapping { fd, size, PROT_READ };
+        if (!mapping.isMapped())
+            return std::unexpected { HandoverError::MemoryUnavailable };
+        auto const image = mapping.bytes();
+        return viewOf(std::move(mapping), image);
     }
 
     /// Writes @p image through a shared mapping, its size ahead of it, sizing the object once.
@@ -178,22 +180,22 @@ namespace
         return {};
     }
 
-    /// Reads the image a shared mapping of an object of @p size bytes holds after its size, which may be
-    /// rounded up to a page.
-    [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> readThroughMapping(int fd, size_t size)
+    /// Maps the image an object of @p size bytes holds after its size, which may be rounded up to a page.
+    [[nodiscard]] std::expected<HandoverView, HandoverError> readAfterHeader(int fd, size_t size)
     {
         if (size < sizeof(MappedHeader))
-            return std::unexpected { HandoverError::MemoryUnavailable };
-        auto const mapping = Mapping { fd, size, PROT_READ };
+            return std::unexpected { HandoverError::Truncated };
+        auto mapping = Mapping { fd, size, PROT_READ };
         if (!mapping.isMapped())
             return std::unexpected { HandoverError::MemoryUnavailable };
         auto const bytes = mapping.bytes();
         auto header = MappedHeader {};
         std::memcpy(&header, bytes.data(), sizeof(header));
+        // A length the object does not hold, or one no image may have, is no image.
         if (header > size - sizeof(MappedHeader) || header > MaxHandoverImageSize)
-            return std::unexpected { HandoverError::MemoryUnavailable };
+            return std::unexpected { HandoverError::Truncated };
         auto const image = bytes.subspan(sizeof(MappedHeader), static_cast<size_t>(header));
-        return std::vector<uint8_t>(image.begin(), image.end());
+        return viewOf(std::move(mapping), image);
     }
 
     class NativeHandoverMemory final: public HandoverMemory
@@ -222,9 +224,11 @@ namespace
             return vtpty::CrossingHandle::of(owner.release());
         }
 
-        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(
-            vtpty::CrossingHandle handle) override
+        [[nodiscard]] std::expected<HandoverView, HandoverError> read(vtpty::CrossingHandle handle) override
         {
+            // No handle names no memory object: refused before any system call sees it.
+            if (handle.isNone())
+                return std::unexpected { HandoverError::MemoryUnavailable };
             auto const fd = handle.native();
             struct stat info {};
             // A mapped object carries its size ahead of the image, and may be rounded up to a page past it.
@@ -240,10 +244,10 @@ namespace
                     case HandoverMemoryAccess::Descriptor:
                         if (std::cmp_greater(size, MaxHandoverImageSize))
                             return std::unexpected { HandoverError::MemoryUnavailable };
-                        return readThroughDescriptor(fd, size);
+                        return readWhole(fd, size);
                     case HandoverMemoryAccess::Mapped: break;
                 }
-                return readThroughMapping(fd, size);
+                return readAfterHeader(fd, size);
             }
             catch (std::bad_alloc const&)
             {

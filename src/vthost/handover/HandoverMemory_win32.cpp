@@ -6,6 +6,9 @@
     #include <cstddef>
     #include <cstring>
     #include <limits>
+    #include <memory>
+    #include <new>
+    #include <utility>
 
     #include <Windows.h>
 
@@ -27,7 +30,7 @@ namespace
         }
         MappedView(MappedView const&) = delete;
         MappedView& operator=(MappedView const&) = delete;
-        MappedView(MappedView&&) = delete;
+        MappedView(MappedView&& other) noexcept: _address { std::exchange(other._address, nullptr) } {}
         MappedView& operator=(MappedView&&) = delete;
         ~MappedView()
         {
@@ -36,7 +39,7 @@ namespace
         }
 
         [[nodiscard]] bool isMapped() const noexcept { return _address != nullptr; }
-        [[nodiscard]] std::byte* data() const noexcept { return static_cast<std::byte*>(_address); }
+        [[nodiscard]] uint8_t* data() const noexcept { return static_cast<uint8_t*>(_address); }
 
         /// @return How many bytes the view spans: the mapping's size, rounded up to a page.
         [[nodiscard]] std::size_t size() const noexcept
@@ -85,10 +88,9 @@ namespace
             return vtpty::CrossingHandle::of(mapping);
         }
 
-        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(
-            vtpty::CrossingHandle handle) override
+        [[nodiscard]] std::expected<HandoverView, HandoverError> read(vtpty::CrossingHandle handle) override
         {
-            auto const view = MappedView { handle.native(), FILE_MAP_READ };
+            auto view = MappedView { handle.native(), FILE_MAP_READ };
             if (!view.isMapped())
                 return std::unexpected { HandoverError::MemoryUnavailable };
             auto const spanned = view.size();
@@ -99,10 +101,16 @@ namespace
             // A length the mapping does not hold, or one no image may have, is no image.
             if (length > MaxHandoverImageSize || length > spanned - sizeof(length))
                 return std::unexpected { HandoverError::Truncated };
-            auto bytes = std::vector<uint8_t>(static_cast<std::size_t>(length));
-            if (!bytes.empty())
-                std::memcpy(bytes.data(), view.data() + sizeof(length), bytes.size());
-            return bytes;
+            auto const image =
+                std::span<uint8_t const> { view.data() + sizeof(length), static_cast<std::size_t>(length) };
+            try
+            {
+                return HandoverView { image, std::make_shared<MappedView const>(std::move(view)) };
+            }
+            catch (std::bad_alloc const&)
+            {
+                return std::unexpected { HandoverError::MemoryUnavailable };
+            }
         }
 
         /// Nothing: there is no exec, and the successor's launch makes inheritable what it names, for itself

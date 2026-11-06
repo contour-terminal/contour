@@ -308,10 +308,12 @@ std::unique_ptr<SuccessorLauncher> makeNativeSuccessorLauncher()
 
 ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
                                        std::vector<std::string> argv,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes)
+                                       std::vector<vtpty::CrossingHandle> crossing,
+                                       std::vector<uint8_t> bytes)
 {
-    auto const mapping = _memory.write(bytes);
+    // The encoded image goes as soon as the mapping holds it: it would otherwise live on through the wait
+    // for the successor, beside the mapping and the successor's view of it.
+    auto const mapping = _memory.write(std::exchange(bytes, {}));
     if (!mapping)
         return ExecFailure { .cause = std::make_error_code(std::errc::not_enough_memory) };
     auto const discarded = DiscardedImage { _memory, *mapping };
@@ -323,11 +325,10 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
                                             .ready = CrossingHandle::of(handshake.ready.get()),
                                             .commit = CrossingHandle::of(handshake.commit.get()),
                                             .predecessor = CrossingHandle::of(handshake.self.get()) };
-    auto inherited = handlesNamedBy(image);
-    inherited.insert(inherited.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
+    crossing.insert(crossing.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
     argv.push_back(handoverArgument(handoverToken(handles)));
 
-    auto const successor = _launcher.launch(executable, argv, inherited);
+    auto const successor = _launcher.launch(executable, argv, crossing);
     if (!successor)
         return ExecFailure { .cause = successor.error() };
     auto const process = UniqueHandle { successor->process.native() };

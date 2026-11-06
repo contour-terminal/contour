@@ -8,6 +8,7 @@
 #include <expected>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include <vthost/handover/HandoverCodec.hpp>
@@ -19,6 +20,40 @@ namespace vthost::handover
 /// (UpgradeRefusal::ImageTooLarge) and what the new image refuses to read, one constant, so that an image the
 /// writer lets go is one the reader takes. A 64-bit count, as it exceeds what a 32-bit size_t holds.
 inline constexpr uint64_t MaxHandoverImageSize = uint64_t { 4 } << 30;
+
+/// A handover image as HandoverMemory::read() hands it out: the bytes where they were written, in a view of
+/// the memory object mapped into this process, so that the image is decoded in place rather than copied out
+/// first. Unmapped as the last copy of it is destroyed; it holds its mapping by itself, so the memory
+/// object's handle may be closed first.
+class HandoverView
+{
+  public:
+    /// An empty image, which nothing maps.
+    HandoverView() = default;
+
+    /// @param bytes The image's bytes.
+    /// @param keepAlive What keeps @p bytes where they are -- the mapping they are in, unmapped as it is
+    ///        destroyed, or a buffer that holds them.
+    HandoverView(std::span<uint8_t const> bytes, std::shared_ptr<void const> keepAlive) noexcept:
+        _bytes { bytes }, _keepAlive { std::move(keepAlive) }
+    {
+    }
+
+    /// @param buffer The image, which the view takes.
+    /// @return A view of it, holding it.
+    [[nodiscard]] static HandoverView holding(std::vector<uint8_t> buffer)
+    {
+        auto held = std::make_shared<std::vector<uint8_t> const>(std::move(buffer));
+        return HandoverView { *held, held };
+    }
+
+    /// @return The image's bytes, valid for as long as this view lives and is not moved from.
+    [[nodiscard]] std::span<uint8_t const> bytes() const noexcept { return _bytes; }
+
+  private:
+    std::span<uint8_t const> _bytes;
+    std::shared_ptr<void const> _keepAlive;
+};
 
 /// The anonymous memory object a handover image is written into, and which the new process reads it back
 /// from. An interface, so the orchestrator is tested without touching the operating system.
@@ -44,11 +79,12 @@ class HandoverMemory
     [[nodiscard]] virtual std::expected<vtpty::CrossingHandle, HandoverError> write(
         std::span<uint8_t const> image) = 0;
 
-    /// Reads everything a memory object holds, from its start.
-    /// @param handle What write() returned, in this or in the process that took over from this one.
-    /// @return The bytes, or why they could not be read.
-    [[nodiscard]] virtual std::expected<std::vector<uint8_t>, HandoverError> read(
-        vtpty::CrossingHandle handle) = 0;
+    /// Maps the image a memory object holds into this process, without copying it.
+    /// @param handle What write() returned, in this or in the process that took over from this one. Not
+    ///        closed: the view outlives it.
+    /// @return A view of the image; or Truncated where the length the object carries ahead of the image
+    ///         exceeds what it holds or any image may have, and MemoryUnavailable where it cannot be mapped.
+    [[nodiscard]] virtual std::expected<HandoverView, HandoverError> read(vtpty::CrossingHandle handle) = 0;
 
     /// Makes @p handle survive the next exec: clears its close-on-exec flag. Called right before the exec,
     /// for the memory object and for every other descriptor the image names (PTY masters, listeners, the
@@ -79,7 +115,8 @@ enum class HandoverMemoryObject : uint8_t
 /// How an image's bytes get into the memory object and out of it again.
 enum class HandoverMemoryAccess : uint8_t
 {
-    /// `pwrite`/`pread` on the descriptor: the object's size is the image's.
+    /// `pwrite` on the descriptor, and a mapping of the whole object to read it: the object's size is the
+    /// image's.
     Descriptor = 0,
     /// A shared mapping, the size of the image first: Darwin's shared memory objects take no `read`/`write`,
     /// may be sized only once, and report their size rounded up to a page.

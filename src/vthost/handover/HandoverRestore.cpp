@@ -355,8 +355,9 @@ std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
 std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
                                                          vtpty::CrossingHandle memoryHandle)
 {
-    auto image = memory.read(memoryHandle).and_then([](std::vector<uint8_t> const& bytes) {
-        return decodeHandover(bytes);
+    // Decoded where it was written, and unmapped as soon as it is.
+    auto image = memory.read(memoryHandle).and_then([](HandoverView const& view) {
+        return decodeHandover(view.bytes());
     });
     memory.discard(memoryHandle);
     return image;

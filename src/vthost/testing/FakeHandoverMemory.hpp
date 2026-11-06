@@ -42,13 +42,13 @@ class FakeHandoverMemory final: public handover::HandoverMemory
         return handle;
     }
 
-    [[nodiscard]] std::expected<std::vector<uint8_t>, handover::HandoverError> read(
+    [[nodiscard]] std::expected<handover::HandoverView, handover::HandoverError> read(
         vtpty::CrossingHandle handle) override
     {
         auto const found = objects.find(handle);
         if (found == objects.end())
             return std::unexpected(handover::HandoverError::MemoryUnavailable);
-        return found->second;
+        return handover::HandoverView::holding(found->second);
     }
 
     [[nodiscard]] std::expected<void, handover::HandoverError> keepAcrossExec(
