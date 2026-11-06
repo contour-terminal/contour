@@ -785,7 +785,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep the stable entry in step with do_release's fetch below and the Dockerfile's default.
+        # Keep the stable entry in step with the fedora44 rows of .github/release.json and the Dockerfile's default.
         os_version: ["44", "rawhide"]
     continue-on-error: ${{ matrix.os_version == 'rawhide' }}
     runs-on: ubuntu-24.04
@@ -3006,27 +3006,22 @@ jobs:
   # }}}
   # {{{ Release
   check_release:
-    if: github.head_ref == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Check Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: "update APT database"
-        run: sudo ./scripts/apt-update.sh
-      - name: Installing xmllint for ci-set-vars.sh and check-release.sh
-        run: sudo apt -qy install libxml2-utils
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "fetch the annotated tag"
+        # checkout leaves a lightweight copy of the tag; the annotated tag object carries the date the
+        # release date in metainfo.xml must match.
+        run: git fetch --no-tags --force origin "${GITHUB_REF}:${GITHUB_REF}"
       - name: run release checks
-        run: ./scripts/check-release.sh
+        run: python3 scripts/check-release.py --tag "${GITHUB_REF_NAME}"
 
   do_release:
-    if: github.head_ref == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Create Github release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - check_links
       - check_release
@@ -3042,10 +3037,8 @@ jobs:
       - package_for_Fedora
       - windows
     permissions:
-      # We need write permissions on contents to create GitHub releases and on
-      # discussions to create the release announcement in the discussion forums
+      # We need write permissions on contents to create GitHub releases.
       contents: write
-      discussions: write
     steps:
       - uses: actions/checkout@v4
       - name: "update APT database"
@@ -3058,77 +3051,41 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
 
-      # {{{ fetch release artifacts
-      - name: "fetch artifact: Ubuntu 26.04"
-        uses: actions/download-artifact@v4
+      # Every artifact of this run named for this version: the packages, and nothing else (test
+      # binaries, transcripts and the static build carry no version). .github/release.json decides
+      # which of these files the release gets.
+      - uses: actions/download-artifact@v4
         with:
-          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
-      # The Qt-free contour-daemon package; its .deb and -dbgsym .ddeb land beside the GUI ones and are
-      # attached by the same *.deb / *.ddeb globs below.
-      - name: "fetch artifact: contour-daemon (Ubuntu 24.04)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-      - name: "fetch artifact: contour-daemon (Ubuntu 26.04)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
-      # The Fedora RPMs (stable release only: rawhide is a canary and publishes nothing). The release
-      # number follows the stable entry of package_for_Fedora's matrix.
-      - name: "fetch artifact: contour RPM (Fedora 44)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
-      - name: "fetch artifact: contour-daemon RPM (Fedora 44)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
-      - name: "fetch artifact: MacOS (ARM)"
-        uses: actions/download-artifact@v4
-        with:
-          # VERSION_STRING, matching the .deb above: `version` omits the `-prerelease`
-          # suffix, so a prerelease used to publish a .dmg whose name claimed otherwise.
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
-      - name: "fetch artifact: Windows (MSI)"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-      - name: "fetch artifact: Windows (ZIP)"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "fetch artifact: AppImage"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
-      # }}}
-
-      - name: "inspect"
-        run: ls -lisahF
-      - name: inspect recurse
-        run: pwd; ls -hlaR
-
-      # -------------------------------------------------------------
-      - name: Create Github release page
-        id: create_release
-        uses: softprops/action-gh-release@v1
+          pattern: "contour*-${{ steps.set_vars.outputs.version }}-*"
+          merge-multiple: true
+          path: release-assets
+      - name: "Create the draft release for this tag"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # token provided by Actions
-        with:
-          tag_name: v${{ steps.set_vars.outputs.version }}${{ steps.set_vars.outputs.tag_suffix}}
-          name: Contour ${{ steps.set_vars.outputs.version }} ${{ steps.set_vars.outputs.RELEASENAME_SUFFIX}}
-          body_path: ${{ github.workspace }}/release-body.md
-          draft: true
-          prerelease: ${{ steps.set_vars.outputs.IS_PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: |
-            *.deb
-            *.ddeb
-            *.rpm
-            *.dmg
-            *.msi
-            *.zip
-            *.AppImage
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release-assets.py select release-assets > release-files.txt
+          mapfile -t files < release-files.txt
+          # A rebuild of the same tag replaces its draft (a re-pushed tag has a new run number, which
+          # renames every file, so updating in place would leave the old run's files behind). A
+          # published release is never touched; the tag is never created here (--verify-tag). Only
+          # gh's "release not found" means there is no release yet; any other failure (rate limit, 5xx)
+          # stops the step rather than creating a second draft.
+          if is_draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>release-view.err); then
+            if [[ "$is_draft" != "true" ]]; then
+              echo "::error::release $TAG is already published; a release build never changes it"
+              exit 1
+            fi
+            gh release delete "$TAG" --yes
+          elif ! grep -qi "release not found" release-view.err; then
+            cat release-view.err
+            echo "::error::could not look up release $TAG"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "Contour ${TAG#v}" --notes-file release-body.md "${files[@]}"
   # }}}
 
 
