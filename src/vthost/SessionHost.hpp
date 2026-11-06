@@ -885,12 +885,12 @@ struct SessionHostConfig
     /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
     /// startup layout is realized only when it realizes none (or none is given).
     std::optional<WorkspaceRestore> restore {};
-    /// What the previous image of this daemon handed over as it exec'd this one in place (a live upgrade):
-    /// the host adopts every session's PTY and child, rebuilds each terminal from its captured state, and
-    /// restores the model and the object registry with the very ids they had; then applies @ref profiles to
-    /// every session as a configuration reload would (replaceProfiles()). Wins over @ref restore and
-    /// @ref startupLayout, neither of which is realized, and over @ref firstSessionId. Nothing in it is
-    /// refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
+    /// What the daemon this one took over from handed over in a live upgrade (an exec in place, or a
+    /// successor process): the host adopts every session's PTY and child, rebuilds each terminal from its
+    /// captured state, and restores the model and the object registry with the very ids they had; then
+    /// applies @ref profiles to every session as a configuration reload would (replaceProfiles()). Wins over
+    /// @ref restore and @ref startupLayout, neither of which is realized, and over @ref firstSessionId.
+    /// Nothing in it is refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
     std::optional<handover::HandoverImage> handover {};
     /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();

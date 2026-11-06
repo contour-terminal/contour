@@ -5,7 +5,7 @@
 
     #include <vtpty/Process.hpp>
     #include <vtpty/PtyAdoption.hpp>
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
 
     #include <core/WideString.hpp>
 

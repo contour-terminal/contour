@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
 
-#include <vtpty/WindowsHandle.hpp>
+#include <vtpty/Win32Handle.hpp>
 
 #include <crispy/BufferObject.hpp>
 

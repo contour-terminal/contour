@@ -16,7 +16,7 @@
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
-#include <vtpty/WindowsHandle.hpp>
+#include <vtpty/Win32Handle.hpp>
 #include <vtpty/test/PtyReading.hpp>
 
 #include <array>

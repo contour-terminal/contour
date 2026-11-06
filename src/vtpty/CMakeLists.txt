@@ -61,7 +61,7 @@ set(vtpty_HEADERS
     SpawnLadder.hpp
     SshFailureMessage.hpp
     WindowsCommandLine.hpp
-    WindowsHandle.hpp
+    Win32Handle.hpp
 )
 
 set(_include_SshSession_module FALSE)

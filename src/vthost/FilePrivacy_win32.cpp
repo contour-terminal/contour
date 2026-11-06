@@ -7,8 +7,9 @@
     #include <aclapi.h>
 // clang-format on
 
+    #include <vtpty/Win32Handle.hpp>
+
     #include <format>
-    #include <memory>
     #include <vector>
 
     #include <vthost/FilePrivacy.hpp>
@@ -16,23 +17,13 @@
 namespace vthost
 {
 
-namespace
-{
-    struct HandleCloser
-    {
-        void operator()(HANDLE handle) const noexcept { CloseHandle(handle); }
-    };
-
-    using TokenHandle = std::unique_ptr<std::remove_pointer_t<HANDLE>, HandleCloser>;
-} // namespace
-
 std::expected<void, std::string> NativeFilePrivacy::restrictToOwner(std::filesystem::path const& path,
                                                                     PrivateEntry kind) const
 {
     auto rawToken = HANDLE { nullptr };
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
         return std::unexpected(std::format("cannot open the process token: error {}", GetLastError()));
-    auto const token = TokenHandle { rawToken };
+    auto const token = vtpty::UniqueHandle { rawToken };
 
     auto userSize = DWORD { 0 };
     GetTokenInformation(token.get(), TokenUser, nullptr, 0, &userSize);

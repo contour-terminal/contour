@@ -60,7 +60,6 @@ using namespace vthost;
 using namespace vthost::handover;
 using namespace std::chrono_literals;
 using vthost::testing::LiveHost;
-using vthost::testing::occurrences;
 using vthost::testing::readyTarget;
 using vthost::testing::refusedWith;
 using vthost::testing::releaseForAdoption;
@@ -133,6 +132,9 @@ struct Upgrade: vthost::testing::UpgradeBench
     {
     }
 
+    /// @return The orchestrator, over this daemon, with the default configuration.
+    [[nodiscard]] LiveUpgrade orchestrator() { return UpgradeBench::orchestrator(handoff); }
+
     /// @return The orchestrator, over this daemon.
     [[nodiscard]] LiveUpgrade orchestrator(LiveUpgradeConfig config)
     {
@@ -181,7 +183,7 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
         throw ImageReplaced {};
     };
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
 
     // Probed, announced, snapshotted and closed, in that order, then exec'd as the target.
@@ -257,7 +259,7 @@ TEST_CASE("live upgrade loses no output from a flooding program", "[vthost][hand
         next->host.subscribeStream(&newCount);
         throw ImageReplaced {};
     };
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
     u.live->host.unsubscribeStream(&oldCount);
     u.acceptor.reset();
@@ -292,7 +294,7 @@ TEST_CASE("exec failure resumes the old daemon with no lost input", "[vthost][ha
         // Typed while the daemon was stopped: carried, and delivered once it resumes.
         u.live->host.writeInput(ids[0], "carried");
     };
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
 
     REQUIRE_FALSE(result.has_value());
@@ -312,11 +314,7 @@ TEST_CASE("exec failure resumes the old daemon with no lost input", "[vthost][ha
     auto const client = connectRaw(u.socketPath);
     REQUIRE(u.live->eventually([&] { return u.acceptor->acceptedCount() == 1; }));
     ::close(client);
-    u.live->host.writeInput(ids[0], "-after");
-    u.live->host.writeInput(ids[1], "second");
-    REQUIRE(u.live->eventually([&] { return u.live->pageText(ids[0]).contains("carried-after"); }));
-    REQUIRE(u.live->eventually([&] { return u.live->pageText(ids[1]).contains("second"); }));
-    CHECK(occurrences(u.live->pageText(ids[0]), "carried") == 1);
+    u.checkResumed(ids, "carried");
 }
 
 TEST_CASE("unreadable format refuses before quiescing", "[vthost][handover][upgrade][threading]")
@@ -329,7 +327,7 @@ TEST_CASE("unreadable format refuses before quiescing", "[vthost][handover][upgr
     auto newer = readyTarget();
     newer.handoverFormats = { HandoverFormatVersion + 1, HandoverFormatVersion + 1 };
     u.probe.answer = newer;
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
                       UpgradeRefusal::FormatUnreadable));
 
@@ -347,7 +345,7 @@ TEST_CASE("an unresponsive target refuses before quiescing", "[vthost][handover]
 {
     auto u = Upgrade {};
     u.probe.answer = std::unexpected(UpgradeRefusal::TargetUnresponsive);
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
                       UpgradeRefusal::TargetUnresponsive));
     CHECK(u.hooks.events.empty());
@@ -450,7 +448,7 @@ TEST_CASE("oversize in-flight tail refuses before quiescing", "[vthost][handover
         return terminal.inFlightTailCompleteness() == vtbackend::TailCompleteness::Overflowed;
     }));
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
                       UpgradeRefusal::InFlightTailTooLarge));
     CHECK(u.hooks.events.empty());
@@ -469,7 +467,7 @@ TEST_CASE("a session no new image could adopt refuses before quiescing",
         return std::make_unique<vthost::testing::StallingPty>(size);
     } };
     REQUIRE(u.live->host.createTab() != nullptr);
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
                       UpgradeRefusal::UnsupportedSession));
     CHECK(u.hooks.events.empty());
@@ -479,7 +477,7 @@ TEST_CASE("a session no new image could adopt refuses before quiescing",
 TEST_CASE("a target outside the store is refused", "[vthost][handover][upgrade]")
 {
     auto u = Upgrade {};
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     for (auto const* const imageId: { "../../usr/bin", "/usr/bin/contour", "0.9.1-00000000", "" })
     {
         INFO(imageId);
@@ -529,7 +527,7 @@ TEST_CASE("a session still starting is refused before anything is announced",
     auto const ids = u.live->host.sessionIds();
     REQUIRE(u.live->eventually([&] { return u.live->pageText(ids[0]).contains("ready"); }));
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(
         refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), UpgradeRefusal::SessionStarting));
     // No client was told, snapshotted for or closed for nothing.
@@ -553,7 +551,7 @@ TEST_CASE("a session that keeps starting is waited for, then refused, and every 
         REQUIRE(u.live->host.createTab() != nullptr);
     };
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(
         refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), UpgradeRefusal::SessionStarting));
     CHECK(u.replacer.replacements.empty());
@@ -584,7 +582,7 @@ TEST_CASE("a session no image could adopt that starts during the settle is refus
         REQUIRE(u.live->host.createTab() != nullptr);
     };
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
                       UpgradeRefusal::UnsupportedSession));
     CHECK(u.acceptor->admission() == Admission::Accepting);
@@ -640,7 +638,7 @@ TEST_CASE("the exec waits for a connection that is no attached client to end in 
     u.replacer.onReplace = [&] {
         replacedAtPoll = polls;
     };
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
 
     auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
     REQUIRE_FALSE(result.has_value());
@@ -700,7 +698,7 @@ TEST_CASE("an exception after the clients went rolls everything back",
         throw std::bad_alloc {};
     };
 
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), std::bad_alloc);
 
     // Not wedged: accepting, idle, and every session answering.
@@ -740,7 +738,7 @@ TEST_CASE("a second upgrade during an upgrade is refused with InProgress",
     auto u = Upgrade { firstRunsThenParked(placement) };
     REQUIRE(u.live->host.createTab() != nullptr);
     REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
-    auto upgrade = u.orchestrator(Upgrade::config());
+    auto upgrade = u.orchestrator();
     auto second = std::optional<std::expected<void, UpgradeError>> {};
     auto asked = false;
     u.hooks.onClose = [&] {

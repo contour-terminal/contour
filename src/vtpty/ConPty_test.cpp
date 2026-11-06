@@ -7,7 +7,7 @@
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
 #ifdef _WIN32
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
 #endif
 
 #include <crispy/BufferObject.hpp>

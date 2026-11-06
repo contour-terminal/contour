@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
-#include <format>
 #include <ranges>
 #include <string_view>
 #include <system_error>
@@ -15,7 +14,6 @@
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
-#include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/SessionHost.hpp>

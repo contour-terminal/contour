@@ -26,7 +26,7 @@
 #ifdef _WIN32
     #include <vtpty/ConPty.hpp>
     #include <vtpty/Process.hpp>
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
     #include <vtpty/test/HandoverSupport.hpp>
 
     #include <chrono>
@@ -111,7 +111,6 @@ using namespace std::chrono_literals;
 using vthost::Admission;
 using vthost::testing::FakeSuccessorLauncher;
 using vthost::testing::LiveHost;
-using vthost::testing::occurrences;
 using vthost::testing::SuccessorBehaviour;
 using vthost::testing::SuccessorTookOver;
 using vthost::testing::UpgradeBench;
@@ -140,10 +139,7 @@ struct SuccessorUpgrade: UpgradeBench
     }
 
     /// @return The orchestrator, over this daemon.
-    [[nodiscard]] LiveUpgrade orchestrator()
-    {
-        return UpgradeBench::orchestrator(UpgradeBench::config(), handoff);
-    }
+    [[nodiscard]] LiveUpgrade orchestrator() { return UpgradeBench::orchestrator(handoff); }
 
     /// @return Upgrades this daemon to the staged target.
     [[nodiscard]] std::expected<void, UpgradeError> upgrade(LiveUpgrade& upgrade) const
@@ -163,23 +159,6 @@ struct SuccessorUpgrade: UpgradeBench
     FakeSuccessorLauncher launcher;
     SuccessorHandoff handoff;
 };
-
-/// Checks that the daemon serves on after a handoff that did not happen: every listener accepting, every
-/// session answering, and @p carried -- typed into the first while the upgrade had everything stopped, if
-/// anything -- delivered once, ahead of what is typed afterwards.
-void checkResumed(SuccessorUpgrade& u, std::vector<SessionId> const& ids, std::string_view carried = {})
-{
-    CHECK(u.acceptor->admission() == Admission::Accepting);
-    u.live->host.writeInput(ids[0], "-after");
-    u.live->host.writeInput(ids[1], "second");
-    auto const expected = std::string { carried } + "-after";
-    auto const shown = u.live->eventually([&] { return u.live->pageText(ids[0]).contains(expected); });
-    INFO("first session's screen: " << u.live->pageText(ids[0]));
-    REQUIRE(shown);
-    REQUIRE(u.live->eventually([&] { return u.live->pageText(ids[1]).contains("second"); }));
-    if (!carried.empty())
-        CHECK(occurrences(u.live->pageText(ids[0]), std::string { carried }) == 1);
-}
 
 } // namespace
 
@@ -278,7 +257,7 @@ TEST_CASE("a successor that ends before it is ready leaves the old daemon servin
     CHECK(u.launcher.committed == false);
     CHECK(u.launcher.terminated == 0); // nothing left to end
     CHECK(u.leases.heldCount() == 0);
-    checkResumed(u, ids, "carried");
+    u.checkResumed(ids, "carried");
 }
 
 TEST_CASE("a target that cannot adopt the pseudoconsoles is refused before any client goes",
@@ -294,7 +273,7 @@ TEST_CASE("a target that cannot adopt the pseudoconsoles is refused before any c
     CHECK(u.hooks.events.empty()); // no announcement, no client closed
     CHECK(u.launcher.launches.empty());
     CHECK(u.leases.heldCount() == 0);
-    checkResumed(u, ids);
+    u.checkResumed(ids);
 }
 
 TEST_CASE("a target that does not say whether it adopts pseudoconsoles is upgraded to as before",
@@ -308,7 +287,7 @@ TEST_CASE("a target that does not say whether it adopts pseudoconsoles is upgrad
     auto const result = u.upgrade(upgrade);
     CHECK_FALSE(vthost::testing::refusedWith(result, UpgradeRefusal::TargetCannotAdoptTerminals));
     CHECK(u.launcher.launches.size() == 1);
-    checkResumed(u, ids);
+    u.checkResumed(ids);
 }
 
 TEST_CASE("a successor not ready in time is ended, and the old daemon serves on",
@@ -325,7 +304,7 @@ TEST_CASE("a successor not ready in time is ended, and the old daemon serves on"
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == UpgradeError { ExecFailure { std::make_error_code(std::errc::timed_out) } });
     CHECK(u.launcher.terminated == 1);
-    checkResumed(u, ids, "carried");
+    u.checkResumed(ids, "carried");
 }
 
 TEST_CASE("a successor that cannot be started leaves the old daemon serving",
@@ -341,7 +320,7 @@ TEST_CASE("a successor that cannot be started leaves the old daemon serving",
           == UpgradeError { ExecFailure { std::make_error_code(std::errc::no_such_file_or_directory) } });
     CHECK(u.launcher.terminated == 0);
     REQUIRE(u.launcher.launches.size() == 1);
-    checkResumed(u, ids);
+    u.checkResumed(ids);
 }
 
 // The old daemon's loop answers nothing while it waits for its successor, and a client that stops holding on

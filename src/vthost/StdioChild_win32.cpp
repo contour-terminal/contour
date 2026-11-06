@@ -26,6 +26,8 @@
     #include <windows.h>
 // clang-format on
 
+    #include <vtpty/Win32Handle.hpp>
+
 namespace vthost
 {
 
@@ -39,39 +41,14 @@ namespace
         };
     }
 
-    /// Closes a handle once, when it goes out of scope.
-    class Handle
-    {
-      public:
-        explicit Handle(HANDLE handle = nullptr) noexcept: _handle { handle } {}
-        ~Handle() { reset(); }
-        Handle(Handle const&) = delete;
-        Handle& operator=(Handle const&) = delete;
-        Handle(Handle&& other) noexcept: _handle { other.release() } {}
-        Handle& operator=(Handle&& other) noexcept
-        {
-            reset(other.release());
-            return *this;
-        }
-
-        [[nodiscard]] HANDLE get() const noexcept { return _handle; }
-        [[nodiscard]] HANDLE release() noexcept { return std::exchange(_handle, nullptr); }
-        void reset(HANDLE handle = nullptr) noexcept
-        {
-            if (auto const old = std::exchange(_handle, handle);
-                old != nullptr && old != INVALID_HANDLE_VALUE)
-                CloseHandle(old);
-        }
-
-      private:
-        HANDLE _handle;
-    };
-
     /// One end of an anonymous pipe as a stream: the child's stdin (written) or stdout (read).
     class PipeStream final: public IByteStream
     {
       public:
-        PipeStream(Handle read, Handle write): _read { std::move(read) }, _write { std::move(write) } {}
+        PipeStream(vtpty::UniqueHandle read, vtpty::UniqueHandle write):
+            _read { std::move(read) }, _write { std::move(write) }
+        {
+        }
 
         [[nodiscard]] std::expected<std::size_t, std::string> readSome(std::span<std::byte> buffer) override
         {
@@ -100,8 +77,8 @@ namespace
         void closeWrite() noexcept override { _write.reset(); }
 
       private:
-        Handle _read;
-        Handle _write;
+        vtpty::UniqueHandle _read;
+        vtpty::UniqueHandle _write;
     };
 
     /// A blocking loopback TCP pair: what the reactor end is adopted from and the bridge's end.
@@ -165,7 +142,7 @@ namespace
     }
 
     /// Copies the child's stderr into @p tail until it ends. Detached, as on POSIX.
-    void drainInto(Handle read, std::shared_ptr<StderrTail> tail)
+    void drainInto(vtpty::UniqueHandle read, std::shared_ptr<StderrTail> tail)
     {
         std::thread { [read = std::move(read), tail = std::move(tail)]() {
             auto buffer = std::array<char, 1024> {};
@@ -180,7 +157,7 @@ namespace
     class Win32StdioChild final: public IStdioChild
     {
       public:
-        Win32StdioChild(Handle process, std::shared_ptr<StderrTail> tail):
+        Win32StdioChild(vtpty::UniqueHandle process, std::shared_ptr<StderrTail> tail):
             _process { std::move(process) }, _tail { std::move(tail) }
         {
         }
@@ -212,7 +189,7 @@ namespace
         }
 
       private:
-        Handle _process;
+        vtpty::UniqueHandle _process;
         std::shared_ptr<StderrTail> _tail;
     };
 
@@ -241,12 +218,12 @@ namespace
             for (auto& pipe: pipes)
                 if (!CreatePipe(&pipe[0], &pipe[1], &inheritable, 0))
                     return std::unexpected { systemError("CreatePipe", GetLastError()) };
-            auto stdinRead = Handle { pipes[0][0] };
-            auto stdinWrite = Handle { pipes[0][1] };
-            auto stdoutRead = Handle { pipes[1][0] };
-            auto stdoutWrite = Handle { pipes[1][1] };
-            auto stderrRead = Handle { pipes[2][0] };
-            auto stderrWrite = Handle { pipes[2][1] };
+            auto stdinRead = vtpty::UniqueHandle { pipes[0][0] };
+            auto stdinWrite = vtpty::UniqueHandle { pipes[0][1] };
+            auto stdoutRead = vtpty::UniqueHandle { pipes[1][0] };
+            auto stdoutWrite = vtpty::UniqueHandle { pipes[1][1] };
+            auto stderrRead = vtpty::UniqueHandle { pipes[2][0] };
+            auto stderrWrite = vtpty::UniqueHandle { pipes[2][1] };
             for (auto const parentEnd: { stdinWrite.get(), stdoutRead.get(), stderrRead.get() })
                 SetHandleInformation(parentEnd, HANDLE_FLAG_INHERIT, 0);
 
@@ -276,7 +253,7 @@ namespace
                 return std::unexpected { systemError(std::format("cannot start {}", *image),
                                                      GetLastError()) };
             CloseHandle(info.hThread);
-            auto process = Handle { info.hProcess };
+            auto process = vtpty::UniqueHandle { info.hProcess };
             // The child holds its own copies now; the parent's would keep its streams from ever ending.
             stdinRead.reset();
             stdoutWrite.reset();

@@ -11,7 +11,7 @@
 
 #ifdef _WIN32
 
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
 
     #include <core/Utf8Path.hpp>
 

@@ -8,7 +8,7 @@
 #ifdef _WIN32
 
     #include <vtpty/CrossingHandle.hpp>
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
 
     #include <cstdint>
     #include <exception>

@@ -39,6 +39,7 @@
 #include <vthost/testing/FakeReadinessProbe.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
 #include <vthost/testing/StagingFileSystem.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 
 namespace vthost::testing
 {
@@ -148,6 +149,33 @@ struct UpgradeBench
     {
         return handover::LiveUpgrade { live->loop, live->host, store,       leases,           handoff,
                                        probe,      hooks,      listeners(), std::move(config) };
+    }
+
+    /// @return The orchestrator, over this daemon, with the configuration config() and handing over with @p
+    /// handoff.
+    [[nodiscard]] handover::LiveUpgrade orchestrator(handover::ImageHandoff& handoff)
+    {
+        return orchestrator(config(), handoff);
+    }
+
+    /// Checks that the daemon serves on after a handoff that did not happen: it accepts again, every
+    /// session answers, and @p carried -- typed into the first while the upgrade had everything stopped, if
+    /// anything -- is delivered once, ahead of what is typed afterwards.
+    /// @param ids The daemon's two sessions.
+    /// @param carried What was typed into the first session during the upgrade.
+    void checkResumed(std::vector<vtworkspace::SessionId> const& ids, std::string_view carried = {}) const
+    {
+        REQUIRE(ids.size() >= 2);
+        CHECK(acceptor->admission() == Admission::Accepting);
+        live->host.writeInput(ids[0], "-after");
+        live->host.writeInput(ids[1], "second");
+        auto const expected = std::string { carried } + "-after";
+        auto const shown = live->eventually([&] { return live->pageText(ids[0]).contains(expected); });
+        INFO("first session's screen: " << live->pageText(ids[0]));
+        REQUIRE(shown);
+        REQUIRE(live->eventually([&] { return live->pageText(ids[1]).contains("second"); }));
+        if (!carried.empty())
+            CHECK(occurrences(live->pageText(ids[0]), std::string { carried }) == 1);
     }
 
     /// @return The configuration a daemon of release 0.9.0 upgrades with.

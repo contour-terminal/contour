@@ -5,8 +5,8 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
+#include <vtpty/Win32Handle.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
-#include <vtpty/WindowsHandle.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
