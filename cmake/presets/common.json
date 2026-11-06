@@ -24,6 +24,14 @@
             }
         },
         {
+            "name": "production",
+            "hidden": true,
+            "description": "The flags the packages are built with: link-time optimization and exploit mitigations for Contour's own code",
+            "cacheVariables": {
+                "CONTOUR_PRODUCTION_BUILD": "ON"
+            }
+        },
+        {
             "name": "debug",
             "hidden": true,
             "cacheVariables": {

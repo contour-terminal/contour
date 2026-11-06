@@ -41,7 +41,8 @@
             "name": "msvc-release",
             "inherits": [
                 "windows-common",
-                "release"
+                "release",
+                "production"
             ],
             "displayName": "MSVC Release",
             "description": "Using MSVC compiler (64-bit)",

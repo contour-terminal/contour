@@ -57,7 +57,8 @@
             "inherits": [
                 "contour-common",
                 "macos-signing",
-                "release"
+                "release",
+                "production"
             ],
             "generator": "Ninja",
             "condition": {

@@ -357,6 +357,7 @@ jobs:
               -D CONTOUR_PACKAGE_TERMINFO=OFF \
               -D PEDANTIC_COMPILER_WERROR=OFF \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
+              -D CONTOUR_PRODUCTION_BUILD=ON \
               -D CONTOUR_LINK_JOBS=1 \
               -D CMAKE_C_COMPILER="clang-${LLVM_VERSION}" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
@@ -385,6 +386,10 @@ jobs:
     # ordinary GUI builds, where they assert the other half.
     - name: "tests"
       run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration|contour_e2e_packaging_rules" --output-on-failure
+    # Its own step: inside the regex above, a check that was never registered (no Python, tests off) would
+    # vanish without a failure. --no-tests=error makes its absence one.
+    - name: "Check the production build"
+      run: ctest --test-dir build -R '^check_production_build$' --no-tests=error --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.
@@ -2196,9 +2201,16 @@ jobs:
           set -euo pipefail
           CXX=g++-15 \
           VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}" \
+          CC=gcc-15 \
           OUTPUT_DIR="$PWD" \
               ./scripts/build-appimage.sh
           ls -lh ./*.AppImage
+      # The AppImage is a package build like the others: its binary must carry the production flags.
+      - name: "Check the production build"
+        run: |
+          python3 scripts/check-production-build.py \
+              --manifest out/appimage/build/production-build.json \
+              --binary out/appimage/build/src/contour/contour
       # Run the bundle itself, not the build tree: a missing library, plugin or QML module is only
       # visible here. No FUSE on the runner, hence --appimage-extract-and-run, and no display either,
       # so only commands that open no window run.
