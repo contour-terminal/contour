@@ -7,6 +7,28 @@
   <!-- CPack accepts each fragment Id once (scripts/check-wix-patch.py checks it), so everything that goes
        into the product element lives in this one fragment. -->
   <CPackWiXFragment Id="#PRODUCT">
+    <!-- Where the previous version was installed, when this is an upgrade, for installs that predate the folder
+         recorded in the scope sources: the Add/Remove Programs entry's InstallLocation (CPack writes it from
+         INSTALL_ROOT). That entry is in HKLM, in the 64-bit view, for per-user products too.
+         [WIX_UPGRADE_DETECTED] is the previous product's code. -->
+    <Property Id="CONTOUR_PREVIOUS_ROOT">
+      <RegistrySearch Id="ContourPreviousRoot" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[WIX_UPGRADE_DETECTED]" Name="InstallLocation" Type="raw" Bitness="always64" />
+    </Property>
+    <!-- Which folder the installation goes to, settled by SetProperty actions that run in this order, the last
+         one that applies winning (the default is in wix_machine.wxs and wix_user.wxs):
+         ContourRootGiven         notes a folder given on the command line, or chosen in the dialog, before
+                                  AppSearch (CPack's search of the previous install location) can overwrite it;
+         ContourRootDefault       the proposal of a first install (scope file);
+         ContourRootRecorded      the folder the installed version recorded for itself, in place of the ARP one.
+                                  Not gated on NOT Installed: uninstall, repair and the nested removal of an
+                                  older product must resolve the folder the files and PATH went to;
+         ContourRootPrevious      the folder the installed version is in, unless that is an old release's
+                                  versioned default, which is left behind;
+         ContourRootGivenRestore  puts back the given folder, which beats all of the above. -->
+    <SetProperty Id="CONTOUR_GIVEN_ROOT" Action="ContourRootGiven" Value="[INSTALL_ROOT]" Before="AppSearch" Sequence="both" Condition="INSTALL_ROOT AND NOT Installed" />
+    <SetProperty Id="CONTOUR_PREVIOUS_ROOT" Action="ContourRootRecorded" Value="[CONTOUR_RECORDED_ROOT]" After="ContourRootDefault" Sequence="both" Condition="CONTOUR_RECORDED_ROOT" />
+    <SetProperty Id="INSTALL_ROOT" Action="ContourRootPrevious" Value="[CONTOUR_PREVIOUS_ROOT]" After="ContourRootRecorded" Sequence="both" Condition="CONTOUR_PREVIOUS_ROOT AND NOT (CONTOUR_PREVIOUS_ROOT &gt;&lt; &quot;\Contour Terminal Emulator &quot;)" />
+    <SetProperty Id="INSTALL_ROOT" Action="ContourRootGivenRestore" Value="[CONTOUR_GIVEN_ROOT]" After="ContourRootPrevious" Sequence="both" Condition="NOT Installed AND CONTOUR_GIVEN_ROOT" />
     <!-- "Launch Contour" on the installer's last page. -->
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>
@@ -15,5 +37,6 @@
   </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCTFEATURE">
     <ComponentRef Id="ContourConnectShortcut" />
+    <ComponentRef Id="ContourInstallRoot" />
   </CPackWiXFragment>
 </CPackWiXPatch>

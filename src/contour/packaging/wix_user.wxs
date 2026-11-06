@@ -4,6 +4,19 @@
      so wix_patch.xml refers to them without knowing the scope. One Fragment: referencing one Id links all. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
+    <!-- The folder this product recorded for itself when it was installed (the component below), read back first
+         to find where an upgrade goes: the Add/Remove Programs entry that wix_patch.xml falls back to is
+         machine-wide even for a per-user product, and shared by every user who installed the same build. -->
+    <Property Id="CONTOUR_RECORDED_ROOT">
+      <RegistrySearch Id="ContourRecordedRoot" Root="HKCU" Key="Software\Contour\Contour" Name="InstallRoot" Type="raw" Bitness="always64" />
+    </Property>
+    <!-- The folder a first install proposes; wix_patch.xml's actions then put back what an upgrade found or the
+         user gave. After AppSearch, so that it replaces the folder CPack's own search found. -->
+    <SetProperty Id="INSTALL_ROOT" Action="ContourRootDefault" Value="[LocalAppDataFolder]Programs\Contour\" After="AppSearch" Sequence="both" Condition="NOT Installed" />
+    <!-- The installation folder, written for the search above; in every installation, so the main feature carries it. -->
+    <Component Id="ContourInstallRoot" Guid="*" Directory="INSTALL_ROOT">
+      <RegistryValue Root="HKCU" Key="Software\Contour\Contour" Name="InstallRoot" Type="string" Value="[INSTALL_ROOT]" KeyPath="yes" />
+    </Component>
     <!-- Contour's bin directory at the end of the user's PATH. -->
     <Component Id="ContourPathEnvironment" Guid="*" Directory="INSTALL_ROOT">
       <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="no" />
