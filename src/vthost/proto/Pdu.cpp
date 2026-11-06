@@ -350,7 +350,9 @@ namespace
     }
 
     /// Reads the cell size a body ends in, if it has bytes left; a sender from before the field ends earlier.
-    /// A width without its height is a truncated body.
+    /// A width without its height is a truncated body. A stated 0x0 reads as none, the way
+    /// WireColorPreference::Unstated does: a sender with no cell yet may write zeros instead of omitting the
+    /// field, so a field appended after this one never forces senders to state a cell.
     [[nodiscard]] bool decodeCellPixelSize(Reader& in,
                                            std::optional<WireCellPixelSize>& size,
                                            DecodeError& error)
@@ -360,7 +362,8 @@ namespace
         auto decoded = WireCellPixelSize {};
         if (!assign(in.varint(), decoded.width, error) || !assign(in.varint(), decoded.height, error))
             return false;
-        size = decoded;
+        if (decoded.width != 0 || decoded.height != 0)
+            size = decoded;
         return true;
     }
 

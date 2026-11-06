@@ -3185,8 +3185,6 @@ TEST_CASE("NativeSession.rejects_an_out_of_range_cell_size", "[vthost][native][c
     auto const rows = std::array {
         Row { .cell = { .width = 0, .height = 20 },
               .logged = "rejecting client cell size 0x20 (out of range)" },
-        Row { .cell = { .width = 0, .height = 0 },
-              .logged = "rejecting client cell size 0x0 (out of range)" },
         Row { .cell = { .width = 65535, .height = 65535 },
               .logged = "rejecting client cell size 65535x65535 (out of range)" },
     };
@@ -3206,6 +3204,24 @@ TEST_CASE("NativeSession.rejects_an_out_of_range_cell_size", "[vthost][native][c
         CHECK(h.host.learnedCellPixelSize() == std::nullopt);
         CHECK(capture.contains(row.logged));
     }
+}
+
+TEST_CASE("NativeSession.takes_a_stated_0x0_cell_size_as_none_without_a_log", "[vthost][native][cell]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness {};
+    std::ignore =
+        exchangeAll(&h,
+                    { proto::DecodedPdu { proto::ClientHello {} },
+                      proto::DecodedPdu { proto::ResizeRequest {
+                          .columns = 100,
+                          .lines = 30,
+                          .cellPixelSize = proto::WireCellPixelSize { .width = 0, .height = 0 } } } });
+
+    REQUIRE(h.host.sessionCount() == 1);
+    CHECK(h.host.terminal(h.host.sessionIds().front())->cellPixelSize() == cellOf(10, 20));
+    CHECK(h.host.learnedCellPixelSize() == std::nullopt);
+    CHECK_FALSE(capture.contains("rejecting"));
 }
 
 TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost][native][diagnostics]")
