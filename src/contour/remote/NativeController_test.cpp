@@ -264,6 +264,11 @@ class ClientFrameCounts
                                   .columns = vtpty::ColumnCount(static_cast<int>(resize->columns)) });
             _requestCells.push_back(resize->cellPixelSize);
         }
+        if (auto const* pane = std::get_if<vthost::proto::ResizePane>(&pdu))
+        {
+            auto const lock = std::lock_guard { _areasMutex };
+            _paneCells.push_back(pane->cellPixelSize);
+        }
         if (auto const* hello = std::get_if<vthost::proto::ClientHello>(&pdu))
         {
             auto const lock = std::lock_guard { _areasMutex };
@@ -277,6 +282,14 @@ class ClientFrameCounts
         checkDecoded();
         auto const lock = std::lock_guard { _areasMutex };
         return _requestCells;
+    }
+
+    /// @return The cell size each ResizePane stated so far (nullopt for none), in arrival order.
+    [[nodiscard]] std::vector<std::optional<vthost::proto::WireCellPixelSize>> paneCells() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _paneCells;
     }
 
     /// @return The cell size each ClientHello stated so far (nullopt for none), in arrival order.
@@ -307,6 +320,7 @@ class ClientFrameCounts
     mutable std::mutex _areasMutex {};
     std::vector<vtpty::PageSize> _areas {};                                        ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _requestCells {}; ///< Under _areasMutex.
+    std::vector<std::optional<vthost::proto::WireCellPixelSize>> _paneCells {};    ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.
 };
 
@@ -1779,6 +1793,20 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     auto* right = paneFor(rightSession);
     REQUIRE(left != nullptr);
     REQUIRE(right != nullptr);
+
+    SECTION("a pane's report carries the cell size")
+    {
+        // 9x18 pixels per cell, the pane's grid being 40x30 cells.
+        left->terminal().device().resizeScreen(
+            cells(40, 30), vtpty::ImageSize { vtpty::Width(40 * 9), vtpty::Height(30 * 18) });
+
+        REQUIRE(waitUntil([&] {
+            auto const stated = daemon.clientFrames.paneCells();
+            return std::ranges::any_of(stated, [](auto const& cell) { return cell.has_value(); });
+        }));
+        CHECK(daemon.clientFrames.paneCells().back()
+              == std::optional { vthost::proto::WireCellPixelSize { .width = 9, .height = 18 } });
+    }
 
     SECTION("the split alone must not shrink anything")
     {

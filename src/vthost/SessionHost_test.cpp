@@ -5143,6 +5143,26 @@ TEST_CASE("SessionHost.cellPixelSize.grid_and_cell_change_resize_once", "[vthost
     CHECK(h.terminal(first).totalPageSize().columns == vtpty::ColumnCount(100));
 }
 
+TEST_CASE("SessionHost.cellPixelSize.a_departure_moving_grid_and_cell_resizes_once", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    auto const first = h.openTab();
+    auto const second = h.openTab();
+    h.report(h.clientA, pixels(9, 18), cells(80, 24));
+    h.report(h.clientB, pixels(18, 36), cells(100, 30));
+    REQUIRE(h.everySessionAt(pixels(18, 36)));
+    REQUIRE(h.terminal(first).totalPageSize().columns == vtpty::ColumnCount(100));
+    auto const before = std::array { h.pty(first).resizes(), h.pty(second).resizes() };
+
+    // B held both the area and the cell; with B gone, A's take over together.
+    h.host.unsubscribeStream(&h.clientB);
+
+    CHECK(h.pty(first).resizes() == before[0] + 1);
+    CHECK(h.pty(second).resizes() == before[1] + 1);
+    CHECK(h.everySessionAt(pixels(9, 18)));
+    CHECK(h.terminal(first).totalPageSize().columns == vtpty::ColumnCount(80));
+}
+
 TEST_CASE("SessionHost.grid_resize_keeps_the_cell_size", "[vthost][host][cell]")
 {
     auto h = CellHarness {};
