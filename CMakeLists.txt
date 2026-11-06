@@ -263,6 +263,10 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)
         contour_add_lint_gate(check_wix_patch_selftest check-wix-patch.py --self-test)
 
+        # The production-build check, tested against inline fixtures; the real check, which reads a
+        # build's compile database and binary, is registered beside the binary it reads.
+        contour_add_lint_gate(check_production_build_selftest check-production-build.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
