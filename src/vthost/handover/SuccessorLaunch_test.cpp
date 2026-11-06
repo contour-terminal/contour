@@ -28,19 +28,13 @@
     #include <vtpty/Process.hpp>
     #include <vtpty/WindowsHandle.hpp>
 
-    #include <core/net/PlatformLoop.hpp>
-    #include <core/net/Sockets.hpp>
-    #include <core/testing/ScopedTempDir.hpp>
-
     #include <chrono>
-    #include <cstring>
     #include <memory>
     #include <system_error>
     #include <thread>
     #include <tuple>
     #include <utility>
 
-    #include <vthost/ListeningSocket.hpp>
     #include <vthost/SessionHost.hpp>
     #include <vthost/client/ClientSupervisor.hpp>
     #include <vthost/handover/HandoverCodec.hpp>
@@ -299,52 +293,6 @@ TEST_CASE("a successor that cannot be started leaves the old daemon serving",
     CHECK(u.launcher.terminated == 0);
     REQUIRE(u.launcher.launches.size() == 1);
     checkResumed(u, ids);
-}
-
-// What a successor does with each listener it inherits: the daemon that handed it over bound it to its own
-// completion port, and a socket is bound to one port for as long as it is open -- in every process that holds
-// it. Released, the successor's loop serves it.
-TEST_CASE("a listener another completion port held is served by a second loop once released",
-          "[vthost][handover]")
-{
-    auto const directory = core::testing::ScopedTempDir { "contour-release-port" };
-    auto const path = (directory.path() / "listener").string();
-
-    // As the old daemon has it: bound, listening, and bound to a completion port of its own.
-    auto const socket = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
-    REQUIRE(socket != INVALID_SOCKET);
-    auto address = sockaddr_un {};
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, path.data(), path.size());
-    REQUIRE(::bind(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
-    REQUIRE(::listen(socket, 4) == 0);
-    auto* const oldPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
-    REQUIRE(CreateIoCompletionPort(reinterpret_cast<HANDLE>(socket), oldPort, 1, 0) == oldPort);
-
-    auto const released = vthost::releaseCompletionPort(static_cast<uint64_t>(socket));
-    INFO((released ? std::string {} : released.error().message()));
-    REQUIRE(released.has_value());
-
-    auto loop = core::net::PlatformLoop {};
-    auto adopted = core::net::adoptListener(loop, reinterpret_cast<core::platform::NativeHandle>(socket));
-    REQUIRE(adopted.has_value());
-    auto accepted = std::optional<core::net::AcceptResult> {};
-    loop.spawn([](core::net::IListener* listener,
-                  std::optional<core::net::AcceptResult>* result) -> core::async::Task<void> {
-        *result = co_await listener->accept();
-    }(adopted->get(), &accepted));
-
-    auto const client = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, 0);
-    REQUIRE(client != INVALID_SOCKET);
-    REQUIRE(::connect(client, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0);
-    auto const deadline = std::chrono::steady_clock::now() + 10s;
-    while (!accepted && std::chrono::steady_clock::now() < deadline)
-        std::ignore = loop.runOnce(10ms);
-    ::closesocket(client);
-    CloseHandle(oldPort);
-
-    REQUIRE(accepted.has_value());
-    CHECK(accepted->has_value());
 }
 
 // The old daemon's loop answers nothing while it waits for its successor, and a client that stops holding on

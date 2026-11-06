@@ -373,19 +373,6 @@ namespace
             auto const listener = std::move(*found);
             _pending.erase(found);
             auto const handle = nativeHandleOf(listener);
-#ifdef _WIN32
-            // Still bound to the completion port of the daemon that handed it over, which a socket can be
-            // bound to only one of: released first, so that this loop's port takes it.
-            if (auto const released = releaseCompletionPort(listener.socket); !released)
-            {
-                errorLog()("cannot serve the inherited {} listener: {}", name, released.error().message());
-                closeInherited(listener);
-                return std::nullopt;
-            }
-            // Crossed for this process alone: no program it starts inherits it.
-            if (auto const set = vtpty::setInheritance(handle, vtpty::HandleInheritance::NotInherited); !set)
-                errorLog()("the inherited {} listener stays inheritable: {}", name, set.error().message());
-#endif
             auto adopted = core::net::adoptListener(loop, handle);
             if (!adopted)
             {

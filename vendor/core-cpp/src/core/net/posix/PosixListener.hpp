@@ -64,6 +64,9 @@ class PosixListener final: public IListener
     /// @return The listening descriptor, or -1 once closed; for diagnostics and tests.
     [[nodiscard]] int native() const noexcept { return _fd; }
 
+    /// @copydoc IListener::nativeHandle
+    [[nodiscard]] platform::NativeHandle nativeHandle() const noexcept override { return _fd; }
+
   protected:
     /// Closes with @c FdWakePolicy::Resume (@c closeWith).
     void doClose() noexcept override;

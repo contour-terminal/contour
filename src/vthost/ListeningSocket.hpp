@@ -61,23 +61,4 @@ namespace detail
 }
 
 } // namespace vthost
-#else
-    #include <cstdint>
-    #include <expected>
-    #include <system_error>
-
-namespace vthost
-{
-
-/// Releases a socket from the I/O completion port it is bound to, so that another port may take it: what a
-/// live upgrade's successor does with each listener it inherits, which the daemon that handed it over bound
-/// to its own port. A socket is bound to one port only, for as long as it is open, and the binding goes with
-/// the socket into every process that holds it: the successor's loop could not bind it otherwise.
-///
-/// Windows 8.1 and later (FileReplaceCompletionInformation).
-/// @param socket The socket, a SOCKET widened to an integer.
-/// @return Nothing; or why it stays bound.
-[[nodiscard]] std::expected<void, std::error_code> releaseCompletionPort(std::uint64_t socket);
-
-} // namespace vthost
 #endif

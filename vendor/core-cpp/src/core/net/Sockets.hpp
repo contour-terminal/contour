@@ -106,6 +106,15 @@ struct ListenOptions
 /// **It does not bind and does not listen.** A handle that is merely open, or open and bound but
 /// not listening, is adopted successfully and then accepts nothing — the kernel is the only thing
 /// that knows, and neither platform offers a portable way to ask.
+///
+/// **What it does change is what the loop needs, and inheritance.** On POSIX the descriptor is made
+/// non-blocking and close-on-exec. On Windows the socket is bound to the loop's completion port --
+/// after releasing its binding to another one, which is what a socket inherited from a process
+/// whose own loop had adopted it still carries, and which `CreateIoCompletionPort` would otherwise
+/// refuse for as long as the socket is open -- and, once it is bound, `HANDLE_FLAG_INHERIT` is
+/// cleared. A failure part-way can leave the handle with some of these changes made; it is still
+/// open, and still the caller's to close. The listener names the handle back through
+/// @c IListener::nativeHandle, for a caller that hands it on in turn.
 /// @param loop The loop whose backend drives accept readiness (not owned).
 /// @param handle The listening socket handle (a descriptor on POSIX, a `SOCKET` on Windows).
 /// @return The adopted listener, or a @c NetError if the handle could not be prepared.

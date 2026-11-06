@@ -7,6 +7,29 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.15.0] - 2026-11-06
+
+### Added
+
+- **`core::net::IListener::nativeHandle()`, the handle a listener accepts on**: a descriptor on POSIX, a `SOCKET`
+  on Windows, or `core::platform::InvalidHandle` once the listener is closed. A caller that hands a listening
+  socket to another process no longer has to cast to a platform type to find it. It is virtual with a default, so
+  a listener with no handle of its own (a test double, a decorator) answers `InvalidHandle` without code.
+- **On Windows, `core::net::adoptListener()` adopts a socket another completion port holds.** A listening socket
+  inherited from a process whose own loop had adopted it is still bound to that process's port, and
+  `CreateIoCompletionPort` refused it with `ERROR_INVALID_PARAMETER` for as long as it was open. Adoption now
+  releases that binding (`NtSetInformationFile` with `FileReplaceCompletionInformation`, resolved from `ntdll` at
+  run time) and binds the socket to the loop's port. It also clears `HANDLE_FLAG_INHERIT` on the adopted socket,
+  as the POSIX side sets close-on-exec, so the processes the adopter starts do not inherit it.
+
+### Fixed
+
+- **On Windows, `core::net::adoptListener()` no longer closes the socket when it fails** (core-cpp#92). Its
+  contract says the caller still owns the handle then, and POSIX kept it, but every failure past the
+  invalid-handle check closed the socket, so a caller following the contract closed it a second time -- by then
+  possibly a handle value reused by another object. The socket is now left open on every failure; `listen()` and
+  `listenUnix()`, which create theirs, still close what they created.
+
 ## [0.14.0] - 2026-11-04
 
 ### Breaking

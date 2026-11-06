@@ -1635,9 +1635,11 @@ What makes the handles adoptable:
   PATH refuses the upgrade (`UpgradeRefusal::ForeignConsoleHost`) before anything is stopped. The cell size in
   pixels, which a pseudoconsole is never told, is kept by `ConPty` (`pixelSize()`) to cross with it.
 - **The listeners.** A socket is bound to one I/O completion port for as long as it is open, in every process
-  that holds it; the successor's loop cannot bind an inherited listener until `releaseCompletionPort()`
-  (`FileReplaceCompletionInformation`, Windows 8.1+) lets it go. It does so after the commit point, never
-  before: the old daemon still accepts through that port if it rolls back.
+  that holds it, so the successor's loop cannot bind an inherited listener as it is. core-cpp's
+  `core::net::adoptListener` adopts it: it releases the socket's completion-port binding
+  (`FileReplaceCompletionInformation`, Windows 8.1+), clears its inheritance, and leaves a socket it refuses to
+  its caller. The successor adopts its listeners after the commit point, never before: the old daemon still
+  accepts through that port if it rolls back.
 - **The image lease** crosses as `HandoverImage::leaseHandle`, kept by the successor until it holds a lease of
   its own (`adoptHandedOverLease()`), so a prune cannot remove the image in between.
 - **A quiesce never blocks on a program that reads nothing.** `ConPty::interruptWrites()` ends a write the

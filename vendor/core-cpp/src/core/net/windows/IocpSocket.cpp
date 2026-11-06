@@ -1114,43 +1114,145 @@ SOCKET IocpListener::native() const noexcept
     return _shared->socket;
 }
 
+platform::NativeHandle IocpListener::nativeHandle() const noexcept
+{
+    // `INVALID_SOCKET` once closed, which is `platform::InvalidHandle` spelled as a SOCKET.
+    return reinterpret_cast<platform::NativeHandle>(_shared->socket);
+}
+
 namespace
 {
+    /// What associating a listening socket with the loop's port does when the socket is bound to
+    /// another completion port already.
+    enum class ForeignPort : std::uint8_t
+    {
+        Refuse,  ///< A socket this library just created, which no other port can hold: fail.
+        Release, ///< An adopted socket, which the process that made it may have bound: unbind it.
+    };
+
+    /// `FILE_COMPLETION_INFORMATION` (`ntifs.h`, in no user-mode SDK header): the port a file is
+    /// bound to, and the key its completions carry.
+    struct FileCompletionInformation
+    {
+        HANDLE port;
+        void* key;
+    };
+
+    /// `IO_STATUS_BLOCK` (`winternl.h`), spelled here so that header -- which declares much of
+    /// `ntdll` and conflicts with other SDK headers -- stays out of this file.
+    struct IoStatusBlock
+    {
+        std::intptr_t status;
+        ULONG_PTR information;
+    };
+
+    /// `FileReplaceCompletionInformation` of `FILE_INFORMATION_CLASS`: Windows 8.1 and later.
+    constexpr auto FileReplaceCompletionInformation = ULONG { 61 };
+
+    using NtSetInformationFileFn = std::int32_t(__stdcall*)(
+        HANDLE file, IoStatusBlock* status, void* information, ULONG length, ULONG informationClass);
+
+    using RtlNtStatusToDosErrorFn = ULONG(__stdcall*)(std::int32_t status);
+
+    /// The two `ntdll` calls a release needs: the one that makes it, and the one that turns its
+    /// `NTSTATUS` into the Win32 code @c NetError::systemCode carries everywhere else.
+    struct ReleaseEntries
+    {
+        NtSetInformationFileFn setInformation = nullptr;
+        RtlNtStatusToDosErrorFn statusToError = nullptr;
+    };
+
+    /// @return The entry points, both or neither. Resolved once, from the `ntdll` every process has
+    ///         mapped, and never linked: see `WaitCompletionPacket.cpp`'s `resolveEntries`.
+    [[nodiscard]] ReleaseEntries const& releaseEntries() noexcept
+    {
+        static auto const resolved = []() noexcept -> ReleaseEntries {
+            auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+            if (ntdll == nullptr)
+                return {};
+            auto entries = ReleaseEntries {
+                .setInformation =
+                    reinterpret_cast<NtSetInformationFileFn>(::GetProcAddress(ntdll, "NtSetInformationFile")),
+                .statusToError = reinterpret_cast<RtlNtStatusToDosErrorFn>(
+                    ::GetProcAddress(ntdll, "RtlNtStatusToDosError")),
+            };
+            if (entries.setInformation == nullptr || entries.statusToError == nullptr)
+                return {};
+            return entries;
+        }();
+        return resolved;
+    }
+
+    /// @param error Why `ICompletionPort::associate` refused a socket.
+    /// @return Whether that is the kernel's answer for a socket another port holds: `CreateIoCompletionPort`
+    ///         fails with `ERROR_INVALID_PARAMETER` then. It answers that for other mistakes too, which
+    ///         is why the release that follows is followed by a second association rather than trusted.
+    [[nodiscard]] bool isBoundElsewhere(NetError const& error) noexcept
+    {
+        return error.code == NetErrorCode::SystemError && error.systemCode == ERROR_INVALID_PARAMETER;
+    }
+
+    /// Unbinds @p socket from whatever completion port holds it, so another may take it.
+    ///
+    /// **The association is a property of the handle, and it outlives the process that made it.** A
+    /// listening socket inherited across a live upgrade is still bound to its predecessor's port,
+    /// and `CreateIoCompletionPort` refuses to bind it to a second one for as long as it is open.
+    /// `NtSetInformationFile` with `FileReplaceCompletionInformation` and no port is the one way to
+    /// end it short of closing the socket.
+    /// @param socket The socket to release.
+    /// @return Nothing, @c NetErrorCode::Unsupported where `ntdll` does not export the calls, or
+    ///         @c NetErrorCode::SystemError carrying the Win32 code the `NTSTATUS` maps to.
+    [[nodiscard]] std::expected<void, NetError> releaseCompletionPort(SOCKET socket) noexcept
+    {
+        auto const& api = releaseEntries();
+        if (api.setInformation == nullptr)
+            return std::unexpected(
+                makeNetError(NetErrorCode::Unsupported, 0, "NtSetInformationFile is not available"));
+        auto information = FileCompletionInformation { .port = nullptr, .key = nullptr };
+        auto status = IoStatusBlock {};
+        auto const result = api.setInformation(reinterpret_cast<HANDLE>(socket),
+                                               &status,
+                                               &information,
+                                               ULONG { sizeof(information) },
+                                               FileReplaceCompletionInformation);
+        if (result != 0)
+            return std::unexpected(makeNetError(NetErrorCode::SystemError,
+                                                static_cast<int>(api.statusToError(result)),
+                                                "NtSetInformationFile(FileReplaceCompletionInformation)"));
+        return {};
+    }
+
     /// Prepares a listening socket for this listener: associates it with the port and fetches the
     /// two extension functions an accept needs.
     /// @param loop The loop whose port completes the accepts.
-    /// @param socket The listening socket; closed on failure.
+    /// @param socket The listening socket. Left open on failure: closing it is for whoever owns it,
+    ///        which on the adopt path is still the caller (core::net::adoptListener()).
+    /// @param foreignPort What to do when another completion port holds @p socket.
     /// @param[out] acceptEx `AcceptEx`.
     /// @param[out] acceptAddresses `GetAcceptExSockaddrs`, or null (the peer address is then "").
     /// @return Nothing, or why the socket cannot be used.
     [[nodiscard]] std::expected<void, NetError> prepareListening(EventLoop& loop,
                                                                  SOCKET socket,
+                                                                 ForeignPort foreignPort,
                                                                  LPFN_ACCEPTEX& acceptEx,
                                                                  LPFN_GETACCEPTEXSOCKADDRS& acceptAddresses)
     {
         auto* const port = loop.completionPort();
         if (port == nullptr)
-        {
-            ::closesocket(socket);
             return std::unexpected(
                 makeNetError(NetErrorCode::Unsupported, 0, "the loop's backend lends no completion port"));
-        }
         acceptEx = extensionFunction<LPFN_ACCEPTEX>(socket, WSAID_ACCEPTEX);
         if (acceptEx == nullptr)
-        {
-            auto const err = ::WSAGetLastError();
-            ::closesocket(socket);
-            return std::unexpected(detail::fromWinsockError(err, "WSAIoctl(AcceptEx)"));
-        }
+            return std::unexpected(detail::fromWinsockError(::WSAGetLastError(), "WSAIoctl(AcceptEx)"));
         // Best-effort: without it the peer address is "", which costs a log prefix, not a
         // connection.
         acceptAddresses = extensionFunction<LPFN_GETACCEPTEXSOCKADDRS>(socket, WSAID_GETACCEPTEXSOCKADDRS);
-        if (auto associated = port->associate(reinterpret_cast<platform::NativeHandle>(socket)); !associated)
-        {
-            ::closesocket(socket);
-            return std::unexpected(std::move(associated.error()));
-        }
-        return {};
+        auto const handle = reinterpret_cast<platform::NativeHandle>(socket);
+        auto associated = port->associate(handle);
+        if (!associated && foreignPort == ForeignPort::Release && isBoundElsewhere(associated.error()))
+            associated =
+                releaseCompletionPort(socket).and_then([port, handle] { return port->associate(handle); });
+        return associated;
     }
 
     /// @param socket A bound socket.
@@ -1230,8 +1332,12 @@ std::expected<std::unique_ptr<IocpListener>, NetError> IocpListener::bind(EventL
 
     auto acceptEx = LPFN_ACCEPTEX { nullptr };
     auto acceptAddresses = LPFN_GETACCEPTEXSOCKADDRS { nullptr };
-    if (auto prepared = prepareListening(loop, socket, acceptEx, acceptAddresses); !prepared)
+    if (auto prepared = prepareListening(loop, socket, ForeignPort::Refuse, acceptEx, acceptAddresses);
+        !prepared)
+    {
+        ::closesocket(socket); // this call made it, so this call closes it
         return std::unexpected(std::move(prepared.error()));
+    }
 
     auto const [family, boundPort] = boundEndpointOf(socket);
     return std::unique_ptr<IocpListener> { new IocpListener(loop,
@@ -1282,9 +1388,11 @@ std::expected<std::unique_ptr<IocpListener>, NetError> IocpListener::bindUnix(Ev
 
     auto acceptEx = LPFN_ACCEPTEX { nullptr };
     auto acceptAddresses = LPFN_GETACCEPTEXSOCKADDRS { nullptr };
-    if (auto prepared = prepareListening(loop, socket, acceptEx, acceptAddresses); !prepared)
+    if (auto prepared = prepareListening(loop, socket, ForeignPort::Refuse, acceptEx, acceptAddresses);
+        !prepared)
     {
-        ::DeleteFileW(file->c_str()); // `prepareListening` has closed the socket
+        ::closesocket(socket);
+        ::DeleteFileW(file->c_str());
         return std::unexpected(std::move(prepared.error()));
     }
 
@@ -1305,10 +1413,25 @@ std::expected<std::unique_ptr<IocpListener>, NetError> IocpListener::adopt(Event
     if (socket == detail::InvalidSocket)
         return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "adoptListener"));
 
+    // Nothing below closes the socket on failure: until this returns a listener, it is the caller's
+    // (core::net::adoptListener()).
     auto acceptEx = LPFN_ACCEPTEX { nullptr };
     auto acceptAddresses = LPFN_GETACCEPTEXSOCKADDRS { nullptr };
-    if (auto prepared = prepareListening(loop, socket, acceptEx, acceptAddresses); !prepared)
+    if (auto prepared = prepareListening(loop, socket, ForeignPort::Release, acceptEx, acceptAddresses);
+        !prepared)
         return std::unexpected(std::move(prepared.error()));
+
+    // Not inherited by the processes this one starts, as `PosixListener::adopt` sets close-on-exec:
+    // a socket handed down to this process was made inheritable for that hand-over, and a child that
+    // kept it open would keep the address bound after the listener is closed.
+    if (::SetHandleInformation(reinterpret_cast<HANDLE>(socket), HANDLE_FLAG_INHERIT, 0) == FALSE)
+    {
+        auto const err = static_cast<int>(::GetLastError());
+        // Drops the port's record only: the kernel binding to the loop's port stays until the
+        // socket is closed, and a later adoption releases and rebinds it like any other.
+        loop.completionPort()->forget(reinterpret_cast<platform::NativeHandle>(socket));
+        return std::unexpected(detail::fromWinsockError(err, "SetHandleInformation"));
+    }
 
     // Asked of the KERNEL: the caller adopting a socket is exactly the caller that does not know
     // which port it is.

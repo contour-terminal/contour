@@ -6,27 +6,11 @@
 #include <core/async/WhenAny.hpp>
 #include <core/net/AcceptPolicy.hpp>
 #include <core/net/InterruptibleSleep.hpp>
-
-#ifdef _WIN32
-    #include <core/net/windows/IocpSocket.hpp>
-
-    #include <cstdint>
-#else
-    #include <core/net/posix/PosixListener.hpp>
-    #include <core/net/posix/UnixListener.hpp>
-
-    #include <sys/resource.h>
-    #include <sys/socket.h>
-    #include <sys/un.h>
-
-    #include <cstring>
-    #include <ranges>
-    #include <string_view>
-#endif
+#include <core/platform/Types.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <exception>
-#include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
@@ -34,7 +18,6 @@
 #include <tuple>
 #include <utility>
 
-#include <vthost/ListeningSocket.hpp>
 #include <vthost/Logging.hpp>
 
 namespace vthost
@@ -105,35 +88,6 @@ namespace
         }
     }
 
-#ifndef _WIN32
-    /// @return The listening AF_UNIX socket of this process bound to @p path, by its descriptor; nullopt for
-    ///         none. Asked of the descriptors in turn, because core::net::UnixListener does not tell its own.
-    [[nodiscard]] std::optional<int> listeningSocketAt(std::filesystem::path const& path)
-    {
-        constexpr auto MaxScannedDescriptor = 1 << 16;
-        auto limit = rlimit {};
-        auto const highest = ::getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY
-                                     && limit.rlim_cur < static_cast<rlim_t>(MaxScannedDescriptor)
-                                 ? static_cast<int>(limit.rlim_cur)
-                                 : MaxScannedDescriptor;
-        auto const& wanted = path.native();
-        for (auto const fd: std::views::iota(0, highest))
-        {
-            if (!isListeningSocket(fd))
-                continue;
-            auto address = sockaddr_un {};
-            auto addressLength = static_cast<socklen_t>(sizeof(address));
-            if (::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &addressLength) != 0
-                || address.sun_family != AF_UNIX)
-                continue;
-            auto const bound =
-                std::string_view { address.sun_path, ::strnlen(address.sun_path, sizeof(address.sun_path)) };
-            if (bound == wanted)
-                return fd;
-        }
-        return std::nullopt;
-    }
-#endif
 } // namespace
 
 bool AcceptFailureThrottle::shouldLog(core::net::NetError const& error) noexcept
@@ -296,9 +250,9 @@ void ConnectionAcceptor::resumeAccepting()
 std::optional<std::uint64_t> ConnectionAcceptor::listeningSocket() const
 {
 #ifdef _WIN32
-    if (auto const* const iocp = dynamic_cast<core::net::IocpListener const*>(_listener.get());
-        iocp != nullptr && iocp->native() != INVALID_SOCKET)
-        return static_cast<std::uint64_t>(iocp->native());
+    auto const handle = _listener->nativeHandle();
+    if (handle != core::platform::InvalidHandle)
+        return reinterpret_cast<std::uint64_t>(handle);
 #endif
     return std::nullopt;
 }
@@ -308,11 +262,8 @@ std::optional<int> ConnectionAcceptor::listeningDescriptor() const
 #ifdef _WIN32
     return std::nullopt;
 #else
-    if (auto const* const tcp = dynamic_cast<core::net::PosixListener const*>(_listener.get()))
-        return tcp->native() >= 0 ? std::optional { tcp->native() } : std::nullopt;
-    if (auto const* const local = dynamic_cast<core::net::UnixListener const*>(_listener.get()))
-        return listeningSocketAt(local->path());
-    return std::nullopt;
+    auto const handle = _listener->nativeHandle();
+    return handle != core::platform::InvalidHandle ? std::optional<int> { handle } : std::nullopt;
 #endif
 }
 

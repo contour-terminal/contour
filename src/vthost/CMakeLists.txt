@@ -61,7 +61,6 @@ add_library(vthost STATIC
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     ListeningSocket.hpp
-    ListeningSocket_win32.cpp
     NativeSession.cpp
     NodeMove.cpp
     NodeMove.hpp

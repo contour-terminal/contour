@@ -5,10 +5,13 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
+#include <core/platform/Types.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <array>
 #include <cstddef>
@@ -125,4 +128,39 @@ TEST_CASE("adopting a descriptor that is not one is refused rather than accepted
     auto const refused = core::net::adoptListener(loop, -1);
     REQUIRE_FALSE(refused.has_value());
     CHECK(refused.error().code == core::net::NetErrorCode::BadHandle);
+}
+
+TEST_CASE("a listener names its native handle", "[net]")
+{
+    auto source = core::net::makeBackend(core::net::preferredBackendKind());
+    REQUIRE(source != nullptr);
+    auto loop = EventLoop { *source };
+
+    SECTION("an adopted TCP listener")
+    {
+        auto const raw = bindRaw();
+        auto adopted = core::net::adoptListener(loop, raw.fd);
+        REQUIRE(adopted.has_value());
+        auto listener = std::move(*adopted);
+
+        CHECK(listener->nativeHandle() == raw.fd);
+        listener->close();
+        CHECK(listener->nativeHandle() == core::platform::InvalidHandle);
+    }
+
+    SECTION("a unix listener")
+    {
+        auto const directory = core::testing::ScopedTempDir { "core-cpp-native-handle" };
+        auto listened = core::net::listenUnix(loop, (directory / "listener").string());
+        REQUIRE(listened.has_value());
+        auto listener = std::move(*listened);
+
+        auto const handle = listener->nativeHandle();
+        REQUIRE(handle != core::platform::InvalidHandle);
+        struct stat status {};
+        REQUIRE(::fstat(handle, &status) == 0);
+        CHECK(S_ISSOCK(status.st_mode));
+        listener->close();
+        CHECK(listener->nativeHandle() == core::platform::InvalidHandle);
+    }
 }
