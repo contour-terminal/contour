@@ -264,6 +264,17 @@ TEST_CASE("a learned cell size round-trips, and a file without one decodes to no
     }
 }
 
+TEST_CASE("a truncated trailing cell size is malformed", "[vthost][snapshot]")
+{
+    auto body = proto::Writer {};
+    body.svarint(0);
+    body.varint(0); // no windows
+    body.varint(9); // a width, and no height
+    auto const decoded = decodeSnapshot(fileAround(body.view()));
+    REQUIRE_FALSE(decoded);
+    CHECK(decoded.error() == SnapshotError::Malformed);
+}
+
 TEST_CASE("an empty workspace encodes and decodes as empty", "[vthost][snapshot]")
 {
     auto const decoded = decodeSnapshot(encodeSnapshot({}));

@@ -518,22 +518,6 @@ TEST_CASE("a host that learned nothing hands over none, and the successor uses i
     CHECK(laysOutOn(*live, id, cellOf(10, 20)));
 }
 
-TEST_CASE("HandoverRestore.migrates_the_cell_size_from_pty_pixels", "[vthost][handover][threading][cell]")
-{
-    auto image = handOver(oneSession());
-    auto& session = image.sessions.front();
-    auto const id = session.id;
-    // As an image written before the field carried it: the PTY's pixels are all there is.
-    image.cellPixelSize.reset();
-    session.pty.pageSize =
-        vtpty::PageSize { .lines = vtpty::LineCount(23), .columns = vtpty::ColumnCount(80) };
-    session.pty.pixels = vtpty::ImageSize { vtpty::Width(9 * 80), vtpty::Height(18 * 23) };
-
-    auto const live = takeOver(std::move(image));
-    CHECK(live->host.learnedCellPixelSize() == cellOf(9, 18));
-    CHECK(laysOutOn(*live, id, cellOf(9, 18)));
-}
-
 TEST_CASE("a corrupt cell size in the image is ignored", "[vthost][handover][threading][cell]")
 {
     auto image = handOver(oneSession());

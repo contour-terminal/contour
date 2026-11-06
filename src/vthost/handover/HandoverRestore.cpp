@@ -62,19 +62,6 @@ namespace
                 visit(tab.root);
         return sessions;
     }
-
-    /// @return The cell size the first of @p sessions that knows its PTY's pixels implies, for an image from
-    ///         before it recorded one; none when no session does.
-    [[nodiscard]] std::optional<vtpty::ImageSize> cellOfPtyPixels(std::span<HandoverSession const> sessions)
-    {
-        for (auto const& session: sessions)
-        {
-            auto const page = session.pty.pageSize;
-            if (session.pty.pixels && unbox(page.lines) > 0 && unbox(page.columns) > 0)
-                return *session.pty.pixels / page;
-        }
-        return std::nullopt;
-    }
 } // namespace
 
 std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage image)
@@ -83,16 +70,8 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
     _objects.restore(image.objects);
     // Sessions spawned from now on are built under the preference the latest client stated, as they were.
     _defaultColorPreference = image.defaultColorPreference;
-    // Before any session is adopted, so each is put on it. An image from before the field has none, but its
-    // sessions' PTYs know their size in pixels: a PTY's page is the main page, so that divides exactly. The
-    // image of a daemon that learned nothing has none either, and its PTYs then carry that daemon's default,
-    // which must not pass for a learned cell: a cell equal to ours is no news, and is not taken.
-    seedLearnedCellPixelSize(image.cellPixelSize.or_else([&] {
-        return cellOfPtyPixels(image.sessions).and_then([&](vtpty::ImageSize cell) {
-            return cell == _defaultCellPixelSize ? std::nullopt : std::optional { cell };
-        });
-    }),
-                             "handover");
+    // Before any session is adopted, so each is put on it.
+    seedLearnedCellPixelSize(image.cellPixelSize, "handover");
 
     auto outcome = std::expected<void, HandoverError> {};
     if (auto const restored = _model.restore(image.tree, image.modelIds); !restored)
