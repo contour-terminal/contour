@@ -7,6 +7,7 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -15,6 +16,9 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #ifndef _WIN32
     #include <cstdlib>
@@ -84,6 +88,31 @@ inline std::string readUntil(Pty& pty,
             wait(std::chrono::duration_cast<std::chrono::milliseconds>(ReadPollInterval - elapsed));
     }
     return collected;
+}
+
+/// What a terminal answers to the queries a pseudoconsole may send it at startup: primary device attributes
+/// and the cursor position. An unanswered one can hold ConPTY's output back.
+constexpr auto TerminalAnswers = std::array {
+    std::pair { std::string_view { "\x1b[c" }, std::string_view { "\x1b[?61;4c" } },
+    std::pair { std::string_view { "\x1b[6n" }, std::string_view { "\x1b[1;1R" } },
+};
+
+/// Reads @p pty as readUntil() does, answering each of TerminalAnswers' queries once as a terminal would.
+/// @param pty  The PTY to read.
+/// @param done Whether what was read so far is enough.
+/// @return Everything read.
+inline std::string readUntilAnswering(Pty& pty, std::function<bool(std::string_view)> const& done)
+{
+    auto answered = std::vector<std::string_view> {};
+    return readUntil(pty, [&](std::string_view text) {
+        for (auto const& [query, answer]: TerminalAnswers)
+            if (text.contains(query) && !std::ranges::contains(answered, query))
+            {
+                answered.push_back(query);
+                std::ignore = pty.write(answer);
+            }
+        return done(text);
+    });
 }
 
 /// @return Whether @p pty printed @p needle within about 30 seconds.

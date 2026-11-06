@@ -5,6 +5,9 @@
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
+#ifdef _WIN32
+    #include <vtpty/WindowsHandle.hpp>
+#endif
 
 #include <crispy/BufferObject.hpp>
 
@@ -26,6 +29,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <future>
@@ -55,13 +59,6 @@ constexpr PageSize pageSize(int columns, int lines) noexcept
     return PageSize { .lines = LineCount(lines), .columns = ColumnCount(columns) };
 }
 
-/// What a terminal answers to the two queries a pseudoconsole may send it at startup: primary
-/// device attributes and the cursor position. An unanswered one can hold ConPTY's output back.
-constexpr auto TerminalAnswers = std::array {
-    std::pair { std::string_view { "\x1b[c" }, std::string_view { "\x1b[?61;4c" } },
-    std::pair { std::string_view { "\x1b[6n" }, std::string_view { "\x1b[1;1R" } },
-};
-
 /// The line the probe prints last, after every mark.
 constexpr auto ProbeSentinel = std::string_view { "contour-probe-done" };
 
@@ -89,18 +86,8 @@ std::filesystem::path probeCopiedInto(std::filesystem::path const& directory)
 /// @return Everything the pseudoconsole wrote.
 std::string readProbeOutput(vtpty::Process& process)
 {
-    auto answered = std::vector<std::string_view> {};
-    auto output = vtpty::testing::readUntil(process, [&](std::string_view text) {
-        for (auto const& [query, answer]: TerminalAnswers)
-        {
-            if (text.contains(query) && !std::ranges::contains(answered, query))
-            {
-                answered.push_back(query);
-                std::ignore = process.write(answer);
-            }
-        }
-        return text.contains(ProbeSentinel);
-    });
+    auto output = vtpty::testing::readUntilAnswering(
+        process, [](std::string_view text) { return text.contains(ProbeSentinel); });
     INFO("pseudoconsole output: " << core::escape(output));
     REQUIRE(output.contains(ProbeSentinel));
     return output;
@@ -867,4 +854,276 @@ TEST_CASE("ConPty.passesOsc133Through", "[vtpty][conpty][osc133]")
     CHECK(output.contains("\x1b]133;B"));
     CHECK(output.contains("\x1b]133;C;cmdline_url=echo%20hi"));
     CHECK(output.contains("\x1b]133;D;0"));
+}
+
+namespace
+{
+
+/// @return The program a pseudoconsole is handed over with, and the process that adopts it
+///         (test/conpty_handover_probe.cpp).
+std::filesystem::path handoverProbe()
+{
+    auto probe = std::filesystem::path { VTPTY_CONPTY_HANDOVER_PROBE };
+    probe.make_preferred();
+    return probe;
+}
+
+/// Reads @p pty until @p needle, answering the pseudoconsole's queries along the way as a terminal would.
+/// @return Whether it came.
+bool awaitOutput(vtpty::Pty& pty, std::string_view needle)
+{
+    auto const output = vtpty::testing::readUntilAnswering(
+        pty, [needle](std::string_view text) { return text.contains(needle); });
+    INFO("pseudoconsole output: " << core::escape(output));
+    return output.contains(needle);
+}
+
+/// Starts @p commandLine with exactly @p inherited inherited, and its standard error this process's.
+/// @return The process; null where it could not be started.
+HANDLE spawnInheriting(std::wstring commandLine, std::vector<HANDLE> inherited)
+{
+    auto errorOutput = HANDLE {};
+    DuplicateHandle(GetCurrentProcess(),
+                    GetStdHandle(STD_ERROR_HANDLE),
+                    GetCurrentProcess(),
+                    &errorOutput,
+                    0,
+                    TRUE,
+                    DUPLICATE_SAME_ACCESS);
+    if (errorOutput != nullptr)
+        inherited.push_back(errorOutput);
+    for (auto* const handle: inherited)
+        REQUIRE(vtpty::setInheritance(handle, vtpty::HandleInheritance::Inherited).has_value());
+
+    auto attributes = vtpty::AttributeList::create(1);
+    REQUIRE(attributes.has_value());
+    REQUIRE(attributes->inheritOnly(inherited).has_value());
+    auto startup = STARTUPINFOEXW {};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdError = errorOutput;
+    startup.lpAttributeList = attributes->get();
+    auto info = PROCESS_INFORMATION {};
+    auto const started = CreateProcessW(nullptr,
+                                        commandLine.data(),
+                                        nullptr,
+                                        nullptr,
+                                        TRUE,
+                                        EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+                                        nullptr,
+                                        nullptr,
+                                        &startup.StartupInfo,
+                                        &info);
+    if (errorOutput != nullptr)
+        CloseHandle(errorOutput);
+    if (!started)
+        return nullptr;
+    CloseHandle(info.hThread);
+    return info.hProcess;
+}
+
+/// Skips a test that hands a pseudoconsole on, or reaches its console host, where the bundled conpty.dll is
+/// not beside the test binary (CONTOUR_EMBED_OPENCONSOLE=OFF): only that one's handles are known.
+void requireBundledConsoleHost()
+{
+    if (ConPty { pageSize(80, 25) }.consoleHost() != vtpty::ConsoleHost::Bundled)
+        SKIP("the bundled conpty.dll is not beside this test");
+}
+
+/// Whether a process runs or is held, as a console host that stopped reading would be.
+enum class Scheduling : uint8_t
+{
+    Running = 0,
+    Suspended,
+};
+
+/// Suspends or resumes every thread of @p process.
+void schedule(HANDLE process, Scheduling scheduling)
+{
+    using NtProcessFn = LONG(NTAPI*)(HANDLE);
+    auto* const call = vtpty::ntdllFunction<NtProcessFn>(
+        scheduling == Scheduling::Suspended ? "NtSuspendProcess" : "NtResumeProcess");
+    REQUIRE(call != nullptr);
+    REQUIRE(call(process) == 0);
+}
+
+} // namespace
+
+// A live upgrade on Windows hands each pseudoconsole to a successor process: the successor inherits its
+// handles, rebuilds it (ConPty::adopt()) and the program on it (Process::adopt()), and the process that made
+// it lets go of its own handles without closing it. The program must notice nothing, a resize from the
+// successor must reach it, and closing the pseudoconsole there must end its console host, as for one the
+// successor had made.
+TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][handover]")
+{
+    requireBundledConsoleHost();
+    auto process =
+        std::make_unique<vtpty::Process>(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
+                                         std::make_unique<ConPty>(pageSize(80, 25)),
+                                         /*escapeSandbox=*/false,
+                                         std::make_shared<vtpty::NoPlacement>());
+    REQUIRE(process->start().has_value());
+    auto& pty = static_cast<ConPty&>(process->pty());
+    REQUIRE(pty.consoleHost() == vtpty::ConsoleHost::Bundled);
+    REQUIRE(awaitOutput(*process, "ready"));
+    std::ignore = process->write("size\r\n");
+    REQUIRE(awaitOutput(*process, "size=80x25"));
+
+    auto const handles = pty.handoverHandles();
+    REQUIRE(handles.has_value());
+    auto const child = process->handoverChild();
+    REQUIRE(child.has_value());
+
+    auto inherited = std::vector<HANDLE> {};
+    for (auto const handle: handles->handles())
+        inherited.push_back(vtpty::handleOf(handle));
+    inherited.push_back(vtpty::handleOf(child->processHandle));
+    auto commandLine = std::format(L"\"{}\" adopter", handoverProbe().wstring());
+    for (auto const handle: handles->handles())
+        commandLine += std::format(L" {}", handle);
+    commandLine += std::format(L" {} {} 80 25", child->pid, child->processHandle);
+    auto* const adopter = spawnInheriting(std::move(commandLine), inherited);
+    REQUIRE(adopter != nullptr);
+
+    // This process's own handles go, as the old daemon's go with it: the adopter's are the last.
+    auto released = process->releaseChild();
+    REQUIRE(released.has_value());
+    auto programProcess = HANDLE {};
+    DuplicateHandle(GetCurrentProcess(),
+                    vtpty::handleOf(released->processHandle),
+                    GetCurrentProcess(),
+                    &programProcess,
+                    SYNCHRONIZE,
+                    FALSE,
+                    0);
+    CloseHandle(vtpty::handleOf(released->processHandle));
+    auto const ownHandles = pty.releaseHandles();
+    REQUIRE(ownHandles.has_value());
+    for (auto const handle: ownHandles->handles())
+        CloseHandle(vtpty::handleOf(handle));
+    process.reset();
+
+    REQUIRE(WaitForSingleObject(adopter, 30'000) == WAIT_OBJECT_0);
+    auto exitCode = DWORD {};
+    GetExitCodeProcess(adopter, &exitCode);
+    CloseHandle(adopter);
+    // The probe says on stderr what failed; its exit code names the step.
+    CHECK(exitCode == 0);
+    CHECK(WaitForSingleObject(programProcess, 10'000) == WAIT_OBJECT_0);
+    CloseHandle(programProcess);
+}
+
+// A live upgrade stops each session's pump, which may be writing to a program that reads nothing: once the
+// pipe is full, the write waits for good. interruptWrites() ends that wait with what was written, and every
+// later write returns at once, until allowWrites().
+TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty][conpty][threading]")
+{
+    requireBundledConsoleHost();
+    auto process = vtpty::testing::unplacedProcess(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
+                                                   pageSize(80, 25));
+    REQUIRE(process.start().has_value());
+    auto& pty = static_cast<ConPty&>(process.pty());
+    REQUIRE(awaitOutput(process, "ready"));
+    auto const handles = pty.handoverHandles();
+    REQUIRE(handles.has_value());
+    auto* const consoleHost = vtpty::handleOf(handles->consoleHost);
+
+    // A console host that reads nothing more: the pipe fills, and the write waits.
+    schedule(consoleHost, Scheduling::Suspended);
+    auto const resume = gsl::finally([consoleHost] { schedule(consoleHost, Scheduling::Running); });
+    auto const flood = std::string(4 * 1024 * 1024, 'x');
+    auto result = std::async(std::launch::async, [&] {
+        auto const written = pty.write(flood);
+        return std::pair { written, errno };
+    });
+    CHECK(result.wait_for(std::chrono::milliseconds { 300 }) == std::future_status::timeout);
+
+    pty.interruptWrites();
+    REQUIRE(result.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    auto const [written, error] = result.get();
+    CHECK(written >= 0);
+    CHECK(std::cmp_less(written, flood.size()));
+    CHECK(error == EINTR);
+
+    SECTION("a write while interrupted returns at once, having written nothing")
+    {
+        errno = 0;
+        CHECK(pty.write("more") == 0);
+        CHECK(errno == EINTR);
+    }
+
+    SECTION("allowWrites() lets writes through again")
+    {
+        pty.allowWrites();
+        schedule(consoleHost, Scheduling::Running);
+        CHECK(pty.write("\r\n") == 2);
+    }
+
+    process.terminate(vtpty::Process::TerminationHint::Normal);
+    std::ignore = process.wait();
+}
+
+// A live upgrade quiesces a session -- its writes interrupted -- and captures its pseudoconsole's handles by
+// value. Closed then, as the program's exit watcher closes it, they would be freed for the next handle this
+// process makes, and the successor would adopt that one under their names: the close is held until the
+// upgrade rolls back.
+TEST_CASE("ConPty.closeWhileWritesAreInterruptedWaitsUntilTheyAreAllowed", "[vtpty][conpty][handover]")
+{
+    requireBundledConsoleHost();
+    auto pty = ConPty { pageSize(80, 25) };
+    REQUIRE(pty.start().has_value());
+    auto const before = pty.handoverHandles();
+    REQUIRE(before.has_value());
+
+    pty.interruptWrites();
+    pty.close();
+    CHECK_FALSE(pty.isClosed());
+    auto const held = pty.handoverHandles();
+    REQUIRE(held.has_value());
+    CHECK(held->handles() == before->handles());
+
+    pty.allowWrites();
+    CHECK(pty.isClosed());
+}
+
+// The upgrade that went ahead: the handles are the successor's, and the close held for them is dropped with
+// them.
+TEST_CASE("ConPty.closeHeldForAHandoverIsDroppedWithItsHandles", "[vtpty][conpty][handover]")
+{
+    requireBundledConsoleHost();
+    auto pty = ConPty { pageSize(80, 25) };
+    REQUIRE(pty.start().has_value());
+    pty.interruptWrites();
+    pty.close();
+
+    auto const released = pty.releaseHandles();
+    REQUIRE(released.has_value());
+    CHECK(pty.isClosed());
+    pty.allowWrites();
+    for (auto const handle: released->handles())
+    {
+        auto flags = DWORD {};
+        CHECK(GetHandleInformation(vtpty::handleOf(handle), &flags) != FALSE);
+    }
+
+    // Adopted again here, as a successor would: it serves on, and closes everything as it goes.
+    auto adopted = ConPty::adopt(vtpty::InheritedPty { .pageSize = pageSize(80, 25), .conpty = *released });
+    REQUIRE(adopted.has_value());
+    CHECK_FALSE((*adopted)->isClosed());
+    adopted->reset();
+    auto flags = DWORD {};
+    CHECK(GetHandleInformation(vtpty::handleOf(released->signal), &flags) == FALSE);
+}
+
+// The pseudoconsole takes no pixel size, but a live upgrade carries it, for the successor's terminal to lay
+// images out by before any client tells it again.
+TEST_CASE("ConPty.keepsThePixelSizeThePseudoconsoleCannotTake", "[vtpty][conpty]")
+{
+    auto pty = ConPty { pageSize(80, 25) };
+    CHECK_FALSE(pty.pixelSize().has_value());
+    auto const pixels = vtpty::ImageSize { .width = vtpty::Width(800), .height = vtpty::Height(500) };
+    pty.resizeScreen(pageSize(100, 50), pixels);
+    CHECK(pty.pixelSize() == pixels);
+    pty.resizeScreen(pageSize(90, 50));
+    CHECK(pty.pixelSize() == pixels);
 }

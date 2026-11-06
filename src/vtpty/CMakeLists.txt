@@ -58,6 +58,7 @@ set(vtpty_HEADERS
     SpawnLadder.hpp
     SshFailureMessage.hpp
     WindowsCommandLine.hpp
+    WindowsHandle.hpp
 )
 
 set(_include_SshSession_module FALSE)
@@ -174,6 +175,24 @@ if(VTPTY_TESTING)
         add_dependencies(vtpty_test conpty_osc133_probe)
         target_compile_definitions(vtpty_test PRIVATE
             VTPTY_CONPTY_OSC133_PROBE="$<TARGET_FILE:conpty_osc133_probe>")
+
+        # The two processes a pseudoconsole is handed between in a live upgrade: the program on it, and the
+        # process that adopts it from the handles it inherited. Beside the bundled conpty.dll, as the daemon
+        # is: only that one's pseudoconsole can be adopted.
+        add_executable(conpty_handover_probe test/conpty_handover_probe.cpp)
+        target_link_libraries(conpty_handover_probe PRIVATE vtpty)
+        add_dependencies(vtpty_test conpty_handover_probe)
+        target_compile_definitions(vtpty_test PRIVATE
+            VTPTY_CONPTY_HANDOVER_PROBE="$<TARGET_FILE:conpty_handover_probe>")
+
+        # A GUI-subsystem program that attaches to its parent's console, as a release build of contour.exe does,
+        # and writes its arguments: what ProgramCommandCapture must read, where under cmd.exe they would go to
+        # cmd.exe's console.
+        add_executable(gui_subsystem_echo WIN32 test/gui_subsystem_echo.cpp)
+        target_link_libraries(gui_subsystem_echo PRIVATE core::base)
+        add_dependencies(vtpty_test gui_subsystem_echo)
+        target_compile_definitions(vtpty_test PRIVATE
+            VTPTY_GUI_SUBSYSTEM_ECHO="$<TARGET_FILE:gui_subsystem_echo>")
     else()
         target_sources(vtpty_test PRIVATE ProcessCgroup_test.cpp ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp UnixUtils_test.cpp)
     endif()
@@ -215,8 +234,8 @@ if(WIN32)
     else()
         message(STATUS "[vtpty] OpenConsole embedding enabled")
 
-        set(OPENCONSOLE_VERSION "1.24.3504.0")
-        set(OPENCONSOLE_VERSION_ALT "1.24.251216004-preview")
+        set(OPENCONSOLE_VERSION "1.25.2733.0")
+        set(OPENCONSOLE_VERSION_ALT "1.25.260930003")
 
         set(OPENCONSOLE_URL "https://github.com/microsoft/terminal/releases/download/v${OPENCONSOLE_VERSION}/Microsoft.Windows.Console.ConPTY.${OPENCONSOLE_VERSION_ALT}.nupkg")
         set(OPENCONSOLE_DEST "${CMAKE_BINARY_DIR}/_deps/OpenConsole-${OPENCONSOLE_VERSION}")
@@ -229,7 +248,7 @@ if(WIN32)
             set(nuget_arch "arm")
         endif()
         set(OPENCONSOLE_EXE "${OPENCONSOLE_DEST}/build/native/runtimes/${nuget_arch}/OpenConsole.exe")
-        set(CONPTY_DLL "${OPENCONSOLE_DEST}/runtimes/win-${nuget_arch}/native/Conpty.dll")
+        set(CONPTY_DLL "${OPENCONSOLE_DEST}/runtimes/win-${nuget_arch}/native/conpty.dll")
 
         if(NOT EXISTS "${OPENCONSOLE_EXE}")
             file(MAKE_DIRECTORY "${OPENCONSOLE_DEST}")

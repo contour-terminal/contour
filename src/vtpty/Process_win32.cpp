@@ -6,6 +6,7 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
+#include <vtpty/WindowsHandle.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -28,6 +29,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -135,7 +137,27 @@ struct Process::Private
     STARTUPINFOEXW startupInfo {};
 
     [[nodiscard]] optional<Process::ExitStatus> checkStatus(bool waitForExit) const;
+
+    /// Watches the child for its exit, on a thread of its own, and closes its pseudoconsole once it has:
+    /// for a spawned child and an adopted one alike.
+    /// @param self The Process this is of.
+    void watchExit(Process& self);
 };
+
+void Process::Private::watchExit(Process& self)
+{
+    exitWatcher = std::thread([this, &self]() {
+        auto const handles = std::array { processInfo.hProcess, stopWatching };
+        auto const count = stopWatching != nullptr ? DWORD { 2 } : DWORD { 1 };
+        if (WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE) != WAIT_OBJECT_0)
+            return; // told to stop, by a Process going away whose child is still ending, or giving it up
+        if (auto const status = self.wait(); status.has_value())
+            ptyLog()("Process terminated with exit code {}.", *status);
+        else
+            ptyLog()("Process terminated without an exit status.");
+        pty->close();
+    });
+}
 
 Process::Process(string const& path,
                  vector<string> const& args,
@@ -167,6 +189,8 @@ bool Process::isFlatpak()
 StartResult Process::start()
 {
     Require(static_cast<ConPty const*>(_d->pty.get()));
+    if (_d->processInfo.hProcess != nullptr)
+        return {}; // Adopted: running already, on a pseudoconsole that is open.
 
     if (auto started = _d->pty->start(); !started)
         return started;
@@ -260,17 +284,7 @@ StartResult Process::start()
             continue;
         }
 
-        _d->exitWatcher = std::thread([this]() {
-            auto const handles = std::array { _d->processInfo.hProcess, _d->stopWatching };
-            auto const count = _d->stopWatching != nullptr ? DWORD { 2 } : DWORD { 1 };
-            if (WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE) != WAIT_OBJECT_0)
-                return; // told to stop, by a Process going away whose child is still ending
-            if (auto const status = wait(); status.has_value())
-                ptyLog()("Process terminated with exit code {}.", *status);
-            else
-                ptyLog()("Process terminated without an exit status.");
-            _d->pty->close();
-        });
+        _d->watchExit(*this);
 
         // The child is running; the only thing left to say is what this rung had to give up to get
         // there, which is empty for the rung that ran exactly what was asked for.
@@ -279,6 +293,73 @@ StartResult Process::start()
 
     return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
                                           .detail = "Could not create process. "s + std::move(lastError) });
+}
+
+std::expected<void, AdoptError> Process::canAdopt(AdoptedChild const& child)
+{
+    // Only a handle this process holds can be waited on; and only to the process it was handed over as, which
+    // also rejects a handle value that names something else here.
+    if (child.processHandle == 0 || child.pid <= 0
+        || std::cmp_not_equal(GetProcessId(handleOf(child.processHandle)), child.pid))
+        return std::unexpected(AdoptError::NoSuchChild);
+    return {};
+}
+
+std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild const& child,
+                                                                   std::unique_ptr<Pty> pty)
+{
+    Require(pty != nullptr);
+    if (auto const adoptable = canAdopt(child); !adoptable)
+        return std::unexpected(adoptable.error());
+
+    auto process = std::make_unique<Process>(child.executable,
+                                             child.args,
+                                             child.cwd,
+                                             Environment {},
+                                             std::vector<std::string> {},
+                                             /*escapeSandbox=*/false,
+                                             std::move(pty),
+                                             std::make_shared<NoPlacement>(),
+                                             child.hangupGrace);
+    auto* const handle = handleOf(child.processHandle);
+    // Crossed for this child alone: no program this process starts inherits it.
+    if (auto const set = setInheritance(handle, HandleInheritance::NotInherited); !set)
+        ptyLog()("An adopted child's handle stays inheritable: {}", set.error().message());
+    process->_d->processInfo.hProcess = handle;
+    process->_d->processInfo.dwProcessId = static_cast<DWORD>(child.pid);
+    process->_d->watchExit(*process);
+    return process;
+}
+
+std::optional<AdoptedChild> Process::handoverChild() const
+{
+    // One that exited is handed over all the same, as POSIX hands over one not reaped yet: its handle still
+    // names it, and the adopter learns of its exit as it starts watching.
+    if (_d->processInfo.hProcess == nullptr)
+        return nullopt;
+    return AdoptedChild { .pid = static_cast<std::int64_t>(_d->processInfo.dwProcessId),
+                          .executable = _d->path,
+                          .args = _d->args,
+                          .cwd = _d->cwd,
+                          .hangupGrace = {},
+                          .processHandle = valueOf(_d->processInfo.hProcess) };
+}
+
+std::optional<AdoptedChild> Process::releaseChild()
+{
+    auto child = handoverChild();
+    // Its watcher stops without the child, and nothing here waits for or closes the child from now on: the
+    // handle is the caller's.
+    if (_d->exitWatcher)
+    {
+        if (_d->stopWatching != nullptr)
+            SetEvent(_d->stopWatching);
+        _d->exitWatcher->join();
+        _d->exitWatcher.reset();
+    }
+    if (child)
+        _d->processInfo.hProcess = nullptr;
+    return child;
 }
 
 void Process::close()

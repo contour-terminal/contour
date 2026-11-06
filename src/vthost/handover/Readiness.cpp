@@ -4,6 +4,9 @@
 #include <vtbackend/state/StateCodec.hpp>
 
 #include <vtpty/CommandCapture.hpp>
+#ifdef _WIN32
+    #include <vtpty/WindowsCommandLine.hpp>
+#endif
 
 #include <core/Utf8Path.hpp>
 #include <core/async/ExecutorContext.hpp>
@@ -17,6 +20,9 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#ifdef _WIN32
+    #include <vector>
+#endif
 
 #include <vtcontrol/Json.hpp>
 #include <vthost/Logging.hpp>
@@ -112,23 +118,29 @@ std::expected<void, UpgradeRefusal> checkConfigured(ReadinessReport const& targe
 std::string readinessCommand(ReadinessQuery const& query)
 {
 #ifdef _WIN32
-    auto const quoted = [](std::string_view text) {
-        return std::format("\"{}\"", text);
-    };
-    auto command = std::format("{} daemon handover-info", quoted(core::pathToUtf8(query.executable)));
+    // The target's own command line, run with no shell between (vtpty::ProgramCommandCapture): a release
+    // build is a GUI-subsystem program that attaches to its parent's console, which under cmd.exe takes its
+    // standard output from the capture. In the daemon's own environment, unchanged, which the successor
+    // inherits too.
+    auto arguments = std::vector<std::string> { "daemon", "handover-info" };
+    if (!query.configFile.empty())
+        arguments.insert(arguments.end(), { "--config", core::pathToUtf8(query.configFile) });
+    if (!query.profile.empty())
+        arguments.insert(arguments.end(), { "--profile", query.profile });
+    return vtpty::buildWindowsCommandLine(core::pathToUtf8(query.executable), arguments);
 #else
-    auto const quoted = shellQuoted;
     // `exec`, so that the timeout's kill reaches the target itself. In the daemon's own environment,
     // unchanged: the exec'd image inherits it too, so the probe must see the world the target will run in --
     // an AppImage's or Nix's paths, $LD_LIBRARY_PATH, $HOME and $XDG_*, which decide whether it starts and
     // what it loads.
-    auto command = std::format("exec {} daemon handover-info", quoted(core::pathToUtf8(query.executable)));
-#endif
+    auto command =
+        std::format("exec {} daemon handover-info", shellQuoted(core::pathToUtf8(query.executable)));
     if (!query.configFile.empty())
-        command += std::format(" --config {}", quoted(core::pathToUtf8(query.configFile)));
+        command += std::format(" --config {}", shellQuoted(core::pathToUtf8(query.configFile)));
     if (!query.profile.empty())
-        command += std::format(" --profile {}", quoted(query.profile));
+        command += std::format(" --profile {}", shellQuoted(query.profile));
     return command;
+#endif
 }
 
 core::async::Task<std::expected<ReadinessReport, UpgradeRefusal>> CommandReadinessProbe::probe(

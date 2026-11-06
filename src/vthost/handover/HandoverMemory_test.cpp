@@ -14,6 +14,12 @@
 #ifndef _WIN32
     #include <fcntl.h>
     #include <unistd.h>
+#else
+    #include <cstddef>
+    #include <cstring>
+    #include <ranges>
+
+    #include <Windows.h>
 #endif
 
 using namespace vthost::handover;
@@ -161,12 +167,71 @@ TEST_CASE("native memory has no name on disk", "[handover]")
 
 #else
 
-TEST_CASE("native memory is not supported on Windows", "[handover]")
+namespace
+{
+/// @return Whether a process this one starts with @p fd in its handle list inherits it.
+[[nodiscard]] bool isInheritable(int fd)
+{
+    auto flags = DWORD {};
+    REQUIRE(GetHandleInformation(LongToHandle(fd), &flags) != FALSE);
+    return (flags & HANDLE_FLAG_INHERIT) != 0;
+}
+} // namespace
+
+TEST_CASE("a mapping reads back what was written, and nothing past it", "[handover]")
+{
+    // Around a page and beyond it: the mapping reports its size rounded up to one.
+    auto const size = GENERATE(std::size_t { 0 }, 1, 4087, 4088, 4089, 4096, 70'000);
+    auto image = std::vector<uint8_t>(size);
+    for (auto const index: std::views::iota(std::size_t { 0 }, size))
+        image[index] = static_cast<uint8_t>(index * 7 + 3);
+    auto memory = makeNativeHandoverMemory();
+    auto const fd = memory->write(image);
+    REQUIRE(fd.has_value());
+    auto const back = memory->read(*fd);
+    REQUIRE(back.has_value());
+    CHECK(*back == image);
+    memory->discard(*fd);
+}
+
+TEST_CASE("reading a handle that is no mapping is MemoryUnavailable", "[handover]")
 {
     auto memory = makeNativeHandoverMemory();
-    auto const fd = memory->write({});
-    REQUIRE_FALSE(fd.has_value());
-    CHECK(fd.error() == HandoverError::NotSupported);
+    auto* const event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    REQUIRE(event != nullptr);
+    auto const back = memory->read(HandleToLong(event));
+    CloseHandle(event);
+    REQUIRE_FALSE(back.has_value());
+    CHECK(back.error() == HandoverError::MemoryUnavailable);
+}
+
+TEST_CASE("a mapping whose length lies is refused", "[handover]")
+{
+    // A whole page, its first eight bytes claiming far more.
+    auto* const mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, nullptr);
+    REQUIRE(mapping != nullptr);
+    auto* const view = static_cast<uint8_t*>(MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0));
+    REQUIRE(view != nullptr);
+    auto const lie = uint64_t { 1 } << 20;
+    std::memcpy(view, &lie, sizeof(lie));
+    UnmapViewOfFile(view);
+
+    auto memory = makeNativeHandoverMemory();
+    auto const back = memory->read(HandleToLong(mapping));
+    CloseHandle(mapping);
+    REQUIRE_FALSE(back.has_value());
+    CHECK(back.error() == HandoverError::Truncated);
+}
+
+// Only the successor's launch, which names it in its handle list, may take it: no program the daemon starts
+// meanwhile, nor after a launch that failed.
+TEST_CASE("a mapping is never inheritable", "[handover]")
+{
+    auto memory = makeNativeHandoverMemory();
+    auto const fd = memory->write(std::vector<uint8_t> { 1, 2, 3 });
+    REQUIRE(fd.has_value());
+    CHECK_FALSE(isInheritable(*fd));
+    memory->discard(*fd);
 }
 
 #endif

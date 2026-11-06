@@ -47,6 +47,12 @@ std::size_t closeListeningSockets();
 ///         image lease -- ascending, each once: what the old image keeps open across its exec.
 [[nodiscard]] std::vector<int> descriptorsNamedBy(HandoverImage const& image);
 
+/// The handles counterpart of descriptorsNamedBy(), for Windows.
+/// @param image A handover image.
+/// @return Every handle @p image names, for a successor to inherit: each session's pseudoconsole and child,
+///         each listener, the image lease; sorted, each once, none zero.
+[[nodiscard]] std::vector<vtpty::HandleValue> handlesNamedBy(HandoverImage const& image);
+
 /// @param image A decoded handover image.
 /// @return Every descriptor the new image keeps: standard input, output and error, and each one @p image
 ///         names -- every session's PTY master and fast-pipe ends, every listener, the image lease --

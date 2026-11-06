@@ -132,6 +132,10 @@ class ConnectionAcceptor
     ///         where it has none, or it cannot be told (Windows, an in-memory listener).
     [[nodiscard]] std::optional<int> listeningDescriptor() const;
 
+    /// @return On Windows, the listener's socket (a SOCKET widened to an integer), which a live upgrade hands
+    ///         to the successor process; nullopt where it has none (an in-memory listener), and elsewhere.
+    [[nodiscard]] std::optional<std::uint64_t> listeningSocket() const;
+
     /// @return The number of connections accepted so far (tests/diagnostics).
     [[nodiscard]] std::size_t acceptedCount() const noexcept { return _acceptedCount; }
 

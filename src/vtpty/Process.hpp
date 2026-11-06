@@ -43,11 +43,13 @@ struct HangupGrace
     std::reference_wrapper<core::platform::IClock const> clock = core::platform::defaultSteadyClock();
 };
 
-/// A running child process a previous image of this process left behind across an exec (live upgrade).
+/// A running child process a previous image of this process left behind across an exec (live upgrade), or
+/// the daemon a Windows successor takes over from left it.
 ///
 /// Plain data, compiled on every platform so a handover image can carry it anywhere; only
-/// Process::adopt() turns it back into a Process, and that is POSIX-only. The child stays a child of this
-/// process across exec (the process id is kept), so waiting for it works as for a spawned one.
+/// Process::adopt() turns it back into a Process. On POSIX the child stays a child of this process across
+/// exec (the process id is kept), so waiting for it works as for a spawned one; on Windows the successor
+/// inherits a handle to it (processHandle), which is what it waits on.
 struct AdoptedChild
 {
     std::int64_t pid = -1;         ///< The child's process id.
@@ -55,6 +57,7 @@ struct AdoptedChild
     std::vector<std::string> args; ///< Its arguments, as spawned.
     std::filesystem::path cwd;     ///< Its working directory, as spawned.
     HangupGrace hangupGrace;       ///< The grace close() gives it.
+    HandleValue processHandle = 0; ///< On Windows, the handle to the process that crosses; 0 elsewhere.
 };
 
 /**
@@ -151,33 +154,36 @@ class [[nodiscard]] Process: public Pty
 
     ~Process() override;
 
-#ifndef _WIN32
-    /// Takes over a running child a previous image left behind: no fork, no placement (it was placed when
-    /// spawned). It is started already, and exit detection is as for a spawned child.
+    /// Takes over a running child a previous image left behind, or on Windows the daemon a successor takes
+    /// over from: no spawn, no placement (it was placed when spawned). It is started already, and exit
+    /// detection is as for a spawned child.
     /// @param child The child, from releaseChild() or a handover image.
-    /// @param pty The PTY it runs on, usually from UnixPty::adopt().
-    /// @return The process; or AdoptError::NoSuchChild where @p child.pid is no child of this process, @p pty
-    ///         then destroyed with the call (@see canAdopt(), which asks first).
+    /// @param pty The PTY it runs on, usually from UnixPty::adopt() or ConPty::adopt().
+    /// @return The process; or AdoptError::NoSuchChild where @p child is no child this process can wait for,
+    ///         @p pty then destroyed with the call (@see canAdopt(), which asks first).
     [[nodiscard]] static std::expected<std::unique_ptr<Process>, AdoptError> adopt(AdoptedChild const& child,
                                                                                    std::unique_ptr<Pty> pty);
 
     /// Asks whether adopt() would take @p child, without taking anything: for an adopter that keeps the PTY
     /// whichever way it goes.
     /// @param child The child, from releaseChild() or a handover image.
-    /// @return Nothing; or AdoptError::NoSuchChild where @p child.pid is no child of this process (dead and
-    ///         reaped, or foreign). A child that exited but is not reaped yet is still one.
+    /// @return Nothing; or AdoptError::NoSuchChild where @p child is no child this process can wait for: on
+    ///         POSIX its pid names no child of this process (dead and reaped, or foreign), on Windows its
+    ///         process handle is not open here or names another process. A child that exited but is not
+    ///         reaped yet is still one.
     [[nodiscard]] static std::expected<void, AdoptError> canAdopt(AdoptedChild const& child);
 
     /// The child as releaseChild() gives it up, while this Process keeps it: for a capture that may yet roll
     /// back, which must not have to undo anything.
-    /// @return The child, or nullopt where there is none running.
+    /// @return The child, or nullopt where there is none: on POSIX none was spawned, or it was reaped; on
+    ///         Windows none was spawned. One that exited is still handed over, for its adopter to see exit.
     [[nodiscard]] std::optional<AdoptedChild> handoverChild() const;
 
     /// Gives up the child without signalling or reaping it, leaving this Process without one, so that
-    /// destroying it neither kills nor waits for it; for an adopter in the same process.
+    /// destroying it neither kills nor waits for it; for an adopter in the same process. On Windows the
+    /// handle to the child is the caller's from then on (AdoptedChild::processHandle), to adopt or close.
     /// @return The child, or nullopt where there is none running.
     [[nodiscard]] std::optional<AdoptedChild> releaseChild();
-#endif
 
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();

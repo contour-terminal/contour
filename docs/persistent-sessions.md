@@ -570,9 +570,12 @@ registered service when there is one, on demand otherwise.
 
 ### Live upgrade
 
-A live upgrade replaces the daemon with the new release **without ending anything it hosts**. The
-daemon re-executes the new release's binary in its own process, so every shell and program keeps its
-process, its process ID, its parent and its terminal. Each session's screens, scrollback, images,
+A live upgrade replaces the daemon with the new release **without ending anything it hosts**. On
+Linux, macOS and the BSDs the daemon re-executes the new release's binary in its own process, so every
+shell and program keeps its process, its process ID, its parent and its terminal. Windows cannot replace
+a running process's binary: there the daemon starts the new release beside itself, hands it every
+session, and ends once the new release has taken over. The daemon's process ID changes; every shell's and
+program's does not, nor does its console. Each session's screens, scrollback, images,
 cursor and modes, and an escape sequence cut in half by the switch (up to a bound, below), come across
 as they were; so do your windows, tabs and splits. The windows show `Upgrading daemon…` for a moment and reconnect by
 themselves.
@@ -599,12 +602,14 @@ What the daemon declines on:
 | a program is in the middle of an escape sequence longer than the handover carries, or its sessions' state is too large | the handover has a fixed bound |
 | a session is still starting, or the new release's image is not in the daemon's store | try again in a moment; the next upgrade stages the image anew |
 | another upgrade is under way, or the clients and sessions do not settle in time | try again in a moment |
+| on Windows, a session runs on Windows' own console host rather than the `conpty.dll` Contour ships | only Contour's can be handed to the new daemon; it is missing only where `conpty.dll` is not beside `contour.exe` |
 
 Most of these are checked before anything is stopped. A few show only after the daemon has told its
 clients it is upgrading and disconnected them: the clients and sessions not settling in time, a session
 that keeps starting, a program caught in an overlong escape sequence, state too large to hand over, and
 the new binary failing to start. The daemon then resumes; the windows reconnect to it a moment later, and
-the chip and `contour daemon upgrade` (exit 5) name the reason.
+the chip and `contour daemon upgrade` (exit 5) name the reason. On Windows the new release that does not
+say it is ready within 8 seconds is ended, and the old daemon resumes the same way.
 
 A refusal never costs a program, and neither does a failure after it: if the new binary cannot start,
 the old daemon resumes and says so.
@@ -614,7 +619,7 @@ A few things to know:
 - The chip offers the upgrade only for a daemon on this machine that announced it supports it and is not
   newer than the client (a newer one is offered the restart, as an upgrade would be a downgrade). A remote
   daemon (`--connect-tcp`, `--host`) is not yours to upgrade, and the chip offers nothing for it.
-- It is available on Linux, macOS and the BSDs. Windows daemons are restarted.
+- It is available on Linux, macOS, the BSDs and Windows.
 - **Flatpak:** a running sandbox keeps the old `/app` mounted, so the daemon cannot reach the new
   release. Update the Flatpak, then restart the daemon from the chip (this ends its shells).
 - **The first release that has it can be upgraded from, not to.** The readiness check needs code in the

@@ -7,7 +7,11 @@
 #include <core/net/AcceptPolicy.hpp>
 #include <core/net/InterruptibleSleep.hpp>
 
-#ifndef _WIN32
+#ifdef _WIN32
+    #include <core/net/windows/IocpSocket.hpp>
+
+    #include <cstdint>
+#else
     #include <core/net/posix/PosixListener.hpp>
     #include <core/net/posix/UnixListener.hpp>
 
@@ -287,6 +291,16 @@ void ConnectionAcceptor::resumeAccepting()
     _admission = Admission::Accepting;
     _hold = core::async::StopSource {};
     _release.request_stop();
+}
+
+std::optional<std::uint64_t> ConnectionAcceptor::listeningSocket() const
+{
+#ifdef _WIN32
+    if (auto const* const iocp = dynamic_cast<core::net::IocpListener const*>(_listener.get());
+        iocp != nullptr && iocp->native() != INVALID_SOCKET)
+        return static_cast<std::uint64_t>(iocp->native());
+#endif
+    return std::nullopt;
 }
 
 std::optional<int> ConnectionAcceptor::listeningDescriptor() const

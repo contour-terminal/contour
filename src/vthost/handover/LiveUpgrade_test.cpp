@@ -52,6 +52,7 @@
     #include <vthost/testing/FakeProcessImageReplacer.hpp>
     #include <vthost/testing/FakeReadinessProbe.hpp>
     #include <vthost/testing/HandoverTesting.hpp>
+    #include <vthost/testing/LiveUpgradeTesting.hpp>
     #include <vthost/testing/StagingFileSystem.hpp>
     #include <vthost/testing/TestHelpers.hpp>
 
@@ -60,53 +61,13 @@ using namespace vthost::handover;
 using namespace std::chrono_literals;
 using vthost::testing::LiveHost;
 using vthost::testing::occurrences;
+using vthost::testing::readyTarget;
+using vthost::testing::refusedWith;
 using vthost::testing::releaseForAdoption;
 using vtworkspace::SessionId;
 
 namespace
 {
-
-/// What a target binary built from this tree answers.
-[[nodiscard]] ReadinessReport readyTarget()
-{
-    return ownReadiness("0.9.1");
-}
-
-/// UpgradeHooks that record what they were asked, in order.
-class RecordingHooks final: public UpgradeHooks
-{
-  public:
-    void announceUpgrade(std::string_view toRelease) override
-    {
-        events.push_back(std::format("announce {}", toRelease));
-    }
-
-    void writeWorkspaceSnapshot() override { events.emplace_back("snapshot"); }
-
-    void closeClients() override
-    {
-        events.emplace_back("close");
-        if (onClose)
-            onClose();
-    }
-
-    void abortClients() override
-    {
-        events.emplace_back("abort");
-        if (onAbort)
-            onAbort();
-    }
-
-    [[nodiscard]] std::size_t endingConnections() const override
-    {
-        return ending ? ending() : std::size_t { 0 };
-    }
-
-    std::vector<std::string> events;
-    std::function<std::size_t()> ending; ///< How many connections are still ending; none when unset.
-    std::function<void()> onClose;       ///< Runs as the clients are closed, while the sessions still run.
-    std::function<void()> onAbort;       ///< Runs as the clients are closed at once.
-};
 
 /// Thrown from the fake replacer where the exec succeeds: it ends run() as the exec ends the old image.
 struct ImageReplaced: std::exception
@@ -122,13 +83,6 @@ class ByteCounter final: public SessionStreamEvents
 
     std::size_t count = 0;
 };
-
-/// A connection handler that lets every connection go at once.
-[[nodiscard]] core::async::Task<void> ignoreConnection(ConnectionId /*id*/,
-                                                       std::unique_ptr<core::net::ISocket> /*connection*/)
-{
-    co_return;
-}
 
 /// @return The echoing shell on a PTY of its own.
 [[nodiscard]] std::unique_ptr<vtpty::Pty> catDevice(vtpty::PageSize size)
@@ -172,117 +126,26 @@ class ByteCounter final: public SessionStreamEvents
     return child->pid;
 }
 
-/// A daemon about to be upgraded: a live host, a listener, a store with the target staged, and fakes for
-/// everything that would leave the process.
-struct Upgrade
+/// A daemon about to be upgraded on POSIX: the shared bench, its handoff an exec that a fake stands in for.
+struct Upgrade: vthost::testing::UpgradeBench
 {
     /// @param devices The device of each session the host spawns.
     /// @param settings The sessions' terminal settings.
     explicit Upgrade(LiveHost::Devices devices = catDevice, vtbackend::Settings settings = {}):
-        live { std::make_unique<LiveHost>(
-            std::move(devices), LiveHost::sequentialIds(), std::move(settings)) }
+        UpgradeBench { std::move(devices), std::move(settings) }
     {
-        std::ignore = files.writeFile("/home/u/Contour.AppImage", "ELF");
-        auto staged = store.stage();
-        REQUIRE(staged.has_value());
-        target = staged->executable;
-        imageId = store.imageDirectoryOf(target).filename().string();
-        // Staged by the client that asks for the upgrade; its lease ends with that client.
-        staged->lease.reset();
-
-        auto listener = core::net::listenUnix(live->loop, socketPath);
-        REQUIRE(listener.has_value());
-        acceptor = std::make_unique<ConnectionAcceptor>(
-            live->loop, "control", std::move(*listener), ignoreConnection);
-        acceptors.push_back(acceptor.get());
-        live->loop.spawn(acceptor->serve());
-    }
-
-    Upgrade(Upgrade const&) = delete;
-    Upgrade& operator=(Upgrade const&) = delete;
-    Upgrade(Upgrade&&) = delete;
-    Upgrade& operator=(Upgrade&&) = delete;
-
-    ~Upgrade()
-    {
-        if (!acceptor || !live)
-            return;
-        // Its accept loop ends before it goes.
-        acceptor->close();
-        std::ignore = live->loop.runOnce(10ms);
-        std::ignore = live->loop.runOnce(10ms);
     }
 
     /// @return The orchestrator, over this daemon.
     [[nodiscard]] LiveUpgrade orchestrator(LiveUpgradeConfig config)
     {
-        return LiveUpgrade { live->loop, live->host, store, leases,      replacer,
-                             memory,     probe,      hooks, listeners(), std::move(config) };
+        return UpgradeBench::orchestrator(std::move(config), handoff);
     }
 
-    /// @return The configuration a daemon of release 0.9.0 upgrades with.
-    [[nodiscard]] static LiveUpgradeConfig config()
-    {
-        return LiveUpgradeConfig {
-            .release = "0.9.0",
-            .daemonInstance = 0xC0FFEE,
-            .upgradeGeneration = 2,
-            .argv = { "/state/bin/0.9.0-00000000/Contour.AppImage",
-                      "daemon",
-                      "--handover-fd=7",
-                      "--label",
-                      "x" },
-            .installedExecutable = {},
-            .sandbox = vtpty::SandboxState::Host,
-            .sessionStartAttempts = 3,
-            .sessionStartRetryDelay = 20ms,
-            .settleTimeout = 5000ms,
-            .settlePollInterval = 2ms,
-        };
-    }
-
-    /// @return Upgrades with @p upgrade to @p to, on the host's loop.
-    [[nodiscard]] std::expected<void, UpgradeError> run(LiveUpgrade& upgrade, UpgradeTarget to) const
-    {
-        return live->loop.blockOn(upgrade.run(std::move(to)));
-    }
-
-    /// @return Whether every session's screen shows @p text.
-    [[nodiscard]] bool allShow(std::string_view text) const
-    {
-        return std::ranges::all_of(live->host.sessionIds(),
-                                   [&](SessionId id) { return live->pageText(id).contains(text); });
-    }
-
-    /// @return The acceptor, as the orchestrator takes its listeners.
-    [[nodiscard]] std::span<ConnectionAcceptor* const> listeners() { return acceptors; }
-
-    vthost::testing::StagingFileSystem files;
-    vthost::testing::FakeImageLeases leases;
-    vthost::testing::FakeSymbolicLinks links;
-    DaemonImageStore store {
-        vthost::testing::appImageStoreConfig("/state/bin", "0.9.1"), files, leases, links
-    };
     vthost::testing::FakeProcessImageReplacer replacer;
     vthost::testing::FakeHandoverMemory memory;
-    vthost::testing::FakeReadinessProbe probe;
-    RecordingHooks hooks;
-    std::filesystem::path target;
-    std::string imageId;
-    core::testing::ScopedTempDir socketDir { "contour-upgrade" };
-    std::string socketPath = (socketDir.path() / "control").string();
-    std::unique_ptr<LiveHost> live;
-    std::unique_ptr<ConnectionAcceptor> acceptor;
-
-    std::vector<ConnectionAcceptor*> acceptors;
+    ExecHandoff handoff { replacer, memory };
 };
-
-/// @return Whether @p result is the refusal @p refusal.
-[[nodiscard]] bool refusedWith(std::expected<void, UpgradeError> const& result, UpgradeRefusal refusal)
-{
-    return !result.has_value() && std::holds_alternative<UpgradeRefusal>(result.error())
-           && std::get<UpgradeRefusal>(result.error()) == refusal;
-}
 
 } // namespace
 
@@ -890,8 +753,8 @@ TEST_CASE("a daemon running in place upgrades to its installed executable",
     };
     auto config = Upgrade::config();
     config.installedExecutable = "/usr/bin/contour";
-    auto upgrade = LiveUpgrade { u.live->loop, u.live->host, packaged, u.leases,      u.replacer,
-                                 u.memory,     u.probe,      u.hooks,  u.listeners(), std::move(config) };
+    auto upgrade = LiveUpgrade { u.live->loop, u.live->host, packaged,      u.leases,         u.handoff,
+                                 u.probe,      u.hooks,      u.listeners(), std::move(config) };
     auto image = std::optional<HandoverImage> {};
     u.replacer.onReplace = [&] {
         auto decoded = readHandover(u.memory, handoverFdOf(u.replacer.replacements.back().second));

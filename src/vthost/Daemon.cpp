@@ -17,6 +17,7 @@
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
+#include <vtpty/WindowsHandle.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -52,6 +53,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -67,6 +69,7 @@
 #include <vthost/HostedShell.hpp>
 #include <vthost/IdleExitWatcher.hpp>
 #include <vthost/LastSessionWatcher.hpp>
+#include <vthost/ListeningSocket.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
@@ -292,7 +295,6 @@ namespace
         return std::move(*listener);
     }
 
-#ifndef _WIN32
     /// @param endpoint The endpoint's name ("control", "native", ...).
     /// @return What the first client is told of an endpoint a daemon serves on without after an upgrade.
     [[nodiscard]] std::string unservedEndpointNotice(std::string_view endpoint)
@@ -318,6 +320,27 @@ namespace
         {
             co_return;
         }
+    }
+
+    /// @return The handle @p listener crossed as: its descriptor on POSIX, its socket on Windows.
+    [[nodiscard]] core::platform::NativeHandle nativeHandleOf(
+        handover::InheritedListener const& listener) noexcept
+    {
+#ifdef _WIN32
+        return vtpty::handleOf(listener.socket);
+#else
+        return listener.fd;
+#endif
+    }
+
+    /// Closes @p listener, inherited and not served.
+    void closeInherited(handover::InheritedListener const& listener) noexcept
+    {
+#ifdef _WIN32
+        ::closesocket(static_cast<SOCKET>(listener.socket));
+#else
+        ::close(listener.fd);
+#endif
     }
 
     /// The listening sockets a handover image hands this process, each taken at most once, by name; what is
@@ -346,13 +369,28 @@ namespace
             auto const found = std::ranges::find(_pending, name, &handover::InheritedListener::name);
             if (found == _pending.end())
                 return std::nullopt;
-            auto const fd = found->fd;
+            // Moved out before it is erased: it is this call's to adopt or to close from here on.
+            auto const listener = std::move(*found);
             _pending.erase(found);
-            auto adopted = core::net::adoptListener(loop, fd);
+            auto const handle = nativeHandleOf(listener);
+#ifdef _WIN32
+            // Still bound to the completion port of the daemon that handed it over, which a socket can be
+            // bound to only one of: released first, so that this loop's port takes it.
+            if (auto const released = releaseCompletionPort(listener.socket); !released)
+            {
+                errorLog()("cannot serve the inherited {} listener: {}", name, released.error().message());
+                closeInherited(listener);
+                return std::nullopt;
+            }
+            // Crossed for this process alone: no program it starts inherits it.
+            if (auto const set = vtpty::setInheritance(handle, vtpty::HandleInheritance::NotInherited); !set)
+                errorLog()("the inherited {} listener stays inheritable: {}", name, set.error().message());
+#endif
+            auto adopted = core::net::adoptListener(loop, handle);
             if (!adopted)
             {
                 errorLog()("cannot serve the inherited {} listener: {}", name, adopted.error().toString());
-                ::close(fd);
+                closeInherited(listener);
                 return std::nullopt;
             }
             daemonLog()("serving the inherited {} listener", name);
@@ -377,7 +415,7 @@ namespace
             {
                 daemonLog()("closing the inherited {} listener, which this configuration does not serve",
                             listener.name);
-                ::close(listener.fd);
+                closeInherited(listener);
             }
         }
 
@@ -456,7 +494,6 @@ namespace
             .state = [&upgrade] { return upgrade ? upgrade->state() : handover::UpgradeState::Idle; },
         };
     }
-#endif
 
     /// The watcher a daemon's lifecycle calls for, if any. Holds at most one, because a lifecycle is one
     /// rule; the watchers hold non-movable subscriptions, so they are emplaced rather than returned.
@@ -1013,8 +1050,6 @@ std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_v
     return std::pair { std::string { host }, static_cast<std::uint16_t>(port) };
 }
 
-#ifndef _WIN32
-
 int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> image)
 {
     Require(config.shutdownSignals != nullptr);
@@ -1185,12 +1220,15 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
         return served.error();
 
     // The imsg endpoint serves the REAL tmux client binary
-    // (`tmux -S <socket>-tmux -C attach-session`).
+    // (`tmux -S <socket>-tmux -C attach-session`). Not on Windows: SCM_RIGHTS descriptor passing, which it
+    // needs, does not exist there.
+    auto imsgServer = std::optional<ConnectionAcceptor> {};
+    auto compatServer = std::optional<ConnectionAcceptor> {};
+#ifndef _WIN32
     auto const makeImsgHandler = [&] {
         return countedHandler(runtime, connections.tracked(tmux::makeTmuxImsgHandler(loop, host)));
     };
     auto const imsgPath = core::pathToUtf8(tmuxSocketPath(config.socketPath));
-    auto imsgServer = std::optional<ConnectionAcceptor> {};
     if (auto const served = serveEndpoint(imsgServer, "imsg", imsgPath, makeImsgHandler); !served)
         return served.error();
 
@@ -1198,7 +1236,6 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // `tmux -L <label> -C attach-session` finds this daemon. Opt-in only —
     // with the daemon down, a `new-session` on that path silently forks a
     // REAL tmux server onto it.
-    auto compatServer = std::optional<ConnectionAcceptor> {};
     if (config.tmuxCompatLabel)
     {
         auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
@@ -1208,6 +1245,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
         if (compatServer)
             daemonLog()("tmux-compat socket bound at {}", compatPath);
     }
+#endif
 
     // Opt-in: ALSO serve the native protocol over TCP (loopback by default). The
     // transport is protocol-agnostic, so the same native handler serves it — with
@@ -1269,15 +1307,18 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
             host,
             config.liveUpgrade->store,
             config.liveUpgrade->leases,
-            config.liveUpgrade->replacer,
-            config.liveUpgrade->memory,
+            config.liveUpgrade->handoff,
             config.liveUpgrade->probe,
             upgradeHooks,
             servers,
             liveUpgradeConfigOf(config, *config.liveUpgrade, lineage, std::move(tlsIdentities)));
 
+#ifdef _WIN32
+    daemonLog()("serving on {} (native: {})", core::pathToUtf8(config.socketPath), nativePath);
+#else
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
+#endif
     if (servers.empty())
     {
         // Only a daemon that took over hosted programs gets here: they run on, unreachable, until it is
@@ -1298,8 +1339,6 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     daemonLog()("shut down");
     return EXIT_SUCCESS;
 }
-
-#endif // _WIN32
 
 DaemonPresence awaitDaemon(DaemonSpawner& spawner,
                            std::filesystem::path const& socketPath,
@@ -1367,142 +1406,5 @@ int runDaemonDetached(std::vector<std::string> commandLine,
 {
     return spawnAndAwaitDaemon(*makeNativeDaemonSpawner(), commandLine, placement, socketPath, timeout);
 }
-
-#ifdef _WIN32
-
-// No image is ever handed over here: a Windows daemon has no in-place upgrade (HasInPlaceExec).
-int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> /*image*/)
-{
-    Require(config.shutdownSignals != nullptr);
-    auto const source = core::net::makeDefaultBackend();
-    auto loop = core::net::EventLoop { *source };
-    auto const clock = core::platform::SteadyClock {};
-    auto const wallClock = core::platform::SystemWallClock {};
-
-    auto servers = std::vector<ConnectionAcceptor*> {};
-    auto sequence = ShutdownSequence { config.beforeShutdown };
-    auto funnel = ShutdownFunnel { loop, servers, [&sequence](ShutdownCause cause) { sequence.run(cause); } };
-
-    // The console-control handler runs on an arbitrary OS thread; the request only posts, so the
-    // shutdown and its log line land on the loop thread like everything else. Armed before the host and
-    // destroyed after it, as in the POSIX body above. For a close, a logoff or a system shutdown it holds
-    // the process until the sequence has written the workspace: Windows ends it as the handler returns.
-    auto const signals = config.shutdownSignals->watch(
-        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); }, sequence.lastWrite());
-
-    // Bound before the snapshot is touched, as in the POSIX body above.
-    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
-    if (!listener)
-        return listener.error();
-
-    // See the POSIX body above.
-    auto const store = snapshotStoreOf(config.persistence);
-    auto restore = restoreOf(store, config.persistence, wallClock);
-    auto const restoredFrom =
-        restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
-
-    auto host = SessionHost {
-        loop,
-        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
-        config.settings,
-        core::defaultEnvironment(),
-        SessionHostConfig { .pumping = SessionPumping::Threaded,
-                            .sizePolicy = config.sizePolicy,
-                            .startupLayout = config.startupLayout,
-                            .identity = thisHostIdentity(),
-                            .extensions = config.extensions ? config.extensions() : nullptr,
-                            .profiles = config.profiles,
-                            .profilePtys =
-                                config.profiles
-                                    ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
-                                    : ProfilePtyFactory {},
-                            .instance = config.instance,
-                            .restore = std::move(restore) }
-    };
-    // See the POSIX body above for why the runtime and the control service are declared here, before the
-    // drain.
-    // No live upgrade on this platform: every run is the first of its line.
-    auto runtime = DaemonRuntime {
-        runtimeConfigOf(config, /*upgradeGeneration=*/0), host, clock, postedShutdown(loop, funnel)
-    };
-    auto controlService =
-        control::ControlService { host, controlServiceConfig(config, wallClock, loop, runtime) };
-    // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
-    auto lifecycleWatchers = LifecycleWatchers {};
-    installLifecycleWatchers(
-        lifecycleWatchers, config, StartContinuity::Fresh, host, runtime.census(), loop, funnel);
-    // After the host, so its timer is disarmed before the host it hands catalogs to goes.
-    auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
-    if (config.configReload)
-        reloadWatcher.emplace(loop, host, *config.configReload);
-    // See the POSIX body above for why the persistence is declared here.
-    auto persistence = std::optional<BoundPersistence> {};
-    if (store)
-        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
-    // Declared after the host: every connection flow the servers below spawn subscribes to it, so
-    // those flows must end before it is destroyed, not in ~EventLoop after it.
-    auto const drain = LoopDrain { loop };
-
-    auto server = ConnectionAcceptor { loop,
-                                       "control",
-                                       std::move(*listener),
-                                       countedHandler(runtime, tmux::makeControlModeHandler(loop, host)) };
-
-    auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
-    auto nativeListener = bindDaemonEndpoint(loop, nativePath);
-    if (!nativeListener)
-        return nativeListener.error();
-    auto nativeServer = ConnectionAcceptor {
-        loop,
-        "native",
-        std::move(*nativeListener),
-        makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config))
-    };
-    // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
-
-    servers = { &server, &nativeServer };
-
-    // Opt-in native TCP listener (loopback by default), same as the POSIX path.
-    auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
-    if (config.nativeTcp)
-    {
-        auto tcpListener = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
-        if (!tcpListener)
-        {
-            errorLog()("cannot listen on {}:{}: {}",
-                       config.nativeTcp->host,
-                       config.nativeTcp->port,
-                       tcpListener.error().toString());
-            return EXIT_FAILURE;
-        }
-        auto tls = makeNativeTcpTls(*config.nativeTcp, std::nullopt);
-        if (!tls)
-            return EXIT_FAILURE;
-        auto const boundPort = (*tcpListener)->boundPort();
-        nativeTcpServer.emplace(
-            loop,
-            "native-tcp",
-            std::move(*tcpListener),
-            makeTlsNativeHandler(
-                loop,
-                host,
-                std::move(tls->context),
-                daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
-        servers.push_back(&*nativeTcpServer);
-        daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
-    }
-
-    daemonLog()("serving on {} (native: {})", core::pathToUtf8(config.socketPath), nativePath);
-    loop.blockOn(serveAll(servers));
-    // The acceptors are destroyed before the drain below turns the loop again, and a shutdown request
-    // still queued may run in it — one that finds the funnel Serving when every listener died on its own.
-    // Emptied, the list lets such a request close nothing that is gone.
-    servers.clear();
-
-    daemonLog()("shut down");
-    return EXIT_SUCCESS;
-}
-
-#endif // _WIN32
 
 } // namespace vthost

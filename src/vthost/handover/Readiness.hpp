@@ -122,9 +122,12 @@ class ReadinessProbe
 inline constexpr auto DefaultReadinessTimeout = std::chrono::milliseconds { 5000 };
 
 /// @param query The binary to ask, and the configuration it is to load.
-/// @return The shell command the native probe runs: the binary's query mode, given the configuration file and
-///         profile when named, in the daemon's own environment, unchanged: the exec'd target inherits that
-///         environment, so the probe asks the target in the world it will run in.
+/// @return The command the native probe runs: the binary's query mode, given the configuration file and
+///         profile when named, in the daemon's own environment, unchanged: the target inherits that
+///         environment, so the probe asks the target in the world it will run in. A shell command on POSIX,
+///         which execs the binary; on Windows the binary's own command line, run with no shell between
+///         (vtpty::ProgramCommandCapture): under cmd.exe a release build, a GUI-subsystem program that
+///         attaches to its parent's console, would write to that console instead.
 [[nodiscard]] std::string readinessCommand(ReadinessQuery const& query);
 
 /// Asks a binary by running its query mode (readinessCommand()) through a command capture, on a worker, so

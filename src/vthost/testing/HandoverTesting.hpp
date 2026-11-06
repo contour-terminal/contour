@@ -9,10 +9,12 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 
-#ifndef _WIN32
+#ifdef _WIN32
+    #include <vtpty/ConPty.hpp>
+#else
     #include <vtpty/UnixPty.hpp>
-    #include <vtpty/test/ProcessTesting.hpp>
 #endif
 
 #include <core/Environment.hpp>
@@ -60,9 +62,36 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
                                             std::move(placement));
 }
 
-/// Lets go of every session's PTY and child without closing or signalling either, as the exec does: the
-/// in-process stand-in for it, after which destroying @p host closes no descriptor and ends no program, and
-/// a second host adopts them from the image a capture took.
+#else
+/// A shell that tells it is ready, then shows what it is sent on the screen: the console echoes each line
+/// typed to a command interpreter that reads it, behind a prompt of one character, so that what is typed does
+/// not wrap where a test looks for it.
+/// @param size The pseudoconsole's size.
+[[nodiscard]] inline std::unique_ptr<vtpty::Pty> shellProcess(vtpty::PageSize size)
+{
+    auto exec = vtpty::testing::execInfo("cmd.exe", { "/q", "/k", "echo ready" });
+    exec.env = { { "PROMPT", "$G" } };
+    return std::make_unique<vtpty::Process>(exec,
+                                            vtpty::createPty(size, std::nullopt),
+                                            /*escapeSandbox=*/false,
+                                            std::make_shared<vtpty::NoPlacement>());
+}
+
+/// Skips the test where the bundled conpty.dll is not beside the test binary (CONTOUR_EMBED_OPENCONSOLE=OFF):
+/// only its pseudoconsoles can be handed over, and every capture would be refused. Called on the test's own
+/// thread, before any session is spawned.
+inline void requireBundledConsoleHost()
+{
+    if (vtpty::ConPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) } }.consoleHost()
+        != vtpty::ConsoleHost::Bundled)
+        SKIP("the bundled conpty.dll is not beside this test");
+}
+#endif
+
+/// Lets go of every session's PTY and child without closing or signalling either, as the handoff does -- the
+/// exec on POSIX, the old daemon's end once its successor took over on Windows: the in-process stand-in for
+/// it, after which destroying @p host closes nothing and ends no program, and a second host adopts them from
+/// the image a capture took, under the very descriptors or handles the new release would inherit them as.
 /// @param host A host every session of which runs on a PTY of its own, a child process on it or none.
 inline void releaseForAdoption(SessionHost& host)
 {
@@ -72,13 +101,17 @@ inline void releaseForAdoption(SessionHost& host)
         auto* const tapped = dynamic_cast<TappingPty*>(&device);
         auto& inner = tapped != nullptr ? tapped->inner() : device;
         auto* const process = dynamic_cast<vtpty::Process*>(&inner);
-        std::ignore =
-            dynamic_cast<vtpty::UnixPty&>(process != nullptr ? process->pty() : inner).releaseDescriptors();
+        // The child first: on Windows its exit watcher closes the pseudoconsole, and stops with it.
         if (process != nullptr)
             std::ignore = process->releaseChild();
+        auto& pty = process != nullptr ? process->pty() : inner;
+#ifdef _WIN32
+        std::ignore = dynamic_cast<vtpty::ConPty&>(pty).releaseHandles();
+#else
+        std::ignore = dynamic_cast<vtpty::UnixPty&>(pty).releaseDescriptors();
+#endif
     }
 }
-#endif
 
 /// A host with pumping sessions, on a loop of its own, as a daemon runs it.
 struct LiveHost

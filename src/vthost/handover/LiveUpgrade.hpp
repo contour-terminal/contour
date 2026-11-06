@@ -2,8 +2,9 @@
 #pragma once
 
 /// @file
-/// The live upgrade of a daemon on POSIX: the daemon execs a new release's binary in its own process, handing
-/// it every hosted program's PTY and child, its listeners and its whole state, so that no program notices.
+/// The live upgrade of a daemon: it hands a new release's binary every hosted program's PTY and child, its
+/// listeners and its whole state, so that no program notices -- on POSIX by exec'ing it in its own process,
+/// on Windows by starting it as a successor process that takes over (ImageHandoff).
 
 #include <vtpty/SandboxInfo.hpp>
 
@@ -23,6 +24,7 @@
 
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/handover/HandoverMemory.hpp>
+#include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/Readiness.hpp>
 #include <vthost/handover/UpgradeError.hpp>
 #include <vthost/handover/UpgradeTarget.hpp>
@@ -38,7 +40,6 @@ class ConnectionAcceptor;
 class DaemonImageStore;
 class ImageLease;
 class ImageLeases;
-class ProcessImageReplacer;
 class SessionHost;
 } // namespace vthost
 
@@ -92,8 +93,8 @@ struct LiveUpgradeConfig
     /// How many live upgrades this run has completed, which the image hands on
     /// (HandoverImage::upgradeGeneration).
     uint64_t upgradeGeneration = 0;
-    /// This process's command line; the exec runs it again, its program replaced by the target's and the
-    /// handover argument (`--handover-fd=N`) appended in place of any it carried.
+    /// This process's command line; the target runs it again, its program replaced by the target's and the
+    /// handover argument (HandoverArguments) appended in place of any it carried.
     std::vector<std::string> argv;
     /// The executable an empty UpgradeTarget names: the daemon's own installed binary, which a package
     /// upgrade replaced; empty for none.
@@ -132,31 +133,31 @@ enum class UpgradeState : uint8_t
     Running,  ///< run() is under way.
 };
 
-/// Upgrades a daemon in place, on POSIX: execs the target binary in this very process, which keeps every
-/// hosted program's parent, process group and controlling terminal, and hands the new image everything it
-/// needs in an anonymous memory object (HandoverMemory) named on its command line.
+/// Upgrades a daemon live: hands the target binary everything it needs in an anonymous memory object
+/// (HandoverMemory), and lets it take over (ImageHandoff) -- on POSIX by exec'ing it in this very process,
+/// which keeps every hosted program's parent, process group and controlling terminal, on Windows by starting
+/// it as a successor process.
 ///
 /// The sequence, every refusal before anything is stopped or announced:
-///  1. refuse while another upgrade runs (InProgress), on a platform without an in-place exec (NotSupported),
-///     inside a sandbox (Sandboxed);
+///  1. refuse while another upgrade runs (InProgress), inside a sandbox (Sandboxed);
 ///  2. resolve the target inside the store and lease its image (NotStaged);
 ///  3. probe the target, off the loop (ReadinessProbe; TargetUnresponsive, FormatUnreadable, and
 ///     ConfigUnreadable for a target that cannot load the daemon's configuration or resolve its profile,
 ///     when the daemon itself loaded it: RunningConfig);
-///  4. refuse a session that could not cross (UnsupportedSession, InFlightTailTooLarge; checkCapturable());
+///  4. refuse a session that could not cross (UnsupportedSession, ForeignConsoleHost, InFlightTailTooLarge;
+///     checkCapturable());
 ///  5. announce the upgrade, write the workspace snapshot, hold every listener, close every client;
 ///  6. stop every session's pump (SessionHost::stopAllPumps()), wait until no client is attached and the
 ///     pumps' events are handled, then capture (captureHandover(), the one quiesce that captures each
 ///     terminal); a session still starting is waited for and tried again
 ///     (SessionStarting once the tries are spent), a host that does not settle in time is QuiesceTimedOut;
-///  7. encode the image, refused when it outgrew what the new image reads (ImageTooLarge), write it
-///     (HandoverMemory::write), keep every descriptor it names and its own across the exec, and exec the
-///     target with `--handover-fd=N`.
+///  7. encode the image, refused when it outgrew what the new image reads (ImageTooLarge), and hand it over
+///     (ImageHandoff::handOver()).
 ///
-/// Whatever ends run() from step 5 on but a successful exec -- a refusal, the exec's failure, an exception --
-/// is rolled back once, by one guard: the descriptors are close-on-exec again, the memory object discarded,
-/// every session resumed with what was handed to it meanwhile, and every listener accepts again. A successful
-/// exec does not return.
+/// Whatever ends run() from step 5 on but a handoff that succeeded -- a refusal, the handoff's failure, an
+/// exception -- is rolled back once, by one guard: every session resumed with what was handed to it
+/// meanwhile, and every listener accepts again; the handoff has undone its own part by then. A handoff that
+/// succeeded does not return.
 class LiveUpgrade
 {
   public:
@@ -164,8 +165,7 @@ class LiveUpgrade
     /// @param host The host whose sessions cross. Not owned.
     /// @param store The daemon's image store, where the target lies. Not owned.
     /// @param leases The leases that guard the store's images. Not owned.
-    /// @param replacer What execs the target. Not owned.
-    /// @param memory Where the image is written, and what keeps descriptors across the exec. Not owned.
+    /// @param handoff What hands the image over to the target. Not owned.
     /// @param probe What asks the target whether it can take over. Not owned.
     /// @param hooks The daemon's clients and snapshot. Not owned.
     /// @param listeners Every listener the daemon serves on; each crosses under its name. Not owned.
@@ -174,8 +174,7 @@ class LiveUpgrade
                 SessionHost& host,
                 DaemonImageStore& store,
                 ImageLeases& leases,
-                ProcessImageReplacer& replacer,
-                HandoverMemory& memory,
+                ImageHandoff& handoff,
                 ReadinessProbe& probe,
                 UpgradeHooks& hooks,
                 std::span<ConnectionAcceptor* const> listeners,
@@ -187,8 +186,8 @@ class LiveUpgrade
     /// clients to go, for the pumps' events to be handled, before a retry -- which a call running inside a
     /// turn of that loop could not.
     /// @param target What to upgrade to.
-    /// @return On success it does not complete: the process is the new image. Otherwise why not -- a refusal,
-    ///         or the exec's failure -- with the daemon serving as before.
+    /// @return On success it does not complete: the process is the new image, or has ended. Otherwise why not
+    ///         -- a refusal, or the handoff's failure -- with the daemon serving as before.
     [[nodiscard]] core::async::Task<std::expected<void, UpgradeError>> run(UpgradeTarget target);
 
     /// @return Whether an upgrade is under way.
@@ -199,9 +198,6 @@ class LiveUpgrade
     void forgetListeners() noexcept;
 
   private:
-    /// run() once nothing refuses an upgrade on this platform: what a platform with an in-place exec does.
-    [[nodiscard]] core::async::Task<std::expected<void, UpgradeError>> upgradeInPlace(UpgradeTarget target);
-
     /// The target, resolved and leased.
     struct ResolvedTarget
     {
@@ -227,26 +223,15 @@ class LiveUpgrade
     /// @return Every listener that has a descriptor to hand over, by name.
     [[nodiscard]] std::vector<InheritedListener> crossingListeners() const;
 
-    /// @return The command line the target is exec'd with.
-    [[nodiscard]] std::vector<std::string> argvFor(std::filesystem::path const& executable,
-                                                   int handoverFd) const;
-
-    /// Writes @p bytes, keeps every descriptor @p image names and its own across the exec, and execs
-    /// @p executable. Returns or throws only when that failed, having undone the descriptors' part.
-    /// @param executable The target.
-    /// @param image The image, for the descriptors it names.
-    /// @param bytes The image, encoded.
-    /// @return Why the exec did not happen.
-    [[nodiscard]] ExecFailure execInto(std::filesystem::path const& executable,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes);
+    /// @return The command line the target runs with, but for the handover argument, which the handoff
+    ///         appends.
+    [[nodiscard]] std::vector<std::string> argvFor(std::filesystem::path const& executable) const;
 
     core::net::EventLoop& _loop;
     SessionHost& _host;
     DaemonImageStore& _store;
     ImageLeases& _leases;
-    ProcessImageReplacer& _replacer;
-    HandoverMemory& _memory;
+    ImageHandoff& _handoff;
     ReadinessProbe& _probe;
     UpgradeHooks& _hooks;
     std::vector<ConnectionAcceptor*> _listeners;
