@@ -12,15 +12,12 @@
 
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
 {
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
-}
 
 void regis(std::string const& commands)
 {

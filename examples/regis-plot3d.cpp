@@ -23,6 +23,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
@@ -33,11 +35,6 @@ std::sig_atomic_t volatile running = 1;
 void onSignal(int) noexcept
 {
     running = 0;
-}
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
 }
 
 /// Parses the three decimal parameters of an SGR mouse report, i.e. the "b;x;y" text

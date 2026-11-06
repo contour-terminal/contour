@@ -13,15 +13,12 @@
 
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
 {
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
-}
 
 /// Wraps a ReGIS command string in the DCS introducer and ST terminator and writes it out.
 void regis(std::string const& commands)
