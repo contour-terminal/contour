@@ -53,6 +53,27 @@ $RequiredZipEntries = @(
 $PathComponent = 'ContourPathEnvironment'
 $ScopedComponents = $PathComponent, 'ContourConnectShortcut'
 
+# The SetProperty actions that settle INSTALL_ROOT, in the order they must run: the given folder is noted
+# before AppSearch, the rest follow it (the last that applies wins).
+$RootChain = 'ContourRootGiven', 'ContourRootDefault', 'ContourRootRecorded', 'ContourRootPrevious', 'ContourRootGivenRestore'
+
+# The one condition under which the previous folder is kept: not an old release's versioned default.
+$PreviousRootCondition = 'CONTOUR_PREVIOUS_ROOT AND (Installed OR NOT (CONTOUR_PREVIOUS_ROOT >< "\Contour Terminal Emulator "))'
+
+# Where an upgrade looks for the previous install folder, per scope: the folder the product recorded for itself
+# (HKLM or HKCU per scope) first, then the Add/Remove Programs entry, which is in HKLM for a per-user product too.
+# Root is the registry hive's number (1 HKCU, 2 HKLM); all are 64-bit raw value searches.
+$RegLocatorRaw64 = 18 # msidbLocatorTypeRawValue (2) + msidbLocatorType64bit (16)
+$ArpLocator = @{ Signature = 'ContourPreviousRoot'; Root = '2'; Key = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\[WIX_UPGRADE_DETECTED]'; Name = 'InstallLocation' }
+$RegLocators = @{
+    machine = @(
+        @{ Signature = 'ContourRecordedRoot'; Root = '2'; Key = 'Software\Contour\Contour'; Name = 'InstallRoot' }
+        $ArpLocator)
+    user    = @(
+        @{ Signature = 'ContourRecordedRoot'; Root = '1'; Key = 'Software\Contour\Contour'; Name = 'InstallRoot' }
+        $ArpLocator)
+}
+
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
 function Invoke-Com {
@@ -118,6 +139,28 @@ function Get-MsiSummaryWordCount {
     return [int](Invoke-Com $summary 'Property' 'GetProperty' @($SummaryWordCountId))
 }
 
+function Get-MsiDirectoryPath {
+    <# A directory of the Directory table as its path, from the standard folder it hangs from: "A/B/C". #>
+    param([Parameter(Mandatory)][string]$Msi, [Parameter(Mandatory)][string]$Directory)
+    $names = @()
+    $current = $Directory
+    while ($current) {
+        $query = 'SELECT `Directory_Parent`, `DefaultDir` FROM `Directory` WHERE `Directory` = ''{0}''' -f $current
+        $rows = Get-MsiRows -Msi $Msi -Query $query
+        if ($rows.Count -eq 0) { return "no $current directory" }
+        $parent, $defaultDir = $rows[0]
+        if (-not $parent -or $parent -eq 'TARGETDIR') {
+            $names = @($current) + $names   # a standard folder: named by its Id
+            break
+        }
+        # A directory named '.' is the one it hangs from (ProgramFiles6432Folder is ProgramFiles64Folder here).
+        $leaf = ($defaultDir -split '\|')[-1]
+        if ($leaf -ne '.') { $names = @($leaf) + $names }
+        $current = $parent
+    }
+    return $names -join '/'
+}
+
 function Get-MsiProperty {
     <# The value of one Property row, or $null when the package has none. #>
     param([Parameter(Mandatory)][string]$Msi, [Parameter(Mandatory)][string]$Name)
@@ -150,6 +193,14 @@ function Test-Equal {
     if ($Found -eq $Expected) { return $null }
     $shownFound = if ($null -eq $Found) { 'nothing' } else { $Found }
     return "expected $Expected, found $shownFound"
+}
+
+function Get-CustomActionTarget {
+    <# The Target of a CustomAction row (for a SetProperty, the value it sets), or a note that there is none. #>
+    param([string]$Msi, [string]$Action)
+    $rows = Get-MsiRows -Msi $Msi -Query ('SELECT `Target` FROM `CustomAction` WHERE `Action` = ''{0}''' -f $Action)
+    if ($rows.Count -eq 0) { return "no $Action action" }
+    return $rows[0][0]
 }
 
 function Test-RegistryRoots {
@@ -228,6 +279,65 @@ $Rows = @(
         param($msi)
         Test-RegistryRoots $msi '1'
     } }
+    @{ Target = 'machine'; Name = 'install folder'; Check = {
+        param($msi)
+        Test-Equal 'ProgramFiles64Folder/Contour' (Get-MsiDirectoryPath $msi 'INSTALL_ROOT')
+    } }
+    @{ Target = 'user'; Name = 'install folder'; Check = {
+        # Never the Local AppData folder itself, which holds Contour's own state.
+        param($msi)
+        Test-Equal 'LocalAppDataFolder/Programs/Contour' (Get-MsiDirectoryPath $msi 'INSTALL_ROOT')
+    } }
+    @{ Target = 'msi'; Name = 'where the previous folder is searched'; Check = {
+        param($msi)
+        $problems = foreach ($locator in $RegLocators[$script:CurrentTarget]) {
+            $query = 'SELECT `Root`, `Key`, `Name`, `Type` FROM `RegLocator` WHERE `Signature_` = ''{0}''' -f $locator.Signature
+            $rows = Get-MsiRows -Msi $msi -Query $query
+            $expected = '{0}|{1}|{2}|{3}' -f $locator.Root, $locator.Key, $locator.Name, $RegLocatorRaw64
+            $found = if ($rows.Count -gt 0) { $rows[0] -join '|' } else { 'no such locator' }
+            if ($found -ne $expected) { "$($locator.Signature) is $found, not $expected" }
+        }
+        if (-not $problems) { return $null }
+        "expected the recorded and the ARP lookups pinned, found $($problems -join '; ')"
+    } }
+    @{ Target = 'msi'; Name = 'INSTALL_ROOT chain runs in order in both sequences'; Check = {
+        param($msi)
+        $problems = foreach ($table in 'InstallUISequence', 'InstallExecuteSequence') {
+            $sequence = @{}
+            $tableRows = Get-MsiRows -Msi $msi -Query ('SELECT `Action`, `Sequence` FROM `{0}`' -f $table)
+            foreach ($row in $tableRows) {
+                $sequence[$row[0]] = [int]$row[1]
+            }
+            $missing = @($RootChain + 'AppSearch' | Where-Object { -not $sequence.ContainsKey($_) })
+            if ($missing) { "$table lacks $($missing -join ', ')"; continue }
+            if ($sequence['ContourRootGiven'] -ge $sequence['AppSearch']) { "${table}: ContourRootGiven is not before AppSearch" }
+            if ($sequence['ContourRootDefault'] -le $sequence['AppSearch']) { "${table}: ContourRootDefault is not after AppSearch" }
+            foreach ($pair in 1..($RootChain.Count - 2)) {
+                $earlier, $later = $RootChain[$pair], $RootChain[$pair + 1]
+                if ($sequence[$earlier] -ge $sequence[$later]) { "${table}: $earlier is not before $later" }
+            }
+        }
+        if (-not $problems) { return $null }
+        "expected $($RootChain -join ' < ') around AppSearch, found $($problems -join '; ')"
+    } }
+    @{ Target = 'machine'; Name = 'default install folder'; Check = {
+        param($msi)
+        Test-Equal '[ProgramFiles64Folder]Contour\' (Get-CustomActionTarget $msi 'ContourRootDefault')
+    } }
+    @{ Target = 'user'; Name = 'default install folder'; Check = {
+        param($msi)
+        Test-Equal '[LocalAppDataFolder]Programs\Contour\' (Get-CustomActionTarget $msi 'ContourRootDefault')
+    } }
+    @{ Target = 'msi'; Name = 'previous folder is kept unless it is an old versioned default'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Condition` FROM `InstallExecuteSequence` WHERE `Action` = ''ContourRootPrevious'''
+        Test-Equal $PreviousRootCondition $(if ($rows.Count -gt 0) { $rows[0][0] } else { 'no such action' })
+    } }
+    @{ Target = 'msi'; Name = 'the recorded folder is resolved at uninstall and repair too'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Condition` FROM `InstallExecuteSequence` WHERE `Action` = ''ContourRootRecorded'''
+        Test-Equal 'CONTOUR_RECORDED_ROOT' $(if ($rows.Count -gt 0) { $rows[0][0] } else { 'no such action' })
+    } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
         Test-Equal $MachineUpgradeCode (Get-MsiProperty -Msi $msi -Name 'UpgradeCode')
@@ -290,6 +400,7 @@ foreach ($subject in $Subjects) {
         continue
     }
     $loaded = & $subject.Load $subject.Path
+    $script:CurrentTarget = $subject.Target
     $isMsi = $subject.Target -ne 'zip'
     foreach ($row in $Rows | Where-Object { $_.Target -eq $subject.Target -or ($isMsi -and $_.Target -eq 'msi') }) {
         $outcome = & $row.Check $loaded

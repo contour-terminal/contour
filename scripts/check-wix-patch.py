@@ -24,6 +24,8 @@ PATCH_FILE = PACKAGING_DIR / "wix_patch.xml"
 # The WiX source each installer scope adds (CPACK_CONTOUR_WIX_<scope>_SOURCE in src/contour/CMakeLists.txt).
 SCOPE_FILES = {"perMachine": PACKAGING_DIR / "wix_machine.wxs", "perUser": PACKAGING_DIR / "wix_user.wxs"}
 WIX_NAMESPACE_URI = "http://wixtoolset.org/schemas/v4/wxs"
+# What wix_patch.xml's INSTALL_ROOT actions rely on every scope to define, as (element, Id).
+REQUIRED_SCOPE_IDS = (("SetProperty", "ContourRootDefault"), ("Property", "CONTOUR_RECORDED_ROOT"))
 
 
 def problems_in(text: str) -> list[str]:
@@ -82,6 +84,11 @@ def scope_problems(scope_texts: dict[str, str], patch_text: str) -> list[str]:
         roots[scope] = root
     defined = {scope: scope_ids(root) for scope, root in roots.items()}
     for scope, ids in defined.items():
+        problems += [
+            f"{scope} does not define the {kind} {identifier} that wix_patch.xml relies on"
+            for kind, identifier in REQUIRED_SCOPE_IDS
+            if (kind, identifier) not in ids
+        ]
         for other, other_ids in defined.items():
             problems += [
                 f"{identifier} is defined for {other} but not for {scope}"
@@ -117,6 +124,8 @@ def self_test() -> int:
 
     def scope(*component_ids: str) -> str:
         components = "".join(f'<Component Id="{component_id}"/>' for component_id in component_ids)
+        components += '<SetProperty Id="INSTALL_ROOT" Action="ContourRootDefault"/>'
+        components += '<Property Id="CONTOUR_RECORDED_ROOT"/>'
         return f'<Wix xmlns="{WIX_NAMESPACE_URI}"><Fragment>{components}</Fragment></Wix>'
 
     def patch(*references: str) -> str:
@@ -128,6 +137,9 @@ def self_test() -> int:
             {"perMachine": scope("A", "B"), "perUser": scope("A", "B")}, patch("A"), 0),
         "a component one scope lacks": (
             {"perMachine": scope("A", "B"), "perUser": scope("A")}, patch("A"), 1),
+        "a scope lacking what the patch relies on": (
+            {"perMachine": scope("A"), "perUser": f'<Wix xmlns="{WIX_NAMESPACE_URI}"><Component Id="A"/></Wix>'},
+            patch("A"), 4),
         "a patch reference no scope defines": (
             {"perMachine": scope("A"), "perUser": scope("A")}, patch("A", "C"), 1),
     }
