@@ -48,26 +48,6 @@
 
 using namespace vthost::handover;
 
-TEST_CASE("the handles a successor is handed round-trip through their argument", "[vthost][handover]")
-{
-    auto const handles = SuccessorHandles { .image = vtpty::CrossingHandle { 0x1A4 },
-                                            .ready = vtpty::CrossingHandle { 0x2B8 },
-                                            .commit = vtpty::CrossingHandle { 0x2BC },
-                                            .predecessor = vtpty::CrossingHandle { 0x7FFF'FFF0 } };
-    auto const argument = handoverHandlesArgument(handles);
-    REQUIRE(argument.starts_with(HandoverHandlesPrefix));
-    CHECK(parseHandoverHandles(std::string_view { argument }.substr(HandoverHandlesPrefix.size()))
-          == handles);
-}
-
-TEST_CASE("an argument that does not name four handles names none", "[vthost][handover]")
-{
-    auto const value = GENERATE(
-        as<std::string_view> {}, "", "1,2,3", "1,2,3,4,5", "1,2,x,4", "1,0,3,4", "-1,2,3,4", "1,2,3,4,");
-    CAPTURE(value);
-    CHECK_FALSE(parseHandoverHandles(value).has_value());
-}
-
 // A pseudoconsole's handles are named on Windows alone (vtpty::InheritedPty::handles()).
 #ifdef _WIN32
 
@@ -246,12 +226,11 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
     auto const& launch = u.launcher.launches.front();
     CHECK(launch.executable == u.target);
     CHECK(launch.argv.front() == u.target.string());
+    // One handover argument, the last: the one the predecessor carried (`--handover=fd=7`) is dropped.
     CHECK(std::ranges::count_if(
-              launch.argv,
-              [](std::string const& argument) { return argument.starts_with(HandoverHandlesPrefix); })
+              launch.argv, [](std::string const& argument) { return argument.starts_with(HandoverPrefix); })
           == 1);
-    CHECK(std::ranges::none_of(
-        launch.argv, [](std::string const& argument) { return argument.starts_with(HandoverFdPrefix); }));
+    CHECK(handoverTokenOf(launch.argv.back()).and_then(parseHandoverHandles) == launch.handles);
 
     REQUIRE(image.has_value());
     CHECK(image->daemonInstance == 0xC0FFEE);

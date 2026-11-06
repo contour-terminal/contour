@@ -60,7 +60,7 @@ struct LiveUpgradeServices
     handover::ImageHandoff& handoff; ///< What hands the image over to the target, which takes over.
     handover::ReadinessProbe& probe; ///< What asks the target whether it can take over.
     /// This process's command line, which the target runs again with its own program and the handover
-    /// argument (handover::HandoverArguments) in place of any it carried.
+    /// argument (handover::HandoverPrefix) in place of any it carried.
     std::vector<std::string> argv;
     /// What an upgrade naming no image runs: the daemon's own installed executable, which a package upgrade
     /// replaced; empty for none.

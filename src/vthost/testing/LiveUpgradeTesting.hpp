@@ -31,6 +31,7 @@
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/LiveUpgrade.hpp>
 #include <vthost/handover/Readiness.hpp>
@@ -159,7 +160,7 @@ struct UpgradeBench
             .upgradeGeneration = 2,
             .argv = { "/state/bin/0.9.0-00000000/Contour.AppImage",
                       "daemon",
-                      "--handover-fd=7",
+                      handover::handoverArgument(handover::handoverToken(vtpty::CrossingHandle { 7 })),
                       "--label",
                       "x" },
             .installedExecutable = {},

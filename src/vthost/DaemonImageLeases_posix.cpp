@@ -12,8 +12,11 @@
     #include <cerrno>
     #include <filesystem>
     #include <format>
+    #include <memory>
+    #include <optional>
     #include <ranges>
     #include <system_error>
+    #include <utility>
 
     #include <fcntl.h>
     #include <unistd.h>
@@ -76,6 +79,24 @@ namespace
                && opened.st_ino == named.st_ino;
     }
 
+    /// @return Whether @p fd is a lease on @p leaseFile that crossed an exec: inheritable, which none of this
+    ///         process's own is, every one opened with FD_CLOEXEC.
+    [[nodiscard]] bool isInheritedLease(int fd, std::filesystem::path const& leaseFile) noexcept
+    {
+        auto const flags = ::fcntl(fd, F_GETFD);
+        return flags != -1 && (flags & FD_CLOEXEC) == 0 && isFileAt(fd, leaseFile);
+    }
+
+    /// Takes over @p fd, an inherited lease (isInheritedLease()), and stops it being inherited any further.
+    /// @return The lease; null where it cannot stop being inherited.
+    [[nodiscard]] std::unique_ptr<ImageLease> adoptLease(int fd)
+    {
+        auto const flags = ::fcntl(fd, F_GETFD);
+        if (flags == -1 || ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == -1)
+            return nullptr;
+        return std::make_unique<FileLease>(fd);
+    }
+
     /// @return flock(@p fd, @p operation), retried across signals.
     [[nodiscard]] int lockRetryingInterrupts(int fd, int operation) noexcept
     {
@@ -88,6 +109,13 @@ namespace
     class NativeImageLeases final: public ImageLeases
     {
       public:
+        /// @param inheritedLease The lease a handover image named, which adoptInherited() takes over; none
+        ///        where none was named.
+        explicit NativeImageLeases(vtpty::CrossingHandle inheritedLease) noexcept:
+            _named { inheritedLease.isNone() ? std::nullopt : std::optional { inheritedLease } }
+        {
+        }
+
         [[nodiscard]] std::expected<std::unique_ptr<ImageLease>, StagingError> hold(
             std::filesystem::path const& leaseFile) override
         {
@@ -138,22 +166,22 @@ namespace
         [[nodiscard]] std::unique_ptr<ImageLease> adoptInherited(
             std::filesystem::path const& leaseFile) override
         {
-            // Whatever number the descriptor had before the exec, it has now. Each number is asked in turn,
-            // rather than /dev/fd listed: FreeBSD's shows 0 to 2 only, unless fdescfs is mounted on it.
-            // Only one without FD_CLOEXEC can have been inherited; every lease of this process's own is
-            // opened with it.
+            // The descriptor a handover image named is the one asked, once.
+            if (_named)
+            {
+                auto const fd = std::exchange(*_named, vtpty::CrossingHandle {}).native();
+                return fd >= 0 && isInheritedLease(fd, leaseFile) ? adoptLease(fd) : nullptr;
+            }
+            // Named by nothing -- the exec that moves a daemon onto a staged image hands no image over
+            // (execFromStagedImage()) -- whatever number the descriptor had before the exec, it has now. Each
+            // number is asked in turn, rather than /dev/fd listed: FreeBSD's shows 0 to 2 only, unless
+            // fdescfs is mounted on it.
             auto const openMax = ::sysconf(_SC_OPEN_MAX);
             auto const limit =
                 static_cast<int>(openMax > 0 ? std::min(openMax, DescriptorsScanned) : DescriptorsScanned);
             for (auto const fd: std::views::iota(0, limit))
-            {
-                auto const flags = ::fcntl(fd, F_GETFD);
-                if (flags == -1 || (flags & FD_CLOEXEC) != 0 || !isFileAt(fd, leaseFile))
-                    continue;
-                if (::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == -1)
-                    return nullptr;
-                return std::make_unique<FileLease>(fd);
-            }
+                if (isInheritedLease(fd, leaseFile))
+                    return adoptLease(fd);
             return nullptr;
         }
 
@@ -165,12 +193,16 @@ namespace
                 StagingError { .code = StagingErrorCode::LeaseFailed,
                                .context = std::format("{}: {}", core::pathToUtf8(leaseFile), reason) });
         }
+
+        /// The lease a handover image named, which adoptInherited() takes over yet; none once it has, nullopt
+        /// where none was named.
+        std::optional<vtpty::CrossingHandle> _named;
     };
 } // namespace
 
-std::unique_ptr<ImageLeases> makeNativeImageLeases()
+std::unique_ptr<ImageLeases> makeNativeImageLeases(vtpty::CrossingHandle inheritedLease)
 {
-    return std::make_unique<NativeImageLeases>();
+    return std::make_unique<NativeImageLeases>(inheritedLease);
 }
 
 } // namespace vthost

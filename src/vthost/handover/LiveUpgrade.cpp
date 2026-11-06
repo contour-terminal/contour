@@ -307,11 +307,10 @@ std::vector<std::string> LiveUpgrade::argvFor(std::filesystem::path const& execu
 {
     // A daemon started from a handover itself carries the argument that named its own image: dropped, so that
     // the command line names only the next one, however many upgrades this daemon has seen.
-    auto argv = std::ranges::to<std::vector>(
-        _config.argv | std::views::filter([](std::string const& argument) {
-            return std::ranges::none_of(
-                HandoverArguments, [&](std::string_view prefix) { return argument.starts_with(prefix); });
-        }));
+    auto argv =
+        std::ranges::to<std::vector>(_config.argv | std::views::filter([](std::string const& argument) {
+                                         return !argument.starts_with(HandoverPrefix);
+                                     }));
     if (argv.empty())
         argv.emplace_back();
     argv.front() = core::pathToUtf8(executable);

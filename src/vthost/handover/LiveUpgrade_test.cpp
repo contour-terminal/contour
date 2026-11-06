@@ -14,7 +14,6 @@
     #include <sys/un.h>
 
     #include <algorithm>
-    #include <charconv>
     #include <chrono>
     #include <csignal>
     #include <cstddef>
@@ -45,6 +44,7 @@
     #include <vthost/SessionHost.hpp>
     #include <vthost/handover/HandoverCodec.hpp>
     #include <vthost/handover/HandoverRestore.hpp>
+    #include <vthost/handover/HandoverToken.hpp>
     #include <vthost/handover/LiveUpgrade.hpp>
     #include <vthost/handover/Readiness.hpp>
     #include <vthost/testing/FakeHandoverMemory.hpp>
@@ -90,16 +90,13 @@ class ByteCounter final: public SessionStreamEvents
     return vthost::testing::shellProcess(size);
 }
 
-/// @return The descriptor the last argument names, `--handover-fd=N`.
+/// @return The descriptor the last argument names, `--handover=fd=N`.
 [[nodiscard]] vtpty::CrossingHandle handoverFdOf(std::vector<std::string> const& argv)
 {
-    constexpr auto Prefix = std::string_view { "--handover-fd=" };
     REQUIRE_FALSE(argv.empty());
-    REQUIRE(argv.back().starts_with(Prefix));
-    auto fd = vtpty::CrossingHandle {};
-    auto const digits = std::string_view { argv.back() }.substr(Prefix.size());
-    REQUIRE(std::from_chars(digits.data(), digits.data() + digits.size(), fd.value).ec == std::errc {});
-    return fd;
+    auto const fd = handoverTokenOf(argv.back()).and_then(parseHandoverDescriptor);
+    REQUIRE(fd.has_value());
+    return *fd;
 }
 
 /// @return A descriptor connected to the unix socket at @p path; the kernel completes the connect into the
@@ -194,8 +191,10 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
     auto const& [program, argv] = u.replacer.replacements.front();
     CHECK(program == u.target);
     CHECK(argv.front() == u.target.string());
-    CHECK(std::ranges::count_if(argv, [](std::string const& arg) { return arg.starts_with("--handover-fd"); })
+    // One handover argument, the last: the one this daemon was started with (`--handover=fd=7`) is dropped.
+    CHECK(std::ranges::count_if(argv, [](std::string const& arg) { return arg.starts_with(HandoverPrefix); })
           == 1);
+    CHECK(handoverTokenOf(argv.back()).and_then(parseHandoverDescriptor).has_value());
     CHECK(std::ranges::find(argv, "--label") != argv.end());
 
     REQUIRE(image.has_value());

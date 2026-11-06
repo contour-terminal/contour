@@ -25,41 +25,18 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
-#include <string_view>
 #include <system_error>
 #include <vector>
 
+#include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 
 namespace vthost::handover
 {
 
 class HandoverMemory;
-
-/// The handles a successor process is handed beside those the image names: what `--handover-handles=` names.
-struct SuccessorHandles
-{
-    vtpty::CrossingHandle image {}; ///< The unnamed mapping the image is in (HandoverMemory).
-    /// The event the successor sets once it has read the image and can take over.
-    vtpty::CrossingHandle ready {};
-    /// The event the predecessor sets once it has seen the successor ready: the successor owns everything
-    /// from then on.
-    vtpty::CrossingHandle commit {};
-    vtpty::CrossingHandle
-        predecessor {}; ///< The predecessor process, which the successor waits to have ended.
-
-    bool operator==(SuccessorHandles const&) const = default;
-};
-
-/// @return @p handles as the argument `--handover-handles=` that names them.
-[[nodiscard]] std::string handoverHandlesArgument(SuccessorHandles const& handles);
-
-/// @param value What follows `--handover-handles=`.
-/// @return The handles it names; nullopt for a value that is not four handles, each of them positive.
-[[nodiscard]] std::optional<SuccessorHandles> parseHandoverHandles(std::string_view value);
 
 #ifdef _WIN32
 /// A successor process SuccessorLauncher started.
@@ -164,7 +141,7 @@ class SuccessorHandoff final: public ImageHandoff
 /// its mapping, checks that every session in it can be adopted here, then holds the commit point: says it is
 /// ready, and waits for the commit. Nothing is taken over before that: a successor that cannot read the
 /// image, or adopt every session in it, never says it is ready, and the predecessor ends it and serves on.
-/// @param handles The handles `--handover-handles` named (parseHandoverHandles()). Closed by this.
+/// @param handles The handles `--handover=handles=` named (parseHandoverHandles()). Closed by this.
 /// @param memory What reads the mapping.
 /// @param config How long it waits at the commit point.
 /// @return The image to take over; or why not, in which case this process ends without serving anything.

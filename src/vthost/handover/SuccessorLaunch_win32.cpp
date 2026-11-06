@@ -325,7 +325,7 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
                                             .predecessor = CrossingHandle::of(handshake.self.get()) };
     auto inherited = handlesNamedBy(image);
     inherited.insert(inherited.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
-    argv.push_back(handoverHandlesArgument(handles));
+    argv.push_back(handoverArgument(handoverToken(handles)));
 
     auto const successor = _launcher.launch(executable, argv, inherited);
     if (!successor)

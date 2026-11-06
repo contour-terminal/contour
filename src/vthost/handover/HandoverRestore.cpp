@@ -330,10 +330,12 @@ namespace
         return values;
     }
 
+#ifndef _WIN32
     /// Whether a descriptor is none: a negative one.
     constexpr auto NoDescriptor = [](int fd) {
         return fd < 0;
     };
+#endif
 } // namespace
 
 std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
@@ -350,6 +352,17 @@ std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
     return sortedUnique(std::move(named), [](vtpty::CrossingHandle handle) { return handle.isNone(); });
 }
 
+std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
+                                                         vtpty::CrossingHandle memoryHandle)
+{
+    auto image = memory.read(memoryHandle).and_then([](std::vector<uint8_t> const& bytes) {
+        return decodeHandover(bytes);
+    });
+    memory.discard(memoryHandle);
+    return image;
+}
+
+#ifndef _WIN32
 std::vector<int> descriptorsToKeep(HandoverImage const& image)
 {
     auto kept = std::vector<int> { 0, 1, 2 };
@@ -358,7 +371,6 @@ std::vector<int> descriptorsToKeep(HandoverImage const& image)
     return sortedUnique(std::move(kept), NoDescriptor);
 }
 
-#ifndef _WIN32
 namespace
 {
     /// Closes descriptors @p first to @p last, both included; nothing when @p first is past @p last.
@@ -382,23 +394,9 @@ namespace
         return static_cast<int>(limit.rlim_cur) - 1;
     }
 } // namespace
-#endif
-
-std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
-                                                         vtpty::CrossingHandle memoryHandle)
-{
-    auto image = memory.read(memoryHandle).and_then([](std::vector<uint8_t> const& bytes) {
-        return decodeHandover(bytes);
-    });
-    memory.discard(memoryHandle);
-    return image;
-}
 
 std::size_t closeListeningSockets()
 {
-#ifdef _WIN32
-    return 0;
-#else
     auto closed = std::size_t { 0 };
     // Above the standard streams, up to the descriptor limit: the old image's listeners are among the first
     // descriptors it opened, but nothing says how far up the rest lie.
@@ -410,14 +408,12 @@ std::size_t closeListeningSockets()
         ++closed;
     }
     return closed;
-#endif
 }
 
 void closeDescriptorsExcept(std::span<int const> keep)
 {
     Require(std::ranges::is_sorted(keep) && std::ranges::adjacent_find(keep) == keep.end()
             && (keep.empty() || keep.front() >= 0));
-#ifndef _WIN32
     // The gaps between kept descriptors are a few numbers each; everything above the last goes at once.
     auto next = 0;
     for (auto const fd: keep)
@@ -427,7 +423,7 @@ void closeDescriptorsExcept(std::span<int const> keep)
     }
     // Above the last: as a spawned child's are (close_range(), else /proc/self/fd, else every number).
     vtpty::util::closeDescriptorsAbove(next - 1, vtpty::util::openDescriptorLimit());
-#endif
 }
+#endif
 
 } // namespace vthost::handover

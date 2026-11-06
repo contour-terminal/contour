@@ -24,6 +24,7 @@
 
     #include <Windows.h>
 
+    #include <vthost/handover/HandoverToken.hpp>
     #include <vthost/handover/ImageHandoff.hpp>
     #include <vthost/handover/SuccessorLaunch.hpp>
 
@@ -54,7 +55,7 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
         std::filesystem::path executable;             ///< What was to run.
         std::vector<std::string> argv;                ///< Its command line.
         std::vector<vtpty::CrossingHandle> inherited; ///< What it was to inherit.
-        handover::SuccessorHandles handles;           ///< What its `--handover-handles` named.
+        handover::SuccessorHandles handles;           ///< What its `--handover=` named.
     };
 
     explicit FakeSuccessorLauncher(SuccessorBehaviour behaviour = SuccessorBehaviour::TakesOver):
@@ -77,10 +78,7 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
         std::span<vtpty::CrossingHandle const> inherited) override
     {
         auto const argument = argv.empty() ? std::string_view {} : std::string_view { argv.back() };
-        auto const prefix = handover::HandoverHandlesPrefix;
-        auto const handles = argument.starts_with(prefix)
-                                 ? handover::parseHandoverHandles(argument.substr(prefix.size()))
-                                 : std::nullopt;
+        auto const handles = handover::handoverTokenOf(argument).and_then(handover::parseHandoverHandles);
         launches.push_back(Launch { .executable = executable,
                                     .argv = { argv.begin(), argv.end() },
                                     .inherited = { inherited.begin(), inherited.end() },

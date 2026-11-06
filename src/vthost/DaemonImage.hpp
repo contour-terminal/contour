@@ -162,15 +162,6 @@ class ImageLease
     [[nodiscard]] virtual vtpty::CrossingHandle nativeHandle() const noexcept { return {}; }
 };
 
-#ifdef _WIN32
-/// Takes over the lease on an image a Windows daemon handed its successor (HandoverImage::lease), which
-/// keeps the image leased until the successor has taken its own (leaseRunningImage()). POSIX has none: a
-/// lease crosses the exec there, and is adopted by its descriptor (ImageLeases::adoptInherited()).
-/// @param handle The lease's handle, as ImageLease::nativeHandle() gave it; none for none.
-/// @return The lease; null for none.
-[[nodiscard]] std::unique_ptr<ImageLease> adoptHandedOverLease(vtpty::CrossingHandle handle);
-#endif
-
 /// Takes and inspects image leases.
 ///
 /// An interface, because a lease is an operating-system lock: the store is tested over
@@ -236,8 +227,16 @@ class SymbolicLinks
 /// claim() is `flock(LOCK_EX | LOCK_NB)`, and unlinking the lease file under it is what tells a
 /// waiting hold() to start again. Windows: hold() opens the lease file sharing read and write but not
 /// delete; claim() opens it sharing nothing, with delete access, and deletes it on close.
+///
+/// adoptInherited() takes over the lease a handover image names (HandoverImage::lease), once: on POSIX the
+/// descriptor that crossed the exec, checked to be a lease on the file asked about; on Windows, which has no
+/// exec, the handle the successor inherited, checked to be open on the file asked about. Where none was named
+/// -- on POSIX the exec that moves a daemon onto a staged image hands no image over -- POSIX finds a lease
+/// that crossed by asking every descriptor.
+/// @param inheritedLease The lease the predecessor handed over, as ImageLease::nativeHandle() gave it, which
+///        the first adoptInherited() takes over; none for none.
 /// @return The production leases.
-[[nodiscard]] std::unique_ptr<ImageLeases> makeNativeImageLeases();
+[[nodiscard]] std::unique_ptr<ImageLeases> makeNativeImageLeases(vtpty::CrossingHandle inheritedLease = {});
 
 /// Where a StagedImage's executable lies.
 enum class ImageOrigin : uint8_t

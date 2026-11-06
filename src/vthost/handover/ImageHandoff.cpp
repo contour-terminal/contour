@@ -2,7 +2,6 @@
 #include <vthost/handover/ImageHandoff.hpp>
 
 #include <cstddef>
-#include <format>
 #include <system_error>
 #include <utility>
 
@@ -82,7 +81,7 @@ ExecFailure ExecHandoff::handOver(std::filesystem::path const& executable,
         return ExecFailure { .cause = std::make_error_code(std::errc::bad_file_descriptor) };
 
     // Returns only on failure.
-    argv.push_back(std::format("{}{}", HandoverFdPrefix, memoryHandle->value));
+    argv.push_back(handoverArgument(handoverToken(*memoryHandle)));
     auto const failure = _replacer.replaceWith(executable, argv);
     return ExecFailure { .cause = failure ? failure : std::make_error_code(std::errc::io_error) };
 }

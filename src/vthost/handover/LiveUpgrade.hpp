@@ -95,7 +95,7 @@ struct LiveUpgradeConfig
     /// (HandoverImage::upgradeGeneration).
     uint64_t upgradeGeneration = 0;
     /// This process's command line; the target runs it again, its program replaced by the target's and the
-    /// handover argument (HandoverArguments) appended in place of any it carried.
+    /// handover argument (HandoverPrefix) appended in place of any it carried.
     std::vector<std::string> argv;
     /// The executable an empty UpgradeTarget names: the daemon's own installed binary, which a package
     /// upgrade replaced; empty for none.

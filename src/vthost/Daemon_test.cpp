@@ -59,6 +59,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/WorkspaceCapture.hpp>
 #include <vthost/WorkspacePersistence.hpp>
+#include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
@@ -1547,7 +1548,9 @@ TEST_CASE("a daemon upgrades itself in place when a local client asks",
     auto const commandLine = UpgradableDaemon::commandLine();
     REQUIRE(argv.size() == commandLine.size() + 1);
     CHECK(std::ranges::equal(argv | std::views::take(commandLine.size()), commandLine));
-    CHECK(argv.back().starts_with("--handover-fd="));
+    CHECK(vthost::handover::handoverTokenOf(argv.back())
+              .and_then(vthost::handover::parseHandoverDescriptor)
+              .has_value());
 
     // The exec failed: the daemon rolled back and serves on, and still stops as it would any day.
     auto after = std::vector<vthost::proto::DecodedFrame> {};
