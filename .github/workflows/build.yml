@@ -1662,16 +1662,19 @@ jobs:
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Check that the package ships no benchmark tool"
+      - name: "Check the package contents"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # bench-headless and bench-latency are built into bin/, beside the staged conpty.dll they must run
-        # with. Two things keep each out of the MSI and the zip, which cpack fills from the same install: its PATTERN
-        # exclusion in src/contour/CMakeLists.txt, against the GUI's wholesale copy of bin/, and
-        # CONTOUR_INSTALL_TOOLS=OFF in the Windows preset, against its own install rule (bench-latency has
-        # none at all, so it needs the first alone). Assert it, as
-        # the macOS job does for its image: the day either goes, a developer tool would ship in a
-        # user-facing release with no other visible symptom. contour.exe must be found too, or the
-        # check would pass on a zip it cannot read.
+        # What the package must and must not hold, asserted as the macOS job does for its image: a mistake
+        # either way has no other visible symptom.
+        # - No executable but those allowed, no .ilk or .pdb, no Qt Test: bin/ is every target's output
+        #   directory (see its install rule in src/contour/CMakeLists.txt for why that matters), and
+        #   CONTOUR_INSTALL_TOOLS=OFF in the Windows preset keeps the tools' own install rules out.
+        # - What is loaded by name or file type at run time, which no build notices missing and CI's tests
+        #   find anyway, in the Qt install QT_PLUGIN_PATH names: the Fluent row's controls style, named through
+        #   QQuickStyle::setStyle where windeployqt's --qmldir scan cannot see it; Qt SVG and its image plugin
+        #   (see cmake/DeployQt.cmake); and the bundled status-line extensions, which contour.exe looks for
+        #   beside bin/.
+        # contour.exe must be found first, or every check would pass on a zip it cannot read.
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -1682,47 +1685,24 @@ jobs:
             $zip.Dispose()
           }
           if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
+            Write-Host "::error::the zip holds no contour.exe; the checks below would pass vacuously"
             exit 1
           }
-          $shipped = $entries | Where-Object { $_ -like '*bench-headless*' -or $_ -like '*bench-latency*' }
-          if ($shipped) {
-            Write-Host "::error::the zip ships $($shipped -join ', ')"
+          $shippedExecutables = 'contour.exe', 'OpenConsole.exe'
+          $strays = $entries | Where-Object {
+            $name = ($_ -split '/')[-1]
+            ($name -like '*.exe' -and $shippedExecutables -notcontains $name) -or $name -like '*.ilk' -or
+              $name -like '*.pdb' -or $name -eq 'Qt6Test.dll' -or $name -eq 'qoffscreen.dll'
+          }
+          if ($strays) {
+            Write-Host "::error::the zip ships $($strays -join ', ')"
             exit 1
           }
-          # The bundled status-line extensions ship in share/contour/extensions, beside bin/, which is
-          # where contour.exe looks for them.
-          foreach ($extension in 'agent-status', 'clock', 'git', 'plasma', 'sysload') {
-            if (-not ($entries | Where-Object { $_ -like "*share/contour/extensions/$extension.wasm" })) {
-              Write-Host "::error::the zip holds no share/contour/extensions/$extension.wasm"
-              exit 1
-            }
-          }
-      - name: "Check that the package ships the Qt pieces loaded at run time"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # Each is loaded by name or by file type at run time, so nothing fails at build or link time without
-        # it, and Qt falls back silently: CI's tests find them anyway, in the Qt install QT_PLUGIN_PATH names.
-        # - The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
-        #   quickControlsStyle token), which windeployqt's --qmldir scan cannot see; without it the Fluent
-        #   row's controls lose their look.
-        # - Qt SVG's image plugin, and the library it needs, read Contour's bundled icons, which are SVG: the
-        #   secure-input lock, and the header bar's and window buttons' where a chrome style draws them.
-        #   Without them each is blank.
-        # contour.exe must be found too, or the check would pass on a zip it cannot read.
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
-          try {
-            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
-          } finally {
-            $zip.Dispose()
-          }
-          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
-            exit 1
-          }
-          $required = 'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir', 'bin/imageformats/qsvg.dll', 'bin/Qt6Svg.dll'
+          $required = @(
+            'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir'
+            'bin/imageformats/qsvg.dll'
+            'bin/Qt6Svg.dll'
+          ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
           foreach ($path in $required) {
             if (-not ($entries | Where-Object { $_ -like "*/$path" -or $_ -eq $path })) {
               Write-Host "::error::the zip holds no $path"

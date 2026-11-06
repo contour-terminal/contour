@@ -1947,6 +1947,11 @@ if(WIN32)
     if(CONTOUR_FRONTEND_GUI)
         include(DeployQt)
         windeployqt(contour)
+        # bin/ is every target's output directory, so beside windeployqt's staging it holds the test suites,
+        # their helpers and the developer tools -- built there to run beside the staged conpty.dll -- and the
+        # .ilk an incremental link leaves beside each. No executable is taken from it: the ones that ship are
+        # installed by rules of their own (contour above, OpenConsole.exe in src/vtpty). This matters beyond
+        # the package's size: the first daemon start copies the whole of bin/ (vthost::stagingPlan).
         install(
             DIRECTORY "$<TARGET_FILE_DIR:contour>/"
             DESTINATION "bin"
@@ -1955,14 +1960,13 @@ if(WIN32)
                 PATTERN "CMakeFiles" EXCLUDE
                 PATTERN "*_autogen" EXCLUDE
                 PATTERN "*.h" EXCLUDE
-                PATTERN "*_test.*" EXCLUDE
                 PATTERN "*.pdb" EXCLUDE
-                PATTERN "unicode_tablegen.exe" EXCLUDE
-                # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
-                # and the .ilk an incremental link leaves beside it.
-                PATTERN "bench-headless.*" EXCLUDE
-                # The latency benchmark, likewise: the .exe and the .ilk beside it.
-                PATTERN "bench-latency.*" EXCLUDE
+                PATTERN "*.exe" EXCLUDE
+                PATTERN "*.ilk" EXCLUDE
+                # Staged for contour_gui_test (contour_stage_runtime_dlls); contour links no Qt Test.
+                PATTERN "Qt6Test.dll" EXCLUDE
+                # Likewise the offscreen QPA plugin: only the tests select it.
+                PATTERN "qoffscreen.dll" EXCLUDE
                 PATTERN "*"
         )
     endif()
