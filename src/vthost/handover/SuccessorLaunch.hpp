@@ -18,20 +18,19 @@
 /// resumes every session and listener, as after a failed exec: it wrote nothing anywhere that the old daemon
 /// would then deliver a second time.
 
-#include <vtpty/InheritedPty.hpp>
+#include <vtpty/CrossingHandle.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
-#include <string_view>
 #include <system_error>
 #include <vector>
 
+#include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 
 namespace vthost::handover
@@ -39,33 +38,12 @@ namespace vthost::handover
 
 class HandoverMemory;
 
-/// The handles a successor process is handed beside those the image names: what `--handover-handles=` names.
-struct SuccessorHandles
-{
-    vtpty::HandleValue image = 0; ///< The unnamed mapping the image is in (HandoverMemory).
-    /// The event the successor sets once it has read the image and can take over.
-    vtpty::HandleValue ready = 0;
-    /// The event the predecessor sets once it has seen the successor ready: the successor owns everything
-    /// from then on.
-    vtpty::HandleValue commit = 0;
-    vtpty::HandleValue predecessor = 0; ///< The predecessor process, which the successor waits to have ended.
-
-    bool operator==(SuccessorHandles const&) const = default;
-};
-
-/// @return @p handles as the argument `--handover-handles=` that names them.
-[[nodiscard]] std::string handoverHandlesArgument(SuccessorHandles const& handles);
-
-/// @param value What follows `--handover-handles=`.
-/// @return The handles it names; nullopt for a value that is not four handles, none of them zero.
-[[nodiscard]] std::optional<SuccessorHandles> parseHandoverHandles(std::string_view value);
-
 #ifdef _WIN32
 /// A successor process SuccessorLauncher started.
 struct SuccessorProcess
 {
-    vtpty::HandleValue process = 0; ///< A handle to it, which the caller closes.
-    std::int64_t pid = -1;          ///< Its process id.
+    vtpty::CrossingHandle process {}; ///< A handle to it, which the caller closes.
+    std::int64_t pid = -1;            ///< Its process id.
 };
 
 /// What the Windows handoff reaches out of the process with: starting the successor, ending it, and ending
@@ -90,7 +68,7 @@ class SuccessorLauncher
     [[nodiscard]] virtual std::expected<SuccessorProcess, std::error_code> launch(
         std::filesystem::path const& executable,
         std::span<std::string const> argv,
-        std::span<vtpty::HandleValue const> inherited) = 0;
+        std::span<vtpty::CrossingHandle const> inherited) = 0;
 
     /// Ends @p successor, one that failed to take over, and waits until it has ended: what lets the old
     /// daemon resume knowing the successor touches nothing more.
@@ -150,8 +128,8 @@ class SuccessorHandoff final: public ImageHandoff
 
     [[nodiscard]] ExecFailure handOver(std::filesystem::path const& executable,
                                        std::vector<std::string> argv,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes) override;
+                                       std::vector<vtpty::CrossingHandle> crossing,
+                                       std::vector<uint8_t> bytes) override;
 
   private:
     SuccessorLauncher& _launcher;
@@ -163,7 +141,7 @@ class SuccessorHandoff final: public ImageHandoff
 /// its mapping, checks that every session in it can be adopted here, then holds the commit point: says it is
 /// ready, and waits for the commit. Nothing is taken over before that: a successor that cannot read the
 /// image, or adopt every session in it, never says it is ready, and the predecessor ends it and serves on.
-/// @param handles The handles `--handover-handles` named (parseHandoverHandles()). Closed by this.
+/// @param handles The handles `--handover=handles=` named (parseHandoverHandles()). Closed by this.
 /// @param memory What reads the mapping.
 /// @param config How long it waits at the commit point.
 /// @return The image to take over; or why not, in which case this process ends without serving anything.

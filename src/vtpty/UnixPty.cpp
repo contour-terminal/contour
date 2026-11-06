@@ -7,7 +7,6 @@
 
 #include <crispy/BufferObject.hpp>
 
-#include <core/Assert.hpp>
 #include <core/Deferred.hpp>
 #include <core/Environment.hpp>
 #include <core/Escape.hpp>
@@ -279,8 +278,10 @@ PtySlave& UnixPty::slave() noexcept
     return *_slave;
 }
 
-InheritedPty UnixPty::handoverDescriptors() const
+std::expected<InheritedPty, AdoptError> UnixPty::handover() const
 {
+    if (!started())
+        return std::unexpected(AdoptError::BadDescriptor);
     auto inherited = InheritedPty {
         .masterFd = _masterFd.get(), .stdoutFastPipe = std::nullopt, .pageSize = _pageSize, .pixels = _pixels
     };
@@ -289,14 +290,15 @@ InheritedPty UnixPty::handoverDescriptors() const
     return inherited;
 }
 
-InheritedPty UnixPty::releaseDescriptors()
+std::expected<InheritedPty, AdoptError> UnixPty::releaseHandover()
 {
     auto const _ = std::scoped_lock { _mutex };
-    Require(started());
-    auto inherited = handoverDescriptors();
+    auto inherited = handover();
+    if (!inherited)
+        return inherited;
     _readSelector.cancelRead(_masterFd);
-    if (inherited.stdoutFastPipe)
-        _readSelector.cancelRead(inherited.stdoutFastPipe->first);
+    if (inherited->stdoutFastPipe)
+        _readSelector.cancelRead(inherited->stdoutFastPipe->first);
     std::ignore = _masterFd.release();
     _stdoutFastPipe.pfd = { -1, -1 };
     _masterState.store(MasterState::Closed, std::memory_order_release);
@@ -304,22 +306,35 @@ InheritedPty UnixPty::releaseDescriptors()
     return inherited;
 }
 
+namespace
+{
+    /// @return Whether @p fd is a descriptor open in this process.
+    [[nodiscard]] bool isOpenDescriptor(int fd) noexcept
+    {
+        return fd >= 0 && ::fcntl(fd, F_GETFD) >= 0;
+    }
+} // namespace
+
+std::expected<void, AdoptError> UnixPty::canAdopt(InheritedPty const& inherited)
+{
+    if (!isOpenDescriptor(inherited.masterFd) || !::isatty(inherited.masterFd))
+        return std::unexpected(AdoptError::BadDescriptor);
+    if (inherited.stdoutFastPipe && !isOpenDescriptor(inherited.stdoutFastPipe->first))
+        return std::unexpected(AdoptError::BadDescriptor);
+    return {};
+}
+
 std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty inherited)
 {
-    auto const isOpen = [](int fd) {
-        return fd >= 0 && ::fcntl(fd, F_GETFD) >= 0;
-    };
-    if (!isOpen(inherited.masterFd) || !::isatty(inherited.masterFd))
-        return std::unexpected(AdoptError::BadDescriptor);
-    if (inherited.stdoutFastPipe && !isOpen(inherited.stdoutFastPipe->first))
-        return std::unexpected(AdoptError::BadDescriptor);
+    if (auto const adoptable = canAdopt(inherited); !adoptable)
+        return std::unexpected(adoptable.error());
 
     auto pty = std::make_unique<UnixPty>(inherited.pageSize, inherited.pixels);
     // The constructor made a pipe of its own; an adopted PTY has the inherited one, or none.
     pty->_stdoutFastPipe.close();
     if (inherited.stdoutFastPipe)
         pty->_stdoutFastPipe.pfd = { inherited.stdoutFastPipe->first,
-                                     isOpen(inherited.stdoutFastPipe->second)
+                                     isOpenDescriptor(inherited.stdoutFastPipe->second)
                                          ? inherited.stdoutFastPipe->second
                                          : -1 };
     pty->_masterFd = crispy::FileDescriptor::fromNative(inherited.masterFd);
@@ -327,9 +342,8 @@ std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty 
 
     // Close-on-exec again: only a hand-off keeps these across an exec. The reader of the fast pipe is
     // non-blocking, as start() makes it.
-    for (auto const fd: inherited.descriptors())
-        if (fd >= 0)
-            std::ignore = util::setExecInheritance(fd, util::ExecInheritance::CloseOnExec);
+    for (auto const handle: inherited.handles())
+        std::ignore = util::setExecInheritance(handle.native(), util::ExecInheritance::CloseOnExec);
     std::ignore = util::setNonBlocking(pty->_masterFd);
     if (pty->_stdoutFastPipe.reader() != -1)
         std::ignore = util::setNonBlocking(pty->_stdoutFastPipe.reader());

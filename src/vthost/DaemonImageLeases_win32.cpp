@@ -11,7 +11,7 @@
 
 #ifdef _WIN32
 
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/Win32Handle.hpp>
 
     #include <core/Utf8Path.hpp>
 
@@ -20,6 +20,7 @@
     #include <ranges>
     #include <system_error>
     #include <thread>
+    #include <utility>
 
     #include <vthost/Logging.hpp>
 
@@ -35,6 +36,31 @@ namespace
     constexpr auto HoldWaitLimit = std::chrono::seconds { 30 };
     constexpr auto HoldAttempts = static_cast<int>(HoldWaitLimit / HoldRetryDelay);
 
+    /// @return Whether @p handle is open on the file at @p path: the same volume and file index. The path is
+    ///         opened for its attributes alone and shared with everything, so the probe never conflicts with
+    ///         a lease's share mode (it asks for no delete access); a claim, sharing nothing, makes it false.
+    [[nodiscard]] bool isFileAt(HANDLE handle, std::filesystem::path const& path) noexcept
+    {
+        auto* const named = ::CreateFileW(path.c_str(),
+                                          FILE_READ_ATTRIBUTES,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                          nullptr,
+                                          OPEN_EXISTING,
+                                          FILE_ATTRIBUTE_NORMAL,
+                                          nullptr);
+        if (named == INVALID_HANDLE_VALUE)
+            return false;
+        auto opened = BY_HANDLE_FILE_INFORMATION {};
+        auto atPath = BY_HANDLE_FILE_INFORMATION {};
+        auto const same = ::GetFileInformationByHandle(handle, &opened) != FALSE
+                          && ::GetFileInformationByHandle(named, &atPath) != FALSE
+                          && opened.dwVolumeSerialNumber == atPath.dwVolumeSerialNumber
+                          && opened.nFileIndexHigh == atPath.nFileIndexHigh
+                          && opened.nFileIndexLow == atPath.nFileIndexLow;
+        ::CloseHandle(named);
+        return same;
+    }
+
     /// A lease file held open; the handle's share mode is the lease.
     class HandleLease final: public ImageLease
     {
@@ -46,7 +72,10 @@ namespace
         HandleLease& operator=(HandleLease&&) = delete;
         ~HandleLease() override { ::CloseHandle(_handle); }
 
-        [[nodiscard]] uint64_t handle() const noexcept override { return vtpty::valueOf(_handle); }
+        [[nodiscard]] vtpty::CrossingHandle nativeHandle() const noexcept override
+        {
+            return vtpty::CrossingHandle::of(_handle);
+        }
 
       private:
         HANDLE _handle;
@@ -55,6 +84,29 @@ namespace
     class NativeImageLeases final: public ImageLeases
     {
       public:
+        /// @param inheritedLease The lease the predecessor handed over, which adoptInherited() takes over;
+        ///        none for none. It stops being inherited right away, so that no program this process starts
+        ///        carries it, whether or not anything adopts it.
+        explicit NativeImageLeases(vtpty::CrossingHandle inheritedLease): _inheritedLease { inheritedLease }
+        {
+            if (_inheritedLease.isNone())
+                return;
+            if (auto const set =
+                    vtpty::setInheritance(_inheritedLease.native(), vtpty::HandleInheritance::NotInherited);
+                !set)
+                errorLog()("the handed-over image lease stays inheritable: {}", set.error().message());
+        }
+        NativeImageLeases(NativeImageLeases const&) = delete;
+        NativeImageLeases& operator=(NativeImageLeases const&) = delete;
+        NativeImageLeases(NativeImageLeases&&) = delete;
+        NativeImageLeases& operator=(NativeImageLeases&&) = delete;
+        /// Lets go of a handed-over lease nothing adopted.
+        ~NativeImageLeases() override
+        {
+            if (!_inheritedLease.isNone())
+                ::CloseHandle(_inheritedLease.native());
+        }
+
         [[nodiscard]] std::expected<std::unique_ptr<ImageLease>, StagingError> hold(
             std::filesystem::path const& leaseFile) override
         {
@@ -116,11 +168,16 @@ namespace
             return LeaseState::Free;
         }
 
-        /// Nothing to adopt: a lease is never handed across an exec on Windows, which has none
-        /// (@see relocationFor).
-        [[nodiscard]] std::unique_ptr<ImageLease> adoptInherited(std::filesystem::path const&) override
+        /// The lease the predecessor handed over, once: a successor holds it as its own, so that the image it
+        /// runs stays leased throughout. Crossed for this process alone: no program it starts inherits it.
+        /// A handle that is no lease on @p leaseFile is kept, not adopted, as POSIX keeps such a descriptor.
+        [[nodiscard]] std::unique_ptr<ImageLease> adoptInherited(
+            std::filesystem::path const& leaseFile) override
         {
-            return nullptr;
+            if (_inheritedLease.isNone() || !isFileAt(_inheritedLease.native(), leaseFile))
+                return nullptr;
+            return std::make_unique<HandleLease>(
+                std::exchange(_inheritedLease, vtpty::CrossingHandle {}).native());
         }
 
       private:
@@ -133,23 +190,14 @@ namespace
                                        core::pathToUtf8(leaseFile),
                                        std::system_category().message(static_cast<int>(error))) });
         }
+
+        vtpty::CrossingHandle _inheritedLease; ///< What adoptInherited() takes over yet; none once it has.
     };
 } // namespace
 
-std::unique_ptr<ImageLeases> makeNativeImageLeases()
+std::unique_ptr<ImageLeases> makeNativeImageLeases(vtpty::CrossingHandle inheritedLease)
 {
-    return std::make_unique<NativeImageLeases>();
-}
-
-std::unique_ptr<ImageLease> adoptHandedOverLease(uint64_t handle)
-{
-    if (handle == 0)
-        return nullptr;
-    auto* const leaseHandle = vtpty::handleOf(handle);
-    // Crossed for this process alone: no program it starts inherits it.
-    if (auto const set = vtpty::setInheritance(leaseHandle, vtpty::HandleInheritance::NotInherited); !set)
-        errorLog()("the handed-over image lease stays inheritable: {}", set.error().message());
-    return std::make_unique<HandleLease>(leaseHandle);
+    return std::make_unique<NativeImageLeases>(inheritedLease);
 }
 
 } // namespace vthost

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/DaemonStart.hpp>
 
+#include <vtpty/PtyAdoption.hpp>
+
 #include <core/Utf8Path.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -126,7 +128,9 @@ TEST_CASE("handover-info reports whether the daemon's configuration loads and na
     using contour::cli::handoverReadiness;
     // Asked about no configuration, it reads none.
     auto const plain = handoverReadiness("1.2.3", {}, {});
-    CHECK(plain == vthost::handover::ownReadiness("1.2.3"));
+    CHECK(plain
+          == vthost::handover::ownReadiness(
+              "1.2.3", vthost::handover::reportedAdoption(vtpty::pseudoconsoleAdoptability())));
     CHECK_FALSE(plain.configProblem.has_value());
 
     auto const good = ConfigFile { OnlyWork };

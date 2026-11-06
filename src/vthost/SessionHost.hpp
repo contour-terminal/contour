@@ -450,8 +450,13 @@ class HostedSession
     ///         MockPty).
     [[nodiscard]] vtpty::Process const* process() const noexcept;
 
-    /// @return The PTY the session runs on: its process's, or the device itself where no process runs on it.
-    [[nodiscard]] vtpty::Pty const& pty() const noexcept;
+    /// @return The child process behind the session's PTY, to give it up; nullptr for a PTY that is no
+    ///         process.
+    [[nodiscard]] vtpty::Process* process() noexcept;
+
+    /// @return The device the session runs on, as its terminal reads it: whatever wraps the PTY (a process, a
+    ///         tap) forwards what a handover asks of it (vtpty::Pty::handover(), isClosed()).
+    [[nodiscard]] vtpty::Pty const& pty() const noexcept { return _terminal.device(); }
 
     /// @return Why the session ended, as the pump saw it once its PTY closed: valid from the moment the
     ///         onClosed callback runs, Exited before.
@@ -880,12 +885,12 @@ struct SessionHostConfig
     /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
     /// startup layout is realized only when it realizes none (or none is given).
     std::optional<WorkspaceRestore> restore {};
-    /// What the previous image of this daemon handed over as it exec'd this one in place (a live upgrade):
-    /// the host adopts every session's PTY and child, rebuilds each terminal from its captured state, and
-    /// restores the model and the object registry with the very ids they had; then applies @ref profiles to
-    /// every session as a configuration reload would (replaceProfiles()). Wins over @ref restore and
-    /// @ref startupLayout, neither of which is realized, and over @ref firstSessionId. Nothing in it is
-    /// refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
+    /// What the daemon this one took over from handed over in a live upgrade (an exec in place, or a
+    /// successor process): the host adopts every session's PTY and child, rebuilds each terminal from its
+    /// captured state, and restores the model and the object registry with the very ids they had; then
+    /// applies @ref profiles to every session as a configuration reload would (replaceProfiles()). Wins over
+    /// @ref restore and @ref startupLayout, neither of which is realized, and over @ref firstSessionId.
+    /// Nothing in it is refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
     std::optional<handover::HandoverImage> handover {};
     /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();

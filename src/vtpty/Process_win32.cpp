@@ -5,8 +5,8 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
+#include <vtpty/Win32Handle.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
-#include <vtpty/WindowsHandle.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -299,8 +299,8 @@ std::expected<void, AdoptError> Process::canAdopt(AdoptedChild const& child)
 {
     // Only a handle this process holds can be waited on; and only to the process it was handed over as, which
     // also rejects a handle value that names something else here.
-    if (child.processHandle == 0 || child.pid <= 0
-        || std::cmp_not_equal(GetProcessId(handleOf(child.processHandle)), child.pid))
+    if (child.processHandle.isNone() || child.pid <= 0
+        || std::cmp_not_equal(GetProcessId(child.processHandle.native()), child.pid))
         return std::unexpected(AdoptError::NoSuchChild);
     return {};
 }
@@ -321,7 +321,7 @@ std::expected<std::unique_ptr<Process>, AdoptError> Process::adopt(AdoptedChild 
                                              std::move(pty),
                                              std::make_shared<NoPlacement>(),
                                              child.hangupGrace);
-    auto* const handle = handleOf(child.processHandle);
+    auto* const handle = child.processHandle.native();
     // Crossed for this child alone: no program this process starts inherits it.
     if (auto const set = setInheritance(handle, HandleInheritance::NotInherited); !set)
         ptyLog()("An adopted child's handle stays inheritable: {}", set.error().message());
@@ -342,7 +342,7 @@ std::optional<AdoptedChild> Process::handoverChild() const
                           .args = _d->args,
                           .cwd = _d->cwd,
                           .hangupGrace = {},
-                          .processHandle = valueOf(_d->processInfo.hProcess) };
+                          .processHandle = CrossingHandle::of(_d->processInfo.hProcess) };
 }
 
 std::optional<AdoptedChild> Process::releaseChild()

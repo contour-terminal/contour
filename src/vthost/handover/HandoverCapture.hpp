@@ -5,6 +5,8 @@
 /// Captures a running daemon into a handover image, the last step before it execs its new binary in place
 /// (POSIX), or starts its successor (Windows).
 
+#include <vtpty/CrossingHandle.hpp>
+
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -44,7 +46,7 @@ namespace vthost::handover
 ///      after the capture. Checked.
 /// @param host The host to capture.
 /// @param listeners The listening sockets the new image keeps serving on.
-/// @param leaseFd The descriptor of the daemon image lease; -1 for none.
+/// @param lease The descriptor or handle of the daemon image lease, which the image names; none for none.
 /// @param daemonInstance Which run of the daemon this is, kept across the exec.
 /// @param release The release capturing it.
 /// @return The image; or why not: UnsupportedSession or ForeignConsoleHost before anything stopped, else
@@ -52,7 +54,7 @@ namespace vthost::handover
 [[nodiscard]] std::expected<HandoverImage, HandoverError> captureHandover(
     SessionHost& host,
     std::span<InheritedListener const> listeners,
-    int leaseFd,
+    vtpty::CrossingHandle lease,
     uint64_t daemonInstance,
     std::string_view release);
 

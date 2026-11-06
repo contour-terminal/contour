@@ -48,13 +48,19 @@ class ICompletionPort
     ///
     /// **Guarantee G4: a SOCKET is associated with exactly one port, and this is the
     /// only place it happens.** The association is a property of the handle and cannot
-    /// be undone, changed or queried: `CreateIoCompletionPort` on an already-associated
-    /// handle fails with `ERROR_INVALID_PARAMETER`, which is what it also answers for a
+    /// be queried, and `CreateIoCompletionPort` cannot change it: on an already-associated
+    /// handle it fails with `ERROR_INVALID_PARAMETER`, which is what it also answers for a
     /// closed handle and for half a dozen ordinary mistakes, so a caller reading that
     /// back would condemn a working connection. The port therefore keeps the record
     /// itself, refuses a second association by name, and asserts on it — two owners
     /// each believing they hold the association is a defect wherever it happens, and
     /// the loser then awaits completions that are delivered to the winner.
+    ///
+    /// Only `NtSetInformationFile` with `FileReplaceCompletionInformation` ends an
+    /// association short of closing the handle, and only adopting a listener does that
+    /// (core::net::adoptListener()). It is meant for a socket another process's port held,
+    /// but it cannot tell that port from another loop's in this process: whichever port
+    /// holds an adopted socket, adoption takes the socket over.
     ///
     /// @param handle The socket or file handle to associate (not owned).
     /// @return Nothing on success; @c NetErrorCode::BadHandle for an invalid handle,

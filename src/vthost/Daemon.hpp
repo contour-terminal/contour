@@ -60,7 +60,7 @@ struct LiveUpgradeServices
     handover::ImageHandoff& handoff; ///< What hands the image over to the target, which takes over.
     handover::ReadinessProbe& probe; ///< What asks the target whether it can take over.
     /// This process's command line, which the target runs again with its own program and the handover
-    /// argument (handover::HandoverArguments) in place of any it carried.
+    /// argument (handover::HandoverPrefix) in place of any it carried.
     std::vector<std::string> argv;
     /// What an upgrade naming no image runs: the daemon's own installed executable, which a package upgrade
     /// replaced; empty for none.
@@ -210,14 +210,15 @@ struct DaemonConfig
 /// an endpoint it can neither inherit nor bind, a TCP listener whose TLS cannot be built, are skipped, logged
 /// and told to the first client, and the adopted programs are served on whatever remains.
 /// @param config The daemon configuration.
-/// @param image What the previous image of this daemon handed over as it exec'd this one in place (a live
-///        upgrade); nullopt for a daemon that starts afresh. When set, the daemon is the same run going on:
-///        it states the image's instance in place of DaemonConfig::instance, serves on the listening sockets
-///        the image names instead of binding new ones (binding only those it names none for), takes every
-///        session over (SessionHostConfig::handover) in place of restoring DaemonConfig::persistence's
-///        snapshot or realizing DaemonConfig::startupLayout, applying DaemonConfig::profiles to them as a
-///        configuration reload would. Consumed: each part goes to what takes it over -- the listeners, the
-///        host, a listener's TLS -- and none is kept beside it, the TLS private keys it carries included.
+/// @param image What the daemon this one took over from handed over in a live upgrade (an exec in place, or a
+///        successor process); nullopt for a daemon that starts afresh. When set, the daemon is the same run
+///        going on: it states the image's instance in place of DaemonConfig::instance, serves on the
+///        listening sockets the image names instead of binding new ones (binding only those it names none
+///        for), takes every session over (SessionHostConfig::handover) in place of restoring
+///        DaemonConfig::persistence's snapshot or realizing DaemonConfig::startupLayout, applying
+///        DaemonConfig::profiles to them as a configuration reload would. Consumed: each part goes to what
+///        takes it over -- the listeners, the host, a listener's TLS -- and none is kept beside it, the TLS
+///        private keys it carries included.
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
 [[nodiscard]] int runDaemon(DaemonConfig const& config,
                             std::optional<handover::HandoverImage> image = std::nullopt);

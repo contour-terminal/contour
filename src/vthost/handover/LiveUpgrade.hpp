@@ -6,6 +6,7 @@
 /// listeners and its whole state, so that no program notices -- on POSIX by exec'ing it in its own process,
 /// on Windows by starting it as a successor process that takes over (ImageHandoff).
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #include <core/async/Task.hpp>
@@ -94,7 +95,7 @@ struct LiveUpgradeConfig
     /// (HandoverImage::upgradeGeneration).
     uint64_t upgradeGeneration = 0;
     /// This process's command line; the target runs it again, its program replaced by the target's and the
-    /// handover argument (HandoverArguments) appended in place of any it carried.
+    /// handover argument (HandoverPrefix) appended in place of any it carried.
     std::vector<std::string> argv;
     /// The executable an empty UpgradeTarget names: the daemon's own installed binary, which a package
     /// upgrade replaced; empty for none.
@@ -143,7 +144,8 @@ enum class UpgradeState : uint8_t
 ///  2. resolve the target inside the store and lease its image (NotStaged);
 ///  3. probe the target, off the loop (ReadinessProbe; TargetUnresponsive, FormatUnreadable, and
 ///     ConfigUnreadable for a target that cannot load the daemon's configuration or resolve its profile,
-///     when the daemon itself loaded it: RunningConfig);
+///     when the daemon itself loaded it: RunningConfig; TargetCannotAdoptTerminals for a target that says it
+///     cannot adopt pseudoconsoles, when a session runs on one);
 ///  4. refuse a session that could not cross (UnsupportedSession, ForeignConsoleHost, InFlightTailTooLarge;
 ///     checkCapturable());
 ///  5. announce the upgrade, write the workspace snapshot, hold every listener, close every client;
@@ -210,10 +212,10 @@ class LiveUpgrade
 
     /// Stops every session's pump, waits for the host to settle and captures it, trying again while a session
     /// is still starting. The caller rolls back what a refusal leaves stopped.
-    /// @param leaseFd The target image's lease descriptor, which the image names; -1 for none.
+    /// @param lease The target image's lease descriptor or handle, which the image names; none for none.
     /// @return The image, or why not.
     [[nodiscard]] core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> quiesceAndCapture(
-        int leaseFd);
+        vtpty::CrossingHandle lease);
 
     /// Waits until no client is attached and the loop has handled what the stopped pumps posted, closing the
     /// clients at once that are still attached half way through.

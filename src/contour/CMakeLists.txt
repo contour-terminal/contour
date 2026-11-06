@@ -1537,6 +1537,7 @@ if(CONTOUR_TESTING)
         session/LocalFileAction_test.cpp
         session/EndReason_test.cpp
         platform/CaptionHitTest_test.cpp
+        platform/ConsoleAttach_test.cpp
         platform/SystemBackdrop_test.cpp
         platform/FinishNotification_test.cpp
         platform/AppBundle_test.cpp

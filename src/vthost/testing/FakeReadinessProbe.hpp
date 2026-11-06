@@ -21,9 +21,10 @@ namespace vthost::testing
 class FakeReadinessProbe final: public handover::ReadinessProbe
 {
   public:
-    /// @param release The release the target reports, which reads every format this build writes.
+    /// @param release The release the target reports, which reads every format this build writes and adopts
+    ///        pseudoconsoles.
     explicit FakeReadinessProbe(std::string release = "0.9.1"):
-        answer { handover::ownReadiness(std::move(release)) }
+        answer { handover::ownReadiness(std::move(release), handover::PseudoconsoleAdoption::Able) }
     {
     }
 

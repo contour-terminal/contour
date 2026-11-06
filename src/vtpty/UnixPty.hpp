@@ -81,21 +81,27 @@ class UnixPty final: public Pty
     /// @name Live-upgrade hand-over (exec of the daemon keeps descriptors, not objects)
     /// @{
 
-    /// @return The descriptors that must cross an exec, with the terminal size. Only valid while started.
-    [[nodiscard]] InheritedPty handoverDescriptors() const;
+    /// @return The descriptors that must cross an exec, with the terminal size; AdoptError::BadDescriptor
+    ///         where there are none: before start(), or once closed.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> handover() const override;
 
     /// Gives up the descriptors without closing them and leaves this PTY closed, for an adopter in the
-    /// same process (the descriptors then belong to the returned value's adopter). Only while started
-    /// (Require): an unstarted or closed PTY has none to give.
-    /// @return What handoverDescriptors() returned.
-    [[nodiscard]] InheritedPty releaseDescriptors();
+    /// same process (the descriptors then belong to the returned value's adopter).
+    /// @return What handover() returned; AdoptError::BadDescriptor, nothing given up, where there are none.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> releaseHandover() override;
 
     /// Takes over the PTY a previous image left behind: no openpty(), no slave. The descriptors are made
     /// close-on-exec again and the master non-blocking.
-    /// @param inherited The descriptors and size from handoverDescriptors().
+    /// @param inherited The descriptors and size from handover().
     /// @return The running PTY; or AdoptError::BadDescriptor where a descriptor is not open or the master
     ///         is no terminal. On error no descriptor is closed.
     [[nodiscard]] static std::expected<std::unique_ptr<UnixPty>, AdoptError> adopt(InheritedPty inherited);
+
+    /// Asks whether adopt() would take @p inherited, without taking anything.
+    /// @param inherited The descriptors and size from handover().
+    /// @return Nothing; or AdoptError::BadDescriptor where the master or the fast pipe's reader is not open,
+    ///         or the master is no terminal.
+    [[nodiscard]] static std::expected<void, AdoptError> canAdopt(InheritedPty const& inherited);
     /// @}
 
   private:

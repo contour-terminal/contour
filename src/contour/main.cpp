@@ -32,8 +32,12 @@
 #include <system_error>
 
 #ifdef _WIN32
+    #include <contour/platform/ConsoleAttach.hpp>
+
     #include <core/WideString.hpp>
 
+    #include <algorithm>
+    #include <array>
     #include <iostream>
     #include <span>
     #include <vector>
@@ -105,10 +109,64 @@ void clearAll(Ts&&... streams)
     return arguments;
 }
 
+/// @param handle A valid handle.
+/// @return What GetFileType() reports for it.
+[[nodiscard]] contour::platform::StdFileType fileTypeOf(HANDLE handle) noexcept
+{
+    using contour::platform::StdFileType;
+    switch (GetFileType(handle))
+    {
+        case FILE_TYPE_DISK: return StdFileType::Disk;
+        case FILE_TYPE_CHAR: return StdFileType::Char;
+        case FILE_TYPE_PIPE: return StdFileType::Pipe;
+        default: return StdFileType::Unknown;
+    }
+}
+
+/// Classifies a standard handle as the process was started with it (@see
+/// contour::platform::classifyStdHandle).
+/// @param handle The handle GetStdHandle() returned.
+/// @return Its kind.
+[[nodiscard]] contour::platform::StdHandleKind stdHandleKindOf(HANDLE handle)
+{
+    using namespace contour::platform;
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+        return classifyStdHandle(HandleValidity::Invalid, ConsoleMode::Unavailable, StdFileType::Unknown);
+    return classifyStdHandle(HandleValidity::Valid,
+                             is_a_console(handle) ? ConsoleMode::Available : ConsoleMode::Unavailable,
+                             fileTypeOf(handle));
+}
+
+/// A standard handle as the process was started with it, and what attaching to the parent's console does
+/// with it.
+struct StartingStdHandle
+{
+    DWORD id = 0;            ///< Which one: STD_INPUT_HANDLE, STD_OUTPUT_HANDLE or STD_ERROR_HANDLE.
+    HANDLE handle = nullptr; ///< What GetStdHandle() returned before the attach.
+    contour::platform::AfterAttach action {}; ///< Whether the attach keeps it.
+};
+
 void tryAttachConsole()
 {
+    // AttachConsole() replaces each standard handle the process was not started with through
+    // STARTF_USESTDHANDLES, and cmd.exe hands its children their handles by inheritance alone. Remember
+    // the redirected ones so they survive the attach.
+    static constexpr auto StdHandles = std::array { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
+    auto starting = std::array<StartingStdHandle, StdHandles.size()> {};
+    std::ranges::transform(StdHandles, starting.begin(), [](DWORD id) {
+        auto* const handle = GetStdHandle(id);
+        return StartingStdHandle { .id = id,
+                                   .handle = handle,
+                                   .action = contour::platform::afterAttach(stdHandleKindOf(handle)) };
+    });
+
     if (AttachConsole(ATTACH_PARENT_PROCESS) == FALSE)
         return;
+
+    // A SetStdHandle() that fails leaves that stream on the console, a benign fallback.
+    for (auto const& stdHandle: starting)
+        if (stdHandle.action == contour::platform::AfterAttach::Restore)
+            SetStdHandle(stdHandle.id, stdHandle.handle);
 
     // We have a console window. Redirect input/output streams to that console's
     // low-level handles, so things that use stdio work later on.

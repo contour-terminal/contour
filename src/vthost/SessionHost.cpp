@@ -16,6 +16,7 @@
 #include <ranges>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -136,10 +137,12 @@ HostedSession::HostedSession(SessionId id,
 
 namespace
 {
-    /// @return @p device, or what it taps.
-    [[nodiscard]] vtpty::Pty const* untapped(vtpty::Pty const* device) noexcept
+    /// @return @p device, or what it taps; const as @p device is.
+    template <typename Device>
+    [[nodiscard]] Device* untapped(Device* device) noexcept
     {
-        auto const* const tapped = dynamic_cast<TappingPty const*>(device);
+        using Tapping = std::conditional_t<std::is_const_v<Device>, TappingPty const, TappingPty>;
+        auto* const tapped = dynamic_cast<Tapping*>(device);
         return tapped != nullptr ? &tapped->inner() : device;
     }
 } // namespace
@@ -149,11 +152,9 @@ vtpty::Process const* HostedSession::process() const noexcept
     return dynamic_cast<vtpty::Process const*>(untapped(&_terminal.device()));
 }
 
-vtpty::Pty const& HostedSession::pty() const noexcept
+vtpty::Process* HostedSession::process() noexcept
 {
-    auto const* const device = untapped(&_terminal.device());
-    auto const* const process = dynamic_cast<vtpty::Process const*>(device);
-    return process != nullptr ? process->pty() : *device;
+    return dynamic_cast<vtpty::Process*>(untapped(&_terminal.device()));
 }
 
 void HostedSession::pollForegroundProcess()

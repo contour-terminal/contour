@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <expected>
@@ -19,6 +20,7 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <semaphore>
 #include <string>
 #include <string_view>
@@ -121,15 +123,75 @@ TEST_CASE("a readiness report is one line of strict JSON", "[vthost][handover][u
     CHECK(decodeReadiness(encodeReadiness(report)) == report);
 }
 
+TEST_CASE("pseudoconsole adoption crosses the readiness JSON", "[vthost][handover][upgrade]")
+{
+    auto report =
+        ReadinessReport { .release = "0.9.0", .handoverFormats = { 2, 2 }, .terminalStateFormats = { 1, 1 } };
+    CHECK_FALSE(encodeReadiness(report).contains("adoptsPseudoconsoles"));
+    CHECK(decodeReadiness(encodeReadiness(report)) == report);
+
+    report.pseudoconsoleAdoption = PseudoconsoleAdoption::Able;
+    CHECK(encodeReadiness(report).contains(R"("adoptsPseudoconsoles":true)"));
+    CHECK(decodeReadiness(encodeReadiness(report)) == report);
+
+    report.pseudoconsoleAdoption = PseudoconsoleAdoption::Unable;
+    CHECK(encodeReadiness(report).contains(R"("adoptsPseudoconsoles":false)"));
+    CHECK(decodeReadiness(encodeReadiness(report)) == report);
+}
+
+TEST_CASE("a report without pseudoconsole adoption reads as unknown", "[vthost][handover][upgrade]")
+{
+    auto const decoded =
+        decodeReadiness(R"({"release":"0.9.0","handoverFormats":[2,2],"terminalStateFormats":[1,1]})");
+    REQUIRE(decoded.has_value());
+    CHECK_FALSE(decoded->pseudoconsoleAdoption.has_value());
+    CHECK(checkAdoptsPseudoconsoles(*decoded).has_value());
+}
+
+TEST_CASE("only a target that says it cannot adopt pseudoconsoles is refused for them",
+          "[vthost][handover][upgrade]")
+{
+    auto report = currentFormats();
+    CHECK(checkAdoptsPseudoconsoles(report).has_value());
+    report.pseudoconsoleAdoption = PseudoconsoleAdoption::Able;
+    CHECK(checkAdoptsPseudoconsoles(report).has_value());
+    report.pseudoconsoleAdoption = PseudoconsoleAdoption::Unable;
+    CHECK(checkAdoptsPseudoconsoles(report) == std::unexpected(UpgradeRefusal::TargetCannotAdoptTerminals));
+}
+
 TEST_CASE("this build reports the formats it reads", "[vthost][handover][upgrade]")
 {
-    auto const own = ownReadiness("1.2.3");
+    auto const own = ownReadiness("1.2.3", std::nullopt);
     CHECK(own.release == "1.2.3");
     CHECK(own.handoverFormats == std::pair { OldestReadableHandoverFormat, HandoverFormatVersion });
     CHECK(
         own.terminalStateFormats
         == std::pair { vtbackend::OldestReadableTerminalStateFormat, vtbackend::TerminalStateFormatVersion });
+    CHECK_FALSE(own.configProblem.has_value());
     CHECK(checkReadable(own).has_value());
+}
+
+TEST_CASE("this build reports the pseudoconsole adoption it is given", "[vthost][handover][upgrade]")
+{
+    struct Row
+    {
+        vtpty::PseudoconsoleAdoptability adoptability {};
+        std::optional<PseudoconsoleAdoption> reported {};
+    };
+    static constexpr auto Table = std::array {
+        Row { .adoptability = vtpty::PseudoconsoleAdoptability::NotApplicable, .reported = std::nullopt },
+        Row { .adoptability = vtpty::PseudoconsoleAdoptability::Unable,
+              .reported = PseudoconsoleAdoption::Unable },
+        Row { .adoptability = vtpty::PseudoconsoleAdoptability::Able,
+              .reported = PseudoconsoleAdoption::Able },
+    };
+    for (auto const& row: Table)
+    {
+        CAPTURE(static_cast<int>(row.adoptability));
+        CHECK(reportedAdoption(row.adoptability) == row.reported);
+        CHECK(ownReadiness("1.2.3", reportedAdoption(row.adoptability)).pseudoconsoleAdoption
+              == row.reported);
+    }
 }
 
 TEST_CASE("a later release's readiness report is read past keys it adds", "[vthost][handover][upgrade]")
@@ -162,6 +224,13 @@ TEST_CASE("a target that cannot read either format this build writes is unreadab
     auto older = currentFormats();
     older.terminalStateFormats = { 0, vtbackend::TerminalStateFormatVersion - 1 };
     CHECK(checkReadable(older) == std::unexpected(UpgradeRefusal::FormatUnreadable));
+}
+
+TEST_CASE("a target that reads only format 1 cannot take this build's image", "[vthost][handover][upgrade]")
+{
+    auto formatOne = currentFormats();
+    formatOne.handoverFormats = { 1, 1 };
+    CHECK(checkReadable(formatOne) == std::unexpected(UpgradeRefusal::FormatUnreadable));
 }
 
 TEST_CASE("a target that cannot run as the daemon's configuration says is refused",

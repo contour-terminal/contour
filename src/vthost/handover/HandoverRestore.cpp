@@ -5,14 +5,9 @@
 #include <vtbackend/state/TerminalStateCodec.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/PtyAdoption.hpp>
 
-#ifdef _WIN32
-    #include <vtpty/ConPty.hpp>
-    #include <vtpty/WindowsHandle.hpp>
-
-    #include <Windows.h>
-#else
-    #include <vtpty/UnixPty.hpp>
+#ifndef _WIN32
     #include <vtpty/UnixUtils.hpp>
 
     #include <sys/resource.h>
@@ -64,39 +59,6 @@ namespace
             for (auto const& tab: window.tabs)
                 visit(tab.root);
         return sessions;
-    }
-
-    /// @return The PTY @p pty names, adopted: on POSIX its master, on Windows its pseudoconsole.
-    [[nodiscard]] std::expected<std::unique_ptr<vtpty::Pty>, vtpty::AdoptError> adoptPty(
-        vtpty::InheritedPty const& pty)
-    {
-#ifdef _WIN32
-        return vtpty::ConPty::adopt(pty).transform([](std::unique_ptr<vtpty::ConPty> adopted) {
-            return std::unique_ptr<vtpty::Pty> { std::move(adopted) };
-        });
-#else
-        return vtpty::UnixPty::adopt(pty).transform([](std::unique_ptr<vtpty::UnixPty> adopted) {
-            return std::unique_ptr<vtpty::Pty> { std::move(adopted) };
-        });
-#endif
-    }
-
-    /// Closes every descriptor or handle of @p pty that is open: what a PTY that could not be adopted leaves,
-    /// which would otherwise stay open, unused -- while the program on it, never seeing a hangup, waited for
-    /// input forever. On POSIX the standard streams are never a PTY's (descriptorsToKeep() keeps them
-    /// whatever a corrupt image says), and are left alone.
-    void closeUnadoptedPty(vtpty::InheritedPty const& pty)
-    {
-#ifdef _WIN32
-        if (pty.conpty)
-            for (auto const handle: pty.conpty->handles())
-                if (handle != 0)
-                    CloseHandle(vtpty::handleOf(handle));
-#else
-        for (auto const fd: pty.descriptors())
-            if (fd > 2)
-                ::close(fd);
-#endif
     }
 } // namespace
 
@@ -161,10 +123,10 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     auto const abandon = [&] {
         if (session.device == handover::SessionDevice::ChildOnPty)
         {
-#ifdef _WIN32
-            if (session.child.processHandle != 0)
-                CloseHandle(vtpty::handleOf(session.child.processHandle));
-#else
+            vtpty::releaseUnadopted(session.child);
+#ifndef _WIN32
+            // Only POSIX leaves a child to reap, by its process id, and reaping it takes this host's loop: a
+            // poll until it exits, which vtpty has no loop to run.
             reapWhenExited(session.child.pid);
 #endif
         }
@@ -172,7 +134,7 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
             _objects.forget(session.id);
     };
 
-    auto pty = adoptPty(session.pty);
+    auto pty = vtpty::adoptPty(session.pty);
     if (!pty)
     {
         errorLog()(
@@ -180,7 +142,7 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
             "sees a hangup",
             session.id.value,
             std::to_underlying(pty.error()));
-        closeUnadoptedPty(session.pty);
+        vtpty::closeInherited(session.pty);
         abandon();
         return;
     }
@@ -368,46 +330,48 @@ namespace
         return values;
     }
 
+#ifndef _WIN32
     /// Whether a descriptor is none: a negative one.
     constexpr auto NoDescriptor = [](int fd) {
         return fd < 0;
     };
+#endif
 } // namespace
 
-std::vector<int> descriptorsNamedBy(HandoverImage const& image)
+std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
 {
-    auto named = std::vector<int> {};
-    for (auto const& session: image.sessions)
-        std::ranges::copy(session.pty.descriptors(), std::back_inserter(named));
-    for (auto const& listener: image.listeners)
-        named.push_back(listener.fd);
-    named.push_back(image.leaseFd);
-    return sortedUnique(std::move(named), NoDescriptor);
-}
-
-std::vector<vtpty::HandleValue> handlesNamedBy(HandoverImage const& image)
-{
-    auto named = std::vector<vtpty::HandleValue> {};
+    auto named = std::vector<vtpty::CrossingHandle> {};
     for (auto const& session: image.sessions)
     {
-        if (session.pty.conpty)
-            std::ranges::copy(session.pty.conpty->handles(), std::back_inserter(named));
+        std::ranges::copy(session.pty.handles(), std::back_inserter(named));
         named.push_back(session.child.processHandle);
     }
     for (auto const& listener: image.listeners)
-        named.push_back(listener.socket);
-    named.push_back(image.leaseHandle);
-    return sortedUnique(std::move(named), [](vtpty::HandleValue handle) { return handle == 0; });
+        named.push_back(listener.handle);
+    named.push_back(image.lease);
+    return sortedUnique(std::move(named), [](vtpty::CrossingHandle handle) { return handle.isNone(); });
 }
 
-std::vector<int> descriptorsToKeep(HandoverImage const& image)
+std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
+                                                         vtpty::CrossingHandle memoryHandle)
 {
-    auto kept = descriptorsNamedBy(image);
-    kept.insert(kept.end(), { 0, 1, 2 });
-    return sortedUnique(std::move(kept), NoDescriptor);
+    // Decoded where it was written, and unmapped as soon as it is.
+    auto image = memory.read(memoryHandle).and_then([](HandoverView const& view) {
+        return decodeHandover(view.bytes());
+    });
+    memory.discard(memoryHandle);
+    return image;
 }
 
 #ifndef _WIN32
+std::vector<int> descriptorsToKeep(HandoverImage const& image)
+{
+    auto kept = std::vector<int> { 0, 1, 2 };
+    for (auto const handle: handlesNamedBy(image))
+        kept.push_back(handle.native());
+    return sortedUnique(std::move(kept), NoDescriptor);
+}
+
 namespace
 {
     /// Closes descriptors @p first to @p last, both included; nothing when @p first is past @p last.
@@ -431,21 +395,9 @@ namespace
         return static_cast<int>(limit.rlim_cur) - 1;
     }
 } // namespace
-#endif
-
-std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory, int fd)
-{
-    auto image =
-        memory.read(fd).and_then([](std::vector<uint8_t> const& bytes) { return decodeHandover(bytes); });
-    memory.discard(fd);
-    return image;
-}
 
 std::size_t closeListeningSockets()
 {
-#ifdef _WIN32
-    return 0;
-#else
     auto closed = std::size_t { 0 };
     // Above the standard streams, up to the descriptor limit: the old image's listeners are among the first
     // descriptors it opened, but nothing says how far up the rest lie.
@@ -457,14 +409,12 @@ std::size_t closeListeningSockets()
         ++closed;
     }
     return closed;
-#endif
 }
 
 void closeDescriptorsExcept(std::span<int const> keep)
 {
     Require(std::ranges::is_sorted(keep) && std::ranges::adjacent_find(keep) == keep.end()
             && (keep.empty() || keep.front() >= 0));
-#ifndef _WIN32
     // The gaps between kept descriptors are a few numbers each; everything above the last goes at once.
     auto next = 0;
     for (auto const fd: keep)
@@ -474,7 +424,7 @@ void closeDescriptorsExcept(std::span<int const> keep)
     }
     // Above the last: as a spawned child's are (close_range(), else /proc/self/fd, else every number).
     vtpty::util::closeDescriptorsAbove(next - 1, vtpty::util::openDescriptorLimit());
-#endif
 }
+#endif
 
 } // namespace vthost::handover

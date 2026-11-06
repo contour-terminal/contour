@@ -61,6 +61,9 @@ class UnixListener final: public IListener
     /// @return The socket file path this listener is bound to.
     [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
+    /// @copydoc IListener::nativeHandle
+    [[nodiscard]] platform::NativeHandle nativeHandle() const noexcept override { return _fd; }
+
   protected:
     /// Stops accepting and unlinks the socket file: @c closeWith with @c FdWakePolicy::Resume.
     void doClose() noexcept override;

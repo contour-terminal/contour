@@ -761,7 +761,9 @@ TEST_CASE("Process.adopt.reportsTheExitStatusOfItsChild", "[process][handover]")
     REQUIRE(original.start().has_value());
     auto* const unixPty = dynamic_cast<vtpty::UnixPty*>(&original.pty());
     REQUIRE(unixPty != nullptr);
-    auto const inherited = unixPty->releaseDescriptors();
+    auto const released = unixPty->releaseHandover();
+    REQUIRE(released.has_value());
+    auto const& inherited = *released;
     auto child = original.releaseChild();
     REQUIRE(child.has_value());
     CHECK_FALSE(original.alive());

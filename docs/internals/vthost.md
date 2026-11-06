@@ -1543,7 +1543,7 @@ hold the listeners' accepting and close every connection; the requester is answe
 at a byte boundary; what is unread stays in the kernel. (4) Encode the handover image into an anonymous
 memory object (`memfd_create`; never a named file, since scrollback may hold secrets). (5) Clear
 close-on-exec on exactly the descriptors that cross (PTY masters, listening sockets, the image lease, the
-handover object) and `exec` with `--handover-fd`. A child's pid needs no descriptor: an unreaped child keeps
+handover object) and `exec` with `--handover=fd=N`. A child's pid needs no descriptor: an unreaped child keeps
 its pid, so the new image reaps and reads its status. (6) If the `exec` fails, close-on-exec is restored,
 the pumps and listeners resume and the requester is told (`ExecFailedResult`); the old daemon carries on. (7)
 The new image decodes the handover, rebuilds the sessions over the inherited descriptors and serves as the
@@ -1585,7 +1585,18 @@ that has it. `DaemonDriftModel` holds the outcome for QML; `ContourGuiApp` runs 
 
 **The handoff is the platform's.** Everything up to the encoded image is one code path; the step that hands
 it over is an `handover::ImageHandoff`. `ExecHandoff` is the POSIX one above: keep the descriptors, write the
-memory object, `exec` with `--handover-fd`. `SuccessorHandoff` is Windows'.
+memory object, `exec` with `--handover=fd=N`. `SuccessorHandoff` is Windows'. The new daemon takes over through
+one hidden option, `--handover=TOKEN`, and an `handover::ImageReceiver` (`makeNativeImageReceiver()`) that reads
+the token its platform writes: `fd=N` on POSIX, `handles=M,R,C,P` on Windows. A token it cannot take starts a
+POSIX daemon afresh, closing nothing (an image named but unreadable closes the inherited listeners first), and
+ends a Windows successor without serving, which leaves the old daemon to serve on.
+
+**A PTY says what of it crosses.** The capture asks each session's device for `vtpty::Pty::handover()`: a
+`UnixPty` names its master and fast pipe, a `ConPty` its pseudoconsole's handles, and any other device (a
+channel, SSH) refuses with `AdoptError::Unsupported`, which the capture reports as `UnsupportedSession`. The
+new image adopts it with `vtpty::adoptPty()`, and closes one it could not adopt with `vtpty::closeInherited()`,
+letting go of its child with `vtpty::releaseUnadopted()`. So vthost's handover code branches on no platform for
+the PTY, and a new kind of PTY is a change to vtpty alone.
 
 **Windows.** There is no `exec` that keeps the process, so the old daemon starts the target as a *successor
 process* and hands it over at one **commit point**:
@@ -1593,7 +1604,7 @@ process* and hands it over at one **commit point**:
 1. The image goes into an unnamed, pagefile-backed file mapping (`HandoverMemory_win32.cpp`), never a file.
    The successor is started detached (`SuccessorLauncher`), inheriting through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`
    exactly the handles the image names (`handlesNamedBy()`: each pseudoconsole's five, each shell's process
-   handle, each listening socket, the image lease) and four more, named by `--handover-handles=M,R,C,P`:
+   handle, each listening socket, the image lease) and four more, named by `--handover=handles=M,R,C,P`:
    the mapping, a `ready` and a `commit` event, and the old daemon's own process handle.
 2. The successor reads the image, checks it can run the sessions' pseudoconsoles here, and sets `ready`
    (`receiveHandover()`). Until then it has touched no PTY and no listener.
@@ -1623,7 +1634,7 @@ Between the capture and the commit, a program may exit. Its exit watcher would c
 free handles the image names by value, for the next handle the daemon makes -- the mapping, the handshake's
 events -- to take their numbers. While a session is quiesced (`interruptWrites()`) `ConPty::close()` is
 therefore held until the upgrade rolls back (`allowWrites()`), and dropped once the handles are handed on
-(`releaseHandles()`); an exited program is handed over like a running one, and the successor sees it exit.
+(`releaseHandover()`); an exited program is handed over like a running one, and the successor sees it exit.
 
 What makes the handles adoptable:
 
@@ -1635,11 +1646,14 @@ What makes the handles adoptable:
   PATH refuses the upgrade (`UpgradeRefusal::ForeignConsoleHost`) before anything is stopped. The cell size in
   pixels, which a pseudoconsole is never told, is kept by `ConPty` (`pixelSize()`) to cross with it.
 - **The listeners.** A socket is bound to one I/O completion port for as long as it is open, in every process
-  that holds it; the successor's loop cannot bind an inherited listener until `releaseCompletionPort()`
-  (`FileReplaceCompletionInformation`, Windows 8.1+) lets it go. It does so after the commit point, never
-  before: the old daemon still accepts through that port if it rolls back.
-- **The image lease** crosses as `HandoverImage::leaseHandle`, kept by the successor until it holds a lease of
-  its own (`adoptHandedOverLease()`), so a prune cannot remove the image in between.
+  that holds it, so the successor's loop cannot bind an inherited listener as it is. core-cpp's
+  `core::net::adoptListener` adopts it: it releases the socket's completion-port binding
+  (`FileReplaceCompletionInformation`, Windows 8.1+), clears its inheritance, and leaves a socket it refuses to
+  its caller. The successor adopts its listeners after the commit point, never before: the old daemon still
+  accepts through that port if it rolls back.
+- **The image lease** crosses as `HandoverImage::lease`, and the successor holds it as its own:
+  `makeNativeImageLeases()` is handed it, and its first `adoptInherited()` takes it over, so a prune cannot
+  remove the image in between.
 - **A quiesce never blocks on a program that reads nothing.** `ConPty::interruptWrites()` ends a write the
   pseudoconsole is not reading. The input pipe's end is overlapped, and a write never asks for more than the
   pipe has room for (`FilePipeLocalInformation`'s `WriteQuotaAvailable`); only a full pipe gets a one-byte

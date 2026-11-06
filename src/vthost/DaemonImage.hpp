@@ -9,6 +9,7 @@
 /// place and leased through the sibling file `<imagesRoot>/<release>-<fingerprint>.lease`. Whoever
 /// runs from an image, or is about to, holds its lease; prune() removes only images nobody holds.
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #include <core/platform/FileSystem.hpp>
@@ -154,24 +155,12 @@ class ImageLease
         return std::make_error_code(std::errc::not_supported);
     }
 
-    /// @return The descriptor the lease is held through, which a live upgrade names in its handover image so
-    ///         that the new image keeps it open; -1 for a lease that is no descriptor (Windows, a fake).
-    [[nodiscard]] virtual int descriptor() const noexcept { return -1; }
-
-    /// @return On Windows, the handle the lease is held through, as a successor inherits it (a HANDLE widened
-    ///         to an integer), which a live upgrade names in its handover image so that the image stays
-    ///         leased until the successor holds a lease of its own; 0 elsewhere, and for a fake.
-    [[nodiscard]] virtual uint64_t handle() const noexcept { return 0; }
+    /// @return The descriptor (POSIX) or handle (Windows) the lease is held through, which a live upgrade
+    ///         names in its handover image: so that the new image keeps it open across the exec on POSIX, and
+    ///         so that the image stays leased until the successor holds a lease of its own on Windows. None
+    ///         for a lease that is no operating-system lock.
+    [[nodiscard]] virtual vtpty::CrossingHandle nativeHandle() const noexcept { return {}; }
 };
-
-#ifdef _WIN32
-/// Takes over the lease on an image a Windows daemon handed its successor (HandoverImage::leaseHandle), which
-/// keeps the image leased until the successor has taken its own (leaseRunningImage()). POSIX has none: a
-/// lease crosses the exec there, and is adopted by its descriptor (ImageLeases::adoptInherited()).
-/// @param handle The lease's handle, as ImageLease::handle() gave it; 0 for none.
-/// @return The lease; null for none.
-[[nodiscard]] std::unique_ptr<ImageLease> adoptHandedOverLease(uint64_t handle);
-#endif
 
 /// Takes and inspects image leases.
 ///
@@ -238,8 +227,16 @@ class SymbolicLinks
 /// claim() is `flock(LOCK_EX | LOCK_NB)`, and unlinking the lease file under it is what tells a
 /// waiting hold() to start again. Windows: hold() opens the lease file sharing read and write but not
 /// delete; claim() opens it sharing nothing, with delete access, and deletes it on close.
+///
+/// adoptInherited() takes over the lease a handover image names (HandoverImage::lease), once: on POSIX the
+/// descriptor that crossed the exec, checked to be a lease on the file asked about; on Windows, which has no
+/// exec, the handle the successor inherited, checked to be open on the file asked about. Where none was named
+/// -- on POSIX the exec that moves a daemon onto a staged image hands no image over -- POSIX finds a lease
+/// that crossed by asking every descriptor.
+/// @param inheritedLease The lease the predecessor handed over, as ImageLease::nativeHandle() gave it, which
+///        the first adoptInherited() takes over; none for none.
 /// @return The production leases.
-[[nodiscard]] std::unique_ptr<ImageLeases> makeNativeImageLeases();
+[[nodiscard]] std::unique_ptr<ImageLeases> makeNativeImageLeases(vtpty::CrossingHandle inheritedLease = {});
 
 /// Where a StagedImage's executable lies.
 enum class ImageOrigin : uint8_t

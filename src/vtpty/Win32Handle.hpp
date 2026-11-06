@@ -2,12 +2,10 @@
 #pragma once
 
 /// @file
-/// Windows handle plumbing shared by vtpty and the modules above it: owning a handle, carrying one to another
-/// process as a number, the last error, a process attribute list, and ntdll's functions.
+/// Windows handle plumbing shared by vtpty and the modules above it: owning a handle, the last error, a
+/// process attribute list, and ntdll's functions. A handle crosses to another process as a CrossingHandle.
 
 #ifdef _WIN32
-
-    #include <vtpty/InheritedPty.hpp>
 
     #include <cstddef>
     #include <cstdint>
@@ -21,6 +19,17 @@
 
 namespace vtpty
 {
+
+/// @param handle A handle of this process; null or invalid ones included.
+/// @return Whether @p handle is a pipe or a file: a standard stream redirected away from any console, which a
+///         process without one can go on writing to.
+[[nodiscard]] inline bool isPipeOrFile(HANDLE handle) noexcept
+{
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+        return false;
+    auto const type = GetFileType(handle);
+    return type == FILE_TYPE_PIPE || type == FILE_TYPE_DISK;
+}
 
 /// Owns a Win32 HANDLE and closes it on destruction.
 class UniqueHandle
@@ -73,18 +82,6 @@ class UniqueHandle
 [[nodiscard]] inline std::error_code lastError() noexcept
 {
     return errorFrom(GetLastError());
-}
-
-/// @return @p value, a handle as another process inherits it (HandleValue), as the handle it names.
-[[nodiscard]] inline HANDLE handleOf(HandleValue value) noexcept
-{
-    return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(value));
-}
-
-/// @return @p handle as the number another process inherits it under.
-[[nodiscard]] inline HandleValue valueOf(HANDLE handle) noexcept
-{
-    return static_cast<HandleValue>(reinterpret_cast<uintptr_t>(handle));
 }
 
 /// Whether a process this one starts with a handle in its handle list inherits it.

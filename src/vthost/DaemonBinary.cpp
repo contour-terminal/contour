@@ -151,16 +151,21 @@ std::expected<std::unique_ptr<ImageLease>, StagingError> leaseRunningImage(Daemo
     return lease;
 }
 
-NativeDaemonImages::NativeDaemonImages(DaemonImageStoreConfig config, core::platform::FileSystem const& fs):
+NativeDaemonImages::NativeDaemonImages(DaemonImageStoreConfig config,
+                                       core::platform::FileSystem const& fs,
+                                       vtpty::CrossingHandle inheritedLease):
     _inputs { config.inputs },
-    _leases { makeNativeImageLeases() },
+    _leases { makeNativeImageLeases(inheritedLease) },
     _links { makeNativeSymbolicLinks() },
     _store { std::move(config), fs, *_leases, *_links }
 {
 }
 
 std::expected<std::unique_ptr<NativeDaemonImages>, std::error_code> NativeDaemonImages::ofThisProcess(
-    core::Environment const& env, core::platform::FileSystem const& fs, std::string releaseVersion)
+    core::Environment const& env,
+    core::platform::FileSystem const& fs,
+    std::string releaseVersion,
+    vtpty::CrossingHandle inheritedLease)
 {
     return currentExecutablePath().transform([&](fs::path executable) {
         auto config = ownImageStoreConfig(env,
@@ -171,7 +176,7 @@ std::expected<std::unique_ptr<NativeDaemonImages>, std::error_code> NativeDaemon
         config.imagesRoot = fs.weaklyCanonical(config.imagesRoot);
         config.inputs.appImage = config.inputs.appImage.transform(
             [&](fs::path const& appImage) { return fs.weaklyCanonical(appImage); });
-        return std::make_unique<NativeDaemonImages>(std::move(config), fs);
+        return std::make_unique<NativeDaemonImages>(std::move(config), fs, inheritedLease);
     });
 }
 

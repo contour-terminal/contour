@@ -1,4 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+
+// clang-format off
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <windows.h>
+#else
+    #include <sys/file.h>
+
+    #include <fcntl.h>
+    #include <unistd.h>
+#endif
+// clang-format on
+
+#include <vtpty/CrossingHandle.hpp>
+
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -724,6 +739,118 @@ TEST_CASE("an image is staged, reused and pruned on the real file system", "[vth
     CHECK(newer.prune() == 1);
     CHECK_FALSE(fs::exists(image));
     CHECK_FALSE(fs::exists(older.leaseFileOf(image)));
+}
+#endif
+
+#ifdef _WIN32
+TEST_CASE("a handed-over lease is adopted once", "[vthost][image][native-lease]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-lease" };
+    auto const leaseFile = temp.path() / "img.lease";
+    // As the predecessor's hold() opened it.
+    auto* const handle = ::CreateFileW(leaseFile.c_str(),
+                                       GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                       nullptr,
+                                       OPEN_ALWAYS,
+                                       FILE_ATTRIBUTE_NORMAL,
+                                       nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+
+    auto const leases = vthost::makeNativeImageLeases(vtpty::CrossingHandle::of(handle));
+    auto adopted = leases->adoptInherited(leaseFile);
+    REQUIRE(adopted != nullptr);
+    CHECK(adopted->nativeHandle() == vtpty::CrossingHandle::of(handle));
+    CHECK(leases->probe(leaseFile) == LeaseState::Held);
+    CHECK(leases->adoptInherited(leaseFile) == nullptr);
+    adopted.reset(); // closes the handle
+    CHECK(leases->probe(leaseFile) == LeaseState::Free);
+}
+
+TEST_CASE("a handed-over lease is not adopted for another file", "[vthost][image][native-lease]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-lease" };
+    auto const leaseFile = temp.path() / "img.lease";
+    auto const otherFile = temp.path() / "other.lease";
+    REQUIRE(::CloseHandle(::CreateFileW(
+        otherFile.c_str(), GENERIC_READ, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)));
+    // As the predecessor's hold() opened it.
+    auto* const handle = ::CreateFileW(leaseFile.c_str(),
+                                       GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                       nullptr,
+                                       OPEN_ALWAYS,
+                                       FILE_ATTRIBUTE_NORMAL,
+                                       nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+
+    auto const leases = vthost::makeNativeImageLeases(vtpty::CrossingHandle::of(handle));
+    CHECK(leases->adoptInherited(otherFile) == nullptr);
+    CHECK(leases->probe(leaseFile) == LeaseState::Held); // kept, not closed
+    auto adopted = leases->adoptInherited(leaseFile);
+    REQUIRE(adopted != nullptr);
+    CHECK(adopted->nativeHandle() == vtpty::CrossingHandle::of(handle));
+}
+
+TEST_CASE("a handed-over lease is not inherited any further", "[vthost][image][native-lease]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-lease" };
+    auto const leaseFile = temp.path() / "img.lease";
+    auto security = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                          .lpSecurityDescriptor = nullptr,
+                                          .bInheritHandle = TRUE };
+    // As the successor inherited it.
+    auto* const handle = ::CreateFileW(leaseFile.c_str(),
+                                       GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                       &security,
+                                       OPEN_ALWAYS,
+                                       FILE_ATTRIBUTE_NORMAL,
+                                       nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+
+    auto const leases = vthost::makeNativeImageLeases(vtpty::CrossingHandle::of(handle));
+    auto flags = DWORD { 0 };
+    REQUIRE(::GetHandleInformation(handle, &flags));
+    CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
+}
+#else
+TEST_CASE("a handed-over lease is adopted once", "[vthost][image][native-lease]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-lease" };
+    auto const leaseFile = temp.path() / "img.lease";
+    // Two leases that crossed an exec, as the image before it left them: inheritable, locked shared. Only the
+    // one the handover image names is asked about.
+    auto const unnamed = ::open(leaseFile.c_str(), O_RDWR | O_CREAT, 0600);
+    REQUIRE(unnamed != -1);
+    auto const named = ::open(leaseFile.c_str(), O_RDWR, 0600);
+    REQUIRE(named != -1);
+    REQUIRE(::flock(named, LOCK_SH) == 0);
+
+    auto const leases = vthost::makeNativeImageLeases(vtpty::CrossingHandle::of(named));
+    auto adopted = leases->adoptInherited(leaseFile);
+    REQUIRE(adopted != nullptr);
+    CHECK(adopted->nativeHandle() == vtpty::CrossingHandle::of(named));
+    CHECK((::fcntl(named, F_GETFD) & FD_CLOEXEC) != 0);
+    CHECK(leases->probe(leaseFile) == LeaseState::Held);
+    // Once: no descriptor is asked about after it, not even an inheritable lease on the same file.
+    CHECK(leases->adoptInherited(leaseFile) == nullptr);
+    CHECK((::fcntl(unnamed, F_GETFD) & FD_CLOEXEC) == 0);
+    ::close(unnamed);
+    adopted.reset(); // closes the descriptor
+    CHECK(leases->probe(leaseFile) == LeaseState::Free);
+}
+
+TEST_CASE("a named lease that is no lease on the file is not adopted", "[vthost][image][native-lease]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-lease" };
+    auto const leaseFile = temp.path() / "img.lease";
+    auto const other = ::open((temp.path() / "other").c_str(), O_RDWR | O_CREAT, 0600);
+    REQUIRE(other != -1);
+    auto const leases = vthost::makeNativeImageLeases(vtpty::CrossingHandle::of(other));
+    CHECK(leases->adoptInherited(leaseFile) == nullptr);
+    CHECK((::fcntl(other, F_GETFD) & FD_CLOEXEC) == 0); // left as it was
+    ::close(other);
 }
 #endif
 

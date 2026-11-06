@@ -9,6 +9,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/platform/Types.hpp>
 
 #include <expected>
 #include <memory>
@@ -62,6 +63,18 @@ class IListener
     /// is the kernel's answer. Spelled `localPort` in contour; see the CHANGELOG's Breaking
     /// section for the migration.
     [[nodiscard]] virtual std::uint16_t boundPort() const noexcept = 0;
+
+    /// @return The handle this listener accepts on -- a descriptor on POSIX, a `SOCKET` on Windows
+    ///         -- or @c platform::InvalidHandle once it is closed, or where there is none (an
+    ///         in-memory listener). Borrowed: the listener still owns and closes it.
+    ///
+    /// For a caller that hands the listening socket to another process, as a live upgrade does,
+    /// and must not reach into a platform type to find it. Not pure, so a listener with no handle
+    /// of its own (a test double, a decorator) need not answer.
+    [[nodiscard]] virtual platform::NativeHandle nativeHandle() const noexcept
+    {
+        return platform::InvalidHandle;
+    }
 
     /// Stops accepting. A pending @c accept() resolves with @c NetErrorCode::Cancelled.
     ///

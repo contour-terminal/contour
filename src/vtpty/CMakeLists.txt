@@ -29,6 +29,7 @@ set(vtpty_SOURCES
     ProcessPlacement.cpp
     ProgramLookup.cpp
     Pty.cpp
+    PtyAdoption.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
     SshFailureMessage.cpp
@@ -39,6 +40,7 @@ set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
     CommandLine.hpp
+    CrossingHandle.hpp
     DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
     EnvironmentBlock.hpp
     ErrnoText.hpp
@@ -53,12 +55,13 @@ set(vtpty_HEADERS
     ProcessPlacement.hpp
     ProgramLookup.hpp
     Pty.hpp
+    PtyAdoption.hpp
     SandboxInfo.hpp
     ScopeBus.hpp
     SpawnLadder.hpp
     SshFailureMessage.hpp
     WindowsCommandLine.hpp
-    WindowsHandle.hpp
+    Win32Handle.hpp
 )
 
 set(_include_SshSession_module FALSE)
@@ -152,12 +155,14 @@ if(VTPTY_TESTING)
         ChannelPty_test.cpp
         CommandCapture_test.cpp
         CommandLine_test.cpp
+        CrossingHandle_test.cpp
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
         ImageSize_test.cpp
         MockPty_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
+        PtyAdoption_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
         WindowsCommandLine_test.cpp

@@ -3,9 +3,9 @@
 
 #ifdef _WIN32
 
-    #include <vtpty/ConPty.hpp>
     #include <vtpty/Process.hpp>
-    #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/PtyAdoption.hpp>
+    #include <vtpty/Win32Handle.hpp>
 
     #include <core/WideString.hpp>
 
@@ -33,10 +33,9 @@ namespace vthost::handover
 
 namespace
 {
-    using vtpty::handleOf;
+    using vtpty::CrossingHandle;
     using vtpty::lastError;
     using vtpty::UniqueHandle;
-    using vtpty::valueOf;
 
     /// @return @p timeout as a wait takes it, which never waits INFINITE for a finite one.
     [[nodiscard]] DWORD waitTimeOf(std::chrono::milliseconds timeout) noexcept
@@ -101,7 +100,8 @@ namespace
     class DiscardedImage
     {
       public:
-        DiscardedImage(HandoverMemory& memory, int mapping) noexcept: _memory { memory }, _mapping { mapping }
+        DiscardedImage(HandoverMemory& memory, CrossingHandle mapping) noexcept:
+            _memory { memory }, _mapping { mapping }
         {
         }
         DiscardedImage(DiscardedImage const&) = delete;
@@ -112,18 +112,8 @@ namespace
 
       private:
         HandoverMemory& _memory;
-        int _mapping;
+        CrossingHandle _mapping;
     };
-
-    /// @return Whether @p handle is a standard stream a detached process can go on writing to: a file or a
-    ///         pipe, not a console, which the successor has none of.
-    [[nodiscard]] bool isPassableStream(HANDLE handle) noexcept
-    {
-        if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
-            return false;
-        auto const type = GetFileType(handle);
-        return type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE;
-    }
 
     /// Makes @p handles inheritable for as long as it lives, and restores how each was then: what limits them
     /// to the one launch that names them.
@@ -169,7 +159,7 @@ namespace
         [[nodiscard]] std::expected<SuccessorProcess, std::error_code> launch(
             std::filesystem::path const& executable,
             std::span<std::string const> argv,
-            std::span<vtpty::HandleValue const> inherited) override
+            std::span<CrossingHandle const> inherited) override
         {
             auto commandLine = core::toUtf16(joinCommandLine(argv));
             if (!commandLine)
@@ -177,11 +167,12 @@ namespace
 
             // The standard streams cross where they lead somewhere a detached process can write to: a daemon
             // run with its output redirected logs on into the same place.
-            auto handles = std::ranges::to<std::vector>(std::views::transform(inherited, handleOf));
+            auto handles =
+                std::ranges::to<std::vector>(std::views::transform(inherited, &CrossingHandle::native));
             auto* const output = GetStdHandle(STD_OUTPUT_HANDLE);
             auto* const error = GetStdHandle(STD_ERROR_HANDLE);
             for (auto* const stream: { output, error })
-                if (isPassableStream(stream))
+                if (vtpty::isPipeOrFile(stream))
                     handles.push_back(stream);
             std::ranges::sort(handles);
             auto const repeated = std::ranges::unique(handles);
@@ -197,8 +188,9 @@ namespace
             auto startup = STARTUPINFOEXW {};
             startup.StartupInfo.cb = sizeof(startup);
             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-            startup.StartupInfo.hStdOutput = isPassableStream(output) ? output : nullptr;
-            startup.StartupInfo.hStdError = isPassableStream(error) ? error : nullptr;
+            // A file or a pipe, never a console, which the successor has none of.
+            startup.StartupInfo.hStdOutput = vtpty::isPipeOrFile(output) ? output : nullptr;
+            startup.StartupInfo.hStdError = vtpty::isPipeOrFile(error) ? error : nullptr;
             startup.lpAttributeList = attributes->get();
             auto info = PROCESS_INFORMATION {};
             auto const started = [&] {
@@ -218,13 +210,13 @@ namespace
             if (started == FALSE)
                 return std::unexpected(lastError());
             CloseHandle(info.hThread);
-            return SuccessorProcess { .process = valueOf(info.hProcess),
+            return SuccessorProcess { .process = CrossingHandle::of(info.hProcess),
                                       .pid = static_cast<std::int64_t>(info.dwProcessId) };
         }
 
         void terminate(SuccessorProcess const& successor) override
         {
-            auto* const process = handleOf(successor.process);
+            auto* const process = successor.process.native();
             TerminateProcess(process, ERROR_PROCESS_ABORTED);
             // One that does not end still cannot take over: it gives up waiting for the commit
             // (SuccessorTakeoverConfig::commitWait).
@@ -264,9 +256,9 @@ namespace
     [[nodiscard]] Takeover takeOverFromPredecessor(SuccessorHandles const& handles,
                                                    SuccessorTakeoverConfig const& config)
     {
-        auto const ready = UniqueHandle { handleOf(handles.ready) };
-        auto const commit = UniqueHandle { handleOf(handles.commit) };
-        auto const predecessor = UniqueHandle { handleOf(handles.predecessor) };
+        auto const ready = UniqueHandle { handles.ready.native() };
+        auto const commit = UniqueHandle { handles.commit.native() };
+        auto const predecessor = UniqueHandle { handles.predecessor.native() };
         if (SetEvent(ready.get()) == FALSE)
             return Takeover::Impossible;
 
@@ -290,9 +282,7 @@ namespace
     /// @return Why @p session cannot be adopted in this process; nothing where it can.
     [[nodiscard]] std::optional<std::string_view> unadoptable(HandoverSession const& session)
     {
-        if (!session.pty.conpty)
-            return "its pseudoconsole's handles did not cross";
-        if (auto const adoptable = vtpty::ConPty::canAdopt(*session.pty.conpty); !adoptable)
+        if (auto const adoptable = vtpty::canAdoptPty(session.pty); !adoptable)
             return adoptable.error() == vtpty::AdoptError::ForeignConsoleHost
                        ? "the conpty.dll this release ships is not beside it"
                        : "its pseudoconsole's handles did not cross";
@@ -309,10 +299,12 @@ std::unique_ptr<SuccessorLauncher> makeNativeSuccessorLauncher()
 
 ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
                                        std::vector<std::string> argv,
-                                       HandoverImage const& image,
-                                       std::span<uint8_t const> bytes)
+                                       std::vector<vtpty::CrossingHandle> crossing,
+                                       std::vector<uint8_t> bytes)
 {
-    auto const mapping = _memory.write(bytes);
+    // The encoded image goes as soon as the mapping holds it: it would otherwise live on through the wait
+    // for the successor, beside the mapping and the successor's view of it.
+    auto const mapping = _memory.write(std::exchange(bytes, {}));
     if (!mapping)
         return ExecFailure { .cause = std::make_error_code(std::errc::not_enough_memory) };
     auto const discarded = DiscardedImage { _memory, *mapping };
@@ -320,18 +312,17 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
     if (!handshake.isComplete())
         return ExecFailure { .cause = lastError() };
 
-    auto const handles = SuccessorHandles { .image = valueOf(LongToHandle(*mapping)),
-                                            .ready = valueOf(handshake.ready.get()),
-                                            .commit = valueOf(handshake.commit.get()),
-                                            .predecessor = valueOf(handshake.self.get()) };
-    auto inherited = handlesNamedBy(image);
-    inherited.insert(inherited.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
-    argv.push_back(handoverHandlesArgument(handles));
+    auto const handles = SuccessorHandles { .image = *mapping,
+                                            .ready = CrossingHandle::of(handshake.ready.get()),
+                                            .commit = CrossingHandle::of(handshake.commit.get()),
+                                            .predecessor = CrossingHandle::of(handshake.self.get()) };
+    crossing.insert(crossing.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
+    argv.push_back(handoverArgument(handoverToken(handles)));
 
-    auto const successor = _launcher.launch(executable, argv, inherited);
+    auto const successor = _launcher.launch(executable, argv, crossing);
     if (!successor)
         return ExecFailure { .cause = successor.error() };
-    auto const process = UniqueHandle { handleOf(successor->process) };
+    auto const process = UniqueHandle { successor->process.native() };
     daemonLog()("live upgrade: started the successor (pid {}); waiting for it to take over", successor->pid);
 
     switch (awaitReady(handshake.ready.get(), process.get(), _config.readyTimeout))
@@ -360,11 +351,11 @@ std::expected<HandoverImage, std::string> receiveHandover(SuccessorHandles const
 {
     // Read, and its mapping closed, before anything is said: an image this process cannot read is one the
     // predecessor keeps serving.
-    auto image = readHandover(memory, HandleToLong(handleOf(handles.image)));
+    auto image = readHandover(memory, handles.image);
     auto const refuse = [&](std::string why) {
         // Said nothing: the predecessor ends this process once it gives up waiting, and serves on.
         for (auto const handle: { handles.ready, handles.commit, handles.predecessor })
-            CloseHandle(handleOf(handle));
+            CloseHandle(handle.native());
         return std::unexpected(std::move(why));
     };
     if (!image)

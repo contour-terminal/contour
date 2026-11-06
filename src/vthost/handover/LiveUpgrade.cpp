@@ -7,14 +7,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
-#include <format>
 #include <ranges>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
-#include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/SessionHost.hpp>
@@ -46,6 +45,53 @@ namespace
         }
         // A capture refuses nothing else: these are a reader's.
         return UpgradeRefusal::NotSupported;
+    }
+
+    /// @return Whether some session of @p host that has not ended runs on a bundled pseudoconsole, which only
+    ///         a target that adopts them can take over.
+    [[nodiscard]] bool hostsPseudoconsole(SessionHost& host)
+    {
+        return std::ranges::any_of(host.sessionIds(), [&](auto const id) {
+            auto const& device = host.hostedSession(id)->pty();
+            return !device.isClosed()
+                   && device.handover()
+                          .transform([](vtpty::InheritedPty const& pty) { return pty.conpty.has_value(); })
+                          .value_or(false);
+        });
+    }
+
+    /// @param target What the target binary reports.
+    /// @param host The sessions this daemon would hand over.
+    /// @return Nothing unless @p target cannot adopt pseudoconsoles and @p host runs a session on one, then
+    ///         TargetCannotAdoptTerminals. The report is asked first: it is a comparison, the sessions a
+    ///         walk.
+    [[nodiscard]] std::expected<void, UpgradeRefusal> checkHostedPseudoconsoles(ReadinessReport const& target,
+                                                                                SessionHost& host)
+    {
+        return checkAdoptsPseudoconsoles(target).or_else(
+            [&](UpgradeRefusal refusal) -> std::expected<void, UpgradeRefusal> {
+                if (!hostsPseudoconsole(host))
+                    return {};
+                return std::unexpected(refusal);
+            });
+    }
+
+    /// A captured image as a handoff takes it.
+    struct EncodedImage
+    {
+        std::vector<vtpty::CrossingHandle> crossing; ///< Every handle it names (handlesNamedBy()).
+        std::vector<uint8_t> bytes;                  ///< It, encoded (encodeHandover()).
+    };
+
+    /// @param image A captured image, taken: it is gone once this returns.
+    /// @return @p image as a handoff takes it.
+    [[nodiscard]] EncodedImage encodedOf(HandoverImage&& image)
+    {
+        // Moved into this frame, so that it is destroyed as this returns, whatever the caller holds on to.
+        auto const taken = std::move(image);
+        auto crossing = handlesNamedBy(taken);
+        auto bytes = encodeHandover(taken);
+        return EncodedImage { .crossing = std::move(crossing), .bytes = std::move(bytes) };
     }
 
     /// Marks an upgrade under way for as long as it lives.
@@ -147,6 +193,7 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         .executable = resolved->executable, .configFile = _config.configFile, .profile = _config.profile });
     auto const report = answer.and_then([this](ReadinessReport const& target) {
         return checkReadable(target)
+            .and_then([&] { return checkHostedPseudoconsoles(target, _host); })
             .and_then([&]() -> std::expected<void, UpgradeRefusal> {
                 if (_config.runningConfig == RunningConfig::BuiltInDefaults)
                     return {};
@@ -156,8 +203,10 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     });
     if (!report)
     {
-        if (answer && answer->configProblem)
-            errorLog()("live upgrade refused: {}", *answer->configProblem);
+        if (report.error() == UpgradeRefusal::ConfigUnreadable && answer && answer->configProblem)
+            errorLog()("live upgrade refused: {}: {}", describe(report.error()), *answer->configProblem);
+        else
+            errorLog()("live upgrade refused: {}", describe(report.error()));
         co_return std::unexpected(report.error());
     }
     if (auto const capturable = checkCapturable(_host); !capturable)
@@ -172,26 +221,27 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         listener->holdAccepting();
     _hooks.closeClients();
 
-    auto const leaseFd = resolved->lease ? resolved->lease->descriptor() : -1;
-    auto image = co_await quiesceAndCapture(leaseFd);
+    auto image = co_await quiesceAndCapture(resolved->lease ? resolved->lease->nativeHandle()
+                                                            : vtpty::CrossingHandle {});
     if (!image)
     {
         daemonLog()("live upgrade refused: {}", describe(image.error()));
         co_return std::unexpected(image.error());
     }
-    image->leaseHandle = resolved->lease ? resolved->lease->handle() : 0;
 
+    // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
+    // in it, is let go of here rather than kept through the wait for the target.
+    auto [crossing, bytes] = encodedOf(*std::move(image));
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
-    auto const bytes = encodeHandover(*image);
     if (std::cmp_greater(bytes.size(), std::min(_config.maxImageSize, MaxHandoverImageSize)))
     {
         errorLog()("live upgrade refused: the handover image has {} bytes", bytes.size());
         co_return std::unexpected(UpgradeRefusal::ImageTooLarge);
     }
 
-    auto const failure =
-        _handoff.handOver(resolved->executable, argvFor(resolved->executable), *image, bytes);
+    auto const failure = _handoff.handOver(
+        resolved->executable, argvFor(resolved->executable), std::move(crossing), std::move(bytes));
     errorLog()("live upgrade: cannot run {}: {}; serving on",
                core::pathToUtf8(resolved->executable),
                failure.cause.message());
@@ -219,7 +269,8 @@ std::expected<LiveUpgrade::ResolvedTarget, UpgradeRefusal> LiveUpgrade::resolve(
     return ResolvedTarget { .executable = *executable, .lease = *std::move(lease) };
 }
 
-core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::quiesceAndCapture(int leaseFd)
+core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::quiesceAndCapture(
+    vtpty::CrossingHandle lease)
 {
     for (auto const attempt: std::views::iota(0U, std::max(1U, _config.sessionStartAttempts)))
     {
@@ -236,7 +287,7 @@ core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::qui
         if (auto const settled = co_await awaitSettled(); !settled)
             co_return std::unexpected(settled.error());
         auto image =
-            captureHandover(_host, crossingListeners(), leaseFd, _config.daemonInstance, _config.release);
+            captureHandover(_host, crossingListeners(), lease, _config.daemonInstance, _config.release);
         if (image)
         {
             image->upgradeGeneration = _config.upgradeGeneration;
@@ -285,9 +336,8 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
     auto crossing = std::vector<InheritedListener> {};
     for (auto const* const listener: _listeners)
     {
-        auto const fd = listener->listeningDescriptor();
-        auto const socket = listener->listeningSocket();
-        if (!fd && !socket)
+        auto const handle = listener->listeningHandle();
+        if (handle.isNone())
         {
             // The new image binds it afresh: a client that connects meanwhile is refused, and retries.
             errorLog()("live upgrade: the {} listener has no descriptor to hand over", listener->name());
@@ -296,8 +346,7 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
         auto const identity = _config.tlsIdentities.find(listener->name());
         crossing.push_back(InheritedListener {
             .name = listener->name(),
-            .fd = fd.value_or(-1),
-            .socket = socket.value_or(0),
+            .handle = handle,
             .tlsIdentity =
                 identity != _config.tlsIdentities.end() ? std::optional { identity->second } : std::nullopt,
         });
@@ -309,11 +358,10 @@ std::vector<std::string> LiveUpgrade::argvFor(std::filesystem::path const& execu
 {
     // A daemon started from a handover itself carries the argument that named its own image: dropped, so that
     // the command line names only the next one, however many upgrades this daemon has seen.
-    auto argv = std::ranges::to<std::vector>(
-        _config.argv | std::views::filter([](std::string const& argument) {
-            return std::ranges::none_of(
-                HandoverArguments, [&](std::string_view prefix) { return argument.starts_with(prefix); });
-        }));
+    auto argv =
+        std::ranges::to<std::vector>(_config.argv | std::views::filter([](std::string const& argument) {
+                                         return !argument.starts_with(HandoverPrefix);
+                                     }));
     if (argv.empty())
         argv.emplace_back();
     argv.front() = core::pathToUtf8(executable);

@@ -10,6 +10,7 @@
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/Pty.hpp>
     #include <vtpty/UnixPty.hpp>
+    #include <vtpty/test/HandleTesting.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
 
     #include <csignal>
@@ -105,7 +106,8 @@ struct CaptureHarness: vthost::testing::LiveHost
     /// @return The capture, with the caller's part of it as the tests name it.
     [[nodiscard]] std::expected<HandoverImage, HandoverError> capture()
     {
-        return LiveHost::capture({ { .name = "native", .fd = 17 } }, 23);
+        return LiveHost::capture({ { .name = "native", .handle = vtpty::CrossingHandle { 17 } } },
+                                 vtpty::CrossingHandle { 23 });
     }
 };
 
@@ -123,12 +125,6 @@ struct CaptureHarness: vthost::testing::LiveHost
         for (auto const& tab: window.tabs)
             visit(tab.root);
     return sessions;
-}
-
-/// @return Whether descriptor @p fd is open.
-[[nodiscard]] bool isOpen(int fd)
-{
-    return fcntl(fd, F_GETFD) != -1;
 }
 
 } // namespace
@@ -151,10 +147,10 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
 
     CHECK(image->daemonInstance == 0xC0FFEE);
     CHECK(image->fromRelease == "0.7.1");
-    CHECK(image->leaseFd == 23);
+    CHECK(image->lease == vtpty::CrossingHandle { 23 });
     REQUIRE(image->listeners.size() == 1);
     CHECK(image->listeners[0].name == "native");
-    CHECK(image->listeners[0].fd == 17);
+    CHECK(image->listeners[0].handle == vtpty::CrossingHandle { 17 });
 
     // The model as it is, with the ids it mints next.
     auto const live = h.host.model().idState();
@@ -176,10 +172,11 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
         CHECK(captured.id == id);
         CHECK(captured.uuid == h.host.objects().uuidOf(id));
         auto const& process = *h.host.hostedSession(id)->process();
-        auto const& pty = dynamic_cast<vtpty::UnixPty const&>(process.pty());
         // Read, not released: the host still owns them, and they are open.
-        CHECK(captured.pty.masterFd == pty.handoverDescriptors().masterFd);
-        CHECK(isOpen(captured.pty.masterFd));
+        auto const handedOver = process.handover();
+        REQUIRE(handedOver.has_value());
+        CHECK(captured.pty.masterFd == handedOver->masterFd);
+        CHECK(vtpty::testing::isOpen(captured.pty.masterFd));
         CHECK(captured.child.pid == process.handoverChild()->pid);
         CHECK(::kill(static_cast<pid_t>(captured.child.pid), 0) == 0);
         CHECK(captured.child.executable == "/bin/sh");

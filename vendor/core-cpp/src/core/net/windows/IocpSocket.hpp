@@ -358,6 +358,9 @@ class IocpListener final: public IListener
     /// @return The listening socket, or `INVALID_SOCKET` once closed; for diagnostics and tests.
     [[nodiscard]] SOCKET native() const noexcept;
 
+    /// @copydoc IListener::nativeHandle
+    [[nodiscard]] platform::NativeHandle nativeHandle() const noexcept override;
+
     /// What a parked accept reads after it resumes; defined in the implementation.
     struct Shared;
 

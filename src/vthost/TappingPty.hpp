@@ -13,6 +13,7 @@
 
 #include <vtpty/Pty.hpp>
 
+#include <expected>
 #include <functional>
 #include <memory>
 #include <string_view>
@@ -54,6 +55,14 @@ class TappingPty final: public vtpty::Pty
     [[nodiscard]] int write(std::string_view buf) override { return _inner->write(buf); }
     void interruptWrites() override { _inner->interruptWrites(); }
     void allowWrites() override { _inner->allowWrites(); }
+    [[nodiscard]] std::expected<vtpty::InheritedPty, vtpty::AdoptError> handover() const override
+    {
+        return _inner->handover();
+    }
+    [[nodiscard]] std::expected<vtpty::InheritedPty, vtpty::AdoptError> releaseHandover() override
+    {
+        return _inner->releaseHandover();
+    }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _inner->pageSize(); }
 
     void resizeScreen(vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels = std::nullopt) override

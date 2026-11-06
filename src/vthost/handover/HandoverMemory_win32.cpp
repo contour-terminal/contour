@@ -6,6 +6,9 @@
     #include <cstddef>
     #include <cstring>
     #include <limits>
+    #include <memory>
+    #include <new>
+    #include <utility>
 
     #include <Windows.h>
 
@@ -17,12 +20,6 @@ namespace
     /// The length of the image, ahead of it in the mapping: a mapping reports its size rounded up to a page.
     using LengthPrefix = uint64_t;
 
-    /// @return @p fd as the handle it names (HandleToLong() made it).
-    [[nodiscard]] HANDLE handleOf(int fd) noexcept
-    {
-        return LongToHandle(fd);
-    }
-
     /// A view of a whole mapping, unmapped as it goes.
     class MappedView
     {
@@ -33,7 +30,7 @@ namespace
         }
         MappedView(MappedView const&) = delete;
         MappedView& operator=(MappedView const&) = delete;
-        MappedView(MappedView&&) = delete;
+        MappedView(MappedView&& other) noexcept: _address { std::exchange(other._address, nullptr) } {}
         MappedView& operator=(MappedView&&) = delete;
         ~MappedView()
         {
@@ -42,7 +39,7 @@ namespace
         }
 
         [[nodiscard]] bool isMapped() const noexcept { return _address != nullptr; }
-        [[nodiscard]] std::byte* data() const noexcept { return static_cast<std::byte*>(_address); }
+        [[nodiscard]] uint8_t* data() const noexcept { return static_cast<uint8_t*>(_address); }
 
         /// @return How many bytes the view spans: the mapping's size, rounded up to a page.
         [[nodiscard]] std::size_t size() const noexcept
@@ -58,13 +55,13 @@ namespace
     };
 
     /// A pagefile-backed file mapping with no name: nothing on disk holds the image, and nothing but a handle
-    /// reaches it -- the one the successor process inherits. The "descriptor" this interface speaks of is
-    /// that handle, as HandleToLong() narrows it, which Windows guarantees loses nothing (handles stay within
-    /// 32 bits so that 32- and 64-bit processes can share them).
+    /// reaches it -- the one the successor process inherits. The descriptor this interface speaks of is that
+    /// handle.
     class MappedHandoverMemory final: public HandoverMemory
     {
       public:
-        [[nodiscard]] std::expected<int, HandoverError> write(std::span<uint8_t const> image) override
+        [[nodiscard]] std::expected<vtpty::CrossingHandle, HandoverError> write(
+            std::span<uint8_t const> image) override
         {
             auto const size = uint64_t { sizeof(LengthPrefix) } + image.size();
             // Not inheritable: only the launch that names it in its handle list takes it.
@@ -88,12 +85,12 @@ namespace
                 if (!image.empty())
                     std::memcpy(view.data() + sizeof(length), image.data(), image.size());
             }
-            return HandleToLong(mapping);
+            return vtpty::CrossingHandle::of(mapping);
         }
 
-        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(int fd) override
+        [[nodiscard]] std::expected<HandoverView, HandoverError> read(vtpty::CrossingHandle handle) override
         {
-            auto const view = MappedView { handleOf(fd), FILE_MAP_READ };
+            auto view = MappedView { handle.native(), FILE_MAP_READ };
             if (!view.isMapped())
                 return std::unexpected { HandoverError::MemoryUnavailable };
             auto const spanned = view.size();
@@ -104,20 +101,34 @@ namespace
             // A length the mapping does not hold, or one no image may have, is no image.
             if (length > MaxHandoverImageSize || length > spanned - sizeof(length))
                 return std::unexpected { HandoverError::Truncated };
-            auto bytes = std::vector<uint8_t>(static_cast<std::size_t>(length));
-            if (!bytes.empty())
-                std::memcpy(bytes.data(), view.data() + sizeof(length), bytes.size());
-            return bytes;
+            auto const image =
+                std::span<uint8_t const> { view.data() + sizeof(length), static_cast<std::size_t>(length) };
+            try
+            {
+                return HandoverView { image, std::make_shared<MappedView const>(std::move(view)) };
+            }
+            catch (std::bad_alloc const&)
+            {
+                return std::unexpected { HandoverError::MemoryUnavailable };
+            }
         }
 
         /// Nothing: there is no exec, and the successor's launch makes inheritable what it names, for itself
         /// alone (@see SuccessorHandoff).
-        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(int /*fd*/) override { return {}; }
+        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(
+            vtpty::CrossingHandle /*handle*/) override
+        {
+            return {};
+        }
 
         /// Nothing, as keepAcrossExec().
-        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(int /*fd*/) override { return {}; }
+        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(
+            vtpty::CrossingHandle /*handle*/) override
+        {
+            return {};
+        }
 
-        void discard(int fd) override { CloseHandle(handleOf(fd)); }
+        void discard(vtpty::CrossingHandle handle) override { CloseHandle(handle.native()); }
     };
 } // namespace
 

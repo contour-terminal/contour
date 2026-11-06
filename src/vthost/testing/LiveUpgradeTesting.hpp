@@ -31,6 +31,7 @@
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/handover/HandoverToken.hpp>
 #include <vthost/handover/ImageHandoff.hpp>
 #include <vthost/handover/LiveUpgrade.hpp>
 #include <vthost/handover/Readiness.hpp>
@@ -38,14 +39,15 @@
 #include <vthost/testing/FakeReadinessProbe.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
 #include <vthost/testing/StagingFileSystem.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 
 namespace vthost::testing
 {
 
-/// What a target binary built from this tree answers.
+/// What a target binary built from this tree answers, one that can adopt pseudoconsoles.
 [[nodiscard]] inline handover::ReadinessReport readyTarget()
 {
-    return handover::ownReadiness("0.9.1");
+    return handover::ownReadiness("0.9.1", handover::PseudoconsoleAdoption::Able);
 }
 
 /// UpgradeHooks that record what they were asked, in order.
@@ -149,6 +151,33 @@ struct UpgradeBench
                                        probe,      hooks,      listeners(), std::move(config) };
     }
 
+    /// @return The orchestrator, over this daemon, with the configuration config() and handing over with @p
+    /// handoff.
+    [[nodiscard]] handover::LiveUpgrade orchestrator(handover::ImageHandoff& handoff)
+    {
+        return orchestrator(config(), handoff);
+    }
+
+    /// Checks that the daemon serves on after a handoff that did not happen: it accepts again, every
+    /// session answers, and @p carried -- typed into the first while the upgrade had everything stopped, if
+    /// anything -- is delivered once, ahead of what is typed afterwards.
+    /// @param ids The daemon's two sessions.
+    /// @param carried What was typed into the first session during the upgrade.
+    void checkResumed(std::vector<vtworkspace::SessionId> const& ids, std::string_view carried = {}) const
+    {
+        REQUIRE(ids.size() >= 2);
+        CHECK(acceptor->admission() == Admission::Accepting);
+        live->host.writeInput(ids[0], "-after");
+        live->host.writeInput(ids[1], "second");
+        auto const expected = std::string { carried } + "-after";
+        auto const shown = live->eventually([&] { return live->pageText(ids[0]).contains(expected); });
+        INFO("first session's screen: " << live->pageText(ids[0]));
+        REQUIRE(shown);
+        REQUIRE(live->eventually([&] { return live->pageText(ids[1]).contains("second"); }));
+        if (!carried.empty())
+            CHECK(occurrences(live->pageText(ids[0]), std::string { carried }) == 1);
+    }
+
     /// @return The configuration a daemon of release 0.9.0 upgrades with.
     [[nodiscard]] static handover::LiveUpgradeConfig config()
     {
@@ -159,7 +188,7 @@ struct UpgradeBench
             .upgradeGeneration = 2,
             .argv = { "/state/bin/0.9.0-00000000/Contour.AppImage",
                       "daemon",
-                      "--handover-fd=7",
+                      handover::handoverArgument(handover::handoverToken(vtpty::CrossingHandle { 7 })),
                       "--label",
                       "x" },
             .installedExecutable = {},

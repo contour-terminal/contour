@@ -5,6 +5,7 @@
 /// Which executable a daemon is started from, and the re-execution that moves a daemon onto its
 /// version-specific image (@see DaemonImage.hpp) before it serves.
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #include <core/Environment.hpp>
@@ -225,7 +226,10 @@ class NativeDaemonImages
   public:
     /// @param config What to stage, and where.
     /// @param fs The file system the images live on (not owned; outlives this).
-    NativeDaemonImages(DaemonImageStoreConfig config, core::platform::FileSystem const& fs);
+    /// @param inheritedLease The lease a predecessor handed over (makeNativeImageLeases()); none for none.
+    NativeDaemonImages(DaemonImageStoreConfig config,
+                       core::platform::FileSystem const& fs,
+                       vtpty::CrossingHandle inheritedLease = {});
 
     NativeDaemonImages(NativeDaemonImages const&) = delete;
     NativeDaemonImages& operator=(NativeDaemonImages const&) = delete;
@@ -240,9 +244,14 @@ class NativeDaemonImages
     /// @param env Where `$APPIMAGE` and the state directory are read from.
     /// @param fs The file system the images live on (not owned; outlives the result).
     /// @param releaseVersion The release this executable reports.
+    /// @param inheritedLease The lease a predecessor handed over in a live upgrade (HandoverImage::lease),
+    ///        which the leases adopt (makeNativeImageLeases()); none for none.
     /// @return The store, or why the running executable is unknown.
     [[nodiscard]] static std::expected<std::unique_ptr<NativeDaemonImages>, std::error_code> ofThisProcess(
-        core::Environment const& env, core::platform::FileSystem const& fs, std::string releaseVersion);
+        core::Environment const& env,
+        core::platform::FileSystem const& fs,
+        std::string releaseVersion,
+        vtpty::CrossingHandle inheritedLease = {});
 
     /// @return What staging knows of the executable.
     [[nodiscard]] StagingInputs const& inputs() const noexcept { return _inputs; }
