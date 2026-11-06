@@ -1856,7 +1856,8 @@ if(WIN32)
 else()
     set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
 endif()
-set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
+# No CPACK_PACKAGE_EXECUTABLES: it would make CPack author the Start menu shortcut, with a component the two
+# installers share; the scope sources author it (see wix_machine.wxs).
 set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
 #TODO? set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
@@ -1864,7 +1865,6 @@ set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico"
 #TODO: set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
-set(CPACK_CREATE_DESKTOP_LINKS contour)
 set(CPACK_WIX_VERSION 4)
 if(WIN32)
     # The Windows installers, one per install scope, from one table. CPACK_CONTOUR_WIX_SCOPE (default

@@ -22,12 +22,29 @@
       <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="yes" />
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes" />
     </Component>
+    <!-- The key paths of the shortcuts below are in HKLM, as a per-machine package's components are (the spec,
+         2.3), although the shortcuts are in the profile-relative Start menu and desktop folders: that is
+         correct for the ALL USERS install this package is, and Windows Installer's ICE38, ICE43 and ICE57 say
+         otherwise by design. Validating this package therefore passes -sice for exactly those three. -->
+    <!-- The Start menu shortcut to Contour itself, a component of our own as the other shortcuts are: CPack's
+         (CPACK_PACKAGE_EXECUTABLES) would have the same component Id, GUID and key path in both installers
+         for shortcuts in different folders, and uninstalling one would then break the other's. -->
+    <Component Id="ContourStartMenuShortcut" Guid="*" Directory="ProgramMenuFolder">
+      <Shortcut Id="CM_S_contour_start" Name="Contour Terminal Emulator" Target="[INSTALL_ROOT]bin\contour.exe" WorkingDirectory="INSTALL_ROOT" />
+      <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
     <!-- The Start menu shortcut "Contour (Connect…)": `contour.exe connect`, which asks where the new window's
          sessions should live (this computer's daemon, this window only, a saved host) before it opens. CPack's
          own shortcuts take no arguments, hence a component of our own, attached to the main feature. -->
     <Component Id="ContourConnectShortcut" Guid="*" Directory="ProgramMenuFolder">
       <Shortcut Id="CM_S_contour_connect" Name="Contour (Connect…)" Description="Choose where a new Contour window's sessions live" Target="[INSTALL_ROOT]bin\contour.exe" Arguments="connect" WorkingDirectory="INSTALL_ROOT" />
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="ConnectShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <!-- The desktop shortcut, a component of our own so that DESKTOP_SHORTCUT=0 can drop it (CPack's
+         CPACK_CREATE_DESKTOP_LINKS puts its shortcut in the file component, out of reach of a feature). -->
+    <Component Id="ContourDesktopShortcut" Guid="*" Directory="DesktopFolder">
+      <Shortcut Id="CM_S_contour_desktop" Name="Contour Terminal Emulator" Target="[INSTALL_ROOT]bin\contour.exe" WorkingDirectory="INSTALL_ROOT" />
+      <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
   </Fragment>
 </Wix>
