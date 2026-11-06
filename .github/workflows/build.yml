@@ -1059,10 +1059,6 @@ jobs:
           echo "PACKAGE_IMAGE=$PACKAGE_IMAGE" >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-          # Via the environment, not interpolated into the script: a branch name is
-          # attacker-controlled on a fork's pull request.
-          GH_REF: ${{ github.ref }}
-          GH_HEAD_REF: ${{ github.head_ref }}
           # Empty on fork pull requests, where GitHub withholds secrets. Only the
           # emptiness is observable here -- the value never reaches the log.
           #
