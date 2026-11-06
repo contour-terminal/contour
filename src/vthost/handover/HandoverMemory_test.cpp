@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/test/HandleTesting.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
@@ -145,7 +147,7 @@ TEST_CASE("a descriptor kept for a failed exec is close-on-exec again, and disca
     REQUIRE(memory->closeOnExecAgain(*fd).has_value());
     CHECK(isCloseOnExec(fd->native()));
     memory->discard(*fd);
-    CHECK(::fcntl(fd->native(), F_GETFD) == -1);
+    CHECK_FALSE(vtpty::testing::isOpen(*fd));
     CHECK_FALSE(memory->closeOnExecAgain(*fd).has_value());
 }
 

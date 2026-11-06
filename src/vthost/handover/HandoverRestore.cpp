@@ -5,14 +5,9 @@
 #include <vtbackend/state/TerminalStateCodec.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/PtyAdoption.hpp>
 
-#ifdef _WIN32
-    #include <vtpty/ConPty.hpp>
-    #include <vtpty/WindowsHandle.hpp>
-
-    #include <Windows.h>
-#else
-    #include <vtpty/UnixPty.hpp>
+#ifndef _WIN32
     #include <vtpty/UnixUtils.hpp>
 
     #include <sys/resource.h>
@@ -64,39 +59,6 @@ namespace
             for (auto const& tab: window.tabs)
                 visit(tab.root);
         return sessions;
-    }
-
-    /// @return The PTY @p pty names, adopted: on POSIX its master, on Windows its pseudoconsole.
-    [[nodiscard]] std::expected<std::unique_ptr<vtpty::Pty>, vtpty::AdoptError> adoptPty(
-        vtpty::InheritedPty const& pty)
-    {
-#ifdef _WIN32
-        return vtpty::ConPty::adopt(pty).transform([](std::unique_ptr<vtpty::ConPty> adopted) {
-            return std::unique_ptr<vtpty::Pty> { std::move(adopted) };
-        });
-#else
-        return vtpty::UnixPty::adopt(pty).transform([](std::unique_ptr<vtpty::UnixPty> adopted) {
-            return std::unique_ptr<vtpty::Pty> { std::move(adopted) };
-        });
-#endif
-    }
-
-    /// Closes every descriptor or handle of @p pty that is open: what a PTY that could not be adopted leaves,
-    /// which would otherwise stay open, unused -- while the program on it, never seeing a hangup, waited for
-    /// input forever. On POSIX the standard streams are never a PTY's (descriptorsToKeep() keeps them
-    /// whatever a corrupt image says), and are left alone.
-    void closeUnadoptedPty(vtpty::InheritedPty const& pty)
-    {
-#ifdef _WIN32
-        if (pty.conpty)
-            for (auto const handle: pty.conpty->handles())
-                if (!handle.isNone())
-                    CloseHandle(handle.native());
-#else
-        for (auto const fd: pty.descriptors())
-            if (fd > 2)
-                ::close(fd);
-#endif
     }
 } // namespace
 
@@ -161,10 +123,10 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     auto const abandon = [&] {
         if (session.device == handover::SessionDevice::ChildOnPty)
         {
-#ifdef _WIN32
-            if (!session.child.processHandle.isNone())
-                CloseHandle(session.child.processHandle.native());
-#else
+            vtpty::releaseUnadopted(session.child);
+#ifndef _WIN32
+            // Only POSIX leaves a child to reap, by its process id, and reaping it takes this host's loop: a
+            // poll until it exits, which vtpty has no loop to run.
             reapWhenExited(session.child.pid);
 #endif
         }
@@ -172,7 +134,7 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
             _objects.forget(session.id);
     };
 
-    auto pty = adoptPty(session.pty);
+    auto pty = vtpty::adoptPty(session.pty);
     if (!pty)
     {
         errorLog()(
@@ -180,7 +142,7 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
             "sees a hangup",
             session.id.value,
             std::to_underlying(pty.error()));
-        closeUnadoptedPty(session.pty);
+        vtpty::closeInherited(session.pty);
         abandon();
         return;
     }

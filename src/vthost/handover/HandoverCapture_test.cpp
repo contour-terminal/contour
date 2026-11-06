@@ -10,6 +10,7 @@
     #include <vtpty/ProcessPlacement.hpp>
     #include <vtpty/Pty.hpp>
     #include <vtpty/UnixPty.hpp>
+    #include <vtpty/test/HandleTesting.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
 
     #include <csignal>
@@ -126,12 +127,6 @@ struct CaptureHarness: vthost::testing::LiveHost
     return sessions;
 }
 
-/// @return Whether descriptor @p fd is open.
-[[nodiscard]] bool isOpen(int fd)
-{
-    return fcntl(fd, F_GETFD) != -1;
-}
-
 } // namespace
 
 TEST_CASE("capture holds every session with its pty descriptors and ids", "[vthost][handover][threading]")
@@ -177,10 +172,11 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
         CHECK(captured.id == id);
         CHECK(captured.uuid == h.host.objects().uuidOf(id));
         auto const& process = *h.host.hostedSession(id)->process();
-        auto const& pty = dynamic_cast<vtpty::UnixPty const&>(process.pty());
         // Read, not released: the host still owns them, and they are open.
-        CHECK(captured.pty.masterFd == pty.handoverDescriptors().masterFd);
-        CHECK(isOpen(captured.pty.masterFd));
+        auto const handedOver = process.handover();
+        REQUIRE(handedOver.has_value());
+        CHECK(captured.pty.masterFd == handedOver->masterFd);
+        CHECK(vtpty::testing::isOpen(captured.pty.masterFd));
         CHECK(captured.child.pid == process.handoverChild()->pid);
         CHECK(::kill(static_cast<pid_t>(captured.child.pid), 0) == 0);
         CHECK(captured.child.executable == "/bin/sh");

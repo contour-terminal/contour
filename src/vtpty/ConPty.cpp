@@ -5,7 +5,6 @@
 
 #include <crispy/BufferObject.hpp>
 
-#include <core/Assert.hpp>
 #include <core/WideString.hpp>
 
 #include <algorithm>
@@ -341,9 +340,9 @@ ConPty::ConPty(PageSize const& windowSize):
 {
 }
 
-std::expected<void, AdoptError> ConPty::canAdopt(InheritedConPty const& handles)
+std::expected<void, AdoptError> ConPty::canAdopt(InheritedPty const& inherited)
 {
-    if (!std::ranges::all_of(handles.handles(), isOpenHandle))
+    if (!inherited.conpty || !std::ranges::all_of(inherited.conpty->handles(), isOpenHandle))
         return std::unexpected(AdoptError::BadDescriptor);
     if (auto const& api = ConptyApiImpl::instance();
         api.host != ConsoleHost::Bundled || !api.packPseudoConsole)
@@ -353,11 +352,9 @@ std::expected<void, AdoptError> ConPty::canAdopt(InheritedConPty const& handles)
 
 std::expected<std::unique_ptr<ConPty>, AdoptError> ConPty::adopt(InheritedPty const& inherited)
 {
-    if (!inherited.conpty)
-        return std::unexpected(AdoptError::BadDescriptor);
-    auto const& handles = *inherited.conpty;
-    if (auto const adoptable = canAdopt(handles); !adoptable)
+    if (auto const adoptable = canAdopt(inherited); !adoptable)
         return std::unexpected(adoptable.error());
+    auto const& handles = *inherited.conpty;
     auto pty = std::make_unique<ConPty>(inherited.pageSize);
     if (pty->_conptyApi->packPseudoConsole(
             handles.consoleHost.native(), handles.reference.native(), handles.signal.native(), &pty->_master)
@@ -405,32 +402,35 @@ std::optional<ImageSize> ConPty::pixelSize() const noexcept
     return _pixels;
 }
 
-std::expected<InheritedConPty, AdoptError> ConPty::handoverHandles() const
+std::expected<InheritedPty, AdoptError> ConPty::handover() const
 {
     // Not while close() frees the pseudoconsole on another thread: as a program's exit watcher does.
     auto const _ = std::lock_guard { _mutex };
-    return handoverHandlesLocked();
+    return handoverLocked();
 }
 
-std::expected<InheritedConPty, AdoptError> ConPty::handoverHandlesLocked() const
+std::expected<InheritedPty, AdoptError> ConPty::handoverLocked() const
 {
     if (consoleHost() != ConsoleHost::Bundled)
         return std::unexpected(AdoptError::ForeignConsoleHost);
     if (isClosed() || _input == INVALID_HANDLE_VALUE || _output == INVALID_HANDLE_VALUE)
         return std::unexpected(AdoptError::BadDescriptor);
     auto const* const console = reinterpret_cast<BundledPseudoConsole const*>(_master);
-    return InheritedConPty { .outputReader = CrossingHandle::of(_input),
-                             .inputWriter = CrossingHandle::of(_output),
-                             .signal = CrossingHandle::of(console->signal),
-                             .reference = CrossingHandle::of(console->reference),
-                             .consoleHost = CrossingHandle::of(console->process) };
+    return InheritedPty { .pageSize = _size,
+                          .pixels = _pixels,
+                          .conpty = InheritedConPty { .outputReader = CrossingHandle::of(_input),
+                                                      .inputWriter = CrossingHandle::of(_output),
+                                                      .signal = CrossingHandle::of(console->signal),
+                                                      .reference = CrossingHandle::of(console->reference),
+                                                      .consoleHost = CrossingHandle::of(console->process) } };
 }
 
-std::expected<InheritedConPty, AdoptError> ConPty::releaseHandles()
+std::expected<InheritedPty, AdoptError> ConPty::releaseHandover()
 {
-    Require(consoleHost() == ConsoleHost::Bundled);
     auto const _ = std::lock_guard { _mutex };
-    auto handles = handoverHandlesLocked();
+    auto inherited = handoverLocked();
+    if (!inherited)
+        return inherited;
     _closeDeferral = CloseDeferral::None; // nothing is this process's to close any more
 
     // A read or a write under way is ended first, and each handle forgotten once nothing uses it, as close()
@@ -453,7 +453,7 @@ std::expected<InheritedConPty, AdoptError> ConPty::releaseHandles()
     }
     if (_closed != nullptr)
         SetEvent(_closed);
-    return handles;
+    return inherited;
 }
 
 StartResult ConPty::start()
@@ -521,7 +521,7 @@ void ConPty::close()
     // Quiesced for a live upgrade that may yet hand this pseudoconsole on, by handles a capture names: closed
     // now, they would be freed for whatever this process opens next -- the handover's own mapping and events
     // among them -- and the successor would adopt those under their names. Held until the upgrade rolls back
-    // (allowWrites()), or the handles are handed on (releaseHandles()), or this ConPty goes.
+    // (allowWrites()), or the handles are handed on (releaseHandover()), or this ConPty goes.
     if (_writeInterruption.load(std::memory_order_acquire) == WriteInterruption::Interrupted && !isClosed())
     {
         ptyLog()("ConPty.close() held until writes are allowed again");

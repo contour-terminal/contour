@@ -338,7 +338,9 @@ TEST_CASE("UnixPty.adopt.readsWhatTheChildWrites", "[vtpty][unixpty][handover]")
         // The child flushes the terminal as it starts, which would eat what is written before it ran.
         REQUIRE(vtpty::testing::printed(original, "ready"));
 
-        auto const inherited = unixPty->releaseDescriptors();
+        auto const released = unixPty->releaseHandover();
+        REQUIRE(released.has_value());
+        auto const& inherited = *released;
         CHECK(unixPty->isClosed());
         child = original.releaseChild();
         REQUIRE(child.has_value());
@@ -427,7 +429,9 @@ TEST_CASE("UnixPty.start.ofAnAdoptedPtyKeepsItsDescriptors", "[vtpty][unixpty][h
     REQUIRE(vtpty::testing::printed(original, "ready"));
     auto* const unixPty = dynamic_cast<vtpty::UnixPty*>(&original.pty());
     REQUIRE(unixPty != nullptr);
-    auto const inherited = unixPty->releaseDescriptors();
+    auto const released = unixPty->releaseHandover();
+    REQUIRE(released.has_value());
+    auto const& inherited = *released;
     auto child = original.releaseChild();
     REQUIRE(child.has_value());
 

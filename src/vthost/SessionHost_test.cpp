@@ -4803,12 +4803,13 @@ TEST_CASE("a quiesced session crosses into an adopted one, every byte exactly on
 
     // The old process lets go of the PTY and the child, and goes; neither closes nor dies with it.
     auto& oldProcess = dynamic_cast<vtpty::Process&>(old->terminal().device());
-    auto const inherited = dynamic_cast<vtpty::UnixPty&>(oldProcess.pty()).releaseDescriptors();
+    auto const inherited = oldProcess.releaseHandover();
+    REQUIRE(inherited.has_value());
     auto child = oldProcess.releaseChild();
     REQUIRE(child.has_value());
     old.reset();
 
-    auto pty = vtpty::UnixPty::adopt(inherited);
+    auto pty = vtpty::UnixPty::adopt(*inherited);
     REQUIRE(pty.has_value());
     auto process = vtpty::Process::adopt(*child, std::move(*pty));
     REQUIRE(process.has_value());

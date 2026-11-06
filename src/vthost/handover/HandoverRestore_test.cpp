@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/state/TerminalStateCodec.hpp>
 
+#include <vtpty/test/HandleTesting.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -25,6 +27,8 @@
     #else
         #include <pty.h>
     #endif
+#else
+    #include <Windows.h>
 #endif
 
 #include <algorithm>
@@ -49,6 +53,7 @@
 
 using namespace vthost;
 using namespace vthost::handover;
+using vtpty::testing::isOpen;
 using vtworkspace::SessionId;
 
 #ifndef _WIN32
@@ -74,12 +79,6 @@ using vthost::testing::LiveHost;
 using vthost::testing::occurrences;
 using vthost::testing::releaseForAdoption;
 using vthost::testing::shellProcess;
-
-/// @return Whether descriptor @p fd is open.
-[[nodiscard]] bool isOpen(int fd)
-{
-    return ::fcntl(fd, F_GETFD) != -1;
-}
 
 /// A Sixel image one cell wide and tall.
 constexpr auto SixelImage = std::string_view { "\033Pq\"1;1;4;6#1;2;100;0;0#1~~~~\033\\" };
@@ -665,5 +664,52 @@ TEST_CASE("a session served on its PTY alone crosses every later handover so, an
     REQUIRE(::write(slave, "-again", 6) == 6);
     CHECK(next->eventually([&] { return next->pageText(id).contains("ready-again"); }));
     ::close(slave);
+}
+#endif
+
+#ifdef _WIN32
+TEST_CASE("a pseudoconsole that cannot be adopted is closed, and its program's handle let go",
+          "[vthost][handover]")
+{
+    // No pseudoconsole: two events the image names as one's pipes, the rest of its handles missing, beside a
+    // handle its program would have crossed under.
+    auto const event = [] {
+        return vtpty::CrossingHandle::of(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    };
+    auto program = HANDLE {};
+    REQUIRE(
+        DuplicateHandle(
+            GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &program, SYNCHRONIZE, FALSE, 0)
+        != FALSE);
+    auto image = HandoverImage {};
+    auto session = HandoverSession {};
+    session.id = SessionId { 1 };
+    session.pty.pageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+    session.pty.conpty = vtpty::InheritedConPty { .outputReader = event(),
+                                                  .inputWriter = event(),
+                                                  .signal = vtpty::CrossingHandle {},
+                                                  .reference = vtpty::CrossingHandle {},
+                                                  .consoleHost = vtpty::CrossingHandle {} };
+    session.child.pid = static_cast<int64_t>(GetCurrentProcessId());
+    session.child.processHandle = vtpty::CrossingHandle::of(program);
+    auto const named = std::array { session.pty.conpty->outputReader,
+                                    session.pty.conpty->inputWriter,
+                                    session.child.processHandle };
+    image.sessions.push_back(std::move(session));
+    auto const unnamed = event();
+
+    auto config = SessionHostConfig {};
+    config.handover = std::move(image);
+    auto const live = std::make_unique<vthost::testing::LiveHost>(
+        [](vtpty::PageSize size) { return vthost::testing::shellProcess(size); }, std::move(config));
+    CHECK(live->host.sessionCount() == 0);
+    for (auto const handle: named)
+    {
+        INFO("handle " << handle.value);
+        CHECK_FALSE(isOpen(handle));
+    }
+    // What the image did not name stays open.
+    CHECK(isOpen(unnamed));
+    CloseHandle(unnamed.native());
 }
 #endif

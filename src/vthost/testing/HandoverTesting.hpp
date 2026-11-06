@@ -11,12 +11,6 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 
-#ifdef _WIN32
-    #include <vtpty/ConPty.hpp>
-#else
-    #include <vtpty/UnixPty.hpp>
-#endif
-
 #include <core/Environment.hpp>
 #include <core/net/PlatformLoop.hpp>
 
@@ -76,16 +70,6 @@ inline constexpr auto CatScript = "stty raw -echo; printf ready; exec cat";
                                             /*escapeSandbox=*/false,
                                             std::make_shared<vtpty::NoPlacement>());
 }
-
-/// Skips the test where the bundled conpty.dll is not beside the test binary (CONTOUR_EMBED_OPENCONSOLE=OFF):
-/// only its pseudoconsoles can be handed over, and every capture would be refused. Called on the test's own
-/// thread, before any session is spawned.
-inline void requireBundledConsoleHost()
-{
-    if (vtpty::ConPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) } }.consoleHost()
-        != vtpty::ConsoleHost::Bundled)
-        SKIP("the bundled conpty.dll is not beside this test");
-}
 #endif
 
 /// Lets go of every session's PTY and child without closing or signalling either, as the handoff does -- the
@@ -97,19 +81,11 @@ inline void releaseForAdoption(SessionHost& host)
 {
     for (auto const id: host.sessionIds())
     {
-        auto& device = host.hostedSession(id)->terminal().device();
-        auto* const tapped = dynamic_cast<TappingPty*>(&device);
-        auto& inner = tapped != nullptr ? tapped->inner() : device;
-        auto* const process = dynamic_cast<vtpty::Process*>(&inner);
+        auto& session = *host.hostedSession(id);
         // The child first: on Windows its exit watcher closes the pseudoconsole, and stops with it.
-        if (process != nullptr)
+        if (auto* const process = session.process(); process != nullptr)
             std::ignore = process->releaseChild();
-        auto& pty = process != nullptr ? process->pty() : inner;
-#ifdef _WIN32
-        std::ignore = dynamic_cast<vtpty::ConPty&>(pty).releaseHandles();
-#else
-        std::ignore = dynamic_cast<vtpty::UnixPty&>(pty).releaseDescriptors();
-#endif
+        std::ignore = session.terminal().device().releaseHandover();
     }
 }
 

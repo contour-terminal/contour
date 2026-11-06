@@ -27,6 +27,7 @@
     #include <vtpty/ConPty.hpp>
     #include <vtpty/Process.hpp>
     #include <vtpty/WindowsHandle.hpp>
+    #include <vtpty/test/HandoverSupport.hpp>
 
     #include <chrono>
     #include <memory>
@@ -155,7 +156,7 @@ struct SuccessorUpgrade: UpgradeBench
         launcher { behaviour },
         handoff { launcher, *memory, SuccessorHandoffConfig { .readyTimeout = readyTimeout } }
     {
-        vthost::testing::requireBundledConsoleHost();
+        vtpty::testing::requireHandoverCapable();
     }
 
     /// @return The orchestrator, over this daemon.

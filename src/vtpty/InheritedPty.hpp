@@ -92,6 +92,7 @@ enum class AdoptError : std::uint8_t
     /// The pseudoconsole is not the bundled conpty.dll's: only that one's layout behind an HPCON is known,
     /// and only it can be rebuilt from its handles (ConPty::adopt()).
     ForeignConsoleHost,
+    Unsupported, ///< A device that cannot be handed over at all (a channel, SSH, a test double).
 };
 
 } // namespace vtpty

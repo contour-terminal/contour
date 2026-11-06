@@ -158,7 +158,7 @@ class [[nodiscard]] Process: public Pty
     /// over from: no spawn, no placement (it was placed when spawned). It is started already, and exit
     /// detection is as for a spawned child.
     /// @param child The child, from releaseChild() or a handover image.
-    /// @param pty The PTY it runs on, usually from UnixPty::adopt() or ConPty::adopt().
+    /// @param pty The PTY it runs on, usually from adoptPty().
     /// @return The process; or AdoptError::NoSuchChild where @p child is no child this process can wait for,
     ///         @p pty then destroyed with the call (@see canAdopt(), which asks first).
     [[nodiscard]] static std::expected<std::unique_ptr<Process>, AdoptError> adopt(AdoptedChild const& child,
@@ -255,6 +255,10 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     void interruptWrites() override { pty().interruptWrites(); }
     void allowWrites() override { pty().allowWrites(); }
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> handover() const override { return pty().handover(); }
+    /// Gives up the PTY's handover (Pty::releaseHandover()); the child stays this Process's, to give up with
+    /// releaseChild() -- first, on Windows, whose exit watcher closes the pseudoconsole.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> releaseHandover() override { return pty().releaseHandover(); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     [[nodiscard]] InputEcho inputEcho() const noexcept override { return pty().inputEcho(); }

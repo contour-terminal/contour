@@ -40,7 +40,7 @@ class ConPty final: public Pty
     /// Takes over a pseudoconsole another process left behind, whose handles this process inherited: the
     /// successor's side of a Windows daemon's live upgrade. The pseudoconsole is started already, and
     /// serves on as though this process had created it; closing it ends it as for one it created.
-    /// @param inherited Its handles (InheritedPty::conpty), from handoverHandles() in the process that hands
+    /// @param inherited Its handles (InheritedPty::conpty), from handover() in the process that hands
     ///        it over, and its size at hand-off.
     /// @return It; or AdoptError::ForeignConsoleHost where this process cannot load the bundled conpty.dll,
     ///         BadDescriptor where it names no handles, or one is not open in this process.
@@ -57,7 +57,7 @@ class ConPty final: public Pty
     [[nodiscard]] StartResult start() override;
     /// Closes the pseudoconsole, which ends the program on it -- unless writes are interrupted
     /// (interruptWrites()): a session quiesced for a live upgrade, whose capture names these handles. The
-    /// close is then held until allowWrites(), and dropped by releaseHandles(); the destructor closes
+    /// close is then held until allowWrites(), and dropped by releaseHandover(); the destructor closes
     /// regardless.
     void close() override;
     void waitForClosed() override;
@@ -90,32 +90,35 @@ class ConPty final: public Pty
     ///         none was. The pseudoconsole takes none: it is kept for a live upgrade to carry.
     [[nodiscard]] std::optional<ImageSize> pixelSize() const noexcept;
 
-    /// Asks whether adopt() would take @p handles, without taking anything: what a successor checks before it
-    /// says it can take over.
-    /// @param handles The pseudoconsole's handles, from handoverHandles() in the process that hands it over.
+    /// Asks whether adopt() would take @p inherited, without taking anything: what a successor checks before
+    /// it says it can take over.
+    /// @param inherited The pseudoconsole's handles and size, from handover() in the process that hands it
+    ///        over.
     /// @return Nothing; or AdoptError::ForeignConsoleHost where this process cannot load the bundled
-    ///         conpty.dll, BadDescriptor where a handle is not open in this process.
-    [[nodiscard]] static std::expected<void, AdoptError> canAdopt(InheritedConPty const& handles);
+    ///         conpty.dll, BadDescriptor where it names no handles, or one is not open in this process.
+    [[nodiscard]] static std::expected<void, AdoptError> canAdopt(InheritedPty const& inherited);
 
-    /// The handles that make up the pseudoconsole, as a successor process inherits them, while this one
-    /// keeps them: for a capture that may yet roll back, which must not have to undo anything.
-    /// @return They; or AdoptError::ForeignConsoleHost where it does not run on the bundled conpty.dll
+    /// The pseudoconsole as it crosses -- the handles that make it up, as a successor process inherits them,
+    /// with the terminal's size in cells and pixels -- while this one keeps them: for a capture that may yet
+    /// roll back, which must not have to undo anything.
+    /// @return It; or AdoptError::ForeignConsoleHost where it does not run on the bundled conpty.dll
     ///         (ConsoleHost::Bundled), BadDescriptor where there is no live pseudoconsole.
-    [[nodiscard]] std::expected<InheritedConPty, AdoptError> handoverHandles() const;
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> handover() const override;
 
     /// Gives up the pseudoconsole without closing it or any of its handles, and leaves this ConPty closed:
     /// the handles then belong to whoever adopts them (adopt()) -- in this process, or in one that inherited
-    /// them, once this process closed its own. Only on the bundled conpty.dll (Require), whose layout alone
-    /// is known.
-    /// @return What handoverHandles() returned.
-    [[nodiscard]] std::expected<InheritedConPty, AdoptError> releaseHandles();
+    /// them, once this process closed its own.
+    /// @return What handover() returned; or, nothing given up, AdoptError::ForeignConsoleHost where it does
+    ///         not run on the bundled conpty.dll, whose layout alone is known, BadDescriptor where there is
+    ///         no live pseudoconsole.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> releaseHandover() override;
 
   private:
     // Private class for ConPTY API implementation details
     class ConptyApiImpl;
 
-    /// handoverHandles(), under _mutex.
-    [[nodiscard]] std::expected<InheritedConPty, AdoptError> handoverHandlesLocked() const;
+    /// handover(), under _mutex.
+    [[nodiscard]] std::expected<InheritedPty, AdoptError> handoverLocked() const;
     /// Closes the pseudoconsole now, under _mutex: close() without its deferral.
     void closeLocked();
     /// interruptWrites(), under _mutex.

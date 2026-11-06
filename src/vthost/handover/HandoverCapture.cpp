@@ -3,14 +3,12 @@
 
 #include <vtbackend/state/TerminalStateCodec.hpp>
 
-#ifdef _WIN32
-    #include <vtpty/ConPty.hpp>
-#else
-    #include <vtpty/UnixPty.hpp>
-#endif
+#include <vtpty/InheritedPty.hpp>
 
 #include <core/Assert.hpp>
 
+#include <algorithm>
+#include <array>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -35,31 +33,33 @@ namespace
         SessionDevice device = SessionDevice::ChildOnPty; ///< Which of the two cross.
     };
 
-    /// @return What of @p pty crosses: its descriptors on POSIX, its pseudoconsole's handles on Windows; or
-    ///         UnsupportedSession for a device that is no PTY of this process, ForeignConsoleHost for a
-    ///         pseudoconsole no successor could rebuild.
+    /// What a PTY's refusal to be handed over makes of a capture.
+    struct AdoptRefusal
+    {
+        vtpty::AdoptError adopt; ///< Why the PTY cannot be handed over.
+        HandoverError capture;   ///< Why the capture is refused for it.
+    };
+
+    /// Each refusal a capture reports as its own; any other is a session that cannot cross
+    /// (HandoverError::UnsupportedSession).
+    constexpr auto AdoptRefusals = std::array {
+        // Distinct, for the user to learn which conpty.dll a pseudoconsole needs.
+        AdoptRefusal { .adopt = vtpty::AdoptError::ForeignConsoleHost,
+                       .capture = HandoverError::ForeignConsoleHost },
+    };
+
+    /// @return Why a capture is refused, for why a session's PTY cannot be handed over (AdoptRefusals).
+    [[nodiscard]] HandoverError handoverErrorOfAdopt(vtpty::AdoptError error) noexcept
+    {
+        auto const row = std::ranges::find(AdoptRefusals, error, &AdoptRefusal::adopt);
+        return row != AdoptRefusals.end() ? row->capture : HandoverError::UnsupportedSession;
+    }
+
+    /// @return What of @p pty crosses (vtpty::Pty::handover()); or UnsupportedSession for a device that is no
+    ///         PTY of this process, ForeignConsoleHost for a pseudoconsole no successor could rebuild.
     [[nodiscard]] std::expected<vtpty::InheritedPty, HandoverError> crossingPtyOf(vtpty::Pty const& pty)
     {
-#ifdef _WIN32
-        auto const* const conpty = dynamic_cast<vtpty::ConPty const*>(&pty);
-        if (conpty == nullptr)
-            return std::unexpected(HandoverError::UnsupportedSession);
-        return conpty->handoverHandles()
-            .transform([&](vtpty::InheritedConPty const& handles) {
-                return vtpty::InheritedPty { .pageSize = conpty->pageSize(),
-                                             .pixels = conpty->pixelSize(),
-                                             .conpty = handles };
-            })
-            .transform_error([](vtpty::AdoptError error) {
-                return error == vtpty::AdoptError::ForeignConsoleHost ? HandoverError::ForeignConsoleHost
-                                                                      : HandoverError::UnsupportedSession;
-            });
-#else
-        auto const* const unix = dynamic_cast<vtpty::UnixPty const*>(&pty);
-        if (unix == nullptr)
-            return std::unexpected(HandoverError::UnsupportedSession);
-        return unix->handoverDescriptors();
-#endif
+        return pty.handover().transform_error(handoverErrorOfAdopt);
     }
 
     /// Reads what of @p session crosses the exec, giving up nothing: the host keeps owning it.

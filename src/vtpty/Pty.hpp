@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/ImageSize.hpp>
+#include <vtpty/InheritedPty.hpp>
 #include <vtpty/InputEcho.hpp>
 #include <vtpty/PageSize.hpp>
 
@@ -173,6 +174,26 @@ class Pty
     /// Ends interruptWrites(): writes wait for the other end to read again. Called with no write in
     /// progress.
     virtual void allowWrites() {}
+
+    /// What of this device crosses to the process that takes over a live upgrade, while this one keeps it:
+    /// for a capture that may yet roll back, which must not have to undo anything. Adopted again with
+    /// adoptPty().
+    /// @return On POSIX the master's descriptors, on Windows the pseudoconsole's handles, with the terminal's
+    ///         size; or why it cannot cross: AdoptError::Unsupported for a device that cannot be handed over
+    ///         at all, as this default says.
+    [[nodiscard]] virtual std::expected<InheritedPty, AdoptError> handover() const
+    {
+        return std::unexpected(AdoptError::Unsupported);
+    }
+
+    /// Gives up what handover() names without closing any of it, and leaves this PTY closed: it then belongs
+    /// to whoever adopts it (adoptPty()) -- in this process, or in the one it crosses to.
+    /// @return What handover() returned; or why nothing was given up, this PTY then left as it was:
+    ///         AdoptError::Unsupported for a device that cannot be handed over at all, as this default says.
+    [[nodiscard]] virtual std::expected<InheritedPty, AdoptError> releaseHandover()
+    {
+        return std::unexpected(AdoptError::Unsupported);
+    }
 
     /// @returns current underlying window size in characters width and height.
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;

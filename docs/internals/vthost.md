@@ -1587,6 +1587,13 @@ that has it. `DaemonDriftModel` holds the outcome for QML; `ContourGuiApp` runs 
 it over is an `handover::ImageHandoff`. `ExecHandoff` is the POSIX one above: keep the descriptors, write the
 memory object, `exec` with `--handover-fd`. `SuccessorHandoff` is Windows'.
 
+**A PTY says what of it crosses.** The capture asks each session's device for `vtpty::Pty::handover()`: a
+`UnixPty` names its master and fast pipe, a `ConPty` its pseudoconsole's handles, and any other device (a
+channel, SSH) refuses with `AdoptError::Unsupported`, which the capture reports as `UnsupportedSession`. The
+new image adopts it with `vtpty::adoptPty()`, and closes one it could not adopt with `vtpty::closeInherited()`,
+letting go of its child with `vtpty::releaseUnadopted()`. So vthost's handover code branches on no platform for
+the PTY, and a new kind of PTY is a change to vtpty alone.
+
 **Windows.** There is no `exec` that keeps the process, so the old daemon starts the target as a *successor
 process* and hands it over at one **commit point**:
 
@@ -1623,7 +1630,7 @@ Between the capture and the commit, a program may exit. Its exit watcher would c
 free handles the image names by value, for the next handle the daemon makes -- the mapping, the handshake's
 events -- to take their numbers. While a session is quiesced (`interruptWrites()`) `ConPty::close()` is
 therefore held until the upgrade rolls back (`allowWrites()`), and dropped once the handles are handed on
-(`releaseHandles()`); an exited program is handed over like a running one, and the successor sees it exit.
+(`releaseHandover()`); an exited program is handed over like a running one, and the successor sees it exit.
 
 What makes the handles adoptable:
 

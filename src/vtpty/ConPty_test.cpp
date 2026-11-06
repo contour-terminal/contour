@@ -2,6 +2,7 @@
 #include <vtpty/ConPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/test/HandoverSupport.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
@@ -922,14 +923,6 @@ HANDLE spawnInheriting(std::wstring commandLine, std::vector<HANDLE> inherited)
     return info.hProcess;
 }
 
-/// Skips a test that hands a pseudoconsole on, or reaches its console host, where the bundled conpty.dll is
-/// not beside the test binary (CONTOUR_EMBED_OPENCONSOLE=OFF): only that one's handles are known.
-void requireBundledConsoleHost()
-{
-    if (ConPty { pageSize(80, 25) }.consoleHost() != vtpty::ConsoleHost::Bundled)
-        SKIP("the bundled conpty.dll is not beside this test");
-}
-
 /// Whether a process runs or is held, as a console host that stopped reading would be.
 enum class Scheduling : uint8_t
 {
@@ -938,13 +931,13 @@ enum class Scheduling : uint8_t
 };
 
 /// Suspends or resumes every thread of @p process.
-void schedule(HANDLE process, Scheduling scheduling)
+/// @return The call's NTSTATUS: zero once done.
+[[nodiscard]] LONG schedule(HANDLE process, Scheduling scheduling)
 {
     using NtProcessFn = LONG(NTAPI*)(HANDLE);
     auto* const call = vtpty::ntdllFunction<NtProcessFn>(
         scheduling == Scheduling::Suspended ? "NtSuspendProcess" : "NtResumeProcess");
-    REQUIRE(call != nullptr);
-    REQUIRE(call(process) == 0);
+    return call != nullptr ? call(process) : static_cast<LONG>(STATUS_ENTRYPOINT_NOT_FOUND);
 }
 
 } // namespace
@@ -956,7 +949,7 @@ void schedule(HANDLE process, Scheduling scheduling)
 // successor had made.
 TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][handover]")
 {
-    requireBundledConsoleHost();
+    vtpty::testing::requireHandoverCapable();
     auto process =
         std::make_unique<vtpty::Process>(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
                                          std::make_unique<ConPty>(pageSize(80, 25)),
@@ -969,7 +962,7 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
     std::ignore = process->write("size\r\n");
     REQUIRE(awaitOutput(*process, "size=80x25"));
 
-    auto const handles = pty.handoverHandles();
+    auto const handles = pty.handover();
     REQUIRE(handles.has_value());
     auto const child = process->handoverChild();
     REQUIRE(child.has_value());
@@ -997,9 +990,10 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
                     FALSE,
                     0);
     CloseHandle(released->processHandle.native());
-    auto const ownHandles = pty.releaseHandles();
+    auto const ownHandles = pty.releaseHandover();
     REQUIRE(ownHandles.has_value());
-    for (auto const handle: ownHandles->handles())
+    REQUIRE(ownHandles->conpty.has_value());
+    for (auto const handle: ownHandles->conpty->handles())
         CloseHandle(handle.native());
     process.reset();
 
@@ -1018,19 +1012,32 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
 // later write returns at once, until allowWrites().
 TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty][conpty][threading]")
 {
-    requireBundledConsoleHost();
+    vtpty::testing::requireHandoverCapable();
     auto process = vtpty::testing::unplacedProcess(execInfo(core::pathToUtf8(handoverProbe()), { "program" }),
                                                    pageSize(80, 25));
     REQUIRE(process.start().has_value());
     auto& pty = static_cast<ConPty&>(process.pty());
     REQUIRE(awaitOutput(process, "ready"));
-    auto const handles = pty.handoverHandles();
+    auto const handles = pty.handover();
     REQUIRE(handles.has_value());
-    auto* const consoleHost = handles->consoleHost.native();
+    REQUIRE(handles->conpty.has_value());
+    // A handle of the test's own: the program's exit closes the pseudoconsole's, and frees its value.
+    auto duplicate = HANDLE {};
+    REQUIRE(DuplicateHandle(GetCurrentProcess(),
+                            handles->conpty->consoleHost.native(),
+                            GetCurrentProcess(),
+                            &duplicate,
+                            0,
+                            FALSE,
+                            DUPLICATE_SAME_ACCESS)
+            != FALSE);
+    auto const consoleHost = vtpty::UniqueHandle { duplicate };
 
     // A console host that reads nothing more: the pipe fills, and the write waits.
-    schedule(consoleHost, Scheduling::Suspended);
-    auto const resume = gsl::finally([consoleHost] { schedule(consoleHost, Scheduling::Running); });
+    REQUIRE(schedule(consoleHost.get(), Scheduling::Suspended) == 0);
+    // Unchecked: the console host may have ended with the program by then.
+    auto const resume =
+        gsl::finally([&consoleHost] { std::ignore = schedule(consoleHost.get(), Scheduling::Running); });
     auto const flood = std::string(4 * 1024 * 1024, 'x');
     auto result = std::async(std::launch::async, [&] {
         auto const written = pty.write(flood);
@@ -1055,7 +1062,7 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
     SECTION("allowWrites() lets writes through again")
     {
         pty.allowWrites();
-        schedule(consoleHost, Scheduling::Running);
+        REQUIRE(schedule(consoleHost.get(), Scheduling::Running) == 0);
         CHECK(pty.write("\r\n") == 2);
     }
 
@@ -1069,16 +1076,16 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
 // upgrade rolls back.
 TEST_CASE("ConPty.closeWhileWritesAreInterruptedWaitsUntilTheyAreAllowed", "[vtpty][conpty][handover]")
 {
-    requireBundledConsoleHost();
+    vtpty::testing::requireHandoverCapable();
     auto pty = ConPty { pageSize(80, 25) };
     REQUIRE(pty.start().has_value());
-    auto const before = pty.handoverHandles();
+    auto const before = pty.handover();
     REQUIRE(before.has_value());
 
     pty.interruptWrites();
     pty.close();
     CHECK_FALSE(pty.isClosed());
-    auto const held = pty.handoverHandles();
+    auto const held = pty.handover();
     REQUIRE(held.has_value());
     CHECK(held->handles() == before->handles());
 
@@ -1090,14 +1097,16 @@ TEST_CASE("ConPty.closeWhileWritesAreInterruptedWaitsUntilTheyAreAllowed", "[vtp
 // them.
 TEST_CASE("ConPty.closeHeldForAHandoverIsDroppedWithItsHandles", "[vtpty][conpty][handover]")
 {
-    requireBundledConsoleHost();
+    vtpty::testing::requireHandoverCapable();
     auto pty = ConPty { pageSize(80, 25) };
     REQUIRE(pty.start().has_value());
     pty.interruptWrites();
     pty.close();
 
-    auto const released = pty.releaseHandles();
-    REQUIRE(released.has_value());
+    auto const handedOver = pty.releaseHandover();
+    REQUIRE(handedOver.has_value());
+    REQUIRE(handedOver->conpty.has_value());
+    auto const& released = handedOver->conpty;
     CHECK(pty.isClosed());
     pty.allowWrites();
     for (auto const handle: released->handles())
@@ -1107,7 +1116,7 @@ TEST_CASE("ConPty.closeHeldForAHandoverIsDroppedWithItsHandles", "[vtpty][conpty
     }
 
     // Adopted again here, as a successor would: it serves on, and closes everything as it goes.
-    auto adopted = ConPty::adopt(vtpty::InheritedPty { .pageSize = pageSize(80, 25), .conpty = *released });
+    auto adopted = ConPty::adopt(*handedOver);
     REQUIRE(adopted.has_value());
     CHECK_FALSE((*adopted)->isClosed());
     adopted->reset();

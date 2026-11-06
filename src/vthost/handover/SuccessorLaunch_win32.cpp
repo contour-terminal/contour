@@ -3,8 +3,8 @@
 
 #ifdef _WIN32
 
-    #include <vtpty/ConPty.hpp>
     #include <vtpty/Process.hpp>
+    #include <vtpty/PtyAdoption.hpp>
     #include <vtpty/WindowsHandle.hpp>
 
     #include <core/WideString.hpp>
@@ -291,9 +291,7 @@ namespace
     /// @return Why @p session cannot be adopted in this process; nothing where it can.
     [[nodiscard]] std::optional<std::string_view> unadoptable(HandoverSession const& session)
     {
-        if (!session.pty.conpty)
-            return "its pseudoconsole's handles did not cross";
-        if (auto const adoptable = vtpty::ConPty::canAdopt(*session.pty.conpty); !adoptable)
+        if (auto const adoptable = vtpty::canAdoptPty(session.pty); !adoptable)
             return adoptable.error() == vtpty::AdoptError::ForeignConsoleHost
                        ? "the conpty.dll this release ships is not beside it"
                        : "its pseudoconsole's handles did not cross";

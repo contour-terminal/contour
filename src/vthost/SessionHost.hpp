@@ -450,8 +450,13 @@ class HostedSession
     ///         MockPty).
     [[nodiscard]] vtpty::Process const* process() const noexcept;
 
-    /// @return The PTY the session runs on: its process's, or the device itself where no process runs on it.
-    [[nodiscard]] vtpty::Pty const& pty() const noexcept;
+    /// @return The child process behind the session's PTY, to give it up; nullptr for a PTY that is no
+    ///         process.
+    [[nodiscard]] vtpty::Process* process() noexcept;
+
+    /// @return The device the session runs on, as its terminal reads it: whatever wraps the PTY (a process, a
+    ///         tap) forwards what a handover asks of it (vtpty::Pty::handover(), isClosed()).
+    [[nodiscard]] vtpty::Pty const& pty() const noexcept { return _terminal.device(); }
 
     /// @return Why the session ended, as the pump saw it once its PTY closed: valid from the moment the
     ///         onClosed callback runs, Exited before.
