@@ -13,6 +13,10 @@ on:
       - '*.sh'
     branches:
       - master
+    # Only full release tags (v<major>.<minor>.<patch>). GitHub does not evaluate `paths-ignore` for
+    # tag pushes, so a release tag always builds.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -24,6 +28,7 @@ on:
       - '*.sh'
     branches:
       - master
+      - 'maintenance/**'
 
 concurrency:
   group: build-${{ github.ref }}
@@ -45,22 +50,26 @@ env:
   # the object was built. BASEDIR makes paths under the checkout relative, NOHASHDIR keeps the
   # build directory out of the key, and the two sloppiness flags stop a header's mtime/ctime --
   # which a fresh checkout always changes -- from defeating a hit. (No pch_defines: there is no PCH.)
-  # The caches themselves are saved by `push` runs only and merely restored by pull requests; see
+  # The caches themselves are saved by master pushes only and merely restored by every other run; see
   # docs/internals/build-times.md ("The compiler cache").
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: "1"
   CCACHE_SLOPPINESS: include_file_mtime,include_file_ctime
+  # The one place where a step or script learns that it builds a release; jobs use the same condition
+  # in their `if:` (docs/internals/releasing.md).
+  CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
 
 # What runs where. A pull request runs the platform builds and tests (Windows, macOSArm, one Linux
 # leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
 # the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
-# pushes and in the merge queue, and on the `release` branch's pull request, through
-# `if: github.event_name != 'pull_request' || github.head_ref == 'release'`. Exceptions: FreeBSD and
-# the full-tree clang-tidy use `github.event_name != 'pull_request'` and skip even the `release`
-# pull request, and the static build (`github.ref == 'refs/heads/master' || head_ref == 'release'`)
-# never runs in the merge queue. The daemon packages: the Debian one (`package_daemon_for_Ubuntu`) runs
-# on every pull request, for 24.04 alone (both releases otherwise), because it is the only job that
-# builds the GUI-less configuration; the RPMs (`package_for_Fedora`) follow the packaging rule above.
+# pushes, in the merge queue and on release tags, through `if: github.event_name != 'pull_request'`.
+# That includes FreeBSD and the full-tree clang-tidy, which nothing exempts a release tag from. The
+# static build (`github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')`) runs on
+# master and release tags and never in the merge queue. The release-only jobs use
+# `startsWith(github.ref, 'refs/tags/v')`. The daemon packages: the Debian one
+# (`package_daemon_for_Ubuntu`) runs on every pull request, for 24.04 alone (both releases
+# otherwise), because it is the only job that builds the GUI-less configuration; the RPMs
+# (`package_for_Fedora`) follow the packaging rule above.
 # A required status check is never gated that way: it always runs and judges a skipped job as passed
 # (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 
@@ -121,7 +130,7 @@ jobs:
       with:
         key: "ccache-ubuntu2404-clang-tidy"
         max-size: 700M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "update APT database"
       run: sudo ./scripts/apt-update.sh
@@ -307,7 +316,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '["24.04"]' || '["24.04","26.04"]') }}
+        os_version: ${{ fromJSON(github.event_name == 'pull_request' && '["24.04"]' || '["24.04","26.04"]') }}
     runs-on: ubuntu-${{ matrix.os_version }}
     env:
       OS_VERSION: ${{ matrix.os_version }}
@@ -327,7 +336,7 @@ jobs:
       with:
         key: "ccache-ubuntu${{ matrix.os_version }}-headless"
         max-size: 500M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "install dependencies"
       run: sudo env QTVER=6 ./scripts/install-deps.sh
@@ -488,7 +497,7 @@ jobs:
     # Uploaded wherever the GUI package is, and no more widely: the install-swap job and the release
     # take it from here. The steps above are what run on a pull request.
     - name: "Uploading artifact .deb package"
-      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
@@ -506,11 +515,11 @@ jobs:
   #
   # ubuntu:26.04, the release the GUI package is built for, with the daemon package built on that same
   # release (the 26.04 matrix entry above), so neither package meets a soname or virtual-package skew
-  # that a user installing from one release would not. The swap job is restricted to non-PR / release
-  # events, hence the swap behaviour is first exercised on release branches, not on ordinary pull
+  # that a user installing from one release would not. The swap job is restricted to non-PR events,
+  # hence the swap behaviour is first exercised on master pushes and release tags, not on ordinary pull
   # requests (the PR description states it).
   test_daemon_package_swap:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Ubuntu Linux (contour / contour-daemon swap)"
     runs-on: ubuntu-24.04
     needs:
@@ -581,7 +590,7 @@ jobs:
       with:
         key: "ccache-ubuntu2404-no-extensions"
         max-size: 700M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "update APT database"
       run: sudo ./scripts/apt-update.sh
@@ -718,7 +727,7 @@ jobs:
   # }}}
   # {{{ StaticBuild
   staticBuild:
-    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
     name: "Static build"
     runs-on: ubuntu-latest
     steps:
@@ -768,10 +777,10 @@ jobs:
   # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
   #
   # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
-  # merge queue and on the `release` pull request, not on ordinary pull requests: the Ubuntu daemon job
+  # merge queue and on release tags, not on ordinary pull requests: the Ubuntu daemon job
   # already builds the GUI-less configuration on every one.
   package_for_Fedora:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
     strategy:
       fail-fast: false
@@ -977,7 +986,7 @@ jobs:
   # }}}
   # {{{ OpenBSD
   openbsd:
-    if: false #github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: false
     runs-on: ubuntu-latest
     name: OpenBSD 7.5
     # env:
@@ -1034,8 +1043,8 @@ jobs:
           # that was in no keychain (breaking every PR run of this job), while a release
           # branch's signing path went completely unexercised until it was already on
           # master. Signing has to be proven before the merge, not after it.
-          # (An ordinary pull request no longer packages or signs at all; the merge queue and the
-          # release branch, which carry the secrets, prove it before it ships.)
+          # (An ordinary pull request no longer packages or signs at all; the merge queue and
+          # release tags, which carry the secrets, prove it before it ships.)
           if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
             echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
             echo "NOTARIZE=ON" >> "$GITHUB_OUTPUT"
@@ -1064,9 +1073,9 @@ jobs:
           #
           # Not even read on an ordinary pull request: nothing is signed there, so the secret is
           # never exposed to the job and the PR path is the same with or without secrets.
-          HAS_SIGNING_SECRETS: ${{ (github.event_name != 'pull_request' || github.head_ref == 'release') && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
+          HAS_SIGNING_SECRETS: ${{ github.event_name != 'pull_request' && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
           # A pull request builds and tests; it does not package, so it neither signs nor notarizes.
-          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' || github.head_ref == 'release' }}
+          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' }}
       - name: Install the Apple signing certificate
         if: steps.set_vars.outputs.NOTARIZE == 'ON'
         env:
@@ -1119,7 +1128,7 @@ jobs:
         with:
           key: ccache-macosArm-r1
           max-size: 800M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: Install Qt
         # The official Qt binaries, as on Linux and Windows -- not Homebrew's. Homebrew
@@ -1472,7 +1481,7 @@ jobs:
         with:
           key: ccache-windows-msvc-release
           max-size: 1500M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: setup environment
         shell: powershell
@@ -1678,9 +1687,9 @@ jobs:
           }
           if ($status -ne 0) { exit 1 }
       # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
-      # queue and the `release` branch.
+      # queue and release tags.
       - name: "Install Wix Toolset"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         run: |
           # Use this to list all available versions
           # dotnet tool search --global wix --detail
@@ -1691,7 +1700,7 @@ jobs:
           wix extension add --global WixToolset.UI.wixext/4.0.6
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
       - name: "Create Package(s)"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         shell: powershell
         run: |
           cpack --preset ${{ env.CMAKE_PRESET }} -V
@@ -1701,12 +1710,12 @@ jobs:
             exit $LASTEXITCODE
           }
       - name: "Rename package(s)"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - name: "Check the package contents"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         # What the package must and must not hold, asserted as the macOS job does for its image: a mistake
         # either way has no other visible symptom.
         # - No executable but those allowed, no .ilk or .pdb, no Qt Test: bin/ is every target's output
@@ -1753,7 +1762,7 @@ jobs:
             }
           }
       - name: "Uploading MSI to artifact store"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
@@ -1761,7 +1770,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -1769,7 +1778,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
         # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
@@ -1812,7 +1821,7 @@ jobs:
           pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading the upgrade check's logs"
-        if: failure() && (github.event_name != 'pull_request' || github.head_ref == 'release')
+        if: failure() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: "msi-upgrade-check-logs"
@@ -1826,7 +1835,7 @@ jobs:
       fail-fast: false
       matrix:
         # Chosen by event, as data: a pull request builds one leg -- Clang 22 on x86, the compiler
-        # that also gates -Werror -- while master, the merge queue and the `release` pull request
+        # that also gates -Werror -- while master, the merge queue and release tags
         # build all four. `werror` is OFF only where the leg is not known to build clean with it
         # (GCC: a local GCC 16 build stops on -Werror=bidi-chars; GCC 15 is unverified). `artifacts`
         # marks the single leg that runs the chrome snapshots and uploads the test binaries: the GCC
@@ -1834,7 +1843,7 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
@@ -1849,7 +1858,7 @@ jobs:
         with:
           key: "ccache-${{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
           max-size: ${{ startsWith(matrix.compiler, 'GCC') && '1200M' || '700M' }}
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "update APT database"
         run: sudo ./scripts/apt-update.sh
@@ -2211,7 +2220,7 @@ jobs:
         with:
           key: "ccache-appimage"
           max-size: 1200M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "install dependencies"
         run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
@@ -2286,7 +2295,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04
   package_for_Ubuntu:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
       fail-fast: false
@@ -2310,7 +2319,7 @@ jobs:
         with:
           key: "ccache-ubuntu-${{ matrix.os_version }}"
           max-size: 1200M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
@@ -2393,7 +2402,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Run tests via valgrind"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2449,7 +2458,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Run VT conformance suites"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2509,7 +2518,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         test_case:
@@ -2544,7 +2553,7 @@ jobs:
   # }}}
   # {{{ Latency trend: in-process vs daemon, recorded on every platform, never gating
   latency_trend:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     # Records, never gates: a shared runner is too noisy to hold a 1 ms budget to, and the gate is a
     # reproducible local run (docs/internals/latency.md). What this gives is the trend -- a regression
     # shows up as a step in the artifacts across commits. continue-on-error keeps a leg that cannot
@@ -2781,7 +2790,7 @@ jobs:
   # }}}
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "GUI: Quick Shell Exit"
     needs: [package_for_Ubuntu]
     strategy:
@@ -2850,7 +2859,7 @@ jobs:
   # }}}
   # {{{ GUI: external test: notcurses
   test_notcurses:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     # Must match the OS the consumed .deb targets (26.04): a 26.04-built package links Qt 6.10 and a
     # newer libstdc++ than a 24.04 runner provides, so running it there fails with GLIBCXX/Qt-version
@@ -2969,7 +2978,7 @@ jobs:
   # }}}
   # {{{ Check Ubuntu package
   check_package_ubuntu:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Check packages for Ubuntu "
     strategy:
       fail-fast: false
