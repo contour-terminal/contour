@@ -18,7 +18,7 @@
 /// resumes every session and listener, as after a failed exec: it wrote nothing anywhere that the old daemon
 /// would then deliver a second time.
 
-#include <vtpty/InheritedPty.hpp>
+#include <vtpty/CrossingHandle.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -42,13 +42,14 @@ class HandoverMemory;
 /// The handles a successor process is handed beside those the image names: what `--handover-handles=` names.
 struct SuccessorHandles
 {
-    vtpty::HandleValue image = 0; ///< The unnamed mapping the image is in (HandoverMemory).
+    vtpty::CrossingHandle image {}; ///< The unnamed mapping the image is in (HandoverMemory).
     /// The event the successor sets once it has read the image and can take over.
-    vtpty::HandleValue ready = 0;
+    vtpty::CrossingHandle ready {};
     /// The event the predecessor sets once it has seen the successor ready: the successor owns everything
     /// from then on.
-    vtpty::HandleValue commit = 0;
-    vtpty::HandleValue predecessor = 0; ///< The predecessor process, which the successor waits to have ended.
+    vtpty::CrossingHandle commit {};
+    vtpty::CrossingHandle
+        predecessor {}; ///< The predecessor process, which the successor waits to have ended.
 
     bool operator==(SuccessorHandles const&) const = default;
 };
@@ -57,15 +58,15 @@ struct SuccessorHandles
 [[nodiscard]] std::string handoverHandlesArgument(SuccessorHandles const& handles);
 
 /// @param value What follows `--handover-handles=`.
-/// @return The handles it names; nullopt for a value that is not four handles, none of them zero.
+/// @return The handles it names; nullopt for a value that is not four handles, each of them positive.
 [[nodiscard]] std::optional<SuccessorHandles> parseHandoverHandles(std::string_view value);
 
 #ifdef _WIN32
 /// A successor process SuccessorLauncher started.
 struct SuccessorProcess
 {
-    vtpty::HandleValue process = 0; ///< A handle to it, which the caller closes.
-    std::int64_t pid = -1;          ///< Its process id.
+    vtpty::CrossingHandle process {}; ///< A handle to it, which the caller closes.
+    std::int64_t pid = -1;            ///< Its process id.
 };
 
 /// What the Windows handoff reaches out of the process with: starting the successor, ending it, and ending
@@ -90,7 +91,7 @@ class SuccessorLauncher
     [[nodiscard]] virtual std::expected<SuccessorProcess, std::error_code> launch(
         std::filesystem::path const& executable,
         std::span<std::string const> argv,
-        std::span<vtpty::HandleValue const> inherited) = 0;
+        std::span<vtpty::CrossingHandle const> inherited) = 0;
 
     /// Ends @p successor, one that failed to take over, and waits until it has ended: what lets the old
     /// daemon resume knowing the successor touches nothing more.

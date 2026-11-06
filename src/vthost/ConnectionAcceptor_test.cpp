@@ -430,11 +430,11 @@ TEST_CASE("an acceptor names the descriptor its unix listener listens on", "[vth
                                  return drainConnection(std::move(conn));
                              } };
     CHECK(server.name() == "control");
-    auto const fd = server.listeningDescriptor();
-    REQUIRE(fd.has_value());
+    auto const handle = server.listeningHandle();
+    REQUIRE_FALSE(handle.isNone());
     auto address = sockaddr_un {};
     auto length = static_cast<socklen_t>(sizeof(address));
-    REQUIRE(::getsockname(*fd, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+    REQUIRE(::getsockname(handle.native(), reinterpret_cast<sockaddr*>(&address), &length) == 0);
     CHECK(std::string { address.sun_path } == socketPath);
     server.close();
 }

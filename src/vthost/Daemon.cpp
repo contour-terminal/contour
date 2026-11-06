@@ -17,7 +17,6 @@
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
-#include <vtpty/WindowsHandle.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -33,6 +32,7 @@
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/SystemInfo.hpp>
+#include <core/platform/Types.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -322,24 +322,15 @@ namespace
         }
     }
 
-    /// @return The handle @p listener crossed as: its descriptor on POSIX, its socket on Windows.
-    [[nodiscard]] core::platform::NativeHandle nativeHandleOf(
-        handover::InheritedListener const& listener) noexcept
-    {
-#ifdef _WIN32
-        return vtpty::handleOf(listener.socket);
-#else
-        return listener.fd;
-#endif
-    }
-
-    /// Closes @p listener, inherited and not served.
+    /// Closes @p listener, inherited and not served: its socket, which on Windows only closesocket() closes.
     void closeInherited(handover::InheritedListener const& listener) noexcept
     {
+        if (listener.handle.isNone())
+            return;
 #ifdef _WIN32
-        ::closesocket(static_cast<SOCKET>(listener.socket));
+        ::closesocket(reinterpret_cast<SOCKET>(listener.handle.native()));
 #else
-        ::close(listener.fd);
+        core::platform::platformClose(listener.handle.native());
 #endif
     }
 
@@ -372,8 +363,7 @@ namespace
             // Moved out before it is erased: it is this call's to adopt or to close from here on.
             auto const listener = std::move(*found);
             _pending.erase(found);
-            auto const handle = nativeHandleOf(listener);
-            auto adopted = core::net::adoptListener(loop, handle);
+            auto adopted = core::net::adoptListener(loop, listener.handle.native());
             if (!adopted)
             {
                 errorLog()("cannot serve the inherited {} listener: {}", name, adopted.error().toString());

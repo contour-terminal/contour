@@ -90,8 +90,8 @@ namespace
 #ifdef _WIN32
         if (pty.conpty)
             for (auto const handle: pty.conpty->handles())
-                if (handle != 0)
-                    CloseHandle(vtpty::handleOf(handle));
+                if (!handle.isNone())
+                    CloseHandle(handle.native());
 #else
         for (auto const fd: pty.descriptors())
             if (fd > 2)
@@ -162,8 +162,8 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
         if (session.device == handover::SessionDevice::ChildOnPty)
         {
 #ifdef _WIN32
-            if (session.child.processHandle != 0)
-                CloseHandle(vtpty::handleOf(session.child.processHandle));
+            if (!session.child.processHandle.isNone())
+                CloseHandle(session.child.processHandle.native());
 #else
             reapWhenExited(session.child.pid);
 #endif
@@ -374,36 +374,25 @@ namespace
     };
 } // namespace
 
-std::vector<int> descriptorsNamedBy(HandoverImage const& image)
+std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image)
 {
-    auto named = std::vector<int> {};
-    for (auto const& session: image.sessions)
-        std::ranges::copy(session.pty.descriptors(), std::back_inserter(named));
-    for (auto const& listener: image.listeners)
-        named.push_back(listener.fd);
-    named.push_back(image.leaseFd);
-    return sortedUnique(std::move(named), NoDescriptor);
-}
-
-std::vector<vtpty::HandleValue> handlesNamedBy(HandoverImage const& image)
-{
-    auto named = std::vector<vtpty::HandleValue> {};
+    auto named = std::vector<vtpty::CrossingHandle> {};
     for (auto const& session: image.sessions)
     {
-        if (session.pty.conpty)
-            std::ranges::copy(session.pty.conpty->handles(), std::back_inserter(named));
+        std::ranges::copy(session.pty.handles(), std::back_inserter(named));
         named.push_back(session.child.processHandle);
     }
     for (auto const& listener: image.listeners)
-        named.push_back(listener.socket);
-    named.push_back(image.leaseHandle);
-    return sortedUnique(std::move(named), [](vtpty::HandleValue handle) { return handle == 0; });
+        named.push_back(listener.handle);
+    named.push_back(image.lease);
+    return sortedUnique(std::move(named), [](vtpty::CrossingHandle handle) { return handle.isNone(); });
 }
 
 std::vector<int> descriptorsToKeep(HandoverImage const& image)
 {
-    auto kept = descriptorsNamedBy(image);
-    kept.insert(kept.end(), { 0, 1, 2 });
+    auto kept = std::vector<int> { 0, 1, 2 };
+    for (auto const handle: handlesNamedBy(image))
+        kept.push_back(handle.native());
     return sortedUnique(std::move(kept), NoDescriptor);
 }
 
@@ -433,11 +422,13 @@ namespace
 } // namespace
 #endif
 
-std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory, int fd)
+std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
+                                                         vtpty::CrossingHandle memoryHandle)
 {
-    auto image =
-        memory.read(fd).and_then([](std::vector<uint8_t> const& bytes) { return decodeHandover(bytes); });
-    memory.discard(fd);
+    auto image = memory.read(memoryHandle).and_then([](std::vector<uint8_t> const& bytes) {
+        return decodeHandover(bytes);
+    });
+    memory.discard(memoryHandle);
     return image;
 }
 

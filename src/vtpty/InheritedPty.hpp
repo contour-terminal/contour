@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace vtpty
 {
-
-/// A handle's value, as it crosses to another process: a Windows HANDLE widened to an integer, 0 for none.
-/// Windows keeps every kernel handle within 32 bits, so the value survives any round trip through it.
-using HandleValue = std::uint64_t;
 
 /// A pseudoconsole (ConPTY), as it crosses to the successor process of a Windows daemon's live upgrade: the
 /// handles that make it up, which the successor inherits under the same values.
@@ -23,14 +23,19 @@ using HandleValue = std::uint64_t;
 /// ConPty::adopt() turns it back into a live pseudoconsole, and that is Windows-only.
 struct InheritedConPty
 {
-    HandleValue outputReader = 0; ///< This end of the pipe the pseudoconsole writes the program's output to.
-    HandleValue inputWriter = 0;  ///< This end of the pipe the pseudoconsole reads the program's input from.
-    HandleValue signal = 0;       ///< The pseudoconsole's signal pipe, which resizes and closes it.
-    HandleValue reference = 0;    ///< Its reference handle, which keeps the console session open.
-    HandleValue consoleHost = 0;  ///< The console host process that serves it.
+    /// This end of the pipe the pseudoconsole writes the program's output to.
+    CrossingHandle outputReader {};
+    /// This end of the pipe the pseudoconsole reads the program's input from.
+    CrossingHandle inputWriter {};
+    /// The pseudoconsole's signal pipe, which resizes and closes it.
+    CrossingHandle signal {};
+    /// Its reference handle, which keeps the console session open.
+    CrossingHandle reference {};
+    /// The console host process that serves it.
+    CrossingHandle consoleHost {};
 
     /// @return Every handle it is made of, in the order they are declared.
-    [[nodiscard]] std::array<HandleValue, 5> handles() const noexcept
+    [[nodiscard]] std::array<CrossingHandle, 5> handles() const noexcept
     {
         return { outputReader, inputWriter, signal, reference, consoleHost };
     }
@@ -52,13 +57,30 @@ struct InheritedPty
     std::optional<ImageSize> pixels;          ///< The terminal size in pixels at hand-off, where known.
     std::optional<InheritedConPty> conpty {}; ///< The pseudoconsole, on Windows; nullopt elsewhere.
 
-    /// @return Every descriptor this PTY carries across the exec: the master, then the fast pipe's reader and
-    ///         writer; -1 for each one it does not have.
-    [[nodiscard]] std::array<int, 3> descriptors() const noexcept
+    /// @return Every handle or descriptor this PTY carries across on this platform: on POSIX the master, then
+    ///         the fast pipe's reader and writer; on Windows the pseudoconsole's handles
+    ///         (InheritedConPty::handles()). The other platform's members are never named, whatever a corrupt
+    ///         handover image put in them, and each one it does not have is left out.
+    [[nodiscard]] std::vector<CrossingHandle> handles() const
     {
-        if (!stdoutFastPipe)
-            return { masterFd, -1, -1 };
-        return { masterFd, stdoutFastPipe->first, stdoutFastPipe->second };
+        auto named = std::vector<CrossingHandle> {};
+#ifdef _WIN32
+        if (conpty)
+            std::ranges::copy(conpty->handles(), std::back_inserter(named));
+#else
+        // A descriptor as it crosses: a negative one is none.
+        auto const descriptor = [](int fd) {
+            return fd < 0 ? CrossingHandle {} : CrossingHandle { fd };
+        };
+        named.push_back(descriptor(masterFd));
+        if (stdoutFastPipe)
+        {
+            named.push_back(descriptor(stdoutFastPipe->first));
+            named.push_back(descriptor(stdoutFastPipe->second));
+        }
+#endif
+        std::erase_if(named, [](CrossingHandle handle) { return handle.isNone(); });
+        return named;
     }
 };
 

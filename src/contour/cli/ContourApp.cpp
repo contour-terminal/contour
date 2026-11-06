@@ -1117,7 +1117,8 @@ namespace
     {
         if (fd < 0)
             return std::nullopt;
-        auto image = vthost::handover::readHandover(*vthost::handover::makeNativeHandoverMemory(), fd);
+        auto image = vthost::handover::readHandover(*vthost::handover::makeNativeHandoverMemory(),
+                                                    vtpty::CrossingHandle::of(fd));
         if (!image)
         {
             auto const closed = vthost::handover::closeListeningSockets();
@@ -1291,7 +1292,8 @@ int ContourApp::daemonAction()
     auto handover = *std::move(received);
     // The lease the previous daemon held on this image, kept until this one holds its own
     // (settleDaemonImage()). On POSIX it crosses the exec, and is adopted by its descriptor.
-    auto const handedOverLease = vthost::adoptHandedOverLease(handover ? handover->leaseHandle : 0);
+    auto const handedOverLease =
+        vthost::adoptHandedOverLease(handover ? handover->lease : vtpty::CrossingHandle {});
 #else
     // First of all, before this process opens a descriptor of its own: what is open now and the image does
     // not name was leaked across the exec, and is closed.

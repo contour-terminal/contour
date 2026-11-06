@@ -21,18 +21,18 @@ std::string handoverHandlesArgument(SuccessorHandles const& handles)
 {
     return std::format("{}{}{}{}{}{}{}{}",
                        HandoverHandlesPrefix,
-                       handles.image,
+                       handles.image.value,
                        HandleSeparator,
-                       handles.ready,
+                       handles.ready.value,
                        HandleSeparator,
-                       handles.commit,
+                       handles.commit.value,
                        HandleSeparator,
-                       handles.predecessor);
+                       handles.predecessor.value);
 }
 
 std::optional<SuccessorHandles> parseHandoverHandles(std::string_view value)
 {
-    auto values = std::array<vtpty::HandleValue, 4> {};
+    auto values = std::array<vtpty::CrossingHandle, 4> {};
     auto count = std::size_t { 0 };
     for (auto const piece: std::views::split(value, HandleSeparator))
     {
@@ -40,8 +40,8 @@ std::optional<SuccessorHandles> parseHandoverHandles(std::string_view value)
         if (count == values.size())
             return std::nullopt;
         auto& handle = values.at(count++);
-        auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), handle);
-        if (error != std::errc {} || end != text.data() + text.size() || handle == 0)
+        auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), handle.value);
+        if (error != std::errc {} || end != text.data() + text.size() || handle.value <= 0)
             return std::nullopt;
     }
     if (count != values.size())

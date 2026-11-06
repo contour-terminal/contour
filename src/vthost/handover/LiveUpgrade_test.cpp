@@ -91,14 +91,14 @@ class ByteCounter final: public SessionStreamEvents
 }
 
 /// @return The descriptor the last argument names, `--handover-fd=N`.
-[[nodiscard]] int handoverFdOf(std::vector<std::string> const& argv)
+[[nodiscard]] vtpty::CrossingHandle handoverFdOf(std::vector<std::string> const& argv)
 {
     constexpr auto Prefix = std::string_view { "--handover-fd=" };
     REQUIRE_FALSE(argv.empty());
     REQUIRE(argv.back().starts_with(Prefix));
-    auto fd = -1;
+    auto fd = vtpty::CrossingHandle {};
     auto const digits = std::string_view { argv.back() }.substr(Prefix.size());
-    REQUIRE(std::from_chars(digits.data(), digits.data() + digits.size(), fd).ec == std::errc {});
+    REQUIRE(std::from_chars(digits.data(), digits.data() + digits.size(), fd.value).ec == std::errc {});
     return fd;
 }
 
@@ -158,8 +158,8 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
     auto children = std::map<uint64_t, int64_t> {};
     for (auto const id: ids)
         children.emplace(id.value, childOf(u.live->host, id));
-    auto const listenerFd = u.acceptor->listeningDescriptor();
-    REQUIRE(listenerFd.has_value());
+    auto const listenerHandle = u.acceptor->listeningHandle();
+    REQUIRE_FALSE(listenerHandle.isNone());
 
     auto next = std::unique_ptr<LiveHost> {};
     auto image = std::optional<HandoverImage> {};
@@ -169,9 +169,10 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
         auto const fd = handoverFdOf(argv);
         auto decoded = readHandover(u.memory, fd);
         REQUIRE(decoded.has_value());
-        auto expected = descriptorsNamedBy(*decoded);
+        auto expected = handlesNamedBy(*decoded);
         expected.push_back(fd);
-        CHECK(std::ranges::includes(u.memory.kept, std::set<int>(expected.begin(), expected.end())));
+        CHECK(std::ranges::includes(u.memory.kept,
+                                    std::set<vtpty::CrossingHandle>(expected.begin(), expected.end())));
         CHECK(u.leases.holds(u.store.leaseFileOf(u.store.imageDirectoryOf(u.target))) == 1);
         CHECK(u.acceptor->admission() == Admission::Holding);
         image = *decoded;
@@ -204,8 +205,8 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
     CHECK(image->upgradeGeneration == 2);
     REQUIRE(image->listeners.size() == 1);
     CHECK(image->listeners.front().name == "control");
-    CHECK(image->listeners.front().fd == *listenerFd);
-    CHECK(image->leaseFd >= vthost::testing::FakeImageLeases::FirstDescriptor);
+    CHECK(image->listeners.front().handle == listenerHandle);
+    CHECK(image->lease.value >= vthost::testing::FakeImageLeases::FirstDescriptor);
 
     // The old image's host lets go of nothing more as it goes.
     u.acceptor.reset();
@@ -286,7 +287,7 @@ TEST_CASE("exec failure resumes the old daemon with no lost input", "[vthost][ha
     auto const ids = u.live->host.sessionIds();
     REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
 
-    auto fd = -1;
+    auto fd = vtpty::CrossingHandle {};
     u.replacer.onReplace = [&] {
         fd = handoverFdOf(u.replacer.replacements.back().second);
         // Typed while the daemon was stopped: carried, and delivered once it resumes.
@@ -766,7 +767,7 @@ TEST_CASE("a daemon running in place upgrades to its installed executable",
     REQUIRE(u.replacer.replacements.size() == 1);
     CHECK(u.replacer.replacements.front().first == "/usr/bin/contour");
     REQUIRE(image.has_value());
-    CHECK(image->leaseFd == -1); // no image, no lease
+    CHECK(image->lease.isNone()); // no image, no lease
 
     // An image name means nothing to a store that stages nothing.
     CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), UpgradeRefusal::NotStaged));

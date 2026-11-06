@@ -4,6 +4,8 @@
 /// @file
 /// Image leases kept in memory, and the store configurations the image tests stage with.
 
+#include <vtpty/CrossingHandle.hpp>
+
 #include <cstddef>
 #include <expected>
 #include <filesystem>
@@ -87,8 +89,8 @@ class FakeImageLeases final: public ImageLeases
     /// @return How many leases are held, on any lease file.
     [[nodiscard]] std::size_t heldCount() const noexcept { return _held.size(); }
 
-    /// The descriptor number the first lease names (ImageLease::descriptor()); each later one names the next.
-    /// Made up, above any this process opens in a test: nothing is ever done to it but recording it.
+    /// The descriptor number the first lease names (ImageLease::nativeHandle()); each later one names the
+    /// next. Made up, above any this process opens in a test: nothing is ever done to it but recording it.
     static constexpr int FirstDescriptor = 200000;
 
     /// How many times a lease was made to survive an exec (ImageLease::keepAcrossExec).
@@ -120,7 +122,10 @@ class FakeImageLeases final: public ImageLeases
             return {};
         }
 
-        [[nodiscard]] int descriptor() const noexcept override { return _descriptor; }
+        [[nodiscard]] vtpty::CrossingHandle nativeHandle() const noexcept override
+        {
+            return vtpty::CrossingHandle { _descriptor };
+        }
 
       private:
         FakeImageLeases& _leases;

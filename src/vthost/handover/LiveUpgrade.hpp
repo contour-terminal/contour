@@ -6,6 +6,7 @@
 /// listeners and its whole state, so that no program notices -- on POSIX by exec'ing it in its own process,
 /// on Windows by starting it as a successor process that takes over (ImageHandoff).
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #include <core/async/Task.hpp>
@@ -210,10 +211,10 @@ class LiveUpgrade
 
     /// Stops every session's pump, waits for the host to settle and captures it, trying again while a session
     /// is still starting. The caller rolls back what a refusal leaves stopped.
-    /// @param leaseFd The target image's lease descriptor, which the image names; -1 for none.
+    /// @param lease The target image's lease descriptor or handle, which the image names; none for none.
     /// @return The image, or why not.
     [[nodiscard]] core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> quiesceAndCapture(
-        int leaseFd);
+        vtpty::CrossingHandle lease);
 
     /// Waits until no client is attached and the loop has handled what the stopped pumps posted, closing the
     /// clients at once that are still attached half way through.

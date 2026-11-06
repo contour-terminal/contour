@@ -172,14 +172,13 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         listener->holdAccepting();
     _hooks.closeClients();
 
-    auto const leaseFd = resolved->lease ? resolved->lease->descriptor() : -1;
-    auto image = co_await quiesceAndCapture(leaseFd);
+    auto image = co_await quiesceAndCapture(resolved->lease ? resolved->lease->nativeHandle()
+                                                            : vtpty::CrossingHandle {});
     if (!image)
     {
         daemonLog()("live upgrade refused: {}", describe(image.error()));
         co_return std::unexpected(image.error());
     }
-    image->leaseHandle = resolved->lease ? resolved->lease->handle() : 0;
 
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
@@ -219,7 +218,8 @@ std::expected<LiveUpgrade::ResolvedTarget, UpgradeRefusal> LiveUpgrade::resolve(
     return ResolvedTarget { .executable = *executable, .lease = *std::move(lease) };
 }
 
-core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::quiesceAndCapture(int leaseFd)
+core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::quiesceAndCapture(
+    vtpty::CrossingHandle lease)
 {
     for (auto const attempt: std::views::iota(0U, std::max(1U, _config.sessionStartAttempts)))
     {
@@ -236,7 +236,7 @@ core::async::Task<std::expected<HandoverImage, UpgradeRefusal>> LiveUpgrade::qui
         if (auto const settled = co_await awaitSettled(); !settled)
             co_return std::unexpected(settled.error());
         auto image =
-            captureHandover(_host, crossingListeners(), leaseFd, _config.daemonInstance, _config.release);
+            captureHandover(_host, crossingListeners(), lease, _config.daemonInstance, _config.release);
         if (image)
         {
             image->upgradeGeneration = _config.upgradeGeneration;
@@ -285,9 +285,8 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
     auto crossing = std::vector<InheritedListener> {};
     for (auto const* const listener: _listeners)
     {
-        auto const fd = listener->listeningDescriptor();
-        auto const socket = listener->listeningSocket();
-        if (!fd && !socket)
+        auto const handle = listener->listeningHandle();
+        if (handle.isNone())
         {
             // The new image binds it afresh: a client that connects meanwhile is refused, and retries.
             errorLog()("live upgrade: the {} listener has no descriptor to hand over", listener->name());
@@ -296,8 +295,7 @@ std::vector<InheritedListener> LiveUpgrade::crossingListeners() const
         auto const identity = _config.tlsIdentities.find(listener->name());
         crossing.push_back(InheritedListener {
             .name = listener->name(),
-            .fd = fd.value_or(-1),
-            .socket = socket.value_or(0),
+            .handle = handle,
             .tlsIdentity =
                 identity != _config.tlsIdentities.end() ? std::optional { identity->second } : std::nullopt,
         });

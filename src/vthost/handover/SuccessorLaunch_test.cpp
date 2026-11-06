@@ -49,8 +49,10 @@ using namespace vthost::handover;
 
 TEST_CASE("the handles a successor is handed round-trip through their argument", "[vthost][handover]")
 {
-    auto const handles =
-        SuccessorHandles { .image = 0x1A4, .ready = 0x2B8, .commit = 0x2BC, .predecessor = 0x7FFF'FFF0 };
+    auto const handles = SuccessorHandles { .image = vtpty::CrossingHandle { 0x1A4 },
+                                            .ready = vtpty::CrossingHandle { 0x2B8 },
+                                            .commit = vtpty::CrossingHandle { 0x2BC },
+                                            .predecessor = vtpty::CrossingHandle { 0x7FFF'FFF0 } };
     auto const argument = handoverHandlesArgument(handles);
     REQUIRE(argument.starts_with(HandoverHandlesPrefix));
     CHECK(parseHandoverHandles(std::string_view { argument }.substr(HandoverHandlesPrefix.size()))
@@ -65,27 +67,64 @@ TEST_CASE("an argument that does not name four handles names none", "[vthost][ha
     CHECK_FALSE(parseHandoverHandles(value).has_value());
 }
 
+// A pseudoconsole's handles are named on Windows alone (vtpty::InheritedPty::handles()).
+#ifdef _WIN32
+
 TEST_CASE("an image names each of its handles once, for the successor to inherit", "[vthost][handover]")
 {
+    using vtpty::CrossingHandle;
     auto image = HandoverImage {};
     auto session = HandoverSession {};
-    session.pty.conpty = vtpty::InheritedConPty {
-        .outputReader = 40, .inputWriter = 44, .signal = 48, .reference = 52, .consoleHost = 56
-    };
-    session.child.processHandle = 60;
+    session.pty.conpty = vtpty::InheritedConPty { .outputReader = CrossingHandle { 40 },
+                                                  .inputWriter = CrossingHandle { 44 },
+                                                  .signal = CrossingHandle { 48 },
+                                                  .reference = CrossingHandle { 52 },
+                                                  .consoleHost = CrossingHandle { 56 } };
+    session.child.processHandle = CrossingHandle { 60 };
     image.sessions.push_back(session);
     // A second session that shares a handle with the first, as no real one does: it is named once.
-    session.pty.conpty->outputReader = 44;
-    session.child.processHandle = 0;
+    session.pty.conpty->outputReader = CrossingHandle { 44 };
+    session.child.processHandle = CrossingHandle {};
     image.sessions.push_back(session);
-    image.listeners.push_back(InheritedListener { .name = "control", .socket = 100 });
-    image.listeners.push_back(InheritedListener { .name = "native", .socket = 0 });
-    image.leaseHandle = 8;
+    image.listeners.push_back(InheritedListener { .name = "control", .handle = CrossingHandle { 100 } });
+    image.listeners.push_back(InheritedListener { .name = "native", .handle = CrossingHandle {} });
+    image.lease = CrossingHandle { 8 };
 
-    CHECK(handlesNamedBy(image) == std::vector<vtpty::HandleValue> { 8, 40, 44, 48, 52, 56, 60, 100 });
+    CHECK(handlesNamedBy(image)
+          == std::vector<CrossingHandle> { CrossingHandle { 8 },
+                                           CrossingHandle { 40 },
+                                           CrossingHandle { 44 },
+                                           CrossingHandle { 48 },
+                                           CrossingHandle { 52 },
+                                           CrossingHandle { 56 },
+                                           CrossingHandle { 60 },
+                                           CrossingHandle { 100 } });
 }
 
-#ifdef _WIN32
+TEST_CASE("no handle is named twice, and none is never named", "[vthost][handover]")
+{
+    using vtpty::CrossingHandle;
+    auto image = HandoverImage {};
+    auto session = HandoverSession {};
+    session.pty.conpty = vtpty::InheritedConPty { .outputReader = CrossingHandle { 40 },
+                                                  .inputWriter = CrossingHandle { 44 },
+                                                  .signal = CrossingHandle {},
+                                                  .reference = CrossingHandle { 52 },
+                                                  .consoleHost = CrossingHandle { 56 } };
+    image.sessions.push_back(session);
+    image.listeners.push_back(InheritedListener { .name = "native", .handle = CrossingHandle { 12 } });
+    image.lease = CrossingHandle { 12 };
+
+    auto const named = handlesNamedBy(image);
+    CHECK(std::ranges::count(named, CrossingHandle { 12 }) == 1);
+    CHECK(std::ranges::none_of(named, &CrossingHandle::isNone));
+    CHECK(named
+          == std::vector<CrossingHandle> { CrossingHandle { 12 },
+                                           CrossingHandle { 40 },
+                                           CrossingHandle { 44 },
+                                           CrossingHandle { 52 },
+                                           CrossingHandle { 56 } });
+}
 
 using namespace std::chrono_literals;
 using vthost::Admission;
@@ -171,13 +210,13 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
 {
     auto u = SuccessorUpgrade { SuccessorBehaviour::TakesOver };
     auto const ids = u.spawnTwo();
-    auto const listenerSocket = u.acceptor->listeningSocket();
-    REQUIRE(listenerSocket.has_value());
+    auto const listenerSocket = u.acceptor->listeningHandle();
+    REQUIRE_FALSE(listenerSocket.isNone());
 
     auto next = std::unique_ptr<LiveHost> {};
     auto image = std::optional<HandoverImage> {};
     u.launcher.onLaunch = [&](SuccessorHandles const& handles) {
-        auto const bytes = u.memory->read(HandleToLong(vtpty::handleOf(handles.image)));
+        auto const bytes = u.memory->read(handles.image);
         REQUIRE(bytes.has_value());
         auto decoded = decodeHandover(*bytes);
         REQUIRE(decoded.has_value());
@@ -216,13 +255,13 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
     REQUIRE(image.has_value());
     CHECK(image->daemonInstance == 0xC0FFEE);
     REQUIRE(image->listeners.size() == 1);
-    CHECK(image->listeners.front().socket == *listenerSocket);
+    CHECK(image->listeners.front().handle == listenerSocket);
     REQUIRE(image->sessions.size() == 2);
     for (auto const& session: image->sessions)
     {
         REQUIRE(session.pty.conpty.has_value());
-        CHECK(std::ranges::none_of(session.pty.conpty->handles(), [](auto handle) { return handle == 0; }));
-        CHECK(session.child.processHandle != 0);
+        CHECK(std::ranges::none_of(session.pty.conpty->handles(), &vtpty::CrossingHandle::isNone));
+        CHECK_FALSE(session.child.processHandle.isNone());
     }
 
     // The old daemon's host lets go of nothing more as it goes.
@@ -309,13 +348,13 @@ namespace
 
 /// @return A handle of this process's own to what @p handle names, as a successor inherits one: closed by
 ///         whatever it is handed to.
-[[nodiscard]] vtpty::HandleValue duplicateOf(HANDLE handle)
+[[nodiscard]] vtpty::CrossingHandle duplicateOf(HANDLE handle)
 {
     auto duplicate = HANDLE {};
     REQUIRE(DuplicateHandle(
                 GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)
             != FALSE);
-    return vtpty::valueOf(duplicate);
+    return vtpty::CrossingHandle::of(duplicate);
 }
 
 /// The predecessor's half of the commit point, in this process: the events it shares with its successor, and
@@ -332,7 +371,7 @@ struct Predecessor
     {
         auto const mapping = memory->write(encodeHandover(image));
         REQUIRE(mapping.has_value());
-        return SuccessorHandles { .image = vtpty::valueOf(LongToHandle(*mapping)),
+        return SuccessorHandles { .image = *mapping,
                                   .ready = duplicateOf(ready.get()),
                                   .commit = duplicateOf(commit.get()),
                                   .predecessor = duplicateOf(process.get()) };
@@ -406,7 +445,7 @@ TEST_CASE("a successor says nothing of an image it cannot take over", "[vthost][
     SECTION("one it cannot read")
     {
         handles = predecessor.handlesFor(HandoverImage {});
-        CloseHandle(vtpty::handleOf(handles.image));
+        CloseHandle(handles.image.native());
         // An event where the mapping should be.
         handles.image = duplicateOf(predecessor.commit.get());
         why = "cannot read the image";
@@ -425,9 +464,11 @@ TEST_CASE("a successor says nothing of an image it cannot take over", "[vthost][
         auto image = HandoverImage {};
         auto session = HandoverSession {};
         session.label = "foreign";
-        session.pty.conpty = vtpty::InheritedConPty {
-            .outputReader = 4, .inputWriter = 8, .signal = 12, .reference = 16, .consoleHost = 20
-        };
+        session.pty.conpty = vtpty::InheritedConPty { .outputReader = vtpty::CrossingHandle { 4 },
+                                                      .inputWriter = vtpty::CrossingHandle { 8 },
+                                                      .signal = vtpty::CrossingHandle { 12 },
+                                                      .reference = vtpty::CrossingHandle { 16 },
+                                                      .consoleHost = vtpty::CrossingHandle { 20 } };
         image.sessions.push_back(std::move(session));
         handles = predecessor.handlesFor(image);
         why = "cannot adopt the session \"foreign\"";
@@ -443,7 +484,7 @@ TEST_CASE("a successor handed no event to say it is ready with takes nothing ove
 {
     auto const predecessor = Predecessor {};
     auto handles = predecessor.handlesFor(HandoverImage {});
-    CloseHandle(vtpty::handleOf(handles.ready));
+    CloseHandle(handles.ready.native());
     // A mapping where the event should be: it cannot be set.
     auto const notAnEvent = vtpty::UniqueHandle { CreateFileMappingW(
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 16, nullptr) };

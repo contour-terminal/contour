@@ -7,11 +7,12 @@
 ///
 /// Nothing here owns a resource. A descriptor or a handle is a number the new image inherits; turning it back
 /// into a PTY, a child or a listener is the adopter's job (@see vtpty::UnixPty::adopt, vtpty::ConPty::adopt,
-/// vtpty::Process::adopt). Windows' handles are carried beside the descriptors, as vtpty::HandleValue, 0 for
-/// none; each platform reads only its own.
+/// vtpty::Process::adopt). A listener's and the lease's descriptor or handle crosses as a
+/// vtpty::CrossingHandle, whatever the platform.
 
 #include <vtbackend/core/ColorPalette.hpp>
 
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/Process.hpp>
 
@@ -37,11 +38,14 @@ namespace vthost::handover
 ///
 /// The encoding is tolerant (@see vtbackend::detail::FieldEncoder): a field added or dropped later is not a
 /// new version. Only a change an older reader cannot skip over -- a field whose meaning changes under the
-/// same id, a new framing -- is.
-inline constexpr uint32_t HandoverFormatVersion = 1;
+/// same id, a new framing -- is. Format 2 carries a listener's descriptor or handle, and the lease's, as one
+/// field each (vtpty::CrossingHandle), where format 1 carried a descriptor and a Windows handle apart. Under
+/// the same field ids, InheritedConPty's handles and AdoptedChild::processHandle changed encoding too: each
+/// was a uint64 with none as 0, and is a nested int64 with none as -1.
+inline constexpr uint32_t HandoverFormatVersion = 2;
 
 /// The oldest handover format this build can still read.
-inline constexpr uint32_t OldestReadableHandoverFormat = 1;
+inline constexpr uint32_t OldestReadableHandoverFormat = 2;
 
 // The object registry's own vocabulary (@see ObjectRegistry::snapshot()), named here as the image names it.
 using vthost::BoundObject;
@@ -65,21 +69,21 @@ struct TlsIdentity
 /// A listener socket the new image inherits.
 struct InheritedListener
 {
-    std::string name;              ///< "control", "native", "imsg", "tmux-compat" or "native-tcp".
-    int fd = -1;                   ///< The descriptor; -1 on Windows.
-    vtpty::HandleValue socket = 0; ///< On Windows, the listening socket's handle; 0 elsewhere.
+    std::string name; ///< "control", "native", "imsg", "tmux-compat" or "native-tcp".
+    /// The listening socket: its descriptor on POSIX, its handle on Windows.
+    vtpty::CrossingHandle handle {};
     /// The identity the listener presents where the daemon made it up itself (a self-signed certificate):
     /// presented again by the new image, so that a client that trusted it on first use goes on trusting it.
     /// nullopt for a listener without TLS, or with a configured certificate, which the new image reads again.
     std::optional<TlsIdentity> tlsIdentity {};
 
-    /// Lists the fields for the handover codec.
+    /// Lists the fields for the handover codec. Field 4 carried the Windows socket apart from the descriptor
+    /// in format 1; retired, never to be reused.
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.name);
-        visitor(2, self.fd);
+        visitor(2, self.handle);
         visitor(3, self.tlsIdentity);
-        visitor(4, self.socket);
     }
 };
 
@@ -151,8 +155,8 @@ struct HandoverImage
     ObjectRegistrySnapshot objects {};          ///< The object registry.
     std::vector<HandoverSession> sessions;      ///< Every hosted session.
     std::vector<InheritedListener> listeners;   ///< The listeners to keep serving on.
-    int leaseFd = -1;                           ///< The descriptor of the daemon image lease; -1 for none.
-    vtpty::HandleValue leaseHandle = 0; ///< On Windows, the handle the lease is held through; 0 for none.
+    /// The descriptor (POSIX) or handle (Windows) the daemon image lease is held through; none for none.
+    vtpty::CrossingHandle lease {};
     /// The light/dark preference the latest client stated, which new sessions are built under.
     vtbackend::ColorPreference defaultColorPreference = HostedColorPreference;
     /// How many live upgrades the daemon that wrote it had completed
@@ -160,7 +164,8 @@ struct HandoverImage
     /// before the field reads as 0.
     uint64_t upgradeGeneration = 0;
 
-    /// Lists the fields for the handover codec.
+    /// Lists the fields for the handover codec. Field 12 carried the Windows lease handle apart from the
+    /// descriptor in format 1; retired, never to be reused.
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.daemonInstance);
@@ -171,10 +176,9 @@ struct HandoverImage
         visitor(6, self.objects);
         visitor(7, self.sessions);
         visitor(8, self.listeners);
-        visitor(9, self.leaseFd);
+        visitor(9, self.lease);
         visitor(10, self.defaultColorPreference);
         visitor(11, self.upgradeGeneration);
-        visitor(12, self.leaseHandle);
     }
 };
 

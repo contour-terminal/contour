@@ -51,6 +51,7 @@ using namespace vthost;
 using namespace vthost::handover;
 using vtworkspace::SessionId;
 
+#ifndef _WIN32
 TEST_CASE("the descriptors a handover keeps are the standard streams and every one the image names",
           "[vthost][handover]")
 {
@@ -59,13 +60,13 @@ TEST_CASE("the descriptors a handover keeps are the standard streams and every o
     image.sessions[0].pty.masterFd = 9;
     image.sessions[0].pty.stdoutFastPipe = std::pair { 12, -1 };
     image.sessions[1].pty.masterFd = 7;
-    image.listeners = { { .name = "native", .fd = 5 }, { .name = "control", .fd = 7 } };
-    image.leaseFd = 3;
+    image.listeners = { { .name = "native", .handle = vtpty::CrossingHandle { 5 } },
+                        { .name = "control", .handle = vtpty::CrossingHandle { 7 } } };
+    image.lease = vtpty::CrossingHandle { 3 };
     CHECK(descriptorsToKeep(image) == std::vector { 0, 1, 2, 3, 5, 7, 9, 12 });
     CHECK(descriptorsToKeep(HandoverImage {}) == std::vector { 0, 1, 2 });
 }
 
-#ifndef _WIN32
 namespace
 {
 
@@ -188,7 +189,7 @@ TEST_CASE("a handover image is read back from its memory, and its descriptor clo
     auto image = HandoverImage {};
     image.daemonInstance = 0xABCD;
     image.fromRelease = "0.7.1";
-    image.leaseFd = 42;
+    image.lease = vtpty::CrossingHandle { 42 };
 
     auto const written = memory->write(encodeHandover(image));
     REQUIRE(written.has_value());
@@ -196,14 +197,14 @@ TEST_CASE("a handover image is read back from its memory, and its descriptor clo
     REQUIRE(read.has_value());
     CHECK(read->daemonInstance == 0xABCD);
     CHECK(read->fromRelease == "0.7.1");
-    CHECK(read->leaseFd == 42);
-    CHECK_FALSE(isOpen(*written));
+    CHECK(read->lease == vtpty::CrossingHandle { 42 });
+    CHECK_FALSE(isOpen(written->native()));
 
     // Bytes that are no image: refused, the descriptor closed all the same.
     auto const garbage = memory->write(std::vector<uint8_t> { 1, 2, 3, 4, 5 });
     REQUIRE(garbage.has_value());
     CHECK_FALSE(readHandover(*memory, *garbage).has_value());
-    CHECK_FALSE(isOpen(*garbage));
+    CHECK_FALSE(isOpen(garbage->native()));
 }
 
 TEST_CASE("an image that cannot be read closes the listening sockets and nothing else", "[vthost][handover]")

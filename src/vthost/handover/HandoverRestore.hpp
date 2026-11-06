@@ -27,12 +27,14 @@ inline constexpr std::string_view UnrestoredScreenTitle = "Contour";
 inline constexpr std::string_view UnrestoredScreenNotice =
     "Contour could not restore this pane's screen after the upgrade; the program is still running";
 
-/// Reads the image a previous image of this daemon handed over, and decodes it. Closes @p fd however that
-/// goes: the image is all it was for.
+/// Reads the image a previous image of this daemon handed over, and decodes it. Closes @p memoryHandle
+/// however that goes: the image is all it was for.
 /// @param memory Where the image was written (makeNativeHandoverMemory()).
-/// @param fd The descriptor `--handover-fd` names.
+/// @param memoryHandle The memory object: the descriptor `--handover-fd` names on POSIX, the mapping
+///        `--handover-handles` names on Windows.
 /// @return The image; or why it could not be read or decoded.
-[[nodiscard]] std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory, int fd);
+[[nodiscard]] std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
+                                                                       vtpty::CrossingHandle memoryHandle);
 
 /// Closes every listening socket this process holds: what a daemon whose handover image could not be read
 /// does before it binds its own, which the previous image's -- inherited, but no longer known by name --
@@ -42,16 +44,11 @@ inline constexpr std::string_view UnrestoredScreenNotice =
 std::size_t closeListeningSockets();
 
 /// @param image A handover image.
-/// @return Every descriptor @p image names -- every session's PTY master and fast-pipe ends, every listener,
-/// the
-///         image lease -- ascending, each once: what the old image keeps open across its exec.
-[[nodiscard]] std::vector<int> descriptorsNamedBy(HandoverImage const& image);
-
-/// The handles counterpart of descriptorsNamedBy(), for Windows.
-/// @param image A handover image.
-/// @return Every handle @p image names, for a successor to inherit: each session's pseudoconsole and child,
-///         each listener, the image lease; sorted, each once, none zero.
-[[nodiscard]] std::vector<vtpty::HandleValue> handlesNamedBy(HandoverImage const& image);
+/// @return Every descriptor or handle @p image names -- each session's PTY (its master and fast-pipe ends on
+///         POSIX, its pseudoconsole on Windows) and child (Windows), each listener, the image lease --
+///         sorted, each once, none none: what the old image keeps open across its exec on POSIX, and what the
+///         successor inherits on Windows.
+[[nodiscard]] std::vector<vtpty::CrossingHandle> handlesNamedBy(HandoverImage const& image);
 
 /// @param image A decoded handover image.
 /// @return Every descriptor the new image keeps: standard input, output and error, and each one @p image

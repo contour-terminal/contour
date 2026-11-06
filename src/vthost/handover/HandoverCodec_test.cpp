@@ -101,13 +101,13 @@ namespace
     image.objects.labels = { LabeledObject { .ref = { vtcontrol::ObjectKind::Tab, uuidOf(0xA2) },
                                              .label = "work" } };
     image.sessions = { sessionOf(1), sessionOf(2) };
-    image.listeners = { InheritedListener { .name = "control", .fd = 20 },
+    image.listeners = { InheritedListener { .name = "control", .handle = vtpty::CrossingHandle { 20 } },
                         InheritedListener { .name = "native-tcp",
-                                            .fd = 21,
+                                            .handle = vtpty::CrossingHandle { 21 },
                                             .tlsIdentity =
                                                 TlsIdentity { .certPem = "-----BEGIN CERTIFICATE-----",
                                                               .keyPem = "-----BEGIN PRIVATE KEY-----" } } };
-    image.leaseFd = 30;
+    image.lease = vtpty::CrossingHandle { 30 };
     image.defaultColorPreference = vtbackend::ColorPreference::Dark;
     image.upgradeGeneration = 4;
     return image;
@@ -119,7 +119,7 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.daemonInstance == expected.daemonInstance);
     CHECK(actual.fromRelease == expected.fromRelease);
     CHECK(actual.nextSessionId == expected.nextSessionId);
-    CHECK(actual.leaseFd == expected.leaseFd);
+    CHECK(actual.lease == expected.lease);
     CHECK(actual.upgradeGeneration == expected.upgradeGeneration);
     CHECK(actual.modelIds.nextWindow == expected.modelIds.nextWindow);
     CHECK(actual.modelIds.nextTab == expected.modelIds.nextTab);
@@ -148,7 +148,7 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.defaultColorPreference == expected.defaultColorPreference);
     CHECK(actual.listeners.size() == 2);
     CHECK(actual.listeners.at(1).name == "native-tcp");
-    CHECK(actual.listeners.at(1).fd == 21);
+    CHECK(actual.listeners.at(1).handle == vtpty::CrossingHandle { 21 });
     CHECK_FALSE(actual.listeners.at(0).tlsIdentity.has_value());
     REQUIRE(actual.listeners.at(1).tlsIdentity.has_value());
     CHECK(actual.listeners.at(1).tlsIdentity->certPem == expected.listeners.at(1).tlsIdentity->certPem);
@@ -242,6 +242,34 @@ TEST_CASE("a session whose PTY has an empty page size is decoded without its sta
     CHECK(decoded->sessions.back().terminalState == image.sessions.back().terminalState);
 }
 
+TEST_CASE("a listener and the lease cross as one handle each", "[handover]")
+{
+    auto image = HandoverImage {};
+    image.lease = vtpty::CrossingHandle { 7 };
+    image.listeners = { InheritedListener { .name = "native", .handle = vtpty::CrossingHandle { 9 } } };
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->lease == vtpty::CrossingHandle { 7 });
+    REQUIRE(decoded->listeners.size() == 1);
+    CHECK(decoded->listeners.at(0).name == "native");
+    CHECK(decoded->listeners.at(0).handle == vtpty::CrossingHandle { 9 });
+}
+
+TEST_CASE("a none handle round-trips as none", "[handover]")
+{
+    auto image = HandoverImage {};
+    image.lease = vtpty::CrossingHandle {};
+    image.listeners = { InheritedListener { .name = "control", .handle = vtpty::CrossingHandle {} },
+                        InheritedListener { .name = "native", .handle = vtpty::CrossingHandle { 0 } } };
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->lease.isNone());
+    REQUIRE(decoded->listeners.size() == 2);
+    CHECK(decoded->listeners.at(0).handle.isNone());
+    // Zero is a handle, not none.
+    CHECK(decoded->listeners.at(1).handle == vtpty::CrossingHandle { 0 });
+}
+
 TEST_CASE("equal images encode to equal bytes", "[handover]")
 {
     CHECK(encodeHandover(sampleImage()) == encodeHandover(sampleImage()));
@@ -280,7 +308,7 @@ TEST_CASE("an unknown field is skipped and a missing one is defaulted", "[handov
     CHECK(decoded->daemonInstance == 7);
     CHECK(decoded->fromRelease.empty());
     CHECK(decoded->sessions.empty());
-    CHECK(decoded->leaseFd == -1);
+    CHECK(decoded->lease.isNone());
     // An image from before the upgrade generation: its writer had completed none.
     CHECK(decoded->upgradeGeneration == 0);
 }

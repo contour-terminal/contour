@@ -51,7 +51,10 @@ namespace
             return {};
         }
 
-        [[nodiscard]] int descriptor() const noexcept override { return _fd; }
+        [[nodiscard]] vtpty::CrossingHandle nativeHandle() const noexcept override
+        {
+            return vtpty::CrossingHandle::of(_fd);
+        }
 
       private:
         int _fd;

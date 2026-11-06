@@ -46,7 +46,10 @@ namespace
         HandleLease& operator=(HandleLease&&) = delete;
         ~HandleLease() override { ::CloseHandle(_handle); }
 
-        [[nodiscard]] uint64_t handle() const noexcept override { return vtpty::valueOf(_handle); }
+        [[nodiscard]] vtpty::CrossingHandle nativeHandle() const noexcept override
+        {
+            return vtpty::CrossingHandle::of(_handle);
+        }
 
       private:
         HANDLE _handle;
@@ -141,11 +144,11 @@ std::unique_ptr<ImageLeases> makeNativeImageLeases()
     return std::make_unique<NativeImageLeases>();
 }
 
-std::unique_ptr<ImageLease> adoptHandedOverLease(uint64_t handle)
+std::unique_ptr<ImageLease> adoptHandedOverLease(vtpty::CrossingHandle handle)
 {
-    if (handle == 0)
+    if (handle.isNone())
         return nullptr;
-    auto* const leaseHandle = vtpty::handleOf(handle);
+    auto* const leaseHandle = handle.native();
     // Crossed for this process alone: no program it starts inherits it.
     if (auto const set = vtpty::setInheritance(leaseHandle, vtpty::HandleInheritance::NotInherited); !set)
         errorLog()("the handed-over image lease stays inheritable: {}", set.error().message());

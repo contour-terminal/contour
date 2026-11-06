@@ -17,12 +17,6 @@ namespace
     /// The length of the image, ahead of it in the mapping: a mapping reports its size rounded up to a page.
     using LengthPrefix = uint64_t;
 
-    /// @return @p fd as the handle it names (HandleToLong() made it).
-    [[nodiscard]] HANDLE handleOf(int fd) noexcept
-    {
-        return LongToHandle(fd);
-    }
-
     /// A view of a whole mapping, unmapped as it goes.
     class MappedView
     {
@@ -58,13 +52,13 @@ namespace
     };
 
     /// A pagefile-backed file mapping with no name: nothing on disk holds the image, and nothing but a handle
-    /// reaches it -- the one the successor process inherits. The "descriptor" this interface speaks of is
-    /// that handle, as HandleToLong() narrows it, which Windows guarantees loses nothing (handles stay within
-    /// 32 bits so that 32- and 64-bit processes can share them).
+    /// reaches it -- the one the successor process inherits. The descriptor this interface speaks of is that
+    /// handle.
     class MappedHandoverMemory final: public HandoverMemory
     {
       public:
-        [[nodiscard]] std::expected<int, HandoverError> write(std::span<uint8_t const> image) override
+        [[nodiscard]] std::expected<vtpty::CrossingHandle, HandoverError> write(
+            std::span<uint8_t const> image) override
         {
             auto const size = uint64_t { sizeof(LengthPrefix) } + image.size();
             // Not inheritable: only the launch that names it in its handle list takes it.
@@ -88,12 +82,13 @@ namespace
                 if (!image.empty())
                     std::memcpy(view.data() + sizeof(length), image.data(), image.size());
             }
-            return HandleToLong(mapping);
+            return vtpty::CrossingHandle::of(mapping);
         }
 
-        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(int fd) override
+        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(
+            vtpty::CrossingHandle handle) override
         {
-            auto const view = MappedView { handleOf(fd), FILE_MAP_READ };
+            auto const view = MappedView { handle.native(), FILE_MAP_READ };
             if (!view.isMapped())
                 return std::unexpected { HandoverError::MemoryUnavailable };
             auto const spanned = view.size();
@@ -112,12 +107,20 @@ namespace
 
         /// Nothing: there is no exec, and the successor's launch makes inheritable what it names, for itself
         /// alone (@see SuccessorHandoff).
-        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(int /*fd*/) override { return {}; }
+        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(
+            vtpty::CrossingHandle /*handle*/) override
+        {
+            return {};
+        }
 
         /// Nothing, as keepAcrossExec().
-        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(int /*fd*/) override { return {}; }
+        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(
+            vtpty::CrossingHandle /*handle*/) override
+        {
+            return {};
+        }
 
-        void discard(int fd) override { CloseHandle(handleOf(fd)); }
+        void discard(vtpty::CrossingHandle handle) override { CloseHandle(handle.native()); }
     };
 } // namespace
 

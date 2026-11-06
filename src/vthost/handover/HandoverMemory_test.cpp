@@ -66,7 +66,7 @@ TEST_CASE("every kind of memory object reads back what was written, and nothing 
         std::ranges::generate(image, [next = uint8_t { 1 }]() mutable { return next++; });
         auto const fd = memory->write(image);
         REQUIRE(fd.has_value());
-        CHECK(isCloseOnExec(*fd));
+        CHECK(isCloseOnExec(fd->native()));
         auto const back = memory->read(*fd);
         REQUIRE(back.has_value());
         CHECK(*back == image);
@@ -85,7 +85,7 @@ TEST_CASE("a mapped memory object whose size header lies is refused", "[handover
     REQUIRE(fd.has_value());
     // The header claims more than the object holds.
     auto const claimed = uint64_t { 1 } << 20;
-    REQUIRE(::pwrite(*fd, &claimed, sizeof(claimed), 0) == static_cast<ssize_t>(sizeof(claimed)));
+    REQUIRE(::pwrite(fd->native(), &claimed, sizeof(claimed), 0) == static_cast<ssize_t>(sizeof(claimed)));
     CHECK(memory->read(*fd) == std::unexpected(HandoverError::MemoryUnavailable));
     memory->discard(*fd);
 }
@@ -103,7 +103,7 @@ TEST_CASE("read returns what write stored", "[handover]")
     CHECK(*back == image);
     // Reading does not consume it: the same descriptor reads again.
     CHECK(memory->read(*fd) == back);
-    ::close(*fd);
+    ::close(fd->native());
 }
 
 TEST_CASE("an empty image is stored and read back", "[handover]")
@@ -114,13 +114,13 @@ TEST_CASE("an empty image is stored and read back", "[handover]")
     auto const back = memory->read(*fd);
     REQUIRE(back.has_value());
     CHECK(back->empty());
-    ::close(*fd);
+    ::close(fd->native());
 }
 
 TEST_CASE("reading a descriptor that is no memory object is MemoryUnavailable", "[handover]")
 {
     auto memory = makeNativeHandoverMemory();
-    auto const back = memory->read(-1);
+    auto const back = memory->read(vtpty::CrossingHandle {});
     REQUIRE_FALSE(back.has_value());
     CHECK(back.error() == HandoverError::MemoryUnavailable);
 }
@@ -130,10 +130,10 @@ TEST_CASE("the descriptor survives an exec only after keepAcrossExec", "[handove
     auto memory = makeNativeHandoverMemory();
     auto const fd = memory->write(std::vector<uint8_t> { 1, 2, 3 });
     REQUIRE(fd.has_value());
-    CHECK(isCloseOnExec(*fd));
+    CHECK(isCloseOnExec(fd->native()));
     REQUIRE(memory->keepAcrossExec(*fd).has_value());
-    CHECK_FALSE(isCloseOnExec(*fd));
-    ::close(*fd);
+    CHECK_FALSE(isCloseOnExec(fd->native()));
+    ::close(fd->native());
 }
 
 TEST_CASE("a descriptor kept for a failed exec is close-on-exec again, and discarded closed", "[handover]")
@@ -143,9 +143,9 @@ TEST_CASE("a descriptor kept for a failed exec is close-on-exec again, and disca
     REQUIRE(fd.has_value());
     REQUIRE(memory->keepAcrossExec(*fd).has_value());
     REQUIRE(memory->closeOnExecAgain(*fd).has_value());
-    CHECK(isCloseOnExec(*fd));
+    CHECK(isCloseOnExec(fd->native()));
     memory->discard(*fd);
-    CHECK(::fcntl(*fd, F_GETFD) == -1);
+    CHECK(::fcntl(fd->native(), F_GETFD) == -1);
     CHECK_FALSE(memory->closeOnExecAgain(*fd).has_value());
 }
 
@@ -157,11 +157,11 @@ TEST_CASE("native memory has no name on disk", "[handover]")
     REQUIRE(fd.has_value());
     auto link = std::string(256, '\0');
     auto const length =
-        ::readlink(("/proc/self/fd/" + std::to_string(*fd)).c_str(), link.data(), link.size());
+        ::readlink(("/proc/self/fd/" + std::to_string(fd->native())).c_str(), link.data(), link.size());
     REQUIRE(length > 0);
     link.resize(static_cast<size_t>(length));
     CHECK(link.starts_with("/memfd:"));
-    ::close(*fd);
+    ::close(fd->native());
 }
     #endif
 
@@ -169,11 +169,11 @@ TEST_CASE("native memory has no name on disk", "[handover]")
 
 namespace
 {
-/// @return Whether a process this one starts with @p fd in its handle list inherits it.
-[[nodiscard]] bool isInheritable(int fd)
+/// @return Whether a process this one starts with @p handle in its handle list inherits it.
+[[nodiscard]] bool isInheritable(vtpty::CrossingHandle handle)
 {
     auto flags = DWORD {};
-    REQUIRE(GetHandleInformation(LongToHandle(fd), &flags) != FALSE);
+    REQUIRE(GetHandleInformation(handle.native(), &flags) != FALSE);
     return (flags & HANDLE_FLAG_INHERIT) != 0;
 }
 } // namespace
@@ -199,7 +199,7 @@ TEST_CASE("reading a handle that is no mapping is MemoryUnavailable", "[handover
     auto memory = makeNativeHandoverMemory();
     auto* const event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     REQUIRE(event != nullptr);
-    auto const back = memory->read(HandleToLong(event));
+    auto const back = memory->read(vtpty::CrossingHandle::of(event));
     CloseHandle(event);
     REQUIRE_FALSE(back.has_value());
     CHECK(back.error() == HandoverError::MemoryUnavailable);
@@ -217,7 +217,7 @@ TEST_CASE("a mapping whose length lies is refused", "[handover]")
     UnmapViewOfFile(view);
 
     auto memory = makeNativeHandoverMemory();
-    auto const back = memory->read(HandleToLong(mapping));
+    auto const back = memory->read(vtpty::CrossingHandle::of(mapping));
     CloseHandle(mapping);
     REQUIRE_FALSE(back.has_value());
     CHECK(back.error() == HandoverError::Truncated);

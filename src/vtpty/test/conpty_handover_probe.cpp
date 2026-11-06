@@ -12,6 +12,7 @@
 ///   when all of that held, and says on stderr what did not otherwise.
 
 #include <vtpty/ConPty.hpp>
+#include <vtpty/CrossingHandle.hpp>
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
@@ -21,6 +22,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -122,12 +124,15 @@ int adopter(std::span<char const* const> arguments)
     if (values.size() != 9)
         return fail(AdopterFailure::Usage, "expected 9 numbers");
 
+    auto const crossing = [&values](std::size_t index) {
+        return vtpty::CrossingHandle { static_cast<std::int64_t>(values.at(index)) };
+    };
     auto const handles = vtpty::InheritedConPty {
-        .outputReader = values[0],
-        .inputWriter = values[1],
-        .signal = values[2],
-        .reference = values[3],
-        .consoleHost = values[4],
+        .outputReader = crossing(0),
+        .inputWriter = crossing(1),
+        .signal = crossing(2),
+        .reference = crossing(3),
+        .consoleHost = crossing(4),
     };
     auto const handedOverSize =
         vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(values[8])),
@@ -135,7 +140,7 @@ int adopter(std::span<char const* const> arguments)
     // Kept to wait on once the pseudoconsole is closed, which closes its own.
     auto consoleHost = HANDLE {};
     DuplicateHandle(GetCurrentProcess(),
-                    vtpty::handleOf(handles.consoleHost),
+                    handles.consoleHost.native(),
                     GetCurrentProcess(),
                     &consoleHost,
                     SYNCHRONIZE,
@@ -147,7 +152,7 @@ int adopter(std::span<char const* const> arguments)
         return fail(AdopterFailure::PseudoconsoleNotAdopted,
                     std::format("ConPty::adopt() refused with {}", std::to_underlying(pty.error())));
     auto process = vtpty::Process::adopt(
-        vtpty::AdoptedChild { .pid = static_cast<int64_t>(values[5]), .processHandle = values[6] },
+        vtpty::AdoptedChild { .pid = static_cast<int64_t>(values[5]), .processHandle = crossing(6) },
         *std::move(pty));
     if (!process)
         return fail(AdopterFailure::ProgramNotAdopted,

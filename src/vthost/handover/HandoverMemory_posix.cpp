@@ -6,6 +6,8 @@
     #include <vtpty/OwnedFd.hpp>
     #include <vtpty/UnixUtils.hpp>
 
+    #include <core/platform/Types.hpp>
+
     #include <sys/mman.h>
     #include <sys/stat.h>
 
@@ -199,7 +201,8 @@ namespace
       public:
         explicit NativeHandoverMemory(HandoverMemoryKind kind) noexcept: _kind { kind } {}
 
-        [[nodiscard]] std::expected<int, HandoverError> write(std::span<uint8_t const> image) override
+        [[nodiscard]] std::expected<vtpty::CrossingHandle, HandoverError> write(
+            std::span<uint8_t const> image) override
         {
             if (image.size() > MaxHandoverImageSize)
                 return std::unexpected { HandoverError::MemoryUnavailable };
@@ -216,11 +219,13 @@ namespace
             }();
             if (!written)
                 return std::unexpected { written.error() };
-            return owner.release();
+            return vtpty::CrossingHandle::of(owner.release());
         }
 
-        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(int fd) override
+        [[nodiscard]] std::expected<std::vector<uint8_t>, HandoverError> read(
+            vtpty::CrossingHandle handle) override
         {
+            auto const fd = handle.native();
             struct stat info {};
             // A mapped object carries its size ahead of the image, and may be rounded up to a page past it.
             auto const ceiling = MaxHandoverImageSize + sizeof(MappedHeader) + MaxPageSize;
@@ -246,17 +251,21 @@ namespace
             }
         }
 
-        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(int fd) override
+        [[nodiscard]] std::expected<void, HandoverError> keepAcrossExec(vtpty::CrossingHandle handle) override
         {
-            return setInheritance(fd, vtpty::util::ExecInheritance::KeepOnExec);
+            return setInheritance(handle.native(), vtpty::util::ExecInheritance::KeepOnExec);
         }
 
-        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(int fd) override
+        [[nodiscard]] std::expected<void, HandoverError> closeOnExecAgain(
+            vtpty::CrossingHandle handle) override
         {
-            return setInheritance(fd, vtpty::util::ExecInheritance::CloseOnExec);
+            return setInheritance(handle.native(), vtpty::util::ExecInheritance::CloseOnExec);
         }
 
-        void discard(int fd) override { ::close(fd); }
+        void discard(vtpty::CrossingHandle handle) override
+        {
+            core::platform::platformClose(handle.native());
+        }
 
       private:
         /// The largest page any platform rounds a shared memory object's size up to.

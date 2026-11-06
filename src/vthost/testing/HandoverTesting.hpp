@@ -187,15 +187,15 @@ struct LiveHost
     }
 
     /// @param listeners The listening sockets the image names.
-    /// @param leaseFd The lease descriptor the image names.
+    /// @param lease The lease descriptor the image names.
     /// @param instance The daemon instance the image names.
     /// @return The capture.
     [[nodiscard]] std::expected<handover::HandoverImage, handover::HandoverError> capture(
         std::vector<handover::InheritedListener> const& listeners = {},
-        int leaseFd = -1,
+        vtpty::CrossingHandle lease = {},
         uint64_t instance = 0xC0FFEE)
     {
-        return handover::captureHandover(host, listeners, leaseFd, instance, "0.7.1");
+        return handover::captureHandover(host, listeners, lease, instance, "0.7.1");
     }
 
   private:

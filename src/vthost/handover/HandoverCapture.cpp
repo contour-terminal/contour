@@ -161,7 +161,7 @@ std::expected<void, HandoverError> checkCapturable(SessionHost& host)
 
 std::expected<HandoverImage, HandoverError> captureHandover(SessionHost& host,
                                                             std::span<InheritedListener const> listeners,
-                                                            int leaseFd,
+                                                            vtpty::CrossingHandle lease,
                                                             uint64_t daemonInstance,
                                                             std::string_view release)
 {
@@ -196,7 +196,7 @@ std::expected<HandoverImage, HandoverError> captureHandover(SessionHost& host,
             .objects = host.objects().snapshot(),
             .sessions = {},
             .listeners = { listeners.begin(), listeners.end() },
-            .leaseFd = leaseFd,
+            .lease = lease,
             .defaultColorPreference = host.defaultColorPreference(),
         };
         // A session that ended meanwhile is not among the quiesced ones: its crossing is dropped.

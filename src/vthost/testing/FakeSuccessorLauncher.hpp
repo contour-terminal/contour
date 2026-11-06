@@ -7,6 +7,7 @@
 
 #ifdef _WIN32
 
+    #include <vtpty/CrossingHandle.hpp>
     #include <vtpty/WindowsHandle.hpp>
 
     #include <cstdint>
@@ -50,10 +51,10 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
     /// A launch asked for.
     struct Launch
     {
-        std::filesystem::path executable;          ///< What was to run.
-        std::vector<std::string> argv;             ///< Its command line.
-        std::vector<vtpty::HandleValue> inherited; ///< What it was to inherit.
-        handover::SuccessorHandles handles;        ///< What its `--handover-handles` named.
+        std::filesystem::path executable;             ///< What was to run.
+        std::vector<std::string> argv;                ///< Its command line.
+        std::vector<vtpty::CrossingHandle> inherited; ///< What it was to inherit.
+        handover::SuccessorHandles handles;           ///< What its `--handover-handles` named.
     };
 
     explicit FakeSuccessorLauncher(SuccessorBehaviour behaviour = SuccessorBehaviour::TakesOver):
@@ -73,7 +74,7 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
     [[nodiscard]] std::expected<handover::SuccessorProcess, std::error_code> launch(
         std::filesystem::path const& executable,
         std::span<std::string const> argv,
-        std::span<vtpty::HandleValue const> inherited) override
+        std::span<vtpty::CrossingHandle const> inherited) override
     {
         auto const argument = argv.empty() ? std::string_view {} : std::string_view { argv.back() };
         auto const prefix = handover::HandoverHandlesPrefix;
@@ -99,13 +100,14 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
         {
             case SuccessorBehaviour::TakesOver:
                 if (handles)
-                    SetEvent(vtpty::handleOf(handles->ready));
+                    SetEvent(handles->ready.native());
                 break;
             case SuccessorBehaviour::EndsBeforeReady: SetEvent(_process); break;
             case SuccessorBehaviour::NeverReady:
             case SuccessorBehaviour::FailsToStart: break;
         }
-        return handover::SuccessorProcess { .process = vtpty::valueOf(handed), .pid = SuccessorPid };
+        return handover::SuccessorProcess { .process = vtpty::CrossingHandle::of(handed),
+                                            .pid = SuccessorPid };
     }
 
     void terminate(handover::SuccessorProcess const& /*successor*/) override
@@ -117,7 +119,7 @@ class FakeSuccessorLauncher final: public handover::SuccessorLauncher
     [[noreturn]] void endThisProcess() override
     {
         auto const& handles = launches.back().handles;
-        committed = WaitForSingleObject(vtpty::handleOf(handles.commit), 0) == WAIT_OBJECT_0;
+        committed = WaitForSingleObject(handles.commit.native(), 0) == WAIT_OBJECT_0;
         throw SuccessorTookOver {};
     }
 

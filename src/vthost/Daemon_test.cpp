@@ -1137,8 +1137,10 @@ struct HandedOverDaemon
         for (auto const id: sessions)
             uuids.push_back(old->host.objects().uuidOf(id));
         old->settle();
-        auto image =
-            old->capture({ { .name = "native", .fd = rawListener(nativePath) } }, -1, HandedOverInstance);
+        auto image = old->capture(
+            { { .name = "native", .handle = vtpty::CrossingHandle::of(rawListener(nativePath)) } },
+            vtpty::CrossingHandle {},
+            HandedOverInstance);
         REQUIRE(image.has_value());
         vthost::testing::releaseForAdoption(old->host);
         old.reset();
@@ -1261,7 +1263,7 @@ TEST_CASE("a daemon taken over from a handover that can serve no endpoint at all
 {
     auto d = HandedOverDaemon {};
     // The image hands over no listener, and every path is taken: the native one by the listener it named.
-    auto const nativeTaken = d.image.listeners.front().fd;
+    auto const nativeTaken = d.image.listeners.front().handle.native();
     d.image.listeners.clear();
     auto const controlTaken = rawListener(core::pathToUtf8(d.config.socketPath));
     auto const imsgTaken = rawListener(core::pathToUtf8(vthost::tmuxSocketPath(d.config.socketPath)));
@@ -1304,7 +1306,7 @@ TEST_CASE("a daemon taken over from a handover presents the TLS certificate it m
     auto port = std::uint16_t { 0 };
     d.image.listeners.push_back(vthost::handover::InheritedListener {
         .name = "native-tcp",
-        .fd = rawTcpListener(port),
+        .handle = vtpty::CrossingHandle::of(rawTcpListener(port)),
         .tlsIdentity =
             vthost::handover::TlsIdentity { .certPem = identity->certPem, .keyPem = identity->keyPem },
     });
@@ -1343,7 +1345,8 @@ TEST_CASE("a daemon that ends with its last session ends when a handover leaves 
     auto image = vthost::handover::HandoverImage {};
     image.listeners.push_back(vthost::handover::InheritedListener {
         .name = "native",
-        .fd = rawListener(core::pathToUtf8(vthost::nativeSocketPath(config.socketPath))),
+        .handle = vtpty::CrossingHandle::of(
+            rawListener(core::pathToUtf8(vthost::nativeSocketPath(config.socketPath)))),
         .tlsIdentity = std::nullopt,
     });
     auto daemon = std::async(std::launch::async,

@@ -52,12 +52,12 @@ struct HangupGrace
 /// inherits a handle to it (processHandle), which is what it waits on.
 struct AdoptedChild
 {
-    std::int64_t pid = -1;         ///< The child's process id.
-    std::string executable;        ///< The program it runs, as spawned.
-    std::vector<std::string> args; ///< Its arguments, as spawned.
-    std::filesystem::path cwd;     ///< Its working directory, as spawned.
-    HangupGrace hangupGrace;       ///< The grace close() gives it.
-    HandleValue processHandle = 0; ///< On Windows, the handle to the process that crosses; 0 elsewhere.
+    std::int64_t pid = -1;           ///< The child's process id.
+    std::string executable;          ///< The program it runs, as spawned.
+    std::vector<std::string> args;   ///< Its arguments, as spawned.
+    std::filesystem::path cwd;       ///< Its working directory, as spawned.
+    HangupGrace hangupGrace;         ///< The grace close() gives it.
+    CrossingHandle processHandle {}; ///< On Windows, the handle to the process that crosses; none elsewhere.
 };
 
 /**

@@ -164,6 +164,13 @@ TEST_CASE("a target that cannot read either format this build writes is unreadab
     CHECK(checkReadable(older) == std::unexpected(UpgradeRefusal::FormatUnreadable));
 }
 
+TEST_CASE("a target that reads only format 1 cannot take this build's image", "[vthost][handover][upgrade]")
+{
+    auto formatOne = currentFormats();
+    formatOne.handoverFormats = { 1, 1 };
+    CHECK(checkReadable(formatOne) == std::unexpected(UpgradeRefusal::FormatUnreadable));
+}
+
 TEST_CASE("a target that cannot run as the daemon's configuration says is refused",
           "[vthost][handover][upgrade]")
 {

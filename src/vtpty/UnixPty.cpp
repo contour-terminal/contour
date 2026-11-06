@@ -327,9 +327,8 @@ std::expected<std::unique_ptr<UnixPty>, AdoptError> UnixPty::adopt(InheritedPty 
 
     // Close-on-exec again: only a hand-off keeps these across an exec. The reader of the fast pipe is
     // non-blocking, as start() makes it.
-    for (auto const fd: inherited.descriptors())
-        if (fd >= 0)
-            std::ignore = util::setExecInheritance(fd, util::ExecInheritance::CloseOnExec);
+    for (auto const handle: inherited.handles())
+        std::ignore = util::setExecInheritance(handle.native(), util::ExecInheritance::CloseOnExec);
     std::ignore = util::setNonBlocking(pty->_masterFd);
     if (pty->_stdoutFastPipe.reader() != -1)
         std::ignore = util::setNonBlocking(pty->_stdoutFastPipe.reader());

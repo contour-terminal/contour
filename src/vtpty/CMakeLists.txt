@@ -39,6 +39,7 @@ set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
     CommandLine.hpp
+    CrossingHandle.hpp
     DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
     EnvironmentBlock.hpp
     ErrnoText.hpp
@@ -152,6 +153,7 @@ if(VTPTY_TESTING)
         ChannelPty_test.cpp
         CommandCapture_test.cpp
         CommandLine_test.cpp
+        CrossingHandle_test.cpp
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
         ImageSize_test.cpp

@@ -976,12 +976,12 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
 
     auto inherited = std::vector<HANDLE> {};
     for (auto const handle: handles->handles())
-        inherited.push_back(vtpty::handleOf(handle));
-    inherited.push_back(vtpty::handleOf(child->processHandle));
+        inherited.push_back(handle.native());
+    inherited.push_back(child->processHandle.native());
     auto commandLine = std::format(L"\"{}\" adopter", handoverProbe().wstring());
     for (auto const handle: handles->handles())
-        commandLine += std::format(L" {}", handle);
-    commandLine += std::format(L" {} {} 80 25", child->pid, child->processHandle);
+        commandLine += std::format(L" {}", handle.value);
+    commandLine += std::format(L" {} {} 80 25", child->pid, child->processHandle.value);
     auto* const adopter = spawnInheriting(std::move(commandLine), inherited);
     REQUIRE(adopter != nullptr);
 
@@ -990,17 +990,17 @@ TEST_CASE("ConPty.adoptedInASecondProcessResizesAndCloses", "[vtpty][conpty][han
     REQUIRE(released.has_value());
     auto programProcess = HANDLE {};
     DuplicateHandle(GetCurrentProcess(),
-                    vtpty::handleOf(released->processHandle),
+                    released->processHandle.native(),
                     GetCurrentProcess(),
                     &programProcess,
                     SYNCHRONIZE,
                     FALSE,
                     0);
-    CloseHandle(vtpty::handleOf(released->processHandle));
+    CloseHandle(released->processHandle.native());
     auto const ownHandles = pty.releaseHandles();
     REQUIRE(ownHandles.has_value());
     for (auto const handle: ownHandles->handles())
-        CloseHandle(vtpty::handleOf(handle));
+        CloseHandle(handle.native());
     process.reset();
 
     REQUIRE(WaitForSingleObject(adopter, 30'000) == WAIT_OBJECT_0);
@@ -1026,7 +1026,7 @@ TEST_CASE("ConPty.interruptWritesEndsAWriteThePseudoconsoleDoesNotRead", "[vtpty
     REQUIRE(awaitOutput(process, "ready"));
     auto const handles = pty.handoverHandles();
     REQUIRE(handles.has_value());
-    auto* const consoleHost = vtpty::handleOf(handles->consoleHost);
+    auto* const consoleHost = handles->consoleHost.native();
 
     // A console host that reads nothing more: the pipe fills, and the write waits.
     schedule(consoleHost, Scheduling::Suspended);
@@ -1103,7 +1103,7 @@ TEST_CASE("ConPty.closeHeldForAHandoverIsDroppedWithItsHandles", "[vtpty][conpty
     for (auto const handle: released->handles())
     {
         auto flags = DWORD {};
-        CHECK(GetHandleInformation(vtpty::handleOf(handle), &flags) != FALSE);
+        CHECK(GetHandleInformation(handle.native(), &flags) != FALSE);
     }
 
     // Adopted again here, as a successor would: it serves on, and closes everything as it goes.
@@ -1112,7 +1112,7 @@ TEST_CASE("ConPty.closeHeldForAHandoverIsDroppedWithItsHandles", "[vtpty][conpty
     CHECK_FALSE((*adopted)->isClosed());
     adopted->reset();
     auto flags = DWORD {};
-    CHECK(GetHandleInformation(vtpty::handleOf(released->signal), &flags) == FALSE);
+    CHECK(GetHandleInformation(released->signal.native(), &flags) == FALSE);
 }
 
 // The pseudoconsole takes no pixel size, but a live upgrade carries it, for the successor's terminal to lay

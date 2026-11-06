@@ -207,6 +207,13 @@ static void visitStateFields(Visitor& visitor, T& wire)
 }
 
 template <typename Visitor, typename T>
+    requires std::same_as<std::remove_const_t<T>, vtpty::CrossingHandle>
+static void visitStateFields(Visitor& visitor, T& handle)
+{
+    visitor(1, handle.value);
+}
+
+template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtpty::InheritedConPty>
 static void visitStateFields(Visitor& visitor, T& conpty)
 {

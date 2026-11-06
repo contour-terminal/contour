@@ -274,11 +274,11 @@ namespace
         return information.writeQuotaAvailable;
     }
 
-    /// @return Whether @p value names a handle open in this process.
-    [[nodiscard]] bool isOpenHandle(HandleValue value) noexcept
+    /// @return Whether @p handle names a handle open in this process.
+    [[nodiscard]] bool isOpenHandle(CrossingHandle handle) noexcept
     {
         auto flags = DWORD {};
-        return value != 0 && GetHandleInformation(handleOf(value), &flags) != FALSE;
+        return !handle.isNone() && GetHandleInformation(handle.native(), &flags) != FALSE;
     }
 
     /// The pseudoconsole API reports a failure in the HRESULT it returns, not in the thread's last error.
@@ -359,22 +359,20 @@ std::expected<std::unique_ptr<ConPty>, AdoptError> ConPty::adopt(InheritedPty co
     if (auto const adoptable = canAdopt(handles); !adoptable)
         return std::unexpected(adoptable.error());
     auto pty = std::make_unique<ConPty>(inherited.pageSize);
-    if (pty->_conptyApi->packPseudoConsole(handleOf(handles.consoleHost),
-                                           handleOf(handles.reference),
-                                           handleOf(handles.signal),
-                                           &pty->_master)
+    if (pty->_conptyApi->packPseudoConsole(
+            handles.consoleHost.native(), handles.reference.native(), handles.signal.native(), &pty->_master)
         != S_OK)
     {
         pty->_master = INVALID_HANDLE_VALUE;
         return std::unexpected(AdoptError::BadDescriptor);
     }
     pty->_pixels = inherited.pixels;
-    pty->_input = handleOf(handles.outputReader);
-    pty->_output = handleOf(handles.inputWriter);
+    pty->_input = handles.outputReader.native();
+    pty->_output = handles.inputWriter.native();
 
     // Crossed for this pseudoconsole alone: no program this process starts inherits them.
     for (auto const handle: handles.handles())
-        if (auto const set = setInheritance(handleOf(handle), HandleInheritance::NotInherited); !set)
+        if (auto const set = setInheritance(handle.native(), HandleInheritance::NotInherited); !set)
             ptyLog()("An adopted pseudoconsole's handle stays inheritable: {}", set.error().message());
     return pty;
 }
@@ -421,11 +419,11 @@ std::expected<InheritedConPty, AdoptError> ConPty::handoverHandlesLocked() const
     if (isClosed() || _input == INVALID_HANDLE_VALUE || _output == INVALID_HANDLE_VALUE)
         return std::unexpected(AdoptError::BadDescriptor);
     auto const* const console = reinterpret_cast<BundledPseudoConsole const*>(_master);
-    return InheritedConPty { .outputReader = valueOf(_input),
-                             .inputWriter = valueOf(_output),
-                             .signal = valueOf(console->signal),
-                             .reference = valueOf(console->reference),
-                             .consoleHost = valueOf(console->process) };
+    return InheritedConPty { .outputReader = CrossingHandle::of(_input),
+                             .inputWriter = CrossingHandle::of(_output),
+                             .signal = CrossingHandle::of(console->signal),
+                             .reference = CrossingHandle::of(console->reference),
+                             .consoleHost = CrossingHandle::of(console->process) };
 }
 
 std::expected<InheritedConPty, AdoptError> ConPty::releaseHandles()

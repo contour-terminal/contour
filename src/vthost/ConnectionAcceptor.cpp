@@ -247,24 +247,9 @@ void ConnectionAcceptor::resumeAccepting()
     _release.request_stop();
 }
 
-std::optional<std::uint64_t> ConnectionAcceptor::listeningSocket() const
+vtpty::CrossingHandle ConnectionAcceptor::listeningHandle() const
 {
-#ifdef _WIN32
-    auto const handle = _listener->nativeHandle();
-    if (handle != core::platform::InvalidHandle)
-        return reinterpret_cast<std::uint64_t>(handle);
-#endif
-    return std::nullopt;
-}
-
-std::optional<int> ConnectionAcceptor::listeningDescriptor() const
-{
-#ifdef _WIN32
-    return std::nullopt;
-#else
-    auto const handle = _listener->nativeHandle();
-    return handle != core::platform::InvalidHandle ? std::optional<int> { handle } : std::nullopt;
-#endif
+    return vtpty::CrossingHandle::of(_listener->nativeHandle());
 }
 
 } // namespace vthost

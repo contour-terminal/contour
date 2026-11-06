@@ -105,7 +105,8 @@ struct CaptureHarness: vthost::testing::LiveHost
     /// @return The capture, with the caller's part of it as the tests name it.
     [[nodiscard]] std::expected<HandoverImage, HandoverError> capture()
     {
-        return LiveHost::capture({ { .name = "native", .fd = 17 } }, 23);
+        return LiveHost::capture({ { .name = "native", .handle = vtpty::CrossingHandle { 17 } } },
+                                 vtpty::CrossingHandle { 23 });
     }
 };
 
@@ -151,10 +152,10 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
 
     CHECK(image->daemonInstance == 0xC0FFEE);
     CHECK(image->fromRelease == "0.7.1");
-    CHECK(image->leaseFd == 23);
+    CHECK(image->lease == vtpty::CrossingHandle { 23 });
     REQUIRE(image->listeners.size() == 1);
     CHECK(image->listeners[0].name == "native");
-    CHECK(image->listeners[0].fd == 17);
+    CHECK(image->listeners[0].handle == vtpty::CrossingHandle { 17 });
 
     // The model as it is, with the ids it mints next.
     auto const live = h.host.model().idState();

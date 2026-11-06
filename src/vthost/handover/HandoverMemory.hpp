@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/CrossingHandle.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -22,11 +24,10 @@ inline constexpr uint64_t MaxHandoverImageSize = uint64_t { 4 } << 30;
 /// from. An interface, so the orchestrator is tested without touching the operating system.
 ///
 /// The descriptor write() returns has no name on disk. It is close-on-exec until keepAcrossExec(), so that
-/// it is inherited by the one exec that should and by no child spawned in between. On Windows the
-/// "descriptor" is the handle of an unnamed, pagefile-backed file mapping as HandleToLong() narrows it. It is
-/// never inheritable: the successor process the upgrade starts takes it, with every other handle the image
-/// names, through that one launch's handle list (@see SuccessorHandoff), and keepAcrossExec() and
-/// closeOnExecAgain() do nothing there.
+/// it is inherited by the one exec that should and by no child spawned in between. On Windows it is the
+/// handle of an unnamed, pagefile-backed file mapping. It is never inheritable: the successor process the
+/// upgrade starts takes it, with every other handle the image names, through that one launch's handle list
+/// (@see SuccessorHandoff), and keepAcrossExec() and closeOnExecAgain() do nothing there.
 class HandoverMemory
 {
   public:
@@ -39,29 +40,33 @@ class HandoverMemory
 
     /// Stores @p image in a new anonymous memory object.
     /// @param image The bytes.
-    /// @return The descriptor, which the caller owns and closes; or why it could not be made.
-    [[nodiscard]] virtual std::expected<int, HandoverError> write(std::span<uint8_t const> image) = 0;
+    /// @return The descriptor or handle, which the caller owns and closes; or why it could not be made.
+    [[nodiscard]] virtual std::expected<vtpty::CrossingHandle, HandoverError> write(
+        std::span<uint8_t const> image) = 0;
 
     /// Reads everything a memory object holds, from its start.
-    /// @param fd A descriptor write() returned, in this or in the process that exec'd into this one.
+    /// @param handle What write() returned, in this or in the process that took over from this one.
     /// @return The bytes, or why they could not be read.
-    [[nodiscard]] virtual std::expected<std::vector<uint8_t>, HandoverError> read(int fd) = 0;
+    [[nodiscard]] virtual std::expected<std::vector<uint8_t>, HandoverError> read(
+        vtpty::CrossingHandle handle) = 0;
 
-    /// Makes @p fd survive the next exec: clears its close-on-exec flag. Called right before the exec, for
-    /// the memory object and for every other descriptor the image names (PTY masters, listeners, the lease).
-    /// @param fd A descriptor of this process.
+    /// Makes @p handle survive the next exec: clears its close-on-exec flag. Called right before the exec,
+    /// for the memory object and for every other descriptor the image names (PTY masters, listeners, the
+    /// lease).
+    /// @param handle A descriptor of this process.
     /// @return Nothing, or why the flag could not be cleared.
-    [[nodiscard]] virtual std::expected<void, HandoverError> keepAcrossExec(int fd) = 0;
+    [[nodiscard]] virtual std::expected<void, HandoverError> keepAcrossExec(vtpty::CrossingHandle handle) = 0;
 
-    /// Undoes keepAcrossExec() after an exec that failed: sets @p fd's close-on-exec flag again, so that no
-    /// program this process starts later inherits it.
-    /// @param fd A descriptor keepAcrossExec() was called for.
+    /// Undoes keepAcrossExec() after an exec that failed: sets @p handle's close-on-exec flag again, so that
+    /// no program this process starts later inherits it.
+    /// @param handle A descriptor keepAcrossExec() was called for.
     /// @return Nothing, or why the flag could not be set.
-    [[nodiscard]] virtual std::expected<void, HandoverError> closeOnExecAgain(int fd) = 0;
+    [[nodiscard]] virtual std::expected<void, HandoverError> closeOnExecAgain(
+        vtpty::CrossingHandle handle) = 0;
 
-    /// Lets go of a memory object no exec took: closes the descriptor write() returned.
-    /// @param fd A descriptor write() returned.
-    virtual void discard(int fd) = 0;
+    /// Lets go of a memory object no exec took: closes what write() returned.
+    /// @param handle What write() returned.
+    virtual void discard(vtpty::CrossingHandle handle) = 0;
 };
 
 /// What kind of anonymous memory object an image is stored in.
