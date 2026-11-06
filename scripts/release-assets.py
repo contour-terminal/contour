@@ -1,0 +1,230 @@
+#! /usr/bin/env python3
+"""Selects the files a release attaches, from the list in .github/release.json.
+
+    release-assets.py                 check that release.json is well formed
+    release-assets.py select DIR      print the one file under DIR for each pattern, in pattern order
+    release-assets.py --self-test     check the selection rules against inline samples
+
+Each pattern is an fnmatch file-name pattern with `[0-9]*` exactly once, where the version goes. That
+spelling keeps `contour-[0-9]*-ubuntu26.04-amd64.deb` from also matching `contour-daemon-...`, because
+`d` is not a digit. A pattern must match exactly one file; files no pattern claims are only reported.
+
+release.json is also read outside this repository: the owner's release tooling deep-merges the whole
+file over the release model it detects, so a top-level key that collides with a name of that model
+(trigger, changelog, tagPrefix, ...) silently overrides it. Add no key besides `artifacts` without
+checking.
+
+Python rather than shell so that CTest runs it, and so it runs on Windows too.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import sys
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RELEASE_JSON = REPO_ROOT / ".github" / "release.json"
+VERSION_WILDCARD = "[0-9]*"
+_SAMPLE_VERSION = "0.0.0.0"
+
+
+@dataclass(frozen=True)
+class Selection:
+    """The outcome of matching patterns against file names."""
+
+    files: list[str]
+    unclaimed: list[str]
+    problems: list[str]
+
+
+def select(patterns: Sequence[str], names: Iterable[str]) -> Selection:
+    """Picks, per pattern and in pattern order, the single name whose basename matches it."""
+    names = list(names)
+    files: list[str] = []
+    problems: list[str] = []
+    claimed: set[str] = set()
+    for pattern in patterns:
+        matches = [n for n in names if fnmatch.fnmatchcase(PurePosixPath(n).name, pattern)]
+        claimed.update(matches)
+        if not matches:
+            problems.append(f"no file matches {pattern}")
+        elif len(matches) > 1:
+            problems.append(f"{len(matches)} files match {pattern}: {', '.join(matches)}")
+        else:
+            files.append(matches[0])
+    return Selection(files, [n for n in names if n not in claimed], problems)
+
+
+def pattern_problems(patterns: Sequence[str]) -> list[str]:
+    """Returns what is wrong with the pattern list itself, including rows that could claim the same file."""
+    if not patterns:
+        return ["the artifact list is empty"]
+    problems: list[str] = []
+    for index, pattern in enumerate(patterns):
+        if pattern in patterns[:index]:
+            problems.append(f"duplicate pattern {pattern}")
+        elif pattern.count(VERSION_WILDCARD) != 1:
+            problems.append(f"pattern {pattern} must contain {VERSION_WILDCARD} exactly once")
+    if problems:
+        return problems
+    # The wildcard's `*` also crosses hyphens, so one row can swallow another's file name.
+    for index, pattern in enumerate(patterns):
+        sample = pattern.replace(VERSION_WILDCARD, _SAMPLE_VERSION)
+        problems += [
+            f"patterns {pattern} and {other} both match {sample}"
+            for other in patterns[index + 1 :]
+            if fnmatch.fnmatchcase(sample, other)
+        ] + [
+            f"patterns {other} and {pattern} both match {sample}"
+            for other in patterns[:index]
+            if fnmatch.fnmatchcase(sample, other)
+        ]
+    return problems
+
+
+def load_patterns(path: Path) -> list[str]:
+    """Reads the `artifacts` list of release.json; raises ValueError when it is not a list of strings."""
+    document = json.loads(path.read_text(encoding="utf-8"))
+    artifacts = document.get("artifacts") if isinstance(document, dict) else None
+    if not isinstance(artifacts, list) or not all(isinstance(entry, str) for entry in artifacts):
+        raise ValueError(f"{path.name} needs an `artifacts` list of strings")
+    return artifacts
+
+
+_VERSION = "0.9.0.9500"
+_PATTERNS = [
+    "contour-[0-9]*-ubuntu26.04-amd64.deb",
+    "contour-daemon-[0-9]*-ubuntu26.04-amd64.deb",
+    "contour-[0-9]*-macOS-arm.dmg",
+    "contour-[0-9]*-win64.msi",
+    "contour-[0-9]*-win64.zip",
+]
+
+
+def _names(*, skip: str = "") -> list[str]:
+    return [p.replace(VERSION_WILDCARD, _VERSION) for p in _PATTERNS if p != skip]
+
+
+_WIN_ZIP = "contour-[0-9]*-win64.zip"
+_WIN_MSI = "contour-[0-9]*-win64.msi"
+_GUI_DEB = "contour-[0-9]*-ubuntu26.04-amd64.deb"
+_RAWHIDE = f"contour-{_VERSION}-fedorarawhide-x86_64.rpm"
+_PDB = f"contour-{_VERSION}-win64-pdb.zip"
+_USER_MSI = f"contour-{_VERSION}-win64-user.msi"
+
+# (description, patterns, names, expected files, expected unclaimed, expected problems)
+_SELECT_CASES: list[tuple[str, list[str], list[str], list[str], list[str], list[str]]] = [
+    ("one file per pattern, in pattern order", _PATTERNS, _names(), _names(), [], []),
+    (
+        "a missing dmg is a problem",
+        _PATTERNS,
+        _names(skip="contour-[0-9]*-macOS-arm.dmg"),
+        [n for n in _names() if not n.endswith(".dmg")],
+        [],
+        ["no file matches contour-[0-9]*-macOS-arm.dmg"],
+    ),
+    (
+        "two runs' msi files name the pattern and both files",
+        _PATTERNS,
+        [*_names(), "contour-0.9.0.9499-win64.msi"],
+        [n for n in _names() if not n.endswith(".msi")],
+        [],
+        [
+            f"2 files match {_WIN_MSI}: contour-{_VERSION}-win64.msi, contour-0.9.0.9499-win64.msi",
+        ],
+    ),
+    (
+        "the daemon deb is not the GUI deb",
+        [_GUI_DEB],
+        [f"contour-daemon-{_VERSION}-ubuntu26.04-amd64.deb"],
+        [],
+        [f"contour-daemon-{_VERSION}-ubuntu26.04-amd64.deb"],
+        [f"no file matches {_GUI_DEB}"],
+    ),
+    (
+        "pdb zip and user msi are not claimed by the win64 patterns",
+        _PATTERNS,
+        [*_names(), _PDB, _USER_MSI],
+        _names(),
+        [_PDB, _USER_MSI],
+        [],
+    ),
+    ("a rawhide rpm is unclaimed, not a problem", _PATTERNS, [*_names(), _RAWHIDE], _names(), [_RAWHIDE], []),
+    (
+        "files are matched by basename",
+        _PATTERNS,
+        [f"dir/sub/{n}" for n in _names()],
+        [f"dir/sub/{n}" for n in _names()],
+        [],
+        [],
+    ),
+]
+
+# (description, patterns, expected number of problems)
+_PATTERN_CASES: list[tuple[str, list[str], int]] = [
+    ("an empty list", [], 1),
+    ("a duplicate pattern", ["a-[0-9]*.msi", "a-[0-9]*.msi"], 1),
+    ("a pattern without a version wildcard", ["*.msi"], 1),
+    ("a pattern with two version wildcards", ["a-[0-9]*-[0-9]*.msi"], 1),
+    ("rows that can claim the same file", ["a-[0-9]*-win64.zip", "a-[0-9]*-portable-win64.zip"], 1),
+    ("well-formed, disjoint patterns", _PATTERNS, 0),
+]
+
+
+def self_test() -> int:
+    """Runs every case; returns the process exit code."""
+    failures: list[str] = []
+    for description, patterns, names, files, unclaimed, problems in _SELECT_CASES:
+        got = select(patterns, names)
+        if (got.files, got.unclaimed, got.problems) != (files, unclaimed, problems):
+            failures.append(f"{description}: expected {(files, unclaimed, problems)}, got {got}")
+    for description, patterns, count in _PATTERN_CASES:
+        found = pattern_problems(patterns)
+        if len(found) != count:
+            failures.append(f"{description}: expected {count} problem(s), got {found}")
+    for failure in failures:
+        print(f"release-assets self-test: FAILED: {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print(f"release-assets self-test: {len(_SELECT_CASES) + len(_PATTERN_CASES)} cases OK.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--self-test", action="store_true", help="check the rules against inline samples")
+    commands = parser.add_subparsers(dest="command")
+    select_parser = commands.add_parser("select", help="print the file for each pattern")
+    select_parser.add_argument("directory", type=Path)
+    args = parser.parse_args()
+    if args.self_test:
+        return self_test()
+
+    try:
+        patterns = load_patterns(RELEASE_JSON)
+    except (OSError, ValueError) as error:
+        print(f"[RELEASE ASSETS FAILED] cannot read {RELEASE_JSON.name}: {error}", file=sys.stderr)
+        return 1
+    problems = pattern_problems(patterns)
+    if args.command == "select":
+        paths = [p.as_posix() for p in args.directory.rglob("*") if p.is_file()]
+        selection = select(patterns, sorted(paths))
+        problems += selection.problems
+        for name in selection.unclaimed:
+            print(f"release-assets: notice: not attached: {name}", file=sys.stderr)
+        if not problems:
+            print("\n".join(selection.files))
+    elif not problems:
+        print(f"release-assets: {len(patterns)} patterns OK.")
+    for problem in problems:
+        print(f"[RELEASE ASSETS FAILED] {problem}", file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
