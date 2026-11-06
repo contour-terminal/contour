@@ -212,6 +212,15 @@ struct WireClientArea
     bool operator==(WireClientArea const&) const = default;
 };
 
+/// A cell's size in pixels, as the client renders it. Each extent is untrusted: the receiver bounds it
+/// (vthost::sanePixelSize) before it reaches a terminal.
+struct WireCellPixelSize
+{
+    uint32_t width = 0;  ///< The cell's width in pixels.
+    uint32_t height = 0; ///< The cell's height in pixels.
+    bool operator==(WireCellPixelSize const&) const = default;
+};
+
 /// Which of the daemon's windows a connection wants to follow, and whether attaching creates one.
 /// Decoding is lenient: a byte no enumerator names reads as AllWindows, which is what a daemon without
 /// Capability::AttachIntent does anyway.
@@ -275,6 +284,10 @@ struct ClientHello
     /// Capability::InitialClientArea: the hello travels before the daemon says what it offers, so a daemon
     /// predating it ignores the field.
     WireColorPreference colorPreference = WireColorPreference::Unstated;
+    /// The client's cell size in pixels, so the first session's images lay out on it from the start. Absent
+    /// means the client states none. Informational like Capability::CellPixelSize: a daemon predating it
+    /// ignores the field.
+    std::optional<WireCellPixelSize> cellPixelSize = std::nullopt;
     bool operator==(ClientHello const&) const = default;
 };
 
@@ -343,6 +356,8 @@ struct ResizeRequest
 {
     uint32_t columns = 0;
     uint32_t lines = 0;
+    /// The client's cell size in pixels; absent when the client states none (an older client's request).
+    std::optional<WireCellPixelSize> cellPixelSize = std::nullopt;
     bool operator==(ResizeRequest const&) const = default;
 };
 
@@ -356,6 +371,8 @@ struct ResizePane
     uint64_t session = 0;
     uint32_t columns = 0;
     uint32_t lines = 0;
+    /// The client's cell size in pixels; absent when the client states none (an older client's request).
+    std::optional<WireCellPixelSize> cellPixelSize = std::nullopt;
     bool operator==(ResizePane const&) const = default;
 };
 

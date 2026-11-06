@@ -65,7 +65,8 @@ namespace vthost::testing
                                                               .wordDelimiters = "secret-delimiters" },
               .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
               .attachIntent = { .kind = proto::AttachIntentKind::Resume, .windows = { 1, 7 } },
-              .profileName = "work" } } },
+              .profileName = "work",
+              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } },
         { proto::PduType::ServerHello,
           proto::DecodedPdu { proto::ServerHello { .agreedVersion = 4,
                                                    .capabilities = { .idents = { 1 } },
@@ -76,9 +77,16 @@ namespace vthost::testing
           proto::DecodedPdu { proto::Input {
               .session = 4, .data = { std::byte { 'h' }, std::byte { 'i' }, std::byte { '!' } } } } },
         { proto::PduType::ResizeRequest,
-          proto::DecodedPdu { proto::ResizeRequest { .columns = 120, .lines = 40 } } },
+          proto::DecodedPdu { proto::ResizeRequest {
+              .columns = 120,
+              .lines = 40,
+              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } },
         { proto::PduType::ResizePane,
-          proto::DecodedPdu { proto::ResizePane { .session = 4, .columns = 60, .lines = 20 } } },
+          proto::DecodedPdu { proto::ResizePane {
+              .session = 4,
+              .columns = 60,
+              .lines = 20,
+              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } },
         { proto::PduType::FetchImage,
           proto::DecodedPdu { proto::FetchImage { .session = 4, .imageId = 9 } } },
         { proto::PduType::ImageData,
