@@ -115,16 +115,6 @@ namespace
         CrossingHandle _mapping;
     };
 
-    /// @return Whether @p handle is a standard stream a detached process can go on writing to: a file or a
-    ///         pipe, not a console, which the successor has none of.
-    [[nodiscard]] bool isPassableStream(HANDLE handle) noexcept
-    {
-        if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
-            return false;
-        auto const type = GetFileType(handle);
-        return type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE;
-    }
-
     /// Makes @p handles inheritable for as long as it lives, and restores how each was then: what limits them
     /// to the one launch that names them.
     class InheritableForLaunch
@@ -182,7 +172,7 @@ namespace
             auto* const output = GetStdHandle(STD_OUTPUT_HANDLE);
             auto* const error = GetStdHandle(STD_ERROR_HANDLE);
             for (auto* const stream: { output, error })
-                if (isPassableStream(stream))
+                if (vtpty::isPipeOrFile(stream))
                     handles.push_back(stream);
             std::ranges::sort(handles);
             auto const repeated = std::ranges::unique(handles);
@@ -198,8 +188,9 @@ namespace
             auto startup = STARTUPINFOEXW {};
             startup.StartupInfo.cb = sizeof(startup);
             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-            startup.StartupInfo.hStdOutput = isPassableStream(output) ? output : nullptr;
-            startup.StartupInfo.hStdError = isPassableStream(error) ? error : nullptr;
+            // A file or a pipe, never a console, which the successor has none of.
+            startup.StartupInfo.hStdOutput = vtpty::isPipeOrFile(output) ? output : nullptr;
+            startup.StartupInfo.hStdError = vtpty::isPipeOrFile(error) ? error : nullptr;
             startup.lpAttributeList = attributes->get();
             auto info = PROCESS_INFORMATION {};
             auto const started = [&] {

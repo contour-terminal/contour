@@ -20,6 +20,17 @@
 namespace vtpty
 {
 
+/// @param handle A handle of this process; null or invalid ones included.
+/// @return Whether @p handle is a pipe or a file: a standard stream redirected away from any console, which a
+///         process without one can go on writing to.
+[[nodiscard]] inline bool isPipeOrFile(HANDLE handle) noexcept
+{
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+        return false;
+    auto const type = GetFileType(handle);
+    return type == FILE_TYPE_PIPE || type == FILE_TYPE_DISK;
+}
+
 /// Owns a Win32 HANDLE and closes it on destruction.
 class UniqueHandle
 {
