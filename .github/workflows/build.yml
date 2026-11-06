@@ -1725,6 +1725,56 @@ jobs:
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           if-no-files-found: error
           retention-days: 7
+      - name: "Check that the MSI upgrades in place"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        # Installs the package over an earlier build of the same release, and over the latest release, as an
+        # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
+        # version field (the run number), which Windows Installer ignores: only a ProductCode of its own per
+        # build lets the second one in (error 1638 otherwise). Needs a runner without Contour installed, which
+        # scripts/check-msi-upgrade.ps1 insists on.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.set_vars.outputs.version }}'
+          $candidate = "contour-$version-win64.msi"
+          $release = ($version -split '\.')[0..2] -join '.'
+
+          # cpack changes into the preset's build directory before it resolves -B, so the directory is absolute.
+          $earlierDir = Join-Path $PWD 'out\msi-earlier'
+          cpack --preset ${{ env.CMAKE_PRESET }} -G WIX -D CPACK_PACKAGE_VERSION=$release.0 -B $earlierDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "CPack failed. Dumping wix.log..."
+            Get-Content (Join-Path $earlierDir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
+            exit $LASTEXITCODE
+          }
+          $earlier = @(Get-ChildItem $earlierDir -Filter '*-win64.msi')
+          if ($earlier.Count -ne 1) {
+            Write-Host "::error::expected one earlier build of $release in $earlierDir, found $($earlier.Count)"
+            exit 1
+          }
+
+          gh release download --repo contour-terminal/contour --pattern '*-win64.msi' --dir out\msi-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $released = @(Get-ChildItem out\msi-release -Filter '*-win64.msi' -ErrorAction SilentlyContinue)
+          if ($released.Count -ne 1) {
+            Write-Host "::error::expected one *-win64.msi in the latest release, found $($released.Count)"
+            exit 1
+          }
+
+          pwsh scripts\check-msi-upgrade.ps1 -From $earlier[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: "Uploading the upgrade check's logs"
+        if: failure() && (github.event_name != 'pull_request' || github.head_ref == 'release')
+        uses: actions/upload-artifact@v4
+        with:
+          name: "msi-upgrade-check-logs"
+          path: ${{ runner.temp }}/msi-*
+          if-no-files-found: ignore
+          retention-days: 7
   # }}}
   # {{{ Ubuntu 24.04 CC matrix
   ubuntu_2404_cc_matrix:

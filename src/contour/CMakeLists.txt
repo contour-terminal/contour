@@ -26,10 +26,6 @@ endif()
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
-NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
-NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
-NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
-
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is required for SystemTrayIcon's fallback implementation
@@ -1861,9 +1857,10 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
 set(CPACK_WIX_VERSION 4)
-# ProductCode must change for every version to trigger a Major Upgrade.
-set(CPACK_WIX_PRODUCT_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINOR}${HEX_PATCH}")
-# UpgradeCode must stay constant to allow upgrades from previous versions.
+# UpgradeCode must stay constant to allow upgrades from previous versions. The ProductCode is deliberately
+# left to CPack, which generates a new one per package: every build, including two of the same release, is
+# then a major upgrade of the installed one. (Windows Installer ignores the fourth field of the version, the
+# CI run number, so the version cannot tell two builds of a release apart.)
 set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
