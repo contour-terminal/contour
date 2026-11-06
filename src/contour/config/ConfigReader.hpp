@@ -424,7 +424,6 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where);
-
     void loadFromEntry(YAML::Node const& node, std::string const& entry, QuickTerminalConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);

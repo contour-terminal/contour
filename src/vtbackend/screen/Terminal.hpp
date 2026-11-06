@@ -1522,6 +1522,10 @@ class Terminal: public IStatusLinePublishTarget
     // }}}
 
     [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
+    /// A bare member write: it neither reaches the PTY (ws_xpixel/ws_ypixel) nor sends the in-band size
+    /// report. For construction, tests and resizeScreen()'s own bookkeeping; anything changing a live
+    /// terminal's cell uses changeCellPixelSize().
+    /// @param cellPixelSize The cell size to record.
     constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
 
     /// Changes the cell's pixel size without resizing anything: the grid, margins, selection and

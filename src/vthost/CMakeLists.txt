@@ -271,9 +271,9 @@ if(VTHOST_TESTING)
     add_executable(vthost_test
         test_main.cpp
         AccessFile_test.cpp
-        CellPixelBounds_test.cpp
         AttachPlan_test.cpp
         ByteStream_test.cpp
+        CellPixelBounds_test.cpp
         TabEdits_test.cpp
         TabMerge_test.cpp
         GracefulClose_test.cpp
