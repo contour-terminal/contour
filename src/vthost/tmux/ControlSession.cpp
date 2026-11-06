@@ -846,10 +846,11 @@ ControlSession::HandlerResult ControlSession::commandRefreshClient(std::vector<s
         // WINDOW_MINIMUM (1) / WINDOW_MAXIMUM (10000), tmux.h:110-115.
         if (*width < 1 || *width > 10000 || *height < 1 || *height > 10000)
             return std::unexpected("size too small or too big");
-        std::ignore = _host.applyClientSize(
-            this,
-            vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(*height)),
-                              .columns = vtpty::ColumnCount(static_cast<int>(*width)) });
+        std::ignore =
+            _host.applyClientSize(this,
+                                  vtpty::PageSize { .lines = vtpty::LineCount(static_cast<int>(*height)),
+                                                    .columns = vtpty::ColumnCount(static_cast<int>(*width)) },
+                                  std::nullopt); // control mode states no cell size
         // The server decides: answer the proposal with authoritative layouts.
         auto const* window = _host.model().window(_host.windowId());
         for (auto const tabIndex: std::views::iota(0, window->tabCount()))

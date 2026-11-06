@@ -224,15 +224,6 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
         _unrestoredScreens.push_back(id);
     }
 
-    // Not part of a terminal's state, and without it an image a program draws before a client attaches has no
-    // cells to be laid out on: the host's cell size, which restoreHandover() took from the image, gives it
-    // back.
-    {
-        auto& terminal = hosted->terminal();
-        auto const _ = std::lock_guard { terminal };
-        terminal.changeCellPixelSize(cellPixelSize());
-    }
-
     // Delivered after the replies the restored terminal queued, before anything a client hands it from now.
     hosted->replayCarried(std::move(session.carried));
     installSession(std::move(hosted));

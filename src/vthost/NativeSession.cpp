@@ -1688,12 +1688,11 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             errorLog()("{}: rejecting client area {}x{} (out of range)", _id, resize->columns, resize->lines);
             return;
         }
-        // The cell first: the area report that follows settles it, together with the grid.
-        reportCellPixelSize(resize->cellPixelSize, "client");
         // The resync is not issued here. A client area re-projects every pane of every window, and
         // the resulting grids belong to every attached client — not just this one. SessionHost
         // announces each moved grid through sessionResized(), which lands on all of them.
-        std::ignore = _host.applyClientSize(this, *size);
+        std::ignore =
+            _host.applyClientSize(this, *size, statedCellPixelSize(resize->cellPixelSize, "client"));
         return;
     }
     if (auto const* resize = std::get_if<proto::ResizePane>(&frame.pdu))
@@ -1708,11 +1707,11 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
                        resize->lines);
             return;
         }
-        reportCellPixelSize(resize->cellPixelSize, "pane");
         // As above, the resync rides sessionResized(). A client re-asserts every pane size after a
         // client-area change, so most of these arrive already satisfied by the reprojection that
         // change performed — and SizeChange::Unchanged announces nothing.
-        std::ignore = _host.applyPaneSize(this, SessionId { resize->session }, *size);
+        std::ignore = _host.applyPaneSize(
+            this, SessionId { resize->session }, *size, statedCellPixelSize(resize->cellPixelSize, "pane"));
         return;
     }
     if (auto const* fetch = std::get_if<proto::FetchImage>(&frame.pdu))
@@ -2251,16 +2250,16 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     return true;
 }
 
-void NativeSession::reportCellPixelSize(std::optional<proto::WireCellPixelSize> const& stated,
-                                        std::string_view origin)
+std::optional<vtpty::ImageSize> NativeSession::statedCellPixelSize(
+    std::optional<proto::WireCellPixelSize> const& stated, std::string_view origin) const
 {
     if (!stated)
-        return;
-    if (auto const cell = sanePixelSize(stated->width, stated->height))
-        _host.reportCellPixelSize(this, *cell);
-    else
+        return std::nullopt;
+    auto const cell = sanePixelSize(stated->width, stated->height);
+    if (!cell)
         errorLog()(
             "{}: rejecting {} cell size {}x{} (out of range)", _id, origin, stated->width, stated->height);
+    return cell;
 }
 
 void NativeSession::attachClient(uint64_t serial,
@@ -2289,20 +2288,22 @@ void NativeSession::attachClient(uint64_t serial,
     // session spawns at the size the client displays and its snapshot needs no resize and resync. An
     // area out of range is refused as a ResizeRequest's is; the session then spawns at the host's
     // size and the client's own ResizeRequest corrects it, as it does against a daemon that predates
-    // the field.
-    if (hello.clientArea)
+    // the field. The cell rides on the area, so the first session spawns at both; one stated beside a
+    // refused area still counts, as it describes the client, not the area.
+    auto const helloCell = statedCellPixelSize(hello.cellPixelSize, "hello");
+    auto const helloArea = hello.clientArea.and_then(
+        [](proto::WireClientArea const& area) { return sanePageSize(area.columns, area.lines); });
+    if (helloArea)
+        std::ignore = _host.applyClientSize(this, *helloArea, helloCell);
+    else
     {
-        if (auto const size = sanePageSize(hello.clientArea->columns, hello.clientArea->lines))
-        {
-            // The cell rides on the area, so the first session spawns at both.
-            reportCellPixelSize(hello.cellPixelSize, "hello");
-            std::ignore = _host.applyClientSize(this, *size);
-        }
-        else
+        if (hello.clientArea)
             errorLog()("{}: rejecting hello client area {}x{} (out of range)",
                        _id,
                        hello.clientArea->columns,
                        hello.clientArea->lines);
+        if (helloCell)
+            _host.applyCellPixelSize(this, *helloCell);
     }
 
     // The preference the client shows, applied BEFORE the plan spawns anything, so a session spawned for this

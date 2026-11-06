@@ -3132,6 +3132,25 @@ TEST_CASE("NativeSession.applies_the_hello_cell_size_before_the_first_spawn", "[
     CHECK(pty.resizes() == 1);
 }
 
+TEST_CASE("NativeSession.applies_the_hello_cell_size_beside_a_refused_area", "[vthost][native][cell]")
+{
+    auto h = NativeHarness { countingPtys() };
+    std::ignore =
+        exchangeAll(&h,
+                    { proto::DecodedPdu { proto::ClientHello {
+                        .clientArea = proto::WireClientArea { .columns = 0, .lines = 43 },
+                        .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } });
+
+    // The area is refused, so the session spawns at the host's size; the cell describes the client and
+    // counts.
+    REQUIRE(h.host.sessionCount() == 1);
+    CHECK(h.host.learnedCellPixelSize() == cellOf(9, 18));
+    auto const id = h.host.sessionIds().front();
+    auto const& terminal = *h.host.terminal(id);
+    CHECK(terminal.cellPixelSize() == cellOf(9, 18));
+    CHECK(countingPtyOf(h, id).pixelSize() == cellOf(9, 18) * terminal.pageSize());
+}
+
 TEST_CASE("NativeSession.applies_a_resize_cell_size", "[vthost][native][cell]")
 {
     // The session the attach spawns is the host's first.

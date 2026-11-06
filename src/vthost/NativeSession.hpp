@@ -672,11 +672,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param intent What the hello asked for; AllWindows when Capability::AttachIntent is not shared.
     void executeAttachPlan(proto::AttachIntent const& intent);
 
-    /// Hands the host the cell size a client states alongside a grid, once it is bounded
-    /// (vthost::sanePixelSize); an out-of-range one is logged and dropped, and the grid still applies.
+    /// Bounds the cell size a client states alongside a grid (vthost::sanePixelSize); an out-of-range one is
+    /// logged and dropped, and the grid still applies.
     /// @param stated The cell size the PDU carries; nullopt when it carries none.
     /// @param origin What carried it, for the log ("hello", "client", "pane").
-    void reportCellPixelSize(std::optional<proto::WireCellPixelSize> const& stated, std::string_view origin);
+    /// @return The bounded cell size, or nothing when none was stated or it was out of range.
+    [[nodiscard]] std::optional<vtpty::ImageSize> statedCellPixelSize(
+        std::optional<proto::WireCellPixelSize> const& stated, std::string_view origin) const;
 
     /// Adopts the emulation settings the client states for the sessions it creates from now on, in
     /// its ClientHello or later in a SessionSettingsChanged.

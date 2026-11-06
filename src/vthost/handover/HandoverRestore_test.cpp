@@ -488,8 +488,7 @@ TEST_CASE("a learned cell size crosses, and the successor's sessions lay out on 
     auto const id = old->host.sessionIds().front();
     auto client = SilentClient {};
     old->host.subscribeStream(&client);
-    old->host.reportCellPixelSize(&client, cellOf(9, 18));
-    std::ignore = old->host.applyClientSize(&client, old->host.pageSize());
+    std::ignore = old->host.applyClientSize(&client, old->host.pageSize(), cellOf(9, 18));
     old->host.unsubscribeStream(&client);
     REQUIRE(old->host.learnedCellPixelSize() == cellOf(9, 18));
 
