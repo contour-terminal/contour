@@ -6,6 +6,7 @@
 
 #include <array>
 #include <format>
+#include <limits>
 #include <random>
 #include <ranges>
 #include <string>
@@ -121,6 +122,22 @@ TEST_CASE("Functions.VTLevelConstrain.exemptions", "[Functions]")
     CHECK(*decsr == DECSR);
     CHECK_FALSE(vtbackend::selectControl(0, 1, '*', '|', active)); // DECSNLS
     CHECK(DECSR.conformanceLevel == VTType::VT420); // exempt, yet still documented at its own level
+}
+
+TEST_CASE("Functions.call.constexpr", "[Functions]")
+{
+    // Integer parameters known at compile time build the sequence at compile time.
+    static_assert(RIS() == "\033c");
+    static_assert(DECSM(2034) == "\033[?2034h");
+    static_assert(CUP(1, 80) == "\033[1;80H");
+    static_assert(DECSCUSR(2) == "\033[2 q");
+    static_assert(SGR(-1, 0u, std::numeric_limits<uint16_t>::max(), std::numeric_limits<int64_t>::min())
+                  == "\033[-1;0;65535;-9223372036854775808m");
+
+    // Runtime parameters, and parameters std::format renders as text, still work.
+    auto const row = 12;
+    CHECK(CUP(row, 34) == "\033[12;34H");
+    CHECK(SGR('x', "y", std::string_view { "z" }) == "\033[x;y;zm");
 }
 
 TEST_CASE("Functions.DCS_GIP", "[Functions]")
