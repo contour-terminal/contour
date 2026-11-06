@@ -30,6 +30,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_STRING="${VERSION_STRING:-dev}"
 BUILD_DIR="${BUILD_DIR:-$ROOT/out/appimage}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PWD}"
+CC="${CC:-gcc}"
 CXX="${CXX:-g++}"
 APPDIR="$BUILD_DIR/AppDir"
 TOOLS="$BUILD_DIR/tools"
@@ -55,12 +56,14 @@ ucd=()
 [[ -n "${UCD_BASE_DIR:-}" ]] && ucd=(-DLIBUNICODE_UCD_BASE_DIR="$UCD_BASE_DIR")
 cmake -S "$ROOT" -B "$BUILD_DIR/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_C_COMPILER="$CC" \
     -DCMAKE_CXX_COMPILER="$CXX" \
     "${launcher[@]}" \
     "${ucd[@]}" \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCONTOUR_TESTING=OFF \
+    -DCONTOUR_PRODUCTION_BUILD=ON \
     -DCONTOUR_WAYLAND=ON \
     -DPEDANTIC_COMPILER_WERROR=OFF
 cmake --build "$BUILD_DIR/build"

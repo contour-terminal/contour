@@ -357,7 +357,9 @@ TEST_CASE("searchWalk.aCatastrophicPatternEndsTheWalk", "[searchwalk]")
     // (a+)+$ over sixty a's and a b is exponential for a backtracking engine.
     auto constexpr Rows = 10000;
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(80) }, LineCount(Rows) };
-    writeRows(mock, Rows, [](int) { return std::string(60, 'a') + "b"; });
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    writeRows(mock, Rows, [](int) { return std::string(60, 'a').append(1, 'b'); });
     auto& terminal = mock.terminal;
     auto const& grid = terminal.primaryScreen().grid();
     REQUIRE(terminal.setSearchOptions(Regex).has_value());

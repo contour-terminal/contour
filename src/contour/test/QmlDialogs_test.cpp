@@ -114,9 +114,13 @@ void forEverySchemeRowAndAppearance(Check const& check)
         contour::session::PastePreview { .lines = { "git log --oneline --graph --decorate --all",
                                                     "cmake --build out/release -j 8" },
                                          .moreLines = 48'211 };
-    auto const wide =
-        contour::session::PastePreview { .lines = { std::string(120, 'x') + " --and-a-long-flag", "y" },
-                                         .moreLines = 3 };
+    // Built by appending: an initializer list of the two lines makes GCC 14's link-time inlining report a
+    // -Wstringop-overflow that cannot happen.
+    auto wideLines = decltype(contour::session::PastePreview::lines) {};
+    wideLines.emplace_back(120, 'x');
+    wideLines.back() += " --and-a-long-flag";
+    wideLines.emplace_back("y");
+    auto const wide = contour::session::PastePreview { .lines = std::move(wideLines), .moreLines = 3 };
     auto wideQuestion =
         contour::session::permissionPromptMap(contour::session::bigPastePrompt("zsh", 2'400'000, wide), 3);
     wideQuestion.insert(QStringLiteral("rememberText"),

@@ -414,10 +414,12 @@ TEST_CASE("ExecutionPolicySource.pwsh.configFiles", "[executionpolicy]")
     auto rig = PolicyRig {};
     auto const machineFolder = std::filesystem::path { "/Program Files/PowerShell/7" };
     auto const installedAt = [&](std::string_view version, std::filesystem::path const& folder) {
-        rig.registry.putString(RegistryRoot::LocalMachine,
-                               std::string { InstalledVersionsKey } + "\\" + std::string { version },
-                               "InstallLocation",
-                               folder.generic_string());
+        // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+        // temporary joined with `+`) that cannot happen, so it is built in pieces.
+        auto key = std::string { InstalledVersionsKey };
+        key += '\\';
+        key += version;
+        rig.registry.putString(RegistryRoot::LocalMachine, key, "InstallLocation", folder.generic_string());
     };
 
     SECTION("the user's file")

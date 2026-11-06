@@ -736,6 +736,7 @@ else()
 endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
+contour_production_executable(contour)
 
 # LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
 # 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and

@@ -26,7 +26,8 @@
             "displayName": "GCC Release",
             "inherits": [
                 "contour-common",
-                "release"
+                "release",
+                "production"
             ],
             "generator": "Ninja",
             "condition": {
