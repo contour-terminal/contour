@@ -430,7 +430,9 @@ struct YAMLConfigReader
     /// @param node  The mapping holding @p entry.
     /// @param entry The key of the cell size.
     /// @param where Receives the cell size.
-    void loadCellPixelSize(YAML::Node const& node, std::string const& entry, vtbackend::ImageSize& where);
+    void loadCellPixelSize(YAML::Node const& node,
+                           std::string const& entry,
+                           vtbackend::ImageSize& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, QuickTerminalConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);

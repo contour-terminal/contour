@@ -38,7 +38,6 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <limits>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -3155,7 +3154,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
 void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,
                                          std::string const& entry,
-                                         vtbackend::ImageSize& where)
+                                         vtbackend::ImageSize& where) const
 {
     auto const child = node[entry];
     if (!child)
@@ -3171,7 +3170,7 @@ void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,
     auto const width = extent("width");
     auto const height = extent("height");
     auto const bounded = [](std::optional<int64_t> const& v) {
-        return v && *v >= 0 && *v <= std::numeric_limits<uint32_t>::max();
+        return v && std::in_range<uint32_t>(*v);
     };
     auto const size =
         bounded(width) && bounded(height)
