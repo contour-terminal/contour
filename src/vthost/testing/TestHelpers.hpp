@@ -6,6 +6,7 @@
 
 #include <vtbackend/shell/CommandBlock.hpp>
 
+#include <vtpty/ImageSize.hpp>
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -266,5 +267,13 @@ class CountingPty final: public vtpty::MockPty
   private:
     int _resizes = 0;
 };
+
+/// @param width A cell's width in pixels.
+/// @param height Its height in pixels.
+/// @return @p width by @p height pixels, as a cell size.
+[[nodiscard]] inline vtpty::ImageSize cellOf(unsigned width, unsigned height)
+{
+    return vtpty::ImageSize { vtpty::Width(width), vtpty::Height(height) };
+}
 
 } // namespace vthost::testing

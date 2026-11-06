@@ -75,6 +75,7 @@ TEST_CASE("the descriptors a handover keeps are the standard streams and every o
 namespace
 {
 
+using vthost::testing::cellOf;
 using vthost::testing::LiveHost;
 using vthost::testing::occurrences;
 using vthost::testing::releaseForAdoption;
@@ -469,12 +470,6 @@ namespace
 struct SilentClient final: vthost::SessionStreamEvents
 {
 };
-
-/// @return @p width by @p height pixels, as a cell size.
-[[nodiscard]] vtpty::ImageSize cellOf(unsigned width, unsigned height)
-{
-    return vtpty::ImageSize { vtpty::Width(width), vtpty::Height(height) };
-}
 
 /// @return Whether @p session's terminal in @p live lays out on @p cell.
 [[nodiscard]] bool laysOutOn(LiveHost& live, SessionId session, vtpty::ImageSize cell)

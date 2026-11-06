@@ -79,6 +79,7 @@ using vtbackend::test::recordIds;
 using vtbackend::test::reportedOutputStart;
 using vthost::NativeSession;
 using vthost::SessionHost;
+using vthost::testing::cellOf;
 using vthost::testing::eventually;
 using vthost::testing::newSession;
 namespace proto = vthost::proto;
@@ -3108,12 +3109,6 @@ vthost::testing::CountingPty& countingPtyOf(NativeHarness& h, vtworkspace::Sessi
 {
     return dynamic_cast<vthost::testing::CountingPty&>(
         dynamic_cast<vthost::TappingPty&>(h.host.terminal(id)->device()).inner());
-}
-
-/// @return A cell of @p width by @p height pixels.
-vtpty::ImageSize cellOf(unsigned width, unsigned height)
-{
-    return vtpty::ImageSize { vtpty::Width(width), vtpty::Height(height) };
 }
 
 } // namespace
