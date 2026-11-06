@@ -3169,19 +3169,12 @@ void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,
     };
     auto const width = extent("width");
     auto const height = extent("height");
-    auto const bounded = [](std::optional<int64_t> const& v) {
-        return v && std::in_range<uint32_t>(*v);
-    };
-    auto const size =
-        bounded(width) && bounded(height)
-            ? vthost::sanePixelSize(static_cast<uint32_t>(*width), static_cast<uint32_t>(*height))
-            : std::nullopt;
+    auto const size = width && height ? vthost::sanePixelSize(*width, *height) : std::nullopt;
     if (!size)
-        errorLog()("Ignoring {}: it needs a `width` and a `height`, each from 1 to {} pixels; keeping {}x{}.",
+        errorLog()("Ignoring {}: it needs a `width` and a `height`, each from 1 to {} pixels; keeping {}.",
                    keyPathTo(node, entry),
                    vthost::MaxCellPixelExtent,
-                   *where.width,
-                   *where.height);
+                   where);
     else
         where = *size;
 }

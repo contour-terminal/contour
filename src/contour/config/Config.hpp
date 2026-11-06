@@ -91,6 +91,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vtworkspace/LayoutTree.hpp> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
@@ -818,7 +819,7 @@ struct DaemonSettings
 
     /// The cell size in pixels images are laid out on before any client has reported one
     /// (`daemon.default_cell_pixel_size`); 10x20 is the VT340's text cell.
-    vtbackend::ImageSize defaultCellPixelSize { vtbackend::Width(10), vtbackend::Height(20) };
+    vtbackend::ImageSize defaultCellPixelSize = vthost::DefaultCellPixelSize;
 
     /// The scrollback the daemon keeps per session; unset means the hosting profile's `history.limit`.
     std::optional<vtbackend::MaxHistoryLineCount> historyLimit {};

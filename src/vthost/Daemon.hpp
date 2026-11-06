@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <vthost/AccessFile.hpp>
+#include <vthost/CellPixelBounds.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
@@ -155,7 +156,7 @@ struct DaemonConfig
     /// The cell size in pixels images are laid out on before any client has reported one; never
     /// remembered or persisted, since only a size a client reported is. See
     /// SessionHostConfig::defaultCellPixelSize.
-    vtpty::ImageSize defaultCellPixelSize { vtpty::Width(10), vtpty::Height(20) };
+    vtpty::ImageSize defaultCellPixelSize = DefaultCellPixelSize;
     /// Makes the status-line extensions every hosted session runs; unset for none, which constructs, polls
     /// and wakes nothing of them. A factory rather than the extensions themselves, because they post to the
     /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them
