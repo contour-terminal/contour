@@ -264,15 +264,30 @@ TEST_CASE("a learned cell size round-trips, and a file without one decodes to no
     }
 }
 
-TEST_CASE("a truncated trailing cell size is malformed", "[vthost][snapshot]")
+TEST_CASE("a damaged trailing cell size drops only the cell", "[vthost][snapshot]")
 {
     auto body = proto::Writer {};
     body.svarint(0);
     body.varint(0); // no windows
-    body.varint(9); // a width, and no height
-    auto const decoded = decodeSnapshot(fileAround(body.view()));
-    REQUIRE_FALSE(decoded);
-    CHECK(decoded.error() == SnapshotError::Malformed);
+
+    SECTION("a width and no height")
+    {
+        body.varint(9);
+        auto const decoded = decodeSnapshot(fileAround(body.view()));
+        REQUIRE(decoded);
+        CHECK(decoded->snapshot.windows.empty());
+        CHECK_FALSE(decoded->snapshot.cellPixelSize);
+    }
+    SECTION("an oversized extent decodes out of bounds, never negative")
+    {
+        body.varint(uint64_t { UINT32_MAX } + 1);
+        body.varint(18);
+        auto const decoded = decodeSnapshot(fileAround(body.view()));
+        REQUIRE(decoded);
+        REQUIRE(decoded->snapshot.cellPixelSize);
+        CHECK(unbox<int64_t>(decoded->snapshot.cellPixelSize->width) > 1024);
+        CHECK(unbox<int64_t>(decoded->snapshot.cellPixelSize->height) == 18);
+    }
 }
 
 TEST_CASE("an empty workspace encodes and decodes as empty", "[vthost][snapshot]")

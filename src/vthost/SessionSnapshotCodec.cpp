@@ -13,6 +13,7 @@
 #include <utility>
 #include <variant>
 
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/proto/Wire.hpp>
 
 namespace vthost
@@ -365,14 +366,17 @@ namespace
         }
         if (in.remaining() > 0)
         {
+            // Only the cell is dropped when it is damaged: the workspace it trails is still good.
             auto const width = in.varint();
             auto const height = in.varint();
-            if (!width || !height)
-                return std::unexpected(SnapshotError::Malformed);
-            constexpr auto Largest = std::uint64_t { UINT32_MAX };
-            decoded.snapshot.cellPixelSize =
-                vtpty::ImageSize { .width = vtpty::Width::cast_from(std::min(*width, Largest)),
-                                   .height = vtpty::Height::cast_from(std::min(*height, Largest)) };
+            if (width && height)
+            {
+                // One past the bound is enough for sanePixelSize() to refuse it, and never narrows negative.
+                constexpr auto Largest = std::uint64_t { MaxCellPixelExtent } + 1;
+                decoded.snapshot.cellPixelSize =
+                    vtpty::ImageSize { .width = vtpty::Width::cast_from(std::min(*width, Largest)),
+                                       .height = vtpty::Height::cast_from(std::min(*height, Largest)) };
+            }
         }
         decoded.droppedHistories = context.droppedHistories;
         return decoded;
