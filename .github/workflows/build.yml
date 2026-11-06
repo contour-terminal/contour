@@ -3035,6 +3035,9 @@ jobs:
       - macOSArm
       - package_for_AppImage
       - package_for_Ubuntu
+      - check_ubuntu2404_matrix_test_matrix
+      - check_package_ubuntu
+      - test_quick_exit
       - package_daemon_for_Ubuntu
       - test_daemon_package_swap
       - package_for_Fedora
