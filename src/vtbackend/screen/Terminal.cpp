@@ -9299,7 +9299,15 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
     _statusDisplayType = statusDisplayType;
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
-        resizeScreen(_settings.pageSize, nullopt);
+    {
+        // Carry the pixel geometry along: without it UnixPty::resizeScreen() zeroes ws_xpixel/ws_ypixel, and
+        // nothing repairs that when an application merely toggles the status line (DECSSDT). The pixels are
+        // on the total-page basis, as resizeScreen() divides by the total page.
+        auto const pixels = cellPixelSize().area() > 0
+                                ? optional<ImageSize> { cellPixelSize() * _settings.pageSize }
+                                : nullopt;
+        resizeScreen(_settings.pageSize, pixels);
+    }
 }
 
 void Terminal::recordStatusDisplaySelection(StatusDisplayType type)

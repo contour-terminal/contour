@@ -6182,6 +6182,46 @@ TEST_CASE("Terminal.changeCellPixelSize.reaches_the_pty_without_resizing", "[scr
     CHECK(mock.terminal.currentScreen().margin().vertical == marginBefore.vertical);
 }
 
+TEST_CASE("Terminal.changeCellPixelSize.reports_in_band_and_ignores_an_equal_cell", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.writeToScreen("\033[?2048h");
+    REQUIRE(mock.replyData() == "\033[48;10;20;200;200t");
+
+    // A new cell is reported in band, as a resize is: rows, cols, pixel height, pixel width.
+    mock.terminal.changeCellPixelSize(ImageSize { Width(9), Height(18) });
+    CHECK(mock.replyData() == "\033[48;10;20;200;200t\033[48;10;20;180;180t");
+
+    // The same cell again is no change: neither a report nor a PTY resize. A sentinel the PTY would be
+    // overwritten from shows the latter.
+    auto const sentinel = ImageSize { Width(1), Height(1) };
+    mock.mockPty().resizeScreen(PageSize { LineCount(10), ColumnCount(20) }, sentinel);
+    mock.terminal.changeCellPixelSize(ImageSize { Width(9), Height(18) });
+    CHECK(mock.mockPty().pixelSize() == std::optional { sentinel });
+    CHECK(mock.replyData() == "\033[48;10;20;200;200t\033[48;10;20;180;180t");
+}
+
+TEST_CASE("Terminal.setStatusDisplay.keeps_the_pty_pixel_geometry", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize };
+    mock.terminal.changeCellPixelSize(ImageSize { Width(9), Height(18) });
+    auto const expected = ImageSize { Width(9 * 20), Height(18 * 10) };
+    REQUIRE(mock.mockPty().pixelSize() == std::optional { expected });
+
+    // The status line takes a row off the main page; the PTY's pixels follow it, and are not wiped.
+    mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    CHECK(mock.mockPty().pixelSize()
+          == std::optional { mock.terminal.cellPixelSize() * mock.terminal.pageSize() });
+    CHECK(mock.mockPty().pixelSize().has_value());
+    CHECK(mock.terminal.cellPixelSize() == ImageSize { Width(9), Height(18) });
+
+    mock.terminal.setStatusDisplay(StatusDisplayType::None);
+    CHECK(mock.mockPty().pixelSize() == std::optional { expected });
+    CHECK(mock.terminal.cellPixelSize() == ImageSize { Width(9), Height(18) });
+}
+
 TEST_CASE("Terminal.resizeScreenKeepingCellSize.keeps_the_cell_with_a_status_line", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
