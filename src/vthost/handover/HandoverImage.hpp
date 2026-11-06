@@ -165,7 +165,8 @@ struct HandoverImage
     /// before the field reads as 0.
     uint64_t upgradeGeneration = 0;
     /// The cell size in pixels a client last stated (SessionHost::learnedCellPixelSize()); none when none
-    /// ever did, and for an image from before the field, whose sessions' PTY pixels then stand in for it.
+    /// ever did, and for an image from before the field, which has none: the successor uses its default
+    /// until a client reports.
     /// Unchecked: the host that adopts the image bounds it first.
     std::optional<vtpty::ImageSize> cellPixelSize {};
 
