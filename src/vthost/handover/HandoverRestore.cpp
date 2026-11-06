@@ -27,7 +27,6 @@
 #include <functional>
 #include <iterator>
 #include <mutex>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <utility>

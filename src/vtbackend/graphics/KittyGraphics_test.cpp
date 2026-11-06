@@ -2607,7 +2607,7 @@ TEST_CASE("KittyGraphics.laid_out_on_the_given_cell", "[kitty]")
     auto mock = MockTerm<vtpty::MockPty> { pageSize };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
 
-    auto const pixels = std::string(20 * 40 * 4, '\xFF');
+    auto const pixels = std::string(std::size_t { 20 } * 40 * 4, '\xFF');
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=20,v=40,i=1;{}\033\\", core::base64::encode(pixels)));
 
     for (auto const line: std::views::iota(0, unbox<int>(pageSize.lines)))
@@ -2621,7 +2621,7 @@ TEST_CASE("KittyGraphics.laid_out_on_the_given_cell", "[kitty]")
 TEST_CASE("KittyGraphics.unknown_cell_size_is_dropped_unless_c_and_r_are_given", "[kitty]")
 {
     auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
-    auto const pixels = core::base64::encode(std::string(20 * 40 * 4, '\xFF'));
+    auto const pixels = core::base64::encode(std::string(std::size_t { 20 } * 40 * 4, '\xFF'));
     auto const countFragments = [&](auto& mock) {
         auto count = 0;
         for (auto const line: std::views::iota(0, unbox<int>(pageSize.lines)))

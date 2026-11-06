@@ -463,6 +463,8 @@ TEST_CASE("a kitty animation playing as it is handed over keeps the daemon's fra
     CHECK(live->eventually([&] { return live->host.ticksKittyAnimations(id); }));
 }
 
+namespace
+{
 /// A client that listens to nothing: the one that states a cell size.
 struct SilentClient final: vthost::SessionStreamEvents
 {
@@ -481,6 +483,8 @@ struct SilentClient final: vthost::SessionStreamEvents
     auto const _ = std::lock_guard { terminal };
     return terminal.cellPixelSize() == cell;
 }
+
+} // namespace
 
 TEST_CASE("a learned cell size crosses, and the successor's sessions lay out on it",
           "[vthost][handover][threading][cell]")
