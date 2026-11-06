@@ -29,6 +29,12 @@ namespace vtpty
 /// @return Nothing; or why adoptPty() would refuse it.
 [[nodiscard]] std::expected<void, AdoptError> canAdoptPty(InheritedPty const& pty);
 
+/// Asks whether this process can adopt any pseudoconsole at all, without taking anything: what a release
+/// reports of itself, for the daemon that would hand its pseudoconsoles over to ask first. On Windows the
+/// bundled conpty.dll's own check (ConPty::canAdoptAny()), which loads it.
+/// @return NotApplicable on POSIX; Able or Unable on Windows.
+[[nodiscard]] PseudoconsoleAdoptability pseudoconsoleAdoptability();
+
 /// Closes every handle or descriptor @p pty names that is not none: what a PTY that could not be adopted
 /// leaves, which would otherwise stay open, unused -- while the program on it, never seeing a hangup, waited
 /// for input forever. On POSIX the standard streams are never a PTY's, and are left alone whatever @p pty

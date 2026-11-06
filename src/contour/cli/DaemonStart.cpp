@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/DaemonStart.hpp>
 
+#include <vtpty/PtyAdoption.hpp>
+
 #include <format>
 
 namespace contour::cli
@@ -62,7 +64,8 @@ vthost::handover::ReadinessReport handoverReadiness(std::string release,
                                                     std::string_view configPath,
                                                     std::string const& profileName)
 {
-    auto report = vthost::handover::ownReadiness(std::move(release));
+    auto report = vthost::handover::ownReadiness(
+        std::move(release), vthost::handover::reportedAdoption(vtpty::pseudoconsoleAdoptability()));
     if (configPath.empty() && profileName.empty())
         return report;
     // What loadDaemonConfig() and resolveDaemonProfile() refuse a fresh daemon on, in the loader's own words:

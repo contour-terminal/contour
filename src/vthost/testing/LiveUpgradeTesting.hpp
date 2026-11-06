@@ -43,10 +43,10 @@
 namespace vthost::testing
 {
 
-/// What a target binary built from this tree answers.
+/// What a target binary built from this tree answers, one that can adopt pseudoconsoles.
 [[nodiscard]] inline handover::ReadinessReport readyTarget()
 {
-    return handover::ownReadiness("0.9.1");
+    return handover::ownReadiness("0.9.1", handover::PseudoconsoleAdoption::Able);
 }
 
 /// UpgradeHooks that record what they were asked, in order.

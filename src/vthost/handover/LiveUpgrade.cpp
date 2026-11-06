@@ -48,6 +48,35 @@ namespace
         return UpgradeRefusal::NotSupported;
     }
 
+    /// @return Whether some session of @p host that has not ended runs on a bundled pseudoconsole, which only
+    ///         a target that adopts them can take over.
+    [[nodiscard]] bool hostsPseudoconsole(SessionHost& host)
+    {
+        return std::ranges::any_of(host.sessionIds(), [&](auto const id) {
+            auto const& device = host.hostedSession(id)->pty();
+            return !device.isClosed()
+                   && device.handover()
+                          .transform([](vtpty::InheritedPty const& pty) { return pty.conpty.has_value(); })
+                          .value_or(false);
+        });
+    }
+
+    /// @param target What the target binary reports.
+    /// @param host The sessions this daemon would hand over.
+    /// @return Nothing unless @p target cannot adopt pseudoconsoles and @p host runs a session on one, then
+    ///         TargetCannotAdoptTerminals. The report is asked first: it is a comparison, the sessions a
+    ///         walk.
+    [[nodiscard]] std::expected<void, UpgradeRefusal> checkHostedPseudoconsoles(ReadinessReport const& target,
+                                                                                SessionHost& host)
+    {
+        return checkAdoptsPseudoconsoles(target).or_else(
+            [&](UpgradeRefusal refusal) -> std::expected<void, UpgradeRefusal> {
+                if (!hostsPseudoconsole(host))
+                    return {};
+                return std::unexpected(refusal);
+            });
+    }
+
     /// Marks an upgrade under way for as long as it lives.
     class RunningScope
     {
@@ -147,6 +176,7 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
         .executable = resolved->executable, .configFile = _config.configFile, .profile = _config.profile });
     auto const report = answer.and_then([this](ReadinessReport const& target) {
         return checkReadable(target)
+            .and_then([&] { return checkHostedPseudoconsoles(target, _host); })
             .and_then([&]() -> std::expected<void, UpgradeRefusal> {
                 if (_config.runningConfig == RunningConfig::BuiltInDefaults)
                     return {};
@@ -156,8 +186,10 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     });
     if (!report)
     {
-        if (answer && answer->configProblem)
-            errorLog()("live upgrade refused: {}", *answer->configProblem);
+        if (report.error() == UpgradeRefusal::ConfigUnreadable && answer && answer->configProblem)
+            errorLog()("live upgrade refused: {}: {}", describe(report.error()), *answer->configProblem);
+        else
+            errorLog()("live upgrade refused: {}", describe(report.error()));
         co_return std::unexpected(report.error());
     }
     if (auto const capturable = checkCapturable(_host); !capturable)

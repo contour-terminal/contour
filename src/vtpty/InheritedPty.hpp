@@ -84,6 +84,15 @@ struct InheritedPty
     }
 };
 
+/// Whether this process can adopt the pseudoconsoles a daemon hands over: what a release reports of itself
+/// (pseudoconsoleAdoptability()).
+enum class PseudoconsoleAdoptability : std::uint8_t
+{
+    NotApplicable = 0, ///< No PTY of this platform is a pseudoconsole: POSIX.
+    Unable, ///< The bundled conpty.dll does not load beside the executable, or lacks ConptyPackPseudoConsole.
+    Able,   ///< It can.
+};
+
 /// Why a PTY or a child process could not be adopted.
 enum class AdoptError : std::uint8_t
 {

@@ -340,14 +340,19 @@ ConPty::ConPty(PageSize const& windowSize):
 {
 }
 
-std::expected<void, AdoptError> ConPty::canAdopt(InheritedPty const& inherited)
+std::expected<void, AdoptError> ConPty::canAdoptAny()
 {
-    if (!inherited.conpty || !std::ranges::all_of(inherited.conpty->handles(), isOpenHandle))
-        return std::unexpected(AdoptError::BadDescriptor);
     if (auto const& api = ConptyApiImpl::instance();
         api.host != ConsoleHost::Bundled || !api.packPseudoConsole)
         return std::unexpected(AdoptError::ForeignConsoleHost);
     return {};
+}
+
+std::expected<void, AdoptError> ConPty::canAdopt(InheritedPty const& inherited)
+{
+    if (!inherited.conpty || !std::ranges::all_of(inherited.conpty->handles(), isOpenHandle))
+        return std::unexpected(AdoptError::BadDescriptor);
+    return canAdoptAny();
 }
 
 std::expected<std::unique_ptr<ConPty>, AdoptError> ConPty::adopt(InheritedPty const& inherited)

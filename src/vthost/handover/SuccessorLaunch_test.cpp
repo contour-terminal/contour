@@ -281,6 +281,36 @@ TEST_CASE("a successor that ends before it is ready leaves the old daemon servin
     checkResumed(u, ids, "carried");
 }
 
+TEST_CASE("a target that cannot adopt the pseudoconsoles is refused before any client goes",
+          "[vthost][handover][upgrade][threading]")
+{
+    auto u = SuccessorUpgrade { SuccessorBehaviour::TakesOver };
+    auto const ids = u.spawnTwo();
+    u.probe.answer->pseudoconsoleAdoption = PseudoconsoleAdoption::Unable;
+
+    auto upgrade = u.orchestrator();
+    auto const result = u.upgrade(upgrade);
+    CHECK(vthost::testing::refusedWith(result, UpgradeRefusal::TargetCannotAdoptTerminals));
+    CHECK(u.hooks.events.empty()); // no announcement, no client closed
+    CHECK(u.launcher.launches.empty());
+    CHECK(u.leases.heldCount() == 0);
+    checkResumed(u, ids);
+}
+
+TEST_CASE("a target that does not say whether it adopts pseudoconsoles is upgraded to as before",
+          "[vthost][handover][upgrade][threading]")
+{
+    auto u = SuccessorUpgrade { SuccessorBehaviour::EndsBeforeReady };
+    auto const ids = u.spawnTwo();
+    u.probe.answer->pseudoconsoleAdoption = std::nullopt;
+
+    auto upgrade = u.orchestrator();
+    auto const result = u.upgrade(upgrade);
+    CHECK_FALSE(vthost::testing::refusedWith(result, UpgradeRefusal::TargetCannotAdoptTerminals));
+    CHECK(u.launcher.launches.size() == 1);
+    checkResumed(u, ids);
+}
+
 TEST_CASE("a successor not ready in time is ended, and the old daemon serves on",
           "[vthost][handover][upgrade][threading]")
 {

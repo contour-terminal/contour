@@ -48,6 +48,18 @@ namespace
         return range.first <= version && version <= range.second;
     }
 
+    /// @return @p adoption as the wire spells it (detail::ReadinessJson::adoptsPseudoconsoles).
+    [[nodiscard]] constexpr bool adoptsOf(PseudoconsoleAdoption adoption) noexcept
+    {
+        return adoption == PseudoconsoleAdoption::Able;
+    }
+
+    /// @return What the wire's @p adopts says (detail::ReadinessJson::adoptsPseudoconsoles).
+    [[nodiscard]] constexpr PseudoconsoleAdoption adoptionOf(bool adopts) noexcept
+    {
+        return adopts ? PseudoconsoleAdoption::Able : PseudoconsoleAdoption::Unable;
+    }
+
 #ifndef _WIN32
     /// @return @p text as one word of the POSIX shell, whatever it holds.
     [[nodiscard]] std::string shellQuoted(std::string_view text)
@@ -66,13 +78,15 @@ namespace
 #endif
 } // namespace
 
-ReadinessReport ownReadiness(std::string release)
+ReadinessReport ownReadiness(std::string release, std::optional<PseudoconsoleAdoption> pseudoconsoles)
 {
     return ReadinessReport {
         .release = std::move(release),
         .handoverFormats = { OldestReadableHandoverFormat, HandoverFormatVersion },
         .terminalStateFormats = { vtbackend::OldestReadableTerminalStateFormat,
                                   vtbackend::TerminalStateFormatVersion },
+        .configProblem = std::nullopt,
+        .pseudoconsoleAdoption = pseudoconsoles,
     };
 }
 
@@ -83,6 +97,7 @@ std::string encodeReadiness(ReadinessReport const& report)
         .handoverFormats = { report.handoverFormats.first, report.handoverFormats.second },
         .terminalStateFormats = { report.terminalStateFormats.first, report.terminalStateFormats.second },
         .configProblem = report.configProblem,
+        .adoptsPseudoconsoles = report.pseudoconsoleAdoption.transform(adoptsOf),
     });
 }
 
@@ -97,6 +112,7 @@ std::optional<ReadinessReport> decodeReadiness(std::string_view text)
         .handoverFormats = { wire.handoverFormats[0], wire.handoverFormats[1] },
         .terminalStateFormats = { wire.terminalStateFormats[0], wire.terminalStateFormats[1] },
         .configProblem = std::move(wire.configProblem),
+        .pseudoconsoleAdoption = wire.adoptsPseudoconsoles.transform(adoptionOf),
     };
 }
 
@@ -105,6 +121,13 @@ std::expected<void, UpgradeRefusal> checkReadable(ReadinessReport const& target)
     if (!reads(target.handoverFormats, HandoverFormatVersion)
         || !reads(target.terminalStateFormats, vtbackend::TerminalStateFormatVersion))
         return std::unexpected(UpgradeRefusal::FormatUnreadable);
+    return {};
+}
+
+std::expected<void, UpgradeRefusal> checkAdoptsPseudoconsoles(ReadinessReport const& target)
+{
+    if (target.pseudoconsoleAdoption == PseudoconsoleAdoption::Unable)
+        return std::unexpected(UpgradeRefusal::TargetCannotAdoptTerminals);
     return {};
 }
 

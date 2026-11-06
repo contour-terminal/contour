@@ -144,7 +144,8 @@ enum class UpgradeState : uint8_t
 ///  2. resolve the target inside the store and lease its image (NotStaged);
 ///  3. probe the target, off the loop (ReadinessProbe; TargetUnresponsive, FormatUnreadable, and
 ///     ConfigUnreadable for a target that cannot load the daemon's configuration or resolve its profile,
-///     when the daemon itself loaded it: RunningConfig);
+///     when the daemon itself loaded it: RunningConfig; TargetCannotAdoptTerminals for a target that says it
+///     cannot adopt pseudoconsoles, when a session runs on one);
 ///  4. refuse a session that could not cross (UnsupportedSession, ForeignConsoleHost, InFlightTailTooLarge;
 ///     checkCapturable());
 ///  5. announce the upgrade, write the workspace snapshot, hold every listener, close every client;

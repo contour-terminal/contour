@@ -36,6 +36,15 @@ std::expected<std::unique_ptr<Pty>, AdoptError> adoptPty(InheritedPty const& pty
         [](std::unique_ptr<Adopted> adopted) { return std::unique_ptr<Pty> { std::move(adopted) }; });
 }
 
+PseudoconsoleAdoptability pseudoconsoleAdoptability()
+{
+#ifdef _WIN32
+    return ConPty::canAdoptAny() ? PseudoconsoleAdoptability::Able : PseudoconsoleAdoptability::Unable;
+#else
+    return PseudoconsoleAdoptability::NotApplicable;
+#endif
+}
+
 void closeInherited(InheritedPty const& pty) noexcept
 {
     for (auto const handle: pty.handles())

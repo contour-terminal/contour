@@ -409,6 +409,28 @@ TEST_CASE("a daemon already on built-in defaults upgrades to a target that canno
     CHECK(u.replacer.replacements.size() == 1);
 }
 
+TEST_CASE("a target that cannot adopt pseudoconsoles is upgraded to where no session runs on one",
+          "[vthost][handover][upgrade][threading]")
+{
+    auto u = Upgrade {};
+    REQUIRE(u.live->host.createTab() != nullptr);
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    auto unable = readyTarget();
+    unable.pseudoconsoleAdoption = PseudoconsoleAdoption::Unable;
+    u.probe.answer = unable;
+
+    auto upgrade = u.orchestrator();
+    auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+
+    // Not refused for the pseudoconsoles, which no session runs on: it went on as far as the exec, which the
+    // fake fails.
+    CHECK_FALSE(refusedWith(result, UpgradeRefusal::TargetCannotAdoptTerminals));
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error()
+          == UpgradeError { ExecFailure { std::make_error_code(std::errc::no_such_file_or_directory) } });
+    CHECK(u.replacer.replacements.size() == 1);
+}
+
 TEST_CASE("oversize in-flight tail refuses before quiescing", "[vthost][handover][upgrade][threading]")
 {
     auto settings = vtbackend::Settings {};

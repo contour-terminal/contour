@@ -5,6 +5,8 @@
 /// The readiness check a live upgrade runs before it stops anything: the target binary is asked, in a query
 /// mode (`contour daemon handover-info`), which release it is and which formats it reads.
 
+#include <vtpty/InheritedPty.hpp>
+
 #include <core/async/IExecutor.hpp>
 #include <core/async/Task.hpp>
 
@@ -28,6 +30,13 @@ class CommandCapture;
 namespace vthost::handover
 {
 
+/// Whether a binary can adopt the pseudoconsoles a daemon hands over (Windows).
+enum class PseudoconsoleAdoption : uint8_t
+{
+    Unable = 0, ///< It cannot: its bundled conpty.dll does not load, or lacks the entry point.
+    Able,       ///< It can.
+};
+
 /// What a binary says of itself when asked whether it can take a handover over.
 struct ReadinessReport
 {
@@ -37,6 +46,9 @@ struct ReadinessReport
     /// Why it cannot run as the daemon's configuration says (ReadinessQuery::configFile and ::profile): the
     /// file does not load, or no longer names the profile; nullopt when it can, or was asked about none.
     std::optional<std::string> configProblem {};
+    /// Whether it adopts pseudoconsoles; nullopt where it does not say (a release that predates the field, or
+    /// a platform without pseudoconsoles), which never refuses an upgrade.
+    std::optional<PseudoconsoleAdoption> pseudoconsoleAdoption {};
 
     bool operator==(ReadinessReport const&) const = default;
 };
@@ -52,16 +64,37 @@ namespace detail
         std::array<uint32_t, 2> handoverFormats {};      ///< ReadinessReport::handoverFormats.
         std::array<uint32_t, 2> terminalStateFormats {}; ///< ReadinessReport::terminalStateFormats.
         std::optional<std::string> configProblem {};     ///< ReadinessReport::configProblem; absent if none.
+        /// ReadinessReport::pseudoconsoleAdoption, a wire boundary and so a bool; absent if unknown.
+        std::optional<bool> adoptsPseudoconsoles {};
     };
 } // namespace detail
 
+/// @param adoptability Whether a process can adopt pseudoconsoles (vtpty::pseudoconsoleAdoptability()).
+/// @return It as a readiness report says it: nothing where the platform has no pseudoconsoles.
+[[nodiscard]] constexpr std::optional<PseudoconsoleAdoption> reportedAdoption(
+    vtpty::PseudoconsoleAdoptability adoptability) noexcept
+{
+    switch (adoptability)
+    {
+        case vtpty::PseudoconsoleAdoptability::NotApplicable: return std::nullopt;
+        case vtpty::PseudoconsoleAdoptability::Unable: return PseudoconsoleAdoption::Unable;
+        case vtpty::PseudoconsoleAdoptability::Able: return PseudoconsoleAdoption::Able;
+    }
+    return std::nullopt;
+}
+
 /// @param release The release this build reports.
-/// @return What this build says of itself: the formats it reads (HandoverImage.hpp, StateCodec.hpp).
-[[nodiscard]] ReadinessReport ownReadiness(std::string release);
+/// @param pseudoconsoles Whether this build adopts pseudoconsoles (reportedAdoption()); nullopt where it says
+///        nothing of them.
+/// @return What this build says of itself: the formats it reads (HandoverImage.hpp, StateCodec.hpp), and
+///         @p pseudoconsoles.
+[[nodiscard]] ReadinessReport ownReadiness(std::string release,
+                                           std::optional<PseudoconsoleAdoption> pseudoconsoles);
 
 /// @param report A report.
 /// @return It as one line of strict JSON, no line break:
-///         `{"release":"…","handoverFormats":[min,max],"terminalStateFormats":[min,max]}`.
+///         `{"release":"…","handoverFormats":[min,max],"terminalStateFormats":[min,max]}`, with
+///         `"configProblem":"…"` and `"adoptsPseudoconsoles":true|false` added where the report has them.
 [[nodiscard]] std::string encodeReadiness(ReadinessReport const& report);
 
 /// Reads what encodeReadiness() wrote, of this or a later release: a key it does not know is skipped, one it
@@ -73,6 +106,11 @@ namespace detail
 /// @param target What the target binary reports.
 /// @return Nothing when it reads both formats this build writes; FormatUnreadable otherwise.
 [[nodiscard]] std::expected<void, UpgradeRefusal> checkReadable(ReadinessReport const& target);
+
+/// @param target What the target binary reports.
+/// @return Nothing unless it reports it cannot adopt pseudoconsoles, then TargetCannotAdoptTerminals. For a
+///         daemon that hosts one: a daemon that hosts none has nothing to hand over to it.
+[[nodiscard]] std::expected<void, UpgradeRefusal> checkAdoptsPseudoconsoles(ReadinessReport const& target);
 
 /// @param target What the target binary reports.
 /// @return Nothing when it can run as the daemon's configuration says; ConfigUnreadable otherwise.

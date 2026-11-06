@@ -90,12 +90,19 @@ class ConPty final: public Pty
     ///         none was. The pseudoconsole takes none: it is kept for a live upgrade to carry.
     [[nodiscard]] std::optional<ImageSize> pixelSize() const noexcept;
 
+    /// Asks whether this process can adopt any pseudoconsole at all: the bundled conpty.dll loads beside the
+    /// executable and exports ConptyPackPseudoConsole. What a release reports of itself, for the daemon that
+    /// would hand its pseudoconsoles over to ask first.
+    /// @return Nothing; or AdoptError::ForeignConsoleHost where it cannot.
+    [[nodiscard]] static std::expected<void, AdoptError> canAdoptAny();
+
     /// Asks whether adopt() would take @p inherited, without taking anything: what a successor checks before
     /// it says it can take over.
     /// @param inherited The pseudoconsole's handles and size, from handover() in the process that hands it
     ///        over.
     /// @return Nothing; or AdoptError::ForeignConsoleHost where this process cannot load the bundled
-    ///         conpty.dll, BadDescriptor where it names no handles, or one is not open in this process.
+    ///         conpty.dll (canAdoptAny()), BadDescriptor where it names no handles, or one is not open in
+    ///         this process.
     [[nodiscard]] static std::expected<void, AdoptError> canAdopt(InheritedPty const& inherited);
 
     /// The pseudoconsole as it crosses -- the handles that make it up, as a successor process inherits them,

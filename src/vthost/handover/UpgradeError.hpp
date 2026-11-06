@@ -42,6 +42,8 @@ enum class UpgradeRefusal : uint8_t
     /// A session runs on Windows' own console host rather than the conpty.dll Contour ships: only that one's
     /// pseudoconsole can be rebuilt from its handles in the daemon that takes over.
     ForeignConsoleHost,
+    /// The new release reports it cannot adopt the pseudoconsoles this daemon hosts.
+    TargetCannotAdoptTerminals,
 };
 
 /// The new image could not take over after everything was stopped -- the exec failed (POSIX), or the
@@ -102,6 +104,9 @@ inline constexpr auto UpgradeRefusalRows = std::array {
     UpgradeRefusalRow { UpgradeRefusal::ForeignConsoleHost,
                         "foreignConsoleHost",
                         "a session runs on Windows' own console host, which cannot be carried over" },
+    UpgradeRefusalRow { UpgradeRefusal::TargetCannotAdoptTerminals,
+                        "targetCannotAdoptTerminals",
+                        "the new release cannot take over this daemon's terminals" },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRefusalRows.size()),
