@@ -1698,11 +1698,16 @@ jobs:
               exit 1
             }
           }
-      - name: "Check that the package ships the FluentWinUI3 style"
+      - name: "Check that the package ships the Qt pieces loaded at run time"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
-        # quickControlsStyle token), which windeployqt's --qmldir scan cannot see. Assert the style module
-        # is in the zip: without it Qt falls back silently and the Fluent row's controls lose their look.
+        # Each is loaded by name or by file type at run time, so nothing fails at build or link time without
+        # it, and Qt falls back silently: CI's tests find them anyway, in the Qt install QT_PLUGIN_PATH names.
+        # - The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
+        #   quickControlsStyle token), which windeployqt's --qmldir scan cannot see; without it the Fluent
+        #   row's controls lose their look.
+        # - Qt SVG's image plugin, and the library it needs, read Contour's bundled icons, which are SVG: the
+        #   secure-input lock, and the header bar's and window buttons' where a chrome style draws them.
+        #   Without them each is blank.
         # contour.exe must be found too, or the check would pass on a zip it cannot read.
         shell: pwsh
         run: |
@@ -1717,9 +1722,12 @@ jobs:
             Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
             exit 1
           }
-          if (-not ($entries | Where-Object { $_ -like '*qml/QtQuick/Controls/FluentWinUI3/qmldir' })) {
-            Write-Host "::error::the zip holds no qml/QtQuick/Controls/FluentWinUI3/qmldir"
-            exit 1
+          $required = 'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir', 'bin/imageformats/qsvg.dll', 'bin/Qt6Svg.dll'
+          foreach ($path in $required) {
+            if (-not ($entries | Where-Object { $_ -like "*/$path" -or $_ -eq $path })) {
+              Write-Host "::error::the zip holds no $path"
+              exit 1
+            }
           }
       - name: "Uploading MSI to artifact store"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
