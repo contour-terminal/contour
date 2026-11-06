@@ -89,6 +89,9 @@ $ArpLinks = @{
     ARPURLUPDATEINFO = 'https://github.com/contour-terminal/contour/releases'
 }
 
+# The toolset's redistributable DLLs, installed app-local beside contour.exe (InstallRequiredSystemLibraries).
+$VcRuntimeDlls = 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'
+
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
 function Invoke-Com {
@@ -262,6 +265,27 @@ $Rows = @(
         $missing = @($RequiredZipEntries | Where-Object { -not (Test-ZipHolds $entries $_) })
         if ($missing.Count -eq 0) { return $null }
         "expected $($RequiredZipEntries -join ', '), missing $($missing -join ', ')"
+    } }
+    @{ Target = 'zip'; Name = 'carries the VC++ runtime beside contour.exe'; Check = {
+        param($entries)
+        $missing = @($VcRuntimeDlls | Where-Object { -not (Test-ZipHolds $entries "bin/$_") })
+        if ($missing.Count -eq 0) { return $null }
+        "expected $($VcRuntimeDlls -join ', ') in bin/, missing $($missing -join ', ')"
+    } }
+    @{ Target = 'msi'; Name = 'carries the VC++ runtime beside contour.exe'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `FileName` FROM `File`'
+        $names = @($rows | ForEach-Object { ($_[0] -split '\|')[-1].ToLowerInvariant() })
+        $missing = @($VcRuntimeDlls | Where-Object { $names -notcontains $_ })
+        if ($missing.Count -eq 0) { return $null }
+        "expected $($VcRuntimeDlls -join ', ') in the File table, missing $($missing -join ', ')"
+    } }
+    @{ Target = 'zip'; Name = 'carries no Universal CRT'; Check = {
+        param($entries)
+        # Windows 10 and later ship it; a copy beside the executable would pin an old one.
+        $found = @($entries | Where-Object { $name = ($_ -split '/')[-1]; $name -eq 'ucrtbase.dll' -or $name -like 'api-ms-win-*.dll' })
+        if ($found.Count -eq 0) { return $null }
+        "expected no ucrtbase.dll or api-ms-win-*.dll, found $($found -join ', ')"
     } }
     @{ Target = 'msi'; Name = 'files-in-use dialog (MsiRMFilesInUse)'; Check = {
         param($msi)
