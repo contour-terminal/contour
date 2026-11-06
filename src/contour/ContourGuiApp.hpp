@@ -1203,6 +1203,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<remote::NativeController> _nativeController;
+    /// The attach given up on at startup, stopped: kept rather than destroyed then, because its destruction
+    /// waits for a daemon start still under way (see awaitNativeAttach()), and the app's exit waits for it
+    /// instead. Null otherwise.
+    std::unique_ptr<remote::NativeController> _givenUpAttach;
     std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —

@@ -912,4 +912,21 @@ class NativeController final: public QObject, public contour::session::SessionFa
     core::platform::PowerSubscription _powerSubscription;
 };
 
+/// Waits for @p live to connect within @p budget, and gives it up when it does not.
+///
+/// A controller given up on is stopped and cut off from @p owner, then handed to @p abandoned rather than
+/// destroyed: the daemon start its transport began may still be under way -- a first start copies this
+/// version's image -- and destroying the transport waits for that start to end (UnixTransportFactory's
+/// destructor), which would hold the caller back all that while. The caller keeps @p abandoned until it ends.
+/// @param live The controller whose connect is awaited; null once it is given up.
+/// @param abandoned Receives @p live when it is given up.
+/// @param budget @see RemoteController::awaitConnected.
+/// @param owner Every connection from @p live to this object is cut when @p live is given up.
+/// @return Why the connect failed, when it did.
+[[nodiscard]] std::expected<void, std::string> awaitConnectedOrAbandon(
+    std::unique_ptr<NativeController>& live,
+    std::unique_ptr<NativeController>& abandoned,
+    std::chrono::milliseconds budget,
+    QObject const* owner);
+
 } // namespace contour::remote

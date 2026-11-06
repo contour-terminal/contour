@@ -117,6 +117,7 @@
           <li>Fixes building on older macOS SDKs that lack <code>aligned_alloc</code> (#2005)</li>
           <li>Fixes a client reporting an unchanged window area to the daemon discarding the per-pane sizes other attached clients had reported, which put their split panes back on the daemon's estimate (#2227)</li>
           <li>Fixes a release build on Windows, started by <code>cmd.exe</code> with its output redirected (<code>contour version &gt; out.txt</code>, a pipe, or <code>NUL</code>), writing to the console instead of where it was redirected (#2239)</li>
+          <li>Fixes the first window waiting for a daemon start that had been given up on before it opened</li>
           <li>Fixes the Windows package missing Qt's SVG support, which left SVG icons blank</li>
           <li>Fixes the Windows package shipping build and test leftovers: test executables, debug symbols and the Qt Test and offscreen libraries</li>
           <li>Fixes the macOS application icon looking oversized in the app switcher and the Dock, by giving it Apple's icon-grid margin (#1786)</li>

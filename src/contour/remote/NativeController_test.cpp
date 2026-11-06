@@ -19,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -6356,4 +6357,94 @@ TEST_CASE("a client attaching to a titled multi-pane layout shows each tab's own
     CHECK(titles == "editor,logs");
 
     gui.controller->stop();
+}
+
+namespace
+{
+
+/// A daemon start that does not end until the test lets it: stands for a first start copying the image.
+class StartGate
+{
+  public:
+    /// Called from the transport's worker thread: says the start is under way, then waits to be released.
+    void enterAndWait()
+    {
+        auto lock = std::unique_lock { _mutex };
+        _entered = true;
+        _changed.notify_all();
+        _changed.wait(lock, [this] { return _released; });
+    }
+
+    /// Lets the start end; idempotent.
+    void release()
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _released = true;
+        _changed.notify_all();
+    }
+
+    /// @return Whether the start began, within @p timeout.
+    [[nodiscard]] bool waitUntilEntered(std::chrono::milliseconds timeout)
+    {
+        auto lock = std::unique_lock { _mutex };
+        return _changed.wait_for(lock, timeout, [this] { return _entered; });
+    }
+
+  private:
+    std::mutex _mutex;
+    std::condition_variable _changed;
+    bool _entered = false;
+    bool _released = false;
+};
+
+} // namespace
+
+TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start is under way",
+          "[attach][controller][giveup]")
+{
+    auto gate = std::make_shared<StartGate>();
+    auto timeline = TestTimeline {};
+    auto live = std::make_unique<contour::remote::NativeController>(
+        std::make_shared<vthost::UnixTransportFactory>(
+            "contour-giveup-test.sock",
+            [gate]() -> std::expected<void, vthost::TransportError> {
+                gate->enterAndWait();
+                return {};
+            }),
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
+        std::string {},
+        std::nullopt,
+        contour::remote::NativeController::SessionSettingsSource {},
+        std::nullopt,
+        core::platform::defaultSteadyClock(),
+        timeline.timeline,
+        nullptr);
+    live->startConnecting();
+    REQUIRE(gate->waitUntilEntered(10s));
+
+    auto abandoned = std::unique_ptr<contour::remote::NativeController> {};
+    auto const owner = QObject {};
+    // On a thread of its own: a regression that destroys the controller here would wait for the start, which
+    // only this test ends, so the call must not be what the test hangs on.
+    auto const began = std::chrono::steady_clock::now();
+    auto call = std::async(std::launch::async, [&] {
+        return contour::remote::awaitConnectedOrAbandon(live, abandoned, 50ms, &owner);
+    });
+    auto const returned = call.wait_for(5s) == std::future_status::ready;
+    if (!returned)
+        gate->release(); // lets the regression finish, so the test fails instead of hanging
+    auto const result = call.get();
+    auto const waited = std::chrono::steady_clock::now() - began;
+
+    REQUIRE(returned);
+    CHECK_FALSE(result.has_value());
+    CHECK(waited < 5s);
+    CHECK(live == nullptr);
+    REQUIRE(abandoned != nullptr);
+
+    // The premise of keeping it: destroying it waits for the start, so it must not happen while it runs.
+    auto destroyed = std::async(std::launch::async, [&] { abandoned.reset(); });
+    CHECK(destroyed.wait_for(300ms) == std::future_status::timeout);
+    gate->release();
+    CHECK(destroyed.wait_for(10s) == std::future_status::ready);
 }

@@ -945,11 +945,10 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(std::chrono::milliseconds budget,
                                                                   std::string hostLabel)
 {
-    if (auto connected = _nativeController->awaitConnected(budget); !connected)
-    {
-        _nativeController.reset();
-        return std::unexpected(connected.error());
-    }
+    // Given up, not destroyed: see awaitConnectedOrAbandon(). Kept until the app ends instead.
+    if (auto attached = remote::awaitConnectedOrAbandon(_nativeController, _givenUpAttach, budget, this);
+        !attached)
+        return attached;
     _attachedHostLabel = std::move(hostLabel);
     _routingFactory->setDelegate(_nativeController.get());
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
