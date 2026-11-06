@@ -5083,6 +5083,19 @@ TEST_CASE("SessionHost.cellPixelSize.applies_a_cell_stated_without_a_grid", "[vt
     CHECK(h.resizes() == resizesBefore + 2);
 }
 
+TEST_CASE("SessionHost.cellPixelSize.settles_a_cell_reported_for_an_unknown_session", "[vthost][host][cell]")
+{
+    auto h = CellHarness {};
+    std::ignore = h.openTab();
+    std::ignore = h.openTab();
+
+    std::ignore =
+        h.host.applyPaneSize(&h.clientA, vtworkspace::SessionId { 9999 }, cells(80, 24), pixels(9, 18));
+
+    CHECK(h.host.learnedCellPixelSize() == pixels(9, 18));
+    CHECK(h.everySessionAt(pixels(9, 18)));
+}
+
 TEST_CASE("SessionHost.cellPixelSize.survives_the_client_leaving", "[vthost][host][cell]")
 {
     auto h = CellHarness {};

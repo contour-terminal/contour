@@ -111,6 +111,13 @@ enum class SizeChange : bool
     Applied,   ///< The grid moved; mirrors of it are now stale.
 };
 
+/// Whether the daemon's cell size moved when it was last decided (@see SessionHost::cellPixelSize).
+enum class CellChange : uint8_t
+{
+    Unchanged = 0, ///< The cell size stayed; no terminal needs it pushed.
+    Moved,         ///< The cell size moved; terminals whose grid stayed must be told.
+};
+
 /// Why the host performed no engine operation a client asked for.
 enum class OperationError : uint8_t
 {
@@ -1919,12 +1926,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::optional<vtpty::ImageSize> _learnedCellPixelSize;
     /// @see SessionHostConfig::defaultCellPixelSize
     vtpty::ImageSize _defaultCellPixelSize;
-    /// Decides the daemon's cell size from _clientCells, touching no terminal: the latest report of a client
+    /// Decides the daemon's cell size from _clientCells and records it as the learned one
+    /// (_learnedCellPixelSize), touching no terminal: the latest report of a client
     /// whose area is the resolved `_pageSize`, else the latest of any client; with no report at all, the cell
     /// stays what it was. Runs BEFORE the panes are resized, so that resizeLocked() moves each PTY's grid and
     /// cell at once. Precondition: `_pageSize` is already re-resolved (resolveAuthoritativeArea).
-    /// @return SizeChange::Applied when cellPixelSize() moved, SizeChange::Unchanged otherwise.
-    [[nodiscard]] SizeChange resolveCellPixelSize();
+    /// @return CellChange::Moved when cellPixelSize() moved, CellChange::Unchanged otherwise.
+    [[nodiscard]] CellChange adoptResolvedCellPixelSize();
     /// Takes a cell size a previous run learned (a snapshot, a handover image) as the one learned here,
     /// unless it is out of bounds, which is logged and leaves things as they were. Runs before any session
     /// is spawned or adopted, so each starts on it; only the constructor's restore paths call it.
@@ -1934,10 +1942,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Pushes cellPixelSize() into every terminal not already at it, when @p cell says it moved: those
     /// resizeLocked() did not reach, since their grid stayed. Announces nothing, as no grid moved. Takes each
     /// terminal's lock in turn and calls nothing that fans out while holding it.
-    /// @param cell What resolveCellPixelSize() returned.
-    void settleCellPixelSize(SizeChange cell);
-    /// The one shape every size report settles the cell size in: resolveCellPixelSize(), then @p resize, then
-    /// settleCellPixelSize(). Precondition: `_pageSize` is already re-resolved (resolveAuthoritativeArea).
+    /// @param cell What adoptResolvedCellPixelSize() returned.
+    void settleCellPixelSize(CellChange cell);
+    /// The one shape every size report settles the cell size in: adoptResolvedCellPixelSize(), then @p
+    /// resize, then settleCellPixelSize(). Precondition: `_pageSize` is already re-resolved
+    /// (resolveAuthoritativeArea).
     /// @param resize Resizes the panes the report moves; returns whether any grid moved.
     /// @return What @p resize returned.
     template <typename Resize>

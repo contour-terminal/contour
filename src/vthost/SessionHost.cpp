@@ -1367,7 +1367,7 @@ SizeChange SessionHost::resizingWithCellPixelSize(Resize&& resize)
 {
     // Decided before the panes are resized, so that resizeLocked() moves each one's grid and cell at once;
     // applied after to the terminals whose grid stayed.
-    auto const cell = resolveCellPixelSize();
+    auto const cell = adoptResolvedCellPixelSize();
     auto const change = std::forward<Resize>(resize)();
     settleCellPixelSize(cell);
     return change;
@@ -1546,7 +1546,8 @@ SizeChange SessionHost::applyPaneSize(SessionStreamEvents* client,
     if (backing == nullptr)
     {
         errorLog()("applyPaneSize: unknown session {}", session.value);
-        return SizeChange::Unchanged;
+        // The cell just recorded is still the client's word: settle it so the host does not stay stale.
+        return resizingWithCellPixelSize([] { return SizeChange::Unchanged; });
     }
     recordRefinement(client, session, size);
     // The pane's pick, not blindly @p size: an ineligible client's report is remembered (it may become the
@@ -1586,10 +1587,10 @@ void SessionHost::seedLearnedCellPixelSize(std::optional<vtpty::ImageSize> store
     _learnedCellPixelSize = bounded;
 }
 
-SizeChange SessionHost::resolveCellPixelSize()
+CellChange SessionHost::adoptResolvedCellPixelSize()
 {
     if (_clientCells.empty())
-        return SizeChange::Unchanged; // every client gone, or none ever reported one: keep what was learned
+        return CellChange::Unchanged; // every client gone, or none ever reported one: keep what was learned
     // The eligibility refinedSize() uses: a client that displays the resolved area renders the grid the
     // terminals hold, so its cell is the one that grid's images are meant for.
     auto const displaysPageSize = [this](auto const& entry) {
@@ -1606,14 +1607,14 @@ SizeChange SessionHost::resolveCellPixelSize()
     auto const moved = cell != cellPixelSize();
     _learnedCellPixelSize = cell;
     if (!moved)
-        return SizeChange::Unchanged;
+        return CellChange::Unchanged;
     sessionLog()("cell size now {} pixels", cell);
-    return SizeChange::Applied;
+    return CellChange::Moved;
 }
 
-void SessionHost::settleCellPixelSize(SizeChange cell)
+void SessionHost::settleCellPixelSize(CellChange cell)
 {
-    if (cell == SizeChange::Unchanged)
+    if (cell == CellChange::Unchanged)
         return;
     // changeCellPixelSize() is a no-op for a terminal resizeLocked() already moved along with its grid. No
     // sessionResized() follows: no grid moved, and a mirror lays images out on its own cell anyway.
