@@ -271,6 +271,11 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_release_assets release-assets.py)
         contour_add_lint_gate(check_release_assets_selftest release-assets.py --self-test)
 
+        # The winget submission of a release: the UpgradeCodes its manifest rows expect must be declared in the
+        # packaging sources, and the rules that plan a release and check Komac's manifest are tested inline.
+        contour_add_lint_gate(check_winget_upgrade_codes winget-release.py)
+        contour_add_lint_gate(check_winget_upgrade_codes_selftest winget-release.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
