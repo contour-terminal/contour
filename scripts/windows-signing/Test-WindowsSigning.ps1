@@ -510,6 +510,139 @@ Test-OnlineCase 'export import' {
     } finally { Clear-Certificate }
 }
 
+# ---- The dry run, the shipped-artifact check, staging -----------------------------------------------------------------
+
+function New-FixtureMsi {
+    # The smallest installer database: summary information only, which signtool accepts.
+    param([string]$Path)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($Path, 3)
+    $summary = $database.GetType().InvokeMember('SummaryInformation', 'GetProperty', $null, $database, @(20))
+    $set = { param($id, $value) $null = $summary.GetType().InvokeMember('Property', 'SetProperty', $null, $summary, @($id, $value)) }
+    & $set 2 'Contour signing fixture'
+    & $set 7 'x64;1033'
+    & $set 9 ('{' + [guid]::NewGuid().ToString().ToUpper() + '}')
+    & $set 14 200
+    & $set 15 2
+    $null = $summary.GetType().InvokeMember('Persist', 'InvokeMethod', $null, $summary, $null)
+    $null = $database.GetType().InvokeMember('Commit', 'InvokeMethod', $null, $database, $null)
+    # The file stays locked until the COM objects are gone.
+    $null = [System.Runtime.InteropServices.Marshal]::ReleaseComObject($summary)
+    $null = [System.Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+    $summary = $null
+    $database = $null
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    return $Path
+}
+
+function Get-TreeHash {
+    # Every file under a folder with its hash, as one string: a snapshot to compare.
+    param([string]$Root)
+    $base = (Resolve-Path -LiteralPath $Root).Path
+    return (Get-ChildItem -LiteralPath $base -Recurse -File | Sort-Object FullName | ForEach-Object {
+            "$($_.FullName.Substring($base.Length))=$(Get-FileSha256 -Path $_.FullName)"
+        }) -join "`n"
+}
+
+function New-ZipOfTree {
+    # A ZIP of a tree under a top folder, as CPack makes it.
+    param([string]$Tree, [string]$Zip, [string]$Top = 'Contour-0.0.0-win64')
+    $source = Join-Path (Split-Path -Parent $Zip) "zip-source-$([IO.Path]::GetFileNameWithoutExtension($Zip))"
+    if (Test-Path -LiteralPath $source) { Remove-Item -LiteralPath $source -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $source $Top) | Out-Null
+    Copy-Item -Path (Join-Path $Tree '*') -Destination (Join-Path $source $Top) -Recurse
+    if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
+    Compress-Archive -Path (Join-Path $source $Top) -DestinationPath $Zip
+    return $source
+}
+
+function Set-ThrowawaySignature {
+    # Signs a file with the throwaway certificate, without a timestamp: offline.
+    param([string]$Path)
+    $signtool = Resolve-SigningTool -Name signtool -Table (Get-TestTable) -ToolsDirectory $toolsDirectory
+    & $signtool sign /fd sha256 /f $env:CONTOUR_SIGNING_PFX /p $env:CONTOUR_SIGNING_PFX_PASSWORD $Path | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "signtool exited $LASTEXITCODE for $Path" }
+}
+
+Test-Case 'components' {
+    $withList = Join-Path $WorkDirectory 'CPackConfig-with.cmake'
+    [System.IO.File]::WriteAllText($withList, "set(CPACK_BINARY_WIX ""ON"")`nset(CPACK_COMPONENTS_ALL ""Unspecified;contour;contour_path"")`nset(CPACK_COMPONENTS_ALL_SET_BY_USER ""TRUE"")`n")
+    Assert-Equal 'Unspecified|contour|contour_path' (@(Get-CPackComponent -CPackConfig $withList) -join '|') 'the components'
+    $without = Join-Path $WorkDirectory 'CPackConfig-without.cmake'
+    [System.IO.File]::WriteAllText($without, "set(CPACK_BINARY_WIX ""ON"")`n")
+    Assert-Equal 0 @(Get-CPackComponent -CPackConfig $without).Count 'the number of components of a config that names none'
+}
+
+Test-Case 'dry run wrong root' {
+    $table = Get-TestTable
+    $empty = Join-Path $WorkDirectory 'not a stage'
+    New-Item -ItemType Directory -Force -Path $empty | Out-Null
+    $work = Join-Path $WorkDirectory 'dry-run-wrong'
+    Assert-Throws { Invoke-SigningDryRun -Root $empty -Table $table -WorkDirectory $work -ToolsDirectory $toolsDirectory } @('bin/contour.exe') 'a root without contour.exe'
+    if (Test-Path -LiteralPath $work) { throw 'the work directory was made before the root was checked' }
+    $tree = New-FixtureTree 'dry-run-inside'
+    Assert-Throws { Invoke-SigningDryRun -Root $tree -Table $table -WorkDirectory (Join-Path $tree 'work') -ToolsDirectory $toolsDirectory } @('must not contain') 'a work directory inside the tree'
+}
+
+Test-OnlineCase 'dry run' {
+    $table = Get-TestTable
+    $tree = New-FixtureTree 'dry-run'
+    $msi = New-FixtureMsi -Path (Join-Path $WorkDirectory 'dry-run msi/fixture.msi')
+    $treeBefore = Get-TreeHash -Root $tree
+    $msiBefore = Get-FileSha256 -Path $msi
+    $work = Join-Path $WorkDirectory 'dry-run-work'
+    $said = Invoke-SigningDryRun -Root $tree -Packages @($msi) -Table $table -WorkDirectory $work -ToolsDirectory $toolsDirectory 6>&1 | Out-String
+    if ($said -notlike '*signing dry run: 2 payload files and 1 packages signed and verified with a throwaway certificate*') { throw "the summary line is missing: $said" }
+    Assert-Equal $treeBefore (Get-TreeHash -Root $tree) 'the original tree'
+    Assert-Equal $msiBefore (Get-FileSha256 -Path $msi) 'the original installer'
+    if (@(Get-ChildItem -LiteralPath $work -Recurse -Filter '*.pfx' -ErrorAction SilentlyContinue).Count -gt 0) { throw 'the .pfx is still there' }
+    if ($env:CONTOUR_SIGNING_PFX -or $env:CONTOUR_SIGNING_PFX_PASSWORD) { throw 'the environment variables are still set' }
+}
+
+# A shipped ZIP and installer of the unsigned fixture, and a manifest that says so.
+$shipTree = New-FixtureTree 'ship'
+$shipZip = Join-Path $WorkDirectory 'ship/Contour-0.0.0-win64.zip'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $shipZip) | Out-Null
+$shipMsi = New-FixtureMsi -Path (Join-Path $WorkDirectory 'ship/unsigned.msi')
+$shipManifest = Join-Path $WorkDirectory 'ship/manifest.txt'
+$null = Invoke-SignBatch -Root $shipTree -Kind Payload -Signer none -Table (Get-TestTable) -WorkDirectory (Join-Path $WorkDirectory 'work-ship') -ToolsDirectory $toolsDirectory -Manifest $shipManifest
+$null = New-ZipOfTree -Tree $shipTree -Zip $shipZip
+
+Test-Case 'verify none' {
+    Test-ShippedArtifact -Signer none -Table (Get-TestTable) -Manifest $shipManifest -Zip $shipZip -Msi @($shipMsi) -WorkDirectory (Join-Path $WorkDirectory 'verify-none')
+}
+
+Test-Case 'leak guard zip' {
+    $certificate = Use-Certificate 'leak-zip'
+    try {
+        $tree = New-FixtureTree 'leak-zip'
+        Set-ThrowawaySignature -Path (Join-Path $tree 'bin/plugins/second.dll')
+        $zip = Join-Path $WorkDirectory 'leak-zip/Contour-0.0.0-win64.zip'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $zip) | Out-Null
+        $null = New-ZipOfTree -Tree $tree -Zip $zip
+        Assert-Throws { Test-ShippedArtifact -Signer none -Table (Get-TestTable) -Manifest $shipManifest -Zip $zip -Msi @($shipMsi) -WorkDirectory (Join-Path $WorkDirectory 'verify-leak-zip') } @('second.dll', 'UnknownError') 'a ZIP with a throwaway-signed file'
+    } finally { Clear-Certificate }
+}
+
+Test-Case 'leak guard msi' {
+    $certificate = Use-Certificate 'leak-msi'
+    try {
+        $msi = New-FixtureMsi -Path (Join-Path $WorkDirectory 'leak-msi/signed.msi')
+        Set-ThrowawaySignature -Path $msi
+        Assert-Throws { Test-ShippedArtifact -Signer none -Table (Get-TestTable) -Manifest $shipManifest -Zip $shipZip -Msi @($msi) -WorkDirectory (Join-Path $WorkDirectory 'verify-leak-msi') } @('signed.msi') 'an installer signed by a dry run'
+    } finally { Clear-Certificate }
+}
+
+Test-Case 'not the signed file' {
+    $rows = @(Read-SigningManifest -Path $shipManifest)
+    $rows[0].After = ('ab' * 32)
+    $other = Join-Path $WorkDirectory 'ship/manifest-other.txt'
+    Write-SigningManifest -Path $other -Rows $rows
+    Assert-Throws { Test-ShippedArtifact -Signer none -Table (Get-TestTable) -Manifest $other -Zip $shipZip -Msi @($shipMsi) -WorkDirectory (Join-Path $WorkDirectory 'verify-other') } @($rows[0].RelativePath, 'is not the signed file') 'a manifest that is not the ZIP''s'
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host $_ }
     exit 1

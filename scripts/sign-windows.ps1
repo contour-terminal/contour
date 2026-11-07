@@ -9,6 +9,9 @@
       sign-windows.ps1 sign   -Kind Payload|Packages -Root <dir> [-Files <a>,<b>] -Signer <name> [-Manifest <tsv>]
       sign-windows.ps1 export -Kind Payload|Packages -Root <dir> [-Files <a>,<b>] -Signer <name> -Destination <dir> -Manifest <tsv>
       sign-windows.ps1 import -Root <dir> -From <dir> -Manifest <tsv> [-Trust System|Pinned] [-Thumbprint <sha1>]
+      sign-windows.ps1 stage  -Build <build dir> -Destination <stage dir>
+      sign-windows.ps1 dry-run -Root <stage dir> [-Packages <a.msi>,<b.msi>]
+      sign-windows.ps1 verify -Signer <name> -Manifest <tsv> -Zip <zip> -Msi <a.msi>,<b.msi>
 
     plan    Decides which signer a build uses and prints the decision; in a workflow it is also appended to
             $env:GITHUB_OUTPUT as signer=, transport= and dry-run=.
@@ -16,6 +19,10 @@
     sign    Signs the batch with the signer and checks the result.
     export  Copies the files a signer that signs elsewhere (SignPath) would sign out of the tree.
     import  Puts the files signed elsewhere back into the tree, after checking them.
+    stage   Installs a build into a folder with the components CPack packages: the tree that is signed.
+    dry-run Signs a copy of the tree and the packages with a throwaway certificate, and checks the result.
+    verify  Checks that a ZIP and installers are what the signer should ship (nothing signed by a dry run,
+            the signed payload in the ZIP, signatures that Windows trusts).
 
     Common: -WorkDirectory (default out/signing/work), -ToolsDirectory (default out/signing/tools).
 
@@ -63,10 +70,22 @@
 
 .PARAMETER Thumbprint
     For Pinned, the signer certificate's thumbprint.
+
+.PARAMETER Build
+    For stage, the build directory.
+
+.PARAMETER Packages
+    For dry-run, installers to sign a copy of.
+
+.PARAMETER Zip
+    For verify, the ZIP package.
+
+.PARAMETER Msi
+    For verify, the installers.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory, Position = 0)][ValidateSet('plan', 'tools', 'sign', 'export', 'import')][string]$Verb,
+    [Parameter(Mandatory, Position = 0)][ValidateSet('plan', 'tools', 'sign', 'export', 'import', 'stage', 'dry-run', 'verify')][string]$Verb,
     [string]$Signer = '',
     [string]$Configured = '',
     [string]$Builds = '',
@@ -80,7 +99,11 @@ param(
     [string]$Destination = '',
     [string]$From = '',
     [ValidateSet('System', 'Pinned')][string]$Trust = 'System',
-    [string]$Thumbprint = ''
+    [string]$Thumbprint = '',
+    [string]$Build = '',
+    [string[]]$Packages = @(),
+    [string]$Zip = '',
+    [string[]]$Msi = @()
 )
 
 Set-StrictMode -Version Latest
@@ -88,7 +111,8 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'windows-signing/WindowsSigning.psm1') -Force
 
-$table = if ($TablePath) { Import-SigningTable -Path $TablePath } else { Import-SigningTable }
+# Staging reads no table; every other verb needs a valid one.
+$table = if ($Verb -eq 'stage') { $null } elseif ($TablePath) { Import-SigningTable -Path $TablePath } else { Import-SigningTable }
 
 switch ($Verb) {
     'plan' {
@@ -126,6 +150,16 @@ switch ($Verb) {
     'export' {
         $rows = @(Export-SigningBatch -Root $Root -Kind $Kind -Files $Files -Signer $Signer -Table $table -Destination $Destination -Manifest $Manifest)
         Write-Host "exported $($rows.Count) file(s) to $Destination"
+    }
+    'stage' {
+        Invoke-Staging -Build $Build -Destination $Destination
+    }
+    'dry-run' {
+        $work = if ($PSBoundParameters.ContainsKey('WorkDirectory')) { $WorkDirectory } else { 'out/signing/dry-run' }
+        Invoke-SigningDryRun -Root $Root -Packages $Packages -Table $table -WorkDirectory $work -ToolsDirectory $ToolsDirectory
+    }
+    'verify' {
+        Test-ShippedArtifact -Signer $Signer -Table $table -Manifest $Manifest -Zip $Zip -Msi $Msi -WorkDirectory $WorkDirectory
     }
     'import' {
         $rows = @(Import-SigningBatch -Root $Root -From $From -Manifest $Manifest -Trust $Trust -Thumbprint $Thumbprint)
