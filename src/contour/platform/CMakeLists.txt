@@ -155,6 +155,7 @@ endif()
 # palette the configuration model owns; contour_command, because NativeMenuPresenter.hpp shows its
 # resolved MenuTree.
 target_link_libraries(contour_platform PUBLIC
+    contour_application_restart
     contour_command
     contour_config
     core::base

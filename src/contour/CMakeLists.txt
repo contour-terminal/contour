@@ -1462,6 +1462,17 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ contour_application_restart: how the operating system starts the application again
+# Qt-free, so that the decision (which command line a restart gets) is tested in contour_test, in a build
+# without the GUI frontend too. The platform adapter is in contour_platform's care, which links this.
+add_library(contour_application_restart STATIC
+    platform/ApplicationRestart.cpp
+    platform/ApplicationRestart.hpp
+)
+target_link_libraries(contour_application_restart PUBLIC core::base PRIVATE vtpty)
+target_include_directories(contour_application_restart PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_test: the Qt-free unit tests, in BOTH frontend configurations
 # config/, command/ and cli/ link no Qt, so their tests need none either -- and a build configured
 # without the GUI frontend has none to give them. That is how that configuration came to have no
@@ -1546,6 +1557,7 @@ if(CONTOUR_TESTING)
         session/EndReason_test.cpp
         platform/CaptionHitTest_test.cpp
         platform/ConsoleAttach_test.cpp
+        platform/ApplicationRestart_test.cpp
         platform/SystemBackdrop_test.cpp
         platform/FinishNotification_test.cpp
         platform/AppBundle_test.cpp
@@ -1603,6 +1615,7 @@ if(CONTOUR_TESTING)
     # them HERE rather than in contour_gui_test is what proves they need no Qt to reach.
     target_link_libraries(contour_test
         PRIVATE
+        contour_application_restart
         contour_block_tooltip
         contour_command
         contour_command_output
@@ -1746,6 +1759,20 @@ if(CONTOUR_TESTING)
         add_dependencies(contour_manifest_test contour)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
+
+        # Needs the GUI frontend: it runs the application and waits for its window.
+        if(CONTOUR_FRONTEND_GUI)
+            # Restart Manager closing a running Contour and starting it again, as Windows Installer does to
+            # replace it. Opens a real window briefly, so it needs the desktop and runs alone.
+            add_executable(contour_restart_manager_test test/core_test_main.cpp test/RestartManager_test.cpp)
+            target_link_libraries(contour_restart_manager_test PRIVATE
+                core::base core::testing Catch2::Catch2 contour_test_trace rstrtmgr)
+            target_compile_definitions(contour_restart_manager_test PRIVATE
+                CONTOUR_BINARY="$<TARGET_FILE:contour>")
+            add_dependencies(contour_restart_manager_test contour)
+            add_test(NAME contour_e2e_restart_manager COMMAND $<TARGET_FILE:contour_restart_manager_test>)
+            set_tests_properties(contour_e2e_restart_manager PROPERTIES LABELS e2e RUN_SERIAL TRUE TIMEOUT 120)
+        endif()
 
         # The Windows installers' scope table: each row's upgrade code, package file and extra source, and
         # that a misspelt scope stops the packaging. Read off the generated CPack config, so it builds nothing.

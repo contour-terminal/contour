@@ -405,7 +405,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              core::platform::SteadyTimePoint processStart,
                              window::SettingsWindowFactory settingsWindowFactory,
                              ShellIntegrationServices shellIntegration,
-                             std::unique_ptr<window::DragEndProbe> dragEndProbe):
+                             std::unique_ptr<window::DragEndProbe> dragEndProbe,
+                             std::unique_ptr<platform::ApplicationRestart> applicationRestart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _attachedHostLabel(std::move(shellIntegration.attachedHostLabel)),
@@ -422,6 +423,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : platform::makeExternalLauncher(_processPlacement)),
+    _applicationRestart(applicationRestart ? std::move(applicationRestart)
+                                           : platform::makeApplicationRestart()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
@@ -2635,6 +2638,15 @@ int ContourGuiApp::fontConfigAction()
     return EXIT_SUCCESS;
 }
 
+void ContourGuiApp::registerForRestart()
+{
+    auto const& argv = commandLine();
+    if (auto const registered = _applicationRestart->registerRestart(
+            platform::restartCommandLine(platform::restartArguments(argv)));
+        !registered)
+        errorLog()("Could not register to be restarted after an update: {}", registered.error().message());
+}
+
 int ContourGuiApp::terminalGuiAction()
 {
     {
@@ -2752,6 +2764,9 @@ int ContourGuiApp::terminalGuiAction()
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());
     openDaemonSpawnGate();
+    // So that Windows Installer, replacing a running Contour, can close it and open it again as it was
+    // started. Failing to register only costs that reopening, so it is logged and nothing more.
+    registerForRestart();
     // Every Qt object this app owns goes before QApplication, on every return from here on -- the
     // failed-attach one included, which leaves before the event loop ever runs. Declared right after
     // `app`, so it runs before `app` is destroyed.

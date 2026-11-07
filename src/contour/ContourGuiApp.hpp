@@ -15,6 +15,7 @@
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/ApplicationRestart.hpp>
 #include <contour/platform/ExecutionPolicySource.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/KnownFolders.hpp>
@@ -348,7 +349,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now(),
         window::SettingsWindowFactory settingsWindowFactory = nullptr,
         ShellIntegrationServices shellIntegration = {},
-        std::unique_ptr<window::DragEndProbe> dragEndProbe = nullptr);
+        std::unique_ptr<window::DragEndProbe> dragEndProbe = nullptr,
+        std::unique_ptr<platform::ApplicationRestart> applicationRestart = nullptr);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -1091,6 +1093,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Lets a daemon spawned on demand fork. @see _daemonSpawnGate
     void openDaemonSpawnGate() noexcept;
+    /// Tells the operating system how to start this application again after an installer closed it. A failure
+    /// is logged: all it costs is the reopening.
+    void registerForRestart();
 
     /// Starts the native attach establishHosting() decided on: builds the transport and the controller,
     /// wires the controller's signals and starts its connect.
@@ -1287,6 +1292,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     remote::RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
+    // How the operating system starts this application again after an installer closed it. Registered once
+    // the QApplication exists; null in the constructor argument means the platform's own.
+    std::unique_ptr<platform::ApplicationRestart> _applicationRestart;
     // Declared before _sessionManager: the manager holds a reference to the store.
     std::unique_ptr<config::LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
