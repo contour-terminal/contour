@@ -48,8 +48,7 @@ $RequiredZipEntries = @(
     'bin/Qt6Svg.dll'
 ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
 
-# The components whose registry root and environment scope depend on the installer's scope (wix_machine.wxs
-# and wix_user.wxs define both).
+# The components whose registry root and environment scope depend on the installer's scope (wix_scope.wxs).
 $PathComponent = 'ContourPathEnvironment'
 $ScopedComponents = $PathComponent, 'ContourInstallRoot', 'ContourStartMenuShortcut', 'ContourConnectShortcut', 'ContourDesktopShortcut'
 
@@ -446,6 +445,12 @@ $Rows = @(
         $expected = & $asFourFields (Get-MsiProperty -Msi $msi -Name 'ProductVersion')
         $found = if ($exe[0][1]) { & $asFourFields $exe[0][1] } else { 'no version' }
         Test-Equal $expected $found
+    } }
+    @{ Target = 'user'; Name = 'the Programs folder is removed with the install, when empty (ICE64)'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `DirProperty` FROM `RemoveFile` WHERE `Component_` = ''ContourProgramsFolder'''
+        if ($rows.Count -eq 1 -and $rows[0][0] -eq 'INSTALL_PREFIX_1') { return $null }
+        "expected one RemoveFile row of ContourProgramsFolder for INSTALL_PREFIX_1, found $($rows.Count)"
     } }
     @{ Target = 'machine'; Name = 'UpgradeCode'; Check = {
         param($msi)
