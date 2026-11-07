@@ -163,11 +163,25 @@ std::expected<DaemonUpgradeSuccess, DaemonUpgradeFailure> upgradeDaemonTo(Daemon
                                                                           DaemonBinarySource& binary,
                                                                           SettlePacer& pacer)
 {
-    // Read twice at most: with no baseline, a stale failure cannot be told from this upgrade's.
-    auto before = settling.status();
-    if (!before)
-        before = settling.status();
-    auto const baseline = before ? std::optional<DaemonStatus> { *before } : std::nullopt;
+    return upgradeDaemonTo(control, settling, binary, pacer, std::nullopt);
+}
+
+std::expected<DaemonUpgradeSuccess, DaemonUpgradeFailure> upgradeDaemonTo(
+    DaemonControlPort& control,
+    DaemonControlPort& settling,
+    DaemonBinarySource& binary,
+    SettlePacer& pacer,
+    std::optional<DaemonStatus> const& known)
+{
+    auto baseline = known;
+    if (!baseline)
+    {
+        // Read twice at most: with no baseline, a stale failure cannot be told from this upgrade's.
+        auto before = settling.status();
+        if (!before)
+            before = settling.status();
+        baseline = before ? std::optional<DaemonStatus> { *before } : std::nullopt;
+    }
 
     auto const started = upgradeDaemon(control, binary);
     auto provisional = DaemonUpgradeFailure {};
