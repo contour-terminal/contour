@@ -220,6 +220,17 @@ struct ServiceBackendServices
 /// @return `contour-daemon` for the default label, else `contour-daemon-<label>`.
 [[nodiscard]] std::string serviceNameForLabel(std::string_view label);
 
+/// The names a Task Scheduler task for the registration @p name may carry.
+///
+/// Task names share one folder for the whole machine, so a second account's `daemon-service install` would be
+/// refused, or, elevated, replace the first account's task. A task is named for its user, with @p userKey
+/// (the account's SID) appended; the machine-wide name of the releases before that is still looked up, so
+/// such a task is found, started and removed.
+/// @param name The registration name (@see serviceNameForLabel).
+/// @param userKey The account the task belongs to; empty for none (every other backend is per-user already).
+/// @return The name to create first, then the machine-wide one where it differs.
+[[nodiscard]] std::vector<std::string> taskNamesFor(std::string_view name, std::string_view userKey);
+
 /// Every name a daemon serving @p label may be registered under.
 /// @param label The socket label.
 /// @return The current name first, then the pre-phase-2 `contour-daemon-<label>` where it differs, so a
