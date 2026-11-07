@@ -392,6 +392,8 @@ namespace
                            text += std::format(" generation={} lastFailure={}",
                                                value.upgrade->generation,
                                                value.upgrade->lastFailure);
+                       if (value.relocation)
+                           text += std::format(" relocation={}", *value.relocation);
                        return text;
                    } },
         TraceRow { PduType::StopDaemon,

@@ -160,6 +160,14 @@ LaunchdBackend::LaunchdBackend(LaunchdAgentConfig config, ServiceBackendServices
 {
 }
 
+std::expected<void, ServiceError> LaunchdBackend::retarget(std::filesystem::path const& /*program*/)
+{
+    return std::unexpected(
+        ServiceError { .code = ServiceErrorCode::Unsupported,
+                       .systemCode = 0,
+                       .context = "launchd keeps the program inside the command line it runs" });
+}
+
 DaemonLaunchStyle LaunchdBackend::launchStyle() const noexcept
 {
     return DaemonLaunchStyle::Foreground;

@@ -380,18 +380,21 @@ std::optional<DaemonStatus> fromWire(proto::DaemonStatusReply const& reply)
     auto const lifecycle = enumUpTo(reply.lifecycle, DaemonLifecycle::ExitWhenIdle);
     if (!lifecycle)
         return std::nullopt;
-    return DaemonStatus { .releaseVersion = reply.releaseVersion,
-                          .processId = reply.processId,
-                          .uptime = std::chrono::seconds { static_cast<std::chrono::seconds::rep>(
-                              reply.uptimeSeconds) },
-                          .socketPath = std::filesystem::path { reply.socketPath },
-                          .executablePath = std::filesystem::path { reply.executablePath },
-                          .logFile = std::filesystem::path { reply.logFile },
-                          .sessions = reply.sessions,
-                          .clients = reply.clients,
-                          .lifecycle = *lifecycle,
-                          .capabilities = {},
-                          .upgrade = reply.upgrade };
+    return DaemonStatus {
+        .releaseVersion = reply.releaseVersion,
+        .processId = reply.processId,
+        .uptime = std::chrono::seconds { static_cast<std::chrono::seconds::rep>(reply.uptimeSeconds) },
+        .socketPath = std::filesystem::path { reply.socketPath },
+        .executablePath = std::filesystem::path { reply.executablePath },
+        .logFile = std::filesystem::path { reply.logFile },
+        .sessions = reply.sessions,
+        .clients = reply.clients,
+        .lifecycle = *lifecycle,
+        .capabilities = {},
+        .upgrade = reply.upgrade,
+        .relocation =
+            reply.relocation ? enumUpTo(*reply.relocation, RelocationRequest::Refused) : std::nullopt
+    };
 }
 
 SocketDaemonControl::SocketDaemonControl(core::net::EventLoop& loop,

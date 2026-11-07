@@ -313,8 +313,15 @@ class FieldEncoder
             return (static_cast<uint64_t>(signedValue) << 1U)
                    ^ static_cast<uint64_t>(signedValue >> std::numeric_limits<int64_t>::digits);
         };
+        static_assert(!std::is_same_v<T, wchar_t>,
+                      "wchar_t is signed on Linux and unsigned on Windows, so its wire form would differ by "
+                      "platform: use a fixed-width type (char32_t, uint32_t) for the field");
         if constexpr (std::is_same_v<T, bool>)
             return value ? 1 : 0;
+        else if constexpr (std::is_same_v<T, char>)
+            // The wire form is a signed byte, as on x86: char is unsigned on AArch64 Linux, which would
+            // otherwise write the raw value and read the stream of another platform wrongly.
+            return Zigzag(static_cast<int8_t>(value));
         else if constexpr (std::is_enum_v<T>)
         {
             static_assert(WireEnum<T>,
@@ -540,12 +547,23 @@ class FieldDecoder
         constexpr auto Unzigzag = [](uint64_t zigzag) {
             return static_cast<int64_t>(zigzag >> 1U) ^ -static_cast<int64_t>(zigzag & 1U);
         };
+        static_assert(!std::is_same_v<T, wchar_t>,
+                      "wchar_t is signed on Linux and unsigned on Windows, so its wire form would differ by "
+                      "platform: use a fixed-width type (char32_t, uint32_t) for the field");
         if constexpr (std::is_same_v<T, bool>)
         {
             if (raw > 1)
                 fail(StateDecodeError::InvalidValue);
             else
                 value = raw != 0;
+        }
+        else if constexpr (std::is_same_v<T, char>)
+        {
+            // A signed byte on the wire whatever char is here (see scalarOf).
+            auto narrowed = int8_t {};
+            take(narrowed, narrowSigned<int8_t>(Unzigzag(raw)));
+            if (!_error)
+                value = static_cast<char>(narrowed);
         }
         else if constexpr (std::is_enum_v<T>)
         {

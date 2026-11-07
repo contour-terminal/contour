@@ -669,7 +669,8 @@ namespace
                                      .executablePath = config.executablePath,
                                      .logFile = config.logFile,
                                      .lifecycle = config.lifecycle,
-                                     .upgradeGeneration = upgradeGeneration };
+                                     .upgradeGeneration = upgradeGeneration,
+                                     .relocationRequest = config.relocationRequest };
     }
 
     /// What every native endpoint of a daemon serves its connections with: @p runtime behind them, and a

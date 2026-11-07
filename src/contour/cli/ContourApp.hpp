@@ -105,6 +105,9 @@ class ContourApp: public core::cli::App
     /// @param prefix That sub-verb's dotted flag prefix, e.g. "contour.daemon.status".
     /// @return The process exit code.
     int daemonVerbAction(DaemonVerb verb, std::string const& prefix);
+    /// Runs `contour daemon relocate`: moves the daemons of this installation onto their staged copies.
+    /// @return The process exit code: 0 unless a move failed.
+    [[nodiscard]] int daemonRelocateAction();
     /// Reads `contour daemon --listen-tcp` and the options that go with it.
     /// @return The TCP listener to serve, nullopt for none; or why the options cannot be served.
     [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string>

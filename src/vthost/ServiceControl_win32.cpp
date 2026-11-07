@@ -26,6 +26,7 @@
     #include <utility>
     #include <vector>
 
+    #include <sddl.h>
     #include <taskschd.h>
 
 namespace vthost
@@ -136,6 +137,86 @@ namespace
         });
     }
 
+    /// @return The account's SID in its string form (`S-1-5-21-...`), the one thing that tells two accounts
+    /// of a
+    ///         machine apart for good; empty where it cannot be had.
+    [[nodiscard]] std::string currentUserSid()
+    {
+        auto token = HANDLE {};
+        if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+            return {};
+        auto size = DWORD {};
+        std::ignore = ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+        auto buffer = std::vector<std::byte>(size);
+        auto sid = std::string {};
+        if (size != 0 && ::GetTokenInformation(token, TokenUser, buffer.data(), size, &size))
+        {
+            auto* text = static_cast<wchar_t*>(nullptr);
+            if (::ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER const*>(buffer.data())->User.Sid, &text))
+            {
+                sid = core::toUtf8(text);
+                ::LocalFree(text);
+            }
+        }
+        ::CloseHandle(token);
+        return sid;
+    }
+
+    /// @return The names the task of the registration @p name may carry (taskNamesFor(), for this account),
+    ///         in the UTF-16 the Task Scheduler takes.
+    [[nodiscard]] std::expected<std::vector<std::wstring>, ServiceError> wideTaskNames(std::string_view name)
+    {
+        auto wide = std::vector<std::wstring> {};
+        for (auto const& candidate: taskNamesFor(name, currentUserSid()))
+        {
+            auto text = wideText(candidate, "the registration name");
+            if (!text)
+                return std::unexpected(text.error());
+            wide.push_back(*std::move(text));
+        }
+        return wide;
+    }
+
+    /// @return The name a registered task carries.
+    [[nodiscard]] std::wstring taskNameOf(IRegisteredTask* task)
+    {
+        auto name = std::wstring {};
+        auto* text = BSTR {};
+        if (SUCCEEDED(task->get_Name(&text)) && text != nullptr)
+        {
+            name = text;
+            ::SysFreeString(text);
+        }
+        return name;
+    }
+
+    /// Expands `%VARIABLE%` references the way the Task Scheduler does for a task's program.
+    [[nodiscard]] std::string expandEnvironmentVariables(std::string_view text)
+    {
+        auto const wide = core::toUtf16(text);
+        if (!wide)
+            return std::string { text };
+        auto expanded = std::wstring(::ExpandEnvironmentStringsW(wide->c_str(), nullptr, 0), L'\0');
+        if (expanded.empty()
+            || ::ExpandEnvironmentStringsW(
+                   wide->c_str(), expanded.data(), static_cast<DWORD>(expanded.size()))
+                   == 0)
+            return std::string { text };
+        expanded.resize(wcsnlen(expanded.c_str(), expanded.size()));
+        return core::toUtf8(expanded);
+    }
+
+    /// @return What the Task Scheduler says of the task's state, as a run state.
+    [[nodiscard]] ServiceRunState runStateOf(TASK_STATE state) noexcept
+    {
+        switch (state)
+        {
+            case TASK_STATE_RUNNING: return ServiceRunState::Running;
+            case TASK_STATE_DISABLED: return ServiceRunState::Disabled;
+            default: return ServiceRunState::Stopped;
+        }
+    }
+
     [[nodiscard]] ServiceError comError(HRESULT hr, std::string context)
     {
         // Access-denied surfaces through several spellings; all mean the same thing to a user
@@ -146,6 +227,23 @@ namespace
         return ServiceError { .code = code,
                               .systemCode = static_cast<long>(hr),
                               .context = std::move(context) };
+    }
+
+    /// @return The task's first action as an IExecAction (the one program it starts), or why it has none.
+    [[nodiscard]] std::expected<ComPtr<IExecAction>, ServiceError> firstExecAction(
+        ITaskDefinition* definition)
+    {
+        auto actions = ComPtr<IActionCollection> {};
+        if (auto const hr = definition->get_Actions(actions.put()); FAILED(hr))
+            return std::unexpected(comError(hr, "ITaskDefinition::get_Actions"));
+        auto action = ComPtr<IAction> {};
+        if (auto const hr = actions->get_Item(1, action.put()); FAILED(hr))
+            return std::unexpected(comError(hr, "IActionCollection::get_Item"));
+        auto exec = ComPtr<IExecAction> {};
+        if (auto const hr = action->QueryInterface(IID_IExecAction, reinterpret_cast<void**>(exec.put()));
+            FAILED(hr))
+            return std::unexpected(comError(hr, "IAction::QueryInterface(IExecAction)"));
+        return exec;
     }
 
     /// The registering user, in the SAM form the Task Scheduler wants ("DOMAIN\\user").
@@ -217,9 +315,7 @@ namespace
     class TaskSchedulerBackend final: public ServiceBackend
     {
       public:
-        explicit TaskSchedulerBackend(std::string_view name): _name(wideText(name, "the registration name"))
-        {
-        }
+        explicit TaskSchedulerBackend(std::string_view name): _names(wideTaskNames(name)) {}
 
         [[nodiscard]] std::expected<void, ServiceError> install(
             ServiceInstallRequest const& request) override;
@@ -227,6 +323,8 @@ namespace
         [[nodiscard]] std::expected<void, ServiceError> start() override;
         [[nodiscard]] std::expected<void, ServiceError> stop() override;
         [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override;
+        [[nodiscard]] std::expected<void, ServiceError> retarget(
+            std::filesystem::path const& program) override;
         /// The Task Scheduler starts the command and tracks that process, so the daemon detaches itself.
         [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override
         {
@@ -242,9 +340,10 @@ namespace
         /// @pre The name is UTF-8: every operation refuses first where it is not.
         [[nodiscard]] std::expected<ComPtr<IRegisteredTask>, ServiceError> lookup(ITaskFolder* folder) const;
 
-        /// The registration's name, or why there is none: a name that is not UTF-8 names no task, and every
-        /// operation says so before it asks the Task Scheduler anything.
-        std::expected<std::wstring, ServiceError> _name;
+        /// The names the registration's task may carry, the one to create first (taskNamesFor()), or why
+        /// there are none: a name that is not UTF-8 names no task, and every operation says so before it asks
+        /// the Task Scheduler anything.
+        std::expected<std::vector<std::wstring>, ServiceError> _names;
     };
 
     std::expected<std::pair<ComPtr<ITaskService>, ComPtr<ITaskFolder>>, ServiceError> TaskSchedulerBackend::
@@ -278,20 +377,26 @@ namespace
     std::expected<ComPtr<IRegisteredTask>, ServiceError> TaskSchedulerBackend::lookup(
         ITaskFolder* folder) const
     {
-        auto const name = Bstr { _name.value() };
-        auto task = ComPtr<IRegisteredTask> {};
-        auto const hr = folder->GetTask(name.get(), task.put());
-        if (FAILED(hr))
-            return std::unexpected(ServiceError { .code = ServiceErrorCode::NotInstalled,
-                                                  .systemCode = static_cast<long>(hr),
-                                                  .context = "ITaskFolder::GetTask" });
-        return task;
+        // The user's own task first, then the machine-wide name of the releases before the task was named for
+        // its user.
+        auto lastFailure = HRESULT { E_FAIL };
+        for (auto const& candidate: _names.value())
+        {
+            auto const name = Bstr { candidate };
+            auto task = ComPtr<IRegisteredTask> {};
+            lastFailure = folder->GetTask(name.get(), task.put());
+            if (SUCCEEDED(lastFailure))
+                return task;
+        }
+        return std::unexpected(ServiceError { .code = ServiceErrorCode::NotInstalled,
+                                              .systemCode = static_cast<long>(lastFailure),
+                                              .context = "ITaskFolder::GetTask" });
     }
 
     std::expected<void, ServiceError> TaskSchedulerBackend::install(ServiceInstallRequest const& request)
     {
-        if (!_name)
-            return std::unexpected(_name.error());
+        if (!_names)
+            return std::unexpected(_names.error());
         auto const registration = wideRegistration(request);
         if (!registration)
             return std::unexpected(registration.error());
@@ -380,7 +485,7 @@ namespace
         auto empty = VARIANT {};
         ::VariantInit(&empty);
         auto registered = ComPtr<IRegisteredTask> {};
-        auto const name = Bstr { *_name };
+        auto const name = Bstr { _names->front() };
         hr = folder->RegisterTaskDefinition(name.get(),
                                             definition.get(),
                                             TASK_CREATE_OR_UPDATE,
@@ -396,8 +501,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::uninstall()
     {
-        if (!_name)
-            return std::unexpected(_name.error());
+        if (!_names)
+            return std::unexpected(_names.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -409,10 +514,14 @@ namespace
 
         // Stopping first is not optional: DeleteTask leaves a running instance running, and the
         // daemon would then survive its own uninstall with nothing left to manage it.
-        if (auto task = lookup(folder.get()); task)
-            std::ignore = (*task)->Stop(0);
+        // Whichever task was found: the user's own, or the machine-wide one of an older release.
+        auto found = lookup(folder.get());
+        if (!found)
+            return std::unexpected(found.error());
+        std::ignore = (*found)->Stop(0);
 
-        auto const name = Bstr { *_name };
+        auto const taskName = taskNameOf((*found).get());
+        auto const name = Bstr { taskName };
         if (auto const hr = folder->DeleteTask(name.get(), 0); FAILED(hr))
             return std::unexpected(ServiceError { .code = ServiceErrorCode::NotInstalled,
                                                   .systemCode = static_cast<long>(hr),
@@ -422,8 +531,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::start()
     {
-        if (!_name)
-            return std::unexpected(_name.error());
+        if (!_names)
+            return std::unexpected(_names.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -447,8 +556,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::stop()
     {
-        if (!_name)
-            return std::unexpected(_name.error());
+        if (!_names)
+            return std::unexpected(_names.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -471,8 +580,8 @@ namespace
 
     std::expected<ServiceStatus, ServiceError> TaskSchedulerBackend::status() const
     {
-        if (!_name)
-            return std::unexpected(_name.error());
+        if (!_names)
+            return std::unexpected(_names.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -494,32 +603,97 @@ namespace
         // The registered action is what the daemon will actually run, and the one thing a user
         // cannot otherwise check without opening the Task Scheduler UI.
         auto commandLine = std::string {};
+        auto program = std::filesystem::path {};
         if (auto definition = ComPtr<ITaskDefinition> {};
             SUCCEEDED((*task)->get_Definition(definition.put())))
-            if (auto actions = ComPtr<IActionCollection> {};
-                SUCCEEDED(definition->get_Actions(actions.put())))
-                if (auto action = ComPtr<IAction> {}; SUCCEEDED(actions->get_Item(1, action.put())))
-                    if (auto exec = ComPtr<IExecAction> {}; SUCCEEDED(
-                            action->QueryInterface(IID_IExecAction, reinterpret_cast<void**>(exec.put()))))
-                    {
-                        BSTR path = nullptr;
-                        BSTR arguments = nullptr;
-                        if (SUCCEEDED(exec->get_Path(&path)) && path != nullptr)
-                        {
-                            commandLine = core::toUtf8(path);
-                            ::SysFreeString(path);
-                        }
-                        if (SUCCEEDED(exec->get_Arguments(&arguments)) && arguments != nullptr)
-                        {
-                            commandLine += " " + core::toUtf8(arguments);
-                            ::SysFreeString(arguments);
-                        }
-                    }
+            if (auto const exec = firstExecAction(definition.get()))
+            {
+                BSTR path = nullptr;
+                BSTR arguments = nullptr;
+                if (SUCCEEDED((*exec)->get_Path(&path)) && path != nullptr)
+                {
+                    commandLine = core::toUtf8(path);
+                    program = programOfTaskAction(commandLine, expandEnvironmentVariables);
+                    ::SysFreeString(path);
+                }
+                if (SUCCEEDED((*exec)->get_Arguments(&arguments)) && arguments != nullptr)
+                {
+                    commandLine += " " + core::toUtf8(arguments);
+                    ::SysFreeString(arguments);
+                }
+            }
 
-        return ServiceStatus { .state = state == TASK_STATE_RUNNING ? ServiceRunState::Running
-                                                                    : ServiceRunState::Stopped,
+        return ServiceStatus { .state = runStateOf(state),
                                .mode = ServiceStartMode::Logon,
-                               .commandLine = std::move(commandLine) };
+                               .commandLine = std::move(commandLine),
+                               .program = std::move(program) };
+    }
+
+    std::expected<void, ServiceError> TaskSchedulerBackend::retarget(std::filesystem::path const& program)
+    {
+        if (!_names)
+            return std::unexpected(_names.error());
+        auto const wideProgram = wideText(core::pathToUtf8(program), "the program");
+        if (!wideProgram)
+            return std::unexpected(wideProgram.error());
+        auto const com = ComScope {};
+        if (!com.ok())
+            return std::unexpected(comError(com.hr(), "CoInitializeEx"));
+
+        auto connected = connect();
+        if (!connected)
+            return std::unexpected(connected.error());
+        auto& [service, folder] = *connected;
+
+        auto task = lookup(folder.get());
+        if (!task)
+            return std::unexpected(task.error());
+
+        // Only the action's path changes: the arguments, the trigger and the settings stay as registered, and
+        // the task is registered again with the logon type it had.
+        auto definition = ComPtr<ITaskDefinition> {};
+        if (auto const hr = (*task)->get_Definition(definition.put()); FAILED(hr))
+            return std::unexpected(comError(hr, "IRegisteredTask::get_Definition"));
+        auto logonType = TASK_LOGON_INTERACTIVE_TOKEN;
+        if (auto principal = ComPtr<IPrincipal> {}; SUCCEEDED(definition->get_Principal(principal.put())))
+            std::ignore = principal->get_LogonType(&logonType);
+
+        auto const exec = firstExecAction(definition.get());
+        if (!exec)
+            return std::unexpected(exec.error());
+        auto const path = Bstr { *wideProgram };
+        if (auto const hr = (*exec)->put_Path(path.get()); FAILED(hr))
+            return std::unexpected(comError(hr, "IExecAction::put_Path"));
+
+        // And the arguments are brought to this backend's launch style, as a registration of an earlier
+        // release may not say what its daemon needs to detach.
+        auto registeredArguments = std::string {};
+        if (BSTR arguments = nullptr; SUCCEEDED((*exec)->get_Arguments(&arguments)) && arguments != nullptr)
+        {
+            registeredArguments = core::toUtf8(arguments);
+            ::SysFreeString(arguments);
+        }
+        if (auto const wanted = argumentsForLaunchStyle(registeredArguments, launchStyle());
+            wanted != registeredArguments)
+        {
+            auto const wideArguments = wideText(wanted, "the arguments");
+            if (!wideArguments)
+                return std::unexpected(wideArguments.error());
+            auto const bstr = Bstr { *wideArguments };
+            if (auto const hr = (*exec)->put_Arguments(bstr.get()); FAILED(hr))
+                return std::unexpected(comError(hr, "IExecAction::put_Arguments"));
+        }
+
+        auto empty = VARIANT {};
+        ::VariantInit(&empty);
+        auto registered = ComPtr<IRegisteredTask> {};
+        auto const taskName = taskNameOf((*task).get());
+        auto const name = Bstr { taskName };
+        if (auto const hr = folder->RegisterTaskDefinition(
+                name.get(), definition.get(), TASK_UPDATE, empty, empty, logonType, empty, registered.put());
+            FAILED(hr))
+            return std::unexpected(comError(hr, "ITaskFolder::RegisterTaskDefinition(UPDATE)"));
+        return {};
     }
 } // namespace
 
@@ -548,6 +722,10 @@ namespace
         [[nodiscard]] std::expected<void, ServiceError> start() override { return std::unexpected(error()); }
         [[nodiscard]] std::expected<void, ServiceError> stop() override { return std::unexpected(error()); }
         [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override
+        {
+            return std::unexpected(error());
+        }
+        [[nodiscard]] std::expected<void, ServiceError> retarget(std::filesystem::path const&) override
         {
             return std::unexpected(error());
         }

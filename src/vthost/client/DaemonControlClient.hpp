@@ -22,6 +22,7 @@
 #include <string>
 
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/RelocationRequest.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -66,6 +67,9 @@ struct DaemonStatus
     /// How its live upgrades went: the upgrade generation, and the last upgrade that failed after its
     /// announcement. nullopt for a daemon from before the record.
     std::optional<proto::DaemonUpgradeRecord> upgrade {};
+    /// Whether it may move onto its staged copy (`--in-place` refuses it). nullopt for a daemon from before
+    /// it states this, or one that states a request this version does not know.
+    std::optional<RelocationRequest> relocation {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.

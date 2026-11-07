@@ -108,7 +108,7 @@ class DaemonDriftModel: public QObject
 
     /// Ends the restart that failed and shows why.
     /// @param reason The failure, in words for the user.
-    void noteRestartFailed(QString reason);
+    void noteRestartFailed(QString const& reason);
 
     /// Ends the upgrade that failed and shows why. The restart stays on offer, as the fallback.
     /// @param reason The refusal or failure, in words for the user.

@@ -107,9 +107,10 @@ So the gap is cache misses on slow vCPUs, and the cache is the lever. Why it mis
 
 Rules, in `.github/workflows/build.yml`:
 
-- **`master` pushes save, pull requests only restore** (`save: ${{ github.event_name == 'push' }}`).
+- **`master` pushes save, everything else only restores** (`save: ${{ github.ref == 'refs/heads/master' }}`).
   `hendrikmuhs/ccache-action` restores by key prefix, so a pull request takes the newest entry
-  `master` saved under the same key. Merge-queue runs restore too and save nothing.
+  `master` saved under the same key. Merge-queue and release-tag runs restore too and save nothing: a
+  cache saved under a tag's scope would serve only that tag and push master's out of the quota.
 - **`evict-old-files: job`** drops every cached object the saving job did not touch, so an entry is
   one working set -- the current tree -- and does not accumulate dead objects up to `max-size`.
 - **Keys are stable**: one per job, the action appends the timestamp.
@@ -169,15 +170,15 @@ A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (buil
 signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
 builds, the lint jobs and clang-tidy on the changed lines. Master pushes and the merge queue run
 the rest: the other three compiler legs, packaging, valgrind, conformance, bench-headless,
-notcurses, FreeBSD and the full-tree clang-tidy. The `release` branch's pull request runs all of
-those except FreeBSD and the full-tree clang-tidy (both are `github.event_name != 'pull_request'`);
-the static build runs on master pushes and the `release` pull request, never in the merge queue.
+notcurses, FreeBSD and the full-tree clang-tidy. A release tag runs everything a master push runs,
+FreeBSD and the full-tree clang-tidy included; the static build runs on master pushes and release
+tags, never in the merge queue.
 
 The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
 `contour-daemon` .deb) runs on every pull request, for 24.04 alone, and for 24.04 and 26.04 otherwise:
 it is the only job that builds the GUI-less configuration, so it cannot wait for master. The RPMs
 (`package_for_Fedora`: `contour` and `contour-daemon` from one spec, on current Fedora and rawhide) are
-ordinary packaging and run on master pushes, the merge queue and the `release` pull request only;
+ordinary packaging and run on master pushes, the merge queue and release tags only;
 rawhide never blocks a release.
 
 A required status check is never gated off pull requests. `tests matrix` and

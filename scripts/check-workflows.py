@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-"""Validates the GitHub Actions workflow files with actionlint.
+"""Validates the GitHub Actions workflow files with actionlint and a few rules of our own.
 
 This is the same schema check GitHub runs when it compiles a workflow. It catches locally the class
 of error that silently breaks CI dispatch -- e.g. an invalid `${{ env.X }}` context in a job-level
@@ -81,12 +81,35 @@ REQUIRED_CONTEXTS = frozenset(
     }
 )
 
+# The one spelling of "this run is for a release tag" (tags are v<major>.<minor>.<patch>; the trigger
+# filter narrows them further). Every use is spelled exactly like this so it stays greppable.
+RELEASE_TAG_CONDITION = "startsWith(github.ref, 'refs/tags/v')"
+
 # An `if:` containing one of these is false for an ordinary pull request. Data, so that a new way of
 # saying "master only" is one more row.
 PR_SKIP_PATTERNS = (
     re.compile(r"github\.event_name\s*!=\s*['\"]pull_request['\"]"),
     re.compile(r"github\.ref\s*==\s*['\"]refs/heads/master['\"]"),
     re.compile(r"^\s*(\$\{\{\s*)?false\s*(\}\})?\s*$"),
+    # A release tag is never a pull request's ref.
+    re.compile(re.escape(RELEASE_TAG_CONDITION)),
+)
+
+# Text that must not appear anywhere in a workflow file, comments included, with the reason. Data, so
+# that retiring another condition is one more row.
+RETIRED_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"head_ref\s*[!=]=\s*['\"]release['\"]"),
+        "the `release` branch's pull request no longer builds releases; a release tag does "
+        "(see docs/internals/releasing.md)",
+    ),
+)
+
+# Steps that create or change a release. Only a job gated on RELEASE_TAG_CONDITION may contain one.
+RELEASE_WRITERS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bgh\s+release\s+(create|upload|edit|delete)\b"),
+    re.compile(r"softprops/action-gh-release"),
+    re.compile(r"\bgh\s+api\b[^\n]*releases"),
 )
 
 # What lets a job run although a job it needs was skipped.
@@ -155,6 +178,50 @@ def check_required_contexts(jobs: dict[str, Any]) -> list[str]:
     return findings
 
 
+def check_text(text: str) -> list[str]:
+    """Returns the findings that need only a workflow file's text: retired conditions anywhere
+    (comments included), and `refs/tags/` spelled other than as RELEASE_TAG_CONDITION."""
+    findings = [
+        f"`{match.group(0)}` is retired: {reason}"
+        for pattern, reason in RETIRED_PATTERNS
+        for match in pattern.finditer(text)
+    ]
+    if text.count("refs/tags/") != text.count(RELEASE_TAG_CONDITION):
+        findings.append(
+            f"refs/tags/ appears outside the release-tag condition {RELEASE_TAG_CONDITION}; "
+            "spell it exactly so it stays greppable"
+        )
+    return findings
+
+
+def _gated_on_release_tag(condition: str) -> bool:
+    """Whether `condition` is false unless the run is for a release tag: no `||`, and one of its `&&`
+    conjuncts is RELEASE_TAG_CONDITION itself (so `!startsWith(...)` does not count)."""
+    expression = condition.strip().removeprefix("${{").removesuffix("}}").strip()
+    if "||" in expression:
+        return False
+    return RELEASE_TAG_CONDITION in (conjunct.strip() for conjunct in expression.split("&&"))
+
+
+def check_release_writers(jobs: dict[str, Any]) -> list[str]:
+    """Returns the findings for the jobs of one workflow that write releases without being gated on
+    RELEASE_TAG_CONDITION. A job-level `uses:` (a reusable workflow) counts as a writer too."""
+    findings: list[str] = []
+    for job_id, job in jobs.items():
+        if _gated_on_release_tag(_condition(job)):
+            continue
+        writers = [(f"job `{job_id}`", str(job.get("uses", "")))] + [
+            (f"step `{step.get('name', '?')}`", f"{step.get('run', '')}\n{step.get('uses', '')}")
+            for step in job.get("steps", [])
+        ]
+        findings += [
+            f"{job_id}: {what} writes a release, but the job's `if:` is not gated on {RELEASE_TAG_CONDITION} alone"
+            for what, text in writers
+            if any(pattern.search(text) for pattern in RELEASE_WRITERS)
+        ]
+    return findings
+
+
 def _load_yaml() -> Any:
     try:
         import yaml  # PyYAML; optional, see check_workflow_files
@@ -178,7 +245,7 @@ def _without_yaml(require: bool) -> int:
         return 1
     # actionlint is the gate that must not be bypassed; this rule is a second layer, so by default
     # it skips rather than failing.
-    print("required-contexts rule: PyYAML not installed; skipped.")
+    print("YAML rules (required contexts, release writers): PyYAML not installed; skipped.")
     return 0
 
 
@@ -189,7 +256,8 @@ def check_workflow_files(workflows: list[Any]) -> int:
     findings: list[str] = []
     for path in workflows:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for finding in check_required_contexts(document.get("jobs", {})):
+        jobs = document.get("jobs", {})
+        for finding in [*check_required_contexts(jobs), *check_release_writers(jobs)]:
             findings.append(f"{path.name}: {finding}")
     for finding in findings:
         print(f"check-workflows: {finding}", file=sys.stderr)
@@ -231,45 +299,89 @@ _FIXTURE_NO_ALWAYS = {
     },
 }
 
-# The carve-out build.yml uses for the `release` branch's pull request still skips ordinary ones.
-_FIXTURE_RELEASE_CARVE_OUT = {
-    "windows": {
-        "name": "Windows",
-        "if": "github.event_name != 'pull_request' || github.head_ref == 'release'",
-        "steps": [],
-    },
-}
-
 _FIXTURE_UNRELATED = {
     "heavy": _SKIPPED_ON_PRS,
     "lint": {"name": "not required", "needs": "heavy", "steps": []},
 }
 
 
+_RETIRED_IF = "if: github.event_name != 'pull_request' || github.head_ref == 'release'"
+_TAG_ENV = "env:\n  X: ${{ startsWith(github.ref, 'refs/tags/v') && 'a' || 'b' }}"
+
+_DRAFT_STEP = {"name": "Draft", "run": 'gh release create "$TAG" --draft'}
+_FIXTURE_UNGATED_WRITER = {"do_release": {"if": "github.event_name != 'pull_request'", "steps": [_DRAFT_STEP]}}
+_FIXTURE_GATED_WRITER = {"do_release": {"if": RELEASE_TAG_CONDITION, "steps": [_DRAFT_STEP]}}
+_FIXTURE_WIDENED_WRITER = {
+    "do_release": {"if": f"github.ref == 'refs/heads/master' || {RELEASE_TAG_CONDITION}", "steps": [_DRAFT_STEP]}
+}
+_FIXTURE_NEGATED_WRITER = {"do_release": {"if": f"!{RELEASE_TAG_CONDITION}", "steps": [_DRAFT_STEP]}}
+_FIXTURE_CONJUNCT_WRITER = {
+    "do_release": {"if": f"${{{{ github.repository == 'x/y' && {RELEASE_TAG_CONDITION} }}}}", "steps": [_DRAFT_STEP]}
+}
+_FIXTURE_API_WRITER = {
+    "do_release": {"steps": [{"name": "Api", "run": "gh api repos/x/y/releases -f tag_name=v1"}]},
+}
+_FIXTURE_REUSABLE_WRITER = {"do_release": {"uses": "softprops/action-gh-release@v1"}}
+_FIXTURE_SOFTPROPS = {
+    "do_release": {"steps": [{"name": "Upload", "uses": "softprops/action-gh-release@v1"}]},
+}
+_FIXTURE_TAG_REQUIRED = {"windows": {"name": "Windows", "if": RELEASE_TAG_CONDITION, "steps": []}}
+
+
 def self_test() -> int:
     cases = (
-        ("success-only gate over a PR-skipped need fires", _FIXTURE_BROKEN, 2),
-        ("always() plus accepting 'skipped' passes", _FIXTURE_FIXED, 0),
-        ("a required job gated off pull requests fires", _FIXTURE_GATED_REQUIRED, 1),
-        ("a required job needing a skipped job without always() fires", _FIXTURE_NO_ALWAYS, 1),
-        ("a job that is not a required context may be gated", _FIXTURE_UNRELATED, 0),
-        ("the head_ref == 'release' carve-out still skips pull requests", _FIXTURE_RELEASE_CARVE_OUT, 1),
+        ("success-only gate over a PR-skipped need fires", check_required_contexts, _FIXTURE_BROKEN, 2),
+        ("always() plus accepting 'skipped' passes", check_required_contexts, _FIXTURE_FIXED, 0),
+        ("a required job gated off pull requests fires", check_required_contexts, _FIXTURE_GATED_REQUIRED, 1),
+        (
+            "a required job needing a skipped job without always() fires",
+            check_required_contexts,
+            _FIXTURE_NO_ALWAYS,
+            1,
+        ),
+        ("a job that is not a required context may be gated", check_required_contexts, _FIXTURE_UNRELATED, 0),
+        ("a required job gated on a release tag fires", check_required_contexts, _FIXTURE_TAG_REQUIRED, 1),
+        ("the retired head_ref == 'release' condition fires", check_text, _RETIRED_IF, 1),
+        ("the retired condition fires inside a comment", check_text, f"# {_RETIRED_IF}", 1),
+        ("the retired head_ref != 'release' condition fires", check_text, "if: github.head_ref != 'release'", 1),
+        ("refs/tags/ spelled another way fires", check_text, "if: startsWith(github.ref, 'refs/tags/')", 1),
+        (
+            "the canonical release-tag condition passes, in an if and in an expression",
+            check_text,
+            f"if: {RELEASE_TAG_CONDITION}\n{_TAG_ENV}",
+            0,
+        ),
+        ("an ungated job creating a release fires", check_release_writers, _FIXTURE_UNGATED_WRITER, 1),
+        ("a release-tag job creating a release passes", check_release_writers, _FIXTURE_GATED_WRITER, 0),
+        ("an ungated softprops step fires", check_release_writers, _FIXTURE_SOFTPROPS, 1),
+        ("a release-tag condition widened with || fires", check_release_writers, _FIXTURE_WIDENED_WRITER, 1),
+        ("a negated release-tag condition fires", check_release_writers, _FIXTURE_NEGATED_WRITER, 1),
+        ("a release-tag condition among && conjuncts passes", check_release_writers, _FIXTURE_CONJUNCT_WRITER, 0),
+        ("an ungated gh api releases step fires", check_release_writers, _FIXTURE_API_WRITER, 1),
+        ("an ungated job-level uses fires", check_release_writers, _FIXTURE_REUSABLE_WRITER, 1),
     )
     failures = []
-    for description, fixture, expected in cases:
-        found = check_required_contexts(fixture)
+    for description, rule, fixture, expected in cases:
+        found = rule(fixture)
         if len(found) != expected:
             failures.append(f"{description}: expected {expected} finding(s), got {found}")
     if _without_yaml(require=True) != 1:
         failures.append("a missing PyYAML must fail when it is required")
     if _without_yaml(require=False) != 0:
         failures.append("a missing PyYAML must skip when it is not required")
+    if _exit_code(0, ["finding"]) != 1 or _exit_code(0, []) != 0 or _exit_code(2, []) != 2:
+        failures.append("text findings must fail the run whatever the tool did")
     for failure in failures:
         print(f"check-workflows self-test: FAILED: {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"check-workflows self-test: {len(cases) + 2} cases OK.")
+    print(f"check-workflows self-test: {len(cases) + 3} cases OK.")
     return 0
+
+
+def _exit_code(tool_exit_code: int, text_findings: list[str]) -> int:
+    """The process exit code: the text rules fail the run even when the tool cannot run."""
+    return max(tool_exit_code, 1 if text_findings else 0)
 
 
 def main() -> int:
@@ -290,7 +402,18 @@ def main() -> int:
         print("No workflow files; nothing to lint.")
         return 0
 
-    actionlint = resolve(ACTIONLINT)
+    # The text rules need no YAML and no actionlint, so they run (and are reported) first.
+    text_findings = [
+        f"{path.name}: {finding}" for path in workflows for finding in check_text(path.read_text(encoding="utf-8"))
+    ]
+    for finding in text_findings:
+        print(f"check-workflows: {finding}", file=sys.stderr)
+
+    try:
+        actionlint = resolve(ACTIONLINT)
+    except SystemExit as unavailable:
+        # The tool is absent and not required: skip it, but not the text rules' findings.
+        return _exit_code(unavailable.code if isinstance(unavailable.code, int) else 0, text_findings)
 
     arguments: list[str] = []
     for message in IGNORED_MESSAGES:
@@ -299,10 +422,10 @@ def main() -> int:
 
     exit_code = run(actionlint, arguments)
     if exit_code != 0:
-        return exit_code
+        return _exit_code(exit_code, text_findings)
 
     print(f"actionlint: workflows OK ({len(workflows)} files).")
-    return check_workflow_files(workflows)
+    return _exit_code(check_workflow_files(workflows), text_findings)
 
 
 if __name__ == "__main__":

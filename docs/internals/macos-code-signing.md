@@ -65,8 +65,9 @@ Two knobs control the Apple round trips, which cost a minute or more each:
 | `CONTOUR_MACOS_NOTARIZE` | Notarize and staple the **.dmg**. This is the one Gatekeeper demands on a downloaded file. |
 | `CONTOUR_MACOS_STAPLE_APP` | Additionally notarize and staple the **.app inside** the image, so it launches offline after being dragged to /Applications. |
 
-Both are `ON` in the `macos-package` preset. CI enables the first for `master` and the
-second only for `release`, so an ordinary push pays one wait instead of two.
+Both are `ON` in the `macos-package` preset. CI enables both wherever the signing secrets are
+available (master, the merge queue and release tags); an ordinary pull request packages and signs
+nothing.
 
 ## Why not Homebrew's Qt
 

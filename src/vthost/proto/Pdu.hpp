@@ -1300,6 +1300,10 @@ struct DaemonStatusReply
     /// How its live upgrades went. Appended by a later version: nullopt for a daemon from before it, whose
     /// body ends before it.
     std::optional<DaemonUpgradeRecord> upgrade = std::nullopt;
+    /// Whether the daemon may move onto its staged copy: the daemon's RelocationRequest, as the wire spells
+    /// it. Appended after the upgrade record by a later version, so it is encoded only behind one: nullopt
+    /// for a daemon from before it, whose body ends before it.
+    std::optional<uint8_t> relocation = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };
 

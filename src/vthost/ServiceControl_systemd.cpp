@@ -123,6 +123,14 @@ SystemdUserBackend::SystemdUserBackend(SystemdUnitConfig config, ServiceBackendS
 {
 }
 
+std::expected<void, ServiceError> SystemdUserBackend::retarget(std::filesystem::path const& /*program*/)
+{
+    return std::unexpected(
+        ServiceError { .code = ServiceErrorCode::Unsupported,
+                       .systemCode = 0,
+                       .context = "systemd keeps the program inside the command line it runs" });
+}
+
 DaemonLaunchStyle SystemdUserBackend::launchStyle() const noexcept
 {
     return DaemonLaunchStyle::Foreground;

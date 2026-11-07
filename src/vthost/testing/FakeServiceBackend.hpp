@@ -5,9 +5,12 @@
 /// A ServiceBackend that registers nothing: it reports a scripted status and counts what it was asked.
 
 #include <expected>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <vthost/ServiceControl.hpp>
 
@@ -20,6 +23,8 @@ struct FakeServiceLog
 {
     int starts = 0; ///< How often start() was called.
     int stops = 0;  ///< How often stop() was called.
+    std::vector<std::filesystem::path>
+        retargets {}; ///< What retarget() was asked to point the registration at.
 };
 
 /// A ServiceBackend answering from a script. Operations succeed; status() reports @p state.
@@ -30,11 +35,20 @@ class FakeServiceBackend final: public ServiceBackend
     /// @param log Where the calls are counted; outlives the backend.
     /// @param style What launchStyle() reports.
     /// @param commandLine What status() reports the registration to run.
+    /// @param program What status() reports the registration to start.
+    /// @param retargetRefusal Why retarget() fails; it succeeds when empty.
     FakeServiceBackend(ServiceRunState state,
                        FakeServiceLog& log,
                        DaemonLaunchStyle style = DaemonLaunchStyle::Foreground,
-                       std::string commandLine = {}):
-        _state { state }, _log { log }, _style { style }, _commandLine { std::move(commandLine) }
+                       std::string commandLine = {},
+                       std::filesystem::path program = {},
+                       std::optional<ServiceError> retargetRefusal = std::nullopt):
+        _state { state },
+        _log { log },
+        _style { style },
+        _commandLine { std::move(commandLine) },
+        _program { std::move(program) },
+        _retargetRefusal { std::move(retargetRefusal) }
     {
     }
 
@@ -59,7 +73,16 @@ class FakeServiceBackend final: public ServiceBackend
 
     [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override
     {
-        return ServiceStatus { .state = _state, .commandLine = _commandLine };
+        return ServiceStatus { .state = _state, .commandLine = _commandLine, .program = _program };
+    }
+
+    [[nodiscard]] std::expected<void, ServiceError> retarget(std::filesystem::path const& program) override
+    {
+        if (_retargetRefusal)
+            return std::unexpected(*_retargetRefusal);
+        _log.retargets.push_back(program);
+        _program = program;
+        return {};
     }
 
     [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override { return _style; }
@@ -69,6 +92,8 @@ class FakeServiceBackend final: public ServiceBackend
     FakeServiceLog& _log;
     DaemonLaunchStyle _style;
     std::string _commandLine;
+    std::filesystem::path _program;
+    std::optional<ServiceError> _retargetRefusal;
 };
 
 } // namespace vthost::testing

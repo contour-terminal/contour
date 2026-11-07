@@ -19,12 +19,15 @@
 #include <functional>
 #include <iosfwd>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/DaemonRelocation.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 
 namespace contour::config
@@ -48,6 +51,8 @@ enum class DaemonVerb : uint8_t
     Logs,    ///< Print the running daemon's log.
     Stop,    ///< Stop the running daemon.
     Upgrade, ///< Replace the running daemon with this release's, keeping its sessions running.
+    /// Move every daemon of this user that runs from this installation onto its staged copy.
+    Relocate,
     /// Print what this binary reads of a live upgrade's handover, for the daemon that would exec it.
     HandoverInfo,
 };
@@ -77,6 +82,11 @@ inline constexpr auto DaemonSubVerbs = std::array {
         "Upgrades the running daemon to this release without ending its sessions: every program keeps "
         "running and the clients reconnect. Exits 5 with the reason when the daemon declines.",
         DaemonVerb::Upgrade },
+    DaemonVerbRow {
+        "relocate",
+        "Moves every daemon of this user that runs from this installation onto its staged copy, keeping its "
+        "sessions, so that the installation's files can be replaced. The Windows installer runs it.",
+        DaemonVerb::Relocate },
     DaemonVerbRow {
         "handover-info",
         "Internal: prints, as one line of JSON, this binary's release and the handover and terminal "
@@ -155,6 +165,28 @@ class ConfirmPrompt
 /// @param status A daemon's report on itself.
 /// @return One `label: value` line per fact, the labels padded to one column.
 [[nodiscard]] std::string formatDaemonStatus(vthost::client::DaemonStatus const& status);
+
+/// The program a daemon service is registered to start.
+///
+/// A registration outlives the shell that made it, so the program is the executable that is running, not
+/// argv[0]: a shell starts a program found on the PATH with the name it was typed under, and absolute() of
+/// that is a file in the current directory.
+/// @param running The running executable as the operating system reports it
+/// (vthost::currentExecutablePath()),
+///        which also resolves an AppImage to the image.
+/// @param argv0 The program name the process was started with, the fallback where @p running is not known.
+/// @return @p running when known, else @p argv0 made absolute.
+[[nodiscard]] std::filesystem::path daemonServiceProgram(
+    std::expected<std::filesystem::path, std::error_code> const& running, std::string_view argv0);
+
+/// What repairing a daemon task needs, for the call sites that look for a registration.
+///
+/// A task whose program an upgrade removed is pointed at the installed executable: the one the installer
+/// recorded, never the file this process runs from, which may as well be a portable copy or a build tree.
+/// @param fileSystem Where the programs are looked for.
+/// @return The inputs, with the installed executable of this machine.
+[[nodiscard]] vthost::RegistrationRepairInputs nativeRepairInputs(
+    core::platform::FileSystem const& fileSystem);
 
 /// Reads a log file's tail, then what is appended to it.
 class LogFollower
@@ -244,6 +276,43 @@ class LogFollower
                                            std::filesystem::path const& socket,
                                            std::ostream& out,
                                            std::ostream& err);
+
+/// Opens the control port of the daemon at a socket, with the given timeout for a whole call.
+using DaemonControlFor = std::function<std::unique_ptr<vthost::client::DaemonControlPort>(
+    std::filesystem::path const& socket, std::chrono::milliseconds timeout)>;
+
+/// The control sockets in a socket directory.
+/// @param fileSystem Where the directory is listed.
+/// @param directory The directory the label sockets lie in.
+/// @return The directory's entries that are no sibling endpoint (vthost::client::controlSocketsAmong()),
+///         sorted; none where the directory cannot be listed.
+[[nodiscard]] std::vector<std::filesystem::path> daemonSocketsIn(core::platform::FileSystem const& fileSystem,
+                                                                 std::filesystem::path const& directory);
+
+/// `contour daemon relocate`.
+///
+/// Moves each daemon that runs from @p installationBin and allows it onto its staged copy
+/// (vthost::client::upgradeDaemonTo(), the hand-over onto this release's staged image), so that an installer
+/// can replace the installation's files. A socket nobody answers on (a stale file) is skipped silently, and a
+/// daemon of another installation, one started with `--in-place` and one too old to say are left, with the
+/// reason. Never "unreachable": having no daemon to move is the usual case.
+/// @param sockets The control sockets to look at.
+/// @param controlFor Opens the control port of the daemon at a socket: one of
+/// vthost::client::DefaultControlTimeout
+///        to look at it, and one of vthost::client::DefaultUpgradeTimeout to move it.
+/// @param binary What the staged image is made from.
+/// @param pacer The clock and waits of the settling of an outcome that is not known.
+/// @param installationBin The directory of this installation's executable.
+/// @param out Where what was moved or left goes.
+/// @param err Where a failed move goes.
+/// @return Ok unless a move failed, then Failed.
+[[nodiscard]] ExitStatus daemonRelocateVerb(std::span<std::filesystem::path const> sockets,
+                                            DaemonControlFor const& controlFor,
+                                            vthost::DaemonBinarySource& binary,
+                                            vthost::client::SettlePacer& pacer,
+                                            std::filesystem::path const& installationBin,
+                                            std::ostream& out,
+                                            std::ostream& err);
 
 /// @param restore The `daemon.restore` section.
 /// @param snapshotPath The daemon's snapshot file; empty keeps no workspace.
