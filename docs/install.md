@@ -199,7 +199,7 @@ can be installed via the system package manager.
 
 #### Compile
 
-You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux `clang-release` or `gcc-release`, or `appleclang-release` on macOS accordingly.
+You can use cmake presets to compile contour. The full list of available presets can be seen using `cmake --list-presets`. To compile release build for linux `clang-release` or `gcc-release`, or `appleclang-release` on macOS accordingly. `gcc-release`, `msvc-release` and `macos-package` build as the packages are built (link-time optimization, so a slower link) and `clang-release` stays the fast developer build; `-DCONTOUR_PRODUCTION_BUILD=ON` turns the packages' flags on anywhere (see [release builds](internals/release-builds.md)).
 
 ```sh
 cmake --preset clang-release
