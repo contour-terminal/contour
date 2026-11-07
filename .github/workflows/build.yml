@@ -180,6 +180,13 @@ jobs:
     # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     - name: "cmake"
       run: |
         cmake \
@@ -187,6 +194,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
               -D ENABLE_TIDY=ON \
               -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
@@ -256,6 +264,13 @@ jobs:
         sudo apt-get install clang-tidy-${LLVM_VERSION}
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     - name: "cmake"
       run: |
         cmake \
@@ -263,6 +278,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
               -D ENABLE_TIDY=OFF
     - name: "build generated headers only"
@@ -326,6 +342,13 @@ jobs:
     # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     # CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so this configuration
     # cannot merely happen to build against a Qt that is lying around -- it has to want none. The
     # step above installed Qt, which is what makes the assertion worth anything: the point is not
@@ -352,6 +375,7 @@ jobs:
               -G Ninja \
               -D CMAKE_INSTALL_PREFIX=/usr \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
               -D CONTOUR_PACKAGE_TERMINFO=OFF \
@@ -585,6 +609,13 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     # No Rust: without extensions there are no WebAssembly guests to build (CONTOUR_EXTENSIONS_BUNDLED
     # follows CONTOUR_EXTENSIONS).
     - name: "cmake"
@@ -594,6 +625,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CONTOUR_EXTENSIONS=OFF \
               -D CONTOUR_TESTING=ON \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
@@ -1946,6 +1978,13 @@ jobs:
         run: mkdir build
       - name: CMake version
         run: cmake --version
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "cmake"
         run: |
           CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
@@ -2206,10 +2245,17 @@ jobs:
       # Qt's text-to-speech plugin links libspeechd, which linuxdeploy must find to bundle it.
       - name: "install libspeechd"
         run: sudo apt install -y libspeechd2
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs, as in
+      # the matrix jobs: a unicode.org outage used to fail the configure step.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "build the AppImage"
         run: |
           set -euo pipefail
-          CXX=g++-15 \
+          UCD_BASE_DIR="$PWD/_ucd"           CXX=g++-15 \
           VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}" \
           OUTPUT_DIR="$PWD" \
               ./scripts/build-appimage.sh
@@ -2291,6 +2337,13 @@ jobs:
         uses: ssrobins/install-cmake@v1
       - name: CMake version
         run: cmake --version
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "cmake"
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
@@ -2303,6 +2356,7 @@ jobs:
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_TESTING=ON \
                                -DCONTOUR_WAYLAND=OFF \
+                               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
                                -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh
@@ -2623,6 +2677,14 @@ jobs:
       - name: "install Rust (wasm32-wasip1)"
         shell: bash
         run: ./scripts/install-rust-wasm.sh
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        if: runner.os == 'Linux'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "Generate build files"
         shell: bash
         run: |
