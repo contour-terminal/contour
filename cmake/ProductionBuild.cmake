@@ -7,7 +7,9 @@
 # (`add_compile_options`, `CMAKE_*` variables): they reach the subdirectories added afterwards and
 # nothing created before. The top-level directory itself only holds INTERFACE and custom targets.
 #
-# scripts/check-production-build.py verifies the result against the manifest this file writes.
+# The configurations that cannot be a production build are refused earlier, by ProductionBuildRefusals.cmake,
+# before the dependencies are fetched. scripts/check-production-build.py verifies the result against the
+# manifest this file writes.
 
 include_guard(GLOBAL)
 
@@ -16,67 +18,102 @@ include(CheckIPOSupported)
 include(CheckLinkerFlag)
 include(CheckPIESupported)
 
-## Registers the check of a production build's main binary; a no-op unless CONTOUR_PRODUCTION_BUILD is ON.
-## @param target The executable target whose linked binary (and PDB, on MSVC) the check reads.
+## Registers the check of a production build's main binary and the install rules of its debug symbols;
+## a no-op unless CONTOUR_PRODUCTION_BUILD is ON. The symbols go into the install component
+## `debug_symbols`, which is EXCLUDE_FROM_ALL and kept out of every CPack component list (see
+## src/contour/CMakeLists.txt), so no package carries it: CI installs it on its own
+## (`--component debug_symbols`) and publishes it beside the package.
+## Call it once: the check is registered as the test `check_production_build`, the name CI selects.
+## @param target The executable target whose linked binary and symbols the check and the install read.
 function(contour_production_executable target)
     if(NOT CONTOUR_PRODUCTION_BUILD)
         return()
     endif()
-    if(CONTOUR_TESTING AND Python3_Interpreter_FOUND)
-        set(_command
-            "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/check-production-build.py"
-            --manifest "${PROJECT_BINARY_DIR}/production-build.json"
-            --binary "$<TARGET_FILE:${target}>")
-        if(CONTOUR_PRODUCTION_PLATFORM STREQUAL "msvc")
-            list(APPEND _command --symbols "$<TARGET_PDB_FILE:${target}>")
-        endif()
-        add_test(NAME check_production_build COMMAND ${_command})
-        set_tests_properties(check_production_build PROPERTIES LABELS production)
+    set(_symbols "")
+    if(CONTOUR_PRODUCTION_SYMBOLS STREQUAL "pdb")
+        set(_symbols "$<TARGET_PDB_FILE:${target}>")
+        install(FILES "${_symbols}" DESTINATION . COMPONENT debug_symbols EXCLUDE_FROM_ALL)
+    elseif(CONTOUR_PRODUCTION_SYMBOLS STREQUAL "dsym")
+        # dsymutil reads the DWARF from the objects, and ThinLTO deletes its temporary ones at link time:
+        # keep them beside the binary so the dSYM is not empty.
+        set(_symbols "${CMAKE_CURRENT_BINARY_DIR}/${target}.dSYM")
+        set(_lto_objects "${CMAKE_CURRENT_BINARY_DIR}/${target}.lto")
+        file(MAKE_DIRECTORY "${_lto_objects}")
+        target_link_options(${target} PRIVATE "LINKER:-object_path_lto,${_lto_objects}")
+        find_program(CONTOUR_DSYMUTIL dsymutil REQUIRED)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CONTOUR_DSYMUTIL}" "$<TARGET_FILE:${target}>" -o "${_symbols}"
+            COMMENT "Extracting the debug symbols of ${target}"
+            VERBATIM)
+        install(DIRECTORY "${_symbols}" DESTINATION . COMPONENT debug_symbols EXCLUDE_FROM_ALL)
     endif()
+    # Symbols "none" (Linux): CPack's .ddeb and Fedora's -debuginfo split them, and the check's
+    # .debug_info row proves LTO kept them.
+    if(NOT CONTOUR_TESTING)
+        return()
+    endif()
+    if(NOT Python3_Interpreter_FOUND)
+        message(WARNING "CONTOUR_PRODUCTION_BUILD=ON found no Python 3 interpreter, so the test "
+            "check_production_build is not registered and the production flags go unchecked.")
+        return()
+    endif()
+    set(_command
+        "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/check-production-build.py"
+        --manifest "${PROJECT_BINARY_DIR}/production-build.json"
+        --binary "$<TARGET_FILE:${target}>")
+    if(_symbols)
+        list(APPEND _command --symbols "${_symbols}")
+    endif()
+    add_test(NAME check_production_build COMMAND ${_command})
+    set_tests_properties(check_production_build PROPERTIES LABELS production)
 endfunction()
 
 if(NOT CONTOUR_PRODUCTION_BUILD)
     return()
 endif()
 
-# --- refusals: a configuration whose result would not be what the packages ship ------------------
+# --- the platform table --------------------------------------------------------------------------
 
-if(NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON needs CMAKE_BUILD_TYPE=RelWithDebInfo, "
-        "but it is '${CMAKE_BUILD_TYPE}': the packages are RelWithDebInfo builds, and so are the binaries CI tests.")
-endif()
-if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
-    message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON cannot be combined with CONTOUR_SANITIZE=${CONTOUR_SANITIZE}: "
-        "a sanitized binary is not the one that is shipped.")
-endif()
-if(CONTOUR_CODE_COVERAGE_ENABLED)
-    message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON cannot be combined with CONTOUR_CODE_COVERAGE_ENABLED=${CONTOUR_CODE_COVERAGE_ENABLED} "
-        "(CONTOUR_COVERAGE=${CONTOUR_COVERAGE}): an instrumented binary is not the one that is shipped.")
-endif()
-
-# --- platform keys -------------------------------------------------------------------------------
+# <platform key>|<binary format>|<symbols>|<probe tool>|<compile flag the build type lacks>|<flag it replaces>;
+# "-" for none.
+# symbols: pdb (a PDB beside the binary), dsym (a dSYM bundle made from it), none (the distribution's
+# packaging splits them). The probe tool is what scripts/check-production-build.py runs on the binary.
+# RelWithDebInfo inlines only __inline functions (/Ob1); Release's /Ob2 inlines anything suitable.
+set(_contour_platforms
+    "msvc|pe|pdb|dumpbin|/Ob2|/Ob1"
+    "linux|elf|none|readelf|-|-"
+    "macos|macho|dsym|dwarfdump|-|-")
 
 set(_contour_keys "")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    list(APPEND _contour_keys msvc)
-    set(CONTOUR_PRODUCTION_PLATFORM msvc)
-    set(_contour_format pe)
+    set(_contour_keys msvc)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
-    list(APPEND _contour_keys linux)
-    set(CONTOUR_PRODUCTION_PLATFORM linux)
-    set(_contour_format elf)
+    set(_contour_keys linux)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
         list(APPEND _contour_keys linux-x86_64)
     endif()
 elseif(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
-    list(APPEND _contour_keys macos)
-    set(CONTOUR_PRODUCTION_PLATFORM macos)
-    set(_contour_format macho)
+    set(_contour_keys macos)
 else()
     message(FATAL_ERROR "CONTOUR_PRODUCTION_BUILD=ON supports MSVC on Windows, GCC or Clang on Linux and "
         "AppleClang on macOS, but this is ${CMAKE_CXX_COMPILER_ID} on ${CMAKE_SYSTEM_NAME}.")
 endif()
-set(CONTOUR_PRODUCTION_PLATFORM "${CONTOUR_PRODUCTION_PLATFORM}" CACHE INTERNAL "Platform key of the production build")
+
+foreach(_row IN LISTS _contour_platforms)
+    string(REPLACE "|" ";" _fields "${_row}")
+    list(GET _fields 0 _key)
+    if(_key IN_LIST _contour_keys)
+        list(GET _fields 1 _contour_format)
+        list(GET _fields 2 CONTOUR_PRODUCTION_SYMBOLS)
+        list(GET _fields 3 _contour_probe)
+        list(GET _fields 4 _contour_added_flag)
+        list(GET _fields 5 _contour_replaced_flag)
+        if(_contour_replaced_flag STREQUAL "-")
+            set(_contour_added_flag "")
+            set(_contour_replaced_flag "")
+        endif()
+    endif()
+endforeach()
 
 # --- whole-program optimization ------------------------------------------------------------------
 
@@ -97,17 +134,11 @@ if("linux" IN_LIST _contour_keys)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# --- MSVC: full inlining and no incremental linking ----------------------------------------------
+# --- the build type's own flags ------------------------------------------------------------------
 
-if("msvc" IN_LIST _contour_keys)
-    # RelWithDebInfo inlines only __inline functions (/Ob1); Release's /Ob2 inlines anything suitable.
+if(_contour_replaced_flag)
     foreach(_var CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        string(REGEX REPLACE "([/-])Ob1" "\\1Ob2" ${_var} "${${_var}}")
-    endforeach()
-    # CMake defaults RelWithDebInfo to `/debug /INCREMENTAL`; /LTCG ignores it with warning LNK4075.
-    foreach(_var CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO
-            CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO)
-        string(REGEX REPLACE "/INCREMENTAL( |$)" "/INCREMENTAL:NO\\1" ${_var} "${${_var}}")
+        string(REPLACE "${_contour_replaced_flag}" "${_contour_added_flag}" ${_var} "${${_var}}")
     endforeach()
 endif()
 
@@ -161,25 +192,11 @@ endforeach()
 
 # --- the manifest scripts/check-production-build.py reads ----------------------------------------
 
-set(_contour_replaced_flags "")
-list(APPEND _contour_compile_flags ${CMAKE_CXX_COMPILE_OPTIONS_IPO})
-if("msvc" IN_LIST _contour_keys)
-    list(APPEND _contour_compile_flags /Ob2)
-    set(_contour_replaced_flags /Ob1)
-    get_filename_component(_contour_linker_dir "${CMAKE_LINKER}" DIRECTORY)
-    find_program(CONTOUR_DUMPBIN dumpbin HINTS "${_contour_linker_dir}" REQUIRED)
-    set(_contour_tool "${CONTOUR_DUMPBIN}")
-elseif("linux" IN_LIST _contour_keys)
-    if(CMAKE_READELF)
-        set(_contour_tool "${CMAKE_READELF}")
-    else()
-        find_program(CONTOUR_READELF readelf REQUIRED)
-        set(_contour_tool "${CONTOUR_READELF}")
-    endif()
-else()
-    find_program(CONTOUR_DWARFDUMP dwarfdump REQUIRED)
-    set(_contour_tool "${CONTOUR_DWARFDUMP}")
-endif()
+list(APPEND _contour_compile_flags ${CMAKE_CXX_COMPILE_OPTIONS_IPO} ${_contour_added_flag})
+get_filename_component(_contour_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+get_filename_component(_contour_readelf_dir "${CMAKE_READELF}" DIRECTORY)
+find_program(CONTOUR_PRODUCTION_PROBE ${_contour_probe}
+    HINTS "${_contour_linker_dir}" "${_contour_readelf_dir}" REQUIRED)
 
 ## Renders a list as a JSON array of strings.
 function(_contour_json_array out)
@@ -193,9 +210,9 @@ endfunction()
 
 file(TO_CMAKE_PATH "${PROJECT_SOURCE_DIR}" _contour_source_dir)
 file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}" _contour_binary_dir)
-file(TO_CMAKE_PATH "${_contour_tool}" _contour_tool)
+file(TO_CMAKE_PATH "${CONTOUR_PRODUCTION_PROBE}" _contour_tool)
 _contour_json_array(_contour_compile_json ${_contour_compile_flags})
-_contour_json_array(_contour_replaced_json ${_contour_replaced_flags})
+_contour_json_array(_contour_replaced_json ${_contour_replaced_flag})
 
 set(_contour_manifest "{}")
 string(JSON _contour_manifest SET "${_contour_manifest}" format "\"${_contour_format}\"")

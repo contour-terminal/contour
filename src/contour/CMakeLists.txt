@@ -2239,6 +2239,15 @@ if(UNIX)
     )
 endif()
 
+# debug_symbols (the PDB, the dSYM) is published beside the packages, never inside one. EXCLUDE_FROM_ALL
+# only keeps a component out of an unnamed install: CPack installs every component it lists by name, and
+# without a list of its own it lists them all. So name the components of the package here, for every
+# generator; scripts/check-production-build.py checks the generated CPackConfig.cmake.
+if(NOT DEFINED CPACK_COMPONENTS_ALL)
+    get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
+endif()
+list(REMOVE_ITEM CPACK_COMPONENTS_ALL debug_symbols)
+
 include(CPack)
 
 # {{{ Report what this build left out (see contour_note_excluded_feature above)
