@@ -8,5 +8,5 @@ set -ex
 # its compiler from.
 
 sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-sudo apt-get update -q
+sudo "$(dirname "$0")/apt-update.sh"
 sudo apt install -y libstdc++6
