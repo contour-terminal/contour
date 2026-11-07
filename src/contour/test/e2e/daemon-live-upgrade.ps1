@@ -67,16 +67,32 @@ function Fail([string]$why) {
 }
 
 # Runs the contour binary against the daemon under test, bounded: a verb that waits forever must not hold the
-# RUN_SERIAL slot until ctest's own timeout. Sets $script:Status, returns the output.
+# RUN_SERIAL slot until ctest's own timeout. Sets $script:Status, returns the output (also left in last.txt and last.err).
+#
+# The process is started through System.Diagnostics.Process, not Start-Process: Start-Process -PassThru hands back an
+# object that opens its handle only when asked, and a fast verb can be gone by then, which leaves ExitCode null. Here the
+# object holds the handle from the creation on. Both streams are read asynchronously, so that a verb that fills one pipe
+# cannot block on it while this waits for it to end.
 function Contour([string[]]$arguments) {
     $quoted = $arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
-    $process = Start-Process -FilePath $Contour -ArgumentList ($quoted -join ' ') -NoNewWindow -PassThru `
-        -RedirectStandardOutput (Join-Path $Out 'last.txt') -RedirectStandardError (Join-Path $Out 'last.err')
-    # Taken now: a process object that never held its handle reports no exit code once the process is gone.
-    $null = $process.Handle
-    if (-not $process.WaitForExit(60000)) { $process.Kill(); Fail "contour $($arguments -join ' ') did not end within 60s" }
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Contour)
+    $info.Arguments = $quoted -join ' '
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $timedOut = -not $process.WaitForExit(60000)
+    if ($timedOut) { $process.Kill() }
+    # The parameterless wait returns once the streams are read to their end.
+    $process.WaitForExit()
+    [System.IO.File]::WriteAllText((Join-Path $Out 'last.txt'), $stdout.Result)
+    [System.IO.File]::WriteAllText((Join-Path $Out 'last.err'), $stderr.Result)
+    if ($timedOut) { Fail "contour $($arguments -join ' ') did not end within 60s" }
     $script:Status = $process.ExitCode
-    return ((Get-Content (Join-Path $Out 'last.txt') -Raw) + (Get-Content (Join-Path $Out 'last.err') -Raw))
+    return ($stdout.Result + $stderr.Result)
 }
 
 # Waits, at most $Tenths deciseconds, for $Condition to hold.
