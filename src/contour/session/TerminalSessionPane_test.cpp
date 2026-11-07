@@ -1411,6 +1411,41 @@ TEST_CASE("TerminalSession: a program's clipboard write tells no one",
     contour::test::closeAllTabs(*controller);
 }
 
+TEST_CASE("TerminalSession: OSC 52 lands in every place its selection parameter names",
+          "[contour][session][clipboard][osc52]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+    // The primary selection is checked where the desktop has one (X11, Wayland); elsewhere, only that the
+    // clipboard got what it should.
+    // Emplaced rather than built in a conditional expression, which MSVC copies: the guard is not copyable.
+    auto selection = std::optional<ClipboardGuard> {};
+    if (QGuiApplication::clipboard()->supportsSelection())
+        selection.emplace(QStringLiteral("untouched"), QClipboard::Selection);
+
+    SECTION("cp: the clipboard, and the primary selection")
+    {
+        windowed.session.terminal().writeToScreen("\033]52;cp;aGk=\033\\"); // "hi"
+        QCoreApplication::processEvents();
+        CHECK(clipboard.text() == "hi"); // not lost for the `p` beside it
+        if (selection)
+            CHECK(selection->text() == "hi");
+    }
+
+    SECTION("p: the primary selection alone, never the clipboard in its stead")
+    {
+        windowed.session.terminal().writeToScreen("\033]52;p;aGk=\033\\");
+        QCoreApplication::processEvents();
+        CHECK(clipboard.text() == "untouched");
+        if (selection)
+            CHECK(selection->text() == "hi");
+    }
+
+    contour::test::closeAllTabs(*controller);
+}
+
 TEST_CASE("TerminalSession: a hint's copy tells its window", "[contour][session][clipboard][notices]")
 {
     TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };

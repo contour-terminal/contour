@@ -526,23 +526,27 @@ class ClipboardGuard
 {
   public:
     /// @param initial What the clipboard holds to begin with; empty leaves it as it is.
-    explicit ClipboardGuard(QString const& initial = {}): _clipboard { QGuiApplication::clipboard() }
+    /// @param mode Which of the desktop's clipboards to guard: the clipboard, or the primary selection --
+    ///             which must then exist (QClipboard::supportsSelection()).
+    explicit ClipboardGuard(QString const& initial = {}, QClipboard::Mode mode = QClipboard::Clipboard):
+        _clipboard { QGuiApplication::clipboard() }, _mode { mode }
     {
         REQUIRE(_clipboard != nullptr);
         if (!initial.isEmpty())
-            _clipboard->setText(initial);
+            _clipboard->setText(initial, _mode);
     }
     ClipboardGuard(ClipboardGuard const&) = delete;
     ClipboardGuard& operator=(ClipboardGuard const&) = delete;
     ClipboardGuard(ClipboardGuard&&) = delete;
     ClipboardGuard& operator=(ClipboardGuard&&) = delete;
-    ~ClipboardGuard() { _clipboard->clear(); }
+    ~ClipboardGuard() { _clipboard->clear(_mode); }
 
     /// @return What the clipboard holds now.
-    [[nodiscard]] std::string text() const { return _clipboard->text().toStdString(); }
+    [[nodiscard]] std::string text() const { return _clipboard->text(_mode).toStdString(); }
 
   private:
     QClipboard* _clipboard;
+    QClipboard::Mode _mode;
 };
 
 using contour::config::FinishNotificationConfig;

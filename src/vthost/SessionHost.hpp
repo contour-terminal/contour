@@ -13,6 +13,7 @@
 /// to the event-loop thread. Session pump threads never touch the model — they
 /// marshal completion (PTY closed) through EventLoop::post().
 
+#include <vtbackend/core/ClipboardTarget.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Settings.hpp>
@@ -246,10 +247,14 @@ class SessionStreamEvents
     {
     }
 
-    /// @p session wrote the clipboard (OSC 52); @p data is the raw, decoded text.
+    /// @p session wrote the clipboard (OSC 52); @p data is the raw, decoded text, @p targets where it lands.
     /// The daemon forwards it unconditionally — the CLIENT applies its own
-    /// clipboard-write permission.
-    virtual void sessionCopyToClipboard(vtworkspace::SessionId /*session*/, std::string const& /*data*/) {}
+    /// clipboard-write permission, and skips a target its desktop has not got.
+    virtual void sessionCopyToClipboard(vtworkspace::SessionId /*session*/,
+                                        std::string const& /*data*/,
+                                        vtbackend::ClipboardTargets /*targets*/)
+    {
+    }
 
     /// A status-line extension of @p session asks whether it may run its declared commands. Fires once per
     /// question while it stays open: a client attaching later is asked through
@@ -276,6 +281,9 @@ enum class WindowClaim : uint8_t
 /// an OSC 99 notification stated -- nullopt for OSC 9 / OSC 777, which state none.
 using SessionNotifyCallback =
     std::function<void(std::string, std::string, std::optional<vtbackend::DisplayOccasion>)>;
+
+/// What a hosted session hands a clipboard write (OSC 52) on as: the decoded text, and where it lands.
+using SessionClipboardCallback = std::function<void(std::string, vtbackend::ClipboardTargets)>;
 
 /// A hosted session's status-line extensions, as its host hands them to it.
 struct HostedSessionExtensions
@@ -366,7 +374,7 @@ class HostedSession
                   std::function<void()> onKittyAnimationDeadlineMoved,
                   std::function<void()> onBell,
                   SessionNotifyCallback onNotify,
-                  std::function<void(std::string)> onCopyToClipboard,
+                  SessionClipboardCallback onCopyToClipboard,
                   std::function<void()> onClosed,
                   SessionSignalCallback onSignal,
                   HostedSessionExtensions extensions = {},
@@ -522,7 +530,7 @@ class HostedSession
                std::function<void()> kittyAnimationDeadlineMoved,
                std::function<void()> bell,
                SessionNotifyCallback notify,
-               std::function<void(std::string)> copyToClipboard,
+               SessionClipboardCallback copyToClipboard,
                SessionSignalCallback signal,
                std::function<void()> extensionPublished):
             identity(std::move(hostIdentity)),
@@ -545,7 +553,7 @@ class HostedSession
         std::function<void()> onKittyAnimationDeadlineMoved;
         std::function<void()> onBell;
         SessionNotifyCallback onNotify;
-        std::function<void(std::string)> onCopyToClipboard;
+        SessionClipboardCallback onCopyToClipboard;
         SessionSignalCallback onSignal;
         /// A status-line extension published a frame: invoked on its worker. Fixed at construction, as the
         /// worker reads it without a lock.
@@ -594,10 +602,12 @@ class HostedSession
             if (onNotify)
                 onNotify(notification.title, notification.body, notification.occasion);
         }
-        void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
+        void copyToClipboard(std::string_view data,
+                             vtbackend::ClipboardWriter /*writer*/,
+                             vtbackend::ClipboardTargets targets) override
         {
             if (onCopyToClipboard)
-                onCopyToClipboard(std::string { data });
+                onCopyToClipboard(std::string { data }, targets);
         }
         // The five below run on the parser thread under the terminal lock: each copies what it was handed
         // into a signal and reads no terminal state.

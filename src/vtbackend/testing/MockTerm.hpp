@@ -371,7 +371,14 @@ class MockTerm: public Terminal::NullEvents
         pointerShapeNotifications.emplace_back(cssName);
     }
 
-    void copyToClipboard(std::string_view data, ClipboardWriter /*writer*/) override { clipboardData = data; }
+    /// Where the last copy landed, so a test can tell a primary-selection write from a clipboard one.
+    ClipboardTargets clipboardTargets {};
+
+    void copyToClipboard(std::string_view data, ClipboardWriter /*writer*/, ClipboardTargets targets) override
+    {
+        clipboardData = data;
+        clipboardTargets = targets;
+    }
 
     std::string getClipboard() override { return clipboardData; }
 

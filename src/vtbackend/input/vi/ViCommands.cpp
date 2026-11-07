@@ -404,7 +404,8 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
             else
                 _terminal->setHighlightRange(LinearHighlight { .from = _terminal->selector()->from(),
                                                                .to = _terminal->selector()->to() });
-            _terminal->copyToClipboard(_terminal->extractSelectionText(), ClipboardWriter::User);
+            _terminal->copyToClipboard(
+                _terminal->extractSelectionText(), ClipboardWriter::User, ClipboardTarget::Clipboard);
             _terminal->inputHandler().setMode(ViMode::Normal);
             break;
         }
@@ -447,7 +448,8 @@ std::string ViCommands::extractTextAndHighlightRange(CellLocation from, CellLoca
 
 void ViCommands::executeYank(CellLocation from, CellLocation to)
 {
-    _terminal->copyToClipboard(extractTextAndHighlightRange(from, to), ClipboardWriter::User);
+    _terminal->copyToClipboard(
+        extractTextAndHighlightRange(from, to), ClipboardWriter::User, ClipboardTarget::Clipboard);
 }
 
 void ViCommands::executeOpen(CellLocation from, CellLocation to)
@@ -468,7 +470,8 @@ void ViCommands::executeOpen(ViMotion motion, unsigned count)
                 _terminal->setHighlightRange(LinearHighlight { .from = _terminal->selector()->from(),
                                                                .to = _terminal->selector()->to() });
 
-            _terminal->copyToClipboard(_terminal->extractSelectionText(), ClipboardWriter::User);
+            _terminal->copyToClipboard(
+                _terminal->extractSelectionText(), ClipboardWriter::User, ClipboardTarget::Clipboard);
 
             _terminal->inputHandler().setMode(ViMode::Normal);
             break;

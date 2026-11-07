@@ -5,6 +5,7 @@
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/vt/ClipboardSelection.hpp>
 
 #include <core/Overloaded.hpp>
 
@@ -1034,8 +1035,11 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                    },
                    [this](proto::SessionClipboard const& clipboard) {
                        // Under the CLIENT's own write permission, which is the point of routing it
-                       // through the terminal rather than to the clipboard directly.
-                       _terminal->copyToClipboard(clipboard.data, vtbackend::ClipboardWriter::Program);
+                       // through the terminal rather than to the clipboard directly. A selection naming
+                       // nowhere this client knows is dropped, as the session's own OSC 52 would be.
+                       if (auto const targets = vtbackend::clipboard_selection::parse(clipboard.selection))
+                           _terminal->copyToClipboard(
+                               clipboard.data, vtbackend::ClipboardWriter::Program, *targets);
                    },
                    [this](proto::ProgramStatus const& status) {
                        auto const guard = std::lock_guard { *_terminal };

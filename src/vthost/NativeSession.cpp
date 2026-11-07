@@ -4,6 +4,7 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/grid/Line.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/vt/ClipboardSelection.hpp>
 
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
@@ -434,12 +435,31 @@ void NativeSession::sessionNotify(SessionId session,
         .session = session.value, .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
 }
 
-void NativeSession::sessionCopyToClipboard(SessionId session, std::string const& data)
+void NativeSession::sessionCopyToClipboard(SessionId session,
+                                           std::string const& data,
+                                           vtbackend::ClipboardTargets targets)
 {
-    if (!followsSession(session))
+    if (!followsSession(session) || !_negotiated)
         return;
-    // "c" = the CLIPBOARD selection; the client applies its own write permission.
-    emitSessionEvent(proto::SessionClipboard { .session = session.value, .selection = "c", .data = data });
+    auto const forwarded = forwardedClipboardTargets(targets, _negotiated->shared);
+    if (!forwarded)
+        return;
+    // The targets travel as OSC 52 spells them, which the client reads back with the parser that read the
+    // session's own sequence.
+    emitSessionEvent(
+        proto::SessionClipboard { .session = session.value,
+                                  .selection = vtbackend::clipboard_selection::format(*forwarded),
+                                  .data = data });
+}
+
+std::optional<vtbackend::ClipboardTargets> forwardedClipboardTargets(vtbackend::ClipboardTargets targets,
+                                                                     proto::CapabilitySet const& shared)
+{
+    if (shared.contains(proto::Capability::ClipboardTargets))
+        return targets;
+    if (!targets.test(vtbackend::ClipboardTarget::Clipboard))
+        return std::nullopt;
+    return vtbackend::ClipboardTargets { vtbackend::ClipboardTarget::Clipboard };
 }
 
 void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal)

@@ -4202,7 +4202,7 @@ template <typename T>
                                                    std::function<void()> {},
                                                    std::function<void()> {},
                                                    vthost::SessionNotifyCallback {},
-                                                   std::function<void(std::string)> {},
+                                                   vthost::SessionClipboardCallback {},
                                                    std::move(onClosed),
                                                    vthost::SessionSignalCallback {});
 }
@@ -4439,7 +4439,7 @@ namespace
                                                    std::function<void()> {},
                                                    std::function<void()> {},
                                                    vthost::SessionNotifyCallback {},
-                                                   std::function<void(std::string)> {},
+                                                   vthost::SessionClipboardCallback {},
                                                    std::move(onClosed),
                                                    vthost::SessionSignalCallback {});
 }
@@ -4861,7 +4861,7 @@ TEST_CASE("a quiesced session crosses into an adopted one, every byte exactly on
         std::function<void()> {},
         std::function<void()> {},
         vthost::SessionNotifyCallback {},
-        std::function<void(std::string)> {},
+        vthost::SessionClipboardCallback {},
         [&closes] { ++closes; },
         vthost::SessionSignalCallback {});
     {

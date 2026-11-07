@@ -5931,19 +5931,23 @@ void Terminal::resetPointerShape()
     _eventListener.setPointerShape("");
 }
 
-void Terminal::copyToClipboard(string_view data, ClipboardWriter writer)
+void Terminal::copyToClipboard(string_view data, ClipboardWriter writer, ClipboardTargets targets)
 {
     if (writer == ClipboardWriter::User)
     {
-        runOutsideStateLock(
-            [this, copied = string(data)] { _eventListener.copyToClipboard(copied, ClipboardWriter::User); });
+        runOutsideStateLock([this, copied = string(data), targets] {
+            _eventListener.copyToClipboard(copied, ClipboardWriter::User, targets);
+        });
         return;
     }
-    _eventListener.copyToClipboard(data, writer);
+    _eventListener.copyToClipboard(data, writer, targets);
 }
 
-void Terminal::requestClipboardRead(string_view pc)
+void Terminal::requestClipboardRead(string_view pc, ClipboardTargets targets)
 {
+    if (!targets.test(ClipboardTarget::Clipboard))
+        return;
+
     // Reading the clipboard is opt-in: an application that could read it unbidden could exfiltrate
     // whatever the user last copied. When disabled, stay silent (as xterm does when the operation is
     // not permitted) rather than reveal even that a clipboard exists.
@@ -6418,7 +6422,9 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
     auto const& matchedText = match.matchedText;
     switch (action)
     {
-        case HintAction::Copy: terminal.copyToClipboard(matchedText, ClipboardWriter::User); break;
+        case HintAction::Copy:
+            terminal.copyToClipboard(matchedText, ClipboardWriter::User, ClipboardTarget::Clipboard);
+            break;
         case HintAction::Open:
             // As Ctrl+click opens it, with its refusals: a path with file_opener at its location, a URL as a
             // link is followed. Nothing, where the printed text chose a scheme no link may open (§7.6).
@@ -6427,7 +6433,7 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
             break;
         case HintAction::Paste: typeHint(terminal, matchedText); break;
         case HintAction::CopyAndPaste:
-            terminal.copyToClipboard(matchedText, ClipboardWriter::User);
+            terminal.copyToClipboard(matchedText, ClipboardWriter::User, ClipboardTarget::Clipboard);
             typeHint(terminal, matchedText);
             break;
         case HintAction::Select: {

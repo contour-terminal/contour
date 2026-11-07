@@ -94,6 +94,11 @@ enum class Capability : uint8_t
     /// `cellPixelSize`), so a daemon-hosted pane lays images out on the client's real cell. Informational
     /// like ColorPreference: a client sends the field regardless and a daemon predating it ignores it.
     CellPixelSize = 20,
+    /// The peer lands a SessionClipboard where its `selection` names, in OSC 52's letters (`c` the clipboard,
+    /// `p` the primary selection, `cp` both). A client predating it puts every one on the clipboard, so a
+    /// daemon sends a client without it only a write that names the clipboard, as `c`: a write to the primary
+    /// selection alone would otherwise overwrite what its user copied.
+    ClipboardTargets = 21,
 };
 
 /// One row of the table naming a Capability.
@@ -125,6 +130,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LiveUpgrade, .name = "live-upgrade" },
     CapabilityRow { .capability = Capability::PanesReprojected, .name = "panes-reprojected" },
     CapabilityRow { .capability = Capability::CellPixelSize, .name = "cell-pixel-size" },
+    CapabilityRow { .capability = Capability::ClipboardTargets, .name = "clipboard-targets" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

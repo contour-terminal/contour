@@ -514,9 +514,10 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
     auto session = makeDisplaylessSession(testApp.app());
 
     session->copyToClipboard("hello clipboard",
-                             vtbackend::ClipboardWriter::Program); // display-less: guarded no-op
-    session->onSelectionCompleted();                               // display-less: guarded no-op
-    session->focusTerminalWindow();                                // display-less: guarded no-op
+                             vtbackend::ClipboardWriter::Program,
+                             vtbackend::ClipboardTarget::Clipboard); // display-less: guarded no-op
+    session->onSelectionCompleted();                                 // display-less: guarded no-op
+    session->focusTerminalWindow();                                  // display-less: guarded no-op
     session->discardDesktopNotification("no-such-id");
 
     // Multi-count paste replicates the clipboard text N times into the PTY.

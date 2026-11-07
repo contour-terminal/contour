@@ -495,6 +495,65 @@ TEST_CASE("OSC 52: clipboard write and gated read", "[screen]")
     }
 }
 
+TEST_CASE("OSC 52: the selection parameter names where a write lands", "[screen][osc52]")
+{
+    // Which letters name what is clipboard_selection's (ClipboardSelection_test); here, that the handler
+    // hands the parsed set on. base64("hi") == "aGk=".
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+
+    SECTION("cp lands in both, the primary selection not costing the clipboard")
+    {
+        mock.writeToScreen("\033]52;cp;aGk=\033\\");
+        CHECK(mock.clipboardData == "hi");
+        CHECK(mock.clipboardTargets
+              == ClipboardTargets { ClipboardTarget::Clipboard, ClipboardTarget::PrimarySelection });
+    }
+
+    SECTION("a Pc naming nowhere Contour has is ignored")
+    {
+        mock.writeToScreen("\033]52;q;aGk=\033\\");
+        CHECK(mock.clipboardData.empty());
+    }
+
+    SECTION("a Pd that is not base64 is refused, not taken for a clear")
+    {
+        mock.writeToScreen("\033]52;c;aGk=\033\\");
+        REQUIRE(mock.clipboardData == "hi");
+        mock.writeToScreen("\033]52;c;!!!\033\\");
+        CHECK(mock.clipboardData == "hi");
+    }
+
+    SECTION("an empty Pd clears the clipboard")
+    {
+        mock.writeToScreen("\033]52;c;aGk=\033\\");
+        REQUIRE(mock.clipboardData == "hi");
+        mock.writeToScreen("\033]52;c;\033\\");
+        CHECK(mock.clipboardData.empty());
+        CHECK(mock.clipboardTargets == ClipboardTargets { ClipboardTarget::Clipboard });
+    }
+
+    SECTION("a read")
+    {
+        mock.writeToScreen("\033]52;c;aGk=\033\\");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+
+        SECTION("of the primary selection alone is not answered with the clipboard")
+        {
+            mock.writeToScreen("\033]52;p;?\033\\");
+            mock.terminal.flushInput();
+            CHECK(mock.replyData().empty());
+        }
+
+        SECTION("naming the clipboard among others is answered, echoing Pc")
+        {
+            mock.writeToScreen("\033]52;cp;?\033\\");
+            mock.terminal.flushInput();
+            CHECK(mock.replyData() == "\033]52;cp;aGk=\033\\");
+        }
+    }
+}
+
 TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
 {
     // The mechanism esctest ResetSpecialColorTests.test_ResetSpecialColor_Dynamic exercises: OSC 110

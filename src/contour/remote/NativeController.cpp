@@ -233,7 +233,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::ColorPreference,
                                                    vthost::proto::Capability::PanesReprojected,
                                                    vthost::proto::Capability::LiveUpgrade,
-                                                   vthost::proto::Capability::CellPixelSize }),
+                                                   vthost::proto::Capability::CellPixelSize,
+                                                   vthost::proto::Capability::ClipboardTargets }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = helloArea.transform([](auto const& size) {

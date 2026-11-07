@@ -989,6 +989,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
             platform/ExecutionPolicySource_test.cpp
+            platform/Clipboard_test.cpp
             platform/RcText_test.cpp
             platform/ShellRcEditor_test.cpp
             platform/WindowShadowController_test.cpp

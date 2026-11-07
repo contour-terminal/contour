@@ -19,6 +19,8 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandBlockRows.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
+#include <vtbackend/vt/Base64Validation.hpp>
+#include <vtbackend/vt/ClipboardSelection.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/HierarchicalContext.hpp>
@@ -4598,16 +4600,28 @@ namespace impl
         ApplyResult clipboard(Sequence const& seq, Terminal& terminal)
         {
             // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store, or "?" to read the clipboard
-            // back. Contour models the clipboard ('c') and the default/empty selection.
-            auto const& params = seq.intermediateCharacters();
-            auto const splits = core::split(params, ';');
-            if (splits.size() != 2 || !(splits[0] == "c" || splits[0].empty()))
+            // back; Pc names where (clipboard_selection::parse). Split at the one semicolon by hand:
+            // core::split drops an empty last field, and an empty Pd clears the clipboard.
+            auto const params = std::string_view { seq.intermediateCharacters() };
+            auto const separator = params.find(';');
+            if (separator == std::string_view::npos)
+                return ApplyResult::Invalid;
+            auto const pc = params.substr(0, separator);
+            auto const pd = params.substr(separator + 1);
+            if (pd.contains(';'))
+                return ApplyResult::Invalid;
+            auto const targets = clipboard_selection::parse(pc);
+            if (!targets)
                 return ApplyResult::Invalid;
 
-            if (splits[1] == "?")
-                terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
+            if (pd == "?")
+                terminal.requestClipboardRead(pc, *targets); // gated by Settings::allowClipboardRead
+            else if (!isValidBase64(pd))
+                // The decoder stops at the first stray byte, so garbage would arrive as an empty copy:
+                // the clear an empty Pd asks for, of whatever the user had copied.
+                return ApplyResult::Invalid;
             else
-                terminal.copyToClipboard(core::base64::decode(splits[1]), ClipboardWriter::Program);
+                terminal.copyToClipboard(core::base64::decode(pd), ClipboardWriter::Program, *targets);
             return ApplyResult::Ok;
         }
 
@@ -5350,8 +5364,8 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
     switch (packet.type)
     {
         case PacketType::Read: {
-            // Contour has no primary selection, and the spec's answer for a location it cannot serve
-            // is ENOSYS -- not silently using the system clipboard instead.
+            // The frontend hands back the clipboard only, and the spec's answer for a location it cannot
+            // serve is ENOSYS -- not silently using the system clipboard instead.
             if (packet.location == Location::PrimarySelection)
             {
                 respond("ENOSYS");
@@ -5418,8 +5432,10 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
         }
 
         case PacketType::Write:
-            // Contour has no primary selection; per spec that is ENOSYS rather than quietly writing
-            // the system clipboard and reporting DONE.
+            // Only the frontend knows whether the desktop has a primary selection, and this protocol must
+            // answer ENOSYS where it has none, not DONE for a write that never landed -- nor quietly write
+            // the clipboard instead. OSC 52's `p`, which answers nothing, is the way to the primary
+            // selection.
             if (packet.location == Location::PrimarySelection)
             {
                 respond("ENOSYS");
@@ -5455,7 +5471,8 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // An empty chunk is the end-of-transmission marker.
             if (packet.payload.empty())
             {
-                _terminal->copyToClipboard(_terminal->kittyClipboardWrite(), ClipboardWriter::Program);
+                _terminal->copyToClipboard(
+                    _terminal->kittyClipboardWrite(), ClipboardWriter::Program, ClipboardTarget::Clipboard);
                 _terminal->kittyClipboardWrite().clear();
                 _terminal->kittyClipboardWriteOpen() = false;
                 respond("DONE");

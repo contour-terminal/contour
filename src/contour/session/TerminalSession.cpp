@@ -2133,15 +2133,17 @@ int TerminalSession::cursorLine() const
 
 void TerminalSession::copyExplicitly(std::string_view text)
 {
-    copyToClipboard(text, vtbackend::ClipboardWriter::User);
+    copyToClipboard(text, vtbackend::ClipboardWriter::User, vtbackend::ClipboardTarget::Clipboard);
 }
 
-void TerminalSession::copyToClipboard(std::string_view data, vtbackend::ClipboardWriter writer)
+void TerminalSession::copyToClipboard(std::string_view data,
+                                      vtbackend::ClipboardWriter writer,
+                                      vtbackend::ClipboardTargets targets)
 {
     if (!_display)
         return;
 
-    _display->post([data = string(data)]() { platform::copyToClipboard(data); });
+    _display->post([data = string(data), targets]() { platform::copyToClipboard(data, targets); });
 
     // A user's copy is told, a program's is not. Only what reached the clipboard is: without a display
     // nothing does. GUI thread, outside the terminal lock: a vi yank's or a hint's arrives through

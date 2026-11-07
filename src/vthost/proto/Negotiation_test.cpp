@@ -108,6 +108,15 @@ TEST_CASE("the panes-reprojected capability keeps its ident and name", "[vthost]
     CHECK(row->name == "panes-reprojected");
 }
 
+TEST_CASE("the clipboard-targets capability keeps its ident and name", "[vthost][negotiation][clipboard]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::ClipboardTargets) == 21);
+    auto const row =
+        std::ranges::find(CapabilityTable, Capability::ClipboardTargets, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "clipboard-targets");
+}
+
 TEST_CASE("the cell-pixel-size capability keeps its ident and name", "[vthost][negotiation][cellsize]")
 {
     STATIC_CHECK(std::to_underlying(Capability::CellPixelSize) == 20);
