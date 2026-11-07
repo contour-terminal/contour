@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
@@ -333,4 +334,17 @@ TEST_CASE("daemon control over a unix transport never starts a daemon",
     CHECK(status.error().code == client::ControlErrorCode::NotRunning);
     // A daemon started on the probe's behalf would have made its socket directory.
     CHECK_FALSE(fs::exists(directory));
+}
+
+TEST_CASE("a wire status maps its relocation byte, and an unknown one states none",
+          "[vthost][client][control]")
+{
+    auto reply = proto::DaemonStatusReply { .lifecycle = 0 };
+    CHECK(client::fromWire(reply)->relocation == std::nullopt);
+    reply.relocation = uint8_t { 0 };
+    CHECK(client::fromWire(reply)->relocation == vthost::RelocationRequest::Allowed);
+    reply.relocation = uint8_t { 1 };
+    CHECK(client::fromWire(reply)->relocation == vthost::RelocationRequest::Refused);
+    reply.relocation = uint8_t { 200 };
+    CHECK(client::fromWire(reply)->relocation == std::nullopt);
 }

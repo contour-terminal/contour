@@ -1464,6 +1464,8 @@ int ContourApp::daemonAction()
                                                             core::platform::NativeFileSystem::instance(),
                                                             CONTOUR_VERSION_STRING,
                                                             leaseOf(handover));
+    // What the daemon's status states of it: its user's request alone, not the handover-combined one below.
+    config.relocationRequest = relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"));
     if (images)
     {
         runningLease = settleDaemonImage(
