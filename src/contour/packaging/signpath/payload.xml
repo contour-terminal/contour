@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "payload": what SignPath signs in the zip that
+  `scripts/sign-windows.ps1 export -Kind Payload` uploads from the Windows job.
+
+  The owner pastes this file into SignPath under the slug `payload` (the workflow names it in
+  artifact-configuration-slug); nothing reads it from the repository at run time. The files named here
+  must be the ones OwnBinaries lists in scripts/windows-signing/signers.psd1: the export puts them into
+  the zip under their paths relative to the install tree, and the import checks what comes back against
+  that manifest.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="bin/contour.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
