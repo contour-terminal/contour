@@ -8,11 +8,14 @@
 #endif
 // clang-format on
 
+#include <core/platform/testing/InMemoryFileSystem.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -49,6 +52,19 @@
 using namespace vthost::handover;
 
 // A pseudoconsole's handles are named on Windows alone (vtpty::InheritedPty::handles()).
+TEST_CASE("a successor starts in its image's directory, not in its predecessor's", "[vthost][handover]")
+{
+    auto const files = core::platform::testing::InMemoryFileSystem {
+        { .path = "/state/bin/0.9-abc/bin/contour", .content = "" },
+    };
+    auto const profile = std::filesystem::path { "/home/user" };
+    CHECK(vthost::handover::successorWorkingDirectory("/state/bin/0.9-abc/bin/contour", files, profile)
+          == std::filesystem::path { "/state/bin/0.9-abc/bin" });
+    // An image whose directory is gone (or a bare name) leaves the profile.
+    CHECK(vthost::handover::successorWorkingDirectory("/gone/bin/contour", files, profile) == profile);
+    CHECK(vthost::handover::successorWorkingDirectory("contour", files, profile) == profile);
+}
+
 #ifdef _WIN32
 
 TEST_CASE("an image names each of its handles once, for the successor to inherit", "[vthost][handover]")
