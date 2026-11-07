@@ -434,6 +434,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_rect_test.cpp
         screen/Screen_modes_test.cpp
         screen/Screen_osc_test.cpp
+        screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp

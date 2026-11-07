@@ -219,7 +219,8 @@ ColumnCount Line::trimmedColumns() const noexcept
         return blankText && _storage.sgr[column] == GraphicsAttributes {}
                && _storage.hyperlinks[column] == HyperlinkId {}
                && !(_storage.imageFragments
-                    && _storage.imageFragments->contains(static_cast<uint16_t>(column)));
+                    && _storage.imageFragments->contains(static_cast<uint16_t>(column)))
+               && !(_storage.softGlyphs && _storage.softGlyphs->contains(static_cast<uint16_t>(column)));
     };
 
     auto end = unbox<size_t>(_columns);

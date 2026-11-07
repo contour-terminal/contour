@@ -8,14 +8,19 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/SoftGlyphRef.hpp>
 #include <vtbackend/core/TextScale.hpp>
 
 #include <crispy/AlignedAllocator.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <ranges>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace vtbackend
 {
@@ -79,6 +84,51 @@ enum class LineShape : uint8_t
 {
     return shape != LineShape::Spanning;
 }
+
+/// Column → soft glyph reference of one line (@see LineSoA::softGlyphs).
+using SoftGlyphMap = std::unordered_map<uint16_t, SoftGlyphRef>;
+
+/// Owns a line's SoftGlyphMap, null on every line that carries no soft font glyph.
+///
+/// One pointer wide, where an optional map costs 48-64 bytes on every line, and deep-copying so that a
+/// copied line (reflow, scrollback snapshots) never shares a table with its original.
+class SoftGlyphMapPtr
+{
+  public:
+    SoftGlyphMapPtr() noexcept = default;
+    SoftGlyphMapPtr(SoftGlyphMapPtr const& other):
+        _map { other._map ? std::make_unique<SoftGlyphMap>(*other._map) : nullptr }
+    {
+    }
+    SoftGlyphMapPtr(SoftGlyphMapPtr&&) noexcept = default;
+    SoftGlyphMapPtr& operator=(SoftGlyphMapPtr const& other)
+    {
+        if (this != &other)
+            _map = other._map ? std::make_unique<SoftGlyphMap>(*other._map) : nullptr;
+        return *this;
+    }
+    SoftGlyphMapPtr& operator=(SoftGlyphMapPtr&&) noexcept = default;
+    ~SoftGlyphMapPtr() = default;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return _map != nullptr; }
+    [[nodiscard]] SoftGlyphMap* operator->() const noexcept { return _map.get(); }
+    [[nodiscard]] SoftGlyphMap& operator*() const noexcept { return *_map; }
+    [[nodiscard]] SoftGlyphMap* get() const noexcept { return _map.get(); }
+
+    /// Drops the table.
+    void reset() noexcept { _map.reset(); }
+
+    /// Returns the table, creating it first when the line had none.
+    [[nodiscard]] SoftGlyphMap& ensure()
+    {
+        if (!_map)
+            _map = std::make_unique<SoftGlyphMap>();
+        return *_map;
+    }
+
+  private:
+    std::unique_ptr<SoftGlyphMap> _map;
+};
 
 /// Structure-of-Arrays storage for one terminal line.
 ///
@@ -150,6 +200,13 @@ struct LineSoA
     using ImageFragmentMap = std::unordered_map<uint16_t, std::shared_ptr<ImageFragment>>;
     std::optional<ImageFragmentMap> imageFragments;
 
+    // --- Soft font glyph references (DECDLD; null on every line that has none) ---
+
+    /// Column → soft glyph the cell shows in place of its codepoint's glyph. Allocated on first
+    /// setSoftGlyph(), dropped on resetLine(). Like an image fragment, a soft glyph makes a line
+    /// Spanning, so every cell write may skip the lookup on any other line.
+    SoftGlyphMapPtr softGlyphs;
+
     // --- Line-level metadata ---
 
     /// Line flags (Wrappable, Wrapped, Marked, etc.).
@@ -168,6 +225,7 @@ struct LineSoA
     /// - it continues a wide character or a scaled block, or is scaled: Spanning (@see
     ///   fillWideCharContinuation, writeCellToSoA, degradeShapeForTextScale)
     /// - it carries an image fragment: Spanning (@see BasicCellProxy::setImageFragment)
+    /// - it carries a soft glyph: Spanning (@see BasicCellProxy::setSoftGlyph)
     ///
     /// Anything that makes a cell fail its line's shape must degrade it, or @c Line::trivialBuffer
     /// silently drops what it cannot represent and the parser's bulk write overwrites half a cell.
@@ -206,6 +264,95 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
         return;
     for (auto const col: std::views::iota(startCol, static_cast<uint16_t>(startCol + count)))
         clearReplacedImageFragment(fragments, col);
+}
+
+// ---------------------------------------------------------------------------
+// Column-keyed side table helpers (image fragments, soft glyphs)
+// ---------------------------------------------------------------------------
+
+/// Erases the entries of a column-keyed map within [from, from+count).
+/// @param map   The map to prune.
+/// @param from  First column.
+/// @param count Number of columns.
+template <typename Map>
+void eraseColumnRange(Map& map, size_t from, size_t count)
+{
+    std::erase_if(map, [&](auto const& entry) { return entry.first >= from && entry.first < from + count; });
+}
+
+/// Copies the entries of @p src within [srcCol, srcCol+count) to the same offsets from @p dstCol.
+/// The destination's own entries in the target range go first: those cells are overwritten.
+/// @param src    The map to copy from; may be @p dst, with overlapping ranges.
+/// @param dst    The map to copy into.
+/// @param srcCol First source column.
+/// @param dstCol First destination column.
+/// @param count  Number of columns.
+template <typename Map>
+void copyColumnRange(Map const& src, Map& dst, size_t srcCol, size_t dstCol, size_t count)
+{
+    auto copied = std::vector<typename Map::value_type> {};
+    for (auto const& entry: src)
+        if (entry.first >= srcCol && entry.first < srcCol + count)
+            copied.push_back(entry);
+    eraseColumnRange(dst, dstCol, count);
+    for (auto const& [col, value]: copied)
+        dst[static_cast<uint16_t>(dstCol + (col - srcCol))] = value;
+}
+
+/// Re-indexes a column-keyed map for moving [srcCol, srcCol+count) to [dstCol, dstCol+count): the
+/// destination's own entries are dropped (their cells are overwritten) and the source's follow their
+/// cells. Entries outside both ranges stay; the vacated source columns are left to the caller's clear.
+/// @param map    The map to re-index.
+/// @param srcCol First source column.
+/// @param dstCol First destination column.
+/// @param count  Number of columns.
+template <typename Map>
+void moveColumnRange(Map& map, size_t srcCol, size_t dstCol, size_t count)
+{
+    if (map.empty() || count == 0 || srcCol == dstCol)
+        return;
+    auto moved = std::vector<typename Map::value_type> {};
+    for (auto const& entry: map)
+        if (entry.first >= srcCol && entry.first < srcCol + count)
+            moved.push_back(entry);
+    eraseColumnRange(map, srcCol, count);
+    eraseColumnRange(map, dstCol, count);
+    for (auto const& [col, value]: moved)
+        map[static_cast<uint16_t>(dstCol + (col - srcCol))] = value;
+}
+
+/// Drops every cell side table of @p line (out of line: @see dropSideTables).
+void dropSideTablesOfSpanningLine(LineSoA& line) noexcept;
+
+/// Drops what a write to @p count columns from @p startCol replaces from the line's side tables
+/// (out of line: @see clearReplacedSideTables).
+void clearReplacedSideTablesOfSpanningLine(LineSoA& line, uint16_t startCol, size_t count);
+
+/// Drops every cell side table of @p line. Only a Spanning line has any, so any other skips both.
+///
+/// The test is inline and the work is not: the hot write paths this sits in stay as small as they were
+/// before the second table existed.
+inline void dropSideTables(LineSoA& line) noexcept
+{
+    if (line.shape == LineShape::Spanning) [[unlikely]]
+        dropSideTablesOfSpanningLine(line);
+}
+
+/// Drops what a write to @p col replaces from the line's cell side tables: a Replace-layer image
+/// fragment and the soft glyph.
+///
+/// Both tables imply LineShape::Spanning, so one shape test spares every ordinary line both lookups.
+inline void clearReplacedSideTables(LineSoA& line, uint16_t col)
+{
+    if (line.shape == LineShape::Spanning) [[unlikely]]
+        clearReplacedSideTablesOfSpanningLine(line, col, 1);
+}
+
+/// Range overload: @p count columns from @p startCol.
+inline void clearReplacedSideTables(LineSoA& line, uint16_t startCol, size_t count)
+{
+    if (line.shape == LineShape::Spanning) [[unlikely]]
+        clearReplacedSideTablesOfSpanningLine(line, startCol, count);
 }
 
 // ---------------------------------------------------------------------------

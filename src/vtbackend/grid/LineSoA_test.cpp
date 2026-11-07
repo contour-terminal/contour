@@ -944,3 +944,110 @@ TEST_CASE("LineShape.shapeImpliedByCells", "[LineSoA][LineShape]")
     line.sgr[3].flags = CellFlag::WideCharContinuation;
     CHECK(shapeImpliedByCells(line) == LineShape::Spanning);
 }
+
+// =============================================================================
+// Soft glyph references
+// =============================================================================
+
+TEST_CASE("LineSoA.softGlyph setSoftGlyph degrades the line to Spanning", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    auto& storage = line.storage();
+    REQUIRE(storage.shape == LineShape::Uniform);
+    CHECK(!storage.softGlyphs);
+
+    line.useCellAt(ColumnOffset(3)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x41 });
+
+    CHECK(storage.shape == LineShape::Spanning);
+    CHECK(line.useCellAt(ColumnOffset(3)).softGlyph() == SoftGlyphRef { .font = 1, .position = 0x41 });
+    CHECK(!line.useCellAt(ColumnOffset(4)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph writing a cell drops its soft glyph", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(3)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    line.useCellAt(ColumnOffset(4)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x22 });
+
+    line.useCellAt(ColumnOffset(3)).write(GraphicsAttributes {}, U'x', 1);
+    line.useCellAt(ColumnOffset(4)).setCharacter(U'y');
+
+    CHECK(!line.useCellAt(ColumnOffset(3)).softGlyph());
+    CHECK(!line.useCellAt(ColumnOffset(4)).softGlyph());
+
+    line.useCellAt(ColumnOffset(5)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x23 });
+    writeCellToSoA(line.storage(), 5, U'z', 1, GraphicsAttributes {});
+    CHECK(!line.useCellAt(ColumnOffset(5)).softGlyph());
+
+    line.useCellAt(ColumnOffset(6)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x24 });
+    line.useCellAt(ColumnOffset(7)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x25 });
+    static_cast<void>(writeTextToSoA(line.storage(), 6, "ab", GraphicsAttributes {}));
+    CHECK(!line.useCellAt(ColumnOffset(6)).softGlyph());
+    CHECK(!line.useCellAt(ColumnOffset(7)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph reset drops all soft glyphs", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(1)).setSoftGlyph(SoftGlyphRef { .font = 2, .position = 0x30 });
+    line.useCellAt(ColumnOffset(8)).setSoftGlyph(SoftGlyphRef { .font = 2, .position = 0x31 });
+
+    resetLine(line.storage(), ColumnCount(10), GraphicsAttributes {});
+
+    CHECK(!line.storage().softGlyphs);
+    CHECK(!line.useCellAt(ColumnOffset(1)).softGlyph());
+    CHECK(!line.useCellAt(ColumnOffset(8)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph clearSoftGlyph and clearRange", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(1)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    line.useCellAt(ColumnOffset(2)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x22 });
+    line.useCellAt(ColumnOffset(7)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x23 });
+
+    line.useCellAt(ColumnOffset(1)).clearSoftGlyph();
+    CHECK(!line.useCellAt(ColumnOffset(1)).softGlyph());
+    CHECK(line.useCellAt(ColumnOffset(2)).softGlyph());
+
+    clearRange(line.storage(), 2, 3, GraphicsAttributes {});
+    CHECK(!line.useCellAt(ColumnOffset(2)).softGlyph());
+    CHECK(line.useCellAt(ColumnOffset(7)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph copy/reflow carries soft glyphs with their cells", "[LineSoA][SoftGlyph]")
+{
+    auto src = Line(ColumnCount(10));
+    auto dst = Line(ColumnCount(10));
+    static_cast<void>(dst.materializedStorage());
+    src.useCellAt(ColumnOffset(5)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x55 });
+    src.useCellAt(ColumnOffset(9)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x56 });
+
+    copyColumns(src.storage(), 4, dst.storage(), 1, 4);
+
+    CHECK(dst.useCellAt(ColumnOffset(2)).softGlyph() == SoftGlyphRef { .font = 1, .position = 0x55 });
+    CHECK(!dst.useCellAt(ColumnOffset(1)).softGlyph());
+    CHECK(!dst.useCellAt(ColumnOffset(5)).softGlyph());
+    CHECK(!dst.useCellAt(ColumnOffset(9)).softGlyph());
+    CHECK(dst.storage().shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineSoA.softGlyph a copied line owns its own table", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(2)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x40 });
+
+    auto copy = line;
+    copy.useCellAt(ColumnOffset(2)).clearSoftGlyph();
+
+    CHECK(line.useCellAt(ColumnOffset(2)).softGlyph());
+    CHECK(!copy.useCellAt(ColumnOffset(2)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph a line with one is not trimmed away", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(4)).write(GraphicsAttributes {}, U' ', 1);
+    line.useCellAt(ColumnOffset(4)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x20 });
+    CHECK(line.trimmedColumns() == ColumnCount(5));
+}

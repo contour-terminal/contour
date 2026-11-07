@@ -73,7 +73,7 @@ inline void writeCellToSoA(LineSoA& line,
     if (oldClusterSize > 1)
         clearClusterExtras(line, col);
 
-    clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
+    clearReplacedSideTables(line, static_cast<uint16_t>(col));
 
     // Otherwise a rendition or hyperlink differing from another cell's mixes. A spanning cell already
     // left the line Spanning above, so this test skips it.

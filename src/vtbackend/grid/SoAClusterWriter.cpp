@@ -69,7 +69,7 @@ namespace
             std::fill_n(line.textScaleExtras.data() + startCol, count, uint16_t { 0 });
         }
 
-        clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
+        clearReplacedSideTables(line, static_cast<uint16_t>(startCol), count);
 
         // Check once whether the written range breaks the line's uniformity, against an unwritten
         // cell: from col 0, the cell just past the run (none, for a full-width run); from col > 0,
