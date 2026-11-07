@@ -266,11 +266,68 @@ TEST_CASE("TextClusterGrouper.renderLine.DoubleWhitespace")
     CHECK(clusterGroup2.color == RGBColor { 0xF0, 0x80, 0x40 });
 }
 
+TEST_CASE("TextClusterGrouper.a_wide_character_ends_its_group")
+{
+    // The renderer draws each glyph at its group's pen position plus cluster x cell width (RunPen), which
+    // holds only while every cell of a group is exactly one column. A wide character's continuation cell
+    // is what guarantees it: it is empty, and an empty cell ends the group, so the next group starts on
+    // the column after the wide character with its clusters counted from zero again.
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+
+    grouper.beginFrame();
+    grouper.renderLine(U"A\U0001F600B", LineOffset(0), 0x102030_rgb, TextStyle::Regular, LineFlag::None);
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 2);
+
+    auto const& wide = std::get<TextClusterGroup>(recorder.events[0]);
+    CHECK(wide.codepoints == U"A\U0001F600"sv);
+    CHECK(wide.clusters == std::vector { 0, 1 });
+    CHECK(wide.initialPenPosition == CellLocation {});
+
+    auto const& after = std::get<TextClusterGroup>(recorder.events[1]);
+    CHECK(after.codepoints == U"B"sv);
+    CHECK(after.clusters == std::vector { 0 });
+    CHECK(after.initialPenPosition == CellLocation { LineOffset(0), ColumnOffset(3) });
+}
+
+TEST_CASE("TextClusterGrouper.clusters_count_columns_not_cells")
+{
+    // RenderBuffer's layoutRenderText (the sticky header's evicted command, fold labels, gutter chips)
+    // writes a wide character as ONE cell two columns wide, with no empty continuation cell after it, so
+    // nothing ends the group there. The renderer draws each glyph at its cluster's column, so a cluster
+    // must name the column a cell starts at -- not how many cells came before it -- or every glyph after
+    // a wide character is drawn a column too far left, over the wide character's right half.
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+
+    grouper.beginFrame();
+    grouper.forceGroupStart();
+    auto const write = [&](int column, char32_t codepoint) {
+        grouper.renderCell(CellLocation { LineOffset(0), ColumnOffset(column) },
+                           std::u32string_view(&codepoint, 1),
+                           0x102030_rgb,
+                           TextStyle::Regular,
+                           LineFlag::None);
+    };
+    write(0, U'A');
+    write(1, U'文'); // two columns wide
+    write(3, U'档'); // two columns wide
+    write(5, U'B');
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 1);
+    auto const& group = std::get<TextClusterGroup>(recorder.events[0]);
+    CHECK(group.clusters == std::vector { 0, 1, 3, 5 });
+    CHECK(group.initialPenPosition == CellLocation {});
+}
+
 TEST_CASE("TextClusterGrouper.renderLine.DoubleWidth")
 {
     // A double-width line's cells are display columns, two per character, exactly as
     // RenderBufferBuilder::displayColumn lays out the cells of a line that is not trivial -- so a group
-    // after a space starts at the column it is drawn at, not at half of it.
+    // starts, and a cluster counts, in the same unit whichever way the line arrives.
     auto recorder = EventRecorder {};
     auto grouper = TextClusterGrouper(recorder);
 
@@ -279,9 +336,14 @@ TEST_CASE("TextClusterGrouper.renderLine.DoubleWidth")
     grouper.endFrame();
 
     REQUIRE(recorder.events.size() == 2);
-    CHECK(std::get<TextClusterGroup>(recorder.events[0]).initialPenPosition == CellLocation {});
-    CHECK(std::get<TextClusterGroup>(recorder.events[1]).initialPenPosition
-          == CellLocation { LineOffset(0), ColumnOffset(6) });
+
+    auto const& first = std::get<TextClusterGroup>(recorder.events[0]);
+    CHECK(first.clusters == std::vector { 0, 2 });
+    CHECK(first.initialPenPosition == CellLocation {});
+
+    auto const& second = std::get<TextClusterGroup>(recorder.events[1]);
+    CHECK(second.clusters == std::vector { 0, 2 });
+    CHECK(second.initialPenPosition == CellLocation { LineOffset(0), ColumnOffset(6) });
 }
 
 TEST_CASE("TextClusterGrouper.a_group_starts_where_its_first_cell_is")

@@ -113,9 +113,9 @@ Making use of reserved glyph slots
 #include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
-#include <vtrasterizer/GlyphAdvance.hpp>
 #include <vtrasterizer/GlyphSlicing.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/RunPen.hpp>
 #include <vtrasterizer/TracyCellZone.hpp>
 #include <vtrasterizer/Utils.hpp>
 #include <vtrasterizer/shared_defines.h>
@@ -436,9 +436,14 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
     return &_textureAtlas->directMapped(tileIndex);
 }
 
-crispy::StrongHash TextRenderer::shapingCacheKeyFor(std::u32string_view text, TextStyle style) const noexcept
+crispy::StrongHash TextRenderer::shapingCacheKeyFor(std::u32string_view text,
+                                                    std::span<unsigned const> clusters,
+                                                    TextStyle style) const noexcept
 {
-    return hashTextAndStyle(text, style, getFontForStyle(_fonts, style), _fontDescriptions.size);
+    auto const key = hashTextAndStyle(text, style, getFontForStyle(_fonts, style), _fontDescriptions.size);
+    if (clusters.empty() || (clusters.front() == 0 && clusters.back() + 1 == clusters.size()))
+        return key;
+    return key * StrongHash::compute(clusters.data(), clusters.size_bytes());
 }
 
 void TextRenderer::updateFontMetrics()
@@ -720,10 +725,8 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     _textRendererEvents.onBeforeRenderingText();
     auto _ = core::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
-    auto const hash = shapingCacheKeyFor(codepoints, style);
-    text::ShapeResult const& glyphPositions =
-        getOrCreateCachedGlyphPositions(hash, codepoints, clusters, style);
-    crispy::Point pen = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
+    text::ShapeResult const& glyphPositions = getOrCreateCachedGlyphPositions(codepoints, clusters, style);
+    auto const runOrigin = _gridMetrics.mapBottomLeft(initialPenPosition, _smoothScrollYOffset);
 
     using vtbackend::LineFlag;
 
@@ -740,12 +743,16 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
     // hold a tile larger than one cell, and every row of the block has to be able to draw itself.
     if (!scale.isOrdinary())
     {
-        renderBlockGroup(glyphPositions, pen, color, lineFlags, sizing, adjustment);
+        renderBlockGroup(glyphPositions, runOrigin, color, lineFlags, sizing, adjustment);
         return;
     }
 
+    auto runPen = RunPen { cellWidth, advanceScale };
     for (auto const& glyphPosition: glyphPositions)
     {
+        auto pen = runOrigin;
+        pen.x += runPen.place(glyphPosition.cluster, glyphPosition.advance.x);
+
         if (auto const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
         {
             auto const attributesCopy = adjustTileAttributesForLineFlags(lineFlags, *attributes);
@@ -756,10 +763,6 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                          attributes->metadata.y.value,
                                          pen1);
             renderRasterizedGlyph(pen1, color, attributesCopy);
-
-            // Direct mapping only ever covers printable US-ASCII of the primary font, which occupies
-            // exactly one cell. The advance is known, so the font is not consulted for it.
-            pen.x += cellWidth * advanceScale;
             continue;
         }
 
@@ -796,13 +799,6 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                 sliceKey += unbox(textureAtlas().tileSize().width);
             }
         }
-
-        // TODO: The font's advance is a stand-in for the datum the pipeline actually has and then drops:
-        // the glyph's cluster, i.e. which cell it belongs to. Carrying the cluster on GlyphPosition would
-        // let the pen step by the exact cell delta -- zero for a combining mark, N for a ligature spanning
-        // N cells -- with no rounding at all. That awaits TextClusterGrouper's east-asian-width fixme,
-        // since clusters presently count cells appended rather than columns occupied.
-        pen.x += advanceToCells(glyphPosition.advance.x, cellWidth) * cellWidth * advanceScale;
     }
 }
 
@@ -852,8 +848,8 @@ std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
     // origin instead stacks the pieces of a Devanagari conjunct on top of one another, which is what
     // left `क्नि` showing nothing but its matra.
     //
-    // These advances are NOT rounded to whole cells the way the ordinary path rounds them: inside a
-    // cluster they position glyphs against each other, not against the cell grid.
+    // These advances are not rounded to whole cells: inside a cluster they position glyphs against each
+    // other, not against the cell grid -- the same rule RunPen follows on the ordinary path.
     struct Placement
     {
         text::RasterizedGlyph glyph;
@@ -1354,11 +1350,13 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                             toFragmentShaderSelector(glyph.format)) };
 }
 
-text::ShapeResult const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHash hash,
-                                                                       u32string_view codepoints,
+text::ShapeResult const& TextRenderer::getOrCreateCachedGlyphPositions(u32string_view codepoints,
                                                                        gsl::span<unsigned> clusters,
                                                                        TextStyle style)
 {
+    auto const hash =
+        shapingCacheKeyFor(codepoints, std::span<unsigned const> { clusters.data(), clusters.size() }, style);
+
     // getOrTryEmplace, not getOrEmplace: a shaper that fails mid-run (DirectWrite's GetGlyphPlacements
     // is the documented case) yields no positions at all for a non-empty run, and caching THAT turns one
     // transient failure into a permanent hole -- every later occurrence of the same text in the same
@@ -1410,7 +1408,6 @@ text::ShapeResult TextRenderer::shapeTextRun(unicode::run_segmenter::range const
                                              gsl::span<unsigned> totalClusters,
                                              TextStyle style)
 {
-    // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<size_t>(run.end - run.start);
     auto const codepoints = u32string_view(totalCodepoints.data() + run.start, count);
     auto const clusters = gsl::span(totalClusters.data() + run.start, count);

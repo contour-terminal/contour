@@ -187,6 +187,23 @@ TEST_CASE("OpenShaper.fallback.only_uncovered_codepoints_fall_back", "[OpenShape
         CHECK(gpos.glyph.index.value != 0);
 }
 
+TEST_CASE("OpenShaper.fallback.every_glyph_keeps_the_cluster_it_was_shaped_for", "[OpenShaper][fallback]")
+{
+    // The renderer draws each glyph on the cell its cluster names (issue #452), so a glyph that came
+    // from a fallback font must carry its cell exactly as one from the primary does.
+    auto env = FallbackEnv { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { U'B', 8 } } },
+        { .name = "fallback", .monospace = Proportional, .glyphs = { { Ornament, 20 } } },
+    } };
+
+    auto const result = shapeCells(env.shaper(), env.key("primary"), u32string { U'A', Ornament, U'B' });
+
+    REQUIRE(result.size() == 3);
+    CHECK(result[0].cluster == 0);
+    CHECK(result[1].cluster == 1);
+    CHECK(result[2].cluster == 2);
+}
+
 TEST_CASE("OpenShaper.fallback.an_empty_run_shapes_to_nothing", "[OpenShaper][fallback]")
 {
     auto env = FallbackEnv { {

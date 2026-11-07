@@ -648,6 +648,7 @@ namespace
             gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0);
             gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0);
             gpos.presentation = presentation;
+            gpos.cluster = info[i].cluster;
 
             auto const missing = glyphMissing(gpos);
             output.anyMissing = output.anyMissing || missing;

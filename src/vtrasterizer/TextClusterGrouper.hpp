@@ -95,11 +95,8 @@ class TextClusterGrouper
     // uniform unicode properties (script, language, direction).
     std::vector<char32_t> _codepoints;
 
-    // cluster indices for each codepoint
+    // For each codepoint, the column its cell starts at, counted from the group's first. @see RunPen
     std::vector<unsigned> _clusters;
-
-    // number of grid cells processed
-    int _cellCount = 0; // FIXME: EA width vs actual cells
 
     /// The scale the current group is being drawn at. Part of the group's identity: a cell drawn at
     /// a different size cannot share a shaping run with its neighbours.

@@ -51,7 +51,7 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
     //
     // Positions are display columns, two per character on a double-width line, which is how
     // RenderBufferBuilder::displayColumn places the cells of a line that is not trivial: a group then
-    // starts in the same unit whichever way the line arrives.
+    // starts, and its clusters count, in the same unit whichever way the line arrives.
     for (auto const cp: text)
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
@@ -115,36 +115,33 @@ void TextClusterGrouper::appendCellTextToClusterGroup(vtbackend::CellLocation po
     bool const attribsChanged =
         color != _color || style != _style || flags != _lineFlags || sizing != _sizing;
     bool const cellIsEmpty = codepoints.empty() || codepoints[0] == 0x20;
-    bool const textStartsNewCluster = _cellCount == 0 && !cellIsEmpty;
 
-    if (attribsChanged || textStartsNewCluster)
+    if (attribsChanged || (_codepoints.empty() && !cellIsEmpty))
     {
-        if (_cellCount)
-            flushTextClusterGroup();
+        flushTextClusterGroup();
         _color = color;
         _style = style;
         _lineFlags = flags;
         _sizing = sizing;
     }
 
-    if (!cellIsEmpty)
-    {
-        // A group starts where its first cell is. Advancing the previous group's start by the number
-        // of cells it held instead fell short after a wide character written as one cell without a
-        // continuation cell (RenderBuffer's layoutRenderText), whose two columns counted as one.
-        if (_codepoints.empty())
-            _initialPenPosition = position;
-        for (char32_t const codepoint: codepoints)
-        {
-            _codepoints.emplace_back(codepoint);
-            _clusters.emplace_back(_cellCount);
-        }
-        _cellCount++;
-    }
-    else
+    if (cellIsEmpty)
     {
         flushTextClusterGroup();
         _forceUpdateInitialPenPosition = true;
+        return;
+    }
+
+    // A group starts where its first cell is, and each cell's cluster is the column it starts at,
+    // counted from there -- not the number of cells before it, which a wide character written as one
+    // cell without a continuation cell after it (RenderBuffer's layoutRenderText) would undercount.
+    if (_codepoints.empty())
+        _initialPenPosition = position;
+    auto const cluster = static_cast<unsigned>(unbox(position.column - _initialPenPosition.column));
+    for (char32_t const codepoint: codepoints)
+    {
+        _codepoints.emplace_back(codepoint);
+        _clusters.emplace_back(cluster);
     }
 }
 
@@ -163,7 +160,6 @@ void TextClusterGrouper::flushTextClusterGroup()
 
     _codepoints.clear();
     _clusters.clear();
-    _cellCount = 0;
 }
 
 void TextClusterGrouper::endFrame()

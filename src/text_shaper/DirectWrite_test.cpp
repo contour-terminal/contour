@@ -63,6 +63,28 @@ TEST_CASE("DirectWriteLocator.resolve")
     }
 }
 
+TEST_CASE("DirectWriteShaper.shape")
+{
+    auto locator = DirectWriteLocator {};
+    auto shaper = DirectWriteShaper { DPI { .x = 96, .y = 96 }, locator };
+    auto const font = shaper.loadFont(FontDescription {}, FontSize { 12.0 });
+    REQUIRE(font.has_value());
+
+    SECTION("every glyph carries the cluster of the cell it was shaped for")
+    {
+        // The renderer draws each glyph on the cell its cluster names, so the clusters must be the ones
+        // handed in -- here a run that starts three cells into its group -- not glyph indices.
+        auto const text = std::u32string_view { U"AB" };
+        auto clusters = std::array { 3u, 4u };
+        auto result = ShapeResult {};
+        shaper.shape(*font, text, clusters, unicode::Script::Latin, unicode::PresentationStyle::Text, result);
+
+        REQUIRE(result.size() == 2);
+        CHECK(result[0].cluster == 3);
+        CHECK(result[1].cluster == 4);
+    }
+}
+
 TEST_CASE("DirectWriteShaper.loadFont")
 {
     SECTION("a font path that is not UTF-8 loads no font")

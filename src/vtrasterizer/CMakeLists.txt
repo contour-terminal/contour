@@ -5,7 +5,7 @@ set(_header_files
     ChipRenderer.hpp
     CursorRenderer.hpp
     DecorationRenderer.hpp
-    GlyphAdvance.hpp
+    RunPen.hpp
     GlyphScaling.hpp
     GlyphSlicing.hpp
     GridMetrics.hpp
@@ -46,7 +46,7 @@ set(_test_files
     BoxDrawingRenderer_test.cpp
     ChipRenderer_test.cpp
     DecorationRenderer_test.cpp
-    GlyphAdvance_test.cpp
+    RunPen_test.cpp
     GlyphScaling_test.cpp
     GlyphSlicing_test.cpp
     GridMetrics_test.cpp
