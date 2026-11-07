@@ -1660,32 +1660,41 @@ jobs:
             exit 1
           }
           if ($status -ne 0) { exit 1 }
-      - name: "verify the Win32 chrome tests actually ran"
+      - name: "verify the Win32 chrome and Restart Manager tests actually ran"
         # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
         # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
         # pass. windows-latest has a desktop, so a skip here is a regression. The [win11-22h2] cases are left
         # out: they SKIP on a Windows older than 22H2 (a pinned runner image), which is no regression.
         shell: pwsh
+        timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: windows
           QT_QUICK_BACKEND: software
           CONTOUR_TEST_DISPLAY: "1"
         run: |
-          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_gui_test.exe"
-          # A missing binary must not read as "nothing skipped".
-          if (-not (Test-Path $binary)) {
-            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
-            exit 1
+          # The chrome's own cases, and the Restart Manager one (contour_restart_manager_test closes a running
+          # Contour the way Windows Installer does and expects it back): both SKIP without a desktop.
+          $rows = @(
+            @{ Binary = 'contour_gui_test.exe'; Filter = '[win32]~[win11-22h2]'; What = 'the Win32 chrome' }
+            @{ Binary = 'contour_restart_manager_test.exe'; Filter = '[win32]'; What = 'closing and reopening Contour as Windows Installer does' }
+          )
+          foreach ($row in $rows) {
+            $binary = "out/build/$env:CMAKE_PRESET/bin/$($row.Binary)"
+            # A missing binary must not read as "nothing skipped".
+            if (-not (Test-Path $binary)) {
+              Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+              exit 1
+            }
+            Write-Output "--- $binary $($row.Filter)"
+            $output = & $binary $row.Filter 2>&1 | Out-String
+            $status = $LASTEXITCODE
+            Write-Output $output
+            if ($output -match 'skipped') {
+              Write-Output "::error::$binary $($row.Filter) reported SKIPPED; $($row.What) is not being exercised on Windows"
+              exit 1
+            }
+            if ($status -ne 0) { exit 1 }
           }
-          Write-Output "--- $binary [win32]~[win11-22h2]"
-          $output = & $binary '[win32]~[win11-22h2]' 2>&1 | Out-String
-          $status = $LASTEXITCODE
-          Write-Output $output
-          if ($output -match 'skipped') {
-            Write-Output "::error::$binary [win32] reported SKIPPED; the Win32 chrome is not being exercised on Windows"
-            exit 1
-          }
-          if ($status -ne 0) { exit 1 }
       # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
       # queue and release tags.
       - name: "Install Wix Toolset"
@@ -1702,71 +1711,43 @@ jobs:
       - name: "Create Package(s)"
         if: github.event_name != 'pull_request'
         shell: powershell
+        # The per-machine MSI and the zip, then the per-user MSI. CPack names them in lowercase already
+        # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory.
         run: |
-          cpack --preset ${{ env.CMAKE_PRESET }} -V
-          if ($LASTEXITCODE -ne 0) {
-            echo "CPack failed. Dumping wix.log..."
-            type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
-            exit $LASTEXITCODE
-          }
-      - name: "Rename package(s)"
-        if: github.event_name != 'pull_request'
-        run: |
-          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Check the package contents"
-        if: github.event_name != 'pull_request'
-        # What the package must and must not hold, asserted as the macOS job does for its image: a mistake
-        # either way has no other visible symptom.
-        # - No executable but those allowed, no .ilk or .pdb, no Qt Test: bin/ is every target's output
-        #   directory (see its install rule in src/contour/CMakeLists.txt for why that matters), and
-        #   CONTOUR_INSTALL_TOOLS=OFF in the Windows preset keeps the tools' own install rules out.
-        # - What is loaded by name or file type at run time, which no build notices missing and CI's tests
-        #   find anyway, in the Qt install QT_PLUGIN_PATH names: the Fluent row's controls style, named through
-        #   QQuickStyle::setStyle where windeployqt's --qmldir scan cannot see it; Qt SVG and its image plugin
-        #   (see cmake/DeployQt.cmake); and the bundled status-line extensions, which contour.exe looks for
-        #   beside bin/.
-        # contour.exe must be found first, or every check would pass on a zip it cannot read.
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
-          try {
-            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
-          } finally {
-            $zip.Dispose()
-          }
-          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the checks below would pass vacuously"
-            exit 1
-          }
-          $shippedExecutables = 'contour.exe', 'OpenConsole.exe'
-          $strays = $entries | Where-Object {
-            $name = ($_ -split '/')[-1]
-            ($name -like '*.exe' -and $shippedExecutables -notcontains $name) -or $name -like '*.ilk' -or
-              $name -like '*.pdb' -or $name -eq 'Qt6Test.dll' -or $name -eq 'qoffscreen.dll'
-          }
-          if ($strays) {
-            Write-Host "::error::the zip ships $($strays -join ', ')"
-            exit 1
-          }
-          $required = @(
-            'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir'
-            'bin/imageformats/qsvg.dll'
-            'bin/Qt6Svg.dll'
-          ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
-          foreach ($path in $required) {
-            if (-not ($entries | Where-Object { $_ -like "*/$path" -or $_ -eq $path })) {
-              Write-Host "::error::the zip holds no $path"
-              exit 1
+          foreach ($preset in '${{ env.CMAKE_PRESET }}', '${{ env.CMAKE_PRESET }}-user') {
+            cpack --preset $preset -V
+            if ($LASTEXITCODE -ne 0) {
+              echo "CPack failed. Dumping wix.log..."
+              type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
+              exit $LASTEXITCODE
             }
           }
+      - name: "Check the package contents"
+        if: github.event_name != 'pull_request'
+        # What each package must and must not hold, asserted as the macOS job does for its image: a mistake
+        # either way has no other visible symptom. The rows, and why each exists, are in
+        # scripts/check-windows-package.ps1.
+        shell: pwsh
+        run: |
+          $version = '${{ steps.set_vars.outputs.version }}'
+          $dir = "out/build/${{ env.CMAKE_PRESET }}"
+          pwsh scripts/check-windows-package.ps1 -Zip "$dir/contour-$version-win64.zip" `
+            -MachineMsi "$dir/contour-$version-win64.msi" -UserMsi "$dir/contour-$version-win64-user.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading MSI to artifact store"
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading the per-user MSI to artifact store"
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
+          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
@@ -1774,7 +1755,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
@@ -1791,21 +1772,32 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ steps.set_vars.outputs.version }}'
-          $candidate = "contour-$version-win64.msi"
+          $candidate = Join-Path $PWD "out\build\${{ env.CMAKE_PRESET }}\contour-$version-win64.msi"
+          $candidateUser = Join-Path $PWD "out\build\${{ env.CMAKE_PRESET }}\contour-$version-win64-user.msi"
           $release = ($version -split '\.')[0..2] -join '.'
 
-          # cpack changes into the preset's build directory before it resolves -B, so the directory is absolute.
-          $earlierDir = Join-Path $PWD 'out\msi-earlier'
-          cpack --preset ${{ env.CMAKE_PRESET }} -G WIX -D CPACK_PACKAGE_VERSION=$release.0 -B $earlierDir
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "CPack failed. Dumping wix.log..."
-            Get-Content (Join-Path $earlierDir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
-            exit $LASTEXITCODE
-          }
-          $earlier = @(Get-ChildItem $earlierDir -Filter '*-win64.msi')
-          if ($earlier.Count -ne 1) {
-            Write-Host "::error::expected one earlier build of $release in $earlierDir, found $($earlier.Count)"
-            exit 1
+          # An earlier build of this release for each package: lower than the one under test and built from this very
+          # tree, so that it carries the Relocates marker. cpack changes into the preset's build directory before it
+          # resolves -B, so the directories are absolute. No per-user package is released yet, so the per-user one
+          # is upgraded from an earlier build only.
+          $builds = @(
+            @{ Name = 'machine'; Preset = '${{ env.CMAKE_PRESET }}'; Dir = Join-Path $PWD 'out\msi-earlier'; Filter = '*-win64.msi'; Extra = @('-G', 'WIX') }
+            @{ Name = 'user'; Preset = '${{ env.CMAKE_PRESET }}-user'; Dir = Join-Path $PWD 'out\msi-earlier-user'; Filter = '*-win64-user.msi'; Extra = @() }
+          )
+          $earlierBuild = @{}
+          foreach ($build in $builds) {
+            cpack --preset $build.Preset @($build.Extra) -D CPACK_PACKAGE_VERSION=$release.0 -B $build.Dir
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "CPack failed. Dumping wix.log..."
+              Get-Content (Join-Path $build.Dir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
+              exit $LASTEXITCODE
+            }
+            $found = @(Get-ChildItem $build.Dir -Filter $build.Filter)
+            if ($found.Count -ne 1) {
+              Write-Host "::error::expected one earlier $($build.Name) build of $release in $($build.Dir), found $($found.Count)"
+              exit 1
+            }
+            $earlierBuild[$build.Name] = $found[0].FullName
           }
 
           gh release download --repo contour-terminal/contour --pattern '*-win64.msi' --dir out\msi-release
@@ -1816,9 +1808,11 @@ jobs:
             exit 1
           }
 
-          pwsh scripts\check-msi-upgrade.ps1 -From $earlier[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
+          pwsh scripts\check-msi-upgrade.ps1 -From $earlierBuild.machine -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh scripts\check-msi-upgrade.ps1 -From $earlierBuild.user -To $candidateUser -LogDir "$env:RUNNER_TEMP\msi-user-same-release"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading the upgrade check's logs"
         if: failure() && github.event_name != 'pull_request'
