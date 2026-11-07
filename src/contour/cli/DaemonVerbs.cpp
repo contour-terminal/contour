@@ -9,12 +9,15 @@
 
 #include <algorithm>
 #include <array>
+#include <expected>
+#include <filesystem>
 #include <format>
 #include <iostream>
 #include <iterator>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -149,6 +152,14 @@ namespace
         return std::format("{}: {}", name, vthost::client::describeFailure(failure));
     }
 } // namespace
+
+std::filesystem::path daemonServiceProgram(
+    std::expected<std::filesystem::path, std::error_code> const& running, std::string_view argv0)
+{
+    if (running)
+        return *running;
+    return std::filesystem::absolute(core::pathFromUtf8(argv0).value_or(std::filesystem::path {}));
+}
 
 std::string formatDaemonStatus(DaemonStatus const& status)
 {
