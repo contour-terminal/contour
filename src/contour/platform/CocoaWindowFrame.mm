@@ -55,6 +55,7 @@ class CocoaWindowFrame final: public NativeWindowFrame
         {
             // The native title bar: an ordinary decorated window, once the hint is dropped.
             nsWindow.titleVisibility = NSWindowTitleVisible;
+            nsWindow.movable = YES;
             return;
         }
 
@@ -63,6 +64,10 @@ class CocoaWindowFrame final: public NativeWindowFrame
         // traffic lights. Our own tab strip then draws into that area, and reserves the corner the
         // traffic lights occupy (TitleBar.nativeControlsInset). AppKit would still draw the title there.
         nsWindow.titleVisibility = NSWindowTitleHidden;
+
+        // The band moves the window itself (startSystemMove, which still works here). Left movable, AppKit
+        // would also move it on a drag that began on a tab: Qt's view of a translucent window is not opaque.
+        nsWindow.movable = NO;
 
         // Belt and braces: a window whose content is fully transparent can end up with hasShadow
         // cleared, and without it none of the above shows.
