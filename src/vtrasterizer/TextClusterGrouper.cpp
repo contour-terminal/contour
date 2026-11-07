@@ -48,6 +48,10 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
     // remains, so a full-width character on the last writable column does arrive. Hence the measure
     // and the filler loop below, which RenderBufferBuilder::renderGridText mirrors exactly: the two
     // draw the same line whenever a selection switches between them.
+    //
+    // Positions are display columns, two per character on a double-width line, which is how
+    // RenderBufferBuilder::displayColumn places the cells of a line that is not trivial: a group then
+    // starts in the same unit whichever way the line arrives.
     for (auto const cp: text)
     {
         auto const gridPosition = vtbackend::CellLocation { .line = lineOffset, .column = columnOffset };
@@ -62,7 +66,7 @@ void TextClusterGrouper::renderLine(std::u32string_view text,
                        style,
                        flags);
 
-        columnOffset += vtbackend::ColumnOffset::cast_from(std::max(1u, width));
+        columnOffset += vtbackend::ColumnOffset::cast_from(std::max(1u, width) * columnScale);
     }
 
     if (!_codepoints.empty())
@@ -80,7 +84,6 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
     {
         if (!SoftRequire(_codepoints.empty()))
             flushTextClusterGroup();
-        _initialPenPosition = position;
         _forceUpdateInitialPenPosition = false;
     }
 
@@ -99,10 +102,11 @@ void TextClusterGrouper::renderCell(vtbackend::CellLocation position,
         }
     }
 
-    appendCellTextToClusterGroup(graphemeCluster, style, foregroundColor, flags, sizing);
+    appendCellTextToClusterGroup(position, graphemeCluster, style, foregroundColor, flags, sizing);
 }
 
-void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepoints,
+void TextClusterGrouper::appendCellTextToClusterGroup(vtbackend::CellLocation position,
+                                                      std::u32string_view codepoints,
                                                       TextStyle style,
                                                       vtbackend::RGBColor color,
                                                       vtbackend::LineFlags flags,
@@ -116,7 +120,7 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
     if (attribsChanged || textStartsNewCluster)
     {
         if (_cellCount)
-            flushTextClusterGroup(); // also increments text start position
+            flushTextClusterGroup();
         _color = color;
         _style = style;
         _lineFlags = flags;
@@ -125,6 +129,11 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
 
     if (!cellIsEmpty)
     {
+        // A group starts where its first cell is. Advancing the previous group's start by the number
+        // of cells it held instead fell short after a wide character written as one cell without a
+        // continuation cell (RenderBuffer's layoutRenderText), whose two columns counted as one.
+        if (_codepoints.empty())
+            _initialPenPosition = position;
         for (char32_t const codepoint: codepoints)
         {
             _codepoints.emplace_back(codepoint);
@@ -134,7 +143,7 @@ void TextClusterGrouper::appendCellTextToClusterGroup(std::u32string_view codepo
     }
     else
     {
-        flushTextClusterGroup(); // also increments text start position
+        flushTextClusterGroup();
         _forceUpdateInitialPenPosition = true;
     }
 }
@@ -152,7 +161,9 @@ void TextClusterGrouper::flushTextClusterGroup()
                                 _sizing);
     }
 
-    resetAndMovePenForward(vtbackend::ColumnOffset::cast_from(_cellCount));
+    _codepoints.clear();
+    _clusters.clear();
+    _cellCount = 0;
 }
 
 void TextClusterGrouper::endFrame()

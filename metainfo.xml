@@ -116,6 +116,7 @@
           <li>Fixes the kitty graphics protocol ignoring placement ids: placing an image again under the same image id and placement id (<code>p=</code>) now replaces that placement instead of adding another, and <code>a=d,d=i</code> / <code>d=I</code> with a <code>p=</code> deletes only that placement, freeing the image data (upper case) only once no placement of it remains</li>
           <li>Fixes building on older macOS SDKs that lack <code>aligned_alloc</code> (#2005)</li>
           <li>Fixes a client reporting an unchanged window area to the daemon discarding the per-pane sizes other attached clients had reported, which put their split panes back on the daemon's estimate (#2227)</li>
+          <li>Fixes text after a space on a double-width line, and text in another color right after a wide character in the sticky header, a fold label or a gutter chip, being drawn starting at the wrong column</li>
           <li>Fixes a release build on Windows, started by <code>cmd.exe</code> with its output redirected (<code>contour version &gt; out.txt</code>, a pipe, or <code>NUL</code>), writing to the console instead of where it was redirected (#2239)</li>
           <li>Fixes a Windows installer needing the installed Contour uninstalled first: every build now upgrades it in place</li>
           <li>Fixes the first window waiting for a daemon start that had been given up on before it opened</li>

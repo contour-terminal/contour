@@ -68,23 +68,16 @@ class TextClusterGrouper
     void endFrame();
 
   private:
-    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
+    /// Puts a sequence of codepoints that belong to the same grid cell at @p position
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view codepoints,
+    void appendCellTextToClusterGroup(vtbackend::CellLocation position,
+                                      std::u32string_view codepoints,
                                       TextStyle style,
                                       vtbackend::RGBColor color,
                                       vtbackend::LineFlags flags,
                                       vtbackend::GlyphSizing const& sizing);
 
     void flushTextClusterGroup();
-
-    void resetAndMovePenForward(vtbackend::ColumnOffset penIncrementInX) noexcept
-    {
-        _codepoints.clear();
-        _clusters.clear();
-        _cellCount = 0;
-        _initialPenPosition.column += penIncrementInX;
-    }
 
     Events& _events;
 

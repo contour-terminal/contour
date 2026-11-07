@@ -266,6 +266,52 @@ TEST_CASE("TextClusterGrouper.renderLine.DoubleWhitespace")
     CHECK(clusterGroup2.color == RGBColor { 0xF0, 0x80, 0x40 });
 }
 
+TEST_CASE("TextClusterGrouper.renderLine.DoubleWidth")
+{
+    // A double-width line's cells are display columns, two per character, exactly as
+    // RenderBufferBuilder::displayColumn lays out the cells of a line that is not trivial -- so a group
+    // after a space starts at the column it is drawn at, not at half of it.
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+
+    grouper.beginFrame();
+    grouper.renderLine(U"AB CD", LineOffset(0), 0x102030_rgb, TextStyle::Regular, LineFlag::DoubleWidth);
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 2);
+    CHECK(std::get<TextClusterGroup>(recorder.events[0]).initialPenPosition == CellLocation {});
+    CHECK(std::get<TextClusterGroup>(recorder.events[1]).initialPenPosition
+          == CellLocation { LineOffset(0), ColumnOffset(6) });
+}
+
+TEST_CASE("TextClusterGrouper.a_group_starts_where_its_first_cell_is")
+{
+    // RenderBuffer's layoutRenderText (the sticky header's evicted command, fold labels, gutter chips)
+    // writes a wide character as ONE cell two columns wide, with no empty continuation cell after it.
+    // A color change right after it starts a new group, which must start where its first cell is: two
+    // columns past the wide character's own, not one.
+    auto recorder = EventRecorder {};
+    auto grouper = TextClusterGrouper(recorder);
+
+    grouper.beginFrame();
+    grouper.forceGroupStart();
+    auto const write = [&](int column, char32_t codepoint, RGBColor color) {
+        grouper.renderCell(CellLocation { LineOffset(0), ColumnOffset(column) },
+                           std::u32string_view(&codepoint, 1),
+                           color,
+                           TextStyle::Regular,
+                           LineFlag::None);
+    };
+    write(0, U'A', 0x102030_rgb);
+    write(1, U'文', 0x102030_rgb); // two columns wide
+    write(3, U'B', 0x405060_rgb);
+    grouper.endFrame();
+
+    REQUIRE(recorder.events.size() == 2);
+    CHECK(std::get<TextClusterGroup>(recorder.events[1]).initialPenPosition
+          == CellLocation { LineOffset(0), ColumnOffset(3) });
+}
+
 TEST_CASE("TextClusterGrouper.SplitAtColorChange")
 {
     auto recorder = EventRecorder {};
