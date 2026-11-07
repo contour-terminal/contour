@@ -1768,10 +1768,13 @@ jobs:
         if: github.event_name != 'pull_request'
         timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
-        # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
-        # version field (the run number), which Windows Installer ignores: only a ProductCode of its own per
-        # build lets the second one in (error 1638 otherwise). Needs a runner without Contour installed, which
-        # scripts/check-msi-upgrade.ps1 insists on.
+        # installed Contour is upgraded in the field, and checks what the upgrade leaves: the folder, the PATH,
+        # the daemon task, a daemon started by hand, the Start menus, and the leftovers of an uninstall. The two
+        # builds of one release differ only in the fourth version field (the run number), which Windows
+        # Installer ignores: only a ProductCode of its own per build lets the second one in (error 1638
+        # otherwise). An earlier build that should relocate a daemon is built from this very tree, so that it
+        # carries the Relocates marker the installer asks for. Needs a runner without Contour installed, which
+        # scripts/check-msi-upgrade.ps1 insists on; each run below leaves it so.
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1814,12 +1817,37 @@ jobs:
             exit 1
           }
 
-          pwsh scripts\check-msi-upgrade.ps1 -From $earlierBuild.machine -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          pwsh scripts\check-msi-upgrade.ps1 -From $earlierBuild.user -To $candidateUser -LogDir "$env:RUNNER_TEMP\msi-user-same-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Each run: what it proves is in scripts/check-msi-upgrade.ps1's rows.
+          $runs = @(
+            # From the latest release (an old versioned folder): the folder becomes Contour, and the daemon task
+            # is repaired by `daemon-service start`, with no daemon running (a GUI start repairs it only while
+            # one is served).
+            @{ Log = 'msi-from-release'; From = $released[0].FullName; To = $candidate; Extra = @('-ServiceLabel', 'msi-check') }
+            # From a custom folder, kept by the upgrade; a daemon started by hand from the earlier install
+            # lives through it, now on its staged copy.
+            # (and repaired there: the folder, PATH and recorded InstallRoot stay, and the relocator names the folder)
+            @{ Log = 'msi-same-release'; From = $earlierBuild.machine; To = $candidate; Extra = @('-FromInstallRoot', 'C:\ContourCustom', '-ForegroundDaemon', 'msi-fg', '-RepairAfterUpgrade') }
+            # Both installers side by side: each scope keeps its own folder, PATH and Start menu as the other
+            # comes and goes. The earlier install is in the default per-machine folder, C:\Program Files\Contour,
+            # whose space the daemon relocator's command line has to survive, so a daemon started by hand there
+            # must be moved (the log shows the custom action ran, and returned 1, before InstallValidate).
+            @{ Log = 'msi-side-by-side'; From = $earlierBuild.machine; To = $candidate; Extra = @('-SideBySide', $candidateUser, '-ForegroundDaemon', 'msi-fg-default') }
+            # Per user, moved by the upgrade, with the desktop shortcut declined (an upgrade removes it) ...
+            @{ Log = 'msi-user-moved'; From = $earlierBuild.user; To = $candidateUser; Extra = @('-ToInstallRoot', "$env:LOCALAPPDATA\Programs\ContourMoved", '-ToProperties', 'DESKTOP_SHORTCUT=0') }
+            # ... and kept in a custom folder when the upgrade names none.
+            @{ Log = 'msi-user-custom'; From = $earlierBuild.user; To = $candidateUser; Extra = @('-FromInstallRoot', "$env:LOCALAPPDATA\Programs\ContourCustom") }
+          )
+          # Every run, whatever the ones before it did (each cleans up after itself), and the failures together.
+          $failed = @()
+          foreach ($run in $runs) {
+            Write-Host "=== $($run.Log)"
+            pwsh scripts\check-msi-upgrade.ps1 -From $run.From -To $run.To -LogDir "$env:RUNNER_TEMP\$($run.Log)" @($run.Extra)
+            if ($LASTEXITCODE -ne 0) { $failed += $run.Log }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::the install checks failed: $($failed -join ', ')"
+            exit 1
+          }
       - name: "Uploading the upgrade check's logs"
         if: failure() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
