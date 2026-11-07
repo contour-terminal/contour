@@ -180,3 +180,8 @@ TEST_CASE("on Linux without a home directory the backend refuses and says why", 
     CHECK(commands.calls.empty());
 }
 #endif
+
+TEST_CASE("a disabled registration is named as such", "[vthost][service]")
+{
+    CHECK(nameOf(ServiceRunState::Disabled) == "installed, disabled");
+}

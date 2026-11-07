@@ -221,3 +221,27 @@ TEST_CASE("findRegisteredService reports nothing when no name is registered", "[
         } };
     CHECK_FALSE(vthost::findRegisteredService("default", factory).has_value());
 }
+
+TEST_CASE("a disabled registration stays disabled whatever the live probe says", "[vthost][starter]")
+{
+    CHECK(vthost::effectiveRunState(ServiceRunState::Disabled, DaemonPresence::Serving)
+          == ServiceRunState::Disabled);
+    CHECK(vthost::effectiveRunState(ServiceRunState::Disabled, DaemonPresence::Absent)
+          == ServiceRunState::Disabled);
+}
+
+TEST_CASE("a disabled registration is not started: the daemon is spawned on demand", "[vthost][starter]")
+{
+    auto log = FakeServiceLog {};
+    auto fixture = OnDemandFixture {};
+    auto starter = vthost::chooseDaemonStarter(
+        vthost::RegisteredService { .backend =
+                                        std::make_unique<FakeServiceBackend>(ServiceRunState::Disabled, log),
+                                    .name = "contour-daemon" },
+        SocketPath,
+        fixture.spawn(std::chrono::seconds { 0 }));
+    REQUIRE(starter);
+    CHECK_FALSE(starter->start().has_value());
+    CHECK(log.starts == 0);
+    CHECK(fixture.spawner.spawns == 1);
+}
