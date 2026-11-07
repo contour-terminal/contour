@@ -50,7 +50,8 @@ $RequiredZipEntries = @(
 
 # The components whose registry root and environment scope depend on the installer's scope (wix_scope.wxs).
 $PathComponent = 'ContourPathEnvironment'
-$ScopedComponents = $PathComponent, 'ContourInstallRoot', 'ContourStartMenuShortcut', 'ContourConnectShortcut', 'ContourDesktopShortcut'
+$ScopedComponents = $PathComponent, 'ContourInstallRoot', 'ContourStartMenuShortcut', 'ContourConnectShortcut', 'ContourDesktopShortcut',
+    'ContourInstallationMarker'
 
 # The SetProperty actions that settle INSTALL_ROOT, in the order they must run: the given folder is noted
 # before AppSearch, the rest follow it (the last that applies wins).
@@ -67,9 +68,11 @@ $ArpLocator = @{ Signature = 'ContourPreviousRoot'; Root = '2'; Key = 'Software\
 $RegLocators = @{
     machine = @(
         @{ Signature = 'ContourRecordedRoot'; Root = '2'; Key = 'Software\Contour\Contour'; Name = 'InstallRoot' }
+        @{ Signature = 'ContourRelocates'; Root = '2'; Key = 'Software\Contour\Contour'; Name = 'Relocates' }
         $ArpLocator)
     user    = @(
         @{ Signature = 'ContourRecordedRoot'; Root = '1'; Key = 'Software\Contour\Contour'; Name = 'InstallRoot' }
+        @{ Signature = 'ContourRelocates'; Root = '1'; Key = 'Software\Contour\Contour'; Name = 'Relocates' }
         $ArpLocator)
 }
 
@@ -357,6 +360,56 @@ $Rows = @(
         }
         if (-not $problems) { return $null }
         "expected $($RootChain -join ' < ') around AppSearch, found $($problems -join '; ')"
+    } }
+    @{ Target = 'msi'; Name = 'installation marker records that this release relocates daemons'; Check = {
+        param($msi)
+        $rows = Get-MsiRows -Msi $msi -Query 'SELECT `Name`, `Value` FROM `Registry` WHERE `Component_` = ''ContourInstallationMarker'''
+        $found = if ($rows.Count -gt 0) { $rows[0] -join '=' } else { 'no Registry row' }
+        Test-Equal 'Relocates=#1' $found
+    } }
+    @{ Target = 'msi'; Name = 'daemons are relocated before files are replaced'; Check = {
+        param($msi)
+        $action = Get-MsiRows -Msi $msi -Query 'SELECT `Type`, `Source`, `Target` FROM `CustomAction` WHERE `Action` = ''ContourRelocateDaemons'''
+        if ($action.Count -eq 0) { return 'expected a ContourRelocateDaemons action, found none' }
+        $problems = @()
+        # 50 is an EXE named by a property, 64 (msidbCustomActionTypeContinue) ignores its failure: no daemon
+        # (the installer runs as SYSTEM) or a failed move must never fail the install.
+        if ($action[0][0] -ne '114') { $problems += "Type is $($action[0][0]), not 114" }
+        # Private (it has lower case letters): a command line cannot name another program.
+        if ($action[0][1] -cne 'ContourRelocator') { $problems += "Source is $($action[0][1]), not the private ContourRelocator" }
+        if ($action[0][2] -ne 'daemon relocate') { $problems += "Target is $($action[0][2])" }
+        $sequence = @{}
+        $sequenceRows = Get-MsiRows -Msi $msi -Query 'SELECT `Action`, `Sequence`, `Condition` FROM `InstallExecuteSequence`'
+        foreach ($row in $sequenceRows) {
+            $sequence[$row[0]] = @{ Number = [int]$row[1]; Condition = $row[2] }
+        }
+        foreach ($name in 'ContourRelocateDaemons', 'InstallValidate', 'ContourRelocatorSet', 'CostFinalize') {
+            if (-not $sequence.ContainsKey($name)) { $problems += "InstallExecuteSequence lacks $name" }
+        }
+        if (-not $problems) {
+            $number = { param($name) $sequence[$name].Number }
+            if ((& $number 'ContourRelocateDaemons') -ge (& $number 'InstallValidate')) { $problems += 'the action is not before InstallValidate' }
+            if ((& $number 'ContourRelocatorSet') -le (& $number 'CostFinalize') -or (& $number 'ContourRelocatorSet') -ge (& $number 'ContourRelocateDaemons')) {
+                $problems += 'the setter is not between CostFinalize and the action'
+            }
+            if ($sequence['ContourRelocatorSet'].Condition -ne 'CONTOUR_RELOCATES AND CONTOUR_RECORDED_ROOT') {
+                $problems += "the setter's condition is '$($sequence['ContourRelocatorSet'].Condition)'"
+            }
+            $condition = $sequence['ContourRelocateDaemons'].Condition
+            if ($condition -cnotmatch '\bContourRelocator\b') { $problems += 'the action does not require ContourRelocator' }
+            if ($condition -notmatch 'NOT UPGRADINGPRODUCTCODE') { $problems += 'the action does not exclude the nested uninstall of an upgrade' }
+            # Where files are replaced or removed, not where an ARP Change only toggles features.
+            foreach ($term in 'NOT Installed', 'REINSTALL', 'REMOVE~="ALL"') {
+                if (-not $condition.Contains($term)) { $problems += "the action's condition lacks $term" }
+            }
+        }
+        if (-not $problems) { return $null }
+        "expected a Type 114 action on the private ContourRelocator, between the setter and InstallValidate, found $($problems -join '; ')"
+    } }
+    @{ Target = 'msi'; Name = 'the relocator is the contour.exe of the recorded installation'; Check = {
+        param($msi)
+        # Recorded by the installation itself: the previous product's in an upgrade, this one's in maintenance.
+        Test-Equal '[CONTOUR_RECORDED_ROOT]bin\contour.exe' (Get-CustomActionTarget $msi 'ContourRelocatorSet')
     } }
     @{ Target = 'machine'; Name = 'default install folder'; Check = {
         param($msi)
