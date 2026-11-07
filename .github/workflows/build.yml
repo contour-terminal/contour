@@ -2585,8 +2585,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The goldens are read from the source tree at the path the test binaries were built with
+          # (VTBACKEND_GOLDEN_DIR, the same workspace path on every runner).
           sparse-checkout: |
             scripts
+            src/vtbackend/state/golden
       - name: "download artifact"
         uses: actions/download-artifact@v4
         with:
