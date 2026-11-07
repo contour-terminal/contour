@@ -1,0 +1,161 @@
+name: winget
+
+# Publishing a release (not a draft, not a pre-release) submits it to the Windows Package Manager as
+# contour-terminal.Contour: Komac renders the manifests from the release's two MSIs and its portable ZIP, a script
+# finishes and checks them, and `komac submit` opens the pull request on microsoft/winget-pkgs with exactly the
+# files that were checked. How it works, the token it needs and how to rehearse it: docs/internals/releasing.md.
+#
+# A release published with the workflow's own GITHUB_TOKEN does not start this workflow (GitHub does
+# not chain workflows off that token); a release published by a person, or with a personal token, does.
+# The dispatch trigger below covers the rest.
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "A published release's tag, e.g. v0.9.0"
+        required: true
+        type: string
+      submit:
+        description: "Open the pull request on microsoft/winget-pkgs (otherwise only render and check)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  manifest:
+    name: "winget: render and check the manifests"
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install the checker's YAML parser
+        run: python3 -m pip install pyyaml
+      - name: Plan the submission from the published release
+        id: plan
+        run: python3 scripts/winget-release.py plan --tag "$RELEASE_TAG" --out winget-plan.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      - name: Install Komac
+        run: ./scripts/ci/install-komac.sh
+      - name: Fetch the portable ZIP
+        # Komac cannot say which file of a ZIP of several programs runs; the script reads it from the ZIP itself.
+        run: curl -fsSL --retry 3 --max-time 900 -o winget-portable.zip "$ZIP_URL"
+        env:
+          ZIP_URL: ${{ steps.plan.outputs.zip_url }}
+      - name: Render the manifests
+        # --dry-run prints the manifests and submits nothing; Komac 2.17.1 has no non-interactive way to write them
+        # to a directory, so the printed text is what gets finished. $URLS is unquoted on purpose: it splits into one
+        # URL per argument. The bash shell is explicit for its pipefail.
+        shell: bash
+        run: |
+          komac update contour-terminal.Contour --version "$VERSION" --urls $URLS \
+            --release-notes-url "$NOTES_URL" --dry-run | tee winget-render.txt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          URLS: ${{ steps.plan.outputs.urls }}
+          NOTES_URL: ${{ steps.plan.outputs.release_notes_url }}
+      - name: Finish the manifests
+        # The ZIP's nested installer and locale, and no VC++ runtime dependency: what Komac cannot do in CI.
+        run: |
+          python3 scripts/winget-release.py finalize --plan winget-plan.json --render winget-render.txt \
+            --zip winget-portable.zip --out "manifests/c/contour-terminal/Contour/$VERSION"
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+      - name: Check the manifests against the plan
+        run: python3 scripts/winget-release.py check --plan winget-plan.json "manifests/c/contour-terminal/Contour/$VERSION"
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        # Also when a step failed, so that the render can be looked at.
+        if: ${{ !cancelled() }}
+        with:
+          name: winget-manifests
+          path: |
+            winget-plan.json
+            winget-render.txt
+            manifests
+          retention-days: 7
+
+  submit:
+    name: "winget: open the pull request"
+    needs: manifest
+    if: github.event_name == 'release' || inputs.submit
+    runs-on: ubuntu-24.04
+    # The only job that sees the token: a classic PAT with public_repo scope, of a dedicated machine account that owns
+    # the winget-pkgs fork and nothing else (docs/internals/releasing.md).
+    environment: winget
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: winget-manifests
+          path: winget
+      - name: Refuse what must not be submitted
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "::error::pre-releases are not submitted to winget"
+            exit 1
+          fi
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error::the winget environment has no WINGET_TOKEN secret; see docs/internals/releasing.md"
+            exit 1
+          fi
+        env:
+          PRERELEASE: ${{ needs.manifest.outputs.prerelease }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+      - name: Look for a pull request that already exists for this version
+        # Open or merged; a closed, unmerged one does not count (docs/internals/releasing.md).
+        id: existing
+        run: python3 scripts/winget-release.py existing-pr --version "$VERSION"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.manifest.outputs.version }}
+      - name: Report the pull request that exists
+        if: steps.existing.outputs.url != ''
+        run: |
+          echo "A pull request for contour-terminal.Contour $VERSION already exists, so none is opened: $URL" | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          URL: ${{ steps.existing.outputs.url }}
+          VERSION: ${{ needs.manifest.outputs.version }}
+      - name: Install Komac
+        if: steps.existing.outputs.url == ''
+        run: ./scripts/ci/install-komac.sh
+      - name: Open the pull request
+        # Exactly the files the previous job checked; nothing is rendered a second time. The bash shell is explicit for its pipefail.
+        if: steps.existing.outputs.url == ''
+        shell: bash
+        run: komac submit "winget/manifests/c/contour-terminal/Contour/$VERSION" --yes | tee komac-submit.log
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ needs.manifest.outputs.version }}
+      - name: Confirm that the pull request exists
+        # Komac prints the address of the pull request it opened; the search is the fallback.
+        if: steps.existing.outputs.url == ''
+        run: |
+          for attempt in 1 2 3; do
+            if url=$(python3 scripts/winget-release.py submitted-pr --log komac-submit.log --version "$VERSION"); then
+              echo "$url" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::no pull request for contour-terminal.Contour $VERSION appeared on microsoft/winget-pkgs"
+          exit 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.manifest.outputs.version }}
