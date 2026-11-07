@@ -1461,23 +1461,41 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
-    # About twice what a green master run takes (70 minutes), rather than GitHub's 360-minute default.
-    timeout-minutes: 150
+    # About twice what a green master run takes (70 minutes), rather than GitHub's 360-minute default. SignPath
+    # waits for the owner's approval twice (the payload, then the installers), up to an hour each, on top of the
+    # build and the checks: 300 minutes.
+    timeout-minutes: ${{ vars.WINDOWS_SIGNER == 'signpath' && 300 || 150 }}
     permissions:
       contents: read
       packages: write
+      # The SignPath action reads this run's artifacts with GITHUB_TOKEN.
+      actions: read
+    # Signs when a signer is configured (repository variable WINDOWS_SIGNER: signpath, certum or sslcom) and the
+    # build is a release tag, or a master push when WINDOWS_SIGNING_BUILDS is releases-and-master. Only then does
+    # the job enter the release-signing environment, which holds the credentials and the owner's approval rule.
+    # The condition is spelled twice, here and in the concurrency group, because neither can read a step's output:
+    # the two copies must stay identical. `plan` decides the same again from the same variables, and is what the
+    # steps follow; a copy that went wrong shows as secrets that are missing, never as an unsigned release. Both
+    # variables have to be repository variables, since an environment's own variables are not visible before the
+    # job has its environment. How it works, and how to turn it on: docs/internals/release-signing.md.
+    environment: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || '' }}
+    # One signing job at a time: a one-time code is single use, and two jobs logging in within its 30 seconds
+    # collide. Jobs that do not sign get a group of their own and wait for nobody.
+    concurrency:
+      group: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || format('windows-{0}-{1}', github.run_id, github.run_attempt) }}
+      cancel-in-progress: false
     env:
       CMAKE_PRESET: "msvc-release"
       VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
       # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache. The action
       # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
       # follows the image's install time. The statistics step at the end names the binary CMake used
       # and the cache directory it read, so a mismatch with the restored one shows in the log.
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: ccache-windows-msvc-release
           max-size: 1500M
@@ -1489,6 +1507,17 @@ jobs:
         run: .\scripts\ci-set-vars.ps1
         env:
           REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Name the packages"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        # The packages CPack leaves in the build directory, as paths relative to the workspace: every later step
+        # that names one reads these.
+        run: |
+          $directory = "out/build/$env:CMAKE_PRESET"
+          $version = '${{ steps.set_vars.outputs.version }}'
+          "CONTOUR_MSI=$directory/contour-$version-win64.msi" >> $env:GITHUB_ENV
+          "CONTOUR_USER_MSI=$directory/contour-$version-win64-user.msi" >> $env:GITHUB_ENV
+          "CONTOUR_ZIP=$directory/contour-$version-win64.zip" >> $env:GITHUB_ENV
       - name: "Fetch embedded dependencies"
         shell: powershell
         run: |
@@ -1499,7 +1528,7 @@ jobs:
         # this step; only a repeated failure fails the job.
         id: install_qt
         continue-on-error: true
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
           # repository at 6.11 into per-architecture subdirectories
@@ -1517,7 +1546,7 @@ jobs:
           modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install Qt -- retry past a bad mirror
         if: steps.install_qt.outcome == 'failure'
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: "6.10.*"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
@@ -1530,7 +1559,7 @@ jobs:
             --password "${{ secrets.GITHUB_TOKEN }}" \
             --store-password-in-clear-text
       - name: "Cache vcpkg"
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: vcpkg-cache
         with:
           path: ${{ runner.workspace }}/vcpkg
@@ -1558,10 +1587,10 @@ jobs:
       # CMake 3.30 is the first to honour CPACK_WIX_VERSION: older ones run WiX 3's candle and light whatever
       # WiX the next step installs.
       - name: "Install cmake"
-        uses: lukka/get-cmake@v4.3.4
+        uses: lukka/get-cmake@f5b8fbb4d77cec1acc5a5f9f0df4beffaf5d98d9 # v4.3.4
       - name: "Check cmake version"
         run: cmake --version
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - name: "install Rust (wasm32-wasip1)"
         # @see the same step on Linux: the bundled extensions and the test guests are Rust.
         shell: bash
@@ -1708,20 +1737,135 @@ jobs:
           # its version has to match the tool's.
           wix extension add --global WixToolset.UI.wixext/4.0.6
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+      # Signing: the four stages around the packages, each a step of scripts/sign-windows.ps1 (how they fit, and
+      # how to switch a signer on: docs/internals/release-signing.md). The payload is staged and signed before
+      # CPack runs, and CPack packages the signed files (cmake/WindowsSignedOverlay.cmake); the installers are
+      # signed after; a dry run or a verification closes the gap before the checks below look at what ships.
+      # Without a configured signer the plan says `none`, nothing is signed, and the dry run proves the machinery
+      # with a throwaway certificate. The plan, not this file, decides who signs: the steps follow its output.
+      - name: "Signing: plan"
+        if: github.event_name != 'pull_request'
+        id: signing
+        shell: pwsh
+        # The kind of build is the one input the script cannot see.
+        run: ./scripts/sign-windows.ps1 plan -Configured $env:CONFIGURED -Builds $env:BUILDS -Build $env:BUILD_KIND
+        env:
+          CONFIGURED: ${{ vars.WINDOWS_SIGNER }}
+          BUILDS: ${{ vars.WINDOWS_SIGNING_BUILDS }}
+          BUILD_KIND: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'master') || 'other' }}
+      - name: "Signing: stage the payload"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 stage -BuildDirectory out/build/$env:CMAKE_PRESET -Destination out/signing/stage
+      - name: "Signing: sign the payload"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 sign -Kind Payload -Root out/signing/stage -Signer $env:SIGNER -Manifest out/signing/payload.tsv
+        env: &signing_env
+          SIGNER: ${{ steps.signing.outputs.signer }}
+          CERTUM_EMAIL: ${{ secrets.CERTUM_EMAIL }}
+          CERTUM_OTP: ${{ secrets.CERTUM_OTP }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+      - name: "Signing: send the payload to SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 export -Kind Payload -Root out/signing/stage -Signer signpath -Destination out/signing/signpath-payload -Manifest out/signing/payload.tsv
+      - name: "Signing: upload the payload for SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        id: signpath_payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-payload-${{ github.run_id }}
+          path: out/signing/signpath-payload
+          retention-days: 1
+          if-no-files-found: error
+      - name: "Signing: have SignPath sign the payload"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: payload
+          github-artifact-id: ${{ steps.signpath_payload.outputs.artifact-id }}
+          wait-for-completion: true
+          # A release request waits for the owner's approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: out/signing/signpath-payload-signed
+      - name: "Signing: take the signed payload back"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 import -Root out/signing/stage -From out/signing/signpath-payload-signed -Manifest out/signing/payload.tsv -Signer signpath
       - name: "Create Package(s)"
         if: github.event_name != 'pull_request'
         shell: powershell
         # The per-machine MSI and the zip, then the per-user MSI. CPack names them in lowercase already
-        # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory.
+        # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory. The
+        # manifest makes CPack's pre-build hook lay the signed payload over what it stages. wix.log is shown when
+        # WiX wrote one during this step, and only then: a hook or a zip that failed has no WiX log to show.
         run: |
           foreach ($preset in '${{ env.CMAKE_PRESET }}', '${{ env.CMAKE_PRESET }}-user') {
-            cpack --preset $preset -V
+            $started = Get-Date
+            cpack --preset $preset -V -D "CPACK_CONTOUR_SIGNING_MANIFEST=$PWD/out/signing/payload.tsv"
             if ($LASTEXITCODE -ne 0) {
-              echo "CPack failed. Dumping wix.log..."
-              type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
+              $log = "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
+              if ((Test-Path $log) -and (Get-Item $log).LastWriteTime -ge $started) {
+                echo "CPack failed. Dumping wix.log..."
+                type $log
+              }
               exit $LASTEXITCODE
             }
           }
+      - name: "Signing: sign the installers"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 sign -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer $env:SIGNER
+        env: *signing_env
+      - name: "Signing: send the installers to SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 export -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer signpath -Destination out/signing/signpath-packages -Manifest out/signing/packages.tsv
+      - name: "Signing: upload the installers for SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        id: signpath_packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-packages-${{ github.run_id }}
+          path: out/signing/signpath-packages
+          retention-days: 1
+          if-no-files-found: error
+      - name: "Signing: have SignPath sign the installers"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: packages
+          github-artifact-id: ${{ steps.signpath_packages.outputs.artifact-id }}
+          wait-for-completion: true
+          # A release request waits for the owner's approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: out/signing/signpath-packages-signed
+      - name: "Signing: take the signed installers back"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 import -Root out/build/$env:CMAKE_PRESET -From out/signing/signpath-packages-signed -Manifest out/signing/packages.tsv -Signer signpath
+      - name: "Signing: dry run"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.dry-run == 'true'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 dry-run -Root out/signing/stage -Packages $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
+      - name: "Signing: verify what ships"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 verify -Signer $env:SIGNER -Manifest out/signing/payload.tsv -Zip $env:CONTOUR_ZIP -Msi $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
+        env:
+          SIGNER: ${{ steps.signing.outputs.signer }}
       - name: "Check the package contents"
         if: github.event_name != 'pull_request'
         # What each package must and must not hold, asserted as the macOS job does for its image: a mistake
@@ -1729,33 +1873,30 @@ jobs:
         # scripts/check-windows-package.ps1.
         shell: pwsh
         run: |
-          $version = '${{ steps.set_vars.outputs.version }}'
-          $dir = "out/build/${{ env.CMAKE_PRESET }}"
-          pwsh scripts/check-windows-package.ps1 -Zip "$dir/contour-$version-win64.zip" `
-            -MachineMsi "$dir/contour-$version-win64.msi" -UserMsi "$dir/contour-$version-win64-user.msi"
+          pwsh scripts/check-windows-package.ps1 -Zip $env:CONTOUR_ZIP -MachineMsi $env:CONTOUR_MSI -UserMsi $env:CONTOUR_USER_MSI
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading MSI to artifact store"
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          path: ${{ env.CONTOUR_MSI }}
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading the per-user MSI to artifact store"
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
-          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
+          path: ${{ env.CONTOUR_USER_MSI }}
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-          path: "out/build/${{ env.CMAKE_PRESET }}/contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+          path: ${{ env.CONTOUR_ZIP }}
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
@@ -1844,7 +1985,7 @@ jobs:
           }
       - name: "Uploading the upgrade check's logs"
         if: failure() && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "msi-upgrade-check-logs"
           path: ${{ runner.temp }}/msi-*

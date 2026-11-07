@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "packages": what SignPath signs in the zip that
+  `scripts/sign-windows.ps1 export -Kind Packages` uploads from the Windows job, the two installers.
+
+  The owner pastes this file into SignPath under the slug `packages` (the workflow names it in
+  artifact-configuration-slug); nothing reads it from the repository at run time. Exactly two installers
+  are expected, the per-machine one and the per-user one.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <msi-file-set>
+      <include path="*.msi" min-matches="2" max-matches="2"/>
+      <for-each>
+        <authenticode-sign description="Contour" description-url="https://github.com/contour-terminal/contour/"/>
+      </for-each>
+    </msi-file-set>
+  </zip-file>
+</artifact-configuration>
