@@ -1,0 +1,36 @@
+// The version resource contour.exe carries: what Explorer's Details tab, Task Manager, SmartScreen and
+// Windows Installer (which versions the file in the MSI from it) show about the program.
+//
+// Configured by CMake into the binary tree, from the project version: FileVersion is the four fields
+// (the fourth is the CI run number, 0 in a local build), ProductVersion the full version string.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @CONTOUR_FILE_VERSION_FIELDS@
+PRODUCTVERSION  @CONTOUR_FILE_VERSION_FIELDS@
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // US English, Unicode.
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Contour Terminal"
+            VALUE "FileDescription",  "Contour Terminal Emulator"
+            VALUE "FileVersion",      "@CONTOUR_FILE_VERSION@"
+            VALUE "InternalName",     "contour"
+            VALUE "LegalCopyright",   "Copyright (C) Christian Parpart and contributors. Apache License 2.0."
+            VALUE "OriginalFilename", "contour.exe"
+            VALUE "ProductName",      "Contour"
+            VALUE "ProductVersion",   "@CONTOUR_VERSION_STRING@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

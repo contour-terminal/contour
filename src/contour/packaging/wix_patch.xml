@@ -1,29 +1,70 @@
 <CPackWiXPatch>
+  <!-- The components that differ between the per-machine and the per-user installer (the PATH entry, the
+       Connect shortcut) live in wix_scope.wxs; this file refers to them by Id only. -->
+  <!-- The "Add to PATH" feature (keep its Id: an upgrade carries the installed state of a feature over by Id).
+       ADD_TO_PATH=0 on the command line drops it. -->
   <CPackWiXFragment Id="CM_C_contour_path">
-    <Component Id="CM_C_contour_path" Guid="*" Directory="INSTALL_ROOT">
-      <Environment Id="UpdatePath" Name="PATH" Value="[INSTALL_ROOT]bin" Permanent="no" Part="last" Action="set" System="yes" />
-      <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes"/>
-    </Component>
+    <Level Value="0" Condition='ADD_TO_PATH = "0"' />
+    <ComponentRef Id="ContourPathEnvironment" />
   </CPackWiXFragment>
   <!-- CPack accepts each fragment Id once (scripts/check-wix-patch.py checks it), so everything that goes
        into the product element lives in this one fragment. -->
   <CPackWiXFragment Id="#PRODUCT">
-    <!-- The Start menu shortcut "Contour (Connect…)": `contour.exe connect`, which asks where the new window's
-         sessions should live (this computer's daemon, this window only, a saved host) before it opens. CPack's
-         own shortcuts take no arguments, hence a component of our own, attached to the main feature. -->
-    <DirectoryRef Id="ProgramMenuFolder">
-      <Component Id="CM_C_contour_connect_shortcut" Guid="*">
-        <Shortcut Id="CM_S_contour_connect" Name="Contour (Connect…)" Description="Choose where a new Contour window's sessions live" Target="[INSTALL_ROOT]bin\contour.exe" Arguments="connect" WorkingDirectory="INSTALL_ROOT" />
-        <RegistryValue Root="HKCU" Key="Software\Contour\Contour" Name="ConnectShortcut" Type="integer" Value="1" KeyPath="yes"/>
-      </Component>
-    </DirectoryRef>
+    <!-- Where the previous version was installed, when this is an upgrade, for installs that predate the folder
+         recorded in the scope sources: the Add/Remove Programs entry's InstallLocation (CPack writes it from
+         INSTALL_ROOT). That entry is in HKLM, in the 64-bit view, for per-user products too.
+         [WIX_UPGRADE_DETECTED] is the previous product's code. -->
+    <Property Id="CONTOUR_PREVIOUS_ROOT">
+      <RegistrySearch Id="ContourPreviousRoot" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[WIX_UPGRADE_DETECTED]" Name="InstallLocation" Type="raw" Bitness="always64" />
+    </Property>
+    <!-- Which folder the installation goes to, settled by SetProperty actions that run in this order, the last
+         one that applies winning (the default is in wix_scope.wxs):
+         ContourRootGiven         notes a folder given on the command line, or chosen in the dialog, before
+                                  AppSearch (CPack's search of the previous install location) can overwrite it;
+         ContourRootDefault       the proposal of a first install (scope file);
+         ContourRootRecorded      the folder the installed version recorded for itself, in place of the ARP one.
+                                  Not gated on NOT Installed: uninstall, repair and the nested removal of an
+                                  older product must resolve the folder the files and PATH went to;
+         ContourRootPrevious      the folder the installed version is in, unless, in an upgrade, that is an old
+                                  release's versioned default, which is left behind;
+         ContourRootGivenRestore  puts back the given folder, which beats all of the above. -->
+    <SetProperty Id="CONTOUR_GIVEN_ROOT" Action="ContourRootGiven" Value="[INSTALL_ROOT]" Before="AppSearch" Sequence="both" Condition="INSTALL_ROOT AND NOT Installed" />
+    <SetProperty Id="CONTOUR_PREVIOUS_ROOT" Action="ContourRootRecorded" Value="[CONTOUR_RECORDED_ROOT]" After="ContourRootDefault" Sequence="both" Condition="CONTOUR_RECORDED_ROOT" />
+    <SetProperty Id="INSTALL_ROOT" Action="ContourRootPrevious" Value="[CONTOUR_PREVIOUS_ROOT]" After="ContourRootRecorded" Sequence="both" Condition="CONTOUR_PREVIOUS_ROOT AND (Installed OR NOT (CONTOUR_PREVIOUS_ROOT &gt;&lt; &quot;\Contour Terminal Emulator &quot;))" />
+    <SetProperty Id="INSTALL_ROOT" Action="ContourRootGivenRestore" Value="[CONTOUR_GIVEN_ROOT]" After="ContourRootPrevious" Sequence="both" Condition="NOT Installed AND CONTOUR_GIVEN_ROOT" />
+    <!-- The switches of an unattended install: both on unless given as 0 (msiexec ... ADD_TO_PATH=0). Secure, so
+         that they reach the elevated install from the unelevated command line. -->
+    <Property Id="ADD_TO_PATH" Value="1" Secure="yes" />
+    <Property Id="DESKTOP_SHORTCUT" Value="1" Secure="yes" />
+    <!-- Before anything is replaced, the installed (or, for an upgrade, the previous) contour.exe is asked to move
+         the user's hand-started daemons onto their staged copies, so that no daemon holds the files about to be
+         replaced. Only an installation that records `Relocates` has the verb. Its folder is the one the installation
+         recorded for itself: in an upgrade the previous product's, in maintenance this product's, and unlike
+         INSTALL_ROOT it needs no resolving at this point. The action runs as the installing user, in the immediate
+         sequence ahead of InstallValidate, and reaches that user's daemons; as SYSTEM it finds none, and
+         Return="ignore" lets that and any failed move leave the install alone. It runs where files are replaced or
+         removed (an install, an upgrade, a repair, an uninstall), not when an ARP "Change" only toggles features,
+         and the nested uninstall of a major upgrade does not ask again. The property is private (it has lower case
+         letters), so no command line can name another program. -->
+    <SetProperty Id="ContourRelocator" Action="ContourRelocatorSet" Value="[CONTOUR_RECORDED_ROOT]bin\contour.exe" After="CostFinalize" Sequence="execute" Condition="CONTOUR_RELOCATES AND CONTOUR_RECORDED_ROOT" />
+    <CustomAction Id="ContourRelocateDaemons" Property="ContourRelocator" ExeCommand="daemon relocate" Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ContourRelocateDaemons" Before="InstallValidate" Condition="ContourRelocator AND (NOT Installed OR REINSTALL OR REMOVE~=&quot;ALL&quot;) AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
     <!-- "Launch Contour" on the installer's last page. -->
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
   </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCTFEATURE">
-    <ComponentRef Id="CM_C_contour_connect_shortcut" />
+    <Feature Id="ContourDesktopShortcutFeature" Title="Desktop shortcut" Level="1">
+      <Level Value="0" Condition='DESKTOP_SHORTCUT = "0"' />
+      <ComponentRef Id="ContourDesktopShortcut" />
+    </Feature>
+    <ComponentRef Id="ContourStartMenuShortcut" />
+    <ComponentRef Id="ContourConnectShortcut" />
+    <ComponentRef Id="ContourInstallRoot" />
+    <ComponentRef Id="ContourInstallationMarker" />
   </CPackWiXFragment>
 </CPackWiXPatch>

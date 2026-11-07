@@ -58,9 +58,11 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -299,6 +301,9 @@ namespace
         namespace CLI = core::cli;
         using contour::cli::DaemonVerb;
 
+        // It looks in the one directory every label's socket lies in, and takes no socket or label.
+        if (verb == DaemonVerb::Relocate)
+            return {};
         auto options = CLI::OptionList {
             CLI::Option { "label",
                           CLI::Value { ""s },
@@ -344,6 +349,7 @@ namespace
                 break;
             case DaemonVerb::Run:
             case DaemonVerb::Status:
+            case DaemonVerb::Relocate:
             case DaemonVerb::Upgrade: break;
         }
         return options;
@@ -1125,15 +1131,27 @@ namespace
     /// probe that runs the target's query mode. Made before the daemon runs, so that it outlives it.
     struct DaemonUpgradeResources
     {
+        /// @param notices Where a Windows hand-over says where the daemon goes (the successor's launch and
+        /// its
+        ///        failure); unused elsewhere, where the process image is replaced in place.
+        explicit DaemonUpgradeResources([[maybe_unused]] std::ostream& notices):
+#ifdef _WIN32
+            handoff { *launcher, *memory, {}, notices }
+#else
+            handoff { *replacer, *memory }
+#endif
+        {
+        }
+
         std::unique_ptr<vthost::handover::HandoverMemory> memory =
             vthost::handover::makeNativeHandoverMemory();
 #ifdef _WIN32
         std::unique_ptr<vthost::handover::SuccessorLauncher> launcher =
             vthost::handover::makeNativeSuccessorLauncher();
-        vthost::handover::SuccessorHandoff handoff { *launcher, *memory, {} };
+        vthost::handover::SuccessorHandoff handoff;
 #else
         std::unique_ptr<vthost::ProcessImageReplacer> replacer = vthost::makeNativeProcessImageReplacer();
-        vthost::handover::ExecHandoff handoff { *replacer, *memory };
+        vthost::handover::ExecHandoff handoff;
 #endif
         /// Never asked to stop: a probe is bounded by its own timeout.
         core::async::StopSource probeShutdown;
@@ -1464,6 +1482,8 @@ int ContourApp::daemonAction()
                                                             core::platform::NativeFileSystem::instance(),
                                                             CONTOUR_VERSION_STRING,
                                                             leaseOf(handover));
+    // What the daemon's status states of it: its user's request alone, not the handover-combined one below.
+    config.relocationRequest = relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"));
     if (images)
     {
         runningLease = settleDaemonImage(
@@ -1487,10 +1507,13 @@ int ContourApp::daemonAction()
     // executable has no store to upgrade from, and refuses, and makes none of it. Held until runDaemon
     // returns.
     auto upgradeResources = std::optional<DaemonUpgradeResources> {};
+    // The daemon's log already says where a hand-over goes when it is the console's: the notices are for a
+    // daemon that logs to a file, whose console says nothing otherwise.
+    auto discardedNotices = std::ostream { nullptr };
     if (images)
         config.liveUpgrade.emplace(liveUpgradeServicesOf(
             **images,
-            upgradeResources.emplace(),
+            upgradeResources.emplace(config.logFile.empty() ? discardedNotices : std::cerr),
             commandLine(),
             resolved.configFile,
             daemonProfile,
@@ -1620,7 +1643,10 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     // on-demand daemon beside it.
     auto const label = vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")).name;
     auto starter = vthost::chooseDaemonStarter(
-        vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+        vthost::findRepairedRegisteredService(label,
+                                              vthost::nativeServiceBackendFactory(services),
+                                              nativeRepairInputs(services.fileSystem),
+                                              vthost::RegistrationUse::Start),
         vthost::labelSocketPath(label, services.environment),
         vthost::OnDemandSpawn { .endpoint = vthost::UnixEndpoint { .socketPath = socketPath },
                                 .spawner = *spawner,
@@ -1737,6 +1763,7 @@ namespace
             case contour::cli::DaemonVerb::Upgrade: return vthost::client::DefaultUpgradeTimeout;
             case contour::cli::DaemonVerb::Run:
             case contour::cli::DaemonVerb::Status:
+            case contour::cli::DaemonVerb::Relocate:
             case contour::cli::DaemonVerb::Logs:
             case contour::cli::DaemonVerb::HandoverInfo: break;
         }
@@ -1757,6 +1784,10 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
              << '\n';
         return exitCode(ExitStatus::Ok);
     }
+
+    // Asks no one socket: it looks at every daemon of this user, and takes no option to say which.
+    if (verb == DaemonVerb::Relocate)
+        return daemonRelocateAction();
 
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
     auto const label = mergeSharedOption("label",
@@ -1830,9 +1861,49 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
                                            cerr));
         }
         case DaemonVerb::Run:
+        case DaemonVerb::Relocate:
         case DaemonVerb::HandoverInfo: break;
     }
     return exitCode(ExitStatus::BadUsage);
+}
+
+int ContourApp::daemonRelocateAction()
+{
+    // Every label's daemon of this user lies in the one directory the default label's socket does; a daemon
+    // on a `--socket` path elsewhere is not found.
+    auto const installation = vthost::currentExecutablePath();
+    if (!installation)
+    {
+        cerr << std::format("contour daemon: cannot locate this executable: {}\n",
+                            installation.error().message());
+        return exitCode(ExitStatus::Failed);
+    }
+    auto const& files = core::platform::NativeFileSystem::instance();
+    auto const sockets = daemonSocketsIn(
+        files, vthost::labelSocketPath(vthost::DefaultSocketLabel, processEnvironment()).parent_path());
+    auto const argv0 = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
+    auto const binary =
+        vthost::makeOwnDaemonBinary(processEnvironment(), files, CONTOUR_VERSION_STRING, argv0);
+    auto pacer = vthost::client::SystemSettlePacer {};
+    auto const controlFor =
+        DaemonControlFor { [](std::filesystem::path const& socket, std::chrono::milliseconds timeout) {
+            return vthost::client::makeDaemonControl(
+                std::make_shared<vthost::UnixTransportFactory>(socket, nullptr), timeout);
+        } };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const status =
+        daemonRelocateVerb(sockets, controlFor, *binary, pacer, installation->parent_path(), out, err);
+    cout << out.str();
+    cerr << err.str();
+    // Under msiexec these go nowhere: the trace is what a failed or skipped move leaves behind.
+    if (auto const report = out.str() + err.str(); !report.empty())
+    {
+        auto const log = vthost::daemonStateDirectory(processEnvironment()) / "relocate.log";
+        if (files.createDirectories(log.parent_path()))
+            std::ignore = files.appendFile(log, report);
+    }
+    return exitCode(status);
 }
 
 int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
@@ -1925,7 +1996,16 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
         backend = vthost::makeServiceBackend(*mode, name, services);
     else
     {
-        if (auto found = vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)))
+        // The task is repaired only where it is about to be started; `status` shows what it names, and
+        // `uninstall` removes it as it is.
+        auto const repairs = action == DaemonServiceAction::Start || action == DaemonServiceAction::Restart;
+        auto const factory = vthost::nativeServiceBackendFactory(services);
+        if (auto found = repairs
+                             ? vthost::findRepairedRegisteredService(label,
+                                                                     factory,
+                                                                     nativeRepairInputs(services.fileSystem),
+                                                                     vthost::RegistrationUse::Manage)
+                             : vthost::findRegisteredService(label, factory))
         {
             backend = std::move(found->backend);
             name = std::move(found->name);
@@ -2074,8 +2154,8 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
     // auto-spawn builds its command line the same way, so a daemon option cannot end up forwarded
     // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
     // daemon exists precisely to still be there for the next client.
-    auto const program = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
-    auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(std::filesystem::absolute(program)),
+    auto const program = daemonServiceProgram(vthost::currentExecutablePath(), commandLine().front());
+    auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(program),
                                              socketPath,
                                              vthost::DaemonSpawnOptions {
                                                  .filter = parameters().get<string>(prefix + ".log"),

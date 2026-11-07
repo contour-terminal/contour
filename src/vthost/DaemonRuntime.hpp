@@ -19,6 +19,7 @@
 #include <vthost/DaemonControl.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/DaemonUpgradeHooks.hpp>
+#include <vthost/RelocationRequest.hpp>
 #include <vthost/handover/LiveUpgrade.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -39,6 +40,9 @@ struct DaemonRuntimeConfig
     /// How many live upgrades this run of the daemon has completed (proto::DaemonUpgradeRecord::generation):
     /// 0 for a daemon started afresh, one more than its handover image's for one started from a handover.
     std::uint64_t upgradeGeneration = 0;
+    /// What the user asked of the daemon's moving onto its staged copy (`contour daemon --in-place` refuses
+    /// it), as its status states it: the request itself, not whether the daemon moved.
+    RelocationRequest relocationRequest = RelocationRequest::Allowed;
 };
 
 /// What a daemon needs to upgrade itself, wired by whoever builds its handover::LiveUpgrade.

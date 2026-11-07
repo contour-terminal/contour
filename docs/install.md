@@ -4,7 +4,79 @@
 
 ## Windows 10 or newer
 
-Please download Contour for Windows (the `.msi` file) from our [release page](https://github.com/contour-terminal/contour/releases/latest/), and double click on it to install.
+Please download Contour for Windows from our [release page](https://github.com/contour-terminal/contour/releases/latest/), and double click the installer (an `.msi` file) to install. There are two installers, and you need one of them:
+
+| Installer | Installs for | Default folder | Needs |
+| --- | --- | --- | --- |
+| `contour-<version>-win64.msi` | everyone on the computer | `C:\Program Files\Contour\` | an administrator's approval |
+| `contour-<version>-win64-user.msi` | you only | `%LOCALAPPDATA%\Programs\Contour\` | nothing |
+
+Pick the per-user installer when you cannot or do not want to elevate. Both add Contour to the Start menu
+and, unless you deselect their features in the installer, to your `PATH` and your desktop. There is also a `contour-<version>-win64.zip`
+that needs no installation at all: unpack it anywhere and run `bin\contour.exe`.
+
+- **The two installers are separate products.** Both can be installed on one computer, and neither ever
+  upgrades or removes the other. When a command name is found in both, the per-machine `PATH` comes first.
+- **An installer upgrades in place.** Run any later build over an earlier one, or over a release, without
+  uninstalling first; an older build of the same release also installs over a newer one. An upgrade keeps the
+  folder Contour is in, even a folder you chose; the one exception is an old release's folder with its version
+  in the name (`Contour Terminal Emulator 0.8`), which moves to a folder named `Contour` once. Installations
+  of Contour 0.6.1 and earlier have to be uninstalled first.
+- **A running Contour is closed and opened again.** Windows Installer closes the Contour window it finds
+  running and starts it again, with the arguments it had, once the files are replaced. A window whose
+  sessions run in its own process (`daemon.mode: in_process`, or the fallback when no daemon could be
+  started) loses them. Sessions a daemon hosts keep running: the installer moves a daemon started by hand out
+  of the way first, and does not end one. What it leaves is described in
+  [Installing a new Contour on Windows](persistent-sessions.md#installing-a-new-contour-on-windows).
+
+### Unattended installation
+
+Run an installer without a dialog from a command prompt or a deployment tool:
+
+```sh
+msiexec /i contour-<version>-win64.msi /qn /norestart /l*v contour-install.log
+```
+
+Three properties change what it installs. Give them on the command line after the file name
+(`INSTALL_ROOT` is older than the other two):
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `INSTALL_ROOT=<folder>` | the installer's default folder (table above); on an upgrade, the folder Contour is in | where Contour goes. A folder given here wins over the installed one, which moves the installation. |
+| `ADD_TO_PATH=0` | `1` | does not add Contour's `bin` folder to `PATH` |
+| `DESKTOP_SHORTCUT=0` | `1` | does not put a shortcut on the desktop |
+
+On an upgrade, `ADD_TO_PATH=0` and `DESKTOP_SHORTCUT=0` remove the entry or the shortcut the earlier
+installation made, and a later install with the default does not bring it back: name the feature again with
+`ADDLOCAL=CM_C_contour_path` (the `PATH` entry) or `ADDLOCAL=ContourDesktopShortcutFeature` (the shortcut).
+
+`msiexec` reports through its exit code: `0` success; `3010` success, but a restart is needed; `1602` the
+installation was cancelled; `1603` a fatal error (also what an installer says when a later version of
+Contour is already installed: "A later version of Contour is already installed"); `1618` another installation
+is already running; `1638` another build of the same product is already installed with the same product code: this
+happens only between builds made before Contour 0.9, which all builds of one release shared; uninstall it
+first. Builds of 0.9 and later each have a product code of their own, and upgrade each other. The log named by `/l*v` has the detail.
+
+With the Windows Package Manager:
+
+```sh
+winget install --id contour-terminal.Contour --silent --scope machine
+winget install --id contour-terminal.Contour --silent --scope user
+```
+
+`--scope machine` installs the per-machine installer, `--scope user` the per-user one. Without `--scope`, winget
+prefers the per-user installer unless your winget settings say otherwise (`installBehavior.preferences.scope`):
+a plain `winget install contour-terminal.Contour` needs no administrator and installs into your profile. Name
+`--scope machine` for an installation for every user. `winget upgrade` keeps the scope Contour was installed in.
+The portable package (the ZIP, without installer) is available as `winget install --id contour-terminal.Contour
+--installer-type portable`, and `winget upgrade` keeps an installation made that way portable. Installations of
+Contour 0.6.1 and earlier have to be uninstalled first, also when winget offers the upgrade.
+
+!!! note "Installing as SYSTEM"
+    A deployment tool that installs as the SYSTEM account cannot reach your daemon. Contour is still
+    installed, but a daemon that you started by hand keeps running from the old folder until it next
+    restarts. Deployment tools pass `--scope machine` to `winget install`: without it winget prefers the
+    per-user installer, which would install into the profile of the SYSTEM account. See [Installing a new Contour on Windows](persistent-sessions.md#installing-a-new-contour-on-windows).
 
 ## macOS
 

@@ -66,6 +66,15 @@ enum class WireKind : uint8_t
     return (uint64_t { id } << 1U) | static_cast<uint64_t>(kind);
 }
 
+/// Whether a scalar type's signedness or width differs between platforms, so its wire form would too: wchar_t
+/// (signed 32 bit on x86 Linux, unsigned on AArch64 Linux, unsigned 16 bit on Windows) and long (32 bit on
+/// Windows, 64 bit elsewhere). Where long is 64 bit it is the wire form of int64_t, so only the 32-bit long
+/// of Windows is refused: that build breaks, instead of the data.
+template <typename T>
+inline constexpr bool IsPlatformDependentScalar =
+    std::is_same_v<T, wchar_t>
+    || ((std::is_same_v<T, long> || std::is_same_v<T, unsigned long>) && sizeof(T) != sizeof(int64_t));
+
 /// What a decode may allocate beyond what the stream holds: every element of a sequence costs at least one
 /// byte of the stream, but may cost much more memory, so the decode keeps an account of the memory it
 /// builds and refuses a stream that asks for more than a fixed multiple of its own size.
@@ -313,8 +322,15 @@ class FieldEncoder
             return (static_cast<uint64_t>(signedValue) << 1U)
                    ^ static_cast<uint64_t>(signedValue >> std::numeric_limits<int64_t>::digits);
         };
+        static_assert(!detail::IsPlatformDependentScalar<T>,
+                      "this scalar differs in signedness and width between platforms, so its wire form would "
+                      "too: use a fixed-width type (int32_t, uint32_t, char32_t) for the field");
         if constexpr (std::is_same_v<T, bool>)
             return value ? 1 : 0;
+        else if constexpr (std::is_same_v<T, char>)
+            // The wire form is a signed byte, as on x86: char is unsigned on AArch64 Linux, which would
+            // otherwise write the raw value and read the stream of another platform wrongly.
+            return Zigzag(static_cast<int8_t>(value));
         else if constexpr (std::is_enum_v<T>)
         {
             static_assert(WireEnum<T>,
@@ -540,12 +556,23 @@ class FieldDecoder
         constexpr auto Unzigzag = [](uint64_t zigzag) {
             return static_cast<int64_t>(zigzag >> 1U) ^ -static_cast<int64_t>(zigzag & 1U);
         };
+        static_assert(!detail::IsPlatformDependentScalar<T>,
+                      "this scalar differs in signedness and width between platforms, so its wire form would "
+                      "too: use a fixed-width type (int32_t, uint32_t, char32_t) for the field");
         if constexpr (std::is_same_v<T, bool>)
         {
             if (raw > 1)
                 fail(StateDecodeError::InvalidValue);
             else
                 value = raw != 0;
+        }
+        else if constexpr (std::is_same_v<T, char>)
+        {
+            // A signed byte on the wire whatever char is here (see scalarOf).
+            auto narrowed = int8_t {};
+            take(narrowed, narrowSigned<int8_t>(Unzigzag(raw)));
+            if (!_error)
+                value = static_cast<char>(narrowed);
         }
         else if constexpr (std::is_enum_v<T>)
         {

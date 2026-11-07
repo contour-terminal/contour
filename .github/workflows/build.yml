@@ -13,6 +13,10 @@ on:
       - '*.sh'
     branches:
       - master
+    # Only full release tags (v<major>.<minor>.<patch>). GitHub does not evaluate `paths-ignore` for
+    # tag pushes, so a release tag always builds.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -24,6 +28,7 @@ on:
       - '*.sh'
     branches:
       - master
+      - 'maintenance/**'
 
 concurrency:
   group: build-${{ github.ref }}
@@ -45,22 +50,26 @@ env:
   # the object was built. BASEDIR makes paths under the checkout relative, NOHASHDIR keeps the
   # build directory out of the key, and the two sloppiness flags stop a header's mtime/ctime --
   # which a fresh checkout always changes -- from defeating a hit. (No pch_defines: there is no PCH.)
-  # The caches themselves are saved by `push` runs only and merely restored by pull requests; see
+  # The caches themselves are saved by master pushes only and merely restored by every other run; see
   # docs/internals/build-times.md ("The compiler cache").
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: "1"
   CCACHE_SLOPPINESS: include_file_mtime,include_file_ctime
+  # The one place where a step or script learns that it builds a release; jobs use the same condition
+  # in their `if:` (docs/internals/releasing.md).
+  CONTOUR_BUILD_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'prerelease' }}
 
 # What runs where. A pull request runs the platform builds and tests (Windows, macOSArm, one Linux
 # leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
 # the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
-# pushes and in the merge queue, and on the `release` branch's pull request, through
-# `if: github.event_name != 'pull_request' || github.head_ref == 'release'`. Exceptions: FreeBSD and
-# the full-tree clang-tidy use `github.event_name != 'pull_request'` and skip even the `release`
-# pull request, and the static build (`github.ref == 'refs/heads/master' || head_ref == 'release'`)
-# never runs in the merge queue. The daemon packages: the Debian one (`package_daemon_for_Ubuntu`) runs
-# on every pull request, for 24.04 alone (both releases otherwise), because it is the only job that
-# builds the GUI-less configuration; the RPMs (`package_for_Fedora`) follow the packaging rule above.
+# pushes, in the merge queue and on release tags, through `if: github.event_name != 'pull_request'`.
+# That includes FreeBSD and the full-tree clang-tidy, which nothing exempts a release tag from. The
+# static build (`github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')`) runs on
+# master and release tags and never in the merge queue. The release-only jobs use
+# `startsWith(github.ref, 'refs/tags/v')`. The daemon packages: the Debian one
+# (`package_daemon_for_Ubuntu`) runs on every pull request, for 24.04 alone (both releases
+# otherwise), because it is the only job that builds the GUI-less configuration; the RPMs
+# (`package_for_Fedora`) follow the packaging rule above.
 # A required status check is never gated that way: it always runs and judges a skipped job as passed
 # (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 
@@ -121,7 +130,7 @@ jobs:
       with:
         key: "ccache-ubuntu2404-clang-tidy"
         max-size: 700M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "update APT database"
       run: sudo ./scripts/apt-update.sh
@@ -180,6 +189,13 @@ jobs:
     # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     - name: "cmake"
       run: |
         cmake \
@@ -187,6 +203,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
               -D ENABLE_TIDY=ON \
               -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
@@ -256,6 +273,13 @@ jobs:
         sudo apt-get install clang-tidy-${LLVM_VERSION}
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     - name: "cmake"
       run: |
         cmake \
@@ -263,6 +287,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
               -D ENABLE_TIDY=OFF
     - name: "build generated headers only"
@@ -291,7 +316,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '["24.04"]' || '["24.04","26.04"]') }}
+        os_version: ${{ fromJSON(github.event_name == 'pull_request' && '["24.04"]' || '["24.04","26.04"]') }}
     runs-on: ubuntu-${{ matrix.os_version }}
     env:
       OS_VERSION: ${{ matrix.os_version }}
@@ -311,7 +336,7 @@ jobs:
       with:
         key: "ccache-ubuntu${{ matrix.os_version }}-headless"
         max-size: 500M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "install dependencies"
       run: sudo env QTVER=6 ./scripts/install-deps.sh
@@ -326,6 +351,13 @@ jobs:
     # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
     - name: "install Rust (wasm32-wasip1)"
       run: ./scripts/install-rust-wasm.sh
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     # CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so this configuration
     # cannot merely happen to build against a Qt that is lying around -- it has to want none. The
     # step above installed Qt, which is what makes the assertion worth anything: the point is not
@@ -352,6 +384,7 @@ jobs:
               -G Ninja \
               -D CMAKE_INSTALL_PREFIX=/usr \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
               -D CONTOUR_PACKAGE_TERMINFO=OFF \
@@ -464,7 +497,7 @@ jobs:
     # Uploaded wherever the GUI package is, and no more widely: the install-swap job and the release
     # take it from here. The steps above are what run on a pull request.
     - name: "Uploading artifact .deb package"
-      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
@@ -482,11 +515,11 @@ jobs:
   #
   # ubuntu:26.04, the release the GUI package is built for, with the daemon package built on that same
   # release (the 26.04 matrix entry above), so neither package meets a soname or virtual-package skew
-  # that a user installing from one release would not. The swap job is restricted to non-PR / release
-  # events, hence the swap behaviour is first exercised on release branches, not on ordinary pull
+  # that a user installing from one release would not. The swap job is restricted to non-PR events,
+  # hence the swap behaviour is first exercised on master pushes and release tags, not on ordinary pull
   # requests (the PR description states it).
   test_daemon_package_swap:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Ubuntu Linux (contour / contour-daemon swap)"
     runs-on: ubuntu-24.04
     needs:
@@ -557,7 +590,7 @@ jobs:
       with:
         key: "ccache-ubuntu2404-no-extensions"
         max-size: 700M
-        save: ${{ github.event_name == 'push' }}
+        save: ${{ github.ref == 'refs/heads/master' }}
         evict-old-files: job
     - name: "update APT database"
       run: sudo ./scripts/apt-update.sh
@@ -585,6 +618,13 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
+    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+    # unicode.org outage used to fail the configure step of every job at once.
+    - name: "Unicode database"
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: _ucd
+        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
     # No Rust: without extensions there are no WebAssembly guests to build (CONTOUR_EXTENSIONS_BUNDLED
     # follows CONTOUR_EXTENSIONS).
     - name: "cmake"
@@ -594,6 +634,7 @@ jobs:
               -B build \
               -G Ninja \
               -D CONTOUR_WAYLAND=OFF \
+              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
               -D CONTOUR_EXTENSIONS=OFF \
               -D CONTOUR_TESTING=ON \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
@@ -686,7 +727,7 @@ jobs:
   # }}}
   # {{{ StaticBuild
   staticBuild:
-    if: github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
     name: "Static build"
     runs-on: ubuntu-latest
     steps:
@@ -736,15 +777,15 @@ jobs:
   # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
   #
   # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
-  # merge queue and on the `release` pull request, not on ordinary pull requests: the Ubuntu daemon job
+  # merge queue and on release tags, not on ordinary pull requests: the Ubuntu daemon job
   # already builds the GUI-less configuration on every one.
   package_for_Fedora:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
     strategy:
       fail-fast: false
       matrix:
-        # Keep the stable entry in step with do_release's fetch below and the Dockerfile's default.
+        # Keep the stable entry in step with the fedora44 rows of .github/release.json and the Dockerfile's default.
         os_version: ["44", "rawhide"]
     continue-on-error: ${{ matrix.os_version == 'rawhide' }}
     runs-on: ubuntu-24.04
@@ -945,7 +986,7 @@ jobs:
   # }}}
   # {{{ OpenBSD
   openbsd:
-    if: false #github.ref == 'refs/heads/master' || github.head_ref == 'release'
+    if: false
     runs-on: ubuntu-latest
     name: OpenBSD 7.5
     # env:
@@ -1002,8 +1043,8 @@ jobs:
           # that was in no keychain (breaking every PR run of this job), while a release
           # branch's signing path went completely unexercised until it was already on
           # master. Signing has to be proven before the merge, not after it.
-          # (An ordinary pull request no longer packages or signs at all; the merge queue and the
-          # release branch, which carry the secrets, prove it before it ships.)
+          # (An ordinary pull request no longer packages or signs at all; the merge queue and
+          # release tags, which carry the secrets, prove it before it ships.)
           if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
             echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
             echo "NOTARIZE=ON" >> "$GITHUB_OUTPUT"
@@ -1027,18 +1068,14 @@ jobs:
           echo "PACKAGE_IMAGE=$PACKAGE_IMAGE" >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-          # Via the environment, not interpolated into the script: a branch name is
-          # attacker-controlled on a fork's pull request.
-          GH_REF: ${{ github.ref }}
-          GH_HEAD_REF: ${{ github.head_ref }}
           # Empty on fork pull requests, where GitHub withholds secrets. Only the
           # emptiness is observable here -- the value never reaches the log.
           #
           # Not even read on an ordinary pull request: nothing is signed there, so the secret is
           # never exposed to the job and the PR path is the same with or without secrets.
-          HAS_SIGNING_SECRETS: ${{ (github.event_name != 'pull_request' || github.head_ref == 'release') && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
+          HAS_SIGNING_SECRETS: ${{ github.event_name != 'pull_request' && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
           # A pull request builds and tests; it does not package, so it neither signs nor notarizes.
-          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' || github.head_ref == 'release' }}
+          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' }}
       - name: Install the Apple signing certificate
         if: steps.set_vars.outputs.NOTARIZE == 'ON'
         env:
@@ -1091,7 +1128,7 @@ jobs:
         with:
           key: ccache-macosArm-r1
           max-size: 800M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: Install Qt
         # The official Qt binaries, as on Linux and Windows -- not Homebrew's. Homebrew
@@ -1424,25 +1461,45 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
+    # About twice what a green master run takes (70 minutes), rather than GitHub's 360-minute default. SignPath
+    # waits for the owner's approval twice (the payload, then the installers), up to an hour each, on top of the
+    # build and the checks: 300 minutes.
+    timeout-minutes: ${{ vars.WINDOWS_SIGNER == 'signpath' && 300 || 150 }}
     permissions:
       contents: read
       packages: write
+      # The SignPath action reads this run's artifacts with GITHUB_TOKEN.
+      actions: read
+    # Signs when a signer is configured (repository variable WINDOWS_SIGNER: signpath, certum or sslcom) and the
+    # build is a release tag, or a master push when WINDOWS_SIGNING_BUILDS is releases-and-master. Only then does
+    # the job enter the release-signing environment, which holds the credentials and the owner's approval rule.
+    # The condition is spelled twice, here and in the concurrency group, because neither can read a step's output:
+    # the two copies must stay identical. `plan` decides the same again from the same variables, and is what the
+    # steps follow; a copy that went wrong shows as secrets that are missing, never as an unsigned release. Both
+    # variables have to be repository variables, since an environment's own variables are not visible before the
+    # job has its environment. How it works, and how to turn it on: docs/internals/release-signing.md.
+    environment: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || '' }}
+    # One signing job at a time: a one-time code is single use, and two jobs logging in within its 30 seconds
+    # collide. Jobs that do not sign get a group of their own and wait for nobody.
+    concurrency:
+      group: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || format('windows-{0}-{1}', github.run_id, github.run_attempt) }}
+      cancel-in-progress: false
     env:
       CMAKE_PRESET: "msvc-release"
       VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
       # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache. The action
       # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
       # follows the image's install time. The statistics step at the end names the binary CMake used
       # and the cache directory it read, so a mismatch with the restored one shows in the log.
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: ccache-windows-msvc-release
           max-size: 1500M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: setup environment
         shell: powershell
@@ -1450,6 +1507,17 @@ jobs:
         run: .\scripts\ci-set-vars.ps1
         env:
           REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Name the packages"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        # The packages CPack leaves in the build directory, as paths relative to the workspace: every later step
+        # that names one reads these.
+        run: |
+          $directory = "out/build/$env:CMAKE_PRESET"
+          $version = '${{ steps.set_vars.outputs.version }}'
+          "CONTOUR_MSI=$directory/contour-$version-win64.msi" >> $env:GITHUB_ENV
+          "CONTOUR_USER_MSI=$directory/contour-$version-win64-user.msi" >> $env:GITHUB_ENV
+          "CONTOUR_ZIP=$directory/contour-$version-win64.zip" >> $env:GITHUB_ENV
       - name: "Fetch embedded dependencies"
         shell: powershell
         run: |
@@ -1460,7 +1528,7 @@ jobs:
         # this step; only a repeated failure fails the job.
         id: install_qt
         continue-on-error: true
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
           # repository at 6.11 into per-architecture subdirectories
@@ -1478,7 +1546,7 @@ jobs:
           modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install Qt -- retry past a bad mirror
         if: steps.install_qt.outcome == 'failure'
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: "6.10.*"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
@@ -1491,7 +1559,7 @@ jobs:
             --password "${{ secrets.GITHUB_TOKEN }}" \
             --store-password-in-clear-text
       - name: "Cache vcpkg"
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: vcpkg-cache
         with:
           path: ${{ runner.workspace }}/vcpkg
@@ -1516,11 +1584,13 @@ jobs:
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
           VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+      # CMake 3.30 is the first to honour CPACK_WIX_VERSION: older ones run WiX 3's candle and light whatever
+      # WiX the next step installs.
       - name: "Install cmake"
-        uses: lukka/get-cmake@v3.29.0
+        uses: lukka/get-cmake@f5b8fbb4d77cec1acc5a5f9f0df4beffaf5d98d9 # v4.3.4
       - name: "Check cmake version"
         run: cmake --version
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - name: "install Rust (wasm32-wasip1)"
         # @see the same step on Linux: the bundled extensions and the test guests are Rust.
         shell: bash
@@ -1544,7 +1614,13 @@ jobs:
           ccache --show-config | Select-String -Pattern 'cache_dir|max_size|compiler_check|sloppiness|base_dir'
           ccache -s
       - name: "Test"
+        # A hang fails one test, not the step: the preset gives every test 10 minutes (the longest GUI
+        # run takes 7), vthost_test its own 5, and ctest shows a timed-out test's output. The trace
+        # names each Catch2 case on stderr as it starts, so that output ends with the case that hung.
         shell: pwsh
+        timeout-minutes: 30
+        env:
+          CONTOUR_TEST_TRACE: "1"
         run: |
           ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo -j $env:NUMBER_OF_PROCESSORS
       - name: "verify the AF_UNIX tests actually ran"
@@ -1560,7 +1636,14 @@ jobs:
         # <binaryDir>/bin, so the executables do NOT sit beside their source directory the way they
         # do on Linux. The preset's generator is Ninja (single-config), so there is no
         # per-configuration subdirectory under it either.
+        #
+        # Bounded, and streamed with CONTOUR_TEST_TRACE's case names: a case that hangs here would
+        # otherwise hold the job until its own time limit and print nothing, its output still captured.
+        # The skip check reads Catch2's summary, not the trace's case names.
         shell: bash
+        timeout-minutes: 10
+        env:
+          CONTOUR_TEST_TRACE: "1"
         run: |
           set -o pipefail
           for binary in \
@@ -1569,9 +1652,9 @@ jobs:
             # this step exists to catch, one directory layout further out.
             [ -x "$binary" ] || { echo "::error::$binary not found; the assertion below would pass vacuously"; exit 1; }
             echo "--- $binary [afunix]"
-            output=$("$binary" '[afunix]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
-            printf '%s\n' "$output"
-            if printf '%s' "$output" | grep -q 'skipped'; then
+            log=$(mktemp)
+            "$binary" '[afunix]' 2>&1 | tee "$log" || exit 1
+            if grep -v '^\[trace\]' "$log" | grep -q 'skipped'; then
               echo "::error::$binary [afunix] reported SKIPPED; the daemon's AF_UNIX transport is not being exercised on Windows"
               exit 1
             fi
@@ -1589,6 +1672,7 @@ jobs:
         # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
         # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
         shell: pwsh
+        timeout-minutes: 10
         run: |
           $binary = "out/build/$env:CMAKE_PRESET/bin/contour_test.exe"
           $contour = "out/build/$env:CMAKE_PRESET/bin/contour.exe"
@@ -1611,148 +1695,259 @@ jobs:
             exit 1
           }
           if ($status -ne 0) { exit 1 }
-      - name: "verify the Win32 chrome tests actually ran"
+      - name: "verify the Win32 chrome and Restart Manager tests actually ran"
         # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
         # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
         # pass. windows-latest has a desktop, so a skip here is a regression. The [win11-22h2] cases are left
         # out: they SKIP on a Windows older than 22H2 (a pinned runner image), which is no regression.
         shell: pwsh
+        timeout-minutes: 10
         env:
           QT_QPA_PLATFORM: windows
           QT_QUICK_BACKEND: software
           CONTOUR_TEST_DISPLAY: "1"
         run: |
-          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_gui_test.exe"
-          # A missing binary must not read as "nothing skipped".
-          if (-not (Test-Path $binary)) {
-            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
-            exit 1
+          # The chrome's own cases, and the Restart Manager one (contour_restart_manager_test closes a running
+          # Contour the way Windows Installer does and expects it back): both SKIP without a desktop.
+          $rows = @(
+            @{ Binary = 'contour_gui_test.exe'; Filter = '[win32]~[win11-22h2]'; What = 'the Win32 chrome' }
+            @{ Binary = 'contour_restart_manager_test.exe'; Filter = '[win32]'; What = 'closing and reopening Contour as Windows Installer does' }
+          )
+          foreach ($row in $rows) {
+            $binary = "out/build/$env:CMAKE_PRESET/bin/$($row.Binary)"
+            # A missing binary must not read as "nothing skipped".
+            if (-not (Test-Path $binary)) {
+              Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+              exit 1
+            }
+            Write-Output "--- $binary $($row.Filter)"
+            $output = & $binary $row.Filter 2>&1 | Out-String
+            $status = $LASTEXITCODE
+            Write-Output $output
+            if ($output -match 'skipped') {
+              Write-Output "::error::$binary $($row.Filter) reported SKIPPED; $($row.What) is not being exercised on Windows"
+              exit 1
+            }
+            if ($status -ne 0) { exit 1 }
           }
-          Write-Output "--- $binary [win32]~[win11-22h2]"
-          $output = & $binary '[win32]~[win11-22h2]' 2>&1 | Out-String
-          $status = $LASTEXITCODE
-          Write-Output $output
-          if ($output -match 'skipped') {
-            Write-Output "::error::$binary [win32] reported SKIPPED; the Win32 chrome is not being exercised on Windows"
-            exit 1
-          }
-          if ($status -ne 0) { exit 1 }
       # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
-      # queue and the `release` branch.
+      # queue and release tags.
       - name: "Install Wix Toolset"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
         run: |
           # Use this to list all available versions
           # dotnet tool search --global wix --detail
           # or at URL: https://www.nuget.org/packages/wix#versions-body-tab
           dotnet tool install --global wix --version 4.0.6
+          # The WiX .NET tool takes its UI dialogs from this extension, which CPack does not fetch itself, and
+          # its version has to match the tool's.
+          wix extension add --global WixToolset.UI.wixext/4.0.6
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
-      - name: "Create Package(s)"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        shell: powershell
-        run: |
-          cpack --preset ${{ env.CMAKE_PRESET }} -V
-          if ($LASTEXITCODE -ne 0) {
-            echo "CPack failed. Dumping wix.log..."
-            type "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
-            exit $LASTEXITCODE
-          }
-      - name: "Rename package(s)"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        run: |
-          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Check the package contents"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # What the package must and must not hold, asserted as the macOS job does for its image: a mistake
-        # either way has no other visible symptom.
-        # - No executable but those allowed, no .ilk or .pdb, no Qt Test: bin/ is every target's output
-        #   directory (see its install rule in src/contour/CMakeLists.txt for why that matters), and
-        #   CONTOUR_INSTALL_TOOLS=OFF in the Windows preset keeps the tools' own install rules out.
-        # - What is loaded by name or file type at run time, which no build notices missing and CI's tests
-        #   find anyway, in the Qt install QT_PLUGIN_PATH names: the Fluent row's controls style, named through
-        #   QQuickStyle::setStyle where windeployqt's --qmldir scan cannot see it; Qt SVG and its image plugin
-        #   (see cmake/DeployQt.cmake); and the bundled status-line extensions, which contour.exe looks for
-        #   beside bin/.
-        # contour.exe must be found first, or every check would pass on a zip it cannot read.
+      # Signing: the four stages around the packages, each a step of scripts/sign-windows.ps1 (how they fit, and
+      # how to switch a signer on: docs/internals/release-signing.md). The payload is staged and signed before
+      # CPack runs, and CPack packages the signed files (cmake/WindowsSignedOverlay.cmake); the installers are
+      # signed after; a dry run or a verification closes the gap before the checks below look at what ships.
+      # Without a configured signer the plan says `none`, nothing is signed, and the dry run proves the machinery
+      # with a throwaway certificate. The plan, not this file, decides who signs: the steps follow its output.
+      - name: "Signing: plan"
+        if: github.event_name != 'pull_request'
+        id: signing
         shell: pwsh
+        # The kind of build is the one input the script cannot see.
+        run: ./scripts/sign-windows.ps1 plan -Configured $env:CONFIGURED -Builds $env:BUILDS -Build $env:BUILD_KIND
+        env:
+          CONFIGURED: ${{ vars.WINDOWS_SIGNER }}
+          BUILDS: ${{ vars.WINDOWS_SIGNING_BUILDS }}
+          BUILD_KIND: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'master') || 'other' }}
+      - name: "Signing: stage the payload"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 stage -BuildDirectory out/build/$env:CMAKE_PRESET -Destination out/signing/stage
+      - name: "Signing: sign the payload"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 sign -Kind Payload -Root out/signing/stage -Signer $env:SIGNER -Manifest out/signing/payload.tsv
+        env: &signing_env
+          SIGNER: ${{ steps.signing.outputs.signer }}
+          CERTUM_EMAIL: ${{ secrets.CERTUM_EMAIL }}
+          CERTUM_OTP: ${{ secrets.CERTUM_OTP }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+      - name: "Signing: send the payload to SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 export -Kind Payload -Root out/signing/stage -Signer signpath -Destination out/signing/signpath-payload -Manifest out/signing/payload.tsv
+      - name: "Signing: upload the payload for SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        id: signpath_payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-payload-${{ github.run_id }}
+          path: out/signing/signpath-payload
+          retention-days: 1
+          if-no-files-found: error
+      - name: "Signing: have SignPath sign the payload"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: payload
+          github-artifact-id: ${{ steps.signpath_payload.outputs.artifact-id }}
+          wait-for-completion: true
+          # A release request waits for the owner's approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: out/signing/signpath-payload-signed
+      - name: "Signing: take the signed payload back"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 import -Root out/signing/stage -From out/signing/signpath-payload-signed -Manifest out/signing/payload.tsv -Signer signpath
+      - name: "Create Package(s)"
+        if: github.event_name != 'pull_request'
+        shell: powershell
+        # The per-machine MSI and the zip, then the per-user MSI. CPack names them in lowercase already
+        # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory. The
+        # manifest makes CPack's pre-build hook lay the signed payload over what it stages. wix.log is shown when
+        # WiX wrote one during this step, and only then: a hook or a zip that failed has no WiX log to show.
         run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
-          try {
-            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
-          } finally {
-            $zip.Dispose()
-          }
-          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the checks below would pass vacuously"
-            exit 1
-          }
-          $shippedExecutables = 'contour.exe', 'OpenConsole.exe'
-          $strays = $entries | Where-Object {
-            $name = ($_ -split '/')[-1]
-            ($name -like '*.exe' -and $shippedExecutables -notcontains $name) -or $name -like '*.ilk' -or
-              $name -like '*.pdb' -or $name -eq 'Qt6Test.dll' -or $name -eq 'qoffscreen.dll'
-          }
-          if ($strays) {
-            Write-Host "::error::the zip ships $($strays -join ', ')"
-            exit 1
-          }
-          $required = @(
-            'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir'
-            'bin/imageformats/qsvg.dll'
-            'bin/Qt6Svg.dll'
-          ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
-          foreach ($path in $required) {
-            if (-not ($entries | Where-Object { $_ -like "*/$path" -or $_ -eq $path })) {
-              Write-Host "::error::the zip holds no $path"
-              exit 1
+          foreach ($preset in '${{ env.CMAKE_PRESET }}', '${{ env.CMAKE_PRESET }}-user') {
+            $started = Get-Date
+            cpack --preset $preset -V -D "CPACK_CONTOUR_SIGNING_MANIFEST=$PWD/out/signing/payload.tsv"
+            if ($LASTEXITCODE -ne 0) {
+              $log = "out/build/${{ env.CMAKE_PRESET }}/_CPack_Packages/win64/WIX/wix.log"
+              if ((Test-Path $log) -and (Get-Item $log).LastWriteTime -ge $started) {
+                echo "CPack failed. Dumping wix.log..."
+                type $log
+              }
+              exit $LASTEXITCODE
             }
           }
+      - name: "Signing: sign the installers"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 sign -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer $env:SIGNER
+        env: *signing_env
+      - name: "Signing: send the installers to SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 export -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer signpath -Destination out/signing/signpath-packages -Manifest out/signing/packages.tsv
+      - name: "Signing: upload the installers for SignPath"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        id: signpath_packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signpath-packages-${{ github.run_id }}
+          path: out/signing/signpath-packages
+          retention-days: 1
+          if-no-files-found: error
+      - name: "Signing: have SignPath sign the installers"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: packages
+          github-artifact-id: ${{ steps.signpath_packages.outputs.artifact-id }}
+          wait-for-completion: true
+          # A release request waits for the owner's approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: out/signing/signpath-packages-signed
+      - name: "Signing: take the signed installers back"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 import -Root out/build/$env:CMAKE_PRESET -From out/signing/signpath-packages-signed -Manifest out/signing/packages.tsv -Signer signpath
+      - name: "Signing: dry run"
+        if: github.event_name != 'pull_request' && steps.signing.outputs.dry-run == 'true'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 dry-run -Root out/signing/stage -Packages $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
+      - name: "Signing: verify what ships"
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 verify -Signer $env:SIGNER -Manifest out/signing/payload.tsv -Zip $env:CONTOUR_ZIP -Msi $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
+        env:
+          SIGNER: ${{ steps.signing.outputs.signer }}
+      - name: "Check the package contents"
+        if: github.event_name != 'pull_request'
+        # What each package must and must not hold, asserted as the macOS job does for its image: a mistake
+        # either way has no other visible symptom. The rows, and why each exists, are in
+        # scripts/check-windows-package.ps1.
+        shell: pwsh
+        run: |
+          pwsh scripts/check-windows-package.ps1 -Zip $env:CONTOUR_ZIP -MachineMsi $env:CONTOUR_MSI -UserMsi $env:CONTOUR_USER_MSI
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading MSI to artifact store"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          path: ${{ env.CONTOUR_MSI }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading the per-user MSI to artifact store"
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
+          path: ${{ env.CONTOUR_USER_MSI }}
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+          path: ${{ env.CONTOUR_ZIP }}
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
-        # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
-        # version field (the run number), which Windows Installer ignores: only a ProductCode of its own per
-        # build lets the second one in (error 1638 otherwise). Needs a runner without Contour installed, which
-        # scripts/check-msi-upgrade.ps1 insists on.
+        # installed Contour is upgraded in the field, and checks what the upgrade leaves: the folder, the PATH,
+        # the daemon task, a daemon started by hand, the Start menus, and the leftovers of an uninstall. The two
+        # builds of one release differ only in the fourth version field (the run number), which Windows
+        # Installer ignores: only a ProductCode of its own per build lets the second one in (error 1638
+        # otherwise). An earlier build that should relocate a daemon is built from this very tree, so that it
+        # carries the Relocates marker the installer asks for. Needs a runner without Contour installed, which
+        # scripts/check-msi-upgrade.ps1 insists on; each run below leaves it so.
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ steps.set_vars.outputs.version }}'
-          $candidate = "contour-$version-win64.msi"
+          $candidate = Join-Path $PWD "out\build\${{ env.CMAKE_PRESET }}\contour-$version-win64.msi"
+          $candidateUser = Join-Path $PWD "out\build\${{ env.CMAKE_PRESET }}\contour-$version-win64-user.msi"
           $release = ($version -split '\.')[0..2] -join '.'
 
-          # cpack changes into the preset's build directory before it resolves -B, so the directory is absolute.
-          $earlierDir = Join-Path $PWD 'out\msi-earlier'
-          cpack --preset ${{ env.CMAKE_PRESET }} -G WIX -D CPACK_PACKAGE_VERSION=$release.0 -B $earlierDir
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "CPack failed. Dumping wix.log..."
-            Get-Content (Join-Path $earlierDir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
-            exit $LASTEXITCODE
-          }
-          $earlier = @(Get-ChildItem $earlierDir -Filter '*-win64.msi')
-          if ($earlier.Count -ne 1) {
-            Write-Host "::error::expected one earlier build of $release in $earlierDir, found $($earlier.Count)"
-            exit 1
+          # An earlier build of this release for each package: lower than the one under test and built from this very
+          # tree, so that it carries the Relocates marker. cpack changes into the preset's build directory before it
+          # resolves -B, so the directories are absolute. No per-user package is released yet, so the per-user one
+          # is upgraded from an earlier build only.
+          $builds = @(
+            @{ Name = 'machine'; Preset = '${{ env.CMAKE_PRESET }}'; Dir = Join-Path $PWD 'out\msi-earlier'; Filter = '*-win64.msi'; Extra = @('-G', 'WIX') }
+            @{ Name = 'user'; Preset = '${{ env.CMAKE_PRESET }}-user'; Dir = Join-Path $PWD 'out\msi-earlier-user'; Filter = '*-win64-user.msi'; Extra = @() }
+          )
+          $earlierBuild = @{}
+          foreach ($build in $builds) {
+            cpack --preset $build.Preset @($build.Extra) -D CPACK_PACKAGE_VERSION=$release.0 -B $build.Dir
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "CPack failed. Dumping wix.log..."
+              Get-Content (Join-Path $build.Dir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
+              exit $LASTEXITCODE
+            }
+            $found = @(Get-ChildItem $build.Dir -Filter $build.Filter)
+            if ($found.Count -ne 1) {
+              Write-Host "::error::expected one earlier $($build.Name) build of $release in $($build.Dir), found $($found.Count)"
+              exit 1
+            }
+            $earlierBuild[$build.Name] = $found[0].FullName
           }
 
           gh release download --repo contour-terminal/contour --pattern '*-win64.msi' --dir out\msi-release
@@ -1763,13 +1958,40 @@ jobs:
             exit 1
           }
 
-          pwsh scripts\check-msi-upgrade.ps1 -From $earlier[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Each run: what it proves is in scripts/check-msi-upgrade.ps1's rows.
+          $runs = @(
+            # From the latest release (an old versioned folder): the folder becomes Contour, and the daemon task
+            # is repaired by `daemon-service start`, with no daemon running (a GUI start repairs it only while
+            # one is served).
+            @{ Log = 'msi-from-release'; From = $released[0].FullName; To = $candidate; Extra = @('-ServiceLabel', 'msi-check') }
+            # From a custom folder, kept by the upgrade; a daemon started by hand from the earlier install
+            # lives through it, now on its staged copy.
+            # (and repaired there: the folder, PATH and recorded InstallRoot stay, and the relocator names the folder)
+            @{ Log = 'msi-same-release'; From = $earlierBuild.machine; To = $candidate; Extra = @('-FromInstallRoot', 'C:\ContourCustom', '-ForegroundDaemon', 'msi-fg', '-RepairAfterUpgrade') }
+            # Both installers side by side: each scope keeps its own folder, PATH and Start menu as the other
+            # comes and goes. The earlier install is in the default per-machine folder, C:\Program Files\Contour,
+            # whose space the daemon relocator's command line has to survive, so a daemon started by hand there
+            # must be moved (the log shows the custom action ran, and returned 1, before InstallValidate).
+            @{ Log = 'msi-side-by-side'; From = $earlierBuild.machine; To = $candidate; Extra = @('-SideBySide', $candidateUser, '-ForegroundDaemon', 'msi-fg-default') }
+            # Per user, moved by the upgrade, with the desktop shortcut declined (an upgrade removes it) ...
+            @{ Log = 'msi-user-moved'; From = $earlierBuild.user; To = $candidateUser; Extra = @('-ToInstallRoot', "$env:LOCALAPPDATA\Programs\ContourMoved", '-ToProperties', 'DESKTOP_SHORTCUT=0') }
+            # ... and kept in a custom folder when the upgrade names none.
+            @{ Log = 'msi-user-custom'; From = $earlierBuild.user; To = $candidateUser; Extra = @('-FromInstallRoot', "$env:LOCALAPPDATA\Programs\ContourCustom") }
+          )
+          # Every run, whatever the ones before it did (each cleans up after itself), and the failures together.
+          $failed = @()
+          foreach ($run in $runs) {
+            Write-Host "=== $($run.Log)"
+            pwsh scripts\check-msi-upgrade.ps1 -From $run.From -To $run.To -LogDir "$env:RUNNER_TEMP\$($run.Log)" @($run.Extra)
+            if ($LASTEXITCODE -ne 0) { $failed += $run.Log }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::the install checks failed: $($failed -join ', ')"
+            exit 1
+          }
       - name: "Uploading the upgrade check's logs"
-        if: failure() && (github.event_name != 'pull_request' || github.head_ref == 'release')
-        uses: actions/upload-artifact@v4
+        if: failure() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "msi-upgrade-check-logs"
           path: ${{ runner.temp }}/msi-*
@@ -1782,7 +2004,7 @@ jobs:
       fail-fast: false
       matrix:
         # Chosen by event, as data: a pull request builds one leg -- Clang 22 on x86, the compiler
-        # that also gates -Werror -- while master, the merge queue and the `release` pull request
+        # that also gates -Werror -- while master, the merge queue and release tags
         # build all four. `werror` is OFF only where the leg is not known to build clean with it
         # (GCC: a local GCC 16 build stops on -Werror=bidi-chars; GCC 15 is unverified). `artifacts`
         # marks the single leg that runs the chrome snapshots and uploads the test binaries: the GCC
@@ -1790,7 +2012,7 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
@@ -1805,7 +2027,7 @@ jobs:
         with:
           key: "ccache-${{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
           max-size: ${{ startsWith(matrix.compiler, 'GCC') && '1200M' || '700M' }}
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "update APT database"
         run: sudo ./scripts/apt-update.sh
@@ -1915,7 +2137,7 @@ jobs:
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update -q
+          sudo ./scripts/apt-update.sh
           sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
@@ -1931,6 +2153,13 @@ jobs:
         run: mkdir build
       - name: CMake version
         run: cmake --version
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "cmake"
         run: |
           CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
@@ -2160,7 +2389,7 @@ jobs:
         with:
           key: "ccache-appimage"
           max-size: 1200M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "install dependencies"
         run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
@@ -2186,15 +2415,22 @@ jobs:
       - name: Install GCC
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update -q
+          sudo ./scripts/apt-update.sh
           sudo apt install -y g++-15
       # Qt's text-to-speech plugin links libspeechd, which linuxdeploy must find to bundle it.
       - name: "install libspeechd"
         run: sudo apt install -y libspeechd2
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs, as in
+      # the matrix jobs: a unicode.org outage used to fail the configure step.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "build the AppImage"
         run: |
           set -euo pipefail
-          CXX=g++-15 \
+          UCD_BASE_DIR="$PWD/_ucd"           CXX=g++-15 \
           VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}" \
           OUTPUT_DIR="$PWD" \
               ./scripts/build-appimage.sh
@@ -2235,7 +2471,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04
   package_for_Ubuntu:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
       fail-fast: false
@@ -2259,7 +2495,7 @@ jobs:
         with:
           key: "ccache-ubuntu-${{ matrix.os_version }}"
           max-size: 1200M
-          save: ${{ github.event_name == 'push' }}
+          save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
@@ -2276,6 +2512,13 @@ jobs:
         uses: ssrobins/install-cmake@v1
       - name: CMake version
         run: cmake --version
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "cmake"
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
@@ -2288,6 +2531,7 @@ jobs:
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_TESTING=ON \
                                -DCONTOUR_WAYLAND=OFF \
+                               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
                                -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh
@@ -2334,7 +2578,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Run tests via valgrind"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2390,7 +2634,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Run VT conformance suites"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2450,7 +2694,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         test_case:
@@ -2485,7 +2729,7 @@ jobs:
   # }}}
   # {{{ Latency trend: in-process vs daemon, recorded on every platform, never gating
   latency_trend:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     # Records, never gates: a shared runner is too noisy to hold a 1 ms budget to, and the gate is a
     # reproducible local run (docs/internals/latency.md). What this gives is the trend -- a regression
     # shows up as a step in the artifacts across commits. continue-on-error keeps a leg that cannot
@@ -2608,6 +2852,14 @@ jobs:
       - name: "install Rust (wasm32-wasip1)"
         shell: bash
         run: ./scripts/install-rust-wasm.sh
+      # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
+      # unicode.org outage used to fail the configure step of every job at once.
+      - name: "Unicode database"
+        if: runner.os == 'Linux'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: _ucd
+          key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
       - name: "Generate build files"
         shell: bash
         run: |
@@ -2714,7 +2966,7 @@ jobs:
   # }}}
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "GUI: Quick Shell Exit"
     needs: [package_for_Ubuntu]
     strategy:
@@ -2783,7 +3035,7 @@ jobs:
   # }}}
   # {{{ GUI: external test: notcurses
   test_notcurses:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     # Must match the OS the consumed .deb targets (26.04): a 26.04-built package links Qt 6.10 and a
     # newer libstdc++ than a 24.04 runner provides, so running it there fails with GLIBCXX/Qt-version
@@ -2902,7 +3154,7 @@ jobs:
   # }}}
   # {{{ Check Ubuntu package
   check_package_ubuntu:
-    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    if: github.event_name != 'pull_request'
     name: "Check packages for Ubuntu "
     strategy:
       fail-fast: false
@@ -2930,27 +3182,22 @@ jobs:
   # }}}
   # {{{ Release
   check_release:
-    if: github.head_ref == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Check Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: "update APT database"
-        run: sudo ./scripts/apt-update.sh
-      - name: Installing xmllint for ci-set-vars.sh and check-release.sh
-        run: sudo apt -qy install libxml2-utils
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "fetch the annotated tag"
+        # checkout leaves a lightweight copy of the tag; the annotated tag object carries the date the
+        # release date in metainfo.xml must match.
+        run: git fetch --no-tags --force origin "${GITHUB_REF}:${GITHUB_REF}"
       - name: run release checks
-        run: ./scripts/check-release.sh
+        run: python3 scripts/check-release.py --tag "${GITHUB_REF_NAME}"
 
   do_release:
-    if: github.head_ref == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Create Github release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - check_links
       - check_release
@@ -2958,15 +3205,16 @@ jobs:
       - macOSArm
       - package_for_AppImage
       - package_for_Ubuntu
+      - check_ubuntu2404_matrix_test_matrix
+      - check_package_ubuntu
+      - test_quick_exit
       - package_daemon_for_Ubuntu
       - test_daemon_package_swap
       - package_for_Fedora
       - windows
     permissions:
-      # We need write permissions on contents to create GitHub releases and on
-      # discussions to create the release announcement in the discussion forums
+      # We need write permissions on contents to create GitHub releases.
       contents: write
-      discussions: write
     steps:
       - uses: actions/checkout@v4
       - name: "update APT database"
@@ -2979,81 +3227,41 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
 
-      # {{{ fetch release artifacts
-      - name: "fetch artifact: Ubuntu 24.04"
-        uses: actions/download-artifact@v4
+      # Every artifact of this run named for this version: the packages, and nothing else (test
+      # binaries, transcripts and the static build carry no version). .github/release.json decides
+      # which of these files the release gets.
+      - uses: actions/download-artifact@v4
         with:
-          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
-      # The Qt-free contour-daemon package; its .deb and -dbgsym .ddeb land beside the GUI ones and are
-      # attached by the same *.deb / *.ddeb globs below.
-      - name: "fetch artifact: contour-daemon (Ubuntu 24.04)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-      - name: "fetch artifact: contour-daemon (Ubuntu 26.04)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
-      # The Fedora RPMs (stable release only: rawhide is a canary and publishes nothing). The release
-      # number follows the stable entry of package_for_Fedora's matrix.
-      - name: "fetch artifact: contour RPM (Fedora 44)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
-      - name: "fetch artifact: contour-daemon RPM (Fedora 44)"
-        uses: actions/download-artifact@v4
-        with:
-          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
-      - name: "fetch artifact: MacOS (ARM)"
-        uses: actions/download-artifact@v4
-        with:
-          # VERSION_STRING, matching the .deb above: `version` omits the `-prerelease`
-          # suffix, so a prerelease used to publish a .dmg whose name claimed otherwise.
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
-      - name: "fetch artifact: Windows (MSI)"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
-      - name: "fetch artifact: Windows (ZIP)"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "fetch artifact: AppImage"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-x86_64.AppImage"
-      - name: "fetch artifact: Static build"
-        uses: actions/download-artifact@v4
-        with:
-          name: "contour"
-      # }}}
-
-      - name: "inspect"
-        run: ls -lisahF
-      - name: inspect recurse
-        run: pwd; ls -hlaR
-
-      # -------------------------------------------------------------
-      - name: Create Github release page
-        id: create_release
-        uses: softprops/action-gh-release@v1
+          pattern: "contour*-${{ steps.set_vars.outputs.version }}-*"
+          merge-multiple: true
+          path: release-assets
+      - name: "Create the draft release for this tag"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # token provided by Actions
-        with:
-          tag_name: v${{ steps.set_vars.outputs.version }}${{ steps.set_vars.outputs.tag_suffix}}
-          name: Contour ${{ steps.set_vars.outputs.version }} ${{ steps.set_vars.outputs.RELEASENAME_SUFFIX}}
-          body_path: ${{ github.workspace }}/release-body.md
-          draft: true
-          prerelease: ${{ steps.set_vars.outputs.IS_PRERELEASE }}
-          fail_on_unmatched_files: true
-          files: |
-            *.deb
-            *.ddeb
-            *.rpm
-            *.dmg
-            *.msi
-            *.zip
-            *.AppImage
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release-assets.py select release-assets > release-files.txt
+          mapfile -t files < release-files.txt
+          # A rebuild of the same tag replaces its draft (a re-pushed tag has a new run number, which
+          # renames every file, so updating in place would leave the old run's files behind). A
+          # published release is never touched; the tag is never created here (--verify-tag). Only
+          # gh's "release not found" means there is no release yet; any other failure (rate limit, 5xx)
+          # stops the step rather than creating a second draft.
+          if is_draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>release-view.err); then
+            if [[ "$is_draft" != "true" ]]; then
+              echo "::error::release $TAG is already published; a release build never changes it"
+              exit 1
+            fi
+            gh release delete "$TAG" --yes
+          elif ! grep -qi "release not found" release-view.err; then
+            cat release-view.err
+            echo "::error::could not look up release $TAG"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "Contour ${TAG#v}" --notes-file release-body.md "${files[@]}"
   # }}}
 
 

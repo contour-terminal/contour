@@ -67,6 +67,7 @@ Ptd = "Ptd"       # DECCRA's target-destination parameter, same notation.
 DECID = "DECID"   # VT sequence mnemonic: Identify Terminal.
 viw = "viw"       # Vi command: visually select the inner word.
 LAMDA = "LAMDA"   # Unicode's own spelling of U+039B GREEK CAPITAL LETTER LAMDA.
+sice = "sice"     # WiX's -sice switch: suppress one ICE validation.
 WRONLY = "WRONLY" # POSIX O_WRONLY.
 mis = "mis"       # English prefix: mis-sized, mis-set, mis-targeted, mis-navigate, mis-tabled.
 

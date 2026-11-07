@@ -147,6 +147,21 @@ struct DaemonUpgradeSuccess
 [[nodiscard]] std::expected<DaemonUpgradeSuccess, DaemonUpgradeFailure> upgradeDaemonTo(
     DaemonControlPort& control, DaemonControlPort& settling, DaemonBinarySource& binary, SettlePacer& pacer);
 
+/// upgradeDaemonTo() with the daemon's status before the call already in hand.
+/// @param control The running daemon, asked for the upgrade itself.
+/// @param settling The running daemon, asked for its status after.
+/// @param binary What this client's image is staged from.
+/// @param pacer The clock and the waits between asks.
+/// @param known The daemon's status as just read, the baseline an upgrade is judged against; nullopt reads it
+///        (twice at most) as the other overloads do.
+/// @return As the other overloads.
+[[nodiscard]] std::expected<DaemonUpgradeSuccess, DaemonUpgradeFailure> upgradeDaemonTo(
+    DaemonControlPort& control,
+    DaemonControlPort& settling,
+    DaemonBinarySource& binary,
+    SettlePacer& pacer,
+    std::optional<DaemonStatus> const& known);
+
 /// upgradeDaemonTo() asking @p control for everything.
 [[nodiscard]] std::expected<DaemonUpgradeSuccess, DaemonUpgradeFailure> upgradeDaemonTo(
     DaemonControlPort& control, DaemonBinarySource& binary, SettlePacer& pacer);

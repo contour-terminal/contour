@@ -23,14 +23,12 @@ if [[ -z "${GITHUB_OUTPUT}" ]]; then
     GITHUB_OUTPUT="/dev/stdout"
 fi
 
-if [[ "${GITHUB_HEAD_REF}" == "release" ]]; then
-    IS_PRE='false';
-    SUFFIX="";
+# CONTOUR_BUILD_CHANNEL is set at workflow level by .github/workflows/build.yml; anything but
+# "release" (or unset, as in a local run) is a prerelease.
+if [[ "${CONTOUR_BUILD_CHANNEL:-}" == "release" ]]; then
     VERSION_STRING="${VERSION}"
 else
-    IS_PRE='true';
-    SUFFIX="prerelease";
-    VERSION_STRING="${VERSION}-${SUFFIX}"
+    VERSION_STRING="${VERSION}-prerelease"
 fi
 
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
@@ -54,9 +52,6 @@ RELEASEBODY="${RELEASEBODY//$'\r'/''}"
 
 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 echo "VERSION_STRING=${VERSION_STRING}" >> "$GITHUB_OUTPUT"
-echo "RUN_ID=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-echo "IS_PRERELEASE=${IS_PRE}" >> "$GITHUB_OUTPUT"
-echo "RELEASENAME_SUFFIX=${SUFFIX}" >> "$GITHUB_OUTPUT"
 
 echo "${RELEASEBODY}" >release-body.md
 echo "${RELEASEBODY}"

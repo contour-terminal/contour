@@ -21,6 +21,7 @@ set -euo pipefail
 #   BUILD_DIR       CMake build tree (default: out/appimage)
 #   OUTPUT_DIR      where the AppImage lands (default: the current directory)
 #   CXX             C++ compiler (default: g++)
+#   UCD_BASE_DIR    where libunicode keeps the Unicode database it downloads (default: inside BUILD_DIR)
 
 LINUXDEPLOY_VERSION="1-alpha-20251107-1"
 LINUXDEPLOY_QT_VERSION="1-alpha-20250213-1"
@@ -50,10 +51,13 @@ echo "Bundling Qt $("$QMAKE" -query QT_VERSION) from $QT_PREFIX"
 rm -rf "$APPDIR"
 launcher=()
 command -v ccache >/dev/null && launcher=(-DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+ucd=()
+[[ -n "${UCD_BASE_DIR:-}" ]] && ucd=(-DLIBUNICODE_UCD_BASE_DIR="$UCD_BASE_DIR")
 cmake -S "$ROOT" -B "$BUILD_DIR/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_CXX_COMPILER="$CXX" \
     "${launcher[@]}" \
+    "${ucd[@]}" \
     -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCONTOUR_TESTING=OFF \

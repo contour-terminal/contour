@@ -24,12 +24,14 @@ add_library(vthost STATIC
     DaemonImageLeases_posix.cpp
     DaemonImageLeases_win32.cpp
     DaemonLifecycle.hpp
+    RelocationRequest.hpp
     ConnectionRegistry.cpp
     ConnectionRegistry.hpp
     DaemonRuntime.cpp
     DaemonUpgradeHooks.cpp
     DaemonUpgradeHooks.hpp
     DaemonStarter.cpp
+    InstalledExecutable.cpp
     DaemonStarter.hpp
     DaemonRuntime.hpp
     ExtensionHosting.hpp
@@ -140,6 +142,8 @@ add_library(vthost STATIC
     control/PaneText.cpp
     control/PaneText.hpp
     control/ProgramStatusConvert.hpp
+    client/DaemonRelocation.cpp
+    client/DaemonRelocation.hpp
     client/DaemonRestart.cpp
     client/DaemonRestart.hpp
     client/DaemonUpgrade.cpp
@@ -360,6 +364,7 @@ if(VTHOST_TESTING)
         control/EventHub_test.cpp
         control/PaneText_test.cpp
         control/ProgramStatusConvert_test.cpp
+        client/DaemonRelocation_test.cpp
         client/DaemonRestart_test.cpp
         client/DaemonUpgrade_test.cpp
         client/ReleaseDrift_test.cpp

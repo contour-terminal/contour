@@ -421,6 +421,18 @@ if(WIN32)
     # .manifest source is embedded by the linker, and qt_add_executable() then generates none of its own.
     # These sources are the contour executable's alone, so no test binary gets it.
     list(APPEND _main_source_files packaging/contour.rc packaging/contour.manifest)
+
+    # The version resource (Explorer's Details tab, SmartScreen, and the file version Windows Installer
+    # records for contour.exe). The fourth field is the CI run number, empty in a local build.
+    set(CONTOUR_FILE_VERSION_TWEAK 0)
+    if(PROJECT_VERSION_TWEAK)
+        set(CONTOUR_FILE_VERSION_TWEAK ${PROJECT_VERSION_TWEAK})
+    endif()
+    set(CONTOUR_FILE_VERSION
+        "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${CONTOUR_FILE_VERSION_TWEAK}")
+    string(REPLACE "." "," CONTOUR_FILE_VERSION_FIELDS "${CONTOUR_FILE_VERSION}")
+    configure_file(packaging/VersionInfo.rc.in ${CMAKE_CURRENT_BINARY_DIR}/packaging/VersionInfo.rc @ONLY)
+    list(APPEND _main_source_files ${CMAKE_CURRENT_BINARY_DIR}/packaging/VersionInfo.rc)
 endif()
 
 # Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
@@ -1450,6 +1462,17 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ contour_application_restart: how the operating system starts the application again
+# Qt-free, so that the decision (which command line a restart gets) is tested in contour_test, in a build
+# without the GUI frontend too. The platform adapter is in contour_platform's care, which links this.
+add_library(contour_application_restart STATIC
+    platform/ApplicationRestart.cpp
+    platform/ApplicationRestart.hpp
+)
+target_link_libraries(contour_application_restart PUBLIC core::base PRIVATE vtpty)
+target_include_directories(contour_application_restart PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_test: the Qt-free unit tests, in BOTH frontend configurations
 # config/, command/ and cli/ link no Qt, so their tests need none either -- and a build configured
 # without the GUI frontend has none to give them. That is how that configuration came to have no
@@ -1534,6 +1557,7 @@ if(CONTOUR_TESTING)
         session/EndReason_test.cpp
         platform/CaptionHitTest_test.cpp
         platform/ConsoleAttach_test.cpp
+        platform/ApplicationRestart_test.cpp
         platform/SystemBackdrop_test.cpp
         platform/FinishNotification_test.cpp
         platform/AppBundle_test.cpp
@@ -1591,6 +1615,7 @@ if(CONTOUR_TESTING)
     # them HERE rather than in contour_gui_test is what proves they need no Qt to reach.
     target_link_libraries(contour_test
         PRIVATE
+        contour_application_restart
         contour_block_tooltip
         contour_command
         contour_command_output
@@ -1712,6 +1737,18 @@ if(CONTOUR_TESTING)
             PASS_REGULAR_EXPRESSION "packaging-rules: OK")
     endif()
 
+    # The hook that lays signed files over CPack's staging directory, against hand-made staging trees. Pure CMake,
+    # so it runs on every platform.
+    add_test(NAME contour_e2e_signed_overlay
+        COMMAND ${CMAKE_COMMAND}
+                -D "HOOK=${PROJECT_SOURCE_DIR}/cmake/WindowsSignedOverlay.cmake"
+                -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/signed-overlay-test"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/SignedOverlay.cmake)
+    set_tests_properties(contour_e2e_signed_overlay PROPERTIES
+        TIMEOUT 60
+        LABELS e2e
+        PASS_REGULAR_EXPRESSION "signed-overlay: OK")
+
     contour_add_e2e_cmake_test(
         NAME contour_e2e_shell_integration
         SCRIPT ShellIntegration.cmake
@@ -1723,12 +1760,60 @@ if(CONTOUR_TESTING)
     # The application manifest (packaging/contour.manifest), read back out of the built contour.exe as
     # Windows reads it. Its own executable, so that building the unit tests does not build the application.
     if(WIN32)
-        add_executable(contour_manifest_test test/core_test_main.cpp test/ApplicationManifest_test.cpp)
+        add_executable(contour_manifest_test
+            test/core_test_main.cpp test/ApplicationManifest_test.cpp test/VersionInfo_test.cpp)
         target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2 contour_test_trace)
-        target_compile_definitions(contour_manifest_test PRIVATE CONTOUR_BINARY="$<TARGET_FILE:contour>")
+        target_link_libraries(contour_manifest_test PRIVATE version)
+        target_compile_definitions(contour_manifest_test PRIVATE
+            CONTOUR_BINARY="$<TARGET_FILE:contour>"
+            CONTOUR_EXPECTED_FILE_VERSION="${CONTOUR_FILE_VERSION}"
+            CONTOUR_EXPECTED_PRODUCT_VERSION="${CONTOUR_VERSION_STRING}")
         add_dependencies(contour_manifest_test contour)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
+
+        # The self-test of Windows code signing (scripts/windows-signing): the signer table's rules, which signer a
+        # build uses, command lines, portable-executable detection, the manifest, signing and verifying with a
+        # throwaway certificate (no key is left in the user's profile), and, where a timestamp server answers (always
+        # on CI), the cases that need one and every pinned tool starting. PowerShell 7. Its fixtures go in this
+        # directory, not beside contour.exe, whose directory is packaged whole.
+        find_program(CONTOUR_PWSH_EXECUTABLE pwsh)
+        if(CONTOUR_PWSH_EXECUTABLE)
+            add_test(NAME contour_windows_signing
+                COMMAND ${CONTOUR_PWSH_EXECUTABLE} -NoProfile -NonInteractive
+                    -File ${PROJECT_SOURCE_DIR}/scripts/windows-signing/Test-WindowsSigning.ps1
+                    -UnsignedPe $<TARGET_FILE:contour>
+                    -WorkDirectory ${CMAKE_CURRENT_BINARY_DIR}/windows-signing-test)
+            set_tests_properties(contour_windows_signing PROPERTIES
+                TIMEOUT 300
+                LABELS packaging
+                PASS_REGULAR_EXPRESSION "windows-signing: OK")
+        else()
+            message(WARNING "pwsh (PowerShell 7) not found: the test contour_windows_signing is not registered")
+        endif()
+
+        # Needs the GUI frontend: it runs the application and waits for its window.
+        if(CONTOUR_FRONTEND_GUI)
+            # Restart Manager closing a running Contour and starting it again, as Windows Installer does to
+            # replace it. Opens a real window briefly, so it needs the desktop and runs alone.
+            add_executable(contour_restart_manager_test test/core_test_main.cpp test/RestartManager_test.cpp)
+            target_link_libraries(contour_restart_manager_test PRIVATE
+                core::base core::testing Catch2::Catch2 contour_test_trace rstrtmgr)
+            target_compile_definitions(contour_restart_manager_test PRIVATE
+                CONTOUR_BINARY="$<TARGET_FILE:contour>")
+            add_dependencies(contour_restart_manager_test contour)
+            add_test(NAME contour_e2e_restart_manager COMMAND $<TARGET_FILE:contour_restart_manager_test>)
+            set_tests_properties(contour_e2e_restart_manager PROPERTIES LABELS e2e RUN_SERIAL TRUE TIMEOUT 120)
+        endif()
+
+        # The Windows installers' scope table: each row's upgrade code, package file and extra source, and
+        # that a misspelt scope stops the packaging. Read off the generated CPack config, so it builds nothing.
+        contour_add_e2e_cmake_test(
+            NAME contour_e2e_wix_scope
+            SCRIPT WixScope.cmake
+            MARKER "wix-scope: OK"
+            ARGS -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+                 -D "SCOPE_SCRIPT=${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     endif()
 endif()
 # }}}
@@ -1838,7 +1923,9 @@ if(NOT(CPACK_GENERATOR))
 endif()
 
 set(CPACK_PACKAGE_NAME "Contour")
-set(CPACK_PACKAGE_VENDOR "https://github.com/contour-terminal/contour/")
+# The publisher Add/Remove Programs shows (WiX's Manufacturer), and the name CPack's own registry key
+# paths (Software\<vendor>\...) are built from.
+set(CPACK_PACKAGE_VENDOR "Contour Terminal")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
 set(CPACK_PACKAGE_CONTACT "Christian Parpart <christian@parpart.family>")
 if(WIN32)
@@ -1847,25 +1934,51 @@ if(WIN32)
 else()
     set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
 endif()
-set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
+# No CPACK_PACKAGE_EXECUTABLES: it would make CPack author the Start menu shortcut, with a component the two
+# installers share; the scope source authors it (see wix_scope.wxs).
 set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
-#TODO? set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
 #TODO: set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
-set(CPACK_CREATE_DESKTOP_LINKS contour)
 set(CPACK_WIX_VERSION 4)
-# UpgradeCode must stay constant to allow upgrades from previous versions. The ProductCode is deliberately
-# left to CPack, which generates a new one per package: every build, including two of the same release, is
-# then a major upgrade of the installed one. (Windows Installer ignores the fourth field of the version, the
-# CI run number, so the version cannot tell two builds of a release apart.)
-set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
-    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+    # The Windows installers, one per install scope, from one table. CPACK_CONTOUR_WIX_SCOPE (default
+    # perMachine; the package preset msvc-release-user selects perUser) picks the row;
+    # cmake/CPackWixScope.cmake, which CPack runs at package time, copies it into the CPACK_WIX_* variables
+    # CPack reads. A new scope is a new row here, and a branch in the WiX source for what differs.
+    #   UPGRADE_GUID  Must stay constant to allow upgrades from previous versions, and differ between scopes:
+    #                 the two installers are different products. The ProductCode is deliberately left to CPack,
+    #                 which generates a new one per package: every build, including two of the same release, is
+    #                 then a major upgrade of the installed one. (Windows Installer ignores the fourth field of
+    #                 the version, the CI run number, so the version cannot tell two builds of a release apart.)
+    #   FILE_SUFFIX   Appended to the package's file name.
+    #   INSTALL_DIRECTORY  Where the installation goes below the scope's base folder (Program Files, or the
+    #                 user's Local AppData): a '/' nests. The per-user one is Programs/Contour, as other
+    #                 per-user applications are, never the Local AppData folder itself, which holds Contour's
+    #                 own state.
+    # The WiX source all scopes share (wix_scope.wxs) takes the scope's name from the build, as ContourScope.
+    set(CPACK_CONTOUR_WIX_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_scope.wxs")
+    set(CPACK_CONTOUR_WIX_SCOPES perMachine perUser)
+    set(CPACK_CONTOUR_WIX_perMachine_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
+    set(CPACK_CONTOUR_WIX_perMachine_FILE_SUFFIX "")
+    set(CPACK_CONTOUR_WIX_perMachine_INSTALL_DIRECTORY "Contour")
+    set(CPACK_CONTOUR_WIX_perUser_UPGRADE_GUID "AFF353C7-C33A-474C-B9C7-EDD160677BC9")
+    set(CPACK_CONTOUR_WIX_perUser_FILE_SUFFIX "-user")
+    set(CPACK_CONTOUR_WIX_perUser_INSTALL_DIRECTORY "Programs/Contour")
+    set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
+    # Lays the signed files over CPack's staging directory when the Windows job passes a signing manifest
+    # (-D CPACK_CONTOUR_SIGNING_MANIFEST=...); without one the hook does nothing. See scripts/sign-windows.ps1 and
+    # docs/internals/release-signing.md.
+    list(APPEND CPACK_PRE_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/WindowsSignedOverlay.cmake")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
+    # What Add/Remove Programs shows for the entry: its icon and the links beside it.
+    set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
+    set(CPACK_WIX_PROPERTY_ARPURLINFOABOUT "https://contour-terminal.org/")
+    set(CPACK_WIX_PROPERTY_ARPHELPLINK "https://github.com/contour-terminal/contour/issues")
+    set(CPACK_WIX_PROPERTY_ARPURLUPDATEINFO "https://github.com/contour-terminal/contour/releases")
 endif()
 if(CONTOUR_MACOS_APP_BUNDLE AND CONTOUR_MACOS_DEPLOY)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
@@ -1931,6 +2044,15 @@ endif()
 
 if(WIN32)
     install(TARGETS contour DESTINATION bin)
+    if(MSVC)
+        # The toolset's redistributable runtime (vcruntime140, vcruntime140_1, msvcp140), app-local beside
+        # contour.exe, so Contour starts on a machine that never installed the VC++ Redistributable. The
+        # Universal CRT is left out: Windows 10 and later carry it. A GUI-less build needs it too, and the
+        # daemon's staged image copies bin/ whole.
+        set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+        set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
+        include(InstallRequiredSystemLibraries)
+    endif()
     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
         install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "share/contour/fonts")
     endif()
@@ -1965,6 +2087,16 @@ if(WIN32)
                 # Likewise the offscreen QPA plugin: only the tests select it.
                 PATTERN "qoffscreen.dll" EXCLUDE
                 PATTERN "*"
+        )
+    else()
+        # A GUI-less contour.exe links no Qt, so there is nothing to deploy, but it still imports the DLLs vcpkg's
+        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib), staged beside it. Only the DLLs
+        # of bin/ are installed: no test suite, helper or developer tool is.
+        install(
+            DIRECTORY "$<TARGET_FILE_DIR:contour>/"
+            DESTINATION "bin"
+            FILES_MATCHING
+                PATTERN "*.dll"
         )
     endif()
 elseif(CONTOUR_MACOS_APP_BUNDLE)
@@ -2216,7 +2348,7 @@ include(CPackComponent)
 if(WIN32)
     cpack_add_component(contour_path
         DISPLAY_NAME "Add to PATH"
-        DESCRIPTION "Adds the contour executable to the system PATH."
+        DESCRIPTION "Adds Contour's bin folder to PATH."
     )
     set(CPACK_COMPONENTS_ALL Unspecified contour contour_path)
 

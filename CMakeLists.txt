@@ -254,14 +254,27 @@ if(CONTOUR_TESTING)
         # pushed.
         contour_add_lint_gate(check_workflows check-workflows.py)
 
-        # The rule that keeps every required status check runnable on a pull request, tested against
-        # inline fixtures; it needs neither the network nor actionlint.
+        # The workflow rules (required checks stay runnable on pull requests; only release-tag jobs write
+        # releases), tested against inline fixtures; it needs neither the network nor actionlint.
         contour_add_lint_gate(check_workflows_selftest check-workflows.py --self-test)
 
         # The Windows installer's WiX patch file fails only at `cpack` time on a Windows runner, after a
         # full build; the rule CPack enforces (each fragment Id once) is checked here on every platform.
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)
         contour_add_lint_gate(check_wix_patch_selftest check-wix-patch.py --self-test)
+
+        # The release/tag rules of scripts/check-release.py (CI's check_release job), against inline samples.
+        contour_add_lint_gate(check_release_selftest check-release.py --self-test)
+
+        # .github/release.json lists the files a release attaches; its patterns must be well formed, and
+        # the selection rules (one file per pattern, in order) are checked against inline samples.
+        contour_add_lint_gate(check_release_assets release-assets.py)
+        contour_add_lint_gate(check_release_assets_selftest release-assets.py --self-test)
+
+        # The winget submission of a release: the UpgradeCodes its manifest rows expect must be declared in the
+        # packaging sources, and the rules that plan a release and check Komac's manifest are tested inline.
+        contour_add_lint_gate(check_winget_upgrade_codes winget-release.py)
+        contour_add_lint_gate(check_winget_upgrade_codes_selftest winget-release.py --self-test)
 
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI

@@ -31,6 +31,7 @@
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/ProfileCatalog.hpp>
+#include <vthost/RelocationRequest.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/StartContinuity.hpp>
@@ -166,6 +167,9 @@ struct DaemonConfig
     std::string releaseVersion {};
     /// The image this daemon runs from, as its status reply states it.
     std::filesystem::path executablePath {};
+    /// What the user asked of its moving onto its staged copy, as its status reply states it: a successor
+    /// states what its own user asked, not what the daemon it replaced was told.
+    RelocationRequest relocationRequest = RelocationRequest::Allowed;
     /// The file this daemon logs to, as its status reply states it; empty for stderr.
     std::filesystem::path logFile {};
     /// How long an ExitWhenIdle daemon waits with no session and no client before it ends.

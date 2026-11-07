@@ -180,3 +180,57 @@ TEST_CASE("on Linux without a home directory the backend refuses and says why", 
     CHECK(commands.calls.empty());
 }
 #endif
+
+TEST_CASE("a task is named for its user, and the machine-wide name is still looked up", "[vthost][service]")
+{
+    CHECK(taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1001")
+          == std::vector<std::string> { "contour-daemon-S-1-5-21-1-2-3-1001", "contour-daemon" });
+    // Two accounts never share the name a task is created under.
+    CHECK(taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1001").front()
+          != taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1002").front());
+    // Without a user key (systemd and launchd units are per-user already) the name is the registration's own.
+    CHECK(taskNamesFor("contour-daemon-work", "") == std::vector<std::string> { "contour-daemon-work" });
+}
+
+TEST_CASE("a disabled registration is named as such", "[vthost][service]")
+{
+    CHECK(nameOf(ServiceRunState::Disabled) == "installed, disabled");
+}
+
+TEST_CASE("the program of a task action loses its quotes and has its variables expanded", "[vthost][service]")
+{
+    auto const expand = VariableExpander { [](std::string_view text) {
+        auto expanded = std::string { text };
+        if (auto const at = expanded.find("%ProgramFiles%"); at != std::string::npos)
+            expanded.replace(at, std::string_view { "%ProgramFiles%" }.size(), "C:/Program Files");
+        return expanded;
+    } };
+    auto const wanted = std::filesystem::path { "C:/Program Files/Contour/bin/contour.exe" };
+    CHECK(programOfTaskAction("C:/Program Files/Contour/bin/contour.exe", expand) == wanted);
+    CHECK(programOfTaskAction("\"C:/Program Files/Contour/bin/contour.exe\"", expand) == wanted);
+    CHECK(programOfTaskAction("%ProgramFiles%/Contour/bin/contour.exe", expand) == wanted);
+    CHECK(programOfTaskAction(" \"%ProgramFiles%/Contour/bin/contour.exe\" ", expand) == wanted);
+    CHECK(programOfTaskAction("", expand).empty());
+    CHECK(programOfTaskAction("\"\"", expand).empty());
+}
+
+TEST_CASE("a registration is brought to the way its backend launches the daemon", "[vthost][service]")
+{
+    using vthost::DaemonLaunchStyle;
+    // What 0.8.0 registered: no --background, as its Task Scheduler backend did not yet detach the daemon.
+    auto const registered = std::string_view { "daemon --socket=C:/s/default --log-file=C:/s/default.log "
+                                               "--size-policy=latest" };
+    CHECK(vthost::argumentsForLaunchStyle(registered, DaemonLaunchStyle::SelfDetaching)
+          == std::string { registered } + " --background");
+    // A supervisor that tracks the process (systemd, launchd) wants it in the foreground, as it is.
+    CHECK(vthost::argumentsForLaunchStyle(registered, DaemonLaunchStyle::Foreground) == registered);
+    // Already detaching, with or without a value: nothing to add.
+    CHECK(vthost::argumentsForLaunchStyle("daemon --background --socket=x", DaemonLaunchStyle::SelfDetaching)
+          == "daemon --background --socket=x");
+    CHECK(vthost::argumentsForLaunchStyle("daemon --background=true", DaemonLaunchStyle::SelfDetaching)
+          == "daemon --background=true");
+    // A longer flag of the same beginning is another flag.
+    CHECK(vthost::argumentsForLaunchStyle("daemon --background-x", DaemonLaunchStyle::SelfDetaching)
+          == "daemon --background-x --background");
+    CHECK(vthost::argumentsForLaunchStyle("", DaemonLaunchStyle::SelfDetaching) == "--background");
+}

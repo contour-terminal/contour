@@ -1,0 +1,21 @@
+{
+  "artifacts": [
+    "contour-[0-9]*-ubuntu26.04-amd64.deb",
+    "contour-dbgsym-[0-9]*-ubuntu26.04-amd64.ddeb",
+    "contour-daemon-[0-9]*-ubuntu24.04-amd64.deb",
+    "contour-daemon-dbgsym-[0-9]*-ubuntu24.04-amd64.ddeb",
+    "contour-daemon-[0-9]*-ubuntu26.04-amd64.deb",
+    "contour-daemon-dbgsym-[0-9]*-ubuntu26.04-amd64.ddeb",
+    "contour-[0-9]*-fedora44-x86_64.rpm",
+    "contour-debuginfo-[0-9]*-fedora44-x86_64.rpm",
+    "contour-debugsource-[0-9]*-fedora44-x86_64.rpm",
+    "contour-daemon-[0-9]*-fedora44-x86_64.rpm",
+    "contour-daemon-debuginfo-[0-9]*-fedora44-x86_64.rpm",
+    "contour-daemon-debugsource-[0-9]*-fedora44-x86_64.rpm",
+    "contour-[0-9]*-macOS-arm.dmg",
+    "contour-[0-9]*-win64.msi",
+    "contour-[0-9]*-win64-user.msi",
+    "contour-[0-9]*-win64.zip",
+    "contour-[0-9]*-x86_64.AppImage"
+  ]
+}

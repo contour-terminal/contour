@@ -106,7 +106,7 @@ void DaemonDriftModel::requestUpgrade()
     emit upgradeRequested();
 }
 
-void DaemonDriftModel::noteRestartFailed(QString reason)
+void DaemonDriftModel::noteRestartFailed(QString const& reason)
 {
     _action = DriftAction::Idle;
     _failure = tr("Restart failed: %1").arg(reason.isEmpty() ? tr("unknown error") : reason);

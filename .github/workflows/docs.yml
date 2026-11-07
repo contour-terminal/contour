@@ -35,7 +35,7 @@ jobs:
           ./scripts/extract-changelog-from-metainfo.py metainfo.xml docs/release-notes.md
 
       - name: "update APT database"
-        run: sudo apt -q update
+        run: sudo ./scripts/apt-update.sh
       - name: "Install GCC"
         # gcc-14 as well as g++-14: the compiler is named explicitly at configure time below, so the
         # C driver has to exist under that name too (g++-14 does depend on it, but the build should

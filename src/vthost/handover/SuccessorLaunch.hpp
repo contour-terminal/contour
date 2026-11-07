@@ -20,11 +20,14 @@
 
 #include <vtpty/CrossingHandle.hpp>
 
+#include <core/platform/FileSystem.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <ostream>
 #include <span>
 #include <string>
 #include <system_error>
@@ -37,6 +40,26 @@ namespace vthost::handover
 {
 
 class HandoverMemory;
+
+/// Where a successor process starts.
+///
+/// Never the predecessor's working directory: a daemon started from the install folder (`cd bin` and
+/// `.\contour daemon`) would hand it on, and the successor's handle on that directory keeps the folder from
+/// being removed by an uninstall -- which Restart Manager does not report.
+/// @param executable The image the successor runs from.
+/// @param fileSystem Where the image's directory is looked for.
+/// @param profile The user's profile directory, for an image whose directory is gone.
+/// @return The image's directory, else @p profile.
+[[nodiscard]] inline std::filesystem::path successorWorkingDirectory(
+    std::filesystem::path const& executable,
+    core::platform::FileSystem const& fileSystem,
+    std::filesystem::path const& profile)
+{
+    auto directory = executable.parent_path();
+    if (!directory.empty() && fileSystem.isDirectory(directory))
+        return directory;
+    return profile;
+}
 
 #ifdef _WIN32
 /// A successor process SuccessorLauncher started.
@@ -119,10 +142,15 @@ class SuccessorHandoff final: public ImageHandoff
     /// @param launcher What starts the successor, and ends a process. Not owned.
     /// @param memory Where the image is written. Not owned.
     /// @param config How long it waits.
+    /// @param notices Where it says which process takes over, and when it did not: before the successor is
+    ///        started, and after a failure, never in between (a write that blocks there -- a console in
+    ///        selection mode -- could let the successor give up while this process still commits and ends).
+    ///        A background daemon's standard error is its log or `NUL`.
     SuccessorHandoff(SuccessorLauncher& launcher,
                      HandoverMemory& memory,
-                     SuccessorHandoffConfig config) noexcept:
-        _launcher { launcher }, _memory { memory }, _config { config }
+                     SuccessorHandoffConfig config,
+                     std::ostream& notices) noexcept:
+        _launcher { launcher }, _memory { memory }, _config { config }, _notices { notices }
     {
     }
 
@@ -135,6 +163,7 @@ class SuccessorHandoff final: public ImageHandoff
     SuccessorLauncher& _launcher;
     HandoverMemory& _memory;
     SuccessorHandoffConfig _config;
+    std::ostream& _notices;
 };
 
 /// The successor's side of a live upgrade on Windows, whole: reads the image the predecessor handed over in

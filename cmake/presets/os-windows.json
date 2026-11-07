@@ -120,7 +120,8 @@
             },
             "execution": {
                 "noTestsAction": "error",
-                "stopOnFailure": true
+                "stopOnFailure": true,
+                "timeout": 600
             }
         },
         {
@@ -131,7 +132,8 @@
             },
             "execution": {
                 "noTestsAction": "error",
-                "stopOnFailure": true
+                "stopOnFailure": true,
+                "timeout": 600
             }
         }
     ],
@@ -142,6 +144,19 @@
                 "RelWithDebInfo"
             ],
             "configurePreset": "msvc-release"
+        },
+        {
+            "name": "msvc-release-user",
+            "configurations": [
+                "RelWithDebInfo"
+            ],
+            "configurePreset": "msvc-release",
+            "generators": [
+                "WIX"
+            ],
+            "variables": {
+                "CPACK_CONTOUR_WIX_SCOPE": "perUser"
+            }
         },
         {
             "name": "msvc-debug",

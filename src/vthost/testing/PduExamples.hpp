@@ -146,7 +146,8 @@ namespace vthost::testing
               .upgrade = proto::DaemonUpgradeRecord { .generation = 2,
                                                       .attempts = 3,
                                                       .lastFailure = 10,
-                                                      .lastFailureDetail = "did not settle" } } } },
+                                                      .lastFailureDetail = "did not settle" },
+              .relocation = uint8_t { 1 } } } },
         { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
         { proto::PduType::EditTab,
           proto::DecodedPdu {
