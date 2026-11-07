@@ -1508,7 +1508,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "Name the packages"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         shell: pwsh
         # The packages CPack leaves in the build directory, as paths relative to the workspace: every later step
         # that names one reads these.
@@ -1727,7 +1727,7 @@ jobs:
       # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
       # queue and release tags.
       - name: "Install Wix Toolset"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         run: |
           # Use this to list all available versions
           # dotnet tool search --global wix --detail
@@ -1744,7 +1744,7 @@ jobs:
       # Without a configured signer the plan says `none`, nothing is signed, and the dry run proves the machinery
       # with a throwaway certificate. The plan, not this file, decides who signs: the steps follow its output.
       - name: "Signing: plan"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         id: signing
         shell: pwsh
         # The kind of build is the one input the script cannot see.
@@ -1754,11 +1754,11 @@ jobs:
           BUILDS: ${{ vars.WINDOWS_SIGNING_BUILDS }}
           BUILD_KIND: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'master') || 'other' }}
       - name: "Signing: stage the payload"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         shell: pwsh
         run: ./scripts/sign-windows.ps1 stage -BuildDirectory out/build/$env:CMAKE_PRESET -Destination out/signing/stage
       - name: "Signing: sign the payload"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport != 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 sign -Kind Payload -Root out/signing/stage -Signer $env:SIGNER -Manifest out/signing/payload.tsv
         env: &signing_env
@@ -1770,11 +1770,11 @@ jobs:
           ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
       - name: "Signing: send the payload to SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 export -Kind Payload -Root out/signing/stage -Signer signpath -Destination out/signing/signpath-payload -Manifest out/signing/payload.tsv
       - name: "Signing: upload the payload for SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         id: signpath_payload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1783,7 +1783,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: "Signing: have SignPath sign the payload"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -1797,11 +1797,11 @@ jobs:
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: out/signing/signpath-payload-signed
       - name: "Signing: take the signed payload back"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 import -Root out/signing/stage -From out/signing/signpath-payload-signed -Manifest out/signing/payload.tsv -Signer signpath
       - name: "Create Package(s)"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         shell: powershell
         # The per-machine MSI and the zip, then the per-user MSI. CPack names them in lowercase already
         # (contour-<version>-win64.msi, .zip and -win64-user.msi) and leaves them in the build directory. The
@@ -1821,16 +1821,16 @@ jobs:
             }
           }
       - name: "Signing: sign the installers"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport != 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport != 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 sign -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer $env:SIGNER
         env: *signing_env
       - name: "Signing: send the installers to SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 export -Kind Packages -Root out/build/$env:CMAKE_PRESET -Files $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI -Signer signpath -Destination out/signing/signpath-packages -Manifest out/signing/packages.tsv
       - name: "Signing: upload the installers for SignPath"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         id: signpath_packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1839,7 +1839,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: "Signing: have SignPath sign the installers"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -1853,21 +1853,21 @@ jobs:
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: out/signing/signpath-packages-signed
       - name: "Signing: take the signed installers back"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.transport == 'signpath'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.transport == 'signpath'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 import -Root out/build/$env:CMAKE_PRESET -From out/signing/signpath-packages-signed -Manifest out/signing/packages.tsv -Signer signpath
       - name: "Signing: dry run"
-        if: github.event_name != 'pull_request' && steps.signing.outputs.dry-run == 'true'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline') && steps.signing.outputs.dry-run == 'true'
         shell: pwsh
         run: ./scripts/sign-windows.ps1 dry-run -Root out/signing/stage -Packages $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
       - name: "Signing: verify what ships"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         shell: pwsh
         run: ./scripts/sign-windows.ps1 verify -Signer $env:SIGNER -Manifest out/signing/payload.tsv -Zip $env:CONTOUR_ZIP -Msi $env:CONTOUR_MSI,$env:CONTOUR_USER_MSI
         env:
           SIGNER: ${{ steps.signing.outputs.signer }}
       - name: "Check the package contents"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         # What each package must and must not hold, asserted as the macOS job does for its image: a mistake
         # either way has no other visible symptom. The rows, and why each exists, are in
         # scripts/check-windows-package.ps1.
@@ -1876,7 +1876,7 @@ jobs:
           pwsh scripts/check-windows-package.ps1 -Zip $env:CONTOUR_ZIP -MachineMsi $env:CONTOUR_MSI -UserMsi $env:CONTOUR_USER_MSI
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: "Uploading MSI to artifact store"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
@@ -1884,7 +1884,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading the per-user MSI to artifact store"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64-user.msi"
@@ -1892,7 +1892,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
@@ -1900,7 +1900,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
-        if: github.event_name != 'pull_request'
+        if: (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
         # installed Contour is upgraded in the field, and checks what the upgrade leaves: the folder, the PATH,
@@ -1984,7 +1984,7 @@ jobs:
             exit 1
           }
       - name: "Uploading the upgrade check's logs"
-        if: failure() && github.event_name != 'pull_request'
+        if: failure() && (github.event_name != 'pull_request' || github.head_ref == 'feature/windows-release-pipeline')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "msi-upgrade-check-logs"
