@@ -35,6 +35,9 @@ $ErrorActionPreference = 'Stop'
 # need a reboot.
 $ExitSuccess = 0
 
+# How long one msiexec call may take: far past a real install, short of the step's timeout.
+$MsiexecTimeoutMilliseconds = 600000
+
 # One Windows Installer COM object serves every function below.
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
@@ -80,6 +83,36 @@ function Test-Elevated {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Start-BoundedProcess {
+    <# Runs a program and waits for it, at most $TimeoutMilliseconds. Returns @{ ExitCode; Output; Stdout; Stderr; TimedOut }.
+       Through System.Diagnostics.Process, not Start-Process -PassThru: that hands back an object which opens its
+       handle only when asked, and a program that has ended by then leaves ExitCode null. Both streams are read
+       asynchronously, so that a program that fills a pipe cannot block while this waits for it, and decoded as
+       UTF-8. #>
+    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string]$Arguments, [Parameter(Mandatory)][int]$TimeoutMilliseconds)
+    $info = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
+    $info.Arguments = $Arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    $info.StandardOutputEncoding = $utf8
+    $info.StandardErrorEncoding = $utf8
+    $process = [System.Diagnostics.Process]::Start($info)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $timedOut = -not $process.WaitForExit($TimeoutMilliseconds)
+    if ($timedOut) { $process.Kill($true) }
+    # The wait for the process itself, which is still needed after a Kill before ExitCode is read. The streams are
+    # waited for separately and with a bound: a descendant that holds the inherited pipe would keep them open.
+    $process.WaitForExit()
+    $null = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr), 10000)
+    $outText = if ($stdout.IsCompleted) { $stdout.Result } else { '' }
+    $errText = if ($stderr.IsCompleted) { $stderr.Result } else { '' }
+    return @{ ExitCode = $process.ExitCode; Output = ($outText + $errText); Stdout = $outText; Stderr = $errText; TimedOut = $timedOut }
+}
+
 function Invoke-Msiexec {
     <# Runs `msiexec <Action> <Target>` quietly with a verbose log named after LogName, in $LogDir; fails unless it
        exits 0 and prints the log tail on failure. #>
@@ -90,8 +123,12 @@ function Invoke-Msiexec {
         [Parameter(Mandatory)][string]$What
     )
     $Log = Join-Path $LogDir $LogName
-    $process = Start-Process -FilePath msiexec.exe -Wait -PassThru -NoNewWindow `
-        -ArgumentList @($Action, $Target, '/qn', '/norestart', '/l*v', "`"$Log`"")
+    # Bounded: an install that never ends must fail in minutes, not hold the runner for hours.
+    $process = Start-BoundedProcess -FilePath msiexec.exe -TimeoutMilliseconds $MsiexecTimeoutMilliseconds `
+        -Arguments (@($Action, $Target, '/qn', '/norestart', '/l*v', "`"$Log`"") -join ' ')
+    if ($process.TimedOut) {
+        throw "$What did not end within $($MsiexecTimeoutMilliseconds / 1000) s: msiexec was ended"
+    }
     if ($process.ExitCode -ne $ExitSuccess) {
         if (Test-Path $Log) {
             Write-Host "--- last 60 lines of $Log ---"
