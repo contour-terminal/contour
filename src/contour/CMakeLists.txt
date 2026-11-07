@@ -1737,6 +1737,18 @@ if(CONTOUR_TESTING)
             PASS_REGULAR_EXPRESSION "packaging-rules: OK")
     endif()
 
+    # The hook that lays signed files over CPack's staging directory, against hand-made staging trees. Pure CMake,
+    # so it runs on every platform.
+    add_test(NAME contour_e2e_signed_overlay
+        COMMAND ${CMAKE_COMMAND}
+                -D "HOOK=${PROJECT_SOURCE_DIR}/cmake/WindowsSignedOverlay.cmake"
+                -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/signed-overlay-test"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/SignedOverlay.cmake)
+    set_tests_properties(contour_e2e_signed_overlay PROPERTIES
+        TIMEOUT 60
+        LABELS e2e
+        PASS_REGULAR_EXPRESSION "signed-overlay: OK")
+
     contour_add_e2e_cmake_test(
         NAME contour_e2e_shell_integration
         SCRIPT ShellIntegration.cmake
@@ -1957,6 +1969,10 @@ if(WIN32)
     set(CPACK_CONTOUR_WIX_perUser_INSTALL_DIRECTORY "Programs/Contour")
     set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
+    # Lays the signed files over CPack's staging directory when the Windows job passes a signing manifest
+    # (-D CPACK_CONTOUR_SIGNING_MANIFEST=...); without one the hook does nothing. See scripts/sign-windows.ps1 and
+    # docs/internals/release-signing.md.
+    list(APPEND CPACK_PRE_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/WindowsSignedOverlay.cmake")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
     # What Add/Remove Programs shows for the entry: its icon and the links beside it.
     set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
