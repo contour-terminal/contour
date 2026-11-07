@@ -25,6 +25,8 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -122,6 +124,9 @@ struct ServiceStatus
     ServiceRunState state = ServiceRunState::NotInstalled; ///< Installed and/or running.
     ServiceStartMode mode = ServiceStartMode::Logon;       ///< Which backend holds it.
     std::string commandLine {};                            ///< What it was registered to run.
+    /// The program the registration starts; empty where the backend reports it only inside its command line
+    /// (systemd, launchd).
+    std::filesystem::path program {};
 };
 
 /// Everything an install must pin down.
@@ -179,6 +184,14 @@ class ServiceBackend
     /// @return What the registration reports, or why it could not be queried.
     [[nodiscard]] virtual std::expected<ServiceStatus, ServiceError> status() const = 0;
 
+    /// Points the registration at @p program, keeping its arguments, trigger and settings. How a registration
+    /// whose program an upgrade moved or removed is made to start the installed one again.
+    /// @param program The executable the registration is to start.
+    /// @return Nothing, or why the registration could not be changed; Unsupported where the backend names its
+    ///         program only inside a command line it does not take apart.
+    [[nodiscard]] virtual std::expected<void, ServiceError> retarget(
+        std::filesystem::path const& program) = 0;
+
     /// @return Whether the registered command must run in the foreground or detach itself.
     [[nodiscard]] virtual DaemonLaunchStyle launchStyle() const noexcept = 0;
 };
@@ -230,6 +243,30 @@ struct ServiceBackendServices
 /// @param userKey The account the task belongs to; empty for none (every other backend is per-user already).
 /// @return The name to create first, then the machine-wide one where it differs.
 [[nodiscard]] std::vector<std::string> taskNamesFor(std::string_view name, std::string_view userKey);
+
+/// Expands the `%VARIABLE%` references of a text, as the Task Scheduler does for a task's program.
+using VariableExpander = std::function<std::string(std::string_view)>;
+
+/// The program a Task Scheduler action starts, as a path that can be looked for.
+///
+/// The Task Scheduler takes the program as the user typed it: in quotes where it holds spaces (the UI writes
+/// it so), and with `%VARIABLES%` that it expands itself. Compared as stored, either form would look like a
+/// program that does not exist, although the task works.
+/// @param raw The action's path as stored.
+/// @param expand Expands the variables of the text.
+/// @return The path with surrounding quotes dropped and its variables expanded; empty for an empty @p raw.
+[[nodiscard]] std::filesystem::path programOfTaskAction(std::string_view raw, VariableExpander const& expand);
+
+/// Brings the arguments of a registered daemon command to how its backend launches it.
+///
+/// A registration made by an earlier release may lack what a later one needs of the launch style: the Task
+/// Scheduler only starts a launcher, so its daemon must detach itself (`--background`), which a 0.8
+/// registration does not say. Left as it was, a repaired task would run its daemon in the foreground, from
+/// the folder the repair points it at, and hold that folder at every logon.
+/// @param arguments The registered arguments, as a command line.
+/// @param style How the backend launches the command.
+/// @return @p arguments with what the style needs added; unchanged where it needs nothing or has it.
+[[nodiscard]] std::string argumentsForLaunchStyle(std::string_view arguments, DaemonLaunchStyle style);
 
 /// Every name a daemon serving @p label may be registered under.
 /// @param label The socket label.

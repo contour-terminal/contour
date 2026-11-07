@@ -23,6 +23,7 @@
 #include <string_view>
 
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
@@ -168,6 +169,15 @@ class ConfirmPrompt
 /// @return @p running when known, else @p argv0 made absolute.
 [[nodiscard]] std::filesystem::path daemonServiceProgram(
     std::expected<std::filesystem::path, std::error_code> const& running, std::string_view argv0);
+
+/// What repairing a daemon task needs, for the call sites that look for a registration.
+///
+/// A task whose program an upgrade removed is pointed at the installed executable: the one the installer
+/// recorded, never the file this process runs from, which may as well be a portable copy or a build tree.
+/// @param fileSystem Where the programs are looked for.
+/// @return The inputs, with the installed executable of this machine.
+[[nodiscard]] vthost::RegistrationRepairInputs nativeRepairInputs(
+    core::platform::FileSystem const& fileSystem);
 
 /// Reads a log file's tail, then what is appended to it.
 class LogFollower

@@ -161,6 +161,13 @@ std::filesystem::path daemonServiceProgram(
     return std::filesystem::absolute(core::pathFromUtf8(argv0).value_or(std::filesystem::path {}));
 }
 
+vthost::RegistrationRepairInputs nativeRepairInputs(core::platform::FileSystem const& fileSystem)
+{
+    return vthost::RegistrationRepairInputs { .fileSystem = fileSystem,
+                                              .installedExecutable = vthost::installedExecutableOf(
+                                                  *vthost::makeNativeInstallRootSource(), fileSystem) };
+}
+
 std::string formatDaemonStatus(DaemonStatus const& status)
 {
     struct Row

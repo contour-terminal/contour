@@ -68,6 +68,8 @@ class LaunchdBackend final: public ServiceBackend
     [[nodiscard]] std::expected<void, ServiceError> start() override;
     [[nodiscard]] std::expected<void, ServiceError> stop() override;
     [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override;
+    /// Unsupported: the agent names its program inside the arguments it runs.
+    [[nodiscard]] std::expected<void, ServiceError> retarget(std::filesystem::path const& program) override;
     [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override;
 
   private:
