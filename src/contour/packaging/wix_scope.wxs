@@ -20,12 +20,23 @@
     <Property Id="CONTOUR_RECORDED_ROOT">
       <RegistrySearch Id="ContourRecordedRoot" Root="$(var.Root)" Key="Software\Contour\Contour" Name="InstallRoot" Type="raw" Bitness="always64" />
     </Property>
+    <!-- Whether the installed version moves hand-started daemons out of the way before it is replaced (set by the
+         marker below): an installation without it, every release before this one, has no `daemon relocate` to
+         ask, and is never asked. -->
+    <Property Id="CONTOUR_RELOCATES">
+      <RegistrySearch Id="ContourRelocates" Root="$(var.Root)" Key="Software\Contour\Contour" Name="Relocates" Type="raw" Bitness="always64" />
+    </Property>
     <!-- The folder a first install proposes; wix_patch.xml's actions then put back what an upgrade found or the
          user gave. After AppSearch, so that it replaces the folder CPack's own search found. -->
     <SetProperty Id="INSTALL_ROOT" Action="ContourRootDefault" Value="$(var.DefaultFolder)" After="AppSearch" Sequence="both" Condition="NOT Installed" />
     <!-- The installation folder, written for the search above; in every installation, so the main feature carries it. -->
     <Component Id="ContourInstallRoot" Guid="*" Directory="INSTALL_ROOT">
       <RegistryValue Root="$(var.Root)" Key="Software\Contour\Contour" Name="InstallRoot" Type="string" Value="[INSTALL_ROOT]" KeyPath="yes" />
+    </Component>
+    <!-- Marks this installation as one whose contour.exe has `daemon relocate`, in every installation: the main
+         feature carries it. -->
+    <Component Id="ContourInstallationMarker" Guid="*" Directory="INSTALL_ROOT">
+      <RegistryValue Root="$(var.Root)" Key="Software\Contour\Contour" Name="Relocates" Type="integer" Value="1" KeyPath="yes" />
     </Component>
     <!-- Contour's bin directory at the end of the PATH: the machine's for a per-machine install, the user's
          for a per-user one. -->

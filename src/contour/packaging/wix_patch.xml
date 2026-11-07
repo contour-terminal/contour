@@ -36,6 +36,21 @@
          that they reach the elevated install from the unelevated command line. -->
     <Property Id="ADD_TO_PATH" Value="1" Secure="yes" />
     <Property Id="DESKTOP_SHORTCUT" Value="1" Secure="yes" />
+    <!-- Before anything is replaced, the installed (or, for an upgrade, the previous) contour.exe is asked to move
+         the user's hand-started daemons onto their staged copies, so that no daemon holds the files about to be
+         replaced. Only an installation that records `Relocates` has the verb. Its folder is the one the installation
+         recorded for itself: in an upgrade the previous product's, in maintenance this product's, and unlike
+         INSTALL_ROOT it needs no resolving at this point. The action runs as the installing user, in the immediate
+         sequence ahead of InstallValidate, and reaches that user's daemons; as SYSTEM it finds none, and
+         Return="ignore" lets that and any failed move leave the install alone. It runs where files are replaced or
+         removed (an install, an upgrade, a repair, an uninstall), not when an ARP "Change" only toggles features,
+         and the nested uninstall of a major upgrade does not ask again. The property is private (it has lower case
+         letters), so no command line can name another program. -->
+    <SetProperty Id="ContourRelocator" Action="ContourRelocatorSet" Value="[CONTOUR_RECORDED_ROOT]bin\contour.exe" After="CostFinalize" Sequence="execute" Condition="CONTOUR_RELOCATES AND CONTOUR_RECORDED_ROOT" />
+    <CustomAction Id="ContourRelocateDaemons" Property="ContourRelocator" ExeCommand="daemon relocate" Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ContourRelocateDaemons" Before="InstallValidate" Condition="ContourRelocator AND (NOT Installed OR REINSTALL OR REMOVE~=&quot;ALL&quot;) AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
     <!-- "Launch Contour" on the installer's last page. -->
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>
@@ -50,5 +65,6 @@
     <ComponentRef Id="ContourStartMenuShortcut" />
     <ComponentRef Id="ContourConnectShortcut" />
     <ComponentRef Id="ContourInstallRoot" />
+    <ComponentRef Id="ContourInstallationMarker" />
   </CPackWiXFragment>
 </CPackWiXPatch>
