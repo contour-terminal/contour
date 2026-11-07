@@ -34,6 +34,7 @@
 
     #include <chrono>
     #include <memory>
+    #include <sstream>
     #include <system_error>
     #include <thread>
     #include <tuple>
@@ -149,7 +150,7 @@ struct SuccessorUpgrade: UpgradeBench
     explicit SuccessorUpgrade(SuccessorBehaviour behaviour, std::chrono::milliseconds readyTimeout = 10s):
         UpgradeBench { shellDevice },
         launcher { behaviour },
-        handoff { launcher, *memory, SuccessorHandoffConfig { .readyTimeout = readyTimeout } }
+        handoff { launcher, *memory, SuccessorHandoffConfig { .readyTimeout = readyTimeout }, notices }
     {
         vtpty::testing::requireHandoverCapable();
     }
@@ -173,6 +174,7 @@ struct SuccessorUpgrade: UpgradeBench
 
     std::unique_ptr<HandoverMemory> memory = makeNativeHandoverMemory();
     FakeSuccessorLauncher launcher;
+    std::ostringstream notices; ///< What the old daemon's console is told.
     SuccessorHandoff handoff;
 };
 
@@ -191,7 +193,9 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
 
     auto next = std::unique_ptr<LiveHost> {};
     auto image = std::optional<HandoverImage> {};
+    auto noticesAtLaunch = std::string {};
     u.launcher.onLaunch = [&](SuccessorHandles const& handles) {
+        noticesAtLaunch = u.notices.str();
         auto const view = u.memory->read(handles.image);
         REQUIRE(view.has_value());
         auto decoded = decodeHandover(view->bytes());
@@ -217,6 +221,11 @@ TEST_CASE("a successor that is ready takes every session over, and the old daemo
     REQUIRE_THROWS_AS(std::ignore = u.upgrade(upgrade), SuccessorTookOver);
     CHECK(u.launcher.committed);
     CHECK(u.launcher.terminated == 0);
+    // Exactly one line, written before the successor was started: nothing between ready and commit.
+    auto const handingOver =
+        "contour daemon: handing over to " + u.target.string() + "; this process ends once it serves\n";
+    CHECK(noticesAtLaunch == handingOver);
+    CHECK(u.notices.str() == handingOver);
     REQUIRE(u.launcher.launches.size() == 1);
     auto const& launch = u.launcher.launches.front();
     CHECK(launch.executable == u.target);
@@ -311,7 +320,9 @@ TEST_CASE("a successor not ready in time is ended, and the old daemon serves on"
 {
     auto u = SuccessorUpgrade { SuccessorBehaviour::NeverReady, 200ms };
     auto const ids = u.spawnTwo();
+    auto noticesAtLaunch = std::string {};
     u.launcher.onLaunch = [&](SuccessorHandles const&) {
+        noticesAtLaunch = u.notices.str();
         u.live->host.writeInput(ids[0], "carried");
     };
 
@@ -321,6 +332,14 @@ TEST_CASE("a successor not ready in time is ended, and the old daemon serves on"
     CHECK(result.error() == UpgradeError { ExecFailure { std::make_error_code(std::errc::timed_out) } });
     CHECK(u.launcher.terminated == 1);
     u.checkResumed(ids, "carried");
+
+    // Where the daemon went is told before the successor starts, and that it did not is told after.
+    auto const handingOver =
+        "contour daemon: handing over to " + u.target.string() + "; this process ends once it serves\n";
+    CHECK(noticesAtLaunch == handingOver);
+    CHECK(u.notices.str()
+          == handingOver + "contour daemon: the hand-over to " + u.target.string()
+                 + " failed; this daemon serves on\n");
 }
 
 TEST_CASE("a successor that cannot be started leaves the old daemon serving",
@@ -337,6 +356,7 @@ TEST_CASE("a successor that cannot be started leaves the old daemon serving",
     CHECK(u.launcher.terminated == 0);
     REQUIRE(u.launcher.launches.size() == 1);
     u.checkResumed(ids);
+    CHECK(u.notices.str().contains("failed; this daemon serves on\n"));
 }
 
 // The old daemon's loop answers nothing while it waits for its successor, and a client that stops holding on
