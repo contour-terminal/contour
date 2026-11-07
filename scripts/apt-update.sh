@@ -17,6 +17,12 @@
 # Usage: sudo ./scripts/apt-update.sh   (needs root to write /var/lib/apt/lists)
 set -uo pipefail
 
+# The runner image carries a Microsoft package source (packages.microsoft.com) that nothing here installs from. When
+# that CDN answers 403, `apt update` refuses the whole run ("no longer signed"), however many times it is retried,
+# and so it failed the GCC and Qt install steps of a job. Dropping the one file is enough; a runner without it is
+# unaffected.
+rm -f /etc/apt/sources.list.d/microsoft-prod.list
+
 attempts="${APT_UPDATE_ATTEMPTS:-5}"
 delay="${APT_UPDATE_RETRY_DELAY:-5}"
 
