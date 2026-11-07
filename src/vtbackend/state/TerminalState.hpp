@@ -31,6 +31,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -346,16 +347,42 @@ struct MacrosState
     }
 };
 
+/// What the v1 encoding's DRCS glyph looked like. Placeholder: DECDLD fonts moved to SoftFontStore and are
+/// always written empty here until the state codec carries them.
+struct LegacyDrcsGlyph
+{
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> bitmap;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.width);
+        visitor(2, self.height);
+        visitor(3, self.bitmap);
+    }
+};
+
+/// Placeholder for the v1 encoding's DRCS charset; see LegacyDrcsGlyph.
+struct LegacyDrcsCharset
+{
+    std::unordered_map<int, LegacyDrcsGlyph> glyphs;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self.glyphs); }
+};
+
 /// UDKs, the DEC locator and DRCS.
 struct KeyStringsState
 {
-    std::map<int, std::string> userDefinedKeys {};        ///< DECUDK strings, by key.
-    bool isUdkLocked = false;                             ///< DECUDK lock.
-    Terminal::LocatorState locator {};                    ///< DECELR / DECSLE.
-    uint8_t locatorButtonsHeld = 0;                       ///< The buttons down, DECLRP's bits.
-    uint8_t locatorButtonsOwnedByApp = 0;                 ///< Those whose press was the application's.
-    std::map<int, Terminal::DRCSCharset> drcsCharsets {}; ///< DECDLD fonts, by number.
-    std::map<std::string, int> drcsDesignators {};        ///< Dscs designator to font number.
+    std::map<int, std::string> userDefinedKeys {};    ///< DECUDK strings, by key.
+    bool isUdkLocked = false;                         ///< DECUDK lock.
+    Terminal::LocatorState locator {};                ///< DECELR / DECSLE.
+    uint8_t locatorButtonsHeld = 0;                   ///< The buttons down, DECLRP's bits.
+    uint8_t locatorButtonsOwnedByApp = 0;             ///< Those whose press was the application's.
+    std::map<int, LegacyDrcsCharset> drcsCharsets {}; ///< DECDLD fonts, by number.
+    std::map<std::string, int> drcsDesignators {};    ///< Dscs designator to font number.
 
     /// Lists the fields for the state codec.
     void visitFields(this auto& self, auto& visitor)

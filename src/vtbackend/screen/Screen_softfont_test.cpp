@@ -8,9 +8,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <string>
+#include <string_view>
 
 using namespace vtbackend;
 using namespace vtbackend::test;
@@ -99,4 +102,134 @@ TEST_CASE("SoftGlyph.ICH shifts image fragments too", "[screen][SoftGlyph]")
     mock.writeToScreen("\033[1;1H\033[2P");
     CHECK(!screen.at(LineOffset(0), ColumnOffset(5)).imageFragment());
     CHECK(screen.at(LineOffset(0), ColumnOffset(3)).imageFragment());
+}
+
+namespace
+{
+
+/// One 15-column, two-sixel-row glyph, as in the vt100.net VT320 .fnt files.
+constexpr auto Glyph = std::string_view { "~~~~~~~~~~~~~~~/~~~~~~~~~~~~~~~" };
+
+/// A VT320-shaped DECDLD (Pfn 0, Pcn 1, Pe 1, full cell) for designator B with two glyphs, framed by
+/// @p introducer and @p terminator.
+[[nodiscard]] std::string vt320Font(std::string_view introducer,
+                                    std::string_view terminator,
+                                    std::string_view separator = ";")
+{
+    return std::format("{}0;1;1;0;0;2;0;0{{B{}{}{}{}", introducer, Glyph, separator, Glyph, terminator);
+}
+
+[[nodiscard]] std::string sevenBitFont()
+{
+    return vt320Font("\033P", "\033\\");
+}
+
+constexpr auto OneLine = PageSize { LineCount(3), ColumnCount(20) };
+
+} // namespace
+
+TEST_CASE("a VT320 font loaded at Pcn=1 renders at '!'", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    auto& screen = mock.terminal.primaryScreen();
+    auto const cell = screen.at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'!');
+    CHECK(cell.softGlyph() == SoftGlyphRef { .font = 0, .position = 0x21 });
+}
+
+TEST_CASE("a raw 8-bit DECDLD (0x90 ... 0x9C) loads like the 7-bit form", "[screen][softfont]")
+{
+    auto sevenBit = MockTerm { OneLine };
+    sevenBit.writeToScreen(sevenBitFont());
+
+    auto eightBit = MockTerm { OneLine };
+    eightBit.writeToScreen(vt320Font("\x90", "\x9c", ";\r\n"));
+
+    auto const a = sevenBit.terminal.softFonts().font(0);
+    auto const b = eightBit.terminal.softFonts().font(0);
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    CHECK(a->designator == b->designator);
+    CHECK(a->geometry.fullWidth == b->geometry.fullWidth);
+    CHECK(a->geometry.fullHeight == b->geometry.fullHeight);
+    for (auto const position: { 0x21, 0x22 })
+    {
+        auto const ra =
+            sevenBit.terminal.softFonts().resolve({ .font = 0, .position = static_cast<uint8_t>(position) });
+        auto const rb =
+            eightBit.terminal.softFonts().resolve({ .font = 0, .position = static_cast<uint8_t>(position) });
+        REQUIRE(ra.glyph != nullptr);
+        REQUIRE(rb.glyph != nullptr);
+        CHECK(ra.glyph->id == rb.glyph->id);
+    }
+}
+
+TEST_CASE("a loaded font takes over a standard designator", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+
+    mock.writeToScreen("\033c\033(B!");
+    CHECK(mock.terminal.softFonts().font(0) == nullptr);
+    CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+}
+
+TEST_CASE("copy yields the underlying characters", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\"\033(B#"); // all three are soft cells
+    mock.terminal.setSelector(
+        std::make_unique<LinearSelection>(mock.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          [] {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+    CHECK(mock.terminal.extractSelectionText() == "!\"#");
+}
+
+TEST_CASE("overwriting a soft cell with plain text drops the reference", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    REQUIRE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+
+    mock.writeToScreen("\033P1;1;2;0;0;2;0;0{C\033\\"); // Pe=2 loading font 1 erases font 0
+    mock.writeToScreen("\033(B\033[1;1Hxyz");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoint(0) == U'x');
+}
+
+TEST_CASE("erase drops the reference", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\033[1;1H\033[1X");
+    CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+}
+
+TEST_CASE("an undefined position in a loaded font still writes a reference", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B\"");
+    auto const cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'"');
+    CHECK(cell.softGlyph() == SoftGlyphRef { .font = 0, .position = 0x22 });
+}
+
+TEST_CASE("a designated but erased font falls back to the plain character", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B\033P1;1;2;0;0;2;0;0{C\033\\!");
+    auto const cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'!');
+    CHECK_FALSE(cell.softGlyph().has_value());
 }

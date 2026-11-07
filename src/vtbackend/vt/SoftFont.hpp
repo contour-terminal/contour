@@ -50,6 +50,9 @@ enum class SoftFontError : uint8_t
     Designator,
 };
 
+/// @return A short phrase naming why a DECDLD was refused, for logs.
+[[nodiscard]] std::string_view toString(SoftFontError error) noexcept;
+
 /// The raw DECDLD parameters, in sequence order. An absent parameter is 0.
 struct DecdldParameters
 {

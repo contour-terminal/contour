@@ -165,6 +165,22 @@ namespace
 
 } // namespace
 
+std::string_view toString(SoftFontError error) noexcept
+{
+    switch (error)
+    {
+        case SoftFontError::FontNumber: return "font number out of range";
+        case SoftFontError::EraseControl: return "erase control out of range";
+        case SoftFontError::CellMatrix: return "invalid cell matrix";
+        case SoftFontError::FontSet: return "unknown font set size";
+        case SoftFontError::Usage: return "invalid font usage";
+        case SoftFontError::CharsetSize: return "invalid character set size";
+        case SoftFontError::TooLarge: return "cell or start position too large";
+        case SoftFontError::Designator: return "invalid designator";
+    }
+    return "unknown error";
+}
+
 std::expected<SoftFontDeclaration, SoftFontError> decodeDecdld(DecdldParameters const& p)
 {
     auto declaration = SoftFontDeclaration {};

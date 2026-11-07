@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/SoftGlyphRef.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
@@ -713,44 +714,39 @@ TEST_CASE("Technical charset: ext 15 implied at level 65, listed at level 62", "
 TEST_CASE("DECDLD: define single character glyph", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define DRCS font 0, starting char 0x21 ('!'), erase all, 10x20 matrix
-    // DCS 0;0;0;10;10;0;20;0 { <designator> <sixel data> ST
-    // Simple glyph: first sixel column with bit 0 set = '?' (0x3F + 0 = 0x3F = '?'), wait that's 0.
-    // Actually 0x3F is the base (all zeros). 0x40 = bit 0 set, 0x41 = bits 0+1, etc.
-    // Let's define a minimal glyph with a single pixel set at (0,0): '@' = 0x40 - 0x3F = 1 bit
-    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    // Font 0, default start (0x21), erase all, 10x20 matrix; one glyph, a single sixel column.
+    mock.writeToScreen("\033P0;0;0;10;0;0;20;0{A@\033\\");
     mock.terminal.flushInput();
-    auto const* charset = mock.terminal.drcsCharset(0);
-    REQUIRE(charset != nullptr);
-    CHECK(charset->glyphs.contains(0x21)); // First glyph at starting position
+    auto const font = mock.terminal.softFonts().font(0);
+    REQUIRE(font != nullptr);
+    CHECK(font->glyphs.at(0x21 - 0x20) != nullptr);
 }
 
 TEST_CASE("DECDLD: erase control clears existing", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define first glyph
-    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
+    mock.writeToScreen("\033P0;0;0;10;0;0;20;0{A@;@\033\\");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.drcsCharset(0) != nullptr);
-    // Redefine with erase all (Pe=0)
-    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{B@\033\\");
+    REQUIRE(mock.terminal.softFonts().font(0) != nullptr);
+    CHECK(mock.terminal.softFonts().font(0)->glyphs.at(0x22 - 0x20) != nullptr);
+    // Redefine with erase all (Pe=0): the old second glyph is gone.
+    mock.writeToScreen("\033P0;0;0;10;0;0;20;0{B@\033\\");
     mock.terminal.flushInput();
-    auto const* charset = mock.terminal.drcsCharset(0);
-    REQUIRE(charset != nullptr);
-    // The old glyph should be cleared, only new one exists
-    CHECK(charset->glyphs.contains(0x21));
+    auto const font = mock.terminal.softFonts().font(0);
+    REQUIRE(font != nullptr);
+    CHECK(font->glyphs.at(0x21 - 0x20) != nullptr);
+    CHECK(font->glyphs.at(0x22 - 0x20) == nullptr);
 }
 
 TEST_CASE("DECDLD: multiple glyphs separated by semicolons", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define two glyphs: '@' and 'A' (both just a single column with different bits)
-    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@;A\033\\");
+    mock.writeToScreen("\033P0;0;0;10;0;0;20;0{A@;A\033\\");
     mock.terminal.flushInput();
-    auto const* charset = mock.terminal.drcsCharset(0);
-    REQUIRE(charset != nullptr);
-    CHECK(charset->glyphs.contains(0x21)); // First glyph
-    CHECK(charset->glyphs.contains(0x22)); // Second glyph
+    auto const font = mock.terminal.softFonts().font(0);
+    REQUIRE(font != nullptr);
+    CHECK(font->glyphs.at(0x21 - 0x20) != nullptr);
+    CHECK(font->glyphs.at(0x22 - 0x20) != nullptr);
 }
 
 TEST_CASE("DECDLD: a soft reset keeps the soft character set, and a hard reset clears it", "[screen]")
@@ -758,16 +754,16 @@ TEST_CASE("DECDLD: a soft reset keeps the soft character set, and a hard reset c
     // DEC STD 070 lists DRCS among what is "NOT affected by the soft reset"; RIS "Clears the soft character
     // set" (the VT520 manual), as Windows Terminal's HardReset does and its SoftReset does not.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
-    REQUIRE(mock.terminal.drcsCharset(0) != nullptr);
+    mock.writeToScreen("\033P0;0;0;10;0;0;20;0{A@\033\\");
+    REQUIRE(mock.terminal.softFonts().font(0) != nullptr);
 
     mock.writeToScreen("\033[!p"); // DECSTR
-    CHECK(mock.terminal.drcsCharset(0) != nullptr);
-    CHECK(mock.terminal.drcsDesignatorToFont("A").has_value());
+    CHECK(mock.terminal.softFonts().font(0) != nullptr);
+    CHECK(mock.terminal.softFonts().fontForDesignator("A").has_value());
 
     mock.writeToScreen("\033c"); // RIS
-    CHECK(mock.terminal.drcsCharset(0) == nullptr);
-    CHECK_FALSE(mock.terminal.drcsDesignatorToFont("A").has_value());
+    CHECK(mock.terminal.softFonts().font(0) == nullptr);
+    CHECK_FALSE(mock.terminal.softFonts().fontForDesignator("A").has_value());
 }
 
 TEST_CASE("DECDLD: DA1 includes ext 7 (SoftCharacterSet)", "[screen]")
@@ -780,50 +776,41 @@ TEST_CASE("DECDLD: DA1 includes ext 7 (SoftCharacterSet)", "[screen]")
     CHECK(exts.contains(7)); // ext 7 = SoftCharacterSet
 }
 
-TEST_CASE("DECDLD: cell has image fragment after writing DRCS character", "[screen]")
+TEST_CASE("DECDLD: cell has a soft glyph reference after writing DRCS character", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define DRCS font 1 with designator ' A', single glyph at position 0x21 ('!')
-    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    // Soft font 1 with designator ' A' and a single glyph at position 0x21 ('!')
+    mock.writeToScreen("\033P1;0;0;10;0;0;20;0{ A@\033\\");
     mock.terminal.flushInput();
 
-    // Verify DRCS font was stored with correct designator
-    REQUIRE(mock.terminal.drcsDesignatorToFont(" A").has_value());
-    CHECK(mock.terminal.drcsDesignatorToFont(" A").value() == 1);
-    REQUIRE(mock.terminal.drcsCharset(1) != nullptr);
-    CHECK(mock.terminal.drcsCharset(1)->glyphs.contains(0x21));
+    REQUIRE(mock.terminal.softFonts().fontForDesignator(" A").has_value());
+    CHECK(mock.terminal.softFonts().fontForDesignator(" A").value() == 1);
+    REQUIRE(mock.terminal.softFonts().font(1) != nullptr);
 
-    // Designate DRCS font into G1: ESC ) <space> A
+    // Designate the font into G1: ESC ) <space> A
     mock.writeToScreen("\033) A");
     mock.terminal.flushInput();
-
-    // Verify G1 was set to DRCS font 1
     REQUIRE(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).has_value());
     CHECK(mock.terminal.currentScreen().cursor().charsets.drcsFont(CharsetTable::G1).value() == 1);
 
-    // Switch to G1 (SO = 0x0E), write '!' (position 0x21), switch back (SI = 0x0F)
+    // Shift out to G1, write '!', shift back in.
     mock.writeToScreen("\x0E");
     mock.terminal.flushInput();
-
-    // Verify DRCS font is active
     REQUIRE(mock.terminal.currentScreen().cursor().charsets.activeDRCSFont().has_value());
-
     mock.writeToScreen("!");
     mock.writeToScreen("\x0F");
     mock.terminal.flushInput();
 
-    // The cell at (0,0) should have an image fragment (the DRCS glyph bitmap)
-    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
-    CHECK(line.storage().imageFragments.has_value());
-    if (line.storage().imageFragments.has_value())
-        CHECK(line.storage().imageFragments->contains(0));
+    auto const cell = mock.terminal.currentScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.codepoint(0) == U'!');
+    CHECK(cell.softGlyph() == SoftGlyphRef { .font = 1, .position = 0x21 });
 }
 
 TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
     // Define DRCS font 1
-    mock.writeToScreen("\033P1;0;0;10;10;0;20;0{ A@\033\\");
+    mock.writeToScreen("\033P1;0;0;10;0;0;20;0{ A@\033\\");
     mock.terminal.flushInput();
     // Designate DRCS to G1 and switch to it
     mock.writeToScreen("\033) A\x0E!\x0F");
@@ -831,35 +818,36 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
     // Write normal character 'X' through G0 (USASCII)
     mock.writeToScreen("X");
     mock.terminal.flushInput();
-    // Column 1 ('X') should NOT have an image fragment
-    auto const& line = mock.terminal.currentScreen().grid().lineAt(LineOffset(0));
-    auto const hasImageAtCol1 =
-        line.storage().imageFragments.has_value() && line.storage().imageFragments->contains(1);
-    CHECK_FALSE(hasImageAtCol1);
+    // Column 1 ('X') should NOT carry a soft glyph reference
+    CHECK_FALSE(mock.terminal.currentScreen().at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
     // But it should have the character 'X'
     CHECK(mock.terminal.currentScreen().cellTextAt({ .line = LineOffset(0), .column = ColumnOffset(1) })
           == "X");
 }
 
-TEST_CASE("DECDLD: a single shift reaches the character after it when the soft font has no glyph for it",
-          "[screen][charset]")
+TEST_CASE("DECDLD: a single shift reaches a soft font, undefined position or not", "[screen][charset]")
 {
     // G0 = DEC Special Graphics, G2 = soft font 1 with a glyph for '!' only, SS2, then 'q' twice. The
-    // first 'q' has no glyph, so it is the single-shifted G2 (US-ASCII fallback) that maps it: 'q'.
-    // The second one is back in G0: '─'.
-    auto constexpr Bytes = std::string_view { "\033P1;0;0;10;10;0;20;0{ A@\033\\"
+    // font is loaded, so the first 'q' is a reference to its (undefined) position 0x71 -- the renderer
+    // shows the error glyph -- and consumes the single shift. The second one is back in G0: '─'.
+    auto constexpr Bytes = std::string_view { "\033P1;0;0;10;0;0;20;0{ A@\033\\"
                                               "\033(0\033* A\033Nqq" };
     auto const cellAt = [](auto& mock, int column) {
         return mock.terminal.currentScreen().cellTextAt(
             { .line = LineOffset(0), .column = ColumnOffset(column) });
     };
+    auto const glyphAt = [](auto& mock, int column) {
+        return mock.terminal.currentScreen().at(LineOffset(0), ColumnOffset(column)).softGlyph();
+    };
 
     auto bulk = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
     bulk.writeToScreen(Bytes);
     bulk.terminal.flushInput();
-    REQUIRE(bulk.terminal.drcsCharset(1) != nullptr);
+    REQUIRE(bulk.terminal.softFonts().font(1) != nullptr);
     CHECK(cellAt(bulk, 0) == "q");
+    CHECK(glyphAt(bulk, 0) == SoftGlyphRef { .font = 1, .position = 0x71 });
     CHECK(cellAt(bulk, 1) == "─");
+    CHECK_FALSE(glyphAt(bulk, 1).has_value());
 
     // A wide character further along the line keeps the line from taking the bulk path, so the very
     // same bytes reach the state machine's print path (writeTextInternal); both paths must agree.
@@ -869,9 +857,9 @@ TEST_CASE("DECDLD: a single shift reaches the character after it when the soft f
         stepwise.writeToScreen(std::string_view(&byte, 1));
     stepwise.terminal.flushInput();
     CHECK(cellAt(stepwise, 0) == "q");
+    CHECK(glyphAt(stepwise, 0) == glyphAt(bulk, 0));
     CHECK(cellAt(stepwise, 1) == "─");
-    CHECK(cellAt(bulk, 0) == cellAt(stepwise, 0));
-    CHECK(cellAt(bulk, 1) == cellAt(stepwise, 1));
+    CHECK_FALSE(glyphAt(stepwise, 1).has_value());
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

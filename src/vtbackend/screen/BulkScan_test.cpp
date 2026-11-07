@@ -362,14 +362,15 @@ TEST_CASE("BulkScan.AJoinerAfterAWrapThatScrollsGivesTheSameScreen", "[BulkScan]
 
 TEST_CASE("BulkScan.ASoftFontGlyphInsideAZwjSequenceGivesTheSameScreen", "[BulkScan]")
 {
-    // A soft font glyph is a space cell with an image, so what follows it starts a cluster of its own.
-    // The run's segmentation state must say so: left at the ZWJ before the glyph, it would still be
-    // waiting for the emoji that completes the sequence, and join the next one to the glyph's cell.
-    auto const setup = "\033P1;0;0;10;10;0;20;0{ A@\033\\" // soft font 1 with a glyph for '!'
-                       "\033) A\x0E"sv;                    // designated into G1, shifted out
-    auto const text = "\xF0\x9F\x91\xA8\xE2\x80\x8D"       // MAN, ZWJ
-                      "!"                                  // the glyph
-                      "\xF0\x9F\x91\xA9"sv;                // WOMAN
+    // A soft font glyph is a cell holding its source character with a glyph reference, so what follows it
+    // starts a cluster of its own. The run's segmentation state must say so: left at the ZWJ before the
+    // glyph, it would still be waiting for the emoji that completes the sequence, and join the next one
+    // to the glyph's cell.
+    auto const setup = "\033P1;0;0;10;0;0;20;0{ A@\033\\" // soft font 1 with a glyph for '!'
+                       "\033) A\x0E"sv;                   // designated into G1, shifted out
+    auto const text = "\xF0\x9F\x91\xA8\xE2\x80\x8D"      // MAN, ZWJ
+                      "!"                                 // the glyph
+                      "\xF0\x9F\x91\xA9"sv;               // WOMAN
     checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, text);
 }
 

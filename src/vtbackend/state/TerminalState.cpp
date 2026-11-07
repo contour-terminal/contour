@@ -365,8 +365,6 @@ TerminalState Terminal::captureState() const
         .locator = _locatorState,
         .locatorButtonsHeld = _locatorButtonsHeld,
         .locatorButtonsOwnedByApp = _locatorButtonsOwnedByApp,
-        .drcsCharsets = std::map<int, DRCSCharset>(_drcsCharsets.begin(), _drcsCharsets.end()),
-        .drcsDesignators = std::map<std::string, int>(_drcsDesignatorMap.begin(), _drcsDesignatorMap.end()),
     };
 
     if (_sixelColorPalette)
@@ -688,10 +686,6 @@ void Terminal::commitRestore(TerminalState const& state,
     _locatorState = state.keyStrings.locator;
     _locatorButtonsHeld = state.keyStrings.locatorButtonsHeld;
     _locatorButtonsOwnedByApp = state.keyStrings.locatorButtonsOwnedByApp;
-    _drcsCharsets = std::unordered_map<int, DRCSCharset>(state.keyStrings.drcsCharsets.begin(),
-                                                         state.keyStrings.drcsCharsets.end());
-    _drcsDesignatorMap = std::unordered_map<std::string, int>(state.keyStrings.drcsDesignators.begin(),
-                                                              state.keyStrings.drcsDesignators.end());
 
     // Present on both sides: a terminal always has the shared palette, and is built here with the size the
     // state carries (ConstructionState::maxImageRegisterCount).
