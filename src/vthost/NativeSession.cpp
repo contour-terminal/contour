@@ -2469,7 +2469,27 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
 
     switch (plan.creation)
     {
-        case AttachCreation::None: break;
+        case AttachCreation::None:
+            // An attach that brings back the kept windows creates nothing, so a directory its hello names
+            // would be dropped: the terminal asked for there joins them, as a new tab of the first window
+            // followed.
+            if (!_attachWorkingDirectory.empty() && !_followedWindows.empty())
+            {
+                auto beside = std::optional<vtworkspace::SessionId> {};
+                model.forEachTab([&](vtworkspace::Window& window, vtworkspace::Tab& tab) {
+                    if (beside || window.id().value != *_followedWindows.begin())
+                        return;
+                    tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+                        if (!beside && pane.isLeaf())
+                            beside = pane.session();
+                    });
+                });
+                connectionLog()("{}: opening a tab in window {} for the stated directory",
+                                _id,
+                                *_followedWindows.begin());
+                std::ignore = _host.createTab(attachSpawnRequest(), beside);
+            }
+            break;
         case AttachCreation::FirstTabInPrimary:
             connectionLog()("{}: daemon has no tabs; spawning the first session", _id);
             std::ignore = _host.createTab(attachSpawnRequest());
