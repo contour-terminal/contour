@@ -1760,6 +1760,26 @@ if(CONTOUR_TESTING)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
         set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
 
+        # The self-test of Windows code signing (scripts/windows-signing): the signer table's rules, which signer a
+        # build uses, command lines, portable-executable detection, the manifest, signing and verifying with a
+        # throwaway certificate (no key is left in the user's profile), and, where a timestamp server answers (always
+        # on CI), the cases that need one and every pinned tool starting. PowerShell 7. Its fixtures go in this
+        # directory, not beside contour.exe, whose directory is packaged whole.
+        find_program(CONTOUR_PWSH_EXECUTABLE pwsh)
+        if(CONTOUR_PWSH_EXECUTABLE)
+            add_test(NAME contour_windows_signing
+                COMMAND ${CONTOUR_PWSH_EXECUTABLE} -NoProfile -NonInteractive
+                    -File ${PROJECT_SOURCE_DIR}/scripts/windows-signing/Test-WindowsSigning.ps1
+                    -UnsignedPe $<TARGET_FILE:contour>
+                    -WorkDirectory ${CMAKE_CURRENT_BINARY_DIR}/windows-signing-test)
+            set_tests_properties(contour_windows_signing PROPERTIES
+                TIMEOUT 300
+                LABELS packaging
+                PASS_REGULAR_EXPRESSION "windows-signing: OK")
+        else()
+            message(WARNING "pwsh (PowerShell 7) not found: the test contour_windows_signing is not registered")
+        endif()
+
         # Needs the GUI frontend: it runs the application and waits for its window.
         if(CONTOUR_FRONTEND_GUI)
             # Restart Manager closing a running Contour and starting it again, as Windows Installer does to
