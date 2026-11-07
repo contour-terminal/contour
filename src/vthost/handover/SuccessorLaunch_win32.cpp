@@ -323,7 +323,9 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
     if (!successor)
         return ExecFailure { .cause = successor.error() };
     auto const process = UniqueHandle { successor->process.native() };
-    daemonLog()("live upgrade: started the successor (pid {}); waiting for it to take over", successor->pid);
+    // Nothing is logged from here to the commit, nor after it: a daemon's console in selection mode blocks a
+    // write for as long as it likes, which past the successor's commit wait abandons the hand-over, and past
+    // the commit keeps this process, and the folder it holds, alive.
 
     switch (awaitReady(handshake.ready.get(), process.get(), _config.readyTimeout))
     {
@@ -331,7 +333,6 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
             // The commit point: from here the successor owns every session and listener, and this process
             // touches none of them again.
             SetEvent(handshake.commit.get());
-            daemonLog()("live upgrade: handed over to the successor (pid {})", successor->pid);
             _launcher.endThisProcess();
         case Readiness::Ended:
             errorLog()("live upgrade: the successor (pid {}) ended before it took over", successor->pid);
