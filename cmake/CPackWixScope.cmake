@@ -34,7 +34,9 @@ if(CPACK_GENERATOR STREQUAL "WIX")
 
     set(CPACK_WIX_INSTALL_SCOPE "${CPACK_CONTOUR_WIX_SCOPE}")
     set(CPACK_WIX_UPGRADE_GUID "${CPACK_CONTOUR_WIX_${CPACK_CONTOUR_WIX_SCOPE}_UPGRADE_GUID}")
-    set(CPACK_WIX_EXTRA_SOURCES "${CPACK_CONTOUR_WIX_${CPACK_CONTOUR_WIX_SCOPE}_SOURCE}")
+    set(CPACK_WIX_EXTRA_SOURCES "${CPACK_CONTOUR_WIX_SOURCE}")
+    # The source branches on the scope, by this variable of the WiX preprocessor.
+    set(CPACK_WIX_BUILD_EXTRA_FLAGS "-d;ContourScope=${CPACK_CONTOUR_WIX_SCOPE}")
     # A '/' makes CPack nest the folders (Programs/Contour is Programs below the scope's base, then Contour).
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CPACK_CONTOUR_WIX_${CPACK_CONTOUR_WIX_SCOPE}_INSTALL_DIRECTORY}")
     set(_contour_file_suffix "${CPACK_CONTOUR_WIX_${CPACK_CONTOUR_WIX_SCOPE}_FILE_SUFFIX}")

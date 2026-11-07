@@ -1903,7 +1903,7 @@ else()
     set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
 endif()
 # No CPACK_PACKAGE_EXECUTABLES: it would make CPack author the Start menu shortcut, with a component the two
-# installers share; the scope sources author it (see wix_machine.wxs).
+# installers share; the scope source authors it (see wix_scope.wxs).
 set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
 #TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
 #TODO: set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
@@ -1915,7 +1915,7 @@ if(WIN32)
     # The Windows installers, one per install scope, from one table. CPACK_CONTOUR_WIX_SCOPE (default
     # perMachine; the package preset msvc-release-user selects perUser) picks the row;
     # cmake/CPackWixScope.cmake, which CPack runs at package time, copies it into the CPACK_WIX_* variables
-    # CPack reads. A new scope is a new row here and a new SOURCE file, nothing else.
+    # CPack reads. A new scope is a new row here, and a branch in the WiX source for what differs.
     #   UPGRADE_GUID  Must stay constant to allow upgrades from previous versions, and differ between scopes:
     #                 the two installers are different products. The ProductCode is deliberately left to CPack,
     #                 which generates a new one per package: every build, including two of the same release, is
@@ -1926,16 +1926,15 @@ if(WIN32)
     #                 user's Local AppData): a '/' nests. The per-user one is Programs/Contour, as other
     #                 per-user applications are, never the Local AppData folder itself, which holds Contour's
     #                 own state.
-    #   SOURCE        The scope's own WiX source: the components whose registry root and environment scope differ.
+    # The WiX source all scopes share (wix_scope.wxs) takes the scope's name from the build, as ContourScope.
+    set(CPACK_CONTOUR_WIX_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_scope.wxs")
     set(CPACK_CONTOUR_WIX_SCOPES perMachine perUser)
     set(CPACK_CONTOUR_WIX_perMachine_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
     set(CPACK_CONTOUR_WIX_perMachine_FILE_SUFFIX "")
     set(CPACK_CONTOUR_WIX_perMachine_INSTALL_DIRECTORY "Contour")
-    set(CPACK_CONTOUR_WIX_perMachine_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_machine.wxs")
     set(CPACK_CONTOUR_WIX_perUser_UPGRADE_GUID "AFF353C7-C33A-474C-B9C7-EDD160677BC9")
     set(CPACK_CONTOUR_WIX_perUser_FILE_SUFFIX "-user")
     set(CPACK_CONTOUR_WIX_perUser_INSTALL_DIRECTORY "Programs/Contour")
-    set(CPACK_CONTOUR_WIX_perUser_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_user.wxs")
     set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/cmake/CPackWixScope.cmake")
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")

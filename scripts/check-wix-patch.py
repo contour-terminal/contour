@@ -21,10 +21,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGING_DIR = REPO_ROOT / "src" / "contour" / "packaging"
 PATCH_FILE = PACKAGING_DIR / "wix_patch.xml"
-# The WiX source each installer scope adds (CPACK_CONTOUR_WIX_<scope>_SOURCE in src/contour/CMakeLists.txt).
-SCOPE_FILES = {"perMachine": PACKAGING_DIR / "wix_machine.wxs", "perUser": PACKAGING_DIR / "wix_user.wxs"}
+# The WiX source the installer adds for every scope (CPACK_CONTOUR_WIX_SOURCE in src/contour/CMakeLists.txt).
+SCOPE_FILE = PACKAGING_DIR / "wix_scope.wxs"
 WIX_NAMESPACE_URI = "http://wixtoolset.org/schemas/v4/wxs"
-# What wix_patch.xml's INSTALL_ROOT actions rely on every scope to define, as (element, Id).
+# What wix_patch.xml's INSTALL_ROOT actions rely on the scope source to define, as (element, Id).
 REQUIRED_SCOPE_IDS = (("SetProperty", "ContourRootDefault"), ("Property", "CONTOUR_RECORDED_ROOT"))
 
 
@@ -53,7 +53,7 @@ def local_name(tag: str) -> str:
 
 
 def scope_ids(root: ElementTree.Element) -> set[tuple[str, str]]:
-    """Returns the (kind, Id) of what a scope file defines and the patch and the other scope rely on."""
+    """Returns the (kind, Id) of what a scope source defines and the patch file relies on."""
     ids: set[tuple[str, str]] = set()
     for element in root.iter():
         kind = local_name(element.tag)
@@ -68,43 +68,33 @@ def scope_ids(root: ElementTree.Element) -> set[tuple[str, str]]:
     return ids
 
 
-def scope_problems(scope_texts: dict[str, str], patch_text: str) -> list[str]:
-    """Returns one message per way the scope files disagree with each other or with the patch file."""
-    roots: dict[str, ElementTree.Element] = {}
-    problems: list[str] = []
-    for scope, text in scope_texts.items():
-        try:
-            root = ElementTree.fromstring(text)
-        except ElementTree.ParseError as error:
-            problems.append(f"{scope}: not well-formed XML: {error}")
-            continue
-        if root.tag != f"{{{WIX_NAMESPACE_URI}}}Wix":
-            problems.append(f"{scope}: root element is {root.tag}, expected {{{WIX_NAMESPACE_URI}}}Wix")
-            continue
-        roots[scope] = root
-    defined = {scope: scope_ids(root) for scope, root in roots.items()}
-    for scope, ids in defined.items():
-        problems += [
-            f"{scope} does not define the {kind} {identifier} that wix_patch.xml relies on"
-            for kind, identifier in REQUIRED_SCOPE_IDS
-            if (kind, identifier) not in ids
-        ]
-        for other, other_ids in defined.items():
-            problems += [
-                f"{identifier} is defined for {other} but not for {scope}"
-                for _, identifier in sorted(other_ids - ids)
-            ]
+def scope_problems(scope_text: str, patch_text: str) -> list[str]:
+    """Returns one message per way the scope source lacks what the patch file relies on.
+
+    The source is one file for every install scope, which the WiX preprocessor branches (<?if?>, processing
+    instructions the XML parser skips), so what it defines does not depend on the scope.
+    """
+    try:
+        root = ElementTree.fromstring(scope_text)
+    except ElementTree.ParseError as error:
+        return [f"scope source is not well-formed XML: {error}"]
+    if root.tag != f"{{{WIX_NAMESPACE_URI}}}Wix":
+        return [f"scope source: root element is {root.tag}, expected {{{WIX_NAMESPACE_URI}}}Wix"]
+    defined = scope_ids(root)
+    problems = [
+        f"the scope source does not define the {kind} {identifier} that wix_patch.xml relies on"
+        for kind, identifier in REQUIRED_SCOPE_IDS
+        if (kind, identifier) not in defined
+    ]
     try:
         patch_root = ElementTree.fromstring(patch_text)
     except ElementTree.ParseError as error:
         return problems + [f"patch file is not well-formed XML: {error}"]
-    for reference in patch_root.iter("ComponentRef"):
-        identifier = reference.get("Id")
-        lacking = [scope for scope, ids in defined.items() if ("Component", identifier) not in ids]
-        if lacking:
-            problems.append(
-                f"the patch file refers to component {identifier}, which {', '.join(lacking)} does not define"
-            )
+    problems += [
+        f"the patch file refers to component {reference.get('Id')}, which the scope source does not define"
+        for reference in patch_root.iter("ComponentRef")
+        if ("Component", reference.get("Id")) not in defined
+    ]
     return problems
 
 
@@ -133,18 +123,16 @@ def self_test() -> int:
         return f'<CPackWiXPatch><CPackWiXFragment Id="#PRODUCTFEATURE">{refs}</CPackWiXFragment></CPackWiXPatch>'
 
     scope_cases = {
-        "scopes agree": (
-            {"perMachine": scope("A", "B"), "perUser": scope("A", "B")}, patch("A"), 0),
-        "a component one scope lacks": (
-            {"perMachine": scope("A", "B"), "perUser": scope("A")}, patch("A"), 1),
-        "a scope lacking what the patch relies on": (
-            {"perMachine": scope("A"), "perUser": f'<Wix xmlns="{WIX_NAMESPACE_URI}"><Component Id="A"/></Wix>'},
-            patch("A"), 4),
-        "a patch reference no scope defines": (
-            {"perMachine": scope("A"), "perUser": scope("A")}, patch("A", "C"), 1),
+        "a scope source with what the patch relies on": (scope("A", "B"), patch("A"), 0),
+        "a scope source lacking what the patch relies on": (
+            f'<Wix xmlns="{WIX_NAMESPACE_URI}"><Component Id="A"/></Wix>', patch("A"), 2),
+        "a patch reference the scope source does not define": (scope("A"), patch("A", "C"), 1),
+        "a scope source branching on the scope": (
+            scope("A").replace("<Fragment>", "<?if $(var.ContourScope) = perUser ?><Fragment>")
+            .replace("</Fragment>", "</Fragment><?endif?>"), patch("A"), 0),
     }
-    for name, (texts, patch_text, expected) in scope_cases.items():
-        found = scope_problems(texts, patch_text)
+    for name, (scope_text, patch_text, expected) in scope_cases.items():
+        found = scope_problems(scope_text, patch_text)
         if len(found) != expected:
             failed.append(name)
             print(f"check-wix-patch self-test: FAILED: {name}: {found}", file=sys.stderr)
@@ -161,9 +149,7 @@ def main() -> int:
         return self_test()
     patch_text = PATCH_FILE.read_text(encoding="utf-8")
     problems = problems_in(patch_text)
-    problems += scope_problems(
-        {scope: path.read_text(encoding="utf-8") for scope, path in SCOPE_FILES.items()}, patch_text
-    )
+    problems += scope_problems(SCOPE_FILE.read_text(encoding="utf-8"), patch_text)
     for problem in problems:
         print(f"{PATCH_FILE.relative_to(REPO_ROOT).as_posix()}: {problem}", file=sys.stderr)
     if problems:

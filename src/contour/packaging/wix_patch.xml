@@ -1,6 +1,6 @@
 <CPackWiXPatch>
   <!-- The components that differ between the per-machine and the per-user installer (the PATH entry, the
-       Connect shortcut) live in wix_machine.wxs and wix_user.wxs; this file refers to them by Id only. -->
+       Connect shortcut) live in wix_scope.wxs; this file refers to them by Id only. -->
   <!-- The "Add to PATH" feature (keep its Id: an upgrade carries the installed state of a feature over by Id).
        ADD_TO_PATH=0 on the command line drops it. -->
   <CPackWiXFragment Id="CM_C_contour_path">
@@ -18,7 +18,7 @@
       <RegistrySearch Id="ContourPreviousRoot" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[WIX_UPGRADE_DETECTED]" Name="InstallLocation" Type="raw" Bitness="always64" />
     </Property>
     <!-- Which folder the installation goes to, settled by SetProperty actions that run in this order, the last
-         one that applies winning (the default is in wix_machine.wxs and wix_user.wxs):
+         one that applies winning (the default is in wix_scope.wxs):
          ContourRootGiven         notes a folder given on the command line, or chosen in the dialog, before
                                   AppSearch (CPack's search of the previous install location) can overwrite it;
          ContourRootDefault       the proposal of a first install (scope file);

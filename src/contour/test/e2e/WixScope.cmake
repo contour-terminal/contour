@@ -83,9 +83,10 @@ expect_equal("default scope" "${CPACK_WIX_INSTALL_SCOPE}" "perMachine")
 expect_equal("per-machine upgrade code" "${CPACK_WIX_UPGRADE_GUID}" "0E736497-2B72-4117-95E9-54EC6D000000")
 expect_equal("per-machine package name" "${CPACK_PACKAGE_FILE_NAME}" "contour-1.2.3.4-win64")
 expect_equal("per-machine install folder" "${CPACK_PACKAGE_INSTALL_DIRECTORY}" "Contour")
-if(NOT CPACK_WIX_EXTRA_SOURCES MATCHES "wix_machine\\.wxs$")
-    message(FATAL_ERROR "per-machine extra source: expected wix_machine.wxs, got '${CPACK_WIX_EXTRA_SOURCES}'")
+if(NOT CPACK_WIX_EXTRA_SOURCES MATCHES "wix_scope\\.wxs$")
+    message(FATAL_ERROR "per-machine extra source: expected wix_scope.wxs, got '${CPACK_WIX_EXTRA_SOURCES}'")
 endif()
+expect_equal("per-machine scope for the source" "${CPACK_WIX_BUILD_EXTRA_FLAGS}" "-d;ContourScope=perMachine")
 
 if(CMAKE_VERSION VERSION_LESS 4.3)
     # CPack takes perUser only from 4.3; below, it has to say so rather than build a per-machine package.
@@ -97,9 +98,7 @@ else()
     expect_equal("per-user upgrade code" "${CPACK_WIX_UPGRADE_GUID}" "AFF353C7-C33A-474C-B9C7-EDD160677BC9")
     expect_equal("per-user package name" "${CPACK_PACKAGE_FILE_NAME}" "contour-1.2.3.4-win64-user")
     expect_equal("per-user install folder" "${CPACK_PACKAGE_INSTALL_DIRECTORY}" "Programs/Contour")
-    if(NOT CPACK_WIX_EXTRA_SOURCES MATCHES "wix_user\\.wxs$")
-        message(FATAL_ERROR "per-user extra source: expected wix_user.wxs, got '${CPACK_WIX_EXTRA_SOURCES}'")
-    endif()
+    expect_equal("per-user scope for the source" "${CPACK_WIX_BUILD_EXTRA_FLAGS}" "-d;ContourScope=perUser")
 endif()
 
 # A misspelt scope must not fall back to one of the known ones.
