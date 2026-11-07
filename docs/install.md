@@ -64,12 +64,19 @@ winget install --id contour-terminal.Contour --silent --scope machine
 winget install --id contour-terminal.Contour --silent --scope user
 ```
 
-`--scope machine` installs the per-machine installer, `--scope user` the per-user one.
+`--scope machine` installs the per-machine installer, `--scope user` the per-user one. Without `--scope`, winget
+prefers the per-user installer unless your winget settings say otherwise (`installBehavior.preferences.scope`):
+a plain `winget install contour-terminal.Contour` needs no administrator and installs into your profile. Name
+`--scope machine` for an installation for every user. `winget upgrade` keeps the scope Contour was installed in.
+The portable package (the ZIP, without installer) is available as `winget install --id contour-terminal.Contour
+--installer-type portable`, and `winget upgrade` keeps an installation made that way portable. Installations of
+Contour 0.6.1 and earlier have to be uninstalled first, also when winget offers the upgrade.
 
 !!! note "Installing as SYSTEM"
     A deployment tool that installs as the SYSTEM account cannot reach your daemon. Contour is still
     installed, but a daemon that you started by hand keeps running from the old folder until it next
-    restarts. See [Installing a new Contour on Windows](persistent-sessions.md#installing-a-new-contour-on-windows).
+    restarts. Deployment tools pass `--scope machine` to `winget install`: without it winget prefers the
+    per-user installer, which would install into the profile of the SYSTEM account. See [Installing a new Contour on Windows](persistent-sessions.md#installing-a-new-contour-on-windows).
 
 ## macOS
 
