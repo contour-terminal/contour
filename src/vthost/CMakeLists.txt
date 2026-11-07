@@ -24,6 +24,7 @@ add_library(vthost STATIC
     DaemonImageLeases_posix.cpp
     DaemonImageLeases_win32.cpp
     DaemonLifecycle.hpp
+    RelocationRequest.hpp
     ConnectionRegistry.cpp
     ConnectionRegistry.hpp
     DaemonRuntime.cpp

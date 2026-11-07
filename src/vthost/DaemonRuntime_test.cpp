@@ -443,3 +443,30 @@ TEST_CASE("an upgrade that throws after its announcement is recorded as an exec 
     // The requester is gone with the frame: another announcement reaches no dead lambda.
     hooks.announceUpgrade("1.2.4");
 }
+
+TEST_CASE("DaemonRuntime states whether its daemon may move onto its staged copy", "[vthost][runtime]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto const statusOf = [&](vthost::RelocationRequest request) {
+        auto runtime = vthost::DaemonRuntime { { .releaseVersion = "0.9.0",
+                                                 .processId = 1,
+                                                 .socketPath = "/run/c/default",
+                                                 .executablePath = "/s/bin/contour",
+                                                 .logFile = {},
+                                                 .lifecycle = vthost::DaemonLifecycle::Persistent,
+                                                 .upgradeGeneration = 0,
+                                                 .relocationRequest = request },
+                                               h.host,
+                                               clock,
+                                               [](vthost::ShutdownCause) {} };
+        return runtime.status();
+    };
+    // The encoder drops the relocation byte of a status that has no upgrade record: every daemon would then
+    // read as one that cannot be moved. So the record is part of what this pins.
+    CHECK(statusOf(vthost::RelocationRequest::Allowed)->upgrade.has_value());
+    CHECK(statusOf(vthost::RelocationRequest::Refused)->relocation
+          == std::to_underlying(vthost::RelocationRequest::Refused));
+    CHECK(statusOf(vthost::RelocationRequest::Allowed)->relocation
+          == std::to_underlying(vthost::RelocationRequest::Allowed));
+}

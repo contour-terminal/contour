@@ -194,6 +194,9 @@ std::string formatDaemonStatus(DaemonStatus const& status)
         if (status.upgrade->lastFailure != 0)
             rows.push_back(Row { "last upgrade", describeLastUpgradeFailure(*status.upgrade) });
     }
+    // A daemon from before the field states nothing.
+    if (status.relocation)
+        rows.push_back(Row { "staged copy", std::string { vthost::nameOf(*status.relocation) } });
     auto const width =
         std::ranges::max(rows | std::views::transform([](Row const& r) { return r.label.size(); }));
     auto text = std::string {};

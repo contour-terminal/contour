@@ -746,3 +746,14 @@ TEST_CASE("a daemon service falls back to argv[0] made absolute when the executa
     CHECK(fallback.is_absolute());
     CHECK(fallback.filename() == "contour");
 }
+
+TEST_CASE("status says whether the daemon may move onto its staged copy", "[contour][cli][daemon]")
+{
+    auto status = sampleStatus();
+    CHECK_FALSE(contour::cli::formatDaemonStatus(status).contains("staged copy"));
+    status.relocation = vthost::RelocationRequest::Allowed;
+    CHECK(contour::cli::formatDaemonStatus(status).contains("staged copy:"));
+    CHECK(contour::cli::formatDaemonStatus(status).contains("allowed\n"));
+    status.relocation = vthost::RelocationRequest::Refused;
+    CHECK(contour::cli::formatDaemonStatus(status).contains("refused (--in-place)\n"));
+}

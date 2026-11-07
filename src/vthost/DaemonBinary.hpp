@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <vthost/DaemonImage.hpp>
+#include <vthost/RelocationRequest.hpp>
 #include <vthost/StatePath.hpp>
 
 namespace vthost
@@ -90,13 +91,6 @@ enum class ImagePlacement : uint8_t
 {
     Installed = 0, ///< Where it was installed (or built).
     Staged,        ///< In a version-specific image of the store.
-};
-
-/// Whether the user lets a daemon move onto its staged image (`contour daemon --in-place` refuses).
-enum class RelocationRequest : uint8_t
-{
-    Allowed = 0,
-    Refused,
 };
 
 /// Decides whether a daemon re-executes from its staged image before it serves.

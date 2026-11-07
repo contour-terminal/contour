@@ -2367,3 +2367,23 @@ TEST_CASE("an older sender's Delta and SessionState decode without the OSC 30 ta
               == state);
     }
 }
+
+TEST_CASE("DaemonStatusReply carries the relocation request, and a body from before it reads as none",
+          "[vthost][proto][upgrade]")
+{
+    auto const refused = DaemonStatusReply { .releaseVersion = "0.9.0",
+                                             .processId = 4242,
+                                             .sessions = 1,
+                                             .lifecycle = 0,
+                                             .upgrade = DaemonUpgradeRecord { .generation = 1 },
+                                             .relocation = uint8_t { 1 } };
+    CHECK(roundTrip(DecodedPdu { refused }) == DecodedPdu { refused });
+    CHECK(std::get<DaemonStatusReply>(roundTrip(DecodedPdu { refused })).relocation == uint8_t { 1 });
+
+    // A daemon from before the field ends its body after the upgrade record, one byte short.
+    auto legacy = refused;
+    legacy.relocation = std::nullopt;
+    CHECK(decodeAs<DaemonStatusReply>(encodeWithoutTrailingField(DecodedPdu { refused }, /*bytesToDrop=*/1))
+          == legacy);
+    CHECK(roundTrip(DecodedPdu { legacy }) == DecodedPdu { legacy });
+}

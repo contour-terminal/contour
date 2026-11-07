@@ -856,6 +856,9 @@ namespace
             out.varint(pdu.upgrade->attempts);
             out.u8(pdu.upgrade->lastFailure);
             out.string(pdu.upgrade->lastFailureDetail);
+            // Behind the upgrade record, which the field was appended after: without one it has no place.
+            if (pdu.relocation.has_value())
+                out.u8(*pdu.relocation);
         }
     }
 
@@ -1781,6 +1784,14 @@ namespace
                 || !assign(in.string(), upgrade.lastFailureDetail, error))
                 return std::unexpected(error);
             pdu.upgrade = std::move(upgrade);
+            // Appended after the record by a still later version.
+            if (in.remaining() != 0)
+            {
+                auto relocation = uint8_t {};
+                if (!assign(in.u8(), relocation, error))
+                    return std::unexpected(error);
+                pdu.relocation = relocation;
+            }
         }
         return pdu;
     }
