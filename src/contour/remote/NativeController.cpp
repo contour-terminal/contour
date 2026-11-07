@@ -1609,4 +1609,18 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     return pty;
 }
 
+std::expected<void, std::string> awaitConnectedOrAbandon(std::unique_ptr<NativeController>& live,
+                                                         std::unique_ptr<NativeController>& abandoned,
+                                                         std::chrono::milliseconds budget,
+                                                         QObject const* owner)
+{
+    auto connected = live->awaitConnected(budget);
+    if (connected)
+        return {};
+    live->stop();
+    QObject::disconnect(live.get(), nullptr, owner, nullptr);
+    abandoned = std::move(live);
+    return connected;
+}
+
 } // namespace contour::remote

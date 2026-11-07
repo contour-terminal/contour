@@ -92,17 +92,3 @@ function(HexVersion version_hex_var major minor patch)
     endforeach()
     set(${version_hex_var} "${version_hex}" PARENT_SCOPE)
 endfunction()
-
-# Converts a number such as 104 to 68
-# Gratefully taken from https://github.com/Cisco-Talos/clamav/blob/17c9f5b64f4a9a3fd624b1c9668d034d898a2534/cmake/Version.cmake
-function(NumberToHex number output)
-    set(hex "")
-    foreach(i RANGE 1)
-        math(EXPR nibble "${number} & 15")
-        string(SUBSTRING "0123456789abcdef" "${nibble}" 1 nibble_hex)
-        string(APPEND hex "${nibble_hex}")
-        math(EXPR number "${number} >> 4")
-    endforeach()
-    string(REGEX REPLACE "(.)(.)" "\\2\\1" hex "${hex}")
-    set("${output}" "${hex}" PARENT_SCOPE)
-endfunction()

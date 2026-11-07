@@ -1662,16 +1662,19 @@ jobs:
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Check that the package ships no benchmark tool"
+      - name: "Check the package contents"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # bench-headless and bench-latency are built into bin/, beside the staged conpty.dll they must run
-        # with. Two things keep each out of the MSI and the zip, which cpack fills from the same install: its PATTERN
-        # exclusion in src/contour/CMakeLists.txt, against the GUI's wholesale copy of bin/, and
-        # CONTOUR_INSTALL_TOOLS=OFF in the Windows preset, against its own install rule (bench-latency has
-        # none at all, so it needs the first alone). Assert it, as
-        # the macOS job does for its image: the day either goes, a developer tool would ship in a
-        # user-facing release with no other visible symptom. contour.exe must be found too, or the
-        # check would pass on a zip it cannot read.
+        # What the package must and must not hold, asserted as the macOS job does for its image: a mistake
+        # either way has no other visible symptom.
+        # - No executable but those allowed, no .ilk or .pdb, no Qt Test: bin/ is every target's output
+        #   directory (see its install rule in src/contour/CMakeLists.txt for why that matters), and
+        #   CONTOUR_INSTALL_TOOLS=OFF in the Windows preset keeps the tools' own install rules out.
+        # - What is loaded by name or file type at run time, which no build notices missing and CI's tests
+        #   find anyway, in the Qt install QT_PLUGIN_PATH names: the Fluent row's controls style, named through
+        #   QQuickStyle::setStyle where windeployqt's --qmldir scan cannot see it; Qt SVG and its image plugin
+        #   (see cmake/DeployQt.cmake); and the bundled status-line extensions, which contour.exe looks for
+        #   beside bin/.
+        # contour.exe must be found first, or every check would pass on a zip it cannot read.
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -1682,44 +1685,29 @@ jobs:
             $zip.Dispose()
           }
           if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
+            Write-Host "::error::the zip holds no contour.exe; the checks below would pass vacuously"
             exit 1
           }
-          $shipped = $entries | Where-Object { $_ -like '*bench-headless*' -or $_ -like '*bench-latency*' }
-          if ($shipped) {
-            Write-Host "::error::the zip ships $($shipped -join ', ')"
+          $shippedExecutables = 'contour.exe', 'OpenConsole.exe'
+          $strays = $entries | Where-Object {
+            $name = ($_ -split '/')[-1]
+            ($name -like '*.exe' -and $shippedExecutables -notcontains $name) -or $name -like '*.ilk' -or
+              $name -like '*.pdb' -or $name -eq 'Qt6Test.dll' -or $name -eq 'qoffscreen.dll'
+          }
+          if ($strays) {
+            Write-Host "::error::the zip ships $($strays -join ', ')"
             exit 1
           }
-          # The bundled status-line extensions ship in share/contour/extensions, beside bin/, which is
-          # where contour.exe looks for them.
-          foreach ($extension in 'agent-status', 'clock', 'git', 'plasma', 'sysload') {
-            if (-not ($entries | Where-Object { $_ -like "*share/contour/extensions/$extension.wasm" })) {
-              Write-Host "::error::the zip holds no share/contour/extensions/$extension.wasm"
+          $required = @(
+            'bin/qml/QtQuick/Controls/FluentWinUI3/qmldir'
+            'bin/imageformats/qsvg.dll'
+            'bin/Qt6Svg.dll'
+          ) + ('agent-status', 'clock', 'git', 'plasma', 'sysload' | ForEach-Object { "share/contour/extensions/$_.wasm" })
+          foreach ($path in $required) {
+            if (-not ($entries | Where-Object { $_ -like "*/$path" -or $_ -eq $path })) {
+              Write-Host "::error::the zip holds no $path"
               exit 1
             }
-          }
-      - name: "Check that the package ships the FluentWinUI3 style"
-        if: github.event_name != 'pull_request' || github.head_ref == 'release'
-        # The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
-        # quickControlsStyle token), which windeployqt's --qmldir scan cannot see. Assert the style module
-        # is in the zip: without it Qt falls back silently and the Fluent row's controls lose their look.
-        # contour.exe must be found too, or the check would pass on a zip it cannot read.
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
-          try {
-            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
-          } finally {
-            $zip.Dispose()
-          }
-          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
-            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
-            exit 1
-          }
-          if (-not ($entries | Where-Object { $_ -like '*qml/QtQuick/Controls/FluentWinUI3/qmldir' })) {
-            Write-Host "::error::the zip holds no qml/QtQuick/Controls/FluentWinUI3/qmldir"
-            exit 1
           }
       - name: "Uploading MSI to artifact store"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
@@ -1736,6 +1724,56 @@ jobs:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           path: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
           if-no-files-found: error
+          retention-days: 7
+      - name: "Check that the MSI upgrades in place"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        # Installs the package over an earlier build of the same release, and over the latest release, as an
+        # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
+        # version field (the run number), which Windows Installer ignores: only a ProductCode of its own per
+        # build lets the second one in (error 1638 otherwise). Needs a runner without Contour installed, which
+        # scripts/check-msi-upgrade.ps1 insists on.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.set_vars.outputs.version }}'
+          $candidate = "contour-$version-win64.msi"
+          $release = ($version -split '\.')[0..2] -join '.'
+
+          # cpack changes into the preset's build directory before it resolves -B, so the directory is absolute.
+          $earlierDir = Join-Path $PWD 'out\msi-earlier'
+          cpack --preset ${{ env.CMAKE_PRESET }} -G WIX -D CPACK_PACKAGE_VERSION=$release.0 -B $earlierDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "CPack failed. Dumping wix.log..."
+            Get-Content (Join-Path $earlierDir '_CPack_Packages\win64\WIX\wix.log') -ErrorAction SilentlyContinue
+            exit $LASTEXITCODE
+          }
+          $earlier = @(Get-ChildItem $earlierDir -Filter '*-win64.msi')
+          if ($earlier.Count -ne 1) {
+            Write-Host "::error::expected one earlier build of $release in $earlierDir, found $($earlier.Count)"
+            exit 1
+          }
+
+          gh release download --repo contour-terminal/contour --pattern '*-win64.msi' --dir out\msi-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $released = @(Get-ChildItem out\msi-release -Filter '*-win64.msi' -ErrorAction SilentlyContinue)
+          if ($released.Count -ne 1) {
+            Write-Host "::error::expected one *-win64.msi in the latest release, found $($released.Count)"
+            exit 1
+          }
+
+          pwsh scripts\check-msi-upgrade.ps1 -From $earlier[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-same-release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh scripts\check-msi-upgrade.ps1 -From $released[0].FullName -To $candidate -LogDir "$env:RUNNER_TEMP\msi-from-release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: "Uploading the upgrade check's logs"
+        if: failure() && (github.event_name != 'pull_request' || github.head_ref == 'release')
+        uses: actions/upload-artifact@v4
+        with:
+          name: "msi-upgrade-check-logs"
+          path: ${{ runner.temp }}/msi-*
+          if-no-files-found: ignore
           retention-days: 7
   # }}}
   # {{{ Ubuntu 24.04 CC matrix

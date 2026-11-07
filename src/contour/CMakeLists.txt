@@ -26,10 +26,6 @@ endif()
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
-NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
-NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
-NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
-
 # {{{ Setup QT_COMPONENTS
 # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
 # NB: Widgets is required for SystemTrayIcon's fallback implementation
@@ -1861,9 +1857,10 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
 set(CPACK_WIX_VERSION 4)
-# ProductCode must change for every version to trigger a Major Upgrade.
-set(CPACK_WIX_PRODUCT_GUID "0E736497-2B72-4117-95E9-54EC6D${HEX_MAJOR}${HEX_MINOR}${HEX_PATCH}")
-# UpgradeCode must stay constant to allow upgrades from previous versions.
+# UpgradeCode must stay constant to allow upgrades from previous versions. The ProductCode is deliberately
+# left to CPack, which generates a new one per package: every build, including two of the same release, is
+# then a major upgrade of the installed one. (Windows Installer ignores the fourth field of the version, the
+# CI run number, so the version cannot tell two builds of a release apart.)
 set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6D000000")
 if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "Contour Terminal Emulator ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
@@ -1947,6 +1944,11 @@ if(WIN32)
     if(CONTOUR_FRONTEND_GUI)
         include(DeployQt)
         windeployqt(contour)
+        # bin/ is every target's output directory, so beside windeployqt's staging it holds the test suites,
+        # their helpers and the developer tools -- built there to run beside the staged conpty.dll -- and the
+        # .ilk an incremental link leaves beside each. No executable is taken from it: the ones that ship are
+        # installed by rules of their own (contour above, OpenConsole.exe in src/vtpty). This matters beyond
+        # the package's size: the first daemon start copies the whole of bin/ (vthost::stagingPlan).
         install(
             DIRECTORY "$<TARGET_FILE_DIR:contour>/"
             DESTINATION "bin"
@@ -1955,14 +1957,13 @@ if(WIN32)
                 PATTERN "CMakeFiles" EXCLUDE
                 PATTERN "*_autogen" EXCLUDE
                 PATTERN "*.h" EXCLUDE
-                PATTERN "*_test.*" EXCLUDE
                 PATTERN "*.pdb" EXCLUDE
-                PATTERN "unicode_tablegen.exe" EXCLUDE
-                # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
-                # and the .ilk an incremental link leaves beside it.
-                PATTERN "bench-headless.*" EXCLUDE
-                # The latency benchmark, likewise: the .exe and the .ilk beside it.
-                PATTERN "bench-latency.*" EXCLUDE
+                PATTERN "*.exe" EXCLUDE
+                PATTERN "*.ilk" EXCLUDE
+                # Staged for contour_gui_test (contour_stage_runtime_dlls); contour links no Qt Test.
+                PATTERN "Qt6Test.dll" EXCLUDE
+                # Likewise the offscreen QPA plugin: only the tests select it.
+                PATTERN "qoffscreen.dll" EXCLUDE
                 PATTERN "*"
         )
     endif()
