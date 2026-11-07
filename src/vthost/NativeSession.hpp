@@ -1001,6 +1001,18 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                                          verbNamesProfile ? std::string { verbProfile } : _profileName };
     }
 
+    /// What the session the attach itself creates is spawned with: @ref spawnRequest, its shell started in
+    /// the directory the hello stated, when it stated one. The directory is the attach's alone -- a tab
+    /// the client opens later starts where its profile says.
+    [[nodiscard]] SessionSpawnRequest attachSpawnRequest() const
+    {
+        auto request = spawnRequest({});
+        if (!_attachWorkingDirectory.empty())
+            request.commandOverride =
+                vtpty::Process::ExecInfo { .workingDirectory = _attachWorkingDirectory };
+        return request;
+    }
+
     /// Tells whether this client is asked extensions' permission questions: both ends offered
     /// proto::Capability::ExtensionPermissions. A client that did not stays unasked, and the questions
     /// wait for another, as they do while no client is attached.
@@ -1086,6 +1098,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// The host profile this client's sessions run under, as its hello named it with
     /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
     std::string _profileName;
+    /// The directory the hello asked the attach's own session to start in (proto::ClientHello::
+    /// workingDirectory); empty for the profile's. Read by @ref attachSpawnRequest only.
+    std::filesystem::path _attachWorkingDirectory;
     /// Whether this connection follows every workspace or a listed set; Every until the attach plan says.
     FollowScope _scope = FollowScope::Every;
     /// The workspaces followed under FollowScope::Listed, by id. @see follows

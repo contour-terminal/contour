@@ -6,6 +6,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/vt/ClipboardSelection.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
@@ -2307,6 +2308,16 @@ void NativeSession::attachClient(uint64_t serial,
     else
         adoptClientSessionSettings(hello.sessionSettings);
 
+    // The directory the attach's own session starts in, adopted BEFORE the plan spawns it. Only an absolute
+    // one: a relative path names a place under the client's working directory, which the daemon cannot see.
+    if (!hello.workingDirectory.empty())
+    {
+        if (auto path = core::pathFromUtf8(hello.workingDirectory); path && path->is_absolute())
+            _attachWorkingDirectory = *std::move(path);
+        else
+            errorLog()("{}: ignoring the hello's working directory (not an absolute path)", _id);
+    }
+
     // The stated client area, applied BEFORE the spawn and the attach snapshots below, so the first
     // session spawns at the size the client displays and its snapshot needs no resize and resync. An
     // area out of range is refused as a ResizeRequest's is; the session then spawns at the host's
@@ -2461,10 +2472,10 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
         case AttachCreation::None: break;
         case AttachCreation::FirstTabInPrimary:
             connectionLog()("{}: daemon has no tabs; spawning the first session", _id);
-            std::ignore = _host.createTab(spawnRequest({}));
+            std::ignore = _host.createTab(attachSpawnRequest());
             break;
         case AttachCreation::NewWorkspace:
-            if (auto const* workspace = _host.createWorkspace(spawnRequest({}), this))
+            if (auto const* workspace = _host.createWorkspace(attachSpawnRequest(), this))
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _followedWorkspaces.insert(workspace->id().value);

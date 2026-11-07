@@ -66,7 +66,9 @@ namespace vthost::testing
               .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
               .attachIntent = { .kind = proto::AttachIntentKind::Resume, .workspaces = { 1, 7 } },
               .profileName = "work",
-              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } },
+              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 },
+              // A path of the user's; PduTrace_test proves the trace states only its presence.
+              .workingDirectory = "/home/user/secret" } } },
         { proto::PduType::ServerHello,
           proto::DecodedPdu { proto::ServerHello { .agreedVersion = 4,
                                                    .capabilities = { .idents = { 1 } },

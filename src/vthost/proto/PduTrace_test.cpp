@@ -262,6 +262,9 @@ TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")
           == "recv #3 ResizePane session=4 cols=60 lines=20 cell=9x18 (14 bytes)");
     CHECK(summarize(DecodedPdu { ClientHello { .cellPixelSize = cell } }).contains(" cell=9x18"));
     CHECK_FALSE(summarize(DecodedPdu { ClientHello {} }).contains("cell="));
+    CHECK(summarize(DecodedPdu { ClientHello { .workingDirectory = "/home/user/secret" } })
+              .ends_with(" cwd=yes"));
+    CHECK_FALSE(summarize(DecodedPdu { ClientHello {} }).contains("cwd="));
 
     // A payloadless PDU must not leave a dangling separator before the byte count.
     CHECK(traceLine(Direction::Send, 0, DecodedPdu { NewWorkspace {} }, 4)
