@@ -1452,6 +1452,8 @@ jobs:
   windows:
     name: "Windows"
     runs-on: windows-latest
+    # About twice what a green master run takes (70 minutes), rather than GitHub's 360-minute default.
+    timeout-minutes: 150
     permissions:
       contents: read
       packages: write
@@ -1763,6 +1765,7 @@ jobs:
           retention-days: 7
       - name: "Check that the MSI upgrades in place"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        timeout-minutes: 30
         # Installs the package over an earlier build of the same release, and over the latest release, as an
         # installed Contour is upgraded in the field. The two builds of one release differ only in the fourth
         # version field (the run number), which Windows Installer ignores: only a ProductCode of its own per

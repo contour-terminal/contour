@@ -35,6 +35,9 @@ $ErrorActionPreference = 'Stop'
 # need a reboot.
 $ExitSuccess = 0
 
+# How long one msiexec call may take: far past a real install, short of the step's timeout.
+$MsiexecTimeoutMilliseconds = 600000
+
 # One Windows Installer COM object serves every function below.
 $installer = New-Object -ComObject WindowsInstaller.Installer
 
@@ -90,8 +93,15 @@ function Invoke-Msiexec {
         [Parameter(Mandatory)][string]$What
     )
     $Log = Join-Path $LogDir $LogName
-    $process = Start-Process -FilePath msiexec.exe -Wait -PassThru -NoNewWindow `
+    # Bounded: an install that never ends must fail in minutes, not hold the runner for hours. The handle is taken
+    # now, or a process that ended would report no exit code.
+    $process = Start-Process -FilePath msiexec.exe -PassThru -NoNewWindow `
         -ArgumentList @($Action, $Target, '/qn', '/norestart', '/l*v', "`"$Log`"")
+    $null = $process.Handle
+    if (-not $process.WaitForExit($MsiexecTimeoutMilliseconds)) {
+        $process.Kill($true)
+        throw "$What did not end within $($MsiexecTimeoutMilliseconds / 1000) s: msiexec was ended"
+    }
     if ($process.ExitCode -ne $ExitSuccess) {
         if (Test-Path $Log) {
             Write-Host "--- last 60 lines of $Log ---"
