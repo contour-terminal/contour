@@ -7,7 +7,10 @@
     #include <vtpty/PtyAdoption.hpp>
     #include <vtpty/Win32Handle.hpp>
 
+    #include <core/Environment.hpp>
+    #include <core/Utf8Path.hpp>
     #include <core/WideString.hpp>
+    #include <core/platform/NativeFileSystem.hpp>
 
     #include <algorithm>
     #include <array>
@@ -192,6 +195,12 @@ namespace
             startup.StartupInfo.hStdOutput = vtpty::isPipeOrFile(output) ? output : nullptr;
             startup.StartupInfo.hStdError = vtpty::isPipeOrFile(error) ? error : nullptr;
             startup.lpAttributeList = attributes->get();
+            // Not this process's working directory, which may be the folder a package upgrade replaces.
+            auto const profile =
+                core::pathFromUtf8(core::defaultEnvironment().get("USERPROFILE").value_or(std::string {}))
+                    .value_or(std::filesystem::path {});
+            auto const directory =
+                successorWorkingDirectory(executable, core::platform::NativeFileSystem::instance(), profile);
             auto info = PROCESS_INFORMATION {};
             auto const started = [&] {
                 auto const inheritable = InheritableForLaunch { handles };
@@ -203,7 +212,7 @@ namespace
                                       TRUE,
                                       EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS | CREATE_NO_WINDOW,
                                       nullptr,
-                                      nullptr,
+                                      directory.empty() ? nullptr : directory.c_str(),
                                       &startup.StartupInfo,
                                       &info);
             }();

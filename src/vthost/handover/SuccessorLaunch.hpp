@@ -20,6 +20,8 @@
 
 #include <vtpty/CrossingHandle.hpp>
 
+#include <core/platform/FileSystem.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -37,6 +39,26 @@ namespace vthost::handover
 {
 
 class HandoverMemory;
+
+/// Where a successor process starts.
+///
+/// Never the predecessor's working directory: a daemon started from the install folder (`cd bin` and
+/// `.\contour daemon`) would hand it on, and the successor's handle on that directory keeps the folder from
+/// being removed by an uninstall -- which Restart Manager does not report.
+/// @param executable The image the successor runs from.
+/// @param fileSystem Where the image's directory is looked for.
+/// @param profile The user's profile directory, for an image whose directory is gone.
+/// @return The image's directory, else @p profile.
+[[nodiscard]] inline std::filesystem::path successorWorkingDirectory(
+    std::filesystem::path const& executable,
+    core::platform::FileSystem const& fileSystem,
+    std::filesystem::path const& profile)
+{
+    auto directory = executable.parent_path();
+    if (!directory.empty() && fileSystem.isDirectory(directory))
+        return directory;
+    return profile;
+}
 
 #ifdef _WIN32
 /// A successor process SuccessorLauncher started.
