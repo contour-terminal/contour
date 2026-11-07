@@ -880,7 +880,194 @@ function Import-SigningBatch {
     return @($completed)
 }
 
+function Get-CPackComponent {
+    <#
+    .SYNOPSIS
+        Reads the components CPack packages from a generated CPackConfig.cmake.
+    .PARAMETER CPackConfig
+        The path of CPackConfig.cmake.
+    .OUTPUTS
+        System.String[]. The CPACK_COMPONENTS_ALL list; empty when the file sets none.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][string]$CPackConfig)
+    $text = [System.IO.File]::ReadAllText($CPackConfig)
+    $match = [regex]::Match($text, '(?m)^\s*set\(\s*CPACK_COMPONENTS_ALL\s+"([^"]*)"\s*\)')
+    if (-not $match.Success) { return @() }
+    return @($match.Groups[1].Value.Split(';') | Where-Object { $_ })
+}
+
+function Invoke-Staging {
+    <#
+    .SYNOPSIS
+        Installs a build into a folder the way CPack would: the same components, nothing else.
+    .PARAMETER Build
+        The build directory (holding CPackConfig.cmake).
+    .PARAMETER Destination
+        The folder to install into; recreated.
+    .OUTPUTS
+        None. A component CPack does not package must not be staged: a file of it would be signed, and then fail to
+        overlay the package.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Build, [Parameter(Mandatory)][string]$Destination)
+    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $components = @(Get-CPackComponent -CPackConfig (Join-Path $Build 'CPackConfig.cmake'))
+    # One install per component CPack packages; a plain install where it names none.
+    $targets = if ($components.Count -eq 0) { @('') } else { $components }
+    foreach ($component in $targets) {
+        $extra = if ($component) { @('--component', $component) } else { @() }
+        Write-Host "cmake --install $Build --prefix $Destination $($extra -join ' ')"
+        & cmake --install $Build --prefix $Destination @extra | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "cmake --install failed (exit code $LASTEXITCODE) $($extra -join ' ')" }
+    }
+}
+
+function Invoke-SigningDryRun {
+    <#
+    .SYNOPSIS
+        Signs a copy of an install tree and its packages with a throwaway certificate, to see that signing would work.
+    .PARAMETER Root
+        The staged install tree; it is only read.
+    .PARAMETER Packages
+        Installers to sign as well; copied, never changed.
+    .PARAMETER Table
+        The signer table.
+    .PARAMETER WorkDirectory
+        Recreated; must neither lie inside Root nor contain it.
+    .PARAMETER ToolsDirectory
+        Where downloaded tools are kept.
+    .OUTPUTS
+        None. Prints a summary line; throws on any problem.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [string[]]$Packages = @(),
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$WorkDirectory,
+        [Parameter(Mandatory)][string]$ToolsDirectory
+    )
+    if ((Test-PathInside $Root $WorkDirectory) -or (Test-PathInside $WorkDirectory $Root)) {
+        throw "the work directory $WorkDirectory and the tree $Root must not contain one another"
+    }
+    foreach ($own in $Table.OwnBinaries) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $own) -PathType Leaf)) {
+            throw "$own not found under $Root; is this a staged install tree?"
+        }
+    }
+    if (Test-Path -LiteralPath $WorkDirectory) { Remove-Item -LiteralPath $WorkDirectory -Recurse -Force }
+    $stage = Join-Path $WorkDirectory 'stage'
+    $packageDirectory = Join-Path $WorkDirectory 'packages'
+    $certificateDirectory = Join-Path $WorkDirectory 'cert'
+    New-Item -ItemType Directory -Force -Path $stage, $packageDirectory | Out-Null
+    try {
+        Copy-Item -Path (Join-Path (Resolve-Path -LiteralPath $Root).Path '*') -Destination $stage -Recurse -Force
+        $copies = foreach ($package in $Packages) {
+            $copy = Join-Path $packageDirectory (Split-Path -Leaf $package)
+            Copy-Item -LiteralPath $package -Destination $copy
+            $copy
+        }
+        $certificate = New-ThrowawayCodeSigningCertificate -Directory $certificateDirectory
+        $env:CONTOUR_SIGNING_PFX = $certificate.PfxPath
+        $env:CONTOUR_SIGNING_PFX_PASSWORD = $certificate.Password
+
+        $payload = @(Invoke-SignBatch -Root $stage -Kind Payload -Signer dryrun -Table $Table -WorkDirectory (Join-Path $WorkDirectory 'payload-work') `
+                -ToolsDirectory $ToolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint)
+        $packaged = @()
+        if (@($copies).Count -gt 0) {
+            $packaged = @(Invoke-SignBatch -Root $packageDirectory -Kind Packages -Files @($copies) -Signer dryrun -Table $Table `
+                    -WorkDirectory (Join-Path $WorkDirectory 'package-work') -ToolsDirectory $ToolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint)
+        }
+
+        $signed = @($payload | ForEach-Object { $_.RelativePath })
+        $missing = @($Table.OwnBinaries | Where-Object { $_ -notin $signed })
+        if ($missing.Count -gt 0) { throw "own binaries missing from the payload selection: $($missing -join ', ')" }
+        $unsigned = @(Get-PortableExecutable -Root $stage | Where-Object {
+                [string](Get-AuthenticodeSignature -LiteralPath (Join-Path $stage $_)).Status -eq 'NotSigned'
+            })
+        if ($unsigned.Count -gt 0) { throw "files that should carry a signature do not: $($unsigned -join ', ')" }
+        Write-Host "signing dry run: $($payload.Count) payload files and $($packaged.Count) packages signed and verified with a throwaway certificate"
+    } finally {
+        Remove-Item Env:CONTOUR_SIGNING_PFX, Env:CONTOUR_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $certificateDirectory) { Remove-Item -LiteralPath $certificateDirectory -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Test-ShippedArtifact {
+    <#
+    .SYNOPSIS
+        Checks that the packages are what a signer should ship.
+    .PARAMETER Signer
+        The signer's key in the table.
+    .PARAMETER Table
+        The signer table.
+    .PARAMETER Manifest
+        The manifest of the signed payload.
+    .PARAMETER Zip
+        The ZIP package.
+    .PARAMETER Msi
+        The installers.
+    .PARAMETER WorkDirectory
+        Where the ZIP is extracted (recreated).
+    .OUTPUTS
+        None. Prints a summary line; throws, listing every problem, otherwise.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Signer,
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$Manifest,
+        [Parameter(Mandatory)][string]$Zip,
+        [Parameter(Mandatory)][string[]]$Msi,
+        [Parameter(Mandatory)][string]$WorkDirectory
+    )
+    $row = $Table.Signers[$Signer]
+    $transport = ([string]$row.Transport).ToLowerInvariant()
+    $extracted = Join-Path $WorkDirectory 'zip'
+    if (Test-Path -LiteralPath $extracted) { Remove-Item -LiteralPath $extracted -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $extracted | Out-Null
+    Expand-Archive -LiteralPath $Zip -DestinationPath $extracted -Force
+    $files = @(Get-RelativeFile -Root $extracted)
+    $problems = [System.Collections.Generic.List[string]]::new()
+
+    # The files of the manifest are the ones packaged, as signed.
+    foreach ($entry in Read-SigningManifest -Path $Manifest) {
+        $hits = @($files | Where-Object { $_ -eq $entry.RelativePath -or $_.EndsWith('/' + $entry.RelativePath) })
+        if ($hits.Count -eq 0) { $problems.Add("$($entry.RelativePath): no such entry in the ZIP"); continue }
+        foreach ($name in $hits) {
+            $path = Join-Path $extracted $name
+            if ((Get-FileSha256 -Path $path) -ne $entry.After) { $problems.Add("${name}: is not the signed file of the manifest") }
+            elseif ($transport -ne 'none' -and ($detail = Get-SignatureProblem -Path $path -Trust System)) { $problems.Add($detail) }
+        }
+    }
+
+    # Nothing signed with a certificate Windows does not trust (a dry run's) may ship; a file with no signature may.
+    $executables = @(Get-PortableExecutable -Root $extracted)
+    foreach ($relative in $executables) {
+        $status = [string](Get-AuthenticodeSignature -LiteralPath (Join-Path $extracted $relative)).Status
+        if ($status -notin 'Valid', 'NotSigned') { $problems.Add("${relative}: the ZIP ships a file whose signature status is $status") }
+        elseif ($status -eq 'NotSigned' -and $transport -ne 'none' -and $row.Payload -eq 'Unsigned') {
+            $problems.Add("${relative}: the ZIP ships a file without a signature, which the $Signer signer signs")
+        }
+    }
+
+    foreach ($installer in $Msi) {
+        if ($transport -eq 'none') {
+            $status = [string](Get-AuthenticodeSignature -LiteralPath $installer).Status
+            if ($status -ne 'NotSigned') { $problems.Add("${installer}: the signature status is $status; the none signer ships unsigned installers") }
+        } elseif ($detail = Get-SignatureProblem -Path $installer -Trust System) {
+            $problems.Add($detail)
+        }
+    }
+    if ($problems.Count -gt 0) { throw "the packages are not what the $Signer signer should ship:`n  $($problems -join "`n  ")" }
+    Write-Host "verify: $Zip and $(@($Msi).Count) installers are what the $Signer signer should ship"
+}
+
 Export-ModuleMember -Function Test-SigningTable, Import-SigningTable, Resolve-SigningPlan, Expand-SigningArgument,
 Get-PortableExecutable, Write-SigningManifest, Read-SigningManifest, New-ThrowawayCodeSigningCertificate,
 Get-SignatureProblem, Select-SigningFile, Resolve-SigningTool, Invoke-SigningStep, Invoke-SignBatch,
-Export-SigningBatch, Import-SigningBatch, Get-FileSha256
+Export-SigningBatch, Import-SigningBatch, Get-FileSha256, Get-CPackComponent, Invoke-Staging, Invoke-SigningDryRun,
+Test-ShippedArtifact
