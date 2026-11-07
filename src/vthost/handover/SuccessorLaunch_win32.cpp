@@ -328,9 +328,20 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
     crossing.insert(crossing.end(), { handles.image, handles.ready, handles.commit, handles.predecessor });
     argv.push_back(handoverArgument(handoverToken(handles)));
 
+    // Said before the launch and never between ready and commit: this is the console of the process that is
+    // about to end, which ought to say where its daemon went.
+    auto const target = core::pathToUtf8(executable);
+    _notices << std::format("contour daemon: handing over to {}; this process ends once it serves\n", target)
+             << std::flush;
+    auto const failed = [&](ExecFailure failure) {
+        _notices << std::format("contour daemon: the hand-over to {} failed; this daemon serves on\n", target)
+                 << std::flush;
+        return failure;
+    };
+
     auto const successor = _launcher.launch(executable, argv, crossing);
     if (!successor)
-        return ExecFailure { .cause = successor.error() };
+        return failed(ExecFailure { .cause = successor.error() });
     auto const process = UniqueHandle { successor->process.native() };
     // Nothing is logged from here to the commit, nor after it: a daemon's console in selection mode blocks a
     // write for as long as it likes, which past the successor's commit wait abandons the hand-over, and past
@@ -345,14 +356,14 @@ ExecFailure SuccessorHandoff::handOver(std::filesystem::path const& executable,
             _launcher.endThisProcess();
         case Readiness::Ended:
             errorLog()("live upgrade: the successor (pid {}) ended before it took over", successor->pid);
-            return ExecFailure { .cause = std::make_error_code(std::errc::no_such_process) };
+            return failed(ExecFailure { .cause = std::make_error_code(std::errc::no_such_process) });
         case Readiness::TimedOut: break;
     }
     errorLog()("live upgrade: the successor (pid {}) was not ready within {} ms; ending it",
                successor->pid,
                _config.readyTimeout.count());
     _launcher.terminate(*successor);
-    return ExecFailure { .cause = std::make_error_code(std::errc::timed_out) };
+    return failed(ExecFailure { .cause = std::make_error_code(std::errc::timed_out) });
 }
 
 std::expected<HandoverImage, std::string> receiveHandover(SuccessorHandles const& handles,

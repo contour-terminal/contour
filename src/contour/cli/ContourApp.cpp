@@ -1125,15 +1125,27 @@ namespace
     /// probe that runs the target's query mode. Made before the daemon runs, so that it outlives it.
     struct DaemonUpgradeResources
     {
+        /// @param notices Where a Windows hand-over says where the daemon goes (the successor's launch and
+        /// its
+        ///        failure); unused elsewhere, where the process image is replaced in place.
+        explicit DaemonUpgradeResources([[maybe_unused]] std::ostream& notices):
+#ifdef _WIN32
+            handoff { *launcher, *memory, {}, notices }
+#else
+            handoff { *replacer, *memory }
+#endif
+        {
+        }
+
         std::unique_ptr<vthost::handover::HandoverMemory> memory =
             vthost::handover::makeNativeHandoverMemory();
 #ifdef _WIN32
         std::unique_ptr<vthost::handover::SuccessorLauncher> launcher =
             vthost::handover::makeNativeSuccessorLauncher();
-        vthost::handover::SuccessorHandoff handoff { *launcher, *memory, {} };
+        vthost::handover::SuccessorHandoff handoff;
 #else
         std::unique_ptr<vthost::ProcessImageReplacer> replacer = vthost::makeNativeProcessImageReplacer();
-        vthost::handover::ExecHandoff handoff { *replacer, *memory };
+        vthost::handover::ExecHandoff handoff;
 #endif
         /// Never asked to stop: a probe is bounded by its own timeout.
         core::async::StopSource probeShutdown;
@@ -1489,10 +1501,13 @@ int ContourApp::daemonAction()
     // executable has no store to upgrade from, and refuses, and makes none of it. Held until runDaemon
     // returns.
     auto upgradeResources = std::optional<DaemonUpgradeResources> {};
+    // The daemon's log already says where a hand-over goes when it is the console's: the notices are for a
+    // daemon that logs to a file, whose console says nothing otherwise.
+    auto discardedNotices = std::ostream { nullptr };
     if (images)
         config.liveUpgrade.emplace(liveUpgradeServicesOf(
             **images,
-            upgradeResources.emplace(),
+            upgradeResources.emplace(config.logFile.empty() ? discardedNotices : std::cerr),
             commandLine(),
             resolved.configFile,
             daemonProfile,

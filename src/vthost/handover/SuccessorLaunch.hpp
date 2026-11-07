@@ -27,6 +27,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <ostream>
 #include <span>
 #include <string>
 #include <system_error>
@@ -141,10 +142,15 @@ class SuccessorHandoff final: public ImageHandoff
     /// @param launcher What starts the successor, and ends a process. Not owned.
     /// @param memory Where the image is written. Not owned.
     /// @param config How long it waits.
+    /// @param notices Where it says which process takes over, and when it did not: before the successor is
+    ///        started, and after a failure, never in between (a write that blocks there -- a console in
+    ///        selection mode -- could let the successor give up while this process still commits and ends).
+    ///        A background daemon's standard error is its log or `NUL`.
     SuccessorHandoff(SuccessorLauncher& launcher,
                      HandoverMemory& memory,
-                     SuccessorHandoffConfig config) noexcept:
-        _launcher { launcher }, _memory { memory }, _config { config }
+                     SuccessorHandoffConfig config,
+                     std::ostream& notices) noexcept:
+        _launcher { launcher }, _memory { memory }, _config { config }, _notices { notices }
     {
     }
 
@@ -157,6 +163,7 @@ class SuccessorHandoff final: public ImageHandoff
     SuccessorLauncher& _launcher;
     HandoverMemory& _memory;
     SuccessorHandoffConfig _config;
+    std::ostream& _notices;
 };
 
 /// The successor's side of a live upgrade on Windows, whole: reads the image the predecessor handed over in
