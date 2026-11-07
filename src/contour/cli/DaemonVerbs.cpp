@@ -451,6 +451,108 @@ ExitStatus daemonUpgradeVerb(DaemonControlPort& control,
     return ExitStatus::Refused;
 }
 
+std::vector<std::filesystem::path> daemonSocketsIn(core::platform::FileSystem const& fileSystem,
+                                                   std::filesystem::path const& directory)
+{
+    auto const listed = fileSystem.listDirectory(directory);
+    if (!listed)
+        return {};
+    auto entries = std::vector<std::filesystem::path> {};
+    for (auto const& entry: *listed)
+        if (!entry.isDirectory)
+            entries.push_back(entry.path);
+    std::ranges::sort(entries);
+    return vthost::client::controlSocketsAmong(entries);
+}
+
+namespace
+{
+    /// A binary source that looks at its image ahead, to see whether there is anything to move a daemon onto,
+    /// and hands that same image to the next caller.
+    class PeekingBinary final: public vthost::DaemonBinarySource
+    {
+      public:
+        explicit PeekingBinary(vthost::DaemonBinarySource& inner): _inner { inner } {}
+
+        /// @return Whether the image is one a daemon can move onto: not the installed executable itself,
+        /// which a
+        ///         store that stages nothing offers (a packaged Linux install, or no state directory).
+        [[nodiscard]] bool hasStagedImage()
+        {
+            _peeked = _inner.imageForSpawn();
+            return _peeked->origin != vthost::ImageOrigin::Installed || !_peeked->imageId.empty();
+        }
+
+        [[nodiscard]] vthost::StagedImage imageForSpawn() override
+        {
+            if (!_peeked)
+                return _inner.imageForSpawn();
+            auto image = std::move(*_peeked);
+            _peeked.reset();
+            return image;
+        }
+
+      private:
+        vthost::DaemonBinarySource& _inner;
+        std::optional<vthost::StagedImage> _peeked;
+    };
+} // namespace
+
+ExitStatus daemonRelocateVerb(std::span<std::filesystem::path const> sockets,
+                              DaemonControlFor const& controlFor,
+                              vthost::DaemonBinarySource& binary,
+                              vthost::client::SettlePacer& pacer,
+                              std::filesystem::path const& installationBin,
+                              std::ostream& out,
+                              std::ostream& err)
+{
+    using vthost::client::RelocationVerdict;
+    auto result = ExitStatus::Ok;
+    auto staging = PeekingBinary { binary };
+    for (auto const& socket: sockets)
+    {
+        // A short look first: a daemon that does not answer in a moment is not one to wait for.
+        auto const discovery = controlFor(socket, vthost::client::DefaultControlTimeout);
+        auto const status = discovery->status();
+        if (!status)
+            continue; // Nobody answers: a socket file a daemon left behind.
+        auto const where = core::pathToUtf8(socket);
+        auto const leftBecause = [&](std::string_view reason) {
+            out << std::format("left the daemon at {}: {}\n", where, reason);
+        };
+        auto const verdict =
+            vthost::client::relocationVerdictFor(*status, installationBin, vthost::NativeHostPlatform);
+        if (verdict != RelocationVerdict::Move)
+        {
+            leftBecause(vthost::client::reasonOf(verdict));
+            continue;
+        }
+        if (!staging.hasStagedImage())
+        {
+            leftBecause("there is no staged copy to move it onto");
+            continue;
+        }
+        auto const mover = controlFor(socket, vthost::client::DefaultUpgradeTimeout);
+        auto const moved = vthost::client::upgradeDaemonTo(
+            *mover, *discovery, staging, pacer, std::optional<vthost::client::DaemonStatus> { *status });
+        if (!moved)
+        {
+            err << std::format("contour daemon: could not move the daemon at {}: {}\n",
+                               where,
+                               vthost::client::describeFailure(moved.error()));
+            result = ExitStatus::Failed;
+            continue;
+        }
+        // Where it is now, if it says: not the path it was moved off, which is all the status before holds.
+        if (auto const after = discovery->status())
+            out << std::format(
+                "moved the daemon at {} onto {}\n", where, core::pathToUtf8(after->executablePath));
+        else
+            out << std::format("moved the daemon at {}\n", where);
+    }
+    return result;
+}
+
 vthost::WorkspacePersistenceConfig workspacePersistenceOf(config::DaemonRestoreConfig const& restore,
                                                           std::filesystem::path snapshotPath)
 {

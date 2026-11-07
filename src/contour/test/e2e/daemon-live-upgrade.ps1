@@ -20,6 +20,10 @@
 # Scenario 3 upgrades the successor itself: what one handover appended to the command line is replaced, not
 # repeated, and the program comes through a second time.
 #
+# Scenario 4 runs `contour daemon relocate` from the install, as the installer does: of two daemons started from
+# it, the one that allows a move comes up on its staged copy (a new pid under %LOCALAPPDATA%\contour\bin, the
+# same program, a gapless counter) and the one started with --in-place is left as it was.
+#
 # The handover pause is measured and printed, never asserted.
 #
 # Windows PowerShell 5.1, which every Windows has: nothing newer is assumed.
@@ -57,6 +61,8 @@ $script:Daemon = $null
 # Every daemon this run started or saw take over: the cleanup ends each, whichever assertion failed.
 $script:Daemons = @()
 $script:ProgramPid = 0
+# The programs hosted in Scenario 4's daemons.
+$script:RelocPrograms = @()
 
 function Fail([string]$why) {
     Write-Host "error: $why"
@@ -106,9 +112,9 @@ function WaitFor([int]$Tenths, [scriptblock]$Condition) {
 
 function ProcessAlive([int]$id) { return [bool](Get-Process -Id $id -ErrorAction SilentlyContinue) }
 
-# The daemon's pid, from `contour daemon status`.
-function DaemonStatus {
-    $text = Contour @('daemon', 'status', '--socket', $Socket)
+# The daemon's status text, from `contour daemon status`; the main daemon's unless another socket is given.
+function DaemonStatus([string]$socket = $Socket) {
+    $text = Contour @('daemon', 'status', '--socket', $socket)
     if ($script:Status -ne 0) { Fail "daemon status exited $($script:Status)" }
     return $text
 }
@@ -116,8 +122,8 @@ function DaemonPidOf([string]$status) { return [int]([regex]::Match($status, '\(
 function UpgradesOf([string]$status) { return [int]([regex]::Match($status, '(?m)^upgrades:\s+(\d+)').Groups[1].Value) }
 
 # The tick numbers the program's screen shows now.
-function Ticks {
-    $screen = Contour @('pane', 'capture', 'pane', $script:Pane, 'daemon', $Socket)
+function Ticks([string]$socket = $Socket, [string]$pane = $script:Pane) {
+    $screen = Contour @('pane', 'capture', 'pane', $pane, 'daemon', $socket)
     if ($script:Status -ne 0) { Fail "pane capture exited $($script:Status)" }
     return @([regex]::Matches($screen, '(?m)^\s*tick (\d+)\s*$') | ForEach-Object { [int]$_.Groups[1].Value })
 }
@@ -226,6 +232,66 @@ while ($true) { $n++; Write-Host "tick $n"; Start-Sleep -Milliseconds 200 }
     Contour @('daemon', 'stop', '--socket', $Socket, '--yes') | Out-Null
     if ($script:Status -ne 0) { Fail "daemon stop exited $($script:Status)" }
     if (-not (WaitFor 100 { -not (ProcessAlive $script:Daemon) })) { Fail 'the daemon was still running 10s after daemon stop' }
+
+    # --- Scenario 4: `daemon relocate`, as the installer runs it ------------------------------------------------
+    # The label sockets of a user lie in <temp>\contour-<USERNAME>\, which is what the verb lists: so the temp
+    # directory is this run's own, and two daemons are started in it from the install, one of which refuses a move.
+    $env:TMP = Join-Path $Out 'tmp'
+    $env:TEMP = $env:TMP
+    New-Item -ItemType Directory -Force $env:TMP | Out-Null
+    $labelDir = Join-Path $env:TMP "contour-$env:USERNAME"
+    $socketA = Join-Path $labelDir 'relocA'
+    $socketB = Join-Path $labelDir 'relocB'
+    $a = Start-Process -FilePath $Contour -ArgumentList "daemon --label relocA --log-file `"$(Join-Path $Out 'relocA.log')`"" `
+        -PassThru -WindowStyle Hidden
+    $script:Daemons += $a.Id
+    $b = Start-Process -FilePath $Contour -ArgumentList "daemon --label relocB --in-place --log-file `"$(Join-Path $Out 'relocB.log')`"" `
+        -PassThru -WindowStyle Hidden
+    $script:Daemons += $b.Id
+    if (-not (WaitFor 200 { (Test-Path $socketA) -and (Test-Path $socketB) })) { Fail "the daemons did not bind $labelDir within 20s" }
+
+    $reloc = Join-Path $Out 'reloc'
+    New-Item -ItemType Directory -Force $reloc | Out-Null
+    $created = Contour @('new', 'daemon', $socketA, 'json', 'powershell.exe', '-NoProfile', '-File', (Join-Path $Out 'program.ps1'), $reloc)
+    if ($script:Status -ne 0) { Fail "contour new on relocA exited $($script:Status)" }
+    $paneA = [regex]::Match($created, '"pane":"([^"]*)"').Groups[1].Value
+    if (-not $paneA) { Fail 'contour new on relocA named no pane' }
+    if (-not (WaitFor 200 { Test-Path (Join-Path $reloc 'program.pid') })) { Fail 'the program on relocA did not start within 20s' }
+    $programA = [int]((Get-Content (Join-Path $reloc 'program.pid')) -replace 'pid ', '')
+    $script:RelocPrograms += $programA
+    if (-not (WaitFor 200 { (Ticks $socketA $paneA).Count -ge 10 })) { Fail 'the program on relocA printed no ticks within 20s' }
+
+    $statusA = DaemonStatus $socketA
+    $statusB = DaemonStatus $socketB
+    $pidA = DaemonPidOf $statusA
+    $pidB = DaemonPidOf $statusB
+    $executableB = [regex]::Match($statusB, '(?m)^executable:\s+(.*?)\s*$').Groups[1].Value
+    $tickBefore = (Ticks $socketA $paneA)[-1]
+
+    $said = Contour @('daemon', 'relocate')
+    if ($script:Status -ne 0) { Fail "contour daemon relocate exited $($script:Status), not 0: $said" }
+    if ($said -notmatch 'moved the daemon at [^\r\n]*relocA') { Fail "daemon relocate does not say it moved relocA: $said" }
+    if ($said -notmatch 'left the daemon at [^\r\n]*relocB: it was started with --in-place') { Fail "daemon relocate does not say it left relocB: $said" }
+
+    if (-not (WaitFor 300 { (Ticks $socketA $paneA)[-1] -gt $tickBefore })) { Fail 'no new tick appeared on relocA within 30s of the relocation' }
+    $statusA = DaemonStatus $socketA
+    $newPidA = DaemonPidOf $statusA
+    $script:Daemons += $newPidA
+    if ($newPidA -eq $pidA) { Fail "relocA's pid is still ${pidA}: it did not move" }
+    # Freeing bin\ is the point: the old daemon must be gone, not just superseded.
+    if (-not (WaitFor 100 { -not (ProcessAlive $pidA) })) { Fail "the old relocA daemon $pidA still runs" }
+    $staged = Join-Path $env:LOCALAPPDATA 'contour\bin\'
+    $executableA = [regex]::Match($statusA, '(?m)^executable:\s+(.*?)\s*$').Groups[1].Value
+    if (-not $executableA.StartsWith($staged, [System.StringComparison]::OrdinalIgnoreCase)) { Fail "relocA runs from $executableA, not from under $staged" }
+    if (-not (ProcessAlive $programA)) { Fail 'the program on relocA died in the relocation' }
+    $gap = GapOf (Ticks $socketA $paneA) 10
+    if ($gap) { Fail "relocA's counter is not gapless across the relocation: $gap" }
+
+    $statusB = DaemonStatus $socketB
+    if ((DaemonPidOf $statusB) -ne $pidB) { Fail "relocB's pid changed: it was moved against --in-place" }
+    $nowB = [regex]::Match($statusB, '(?m)^executable:\s+(.*?)\s*$').Groups[1].Value
+    if ($nowB -ne $executableB) { Fail "relocB's executable changed from $executableB to $nowB" }
+
     Write-Host 'live upgrade: ok'
     exit 0
 }
@@ -240,7 +306,7 @@ finally {
         $serving = DaemonPidOf (Contour @('daemon', 'status', '--socket', $Socket))
         if ($serving) { $script:Daemons += $serving }
     } catch {}
-    foreach ($id in @($script:ProgramPid) + $script:Daemons) {
+    foreach ($id in @($script:ProgramPid) + $script:RelocPrograms + $script:Daemons) {
         if ($id -and (ProcessAlive $id)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
     }
     Start-Sleep -Milliseconds 500

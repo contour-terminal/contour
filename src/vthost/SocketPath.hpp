@@ -10,6 +10,7 @@
 #include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -229,17 +230,30 @@ namespace detail
 // consumer (GUI, POSIX daemon, Win32 daemon, attach flows) derives through
 // them.
 
+/// The suffix of the native cells+deltas endpoint beside a control socket.
+inline constexpr auto NativeSocketSuffix = std::string_view { "-native" };
+
+/// The suffix of the binary-tmux (imsg) endpoint beside a control socket.
+inline constexpr auto TmuxSocketSuffix = std::string_view { "-tmux" };
+
+/// The suffix of the log file beside a control socket.
+inline constexpr auto DaemonLogSuffix = std::string_view { ".log" };
+
+/// Every suffix a file beside a control socket carries: what tells such a sibling from a control socket.
+inline constexpr auto SiblingSuffixes =
+    std::to_array({ NativeSocketSuffix, TmuxSocketSuffix, DaemonLogSuffix });
+
 /// @return The native cells+deltas endpoint beside @p controlSocket.
 [[nodiscard]] inline std::filesystem::path nativeSocketPath(std::filesystem::path controlSocket)
 {
-    controlSocket += "-native";
+    controlSocket += NativeSocketSuffix;
     return controlSocket;
 }
 
 /// @return The binary-tmux (imsg) endpoint beside @p controlSocket.
 [[nodiscard]] inline std::filesystem::path tmuxSocketPath(std::filesystem::path controlSocket)
 {
-    controlSocket += "-tmux";
+    controlSocket += TmuxSocketSuffix;
     return controlSocket;
 }
 
@@ -253,7 +267,7 @@ namespace detail
 /// @return The log file path beside @p controlSocket.
 [[nodiscard]] inline std::filesystem::path daemonLogPath(std::filesystem::path controlSocket)
 {
-    controlSocket += ".log";
+    controlSocket += DaemonLogSuffix;
     return controlSocket;
 }
 

@@ -15,6 +15,8 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -83,6 +85,19 @@ class FakeBinarySource final: public vthost::DaemonBinarySource
     }
 };
 
+/// An image store that stages nothing: the installed executable itself, with no image id.
+class InstalledBinarySource final: public vthost::DaemonBinarySource
+{
+  public:
+    [[nodiscard]] vthost::StagedImage imageForSpawn() override
+    {
+        return vthost::StagedImage { .executable = "/opt/contour/bin/contour",
+                                     .lease = nullptr,
+                                     .origin = vthost::ImageOrigin::Installed,
+                                     .imageId = {} };
+    }
+};
+
 /// A daemon offering a live upgrade, answering the upgrade as told.
 class UpgradablePort final: public vthost::client::DaemonControlPort
 {
@@ -98,6 +113,8 @@ class UpgradablePort final: public vthost::client::DaemonControlPort
         status.capabilities = vthost::proto::CapabilitySet::of(
             { vthost::proto::Capability::DaemonControl, vthost::proto::Capability::LiveUpgrade });
         status.upgrade = record;
+        status.executablePath = executable;
+        status.relocation = relocation;
         return status;
     }
 
@@ -105,12 +122,16 @@ class UpgradablePort final: public vthost::client::DaemonControlPort
 
     [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(std::string) override
     {
+        if (absentAfterUpgrade)
+            notRunning = true;
         if (error)
         {
             errored = true;
             return std::unexpected(*error);
         }
         release = upgradedRelease;
+        if (!executableAfterUpgrade.empty())
+            executable = executableAfterUpgrade;
         if (recordAfterUpgrade)
             record = *recordAfterUpgrade;
         return reply;
@@ -121,14 +142,44 @@ class UpgradablePort final: public vthost::client::DaemonControlPort
     /// The record it reports once it answered the upgrade.
     std::optional<vthost::proto::DaemonUpgradeRecord> recordAfterUpgrade = std::nullopt;
 
+    std::filesystem::path executable = "/opt/contour/bin/contour"; ///< The image status() reports.
+    /// Whether status() says it may move onto its staged copy.
+    std::optional<vthost::RelocationRequest> relocation = vthost::RelocationRequest::Allowed;
+    /// The image it runs from once upgraded; unchanged where empty.
+    std::filesystem::path executableAfterUpgrade = "/state/bin/contour";
+
     bool errored = false;                             ///< Whether the upgrade failed with `error`.
     bool absentAfterError = false;                    ///< Whether no daemon answers after that.
     std::optional<std::string> releaseAfterError;     ///< The release it answers with after that.
     bool notRunning = false;                          ///< Whether no daemon listens.
+    bool absentAfterUpgrade = false;                  ///< Whether no daemon answers once it was asked.
     std::string release = "1.0.0";                    ///< The release status() reports.
     std::string upgradedRelease = "2.0.0";            ///< What it reports once upgraded.
     vthost::proto::UpgradeDaemonReply reply {};       ///< The answer to the upgrade.
     std::optional<ControlError> error = std::nullopt; ///< What the upgrade fails with, if it does.
+};
+
+/// A control port forwarding to another, so that a test keeps the daemon it hands out.
+class ForwardingPort final: public vthost::client::DaemonControlPort
+{
+  public:
+    explicit ForwardingPort(vthost::client::DaemonControlPort& daemon): _daemon { daemon } {}
+
+    [[nodiscard]] std::expected<DaemonStatus, ControlError> status() override { return _daemon.status(); }
+
+    [[nodiscard]] std::expected<void, ControlError> stop(vthost::proto::StopReason reason) override
+    {
+        return _daemon.stop(reason);
+    }
+
+    [[nodiscard]] std::expected<vthost::proto::UpgradeDaemonReply, ControlError> upgrade(
+        std::string imageId) override
+    {
+        return _daemon.upgrade(std::move(imageId));
+    }
+
+  private:
+    vthost::client::DaemonControlPort& _daemon;
 };
 
 /// Time that passes only when waited for.
@@ -756,4 +807,119 @@ TEST_CASE("status says whether the daemon may move onto its staged copy", "[cont
     CHECK(contour::cli::formatDaemonStatus(status).contains("allowed\n"));
     status.relocation = vthost::RelocationRequest::Refused;
     CHECK(contour::cli::formatDaemonStatus(status).contains("refused (--in-place)\n"));
+}
+
+TEST_CASE("daemon relocate moves what is the installation's and says what it left", "[contour][cli][daemon]")
+{
+    auto moved = UpgradablePort {};
+    auto inPlace = UpgradablePort {};
+    inPlace.relocation = vthost::RelocationRequest::Refused;
+    auto older = UpgradablePort {};
+    older.relocation = std::nullopt;
+    auto foreign = UpgradablePort {};
+    foreign.executable = "/usr/bin/contour";
+    auto stale = UpgradablePort {};
+    stale.notRunning = true;
+    auto failing = UpgradablePort {};
+    failing.reply = vthost::proto::UpgradeDaemonReply { .result = 3, .detail = {} }; // Sandboxed
+
+    auto const daemons =
+        std::map<std::filesystem::path, UpgradablePort*> { { "/run/c/a", &moved }, { "/run/c/b", &inPlace },
+                                                           { "/run/c/c", &older }, { "/run/c/d", &foreign },
+                                                           { "/run/c/e", &stale }, { "/run/c/f", &failing } };
+    auto const sockets = std::vector<std::filesystem::path> { "/run/c/a", "/run/c/b", "/run/c/c",
+                                                              "/run/c/d", "/run/c/e", "/run/c/f" };
+    auto const controlFor =
+        contour::cli::DaemonControlFor { [&](std::filesystem::path const& socket, std::chrono::milliseconds) {
+            return std::make_unique<ForwardingPort>(*daemons.at(socket));
+        } };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+
+    CHECK(contour::cli::daemonRelocateVerb(sockets, controlFor, binary, pacer, "/opt/contour/bin", out, err)
+          == contour::cli::ExitStatus::Failed);
+
+    CHECK(out.str()
+          == "moved the daemon at /run/c/a onto /state/bin/contour\n"
+             "left the daemon at /run/c/b: it was started with --in-place\n"
+             "left the daemon at /run/c/c: its release cannot be moved\n"
+             "left the daemon at /run/c/d: it does not run from this installation's folder\n");
+    CHECK(err.str().starts_with("contour daemon: could not move the daemon at /run/c/f: "));
+    CHECK(err.str().contains(vthost::handover::describe(vthost::handover::UpgradeRefusal::Sandboxed)));
+    CHECK(moved.executable == std::filesystem::path { "/state/bin/contour" });
+    CHECK(inPlace.executable == std::filesystem::path { "/opt/contour/bin/contour" });
+}
+
+TEST_CASE("daemon relocate says no path for a daemon that does not answer after its move",
+          "[contour][cli][daemon]")
+{
+    auto vanishing = UpgradablePort {};
+    vanishing.absentAfterUpgrade = true;
+    auto const controlFor =
+        contour::cli::DaemonControlFor { [&](std::filesystem::path const&, std::chrono::milliseconds) {
+            return std::make_unique<ForwardingPort>(vanishing);
+        } };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const sockets = std::vector<std::filesystem::path> { "/run/c/a" };
+    CHECK(contour::cli::daemonRelocateVerb(sockets, controlFor, binary, pacer, "/opt/contour/bin", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(out.str() == "moved the daemon at /run/c/a\n");
+}
+
+TEST_CASE("daemon relocate leaves a daemon alone where nothing is staged to move it onto",
+          "[contour][cli][daemon]")
+{
+    auto daemon = UpgradablePort {};
+    auto const controlFor =
+        contour::cli::DaemonControlFor { [&](std::filesystem::path const&, std::chrono::milliseconds) {
+            return std::make_unique<ForwardingPort>(daemon);
+        } };
+    auto binary = InstalledBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const sockets = std::vector<std::filesystem::path> { "/run/c/a" };
+    CHECK(contour::cli::daemonRelocateVerb(sockets, controlFor, binary, pacer, "/opt/contour/bin", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(out.str() == "left the daemon at /run/c/a: there is no staged copy to move it onto\n");
+    CHECK(err.str().empty());
+    CHECK(daemon.executable == std::filesystem::path { "/opt/contour/bin/contour" });
+}
+
+TEST_CASE("daemon relocate with nothing to move succeeds quietly", "[contour][cli][daemon]")
+{
+    auto const controlFor =
+        contour::cli::DaemonControlFor { [](std::filesystem::path const&, std::chrono::milliseconds) {
+            auto gone = std::make_unique<FakeControlPort>(ControlErrorCode::NotRunning);
+            return gone;
+        } };
+    auto binary = FakeBinarySource {};
+    auto pacer = ManualPacer {};
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const none = std::vector<std::filesystem::path> {};
+    CHECK(contour::cli::daemonRelocateVerb(none, controlFor, binary, pacer, "/opt/contour/bin", out, err)
+          == contour::cli::ExitStatus::Ok);
+    auto const stale = std::vector<std::filesystem::path> { "/run/c/default" };
+    CHECK(contour::cli::daemonRelocateVerb(stale, controlFor, binary, pacer, "/opt/contour/bin", out, err)
+          == contour::cli::ExitStatus::Ok);
+    CHECK(out.str().empty());
+    CHECK(err.str().empty());
+}
+
+TEST_CASE("daemon relocate finds the label sockets of a socket directory", "[contour][cli][daemon]")
+{
+    auto files = core::platform::testing::InMemoryFileSystem {
+        { .path = "/run/c/default", .content = "" },      { .path = "/run/c/default-native", .content = "" },
+        { .path = "/run/c/default-tmux", .content = "" }, { .path = "/run/c/default.log", .content = "" },
+        { .path = "/run/c/work", .content = "" },
+    };
+    CHECK(contour::cli::daemonSocketsIn(files, "/run/c")
+          == std::vector<std::filesystem::path> { "/run/c/default", "/run/c/work" });
+    CHECK(contour::cli::daemonSocketsIn(files, "/run/missing").empty());
 }

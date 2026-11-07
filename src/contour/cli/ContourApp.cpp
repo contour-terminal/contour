@@ -58,9 +58,11 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -299,6 +301,9 @@ namespace
         namespace CLI = core::cli;
         using contour::cli::DaemonVerb;
 
+        // It looks in the one directory every label's socket lies in, and takes no socket or label.
+        if (verb == DaemonVerb::Relocate)
+            return {};
         auto options = CLI::OptionList {
             CLI::Option { "label",
                           CLI::Value { ""s },
@@ -344,6 +349,7 @@ namespace
                 break;
             case DaemonVerb::Run:
             case DaemonVerb::Status:
+            case DaemonVerb::Relocate:
             case DaemonVerb::Upgrade: break;
         }
         return options;
@@ -1757,6 +1763,7 @@ namespace
             case contour::cli::DaemonVerb::Upgrade: return vthost::client::DefaultUpgradeTimeout;
             case contour::cli::DaemonVerb::Run:
             case contour::cli::DaemonVerb::Status:
+            case contour::cli::DaemonVerb::Relocate:
             case contour::cli::DaemonVerb::Logs:
             case contour::cli::DaemonVerb::HandoverInfo: break;
         }
@@ -1777,6 +1784,10 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
              << '\n';
         return exitCode(ExitStatus::Ok);
     }
+
+    // Asks no one socket: it looks at every daemon of this user, and takes no option to say which.
+    if (verb == DaemonVerb::Relocate)
+        return daemonRelocateAction();
 
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
     auto const label = mergeSharedOption("label",
@@ -1850,9 +1861,49 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
                                            cerr));
         }
         case DaemonVerb::Run:
+        case DaemonVerb::Relocate:
         case DaemonVerb::HandoverInfo: break;
     }
     return exitCode(ExitStatus::BadUsage);
+}
+
+int ContourApp::daemonRelocateAction()
+{
+    // Every label's daemon of this user lies in the one directory the default label's socket does; a daemon
+    // on a `--socket` path elsewhere is not found.
+    auto const installation = vthost::currentExecutablePath();
+    if (!installation)
+    {
+        cerr << std::format("contour daemon: cannot locate this executable: {}\n",
+                            installation.error().message());
+        return exitCode(ExitStatus::Failed);
+    }
+    auto const& files = core::platform::NativeFileSystem::instance();
+    auto const sockets = daemonSocketsIn(
+        files, vthost::labelSocketPath(vthost::DefaultSocketLabel, processEnvironment()).parent_path());
+    auto const argv0 = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
+    auto const binary =
+        vthost::makeOwnDaemonBinary(processEnvironment(), files, CONTOUR_VERSION_STRING, argv0);
+    auto pacer = vthost::client::SystemSettlePacer {};
+    auto const controlFor =
+        DaemonControlFor { [](std::filesystem::path const& socket, std::chrono::milliseconds timeout) {
+            return vthost::client::makeDaemonControl(
+                std::make_shared<vthost::UnixTransportFactory>(socket, nullptr), timeout);
+        } };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const status =
+        daemonRelocateVerb(sockets, controlFor, *binary, pacer, installation->parent_path(), out, err);
+    cout << out.str();
+    cerr << err.str();
+    // Under msiexec these go nowhere: the trace is what a failed or skipped move leaves behind.
+    if (auto const report = out.str() + err.str(); !report.empty())
+    {
+        auto const log = vthost::daemonStateDirectory(processEnvironment()) / "relocate.log";
+        if (files.createDirectories(log.parent_path()))
+            std::ignore = files.appendFile(log, report);
+    }
+    return exitCode(status);
 }
 
 int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
