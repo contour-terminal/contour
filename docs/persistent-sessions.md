@@ -534,8 +534,8 @@ it needs file-descriptor passing, which Windows sockets do not have.
 next may be newer than the daemon it attaches to.
 
 Where an upgrade would disturb a running binary, the daemon does not run from the installed binary
-at all. On **Windows** (the installer replaces `contour.exe` and the Restart Manager kills whoever
-holds it), on **macOS** (swapping the `.app` breaks the lazy loading of its frameworks) and for an
+at all. On **Windows** (the installer replaces `contour.exe`, and Windows Installer moves the images a
+running copy holds aside rather than failing), on **macOS** (swapping the `.app` breaks the lazy loading of its frameworks) and for an
 **AppImage** (its mount vanishes when the AppImage process exits), a daemon runs from a copy of its
 own release under `<state-dir>/bin/<version>-<id>/`. It is made the first time that release starts a
 daemon, and removed again once no daemon runs from it.
@@ -549,6 +549,42 @@ A packaged **Linux** install (`/usr/...`, Flatpak `/app/...`) runs in place, whi
 cannot disturb. `contour daemon --in-place` opts out of the copy; a package upgrade may then replace
 the binary under the running daemon. A hand-started foreground `contour daemon` on Windows also runs
 from the installed binary.
+
+### Installing a new Contour on Windows
+
+A daemon started by hand runs from the folder an installer is about to replace. Windows Installer moves the
+files a running program holds aside, and that daemon would run on from its old images until it next
+restarts. So the installer asks the Contour it replaces to move your hand-started daemons first: each one is handed over to a copy of itself under `%LOCALAPPDATA%\contour\bin\`, keeping its
+sessions and their programs, exactly as a [live upgrade](#live-upgrade) does. The installer then replaces
+the files. The same step is available as `contour daemon relocate`, which says for each daemon where it went
+(`moved the daemon at <socket> onto <executable>`) and which it left (`left the daemon at <socket>: <reason>`).
+
+A daemon that Contour starts for you already runs from such a copy, and needs none of this. What is not moved:
+
+- A daemon started with `--in-place`, which asked to stay where it is. A silent install replaces the files
+  under it all the same (Windows Installer moves the images it holds aside), and it keeps running from its old
+  images until it next restarts. What an interactive install does with it has not been verified: Windows may
+  list it in its files-in-use dialog, and what "close" does to its sessions is not known. To be safe, stop
+  such a daemon (`contour daemon stop`) before installing.
+- A daemon of an installation from before this change (0.8 and earlier, and earlier 0.9 development builds),
+  which cannot be asked, and a daemon of another installation.
+- A daemon whose socket is not in the default socket directory (`%TEMP%\contour-<user>\`), such as one
+  started with a `--socket` elsewhere. `relocate` looks only in that directory.
+- Another user's daemon. The installer runs as the user who started it, so a UAC elevation as a *different*
+  administrator account looks for that administrator's daemons, not yours; yours is left as it is.
+- Any daemon, when a deployment tool installs as the **SYSTEM** account: SYSTEM has no daemon, so
+  nothing is handed over, the install still succeeds, and your daemon keeps running from the old images
+  until its next restart. Install as yourself to have it moved.
+
+Not moving a daemon never fails the install.
+
+After a move, the sessions' console host (`OpenConsole.exe`) keeps running from its old image, which Windows
+Installer moves aside and deletes at the next restart; the new files are in `bin\`. The console host of a
+session cannot be replaced while the session runs. Keeping it elsewhere is not available yet.
+
+The installer also closes the running Contour *window* and opens it again with the arguments it had. That
+is Windows' Restart Manager, which closes and reopens a running Contour GUI. It does not end daemons: in a
+silent install it left a daemon, and its console host, running.
 
 The two **negotiate a protocol version** when they connect: each states the range of
 versions it speaks, and they agree on the newest one both know. Every release speaks the protocols of
