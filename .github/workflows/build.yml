@@ -1560,7 +1560,14 @@ jobs:
         # <binaryDir>/bin, so the executables do NOT sit beside their source directory the way they
         # do on Linux. The preset's generator is Ninja (single-config), so there is no
         # per-configuration subdirectory under it either.
+        #
+        # Bounded, and streamed with CONTOUR_TEST_TRACE's case names: a case that hangs here would
+        # otherwise hold the job until its own time limit and print nothing, its output still captured.
+        # The skip check reads Catch2's summary, not the trace's case names.
         shell: bash
+        timeout-minutes: 10
+        env:
+          CONTOUR_TEST_TRACE: "1"
         run: |
           set -o pipefail
           for binary in \
@@ -1569,9 +1576,9 @@ jobs:
             # this step exists to catch, one directory layout further out.
             [ -x "$binary" ] || { echo "::error::$binary not found; the assertion below would pass vacuously"; exit 1; }
             echo "--- $binary [afunix]"
-            output=$("$binary" '[afunix]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
-            printf '%s\n' "$output"
-            if printf '%s' "$output" | grep -q 'skipped'; then
+            log=$(mktemp)
+            "$binary" '[afunix]' 2>&1 | tee "$log" || exit 1
+            if grep -v '^\[trace\]' "$log" | grep -q 'skipped'; then
               echo "::error::$binary [afunix] reported SKIPPED; the daemon's AF_UNIX transport is not being exercised on Windows"
               exit 1
             fi
@@ -1589,6 +1596,7 @@ jobs:
         # contour.exe a user installs, so this is where that pipe is proved. Run outside ctest, it learns
         # the binary from CONTOUR_BINARY here, and SKIPs -- failing this step -- without it.
         shell: pwsh
+        timeout-minutes: 10
         run: |
           $binary = "out/build/$env:CMAKE_PRESET/bin/contour_test.exe"
           $contour = "out/build/$env:CMAKE_PRESET/bin/contour.exe"
