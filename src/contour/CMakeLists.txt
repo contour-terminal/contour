@@ -1966,6 +1966,16 @@ if(WIN32)
                 PATTERN "qoffscreen.dll" EXCLUDE
                 PATTERN "*"
         )
+    else()
+        # A GUI-less contour.exe links no Qt, so there is nothing to deploy, but it still imports the DLLs vcpkg's
+        # dynamic triplet builds its libraries as (yaml-cpp, OpenSSL, libssh2, zlib), staged beside it. Only the DLLs
+        # of bin/ are installed: no test suite, helper or developer tool is.
+        install(
+            DIRECTORY "$<TARGET_FILE_DIR:contour>/"
+            DESTINATION "bin"
+            FILES_MATCHING
+                PATTERN "*.dll"
+        )
     endif()
 elseif(CONTOUR_MACOS_APP_BUNDLE)
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
