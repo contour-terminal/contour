@@ -120,26 +120,13 @@ namespace
         0b000001110000000, 0b000001110000000, 0b000001110000000,
     };
 
-    [[nodiscard]] uint64_t hashGlyph(uint8_t width,
-                                     uint8_t height,
-                                     std::span<uint8_t const> coverage) noexcept
+    [[nodiscard]] crispy::StrongHash hashGlyph(uint8_t width,
+                                               uint8_t height,
+                                               std::span<uint8_t const> coverage)
     {
-        // FNV-1a over (width, height, coverage), then a splitmix64 finalizer to spread the low-entropy input.
-        constexpr uint64_t Offset = 14695981039346656037ULL;
-        constexpr uint64_t Prime = 1099511628211ULL;
-        auto hash = Offset;
-        auto const feed = [&](uint8_t byte) {
-            hash = (hash ^ byte) * Prime;
-        };
-        feed(width);
-        feed(height);
-        std::ranges::for_each(coverage, feed);
-        hash ^= hash >> 30;
-        hash *= 0xBF58476D1CE4E5B9ULL;
-        hash ^= hash >> 27;
-        hash *= 0x94D049BB133111EBULL;
-        hash ^= hash >> 31;
-        return hash;
+        auto bytes = std::vector<uint8_t> { width, height };
+        bytes.insert(bytes.end(), coverage.begin(), coverage.end());
+        return crispy::StrongHash::compute(bytes.data(), bytes.size());
     }
 
     [[nodiscard]] std::shared_ptr<SoftGlyph const> makeErrorGlyph(SoftCellGeometry geometry)
@@ -346,6 +333,7 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
     auto column = 0;
     auto row = 0;
     auto touched = false;
+    auto storing = false;
     auto const endOfLine = [&] {
         row += 6;
         usedWidth = std::max(usedWidth, column);
@@ -353,7 +341,11 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
         column = 0;
     };
     auto const beginCharacter = [&] {
-        characters.push_back(Scratch { .position = position });
+        // Positions past the 7-bit range can never be stored, so they get no scratch (the body is untrusted
+        // and may hold any number of them); they still count toward the used size.
+        storing = position <= LastPosition;
+        if (storing)
+            characters.push_back(Scratch { .position = position });
         row = 0;
         column = 0;
         touched = false;
@@ -370,7 +362,7 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
         if (ch >= '?' && ch <= '~')
         {
             touched = true;
-            if (column < MaxWidth)
+            if (storing && column < MaxWidth)
                 for (auto const bit: std::views::iota(0, 6))
                     if (row + bit < MaxHeight && (((ch - '?') >> bit) & 1) != 0)
                         characters.back().pixels.at((static_cast<size_t>(row + bit) * MaxWidth)
@@ -387,7 +379,7 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
     }
     if (touched)
         endOfLine();
-    else
+    else if (storing)
         characters.pop_back(); // No data in the trailing character: it is not defined.
 
     auto const clampByte = [](int value) {
@@ -408,8 +400,6 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
     auto const offset = (geometry.fullWidth - textWidth) / 2;
     for (auto const& character: characters)
     {
-        if (character.position > LastPosition)
-            continue; // Past the 7-bit range.
         auto coverage = std::vector<uint8_t>(static_cast<size_t>(geometry.fullWidth) * geometry.fullHeight);
         for (auto const y: std::views::iota(0, int { geometry.fullHeight }))
             for (auto const x: std::views::iota(0, int { textWidth }))

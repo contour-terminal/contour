@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <crispy/StrongHash.hpp>
+
 #include <array>
 #include <compare>
 #include <cstdint>
@@ -110,7 +112,7 @@ struct SoftCellGeometry
 /// One soft font glyph, as a bitmap of exactly the font's full cell size.
 struct SoftGlyph
 {
-    uint64_t id = 0;               ///< Content hash of (width, height, coverage); the atlas key.
+    crispy::StrongHash id {};      ///< Content hash of (width, height, coverage); the atlas key.
     uint8_t width = 0;             ///< Equals the font's SoftCellGeometry full width.
     uint8_t height = 0;            ///< Equals the font's SoftCellGeometry full height.
     std::vector<uint8_t> coverage; ///< Row-major, top row first, each 0 or 1.

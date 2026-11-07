@@ -326,3 +326,12 @@ TEST_CASE("makeSoftGlyph: identity is the content", "[SoftFont]")
     CHECK(a->id != c->id);
     CHECK(a->id != d->id);
 }
+
+TEST_CASE("buildSoftFont: a flood of character separators stops at position 0x7F", "[SoftFont]")
+{
+    auto const declaration = decodeDecdld({ .pcn = 1, .pt = 2 }).value();
+    auto const font =
+        buildSoftFont(declaration, "B" + repeat(sixel({ 0 }), 15) + repeat(';', 100000), nullptr).value();
+    CHECK(font.glyphs[1] != nullptr);
+    CHECK(std::ranges::count(font.glyphs, nullptr) == 1);
+}
