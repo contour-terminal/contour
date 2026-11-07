@@ -1008,8 +1008,11 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     {
         auto request = spawnRequest({});
         if (!_attachWorkingDirectory.empty())
-            request.commandOverride =
-                vtpty::Process::ExecInfo { .workingDirectory = _attachWorkingDirectory };
+        {
+            // A directory-only override: an empty program keeps the profile's shell and its arguments.
+            request.commandOverride.emplace();
+            request.commandOverride->workingDirectory = _attachWorkingDirectory;
+        }
         return request;
     }
 
