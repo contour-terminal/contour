@@ -159,3 +159,4 @@ nav:
     - internals/macos-code-signing.md
     - internals/releasing.md
     - internals/release-signing.md
+    - internals/release-builds.md

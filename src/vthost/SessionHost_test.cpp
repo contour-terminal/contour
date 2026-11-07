@@ -1491,7 +1491,12 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
     // Lines, which the slave's line discipline keeps for a reader: a megabyte of them parks the pump.
     auto input = std::string {};
     for ([[maybe_unused]] auto const line: std::views::iota(0, 16 * 1024))
-        input += std::string(63, 'a') + "\n";
+    {
+        // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+        // temporary joined with `+`) that cannot happen, so it is built in pieces.
+        input.append(63, 'a');
+        input += '\n';
+    }
     session.writeInput(input);
     // The pump takes the input at once; the wait makes sure its write is parked before the close.
     std::this_thread::sleep_for(std::chrono::milliseconds { 300 });

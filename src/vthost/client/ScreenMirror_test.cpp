@@ -3084,7 +3084,13 @@ TEST_CASE("PARITY a wrapped logical line", "[vthost][parity]")
     // above it. There is no escape sequence that says so.
     auto h = MirrorHarness {};
     auto const session = newSession(h.host);
-    auto const wide = std::string(100, 'w') + "-tail";
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto const wide = [] {
+        auto text = std::string(100, 'w');
+        text += "-tail";
+        return text;
+    }();
     auto const gaps = gapsAfter(&h, session, wide, mirrorShows(&h, "-tail"));
     // `Wrapped` used to be carried on the wire and dropped, because no escape sequence sets it —
     // its only producer in the engine is a real autowrap (Screen::crlfIfWrapPending). The mirror's
@@ -3410,7 +3416,13 @@ TEST_CASE("PARITY wrapped content reflows alike when narrowed", "[vthost][parity
     // enough for two independent reflows to land on the same grid.
     auto h = MirrorHarness {};
     auto const session = newSession(h.host);
-    auto const wide = std::string(100, 'w') + "-tail";
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto const wide = [] {
+        auto text = std::string(100, 'w');
+        text += "-tail";
+        return text;
+    }();
     auto const gaps = gapsAfterResize(&h, session, wide, "-tail", 40, 25);
     // The content really is one logical line spanning several rows; without that this narrows two
     // grids of unwrapped text and learns nothing about reflow.
@@ -3425,7 +3437,13 @@ TEST_CASE("PARITY wrapped content reflows alike when widened", "[vthost][parity]
     // not work at all while `Wrapped` was dropped on the floor.
     auto h = MirrorHarness {};
     auto const session = newSession(h.host);
-    auto const wide = std::string(100, 'w') + "-tail";
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto const wide = [] {
+        auto text = std::string(100, 'w');
+        text += "-tail";
+        return text;
+    }();
     auto const gaps = gapsAfterResize(&h, session, wide, "-tail", 120, 25);
     // Widening REJOINED the split rows: what was two wrapped rows is now one unwrapped line. That is
     // the state the assertion is about, and it is only reachable from correct wrap flags.

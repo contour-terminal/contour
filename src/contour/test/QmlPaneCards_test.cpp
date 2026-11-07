@@ -414,7 +414,13 @@ struct DropGridHost
     {
         auto text = std::string {};
         for ([[maybe_unused]] auto const line: std::views::iota(0, FilledLines))
-            text += "\033[1m" + std::string(80, 'X') + "\033[m\r\n";
+        {
+            // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a
+            // string temporary joined with `+`) that cannot happen, so it is built in pieces.
+            text += "\033[1m";
+            text.append(80, 'X');
+            text += "\033[m\r\n";
+        }
         text += contour::test::DisplayHarness::StatusRequest;
         pty->feed(text);
         REQUIRE(QTest::qWaitFor(

@@ -4429,7 +4429,9 @@ TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentEndsInTheLastColumn", "[t
     // count put it two columns short of the last one. A segment shown is one narrower than the line (the rule
     // kept): twelve bytes of CJK are eight columns, and fit on a ten-column line.
     auto const [columns, right, line] = GENERATE(table<int, std::string_view, std::string>({
-        { 20, "ab│", std::string(17, ' ') + "ab│" },
+        // Seventeen spaces, written out: `std::string(17, ' ') + "ab│"` makes GCC's link-time inlining
+        // report a -Wstringop-overflow that cannot happen.
+        { 20, "ab│", "                 ab│" },
         { 10, "界界界界", "  界界界界" },
     }));
     INFO(right);

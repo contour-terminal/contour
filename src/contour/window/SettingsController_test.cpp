@@ -5536,7 +5536,11 @@ TEST_CASE("SettingsController: search finds a host's rows", "[settings][hosts]")
 
 TEST_CASE("SettingsController: hosts are read-only under gui_config_locked", "[settings][hosts]")
 {
-    auto fx = Fixture(std::string { HostsConfig } + "gui_config_locked: true\n");
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto config = std::string { HostsConfig };
+    config += "gui_config_locked: true\n";
+    auto fx = Fixture(config);
     CHECK_FALSE(fx.controller->createHost().has_value());
     CHECK_FALSE(
         rowNamed(fx.controller->hosts(), "home").value("actions").toMap().value("duplicate").toBool());

@@ -2036,7 +2036,11 @@ TEST_CASE("Terminal.blocks.aRightPromptTheShellMarkedIsKnownAfterAResizeAtThePro
     // be lost with the old names; one that leaves the prompt as drawn hands it on. Widened, the right prompt
     // no longer reaches the margin, and its looks alone would not tell it from the command.
     auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
-    mc.writeToScreen(std::string { ShellMarksOutputStarts } + "\033]133;A\033\\$ \033]133;B\033\\");
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto marks = std::string { ShellMarksOutputStarts };
+    marks += "\033]133;A\033\\$ \033]133;B\033\\";
+    mc.writeToScreen(marks);
     mc.writeToScreen("\0337\033[10G\033]133;P;k=r\033\\~/src 10:42\0338"); // DECSC, CHA, DECRC
     mc.writeToScreen("ls -la");
 
@@ -2357,7 +2361,11 @@ TEST_CASE("Terminal.blocks.aBlockStartedAfterTheResizeKeepsTheHeadItWasGiven", "
 {
     // Guards the rescan's skip: a record minted in the new generation already holds a valid head.
     auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(50) };
-    mc.writeToScreen(std::string(30, 'x') + "\r\n"); // a wrapped line, so the resize rebuilds the ring
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto wrapped = std::string(30, 'x');
+    wrapped += "\r\n";
+    mc.writeToScreen(wrapped); // a wrapped line, so the resize rebuilds the ring
     mc.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(12) });
     mc.writeToScreen("\033]133;A\033\\$ ");
 
@@ -2603,7 +2611,11 @@ TEST_CASE("Terminal.blocks.aRowTheCursorVisitedAboveThePromptLeavesTheHeadInPlac
     // onto -- above its prompt, written before any shell integration -- is now the block's topmost row. The
     // prompt itself survives, and the resize must find it rather than call the head evicted.
     auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(50) };
-    mc.writeToScreen(std::string(30, 'x') + "\r\n"); // a wrapped line, so the resize rebuilds the ring
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto wrapped = std::string(30, 'x');
+    wrapped += "\r\n";
+    mc.writeToScreen(wrapped); // a wrapped line, so the resize rebuilds the ring
     auto const id = runClear(mc);
     auto const& grid = mc.terminal.primaryScreen().grid();
     REQUIRE(grid.lineAt(HomedRowAfterClear).blockId() == id);
@@ -2639,7 +2651,11 @@ TEST_CASE("Terminal.blocks.headsAreReRecordedOnlyWhenRowIdentityDies", "[termina
     // with a head from a generation the grid is not in keeps it until row identity next dies, and is
     // re-recorded then like any other.
     auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(50) };
-    mc.writeToScreen(std::string(30, 'x') + "\r\n"); // a wrapped line, so the resize rebuilds the ring
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto wrapped = std::string(30, 'x');
+    wrapped += "\r\n";
+    mc.writeToScreen(wrapped); // a wrapped line, so the resize rebuilds the ring
     mc.writeToScreen("\033]133;A\033\\$ ");
     REQUIRE(mc.terminal.commandBlocks().current() != nullptr);
     auto record = *mc.terminal.commandBlocks().current();

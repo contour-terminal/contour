@@ -6142,7 +6142,12 @@ TEST_CASE("a capture bigger than the reply bound arrives truncated over the wire
     auto const session = newSession(h.host);
     auto text = std::string {};
     while (text.size() < 5000)
-        text += std::string(70, 'x') + "\r\n";
+    {
+        // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+        // temporary joined with `+`) that cannot happen, so it is built in pieces.
+        text.append(70, 'x');
+        text += "\r\n";
+    }
     h.host.terminal(session)->writeToScreen(text + "LAST");
 
     auto const got =

@@ -254,7 +254,12 @@ TEST_CASE("a capture larger than maxReplyBytes keeps its tail", "[vthost][contro
     auto const session = h.openTab();
     auto text = std::string {};
     while (text.size() < 5000)
-        text += std::string(70, 'x') + "\r\n";
+    {
+        // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+        // temporary joined with `+`) that cannot happen, so it is built in pieces.
+        text.append(70, 'x');
+        text += "\r\n";
+    }
     text += "LAST";
     h.terminal(session).writeToScreen(text);
 

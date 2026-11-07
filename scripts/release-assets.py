@@ -1,7 +1,8 @@
 #! /usr/bin/env python3
 """Selects the files a release attaches, from the list in .github/release.json.
 
-    release-assets.py                 check that release.json is well formed
+    release-assets.py                 check that release.json is well formed, and that it has a row for every
+                                      version-stamped package the workflow uploads
     release-assets.py select DIR      print the one file under DIR for each pattern, in pattern order
     release-assets.py --self-test     check the selection rules against inline samples
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import re
 import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -29,6 +31,7 @@ from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RELEASE_JSON = REPO_ROOT / ".github" / "release.json"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 VERSION_WILDCARD = "[0-9]*"
 _SAMPLE_VERSION = "0.0.0.0"
 
@@ -94,6 +97,29 @@ def load_patterns(path: Path) -> list[str]:
     if not isinstance(artifacts, list) or not all(isinstance(entry, str) for entry in artifacts):
         raise ValueError(f"{path.name} needs an `artifacts` list of strings")
     return artifacts
+
+
+# An artifact upload whose name is `contour-<version>-...` with the version spelled as a step output. Names
+# with a matrix variable in them (the per-release packages) are not checked here.
+_UPLOAD_NAME = re.compile(
+    r'^\s+name: "?(contour-\$\{\{ steps\.set_vars\.outputs\.(?:version|VERSION_STRING) \}\}-[^"\s$]*)"?\s*$',
+    re.MULTILINE,
+)
+_VERSION_EXPRESSION = re.compile(r"\$\{\{ steps\.set_vars\.outputs\.(?:version|VERSION_STRING) \}\}")
+
+
+def upload_problems(patterns: Sequence[str], workflow: str) -> list[str]:
+    """Names the version-stamped artifacts a workflow uploads that no pattern would attach to a release.
+
+    A package row missing from release.json is otherwise silent: files no pattern claims are only
+    reported when a release is assembled, and the release then simply lacks them.
+    """
+    problems = []
+    for expression in _UPLOAD_NAME.findall(workflow):
+        name = _VERSION_EXPRESSION.sub(_SAMPLE_VERSION, expression)
+        if not any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns):
+            problems.append(f"the workflow uploads {name}, which no row of release.json attaches to a release")
+    return problems
 
 
 _VERSION = "0.9.0.9500"
@@ -165,6 +191,28 @@ _SELECT_CASES: list[tuple[str, list[str], list[str], list[str], list[str], list[
     ),
 ]
 
+_SAMPLE_UPLOADS = """
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chrome-snapshots
+"""
+
+# (description, patterns, workflow text, expected number of problems)
+_UPLOAD_CASES: list[tuple[str, list[str], str, int]] = [
+    ("every uploaded package has a row", ["contour-[0-9]*-win64.zip", "contour-[0-9]*-win64-pdb.zip"], _SAMPLE_UPLOADS, 0),
+    ("an uploaded symbol archive without a row", ["contour-[0-9]*-win64.zip"], _SAMPLE_UPLOADS, 1),
+    ("no upload names are found in an empty workflow", ["contour-[0-9]*-win64.zip"], "", 0),
+]
+
 # (description, patterns, expected number of problems)
 _PATTERN_CASES: list[tuple[str, list[str], int]] = [
     ("an empty list", [], 1),
@@ -187,11 +235,15 @@ def self_test() -> int:
         found = pattern_problems(patterns)
         if len(found) != count:
             failures.append(f"{description}: expected {count} problem(s), got {found}")
+    for description, patterns, workflow, count in _UPLOAD_CASES:
+        found = upload_problems(patterns, workflow)
+        if len(found) != count:
+            failures.append(f"{description}: expected {count} problem(s), got {found}")
     for failure in failures:
         print(f"release-assets self-test: FAILED: {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"release-assets self-test: {len(_SELECT_CASES) + len(_PATTERN_CASES)} cases OK.")
+    print(f"release-assets self-test: {len(_SELECT_CASES) + len(_PATTERN_CASES) + len(_UPLOAD_CASES)} cases OK.")
     return 0
 
 
@@ -219,8 +271,10 @@ def main() -> int:
             print(f"release-assets: notice: not attached: {name}", file=sys.stderr)
         if not problems:
             print("\n".join(selection.files))
-    elif not problems:
-        print(f"release-assets: {len(patterns)} patterns OK.")
+    else:
+        problems += upload_problems(patterns, WORKFLOW.read_text(encoding="utf-8"))
+        if not problems:
+            print(f"release-assets: {len(patterns)} patterns OK.")
     for problem in problems:
         print(f"[RELEASE ASSETS FAILED] {problem}", file=sys.stderr)
     return 1 if problems else 0

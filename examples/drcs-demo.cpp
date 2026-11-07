@@ -23,15 +23,12 @@
 
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
 {
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
-}
 
 /// Encodes a 10-wide, 20-tall monochrome bitmap as DECDLD sixel data.
 /// @param bitmap  Row-major array of 200 bytes (10 columns x 20 rows), 1=pixel set, 0=clear.

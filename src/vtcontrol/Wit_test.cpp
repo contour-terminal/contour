@@ -19,7 +19,12 @@ namespace
 /// @return The path of the file @p name in the control WIT package directory.
 [[nodiscard]] std::string witPath(std::string_view name)
 {
-    return std::string(VTCONTROL_WIT_DIR) + "/" + std::string(name);
+    // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a string
+    // temporary joined with `+`) that cannot happen, so it is built in pieces.
+    auto path = std::string(VTCONTROL_WIT_DIR);
+    path += '/';
+    path += name;
+    return path;
 }
 
 /// @return The contents of the file @p name in the control WIT package directory.

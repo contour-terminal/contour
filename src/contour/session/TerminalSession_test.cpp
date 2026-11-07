@@ -2195,7 +2195,13 @@ TEST_CASE("TerminalSession: scrollbar marks are rebuilt a frame after they are a
         // Lines wider than the window is about to be, so the reflow rewraps them and the tick moves.
         terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 2));
         for ([[maybe_unused]] auto const i: std::views::iota(0, 40))
-            terminal.writeToScreen(std::string(70, 'w') + "\r\n");
+        {
+            // GCC's link-time inlining reports a -Wstringop-overflow for the natural form of this (a
+            // string temporary joined with `+`) that cannot happen, so it is built in pieces.
+            auto line = std::string(70, 'w');
+            line += "\r\n";
+            terminal.writeToScreen(line);
+        }
         REQUIRE(spy.wait(1000));
 
         // A narrower window renames every row, while the program in the pane prints nothing.

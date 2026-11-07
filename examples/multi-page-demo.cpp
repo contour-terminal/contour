@@ -22,6 +22,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::literals;
 using namespace std::chrono_literals;
 
@@ -29,11 +31,6 @@ namespace
 {
 
 // -- Low-level terminal helpers -----------------------------------------------
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
-}
 
 /// Reads a terminal response up to (and including) the given @p sentinel character.
 std::string readResponse(char sentinel, std::chrono::milliseconds timeout = 500ms)
