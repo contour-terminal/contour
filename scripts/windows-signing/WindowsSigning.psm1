@@ -338,5 +338,549 @@ function Read-SigningManifest {
     return $rows.ToArray()
 }
 
+function New-ThrowawayCodeSigningCertificate {
+    <#
+    .SYNOPSIS
+        Makes a self-signed code-signing certificate for one run; no certificate store is touched.
+    .PARAMETER Directory
+        Where the .pfx goes.
+    .OUTPUTS
+        System.Management.Automation.PSCustomObject with PfxPath, Password and Thumbprint.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$Directory)
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $rsa = [System.Security.Cryptography.RSA]::Create(3072)
+    $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+        'CN=Contour signing dry run (throwaway)', $rsa,
+        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+            [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature, $true))
+    $usages = [System.Security.Cryptography.OidCollection]::new()
+    $null = $usages.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+    $request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($usages, $true))
+    $now = [DateTimeOffset]::UtcNow
+    $certificate = $request.CreateSelfSigned($now.AddMinutes(-5), $now.AddDays(1))
+    $password = (New-Guid).ToString()
+    $pfx = Join-Path $Directory "$((New-Guid).ToString('N')).pfx"
+    [System.IO.File]::WriteAllBytes($pfx, $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password))
+    $thumbprint = $certificate.Thumbprint
+    $certificate.Dispose()
+    $rsa.Dispose()
+    return [pscustomobject]@{ PfxPath = $pfx; Password = $password; Thumbprint = $thumbprint }
+}
+
+function Get-SignatureProblem {
+    <#
+    .SYNOPSIS
+        Says what is wrong with the Authenticode signature of a file.
+    .PARAMETER Path
+        The file.
+    .PARAMETER Trust
+        System: Windows must trust the signature (status Valid). Pinned: the signature must be intact under a root
+        Windows does not trust (a throwaway certificate's) and be made by Thumbprint.
+    .PARAMETER Thumbprint
+        For Pinned, the signer certificate's thumbprint.
+    .OUTPUTS
+        System.String. The problem, naming the status; $null when the signature is fine. Either way the file must be
+        timestamped.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][ValidateSet('System', 'Pinned')][string]$Trust,
+        [string]$Thumbprint = ''
+    )
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $status = [string]$signature.Status
+    if ($Trust -eq 'System') {
+        if ($status -ne 'Valid') { return "$Path`: the signature status is $status, not Valid" }
+    } else {
+        # A self-signed root that Windows does not trust is reported as UnknownError for a signature that is intact
+        # (observed with signtool and a throwaway certificate: signed and timestamped, Get-AuthenticodeSignature says
+        # UnknownError; HashMismatch after a byte of the file changed, NotSigned without a signature).
+        if ($status -ne 'UnknownError') { return "$Path`: the signature status is $status, not an intact signature under an untrusted root (UnknownError)" }
+        $actual = if ($null -eq $signature.SignerCertificate) { '' } else { $signature.SignerCertificate.Thumbprint }
+        if ($actual -ne $Thumbprint) { return "$Path`: signed by $actual, not by $Thumbprint" }
+    }
+    if ($null -eq $signature.TimeStamperCertificate) { return "$Path`: not timestamped" }
+    return $null
+}
+
+function Select-SigningFile {
+    <#
+    .SYNOPSIS
+        Chooses the files of a staged install tree a signer signs.
+    .PARAMETER Root
+        The staged tree.
+    .PARAMETER Policy
+        Own: the project's own binaries. Unsigned: every portable executable without a valid signature.
+    .PARAMETER OwnBinaries
+        The own binaries, relative to Root, separated by /. Each must exist, whatever the policy.
+    .OUTPUTS
+        System.String[]. Paths relative to Root, separated by /.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][ValidateSet('Own', 'Unsigned')][string]$Policy,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnBinaries
+    )
+    foreach ($own in $OwnBinaries) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $own) -PathType Leaf)) {
+            throw "$own not found under $Root; is this a staged install tree?"
+        }
+    }
+    if ($Policy -eq 'Own') { return @($OwnBinaries) }
+    $selected = [System.Collections.Generic.List[string]]::new()
+    $odd = [System.Collections.Generic.List[string]]::new()
+    foreach ($relative in Get-PortableExecutable -Root $Root) {
+        $status = [string](Get-AuthenticodeSignature -LiteralPath (Join-Path $Root $relative)).Status
+        # No valid signature: signtool replaces an existing one.
+        if ($status -in 'NotSigned', 'UnknownError', 'NotTrusted') { $selected.Add($relative) }
+        elseif ($status -ne 'Valid') { $odd.Add("$relative ($status)") }
+    }
+    if ($odd.Count -gt 0) { throw "files with a signature that is neither valid nor missing: $($odd -join ', ')" }
+    if ($selected.Count -eq 0) {
+        throw "nothing to sign under ${Root}: every PE file already carries a valid signature; stage afresh"
+    }
+    return $selected.ToArray()
+}
+
+function Resolve-SigningTool {
+    <#
+    .SYNOPSIS
+        Finds a signing tool, downloading and verifying a pinned release if it has to.
+    .PARAMETER Name
+        The tool's key in the table.
+    .PARAMETER Table
+        The signer table.
+    .PARAMETER ToolsDirectory
+        Where downloaded tools are kept; a verified one is reused.
+    .PARAMETER Download
+        Fetches a URL to a file: { param($Url, $OutFile) ... }. Invoke-WebRequest by default.
+    .OUTPUTS
+        System.String. The path of the tool's executable.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$ToolsDirectory,
+        [scriptblock]$Download = { param($Url, $OutFile) Invoke-WebRequest -Uri $Url -OutFile $OutFile }
+    )
+    if (-not $Table.Tools.ContainsKey($Name)) { throw "no tool '$Name' in the signer table" }
+    $tool = $Table.Tools[$Name]
+    switch ($tool.Source) {
+        'WindowsSdk' {
+            $command = Get-Command $tool.Executable -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($command) { return $command.Source }
+            $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/bin'
+            $found = @(Get-ChildItem -Path (Join-Path $kits "*/x64/$($tool.Executable)") -ErrorAction SilentlyContinue |
+                    Sort-Object { try { [version]$_.Directory.Parent.Name } catch { [version]'0.0' } })
+            if ($found.Count -eq 0) { throw "$($tool.Executable) is neither on PATH nor in the Windows SDK ($kits)" }
+            return $found[-1].FullName
+        }
+        'Path' {
+            $command = Get-Command $tool.Executable -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $command) { throw "$($tool.Executable) is not on PATH" }
+            return $command.Source
+        }
+        'GitHubRelease' {
+            $directory = Join-Path $ToolsDirectory "$Name-$($tool.Tag)"
+            $marker = Join-Path $directory '.verified'
+            if (-not (Test-Path -LiteralPath $marker)) {
+                if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force }
+                New-Item -ItemType Directory -Force -Path $ToolsDirectory | Out-Null
+                $archive = Join-Path $ToolsDirectory "$Name-$($tool.Tag)-$($tool.Asset)"
+                $url = "https://github.com/$($tool.Repository)/releases/download/$($tool.Tag)/$($tool.Asset)"
+                & $Download $url $archive
+                $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+                if ($actual -ne $tool.Sha256 -and $actual.ToLowerInvariant() -ne $tool.Sha256.ToLowerInvariant()) {
+                    Remove-Item -LiteralPath $archive -Force
+                    throw "$url has SHA-256 $($actual.ToLowerInvariant()), not the pinned $($tool.Sha256.ToLowerInvariant())"
+                }
+                Expand-Archive -LiteralPath $archive -DestinationPath $directory -Force
+                Remove-Item -LiteralPath $archive -Force
+                [System.IO.File]::WriteAllText($marker, $tool.Sha256)
+            }
+            $executable = Join-Path $directory $tool.Executable
+            if (-not (Test-Path -LiteralPath $executable)) { throw "$($tool.Executable) is not in $($tool.Asset)" }
+            return $executable
+        }
+    }
+    throw "tool '$Name' has the unknown Source '$($tool.Source)'"
+}
+
+function Get-FileSha256 {
+    # The SHA-256 of a file, as lowercase hex.
+    param([string]$Path)
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Invoke-SigningStep {
+    <#
+    .SYNOPSIS
+        Runs one signing step of a signer over files.
+    .PARAMETER Root
+        The folder the files are relative to.
+    .PARAMETER Files
+        The files, relative to Root, separated by /.
+    .PARAMETER Step
+        The step: Tool, Invocation (InPlace, InOut or Directory), Arguments, TimestampUrls.
+    .PARAMETER Table
+        The signer table (its tools, Attempts and RetryDelaySeconds).
+    .PARAMETER ToolsDirectory
+        Where downloaded tools are kept.
+    .PARAMETER WorkDirectory
+        Scratch space for the InOut and Directory shapes.
+    .PARAMETER SecretName
+        Environment variables whose values are hidden should a tool echo them.
+    .OUTPUTS
+        None. Throws, naming the tool and the exit code, when a call fails every attempt.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string[]]$Files,
+        [Parameter(Mandatory)][hashtable]$Step,
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$ToolsDirectory,
+        [Parameter(Mandatory)][string]$WorkDirectory,
+        [string[]]$SecretName = @()
+    )
+    $toolName = $Step.Tool
+    $executable = Resolve-SigningTool -Name $toolName -Table $Table -ToolsDirectory $ToolsDirectory
+    $template = @($Step.Arguments)
+    $urls = @(if ($Step.ContainsKey('TimestampUrls')) { $Step.TimestampUrls })
+    $secrets = @($SecretName | ForEach-Object { [Environment]::GetEnvironmentVariable($_) } | Where-Object { $_ })
+
+    # The values that do not change from call to call: tools and data files named by the template.
+    $fixed = @{}
+    foreach ($argument in $template) {
+        foreach ($match in [regex]::Matches($argument, '\{(tool|data):([^{}]+)\}')) {
+            $key = "$($match.Groups[1].Value):$($match.Groups[2].Value)"
+            $fixed[$key] = if ($match.Groups[1].Value -eq 'tool') {
+                Resolve-SigningTool -Name $match.Groups[2].Value -Table $Table -ToolsDirectory $ToolsDirectory
+            } else {
+                Join-Path $PSScriptRoot $match.Groups[2].Value
+            }
+        }
+    }
+
+    # One call, retried: succeeds when the tool exits 0 and $Verify is happy.
+    $call = {
+        param([hashtable]$Values, [string]$Label, [scriptblock]$Verify)
+        $attempts = [int]$Table.Attempts
+        $delays = @($Table.RetryDelaySeconds)
+        $tried = [System.Collections.Generic.List[string]]::new()
+        $lastExit = 0
+        for ($attempt = 0; $attempt -lt $attempts; $attempt++) {
+            if ($attempt -gt 0 -and $delays.Count -gt 0) {
+                Start-Sleep -Seconds $delays[[Math]::Min($attempt - 1, $delays.Count - 1)]
+            }
+            $all = $Values.Clone()
+            foreach ($key in $fixed.Keys) { $all[$key] = $fixed[$key] }
+            if ($urls.Count -gt 0) {
+                $all['timestamp'] = $urls[$attempt % $urls.Count]
+                $tried.Add($all['timestamp'])
+            }
+            $arguments = @(Expand-SigningArgument -Template $template -Values $all)
+            Write-Host "  $toolName $($template -join ' ') [$Label] (attempt $($attempt + 1) of $attempts)"
+            $output = & $executable @arguments 2>&1 | Out-String
+            $lastExit = $LASTEXITCODE
+            if ($lastExit -eq 0 -and (& $Verify)) { return }
+            foreach ($secret in $secrets) { $output = $output.Replace($secret, '***') }
+            Write-Host ($output.TrimEnd())
+        }
+        $servers = if ($tried.Count -gt 0) { "; timestamp servers tried: $($tried -join ', ')" } else { '' }
+        throw "$toolName failed for $Label after $attempts attempts (exit code $lastExit)$servers"
+    }
+
+    $names = $Files | ForEach-Object { Split-Path -Leaf $_ }
+    switch ($Step.Invocation) {
+        'InPlace' {
+            foreach ($relative in $Files) {
+                $path = Join-Path $Root $relative
+                & $call @{ file = $path } $relative { $true }
+            }
+        }
+        'InOut' {
+            $outDirectory = Join-Path $WorkDirectory 'out'
+            foreach ($relative in $Files) {
+                $path = Join-Path $Root $relative
+                $out = Join-Path $outDirectory (Split-Path -Leaf $relative)
+                New-Item -ItemType Directory -Force -Path $outDirectory | Out-Null
+                if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
+                & $call @{ in = $path; out = $out } $relative { Test-Path -LiteralPath $out -PathType Leaf }
+                Move-Item -LiteralPath $out -Destination $path -Force
+            }
+        }
+        'Directory' {
+            $duplicate = $names | Group-Object | Where-Object { $_.Count -gt 1 } | Select-Object -First 1
+            if ($duplicate) { throw "two files are named $($duplicate.Name); the Directory shape signs a flat folder" }
+            $inputDir = Join-Path $WorkDirectory 'batch-in'
+            $outputDir = Join-Path $WorkDirectory 'batch-out'
+            foreach ($directory in $inputDir, $outputDir) {
+                if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force }
+                New-Item -ItemType Directory -Force -Path $directory | Out-Null
+            }
+            foreach ($relative in $Files) { Copy-Item -LiteralPath (Join-Path $Root $relative) -Destination (Join-Path $inputDir (Split-Path -Leaf $relative)) }
+            & $call @{ inputDir = $inputDir; outputDir = $outputDir } "$($Files.Count) files" {
+                @($names | Where-Object { -not (Test-Path -LiteralPath (Join-Path $outputDir $_) -PathType Leaf) }).Count -eq 0
+            }
+            foreach ($relative in $Files) {
+                Copy-Item -LiteralPath (Join-Path $outputDir (Split-Path -Leaf $relative)) -Destination (Join-Path $Root $relative) -Force
+            }
+        }
+    }
+}
+
+function Test-SigningSecret {
+    # Throws, naming every one, unless each secret of the row is a non-empty environment variable.
+    param([hashtable]$Row)
+    $names = @(if ($Row.ContainsKey('Secrets')) { $Row.Secrets })
+    $missing = @($names | Where-Object { [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($_)) })
+    if ($missing.Count -gt 0) { throw "the environment variable(s) $($missing -join ', ') are not set" }
+}
+
+function Get-RelativeFile {
+    # The files under a folder, relative to it, separated by /.
+    param([string]$Root)
+    $base = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+    return @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($base.Length + 1).Replace('\', '/') })
+}
+
+function Test-PathInside {
+    # Whether Child is Parent or lies under it.
+    param([string]$Parent, [string]$Child)
+    $parentPath = [System.IO.Path]::GetFullPath($Parent).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $childPath = [System.IO.Path]::GetFullPath($Child).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    return $childPath.StartsWith($parentPath, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-SigningSelection {
+    # The files a batch signs, relative to Root, by the row's policy (Payload) or as given (Packages).
+    param([string]$Root, [string]$Kind, [string[]]$Files, [hashtable]$Row, [hashtable]$Table)
+    if ($Kind -eq 'Packages') {
+        $base = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+        return @($Files | ForEach-Object {
+                $full = (Resolve-Path -LiteralPath $_).Path
+                if (-not (Test-PathInside $base $full)) { throw "$_ is not under $Root" }
+                $full.Substring($base.Length + 1).Replace('\', '/')
+            })
+    }
+    if ($Row.Transport -eq 'None') {
+        return @(if ($Row.Payload -eq 'Own') { $Table.OwnBinaries } else { Get-PortableExecutable -Root $Root })
+    }
+    return @(Select-SigningFile -Root $Root -Policy $Row.Payload -OwnBinaries @($Table.OwnBinaries))
+}
+
+function Invoke-SignBatch {
+    <#
+    .SYNOPSIS
+        Signs a batch of files with a signer and checks the result.
+    .PARAMETER Root
+        The staged tree (Payload) or the folder the packages are in (Packages).
+    .PARAMETER Kind
+        Payload: the files the signer's Payload policy selects under Root. Packages: Files.
+    .PARAMETER Files
+        For Packages, the package files.
+    .PARAMETER Signer
+        The signer's key in the table.
+    .PARAMETER Table
+        The signer table.
+    .PARAMETER WorkDirectory
+        Scratch space; for Payload it must not lie inside Root.
+    .PARAMETER ToolsDirectory
+        Where downloaded tools are kept.
+    .PARAMETER Manifest
+        A manifest file to write.
+    .PARAMETER Trust
+        System (a trusted certificate) or Pinned (a throwaway one, by Thumbprint).
+    .PARAMETER Thumbprint
+        For Pinned, the signer certificate's thumbprint.
+    .OUTPUTS
+        System.Object[]. Rows with RelativePath, SignedPath, Before and After.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][ValidateSet('Payload', 'Packages')][string]$Kind,
+        [string[]]$Files = @(),
+        [Parameter(Mandatory)][string]$Signer,
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$WorkDirectory,
+        [Parameter(Mandatory)][string]$ToolsDirectory,
+        [string]$Manifest = '',
+        [ValidateSet('System', 'Pinned')][string]$Trust = 'System',
+        [string]$Thumbprint = ''
+    )
+    $row = $Table.Signers[$Signer]
+    if ($Kind -eq 'Payload' -and (Test-PathInside $Root $WorkDirectory)) {
+        throw "the work directory $WorkDirectory lies inside $Root, which would be signed with it"
+    }
+    if ($row.Transport -eq 'SignPath') { throw "the signer '$Signer' signs through SignPath: use export/import" }
+    if ($row.Transport -eq 'Command') { Test-SigningSecret -Row $row }
+
+    $selected = @(Get-SigningSelection -Root $Root -Kind $Kind -Files $Files -Row $row -Table $Table)
+    $base = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+    # What must stay as it is: every file under Root for a payload, the packages for packages.
+    $scope = if ($Kind -eq 'Payload') { Get-RelativeFile -Root $base } else { $selected }
+    $before = @{}
+    foreach ($relative in $scope) { $before[$relative] = Get-FileSha256 -Path (Join-Path $base $relative) }
+
+    if ($row.Transport -eq 'Command') {
+        $step = if ($Kind -eq 'Payload') { $row.PayloadStep } else { $row.PackageStep }
+        New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
+        Invoke-SigningStep -Root $base -Files $selected -Step $step -Table $Table -ToolsDirectory $ToolsDirectory `
+            -WorkDirectory $WorkDirectory -SecretName @(if ($row.ContainsKey('Secrets')) { $row.Secrets })
+    }
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $after = @{}
+    foreach ($relative in $scope) {
+        $path = Join-Path $base $relative
+        if (-not (Test-Path -LiteralPath $path)) { $problems.Add("$relative vanished"); continue }
+        $after[$relative] = Get-FileSha256 -Path $path
+    }
+    if ($Kind -eq 'Payload') {
+        foreach ($relative in Get-RelativeFile -Root $base) {
+            if (-not $before.ContainsKey($relative)) { $problems.Add("$relative appeared under the signed tree") }
+        }
+    }
+    foreach ($relative in $scope) {
+        if (-not $after.ContainsKey($relative)) { continue }
+        $signed = $relative -in $selected
+        if ($row.Transport -eq 'Command') {
+            if ($signed) {
+                if ($after[$relative] -eq $before[$relative]) { $problems.Add("$relative is unchanged: it was not signed") }
+                elseif ($detail = Get-SignatureProblem -Path (Join-Path $base $relative) -Trust $Trust -Thumbprint $Thumbprint) { $problems.Add($detail) }
+            } elseif ($after[$relative] -ne $before[$relative]) {
+                $problems.Add("$relative changed, and is not a file the signer was asked to sign")
+            }
+        }
+    }
+    if ($problems.Count -gt 0) { throw "signing $Kind under ${Root} went wrong:`n  $($problems -join "`n  ")" }
+    foreach ($relative in $selected) {
+        $rows.Add([pscustomobject]@{
+                RelativePath = $relative
+                SignedPath   = ((Join-Path $base $relative).Replace('\', '/'))
+                Before       = $before[$relative]
+                After        = $after[$relative]
+            })
+    }
+    if ($Manifest) { Write-SigningManifest -Path $Manifest -Rows $rows.ToArray() }
+    return $rows.ToArray()
+}
+
+function Export-SigningBatch {
+    <#
+    .SYNOPSIS
+        Copies the files a signer would sign out of a tree, for a signer that signs elsewhere (SignPath).
+    .PARAMETER Root
+        The staged tree or the folder of packages.
+    .PARAMETER Kind
+        Payload or Packages.
+    .PARAMETER Files
+        For Packages, the package files.
+    .PARAMETER Signer
+        The signer's key in the table.
+    .PARAMETER Table
+        The signer table.
+    .PARAMETER Destination
+        Where the copies go, as Destination/<relative path>.
+    .PARAMETER Manifest
+        The manifest to write, with After empty.
+    .OUTPUTS
+        System.Object[]. The manifest rows.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][ValidateSet('Payload', 'Packages')][string]$Kind,
+        [string[]]$Files = @(),
+        [Parameter(Mandatory)][string]$Signer,
+        [Parameter(Mandatory)][hashtable]$Table,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$Manifest
+    )
+    $row = $Table.Signers[$Signer]
+    $base = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+    $selected = @(Get-SigningSelection -Root $base -Kind $Kind -Files $Files -Row $row -Table $Table)
+    $rows = foreach ($relative in $selected) {
+        $target = Join-Path $Destination $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $base $relative) -Destination $target -Force
+        [pscustomobject]@{ RelativePath = $relative; SignedPath = $target.Replace('\', '/'); Before = (Get-FileSha256 -Path (Join-Path $base $relative)); After = '' }
+    }
+    Write-SigningManifest -Path $Manifest -Rows @($rows)
+    return @($rows)
+}
+
+function Import-SigningBatch {
+    <#
+    .SYNOPSIS
+        Puts the files a signer signed elsewhere back into the tree, after checking them.
+    .PARAMETER Root
+        The staged tree or the folder of packages the batch was exported from.
+    .PARAMETER From
+        Where the signed copies are, as From/<relative path>.
+    .PARAMETER Manifest
+        The manifest Export-SigningBatch wrote; completed with the hashes after.
+    .PARAMETER Trust
+        System or Pinned, as for Get-SignatureProblem.
+    .PARAMETER Thumbprint
+        For Pinned, the signer certificate's thumbprint.
+    .OUTPUTS
+        System.Object[]. The completed manifest rows.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$From,
+        [Parameter(Mandatory)][string]$Manifest,
+        [ValidateSet('System', 'Pinned')][string]$Trust = 'System',
+        [string]$Thumbprint = ''
+    )
+    $base = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
+    $rows = @(Read-SigningManifest -Path $Manifest)
+    $problems = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in $rows) {
+        $signed = Join-Path $From $row.RelativePath
+        $current = Join-Path $base $row.RelativePath
+        if (-not (Test-Path -LiteralPath $signed)) { $problems.Add("$($row.RelativePath): no signed copy under $From"); continue }
+        if (-not (Test-Path -LiteralPath $current) -or (Get-FileSha256 -Path $current) -ne $row.Before) {
+            $problems.Add("$($row.RelativePath): the file under $base is not the one that was exported")
+            continue
+        }
+        if ($detail = Get-SignatureProblem -Path $signed -Trust $Trust -Thumbprint $Thumbprint) { $problems.Add($detail) }
+    }
+    if ($problems.Count -gt 0) { throw "the signed files do not fit the tree:`n  $($problems -join "`n  ")" }
+    $completed = foreach ($row in $rows) {
+        $signed = Join-Path $From $row.RelativePath
+        Copy-Item -LiteralPath $signed -Destination (Join-Path $base $row.RelativePath) -Force
+        [pscustomobject]@{
+            RelativePath = $row.RelativePath
+            SignedPath   = (Join-Path $base $row.RelativePath).Replace('\', '/')
+            Before       = $row.Before
+            After        = (Get-FileSha256 -Path (Join-Path $base $row.RelativePath))
+        }
+    }
+    Write-SigningManifest -Path $Manifest -Rows @($completed)
+    return @($completed)
+}
+
 Export-ModuleMember -Function Test-SigningTable, Import-SigningTable, Resolve-SigningPlan, Expand-SigningArgument,
-Get-PortableExecutable, Write-SigningManifest, Read-SigningManifest
+Get-PortableExecutable, Write-SigningManifest, Read-SigningManifest, New-ThrowawayCodeSigningCertificate,
+Get-SignatureProblem, Select-SigningFile, Resolve-SigningTool, Invoke-SigningStep, Invoke-SignBatch,
+Export-SigningBatch, Import-SigningBatch, Get-FileSha256
