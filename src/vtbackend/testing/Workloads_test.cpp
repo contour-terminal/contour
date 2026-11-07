@@ -55,6 +55,7 @@ constexpr auto Goldens = std::array {
     Golden { .workload = "utf8", .size = 65545, .digest = 0x417b51eebafc7b58 },
     Golden { .workload = "utf8sparse", .size = 65663, .digest = 0x6c2738dd607d0df0 },
     Golden { .workload = "tui", .size = 65812, .digest = 0x5fc962bd2d35cc14 },
+    Golden { .workload = "longlines", .size = 66249, .digest = 0xef64cf5d5a183f1b },
 };
 
 /// @return The 64-bit FNV-1a digest of @p bytes.
@@ -165,4 +166,17 @@ TEST_CASE("Workloads.tui_repaints_every_row_without_a_line_feed", "[workloads]")
     CHECK(!text.contains('\n'));
     for (auto const row: std::views::iota(1, vtbackend::test::WorkloadPageLines + 1))
         CHECK(text.contains(std::format("\033[{};1H", row)));
+}
+
+TEST_CASE("Workloads.longlines_wrap_on_the_page", "[workloads]")
+{
+    // What longlines stands for is the wrap (#1488): a line that fit on the page would measure the
+    // line feed instead.
+    auto const text = makeWorkload(workloadNamed("longlines"), TargetBytes);
+    for (auto const line: text | std::views::split("\r\n"sv))
+    {
+        if (std::ranges::empty(line))
+            continue;
+        CHECK(std::ranges::distance(line) > vtbackend::test::WorkloadPageColumns);
+    }
 }

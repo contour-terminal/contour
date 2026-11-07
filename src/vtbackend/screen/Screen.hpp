@@ -103,11 +103,12 @@ namespace XtSmGraphics
     using Value = std::variant<std::monostate, unsigned, ImageSize>;
 } // namespace XtSmGraphics
 
-/// Whether a line feed brought the cursor onto another row: moved down to it, or scrolled it in.
-enum class LineFeedOutcome : uint8_t
+/// Where a line feed takes the cursor: decided before it moves, and reported after.
+enum class LineFeedTarget : uint8_t
 {
-    SameRow, ///< Below the scrolling region, or outside its left and right margins: nowhere to go.
-    NextRow, ///< Onto the row below, or onto a row scrolled in at the bottom margin.
+    Stays,     ///< Below the scrolling region on the last row, or outside its left and right margins.
+    MovesDown, ///< Onto the row below, which keeps what it holds.
+    ScrollsIn, ///< Onto a blank row scrolled in at the bottom margin.
 };
 
 /// TBC - Tab Clear
@@ -578,7 +579,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Carriage return and line feed: to the left margin of the next row.
     /// @return Whether the cursor reached another row (@see linefeed()).
-    LineFeedOutcome crlf() { return linefeed(margin().horizontal.from); }
+    LineFeedTarget crlf() { return linefeed(margin().horizontal.from); }
     void crlfIfWrapPending();
 
     // {{{ VT API
@@ -843,13 +844,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// where the cursor stands and what its line holds; the modes and charsets, which hold for a whole
     /// run of text, are the text writer's own business.
     /// @return 0 while a wrap is pending, on a line holding a cell that spans, or right of the right
-    ///         margin; otherwise the columns from the cursor up to the right margin, the margin's own
-    ///         column left out.
+    ///         margin; otherwise the columns from the cursor up to and including the right margin's.
     [[nodiscard]] size_t bulkWritableColumns() const noexcept
     {
-        // A pending wrap moves the text to the next line, which nothing below looks at. At a real
-        // deferred wrap the cursor stands on the right margin, where the answer would be 0 anyway; a
-        // margin widened under the wrap, or a DECRC after a resize, leaves it pending further left.
+        // A pending wrap moves the text to the next line, which nothing below looks at. Only a whole
+        // run's writer moves there first, and asks bulkTextRunColumns() instead.
         if (_cursor.wrapPending)
             return 0;
 
@@ -867,7 +866,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         if (column > rightMargin)
             return 0;
 
-        return unbox<size_t>(rightMargin - column);
+        return unbox<size_t>(rightMargin - column) + 1;
+    }
+
+    /// How many columns a run of text starting now may take in bulk: bulkWritableColumns(), but at a
+    /// pending wrap the width of the row the wrap lands on, which writeText() moves to before it writes.
+    /// Without that, every row of a line longer than the page would begin per codepoint (#1488).
+    /// @return The columns the run may take; 0 for none.
+    [[nodiscard]] size_t bulkTextRunColumns() const noexcept
+    {
+        if (!_cursor.wrapPending)
+            return bulkWritableColumns();
+        return bulkWritableColumnsAfterPendingWrap();
     }
 
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
@@ -1573,8 +1583,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now,
     /// inside a run for which canBulkWriteAscii() holds.
     ///
-    /// Asks bulkWritableColumns() again, what Terminal::maxBulkTextSequenceWidth() asked for the whole
-    /// run when it began, because the text written before the stretch can change the answer. The
+    /// Asks bulkWritableColumns() again -- the run's own width, Terminal::maxBulkTextSequenceWidth(), was
+    /// bulkTextRunColumns() as the run began -- because the text written before the stretch can change the
+    /// answer. bulkWritableColumns() is the stricter of the two: it is 0 at a pending wrap, which only a
+    /// whole run's writer resolves before it writes. The
     /// screen may have taken more columns than the parser's scan counted for that text: the scan
     /// measures a wide emoji followed by VS15 as one column, while the screen keeps the two the emoji
     /// already took, since applyClusterWidthChange() never narrows a cluster on screen. The stretch
@@ -1585,9 +1597,23 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Writes the interior of an ASCII stretch straight into the current line's arrays and moves the
     /// cursor past it. Lean, because canBulkWriteAsciiStretch() has ruled out all that writeText() sees
     /// to before a run of nothing but ASCII: no wrap can be pending, the line holds no wide character
-    /// to overwrite half of, and the interior ends left of the margin. The run's end -- the parsing
+    /// to overwrite half of, and the interior ends on the margin at the latest. The run's end -- the parsing
     /// buffer's hot end, the instruction counter -- is writeText()'s.
     void writeAsciiInterior(std::string_view interior);
+
+    /// Moves the cursor past @p written cells just written in bulk from column @p startColumn, and
+    /// remembers the last of them as the cell a later combining mark joins. A write that reaches the
+    /// right edge leaves the wrap pending under DECAWM, as the per-codepoint path does.
+    void advanceCursorPastBulkWrite(size_t startColumn, size_t written) noexcept;
+
+    /// bulkTextRunColumns() at a pending wrap. Answered only for a real deferred wrap -- auto-wrap on,
+    /// no left or right margin, the cursor on the right edge -- whose landing row is known.
+    /// @return The page width if the landing row may be written in bulk; otherwise 0.
+    [[nodiscard]] size_t bulkWritableColumnsAfterPendingWrap() const noexcept;
+
+    /// Where a line feed issued now takes the cursor: the one owner of that rule, for linefeed() and for
+    /// the bulk-text gate that predicts it.
+    [[nodiscard]] LineFeedTarget lineFeedTarget() const noexcept;
 
     /// Whether the ASCII stretches of a run may go into the line in bulk.
     enum class AsciiStretches : uint8_t
@@ -1709,7 +1735,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Applies LF but also moves cursor to given column @p column.
     /// @return Whether the cursor reached another row, by moving down or by scrolling one in.
-    LineFeedOutcome linefeed(ColumnOffset column);
+    LineFeedTarget linefeed(ColumnOffset column);
 
     /// Clears the head-only marks, and the borders they name, of the cursor's row as it becomes a
     /// continuation, keeping the fold ranges, the user-mark index and the command blocks in step.

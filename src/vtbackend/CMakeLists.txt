@@ -520,7 +520,7 @@ if(LIBTERMINAL_TESTING)
         add_test(NAME bench_headless_throughput_rejects_unknown_kind
                  COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
-                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui, link-prose, link-line\\.")
+                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui, longlines, link-prose, link-line\\.")
         add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             # Reads the resident set from /proc; what it reports is not asserted.

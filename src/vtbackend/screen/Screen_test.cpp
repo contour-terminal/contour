@@ -5892,14 +5892,47 @@ TEST_CASE("BulkText.theGateFollowsTheLineShapeOnEveryScreen", "[screen][LineShap
     // a line that has left the batched render path.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen("\033[?1049h"sv);
-    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 9);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 10);
 
     mock.writeToScreen("\033[31mab\033[mc"sv); // a Mixed line
     REQUIRE(std::as_const(mock.terminal).currentScreen().currentLine().storage().shape == LineShape::Mixed);
-    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 6);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 7);
 
     mock.writeToScreen("\xE4\xB8\xAD"sv); // a wide character: the line now spans
     CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+}
+
+TEST_CASE("BulkText.theRunReachesTheRightMarginInBulk", "[screen]")
+{
+    // The run may fill the line up to and including the right margin's column (#1488): the bulk writer
+    // leaves the wrap pending there, as the per-codepoint path does, and the next text wraps.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 10);
+
+    mock.writeToScreen("abcdefghij"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "abcdefghij");
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(9) });
+    CHECK(screen.cursor().wrapPending);
+
+    mock.writeToScreen("kl"sv);
+    CHECK(screen.grid().lineText(LineOffset(1)) == "kl        ");
+    CHECK(screen.grid().lineAt(LineOffset(1)).wrapped());
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+}
+
+TEST_CASE("BulkText.aWideCharacterThatDoesNotFitBeforeTheMarginWraps", "[screen]")
+{
+    // With the margin's column in the run, a wide character arriving on it must still wrap as a whole
+    // rather than be split across the margin: the scan counts its two columns and leaves it out.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("abcdefghi\xE4\xB8\xAD"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "abcdefghi");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(9)).codepoints().empty());
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"\u4E2D");
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
 }
 
 TEST_CASE("BulkText.theRunIsSizedOnTheStatusLineBeingWritten", "[screen]")
@@ -5943,13 +5976,194 @@ TEST_CASE("BulkText.aCursorRightOfTheRightMarginGetsNoBulkRun", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "      abcd");
 }
 
-TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
+TEST_CASE("BulkText.aDeferredWrapOffersTheRowItLandsOn", "[screen][LineShape]")
 {
-    // A pending wrap moves the run to the NEXT line before it is written, and the gate asks only about
-    // the current one. At a real deferred wrap the cursor stands on the right margin, where the gate
-    // returns 0 anyway; but the wrap survives a margin widened under it, which leaves the cursor left of
-    // the margin. The run then landed on a line holding a wide character and overwrote its head without
-    // erasing its continuation.
+    // At a real deferred wrap the run lands at the start of the next row, so the gate offers that row
+    // rather than refusing outright -- otherwise every wrapped row of a long line would begin with a
+    // character written per codepoint (#1488).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    SECTION("on the bottom margin: a blank row scrolls in")
+    {
+        mock.writeToScreen("\033[3;1H0123456789"sv);
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 10);
+
+        mock.writeToScreen("abcdefghijKL"sv);
+        CHECK(screen.grid().lineText(LineOffset(0)) == "0123456789");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "abcdefghij");
+        CHECK(screen.grid().lineText(LineOffset(2)) == "KL        ");
+        CHECK(screen.grid().lineAt(LineOffset(1)).wrapped());
+        CHECK(screen.grid().lineAt(LineOffset(2)).wrapped());
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+    }
+    SECTION("above the bottom margin: the row below, written over")
+    {
+        mock.writeToScreen("\033[2;1Hzzzzzzzzzz\033[1;1H0123456789"sv);
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 10);
+
+        mock.writeToScreen("abc"sv);
+        CHECK(screen.grid().lineText(LineOffset(1)) == "abczzzzzzz");
+        CHECK(screen.grid().lineAt(LineOffset(1)).wrapped());
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) });
+    }
+    SECTION("above the bottom margin, onto a row that spans")
+    {
+        mock.writeToScreen("\033[2;1Hab\xE4\xB8\xAD\033[1;1H0123456789"sv);
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+        mock.writeToScreen("xyz"sv);
+        CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"z");
+        CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
+    }
+    SECTION("below the scrolling region on the last row: the wrap goes nowhere")
+    {
+        mock.writeToScreen("\033[1;2r\033[3;1H0123456789"sv);
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+    }
+    SECTION("under a left margin: the wrap lands right of column 0")
+    {
+        mock.writeToScreen("\033[?69h\033[3;10s\033[1;3H01234567"sv); // DECSLRM 3..10, a wrap pending
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+        mock.writeToScreen("abcdefghij"sv);
+        CHECK(screen.grid().lineText(LineOffset(1)) == "  abcdefgh");
+        CHECK(screen.grid().lineText(LineOffset(2)) == "  ij      ");
+    }
+    SECTION("auto-wrap turned off under it")
+    {
+        mock.writeToScreen("\033[1;1H0123456789\033[?7l"sv);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+        mock.writeToScreen("ab"sv);
+        CHECK(screen.grid().lineText(LineOffset(0)) == "012345678b");
+        CHECK(screen.cursor().position.line == LineOffset(0));
+    }
+}
+
+TEST_CASE("BulkText.anInteriorEndingOnTheMarginLeavesTheWrapPending", "[screen]")
+{
+    // In a run of mixed text the last ASCII stretch's interior may end on the right margin's column; it is
+    // written in bulk there and leaves the wrap pending, as a run of nothing but ASCII does.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\xC3\xA9"
+                       "abcdefghiXY"sv);
+    CHECK(screen.grid().lineText(LineOffset(0))
+          == "\xC3\xA9"
+             "abcdefghi");
+    CHECK(screen.grid().lineText(LineOffset(1)) == "XY        ");
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+}
+
+TEST_CASE("BulkText.anInteriorAfterAWrapLeftPendingMidRunGoesToTheNextRow", "[screen]")
+{
+    // The scan counts a wide emoji with VS15 as one column, the screen keeps two, so a run measured to fit
+    // the row can leave a wrap pending before its last ASCII stretch. That stretch belongs on the next row:
+    // written in bulk where the cursor stood, it lost all but its first letter.
+    auto const watchWithVs15 = "\xE2\x8C\x9A\xEF\xB8\x8E"sv;
+    auto text = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        text += watchWithVs15;
+    text += std::string(120, 'a');
+    text += "\xC3\xA9"
+            "xyyyy";
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(130) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(text);
+    CHECK(screen.grid().lineText(LineOffset(1)).starts_with("yyyy"));
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("BulkText.oneRunSpanningSeveralRows", "[screen]")
+{
+    // The #1488 case itself: a single write several rows long, each row taken in bulk.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    SECTION("within the page")
+    {
+        mock.writeToScreen("ABCDEFGHIJKLMNOPQRSTUVWXY"sv);
+        CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHIJ");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "KLMNOPQRST");
+        CHECK(screen.grid().lineText(LineOffset(2)) == "UVWXY     ");
+        CHECK_FALSE(screen.grid().lineAt(LineOffset(0)).wrapped());
+        CHECK(screen.grid().lineAt(LineOffset(1)).wrapped());
+        CHECK(screen.grid().lineAt(LineOffset(2)).wrapped());
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(5) });
+        CHECK_FALSE(screen.cursor().wrapPending);
+    }
+    SECTION("scrolling, and ending on the margin")
+    {
+        mock.writeToScreen("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst"sv); // 46 columns, 5 rows' worth
+        CHECK(screen.grid().lineText(LineOffset(0)) == "UVWXYZabcd");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "efghijklmn");
+        CHECK(screen.grid().lineText(LineOffset(2)) == "opqrst    ");
+        CHECK(screen.grid().lineAt(LineOffset(1)).wrapped());
+        CHECK(screen.grid().lineAt(LineOffset(2)).wrapped());
+
+        mock.writeToScreen("uvwx"sv);
+        CHECK(screen.grid().lineText(LineOffset(2)) == "opqrstuvwx");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(9) });
+        CHECK(screen.cursor().wrapPending);
+    }
+}
+
+TEST_CASE("BulkText.aSequenceAfterAnInteriorEndingOnTheMargin", "[screen]")
+{
+    // The wrap an interior leaves pending on the margin outlasts a sequence that does not move the cursor,
+    // and the text after it wraps.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("\xC3\xA9"
+                       "abcdefghi\033[1mX"sv);
+    CHECK(screen.grid().lineText(LineOffset(1)) == "X         ");
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::Bold));
+}
+
+TEST_CASE("BulkText.aRunEndingOnANarrowRightMargin", "[screen]")
+{
+    // A run sized up to and including a right margin left of the page's edge goes the per-codepoint way,
+    // and wraps within the margins.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h\033[1;5s"sv); // DECSLRM at columns 1..5, which homes the cursor
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 5);
+
+    mock.writeToScreen("abcdefg"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "abcde     ");
+    CHECK(screen.grid().lineText(LineOffset(1)) == "fg        ");
+}
+
+TEST_CASE("BulkText.anInsertEndingOnTheMargin", "[screen]")
+{
+    // In insert mode a run reaching the margin's column shifts what stood there off the line, as it always
+    // did, and leaves the wrap pending.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("0123456789\033[1;9H\033[4h"sv); // IRM, the cursor two columns before the edge
+
+    mock.writeToScreen("xy"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "01234567xy");
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(9) });
+    CHECK(screen.cursor().wrapPending);
+}
+
+TEST_CASE("BulkText.aPendingWrapOffTheMarginGetsNoBulkRun", "[screen][LineShape]")
+{
+    // A pending wrap moves the run to the NEXT line before it is written. At a real deferred wrap the
+    // cursor stands on the right margin and the gate asks about the row the run lands on
+    // (@see BulkText.aDeferredWrapOffersTheRowItLandsOn); but the wrap survives a margin widened under it,
+    // which leaves the cursor left of the margin. The run then landed on a line holding a wide character and
+    // overwrote its head without erasing its continuation.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
     auto const& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("\033[2;1Hab\xE4\xB8\xAD"sv); // line 1 holds a wide character at columns 2..3
