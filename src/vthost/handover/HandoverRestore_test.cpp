@@ -75,6 +75,7 @@ TEST_CASE("the descriptors a handover keeps are the standard streams and every o
 namespace
 {
 
+using vthost::testing::cellOf;
 using vthost::testing::LiveHost;
 using vthost::testing::occurrences;
 using vthost::testing::releaseForAdoption;
@@ -463,27 +464,67 @@ TEST_CASE("a kitty animation playing as it is handed over keeps the daemon's fra
     CHECK(live->eventually([&] { return live->host.ticksKittyAnimations(id); }));
 }
 
-TEST_CASE("a restored terminal lays an image out at the cell size its PTY's pixels give",
-          "[vthost][handover][threading]")
+namespace
 {
-    auto image = handOver(oneSession());
-    auto& session = image.sessions.front();
-    auto const id = session.id;
-    // As a client reported it: the cell size is no part of the terminal's state, the PTY's pixels are.
-    session.pty.pixels = vtpty::ImageSize { vtpty::Width(10 * unbox(session.pty.pageSize.columns)),
-                                            vtpty::Height(20 * unbox(session.pty.pageSize.lines)) };
+/// A client that listens to nothing: the one that states a cell size.
+struct SilentClient final: vthost::SessionStreamEvents
+{
+};
 
+/// @return Whether @p session's terminal in @p live lays out on @p cell.
+[[nodiscard]] bool laysOutOn(LiveHost& live, SessionId session, vtpty::ImageSize cell)
+{
+    auto& terminal = live.host.hostedSession(session)->terminal();
+    auto const _ = std::lock_guard { terminal };
+    return terminal.cellPixelSize() == cell;
+}
+
+} // namespace
+
+TEST_CASE("a learned cell size crosses, and the successor's sessions lay out on it",
+          "[vthost][handover][threading][cell]")
+{
+    auto old = oneSession();
+    auto const id = old->host.sessionIds().front();
+    auto client = SilentClient {};
+    old->host.subscribeStream(&client);
+    std::ignore = old->host.applyClientSize(&client, old->host.pageSize(), cellOf(9, 18));
+    old->host.unsubscribeStream(&client);
+    REQUIRE(old->host.learnedCellPixelSize() == cellOf(9, 18));
+
+    auto image = handOver(std::move(old));
+    CHECK(image.cellPixelSize == cellOf(9, 18));
     auto const live = takeOver(std::move(image));
-    {
-        auto& terminal = live->host.hostedSession(id)->terminal();
-        auto const _ = std::lock_guard { terminal };
-        CHECK(terminal.cellPixelSize().width == vtbackend::Width(10));
-        CHECK(terminal.cellPixelSize().height.value > 0);
-    }
+    CHECK(live->host.learnedCellPixelSize() == cellOf(9, 18));
+    CHECK(laysOutOn(*live, id, cellOf(9, 18)));
 
     // A program drawing an image before any client attached again.
     live->host.writeInput(id, SixelImage);
     CHECK(live->eventually([&] { return showsImage(*live, id); }));
+}
+
+TEST_CASE("a host that learned nothing hands over none, and the successor uses its own default",
+          "[vthost][handover][threading][cell]")
+{
+    auto old = oneSession();
+    auto const id = old->host.sessionIds().front();
+    auto image = handOver(std::move(old));
+    CHECK_FALSE(image.cellPixelSize.has_value());
+
+    auto const live = takeOver(std::move(image));
+    CHECK_FALSE(live->host.learnedCellPixelSize().has_value());
+    CHECK(laysOutOn(*live, id, cellOf(10, 20)));
+}
+
+TEST_CASE("a corrupt cell size in the image is ignored", "[vthost][handover][threading][cell]")
+{
+    auto image = handOver(oneSession());
+    auto const id = image.sessions.front().id;
+    image.cellPixelSize = cellOf(0, 18);
+
+    auto const live = takeOver(std::move(image));
+    CHECK_FALSE(live->host.learnedCellPixelSize().has_value());
+    CHECK(laysOutOn(*live, id, cellOf(10, 20)));
 }
 
 TEST_CASE("a client's session is rebuilt over the new image's host settings, as its connection built it",

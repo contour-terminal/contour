@@ -273,6 +273,7 @@ if(VTHOST_TESTING)
         AccessFile_test.cpp
         AttachPlan_test.cpp
         ByteStream_test.cpp
+        CellPixelBounds_test.cpp
         TabEdits_test.cpp
         TabMerge_test.cpp
         GracefulClose_test.cpp

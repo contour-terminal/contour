@@ -39,10 +39,13 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <utility>
+
+#include <vthost/CellPixelBounds.hpp>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -3136,6 +3139,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         [](std::string const& token) { return vthost::clientSizePolicyFrom(core::toLower(token)); },
         acceptedNames(vthost::ClientSizePolicyNames));
     loadGuarded(child, "socket", where.socket);
+    loadCellPixelSize(child, "default_cell_pixel_size", where.defaultCellPixelSize);
 
     // Absent or null (`~`) leaves the limit to the hosting profile's `history.limit`.
     if (auto const limit = child["history_limit"]; limit && !limit.IsNull())
@@ -3146,6 +3150,33 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 
     loadFromEntry(child, "restore", where.restore);
+}
+
+void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,
+                                         std::string const& entry,
+                                         vtbackend::ImageSize& where) const
+{
+    auto const child = node[entry];
+    if (!child || child.IsNull())
+        return;
+
+    auto const extent = [&](char const* key) -> std::optional<int64_t> {
+        auto const value = child.IsMap() ? child[key] : YAML::Node {};
+        int64_t number = 0;
+        if (!value || !YAML::convert<int64_t>::decode(value, number))
+            return std::nullopt;
+        return number;
+    };
+    auto const width = extent("width");
+    auto const height = extent("height");
+    auto const size = width && height ? vthost::sanePixelSize(*width, *height) : std::nullopt;
+    if (!size)
+        errorLog()("Ignoring {}: it needs a `width` and a `height`, each from 1 to {} pixels; keeping {}.",
+                   keyPathTo(node, entry),
+                   vthost::MaxCellPixelExtent,
+                   where);
+    else
+        where = *size;
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

@@ -170,6 +170,7 @@ daemon:
   mode: auto          # auto, in_process or required
   socket: ""          # the daemon's socket path; empty selects the default
   size_policy: latest # whose size wins when clients disagree: latest, smallest or largest
+  default_cell_pixel_size: { width: 10, height: 20 } # cell size images use until a client reports one
   history_limit: 1000 # scrollback lines per session, -1 for unlimited; unset follows the profile
 ```
 
@@ -659,6 +660,11 @@ since it exits 10 seconds after its last session and client are gone.
 - **A session sitting on the alternate screen has no scrollback to show.** Attach while `vim`,
   `less` or `htop` is running and you get that program's screen, which never has history of its
   own; the shell's scrollback appears when the program exits.
+- **The daemon keeps one cell size.** Images (Sixel, kitty, Contour's own) are laid out on the cell
+  size in pixels the attached client last reported, remembered after it detaches, and on
+  `daemon.default_cell_pixel_size` until one reports. With a per-pane font zoom, or windows on
+  monitors of different DPI, every pane other than the last-reporting one lays its images out for
+  *that* pane's cell, so they come out larger or smaller than its own cells would make them.
 - Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspace comes back
   without them (see [Surviving reboots](#surviving-reboots)).
 - **ssh attach needs key or agent authentication.** Contour never answers an ssh prompt — a

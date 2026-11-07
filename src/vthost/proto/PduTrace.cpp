@@ -41,6 +41,13 @@ namespace
         return std::format("[{}]", text);
     }
 
+    /// @return @p cell as ` cell=9x18` (leading space), or nothing when the sender stated none, so a PDU
+    ///         that states none reads as it always did.
+    [[nodiscard]] std::string formatCell(std::optional<WireCellPixelSize> const& cell)
+    {
+        return cell ? std::format(" cell={}x{}", cell->width, cell->height) : std::string {};
+    }
+
     /// One row of the table naming an AttachIntentKind in a trace.
     struct IntentName
     {
@@ -112,7 +119,7 @@ namespace
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
                            "versions={} caps={} token={} settings={} role={} area={} intent={} windows={} "
-                           "profile=\"{}\"{}",
+                           "profile=\"{}\"{}{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
@@ -129,7 +136,8 @@ namespace
                                ? std::string {}
                                : std::format(" color={}",
                                              value.colorPreference == WireColorPreference::Dark ? "dark"
-                                                                                                : "light"));
+                                                                                                : "light"),
+                           formatCell(value.cellPixelSize));
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",
@@ -165,14 +173,18 @@ namespace
                    "ResizeRequest",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<ResizeRequest>(pdu);
-                       return std::format("cols={} lines={}", value.columns, value.lines);
+                       return std::format(
+                           "cols={} lines={}{}", value.columns, value.lines, formatCell(value.cellPixelSize));
                    } },
         TraceRow { PduType::ResizePane,
                    "ResizePane",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<ResizePane>(pdu);
-                       return std::format(
-                           "session={} cols={} lines={}", value.session, value.columns, value.lines);
+                       return std::format("session={} cols={} lines={}{}",
+                                          value.session,
+                                          value.columns,
+                                          value.lines,
+                                          formatCell(value.cellPixelSize));
                    } },
         TraceRow { PduType::FetchImage,
                    "FetchImage",

@@ -247,6 +247,22 @@ TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")
     CHECK(traceLine(Direction::Recv, 12, DecodedPdu { ResizeRequest { .columns = 120, .lines = 40 } }, 11)
           == "recv #12 ResizeRequest cols=120 lines=40 (11 bytes)");
 
+    // A stated cell size is shown, an absent one adds nothing.
+    auto const cell = WireCellPixelSize { .width = 9, .height = 18 };
+    CHECK(traceLine(Direction::Recv,
+                    12,
+                    DecodedPdu { ResizeRequest { .columns = 120, .lines = 40, .cellPixelSize = cell } },
+                    13)
+          == "recv #12 ResizeRequest cols=120 lines=40 cell=9x18 (13 bytes)");
+    CHECK(traceLine(
+              Direction::Recv,
+              3,
+              DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20, .cellPixelSize = cell } },
+              14)
+          == "recv #3 ResizePane session=4 cols=60 lines=20 cell=9x18 (14 bytes)");
+    CHECK(summarize(DecodedPdu { ClientHello { .cellPixelSize = cell } }).contains(" cell=9x18"));
+    CHECK_FALSE(summarize(DecodedPdu { ClientHello {} }).contains("cell="));
+
     // A payloadless PDU must not leave a dangling separator before the byte count.
     CHECK(traceLine(Direction::Send, 0, DecodedPdu { NewWindow {} }, 4) == "send #0 NewWindow (4 bytes)");
 }

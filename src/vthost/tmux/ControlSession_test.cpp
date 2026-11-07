@@ -115,7 +115,7 @@ Task<void> resizeThenDetach(SessionHost* host,
                             vtworkspace::SessionId sessionId,
                             vtbackend::PageSize size)
 {
-    std::ignore = host->applyPaneSize(other, sessionId, size);
+    std::ignore = host->applyPaneSize(other, sessionId, size, std::nullopt);
     std::ignore = co_await client->write(asBytes("\n")); // empty line -> detach
 }
 

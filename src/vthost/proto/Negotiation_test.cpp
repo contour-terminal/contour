@@ -107,3 +107,12 @@ TEST_CASE("the panes-reprojected capability keeps its ident and name", "[vthost]
     REQUIRE(row != CapabilityTable.end());
     CHECK(row->name == "panes-reprojected");
 }
+
+TEST_CASE("the cell-pixel-size capability keeps its ident and name", "[vthost][negotiation][cellsize]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::CellPixelSize) == 20);
+    auto const row =
+        std::ranges::find(CapabilityTable, Capability::CellPixelSize, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "cell-pixel-size");
+}

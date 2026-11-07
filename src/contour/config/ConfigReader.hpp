@@ -433,6 +433,16 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, CommandBlocksConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
 
+    /// Reads a cell size in pixels, `{ width: W, height: H }`, with both extents required and each
+    /// within `vthost::sanePixelSize`'s bounds. Anything else is reported and leaves @p where as it was; absent
+    /// or null (`~`) leaves it silently.
+    /// @param node  The mapping holding @p entry.
+    /// @param entry The key of the cell size.
+    /// @param where Receives the cell size.
+    void loadCellPixelSize(YAML::Node const& node,
+                           std::string const& entry,
+                           vtbackend::ImageSize& where) const;
+
     /// Loads @p entry as a YAML list of scrollbar mark sources, replacing @p where whole: `[]` is a
     /// deliberate "none". Left unchanged when absent or not a list; a list item that names no source is
     /// reported and skipped.
@@ -863,6 +873,8 @@ struct Writer
                       nameOf(v.mode),
                       SingleQuoted { v.socket },
                       vthost::nameOf(v.sizePolicy),
+                      *v.defaultCellPixelSize.width,
+                      *v.defaultCellPixelSize.height,
                       historyLimit,
                       v.restore.scrollback,
                       v.restore.scrollbackLines,

@@ -188,7 +188,7 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
                                    CaptureOptions const& options,
                                    std::chrono::sys_seconds now)
 {
-    auto snapshot = WorkspaceSnapshot { .takenAt = now };
+    auto snapshot = WorkspaceSnapshot { .takenAt = now, .cellPixelSize = host.learnedCellPixelSize() };
     auto const& model = host.model();
     for (auto const windowIndex: std::views::iota(0, model.windowCount()))
     {

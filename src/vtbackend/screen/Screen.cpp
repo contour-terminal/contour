@@ -6877,11 +6877,18 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
     // one; placements without `p=` are each their own.
     auto const placementId = KittyPlacementId { command.imageId != 0 ? command.placementId : 0 };
 
+    // Without a cell size there is nothing to derive the display size from: the image is dropped, as sixel
+    // is.
+    if ((command.columns == 0 || command.rows == 0) && cellSize.area() == 0)
+    {
+        logImageDroppedForUnknownCellSize("kitty", pixels);
+        return;
+    }
     // `c=`/`r=` state the display size in cells; without them it follows from the pixel size, rounded
     // up so that a partial cell is still drawn rather than clipped away. Both arrive off the wire as
     // unsigned and are clamped to the page for the reason clampToPage() documents.
-    auto const cellWidth = std::max(unbox<int>(cellSize.width), 1);
-    auto const cellHeight = std::max(unbox<int>(cellSize.height), 1);
+    auto const cellWidth = unbox<int>(cellSize.width);
+    auto const cellHeight = unbox<int>(cellSize.height);
     auto const columns = command.columns != 0
                              ? ColumnCount::cast_from(clampToPage(command.columns, pageSize().columns))
                              : ColumnCount::cast_from((unbox<int>(pixels.width) + cellWidth - 1) / cellWidth);

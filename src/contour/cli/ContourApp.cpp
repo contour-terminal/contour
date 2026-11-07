@@ -1434,6 +1434,8 @@ int ContourApp::daemonAction()
     else if (auto const refused = failures.fail(policy.error()); !refused)
         return refuse(refused.error());
 
+    config.defaultCellPixelSize = daemonSettings.defaultCellPixelSize;
+
     // A handed-over daemon serves no TCP at all rather than one it cannot authenticate as asked.
     if (auto nativeTcp = nativeTcpOption())
         config.nativeTcp = *std::move(nativeTcp);

@@ -796,3 +796,20 @@ TEST_CASE("GoodImageProtocol.Oneshot.DefaultFormatIsAuto", "[GIP]")
     auto const fragment = cell.imageFragment();
     REQUIRE(fragment != nullptr);
 }
+
+TEST_CASE("GoodImageProtocol.Oneshot.laid_out_on_the_given_cell", "[GIP]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    auto const pixels = makeRGBA(20, 40, 0x00, 0x00, 0xFF, 0xFF);
+
+    mock.writeToScreen(gipOneshot("f=3,w=20,h=40", pixels));
+
+    for (auto const line: std::views::iota(0, unbox<int>(pageSize.lines)))
+        for (auto const column: std::views::iota(0, unbox<int>(pageSize.columns)))
+        {
+            auto const& cell = mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column));
+            CHECK((cell.imageFragment() != nullptr) == (line <= 1 && column <= 1));
+        }
+}

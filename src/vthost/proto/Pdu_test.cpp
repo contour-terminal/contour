@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -114,13 +115,19 @@ std::vector<std::byte> encodeWithFieldsEdited(DecodedPdu const& pdu, EditFn edit
     return frameOf(type, out.view());
 }
 
-/// @param pdu A PDU.
+/// @param pdu A PDU, which must state no cell size when it is a ClientHello: the hello's fields then end in
+///        the color preference, which is what this assumes.
 /// @return How many bytes its fields end in that a peer from before the ClientHello's color preference
 ///         lacks: the preference's byte for a ClientHello, else none. The frame helpers below cut it first,
 ///         so "a peer from before field X" stays a peer that predates every later field too.
 std::size_t colorPreferenceBytes(DecodedPdu const& pdu)
 {
-    return std::holds_alternative<ClientHello>(pdu) ? 1 : 0;
+    if (auto const* hello = std::get_if<ClientHello>(&pdu))
+    {
+        REQUIRE_FALSE(hello->cellPixelSize.has_value());
+        return 1;
+    }
+    return 0;
 }
 
 /// Encodes @p pdu with the tail of its fields cut off, as a peer from before they were appended would.
@@ -787,6 +794,89 @@ TEST_CASE("a ClientHello's color preference round-trips, and an older sender's h
     CHECK(decodeAs<ClientHello>(later).colorPreference == WireColorPreference::Unstated);
 }
 
+TEST_CASE("a cell pixel size round-trips on ClientHello, ResizeRequest and ResizePane, absent or stated",
+          "[vthost][proto][cellsize]")
+{
+    auto const size = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 9, .height = 18 } };
+    for (auto const& pdu:
+         { DecodedPdu { ClientHello { .profileName = "work", .cellPixelSize = size } },
+           DecodedPdu { ClientHello { .profileName = "work" } },
+           DecodedPdu { ResizeRequest { .columns = 120, .lines = 40, .cellPixelSize = size } },
+           DecodedPdu { ResizeRequest { .columns = 120, .lines = 40 } },
+           DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20, .cellPixelSize = size } },
+           DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20 } } })
+        CHECK(roundTrip(pdu) == pdu);
+}
+
+TEST_CASE("a ResizeRequest and ResizePane of the old layout decode with no cell pixel size",
+          "[vthost][proto][cellsize]")
+{
+    auto const size = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 9, .height = 18 } };
+    // The size is two one-byte varints at the body's end; the old layout has neither.
+    auto const request = encodeWithFieldsCut(
+        DecodedPdu { ResizeRequest { .columns = 120, .lines = 40, .cellPixelSize = size } },
+        [](auto) { return std::size_t { 2 }; });
+    CHECK(decodeAs<ResizeRequest>(request)
+          == ResizeRequest { .columns = 120, .lines = 40, .cellPixelSize = std::nullopt });
+    auto const pane = encodeWithFieldsCut(
+        DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20, .cellPixelSize = size } },
+        [](auto) { return std::size_t { 2 }; });
+    CHECK(decodeAs<ResizePane>(pane)
+          == ResizePane { .session = 4, .columns = 60, .lines = 20, .cellPixelSize = std::nullopt });
+}
+
+TEST_CASE("a ClientHello that ends at the color preference decodes with no cell pixel size",
+          "[vthost][proto][cellsize]")
+{
+    // Every negotiating client released before the cell size ends its hello here.
+    auto const hello = encodeWithFieldsCut(
+        DecodedPdu { ClientHello { .profileName = "work",
+                                   .colorPreference = WireColorPreference::Dark,
+                                   .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 } } },
+        [](auto) { return std::size_t { 2 }; });
+    auto const decoded = decodeAs<ClientHello>(hello);
+    CHECK(decoded.cellPixelSize == std::nullopt);
+    CHECK(decoded.colorPreference == WireColorPreference::Dark);
+    CHECK(decoded.profileName == "work");
+}
+
+TEST_CASE("a stated 0x0 cell pixel size decodes as none", "[vthost][proto][cellsize]")
+{
+    auto const zero = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 0, .height = 0 } };
+    auto const whole = [](DecodedPdu const& pdu) {
+        return encodeWithFieldsCut(pdu, [](auto) { return std::size_t { 0 }; });
+    };
+    CHECK(decodeAs<ClientHello>(whole(DecodedPdu { ClientHello { .cellPixelSize = zero } })).cellPixelSize
+          == std::nullopt);
+    CHECK(decodeAs<ResizeRequest>(
+              whole(DecodedPdu { ResizeRequest { .columns = 80, .lines = 24, .cellPixelSize = zero } }))
+              .cellPixelSize
+          == std::nullopt);
+    CHECK(decodeAs<ResizePane>(whole(DecodedPdu { ResizePane {
+                                   .session = 4, .columns = 60, .lines = 20, .cellPixelSize = zero } }))
+              .cellPixelSize
+          == std::nullopt);
+}
+
+TEST_CASE("a truncated cell pixel size is a decode error", "[vthost][proto][cellsize]")
+{
+    auto const size = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 9, .height = 18 } };
+    // Only the width varint survives.
+    auto const request = encodeWithFieldsCut(
+        DecodedPdu { ResizeRequest { .columns = 120, .lines = 40, .cellPixelSize = size } },
+        [](auto) { return std::size_t { 1 }; });
+    auto const pane = encodeWithFieldsCut(
+        DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20, .cellPixelSize = size } },
+        [](auto) { return std::size_t { 1 }; });
+    auto const hello = encodeWithFieldsCut(DecodedPdu { ClientHello { .cellPixelSize = size } },
+                                           [](auto) { return std::size_t { 1 }; });
+    for (auto const& frame: { request, pane, hello })
+    {
+        auto const decoded = decodePdu(frame);
+        CHECK_FALSE(decoded.has_value());
+    }
+}
+
 TEST_CASE("a ClientHello's client area round-trips and an absent one decodes as none", "[vthost][proto]")
 {
     auto const hello = ClientHello { .clientArea = WireClientArea { .columns = 132, .lines = 43 } };
@@ -1195,7 +1285,9 @@ TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost
             ClientHello { .versions = { 4, 9 },
                           .capabilities = { .idents = { 1, 77 } },
                           .token = "s3cr3t",
-                          .sessionSettings = WireSessionSettings { .historyLineCount = 5000 } };
+                          .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+                          // The last field this version knows, stated: a byte after it is a newer peer's.
+                          .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 } };
         auto const decoded = decodePdu(withAppendedField(PduType::ClientHello, hello));
         REQUIRE(decoded.has_value());
         CHECK(decoded->pdu == DecodedPdu { hello });

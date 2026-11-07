@@ -339,6 +339,34 @@ namespace
         }
     }
 
+    /// Appends @p size to @p out when engaged; an absent size adds no bytes, which is what a sender from
+    /// before the field wrote.
+    void encodeCellPixelSize(Writer& out, std::optional<WireCellPixelSize> const& size)
+    {
+        if (!size)
+            return;
+        out.varint(size->width);
+        out.varint(size->height);
+    }
+
+    /// Reads the cell size a body ends in, if it has bytes left; a sender from before the field ends earlier.
+    /// A width without its height is a truncated body. A stated 0x0 reads as none, the way
+    /// WireColorPreference::Unstated does: a sender with no cell yet may write zeros instead of omitting the
+    /// field, so a field appended after this one never forces senders to state a cell.
+    [[nodiscard]] bool decodeCellPixelSize(Reader& in,
+                                           std::optional<WireCellPixelSize>& size,
+                                           DecodeError& error)
+    {
+        if (in.remaining() == 0)
+            return true;
+        auto decoded = WireCellPixelSize {};
+        if (!assign(in.varint(), decoded.width, error) || !assign(in.varint(), decoded.height, error))
+            return false;
+        if (decoded.width != 0 || decoded.height != 0)
+            size = decoded;
+        return true;
+    }
+
     void encodeOptionalSessionSettings(Writer& out, std::optional<WireSessionSettings> const& settings)
     {
         // A presence byte, so a client with no preference of its own costs exactly one byte rather
@@ -391,6 +419,7 @@ namespace
             fields.varint(window);
         fields.string(pdu.profileName);
         fields.u8(std::to_underlying(pdu.colorPreference));
+        encodeCellPixelSize(fields, pdu.cellPixelSize);
         out.blob(fields.view());
         out.u8(0);
     }
@@ -436,6 +465,7 @@ namespace
     {
         out.varint(pdu.columns);
         out.varint(pdu.lines);
+        encodeCellPixelSize(out, pdu.cellPixelSize);
     }
 
     void encodeBody(Writer& out, ResizePane const& pdu)
@@ -443,6 +473,7 @@ namespace
         out.varint(pdu.session);
         out.varint(pdu.columns);
         out.varint(pdu.lines);
+        encodeCellPixelSize(out, pdu.cellPixelSize);
     }
 
     void encodeBody(Writer& out, FetchImage const& pdu)
@@ -1150,12 +1181,17 @@ namespace
         return true;
     }
 
+    [[nodiscard]] bool decodeHelloCellPixelSize(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        return decodeCellPixelSize(in, pdu.cellPixelSize, error);
+    }
+
     /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
     /// inserted.
-    constexpr auto ClientHelloFields = std::array<ClientHelloField, 7> {
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 8> {
         decodeHelloToken,           decodeHelloSessionSettings, decodeHelloRole,
         decodeHelloClientArea,      decodeHelloAttachIntent,    decodeHelloProfileName,
-        decodeHelloColorPreference,
+        decodeHelloColorPreference, decodeHelloCellPixelSize,
     };
 
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the
@@ -1268,7 +1304,8 @@ namespace
     {
         auto pdu = ResizeRequest {};
         auto error = DecodeError {};
-        if (!assign(in.varint(), pdu.columns, error) || !assign(in.varint(), pdu.lines, error))
+        if (!assign(in.varint(), pdu.columns, error) || !assign(in.varint(), pdu.lines, error)
+            || !decodeCellPixelSize(in, pdu.cellPixelSize, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -1278,7 +1315,7 @@ namespace
         auto pdu = ResizePane {};
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.columns, error)
-            || !assign(in.varint(), pdu.lines, error))
+            || !assign(in.varint(), pdu.lines, error) || !decodeCellPixelSize(in, pdu.cellPixelSize, error))
             return std::unexpected(error);
         return pdu;
     }

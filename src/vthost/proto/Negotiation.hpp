@@ -90,6 +90,10 @@ enum class Capability : uint8_t
     /// client departs, where several survivors' re-asserts would fight its pick -- and a client keeps
     /// offering it for interop with daemons built while they sent it on every departure.
     PanesReprojected = 19,
+    /// The peer applies the cell size in pixels a client states (ClientHello, ResizeRequest and ResizePane
+    /// `cellPixelSize`), so a daemon-hosted pane lays images out on the client's real cell. Informational
+    /// like ColorPreference: a client sends the field regardless and a daemon predating it ignores it.
+    CellPixelSize = 20,
 };
 
 /// One row of the table naming a Capability.
@@ -120,6 +124,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LayoutBatch, .name = "layout-batch" },
     CapabilityRow { .capability = Capability::LiveUpgrade, .name = "live-upgrade" },
     CapabilityRow { .capability = Capability::PanesReprojected, .name = "panes-reprojected" },
+    CapabilityRow { .capability = Capability::CellPixelSize, .name = "cell-pixel-size" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

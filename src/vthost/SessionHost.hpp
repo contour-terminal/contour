@@ -20,6 +20,7 @@
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/state/TerminalState.hpp>
 
+#include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
@@ -54,6 +55,7 @@
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/CarriedDelivery.hpp>
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ExtensionHosting.hpp>
@@ -107,6 +109,13 @@ enum class SizeChange : bool
 {
     Unchanged, ///< The grid already had this size; nothing was resized.
     Applied,   ///< The grid moved; mirrors of it are now stale.
+};
+
+/// Whether the daemon's cell size moved when it was last decided (@see SessionHost::cellPixelSize).
+enum class CellChange : uint8_t
+{
+    Unchanged = 0, ///< The cell size stayed; no terminal needs it pushed.
+    Moved,         ///< The cell size moved; terminals whose grid stayed must be told.
 };
 
 /// Why the host performed no engine operation a client asked for.
@@ -835,6 +844,11 @@ struct SessionHostConfig
     /// How the authoritative client area is resolved when several attached clients report
     /// different ones.
     ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
+    /// The cell size, in pixels, every hosted terminal lays images out on until a client states its own
+    /// (@see SessionHost::cellPixelSize). Each extent must be positive (Require). Never remembered as
+    /// learned: a host that never saw a client follows a changed setting. The default is the VT340's text
+    /// cell.
+    vtpty::ImageSize defaultCellPixelSize = DefaultCellPixelSize;
     /// The profile's configured startup layout. A pane's `command`/`arguments`/`directory` are
     /// honored (see @ref SessionSpawnRequest::commandOverride), and so is its `profile` (else its tab's)
     /// when @ref profiles is set; without a catalog a pane naming one is logged and otherwise ignored.
@@ -1031,12 +1045,20 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// re-projection when the resolved area moved, and otherwise after the panes are settled, so that no
     /// pane is moved for the forgetting alone -- the client re-sends every pane's size right after a new
     /// area, and that re-send sizes them.
+    ///
+    /// A stated @p cell is recorded first (@see applyCellPixelSize for what counts as a client's word on it)
+    /// and settled with the grid: decided before the panes are resized, so a pane whose grid moves resizes
+    /// its PTY once for both, then pushed into every terminal whose grid stayed.
     /// @param client The reporting client, identified by its stream observer.
     /// @param size What that client can display, in cells.
+    /// @param cell The client's cell size in pixels, bounded by the caller (vthost::sanePixelSize); none when
+    ///             it states none (tmux control mode, an older peer).
     /// @return Whether anything moved. Callers resync their mirrors on @c Applied only:
     ///         a resync is a full-grid snapshot, so treating a no-op as a change costs a
     ///         client its entire screen state for nothing.
-    SizeChange applyClientSize(SessionStreamEvents* client, vtpty::PageSize size);
+    SizeChange applyClientSize(SessionStreamEvents* client,
+                               vtpty::PageSize size,
+                               std::optional<vtpty::ImageSize> cell);
 
     /// Records the grid a client actually renders ONE session's pane at, then resizes that session's
     /// terminal to the pane's pick, leaving the client area and every other pane alone.
@@ -1058,13 +1080,47 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param client The reporting client, identified by its stream observer (as for applyClientSize).
     ///               Must not be null, and must be subscribed (subscribeStream): its refinements are
     ///               dropped when it unsubscribes, so an unsubscribed one's would outlive it.
-    /// @param session The session whose terminal to resize; unknown ids are ignored.
+    /// @param session The session whose terminal to resize; unknown ids are ignored, though a stated
+    ///                @p cell is still recorded.
     /// @param size The pane's grid, in cells.
+    /// @param cell The client's cell size, as for applyClientSize().
     /// @return Whether that session's grid actually moved (@c Unchanged for an unknown id, and for a
     ///         report that is not the pane's pick).
     SizeChange applyPaneSize(SessionStreamEvents* client,
                              vtworkspace::SessionId session,
-                             vtpty::PageSize size);
+                             vtpty::PageSize size,
+                             std::optional<vtpty::ImageSize> cell);
+
+    /// Records the cell size, in pixels, a client renders at, and settles the daemon's one cell size (@see
+    /// cellPixelSize) into every terminal -- for a report that carries no grid to apply it with, such as a
+    /// hello whose client area is out of range. A report that carries one goes through applyClientSize() or
+    /// applyPaneSize() instead, so a pane resizes its PTY once for both.
+    ///
+    /// A report counts as the client's latest word only when it differs from what the client last reported
+    /// (or is its first): clients re-assert their sizes on every attach and window event, and such a repeat
+    /// must not take the cell back from a client that reported a new one since. A client that never reports
+    /// one (tmux control mode, an older peer) takes no part.
+    /// @param client The reporting client, identified by its stream observer; must not be null, and must be
+    ///               subscribed (subscribeStream), as unsubscribeStream() forgets its report.
+    /// @param cell The client's cell size; each extent positive (Require), bounded by the caller
+    ///             (vthost::sanePixelSize).
+    void applyCellPixelSize(SessionStreamEvents* client, vtpty::ImageSize cell);
+
+    /// @return The cell size, in pixels, every hosted terminal lays images out on: the one the latest client
+    ///         that displays the resolved client area reported (else the latest of any client), kept after
+    ///         that client left; @ref SessionHostConfig::defaultCellPixelSize while no client ever reported
+    ///         one.
+    [[nodiscard]] vtpty::ImageSize cellPixelSize() const noexcept
+    {
+        return _learnedCellPixelSize.value_or(_defaultCellPixelSize);
+    }
+
+    /// @return The cell size a client last decided, if any ever did: what the host remembers across a
+    ///         restart. Never the configured default.
+    [[nodiscard]] std::optional<vtpty::ImageSize> learnedCellPixelSize() const noexcept
+    {
+        return _learnedCellPixelSize;
+    }
 
     /// Creates a tab whose first pane is backed by a freshly spawned session,
     /// using the same pre-mint handshake as the GUI: the backing session is
@@ -1857,6 +1913,52 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// One pane's refinements: per reporting client, its latest word on the pane's grid (@see applyPaneSize),
     /// stamped from _nextAreaSequence so the most recent one can be told apart.
     using PaneRefinements = std::unordered_map<SessionStreamEvents*, ClientArea>;
+    /// One client's cell size report, stamped from _nextAreaSequence when it changed (@see
+    /// applyCellPixelSize).
+    struct ClientCell
+    {
+        vtpty::ImageSize cell;
+        uint64_t sequence = 0;
+    };
+    /// What each client last reported as its cell size; keyed and pruned as _clientAreas is.
+    std::unordered_map<SessionStreamEvents*, ClientCell> _clientCells;
+    /// The cell size a client last decided (@see learnedCellPixelSize); kept when every client is gone.
+    std::optional<vtpty::ImageSize> _learnedCellPixelSize;
+    /// @see SessionHostConfig::defaultCellPixelSize
+    vtpty::ImageSize _defaultCellPixelSize;
+    /// Decides the daemon's cell size from _clientCells and records it as the learned one
+    /// (_learnedCellPixelSize), touching no terminal: the latest report of a client
+    /// whose area is the resolved `_pageSize`, else the latest of any client; with no report at all, the cell
+    /// stays what it was. Runs BEFORE the panes are resized, so that resizeLocked() moves each PTY's grid and
+    /// cell at once. Precondition: `_pageSize` is already re-resolved (resolveAuthoritativeArea).
+    /// @return CellChange::Moved when cellPixelSize() moved, CellChange::Unchanged otherwise.
+    [[nodiscard]] CellChange adoptResolvedCellPixelSize();
+    /// Takes a cell size a previous run learned (a snapshot, a handover image) as the one learned here,
+    /// unless it is out of bounds, which is logged and leaves things as they were. Runs before any session
+    /// is spawned or adopted, so each starts on it; only the constructor's restore paths call it.
+    /// @param stored What the snapshot or image held; none for none.
+    /// @param source What it came from, for the log.
+    void seedLearnedCellPixelSize(std::optional<vtpty::ImageSize> stored, std::string_view source);
+    /// Pushes cellPixelSize() into every terminal not already at it, when @p cell says it moved: those
+    /// resizeLocked() did not reach, since their grid stayed. Announces nothing, as no grid moved. Takes each
+    /// terminal's lock in turn and calls nothing that fans out while holding it.
+    /// @param cell What adoptResolvedCellPixelSize() returned.
+    void settleCellPixelSize(CellChange cell);
+    /// The one shape every size report settles the cell size in: adoptResolvedCellPixelSize(), then @p
+    /// resize, then settleCellPixelSize(). Precondition: `_pageSize` is already re-resolved
+    /// (resolveAuthoritativeArea).
+    /// @param resize Resizes the panes the report moves; returns whether any grid moved.
+    /// @return What @p resize returned.
+    template <typename Resize>
+    [[nodiscard]] SizeChange resizingWithCellPixelSize(Resize&& resize);
+    /// Records @p cell as @p client's latest word on its cell size, unless it repeats the client's last
+    /// one (@see applyCellPixelSize). Applies nothing: the caller settles it (resizingWithCellPixelSize).
+    /// @param client The reporting client.
+    /// @param cell Its cell size, each extent positive (Require); none records nothing.
+    void recordCellPixelSize(SessionStreamEvents* client, std::optional<vtpty::ImageSize> cell);
+    /// Pushes cellPixelSize() into @p backing under its lock; calls nothing that fans out.
+    /// @param backing A hosted terminal.
+    void pushCellPixelSize(vtbackend::Terminal& backing) const;
     /// Per session, its pane refinements. Pruned when the client departs (unsubscribeStream) or reports a
     /// different area (applyClientSize), when the pane's tab changes its tree (forgetRefinements), or when
     /// the session is erased (eraseSession).
@@ -1873,6 +1975,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<vtpty::PageSize> refinedSize(PaneRefinements const& refinements) const;
     /// @return Whether any attached client reported the resolved `_pageSize` as its area.
     [[nodiscard]] bool anyClientDisplaysPageSize() const;
+    /// @param client A reporting client.
+    /// @return Whether @p client displays the resolved area (`_pageSize`): only such a client measured its
+    ///         panes, and sized its cells, for the grid the terminals hold.
+    [[nodiscard]] bool displaysResolvedArea(SessionStreamEvents* client) const;
     /// @param session A session.
     /// @return Its pane's pick (@see refinedSize), if it has one.
     [[nodiscard]] std::optional<vtpty::PageSize> pickOf(vtworkspace::SessionId session) const;

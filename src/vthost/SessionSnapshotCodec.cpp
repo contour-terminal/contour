@@ -13,6 +13,7 @@
 #include <utility>
 #include <variant>
 
+#include <vthost/CellPixelBounds.hpp>
 #include <vthost/proto/Wire.hpp>
 
 namespace vthost
@@ -363,6 +364,20 @@ namespace
                 return std::unexpected(window.error());
             decoded.snapshot.windows.push_back(*std::move(window));
         }
+        if (in.remaining() > 0)
+        {
+            // Only the cell is dropped when it is damaged: the workspace it trails is still good.
+            auto const width = in.varint();
+            auto const height = in.varint();
+            if (width && height)
+            {
+                // One past the bound is enough for sanePixelSize() to refuse it, and never narrows negative.
+                constexpr auto Largest = std::uint64_t { MaxCellPixelExtent } + 1;
+                decoded.snapshot.cellPixelSize =
+                    vtpty::ImageSize { .width = vtpty::Width::cast_from(std::min(*width, Largest)),
+                                       .height = vtpty::Height::cast_from(std::min(*height, Largest)) };
+            }
+        }
         decoded.droppedHistories = context.droppedHistories;
         return decoded;
     }
@@ -375,6 +390,12 @@ std::vector<std::byte> encodeSnapshot(WorkspaceSnapshot const& snapshot)
     body.varint(snapshot.windows.size());
     for (auto const& window: snapshot.windows)
         writeWindow(body, window);
+    // Appended after the windows, so a file from before the field reads as none.
+    if (snapshot.cellPixelSize)
+    {
+        body.varint(unbox<std::uint64_t>(snapshot.cellPixelSize->width));
+        body.varint(unbox<std::uint64_t>(snapshot.cellPixelSize->height));
+    }
 
     auto file = proto::Writer {};
     file.bytes(Magic);

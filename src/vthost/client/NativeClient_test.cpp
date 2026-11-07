@@ -159,14 +159,14 @@ Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
     CHECK(mock.stdinBuffer() == "ls\r");
 
     // 4. A client-area proposal comes back as an authoritative snapshot.
-    h->client->requestResize(100, 40);
+    h->client->requestResize(100, 40, std::nullopt);
     co_await core::net::testing::waitUntil(
         &h->loop, [&] { return h->client->screens().at(sessionId.value).columns == 100; });
     CHECK(h->client->screens().at(sessionId.value).lines == 40);
     CHECK(h->host.pageSize() == vtpty::PageSize { vtpty::LineCount(40), vtpty::ColumnCount(100) });
 
     // 5. A per-pane report sizes THAT pane's PTY, leaving the client area alone.
-    h->client->resizePane(sessionId.value, 70, 40);
+    h->client->resizePane(sessionId.value, 70, 40, std::nullopt);
     co_await core::net::testing::waitUntil(
         &h->loop, [&] { return h->client->screens().at(sessionId.value).columns == 70; });
     CHECK(h->host.terminal(sessionId)->totalPageSize().columns.value == 70);
@@ -1222,7 +1222,7 @@ Task<void> driveDarkTabSwitches(core::net::EventLoop* loop,
     auto columns = uint32_t { 90 };
     auto const bind = [&](uint64_t session) {
         ++columns;
-        client->resizePane(session, columns, 30);
+        client->resizePane(session, columns, 30, std::nullopt);
         return core::net::testing::waitUntil(loop, [&, session] {
             return client->screens().contains(session) && client->screens().at(session).columns == columns;
         });
@@ -1323,7 +1323,7 @@ Task<void> driveAttachThenResize(core::net::EventLoop* loop, NativeClient* clien
         co_await core::net::testing::waitUntil(loop, [&] { return !client->screens().empty(); });
     REQUIRE(attached);
     // A little more traffic after the attach, so a late light snapshot would show too.
-    client->requestResize(100, 40);
+    client->requestResize(100, 40, std::nullopt);
     co_await core::net::testing::waitUntil(loop,
                                            [&] { return client->screens().begin()->second.columns == 100; });
     client->detach();
@@ -1925,7 +1925,7 @@ TEST_CASE("a PDU the daemon refused is not sent again", "[vthost][negotiation]")
                        std::vector<proto::DecodedFrame> const* seen) -> Task<void> {
         co_await core::net::testing::waitUntil(
             loop, [&] { return client->peerRefused(proto::PduType::ResizePane); });
-        client->resizePane(1, 80, 24);
+        client->resizePane(1, 80, 24, std::nullopt);
         // A PDU the daemon did not refuse, behind it: once it arrives, the ResizePane would have.
         client->createTab(0, {});
         co_await core::net::testing::waitUntil(

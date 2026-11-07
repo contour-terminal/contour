@@ -13,6 +13,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 
 #include <vtpty/CrossingHandle.hpp>
+#include <vtpty/ImageSize.hpp>
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/Process.hpp>
 
@@ -163,6 +164,11 @@ struct HandoverImage
     /// (proto::DaemonUpgradeRecord::generation); the image that reads it serves as one more. An image from
     /// before the field reads as 0.
     uint64_t upgradeGeneration = 0;
+    /// The cell size in pixels a client last stated (SessionHost::learnedCellPixelSize()); none when none
+    /// ever did, and for an image from before the field, which has none: the successor uses its default
+    /// until a client reports.
+    /// Unchecked: the host that adopts the image bounds it first.
+    std::optional<vtpty::ImageSize> cellPixelSize {};
 
     /// Lists the fields for the handover codec. Field 12 carried the Windows lease handle apart from the
     /// descriptor in format 1; retired, never to be reused.
@@ -179,6 +185,7 @@ struct HandoverImage
         visitor(9, self.lease);
         visitor(10, self.defaultColorPreference);
         visitor(11, self.upgradeGeneration);
+        visitor(13, self.cellPixelSize);
     }
 };
 

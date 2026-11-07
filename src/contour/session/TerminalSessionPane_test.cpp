@@ -1737,6 +1737,25 @@ TEST_CASE("TerminalSession: a resize asks for the size indicator outside the loc
     CHECK(texts.size() == 1);
 }
 
+TEST_CASE("TerminalSession: a zoom that keeps the page still tells the PTY the new cell pixels",
+          "[contour][session][resize]")
+{
+    // resizeToFit() used to return as soon as the page size was unchanged, so a zoom whose new cell fits
+    // the same grid never reached the child: ws_xpixel/ws_ypixel stayed at the old cell.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    auto const total = pane->terminal().totalPageSize();
+    auto const cell = vtbackend::ImageSize { vtbackend::Width(9), vtbackend::Height(18) };
+    REQUIRE(pane->terminal().cellPixelSize() != cell);
+
+    contour::session::resizeToFit(*pane, total, cell * total);
+
+    CHECK(pane->terminal().totalPageSize() == total);
+    CHECK(pane->terminal().cellPixelSize() == cell);
+    REQUIRE(mockPtyOf(*pane).pixelSize().has_value());
+    CHECK(*mockPtyOf(*pane).pixelSize() == cell * pane->terminal().pageSize());
+}
+
 TEST_CASE("TerminalSession: a resize on another thread announces the changed page size on the session's",
           "[contour][session][sizeindicator][threading]")
 {

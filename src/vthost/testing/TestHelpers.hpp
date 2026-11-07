@@ -6,6 +6,7 @@
 
 #include <vtbackend/shell/CommandBlock.hpp>
 
+#include <vtpty/ImageSize.hpp>
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -246,6 +247,33 @@ constexpr auto PromptedAt = int64_t { 1'700'000'000'000'000'000 };
     if (text.empty())
         return 0;
     return static_cast<std::size_t>(std::ranges::distance(text | std::views::split(needle))) - 1;
+}
+
+/// A MockPty that counts how often it was resized, so a case can tell one resize from two.
+class CountingPty final: public vtpty::MockPty
+{
+  public:
+    using MockPty::MockPty;
+
+    void resizeScreen(vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels) override
+    {
+        ++_resizes;
+        MockPty::resizeScreen(cells, pixels);
+    }
+
+    /// @return How many resizes it was given.
+    [[nodiscard]] int resizes() const noexcept { return _resizes; }
+
+  private:
+    int _resizes = 0;
+};
+
+/// @param width A cell's width in pixels.
+/// @param height Its height in pixels.
+/// @return @p width by @p height pixels, as a cell size.
+[[nodiscard]] inline vtpty::ImageSize cellOf(unsigned width, unsigned height)
+{
+    return vtpty::ImageSize { vtpty::Width(width), vtpty::Height(height) };
 }
 
 } // namespace vthost::testing

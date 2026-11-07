@@ -79,6 +79,7 @@ using vtbackend::test::recordIds;
 using vtbackend::test::reportedOutputStart;
 using vthost::NativeSession;
 using vthost::SessionHost;
+using vthost::testing::cellOf;
 using vthost::testing::eventually;
 using vthost::testing::newSession;
 namespace proto = vthost::proto;
@@ -3087,6 +3088,154 @@ TEST_CASE("a Control hello's client area is ignored", "[vthost][native]")
         1);
     CHECK(h.host.pageSize() == hostSize);
     CHECK(h.host.sessionCount() == 0);
+}
+
+namespace
+{
+
+/// @return A harness whose sessions run on CountingPty, so a case can tell how often each PTY was resized.
+HarnessOptions countingPtys()
+{
+    return HarnessOptions {
+        .ptyFactory = [](vtbackend::PageSize size,
+                         std::optional<vtpty::Process::ExecInfo> const&) -> std::unique_ptr<vtpty::Pty> {
+            return std::make_unique<vthost::testing::CountingPty>(size);
+        }
+    };
+}
+
+/// @return The CountingPty under @p id's terminal.
+vthost::testing::CountingPty& countingPtyOf(NativeHarness& h, vtworkspace::SessionId id)
+{
+    return dynamic_cast<vthost::testing::CountingPty&>(
+        dynamic_cast<vthost::TappingPty&>(h.host.terminal(id)->device()).inner());
+}
+
+} // namespace
+
+TEST_CASE("NativeSession.applies_the_hello_cell_size_before_the_first_spawn", "[vthost][native][cell]")
+{
+    auto h = NativeHarness { countingPtys() };
+    std::ignore =
+        exchangeAll(&h,
+                    { proto::DecodedPdu { proto::ClientHello {
+                        .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
+                        .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } });
+
+    REQUIRE(h.host.sessionCount() == 1);
+    auto const id = h.host.sessionIds().front();
+    auto const& terminal = *h.host.terminal(id);
+    CHECK(terminal.cellPixelSize() == cellOf(9, 18));
+    auto const& pty = countingPtyOf(h, id);
+    CHECK(pty.pixelSize() == cellOf(9, 18) * terminal.pageSize());
+    // Spawned at the client's cell: not at the default first and corrected after.
+    CHECK(pty.resizes() == 1);
+}
+
+TEST_CASE("NativeSession.applies_the_hello_cell_size_beside_a_refused_area", "[vthost][native][cell]")
+{
+    auto h = NativeHarness { countingPtys() };
+    std::ignore =
+        exchangeAll(&h,
+                    { proto::DecodedPdu { proto::ClientHello {
+                        .clientArea = proto::WireClientArea { .columns = 0, .lines = 43 },
+                        .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } });
+
+    // The area is refused, so the session spawns at the host's size; the cell describes the client and
+    // counts.
+    REQUIRE(h.host.sessionCount() == 1);
+    CHECK(h.host.learnedCellPixelSize() == cellOf(9, 18));
+    auto const id = h.host.sessionIds().front();
+    auto const& terminal = *h.host.terminal(id);
+    CHECK(terminal.cellPixelSize() == cellOf(9, 18));
+    CHECK(countingPtyOf(h, id).pixelSize() == cellOf(9, 18) * terminal.pageSize());
+}
+
+TEST_CASE("NativeSession.applies_a_resize_cell_size", "[vthost][native][cell]")
+{
+    // The session the attach spawns is the host's first.
+    auto constexpr First = vtworkspace::SessionId { 1 };
+    auto h = NativeHarness { countingPtys() };
+    SECTION("a ResizeRequest's")
+    {
+        std::ignore =
+            exchangeAll(&h,
+                        { proto::DecodedPdu { proto::ClientHello {} },
+                          proto::DecodedPdu { proto::ResizeRequest {
+                              .columns = 100,
+                              .lines = 30,
+                              .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 } } } });
+        REQUIRE(h.host.sessionIds() == std::vector { First });
+        auto const& terminal = *h.host.terminal(First);
+        CHECK(terminal.cellPixelSize() == cellOf(9, 18));
+        CHECK(terminal.totalPageSize().columns == vtpty::ColumnCount(100));
+        CHECK(countingPtyOf(h, First).pixelSize() == cellOf(9, 18) * terminal.pageSize());
+    }
+    SECTION("a ResizePane's")
+    {
+        std::ignore =
+            exchangeAll(&h,
+                        { proto::DecodedPdu { proto::ClientHello {} },
+                          proto::DecodedPdu { proto::ResizeRequest { .columns = 100, .lines = 30 } },
+                          proto::DecodedPdu { proto::ResizePane {
+                              .session = First.value,
+                              .columns = 100,
+                              .lines = 30,
+                              .cellPixelSize = proto::WireCellPixelSize { .width = 18, .height = 36 } } } });
+        REQUIRE(h.host.sessionIds() == std::vector { First });
+        auto const& terminal = *h.host.terminal(First);
+        CHECK(terminal.cellPixelSize() == cellOf(18, 36));
+        CHECK(countingPtyOf(h, First).pixelSize() == cellOf(18, 36) * terminal.pageSize());
+    }
+}
+
+TEST_CASE("NativeSession.rejects_an_out_of_range_cell_size", "[vthost][native][cell]")
+{
+    struct Row
+    {
+        proto::WireCellPixelSize cell;
+        std::string_view logged;
+    };
+    auto const rows = std::array {
+        Row { .cell = { .width = 0, .height = 20 },
+              .logged = "rejecting client cell size 0x20 (out of range)" },
+        Row { .cell = { .width = 65535, .height = 65535 },
+              .logged = "rejecting client cell size 65535x65535 (out of range)" },
+    };
+    for (auto const& row: rows)
+    {
+        auto capture = core::log::ScopedCapture {};
+        auto h = NativeHarness {};
+        std::ignore = exchangeAll(&h,
+                                  { proto::DecodedPdu { proto::ClientHello {} },
+                                    proto::DecodedPdu { proto::ResizeRequest {
+                                        .columns = 100, .lines = 30, .cellPixelSize = row.cell } } });
+
+        REQUIRE(h.host.sessionCount() == 1);
+        auto const* terminal = h.host.terminal(h.host.sessionIds().front());
+        CHECK(terminal->cellPixelSize() == cellOf(10, 20));                  // the default, untouched
+        CHECK(terminal->totalPageSize().columns == vtpty::ColumnCount(100)); // the grid still applies
+        CHECK(h.host.learnedCellPixelSize() == std::nullopt);
+        CHECK(capture.contains(row.logged));
+    }
+}
+
+TEST_CASE("NativeSession.takes_a_stated_0x0_cell_size_as_none_without_a_log", "[vthost][native][cell]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness {};
+    std::ignore =
+        exchangeAll(&h,
+                    { proto::DecodedPdu { proto::ClientHello {} },
+                      proto::DecodedPdu { proto::ResizeRequest {
+                          .columns = 100,
+                          .lines = 30,
+                          .cellPixelSize = proto::WireCellPixelSize { .width = 0, .height = 0 } } } });
+
+    REQUIRE(h.host.sessionCount() == 1);
+    CHECK(h.host.terminal(h.host.sessionIds().front())->cellPixelSize() == cellOf(10, 20));
+    CHECK(h.host.learnedCellPixelSize() == std::nullopt);
+    CHECK_FALSE(capture.contains("rejecting"));
 }
 
 TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost][native][diagnostics]")

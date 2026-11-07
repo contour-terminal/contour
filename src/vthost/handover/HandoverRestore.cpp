@@ -28,6 +28,7 @@
 #include <iterator>
 #include <mutex>
 #include <ranges>
+#include <span>
 #include <utility>
 
 #include <vthost/ListeningSocket.hpp>
@@ -68,6 +69,8 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
     _objects.restore(image.objects);
     // Sessions spawned from now on are built under the preference the latest client stated, as they were.
     _defaultColorPreference = image.defaultColorPreference;
+    // Before any session is adopted, so each is put on it.
+    seedLearnedCellPixelSize(image.cellPixelSize, "handover");
 
     auto outcome = std::expected<void, HandoverError> {};
     if (auto const restored = _model.restore(image.tree, image.modelIds); !restored)
@@ -219,16 +222,6 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
             id.value,
             std::to_underlying(restored.error()));
         _unrestoredScreens.push_back(id);
-    }
-
-    // Not part of a terminal's state, and without it an image a program draws before a client attaches has no
-    // cells to be laid out on: the PTY's size in pixels, which a client last reported, gives it back.
-    if (session.pty.pixels)
-    {
-        auto& terminal = hosted->terminal();
-        auto const _ = std::lock_guard { terminal };
-        if (auto const page = terminal.totalPageSize(); page.lines.value > 0 && page.columns.value > 0)
-            terminal.setCellPixelSize(*session.pty.pixels / page);
     }
 
     // Delivered after the replies the restored terminal queued, before anything a client hands it from now.
