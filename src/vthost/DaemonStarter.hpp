@@ -7,6 +7,8 @@
 
 #include <vtpty/ProcessPlacement.hpp>
 
+#include <core/platform/FileSystem.hpp>
+
 #include <chrono>
 #include <expected>
 #include <filesystem>
@@ -18,6 +20,7 @@
 
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/InstalledExecutable.hpp>
 #include <vthost/ServiceControl.hpp>
 
 namespace vthost
@@ -64,6 +67,9 @@ struct RegisteredService
 {
     std::unique_ptr<ServiceBackend> backend; ///< The mechanism that holds the registration.
     std::string name;                        ///< The registration name (an older release's, maybe).
+    /// What the registration reported when it was found: one round trip to the service manager, which what is
+    /// decided from it (repairing, choosing a starter) reuses. Kept current by repairRegistration().
+    ServiceStatus status {};
 };
 
 /// @param label The socket label.
@@ -72,6 +78,53 @@ struct RegisteredService
 ///         whose status can be had and is not NotInstalled; nullopt when none is.
 [[nodiscard]] std::optional<RegisteredService> findRegisteredService(
     std::string_view label, ServiceBackendFactory const& makeBackend);
+
+/// What repairRegistration() did.
+enum class RegistrationRepair : uint8_t
+{
+    Unchanged = 0, ///< Nothing needed doing.
+    Retargeted,    ///< The registration was pointed at the installed executable.
+};
+
+/// What repairing a registration needs to know of the host.
+struct RegistrationRepairInputs
+{
+    core::platform::FileSystem const& fileSystem; ///< Where the programs are looked for.
+    /// The executable an installation provides now (installedExecutableOf()); empty for none, which repairs
+    /// nothing.
+    std::filesystem::path installedExecutable;
+};
+
+/// Points a registration whose program an upgrade removed at the installed executable, so the Task Scheduler
+/// does not start nothing at the next logon.
+/// @param service The registration, as found; its status is updated when it is retargeted.
+/// @param inputs What exists on the host.
+/// @return Retargeted iff the registration names a program that does not exist and the installed executable
+///         does; Unchanged otherwise (also when it names no program, as systemd's and launchd's do not); the
+///         backend's error when it refuses the change.
+[[nodiscard]] std::expected<RegistrationRepair, ServiceError> repairRegistration(
+    RegisteredService& service, RegistrationRepairInputs const& inputs);
+
+/// What a registration is looked for to do.
+enum class RegistrationUse : uint8_t
+{
+    Manage = 0, ///< The `daemon-service` verbs: any registration, a stale or disabled one included, for it to
+                ///< be removed.
+    Start,      ///< A client that wants a daemon serving: a registration that cannot start one is none.
+};
+
+/// @param label The socket label.
+/// @param makeBackend Builds the backend for one mode and name.
+/// @param inputs What repairRegistration() needs.
+/// @param use What the registration is for.
+/// @return findRegisteredService(), the registration repaired by repairRegistration(); a repair that fails is
+///         logged. For Start, a registration whose program is still missing after that is none (nullopt), so
+///         that the daemon is spawned on demand; logged once, with the repair's error where there was one.
+[[nodiscard]] std::optional<RegisteredService> findRepairedRegisteredService(
+    std::string_view label,
+    ServiceBackendFactory const& makeBackend,
+    RegistrationRepairInputs const& inputs,
+    RegistrationUse use);
 
 /// Something that gets a daemon serving.
 class DaemonStarter

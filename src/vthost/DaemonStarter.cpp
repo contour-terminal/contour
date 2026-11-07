@@ -2,11 +2,14 @@
 #include <vthost/DaemonStarter.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <cstdlib>
 #include <format>
 #include <ranges>
 #include <utility>
+
+#include <vthost/Logging.hpp>
 
 namespace vthost
 {
@@ -26,10 +29,54 @@ std::optional<RegisteredService> findRegisteredService(std::string_view label,
     for (auto const& name: registrationNamesForLabel(label))
         for (auto const& mode: ServiceStartModeNames | std::views::values)
             if (auto backend = makeBackend(mode, name))
-                if (auto const found = backend->status();
-                    found && found->state != ServiceRunState::NotInstalled)
-                    return RegisteredService { .backend = std::move(backend), .name = name };
+                if (auto found = backend->status(); found && found->state != ServiceRunState::NotInstalled)
+                    return RegisteredService { .backend = std::move(backend),
+                                               .name = name,
+                                               .status = *std::move(found) };
     return std::nullopt;
+}
+
+std::expected<RegistrationRepair, ServiceError> repairRegistration(RegisteredService& service,
+                                                                   RegistrationRepairInputs const& inputs)
+{
+    auto const& program = service.status.program;
+    if (program.empty() || inputs.installedExecutable.empty() || inputs.fileSystem.exists(program)
+        || !inputs.fileSystem.exists(inputs.installedExecutable))
+        return RegistrationRepair::Unchanged;
+    if (auto const retargeted = service.backend->retarget(inputs.installedExecutable); !retargeted)
+        return std::unexpected(retargeted.error());
+    service.status.program = inputs.installedExecutable;
+    return RegistrationRepair::Retargeted;
+}
+
+std::optional<RegisteredService> findRepairedRegisteredService(std::string_view label,
+                                                               ServiceBackendFactory const& makeBackend,
+                                                               RegistrationRepairInputs const& inputs,
+                                                               RegistrationUse use)
+{
+    auto found = findRegisteredService(label, makeBackend);
+    if (!found)
+        return found;
+    auto repairFailure = std::string {};
+    if (auto const repaired = repairRegistration(*found, inputs); !repaired)
+        repairFailure = std::format(" (it could not be pointed at {}: {})",
+                                    core::pathToUtf8(inputs.installedExecutable),
+                                    repaired.error().toString());
+    auto const& program = found->status.program;
+    if (use == RegistrationUse::Start && !program.empty() && !inputs.fileSystem.exists(program))
+    {
+        errorLog()("the daemon task {} starts {}, which does not exist{}; starting the daemon on demand",
+                   found->name,
+                   core::pathToUtf8(program),
+                   repairFailure);
+        return std::nullopt;
+    }
+    if (!repairFailure.empty())
+        errorLog()("the daemon task {} starts {}, which does not exist{}",
+                   found->name,
+                   core::pathToUtf8(program),
+                   repairFailure);
+    return found;
 }
 
 ServiceDaemonStarter::ServiceDaemonStarter(RegisteredService service,
@@ -93,12 +140,10 @@ std::unique_ptr<DaemonStarter> chooseDaemonStarter(std::optional<RegisteredServi
 {
     if (registered)
     {
-        auto const status = registered->backend->status();
         // A registration the user disabled cannot start anything: spawn on demand rather than run it.
-        if (status && status->state == ServiceRunState::Disabled)
+        if (registered->status.state == ServiceRunState::Disabled)
             return std::make_unique<OnDemandDaemonStarter>(std::move(onDemand));
-        auto const served =
-            (status ? registeredSocketPath(status->commandLine) : std::nullopt).value_or(labelDefaultSocket);
+        auto const served = registeredSocketPath(registered->status.commandLine).value_or(labelDefaultSocket);
         if (isSameSocketPath(served, onDemand.endpoint.socketPath))
             return std::make_unique<ServiceDaemonStarter>(
                 std::move(*registered),

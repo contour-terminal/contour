@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/ServiceControl.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/platform/UserPaths.hpp>
 
 #include <algorithm>
@@ -42,6 +43,10 @@ namespace
         [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override
         {
             return std::unexpected(error());
+        }
+        [[nodiscard]] std::expected<void, ServiceError> retarget(std::filesystem::path const&) override
+        {
+            return refuse();
         }
         [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override
         {
@@ -116,6 +121,42 @@ std::vector<std::string> taskNamesFor(std::string_view name, std::string_view us
         names.push_back(std::format("{}-{}", name, userKey));
     names.emplace_back(name);
     return names;
+}
+
+std::string argumentsForLaunchStyle(std::string_view arguments, DaemonLaunchStyle style)
+{
+    constexpr auto Flag = std::string_view { "--background" };
+    if (style != DaemonLaunchStyle::SelfDetaching)
+        return std::string { arguments };
+    // The flag as a word of its own, with a value or without: `--background=0` is a choice made, not a
+    // flag missing.
+    for (auto at = arguments.find(Flag); at != std::string_view::npos; at = arguments.find(Flag, at + 1))
+    {
+        auto const startsWord = at == 0 || arguments[at - 1] == ' ';
+        auto const end = at + Flag.size();
+        auto const endsWord = end == arguments.size() || arguments[end] == ' ' || arguments[end] == '=';
+        if (startsWord && endsWord)
+            return std::string { arguments };
+    }
+    auto result = std::string { arguments };
+    if (!result.empty())
+        result += ' ';
+    result += Flag;
+    return result;
+}
+
+std::filesystem::path programOfTaskAction(std::string_view raw, VariableExpander const& expand)
+{
+    constexpr auto Blanks = std::string_view { " \t" };
+    auto text = raw;
+    text.remove_prefix(std::min(text.find_first_not_of(Blanks), text.size()));
+    if (auto const last = text.find_last_not_of(Blanks); last != std::string_view::npos)
+        text = text.substr(0, last + 1);
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"')
+        text = text.substr(1, text.size() - 2);
+    if (text.empty())
+        return {};
+    return core::pathFromTrustedUtf8(expand(text));
 }
 
 std::vector<std::string> registrationNamesForLabel(std::string_view label)

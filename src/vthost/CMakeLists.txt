@@ -30,6 +30,7 @@ add_library(vthost STATIC
     DaemonUpgradeHooks.cpp
     DaemonUpgradeHooks.hpp
     DaemonStarter.cpp
+    InstalledExecutable.cpp
     DaemonStarter.hpp
     DaemonRuntime.hpp
     ExtensionHosting.hpp

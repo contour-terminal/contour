@@ -4,6 +4,7 @@
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/ConnectList.hpp>
 #include <contour/cli/ConnectProbe.hpp>
+#include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/command/LauncherEntries.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
@@ -306,6 +307,18 @@ namespace
         {
         }
 
+        /// Points the daemon task at the installed executable if an upgrade removed its program. Called while
+        /// a daemon already serves, when no starter is made to do it.
+        /// @param label The socket label.
+        void repairRegistration(std::string_view label) const
+        {
+            std::ignore =
+                vthost::findRepairedRegisteredService(label,
+                                                      vthost::nativeServiceBackendFactory(services),
+                                                      contour::cli::nativeRepairInputs(services.fileSystem),
+                                                      vthost::RegistrationUse::Manage);
+        }
+
         /// @param label The socket label.
         /// @param endpoint Where the daemon listens.
         /// @param placement Places a daemon spawned on demand.
@@ -320,7 +333,10 @@ namespace
             vthost::DaemonSpawnOptions const& options) const
         {
             return vthost::chooseDaemonStarter(
-                vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+                vthost::findRepairedRegisteredService(label,
+                                                      vthost::nativeServiceBackendFactory(services),
+                                                      contour::cli::nativeRepairInputs(services.fileSystem),
+                                                      vthost::RegistrationUse::Start),
                 vthost::labelSocketPath(label, services.environment),
                 vthost::OnDemandSpawn { .endpoint = endpoint,
                                         .spawner = *spawner,
@@ -1415,11 +1431,18 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
              spawnGate = _daemonSpawnGate,
              placement = _processPlacement,
+             repairOnce = std::make_shared<std::once_flag>(),
              label,
              controlPath,
              daemonOptions]() -> std::expected<void, vthost::TransportError> {
             if (start->spawner->probe(controlPath) == vthost::DaemonPresence::Serving)
+            {
+                // Once per start, here on the transport's worker and not on the GUI thread: an upgrade that
+                // moved the installation leaves the daemon serving, and its logon task naming a program that
+                // is gone, which nothing else would notice until the next logon failed.
+                std::call_once(*repairOnce, [&] { start->repairRegistration(label); });
                 return {};
+            }
             spawnGate->wait(DaemonSpawnGate::Closed);
             // A registered service is started before a daemon is spawned on demand.
             auto const starter = start->starter(

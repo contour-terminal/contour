@@ -1620,7 +1620,10 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     // on-demand daemon beside it.
     auto const label = vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")).name;
     auto starter = vthost::chooseDaemonStarter(
-        vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+        vthost::findRepairedRegisteredService(label,
+                                              vthost::nativeServiceBackendFactory(services),
+                                              nativeRepairInputs(services.fileSystem),
+                                              vthost::RegistrationUse::Start),
         vthost::labelSocketPath(label, services.environment),
         vthost::OnDemandSpawn { .endpoint = vthost::UnixEndpoint { .socketPath = socketPath },
                                 .spawner = *spawner,
@@ -1925,7 +1928,16 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
         backend = vthost::makeServiceBackend(*mode, name, services);
     else
     {
-        if (auto found = vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)))
+        // The task is repaired only where it is about to be started; `status` shows what it names, and
+        // `uninstall` removes it as it is.
+        auto const repairs = action == DaemonServiceAction::Start || action == DaemonServiceAction::Restart;
+        auto const factory = vthost::nativeServiceBackendFactory(services);
+        if (auto found = repairs
+                             ? vthost::findRepairedRegisteredService(label,
+                                                                     factory,
+                                                                     nativeRepairInputs(services.fileSystem),
+                                                                     vthost::RegistrationUse::Manage)
+                             : vthost::findRegisteredService(label, factory))
         {
             backend = std::move(found->backend);
             name = std::move(found->name);
