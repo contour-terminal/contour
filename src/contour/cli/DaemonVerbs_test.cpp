@@ -728,3 +728,21 @@ TEST_CASE("status names the upgrade generation and the last failed upgrade", "[c
     CHECK(contour::cli::formatDaemonStatus(status).contains(
         "execFailed: " + std::string { vthost::handover::ExecFailureText }));
 }
+
+TEST_CASE("a daemon service is registered with the running executable, not with argv[0]",
+          "[contour][cli][daemon]")
+{
+    auto const installed = std::filesystem::path { "/opt/contour/bin/contour" };
+    // Started through the PATH, argv[0] is the bare name: absolute() of it would be a file in the cwd.
+    CHECK(contour::cli::daemonServiceProgram(installed, "contour") == installed);
+    CHECK(contour::cli::daemonServiceProgram(installed, "./relative/contour") == installed);
+}
+
+TEST_CASE("a daemon service falls back to argv[0] made absolute when the executable is not known",
+          "[contour][cli][daemon]")
+{
+    auto const fallback = contour::cli::daemonServiceProgram(
+        std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory)), "contour");
+    CHECK(fallback.is_absolute());
+    CHECK(fallback.filename() == "contour");
+}

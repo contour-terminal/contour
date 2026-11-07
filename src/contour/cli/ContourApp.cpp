@@ -2074,8 +2074,8 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
     // auto-spawn builds its command line the same way, so a daemon option cannot end up forwarded
     // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
     // daemon exists precisely to still be there for the next client.
-    auto const program = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
-    auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(std::filesystem::absolute(program)),
+    auto const program = daemonServiceProgram(vthost::currentExecutablePath(), commandLine().front());
+    auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(program),
                                              socketPath,
                                              vthost::DaemonSpawnOptions {
                                                  .filter = parameters().get<string>(prefix + ".log"),

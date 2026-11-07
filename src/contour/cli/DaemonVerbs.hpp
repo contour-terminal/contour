@@ -156,6 +156,19 @@ class ConfirmPrompt
 /// @return One `label: value` line per fact, the labels padded to one column.
 [[nodiscard]] std::string formatDaemonStatus(vthost::client::DaemonStatus const& status);
 
+/// The program a daemon service is registered to start.
+///
+/// A registration outlives the shell that made it, so the program is the executable that is running, not
+/// argv[0]: a shell starts a program found on the PATH with the name it was typed under, and absolute() of
+/// that is a file in the current directory.
+/// @param running The running executable as the operating system reports it
+/// (vthost::currentExecutablePath()),
+///        which also resolves an AppImage to the image.
+/// @param argv0 The program name the process was started with, the fallback where @p running is not known.
+/// @return @p running when known, else @p argv0 made absolute.
+[[nodiscard]] std::filesystem::path daemonServiceProgram(
+    std::expected<std::filesystem::path, std::error_code> const& running, std::string_view argv0);
+
 /// Reads a log file's tail, then what is appended to it.
 class LogFollower
 {
