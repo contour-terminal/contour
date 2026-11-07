@@ -1546,8 +1546,10 @@ jobs:
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
           VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+      # CMake 3.30 is the first to honour CPACK_WIX_VERSION: older ones run WiX 3's candle and light whatever
+      # WiX the next step installs.
       - name: "Install cmake"
-        uses: lukka/get-cmake@v3.29.0
+        uses: lukka/get-cmake@v4.3.4
       - name: "Check cmake version"
         run: cmake --version
       - uses: ilammy/msvc-dev-cmd@v1
@@ -1691,6 +1693,9 @@ jobs:
           # dotnet tool search --global wix --detail
           # or at URL: https://www.nuget.org/packages/wix#versions-body-tab
           dotnet tool install --global wix --version 4.0.6
+          # The WiX .NET tool takes its UI dialogs from this extension, which CPack does not fetch itself, and
+          # its version has to match the tool's.
+          wix extension add --global WixToolset.UI.wixext/4.0.6
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
       - name: "Create Package(s)"
         if: github.event_name != 'pull_request' || github.head_ref == 'release'
