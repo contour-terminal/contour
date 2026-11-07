@@ -22,6 +22,52 @@ tag. Binaries keep the run number as a fourth version field (`0.9.0.9500`); the 
 4. The tag's run builds, tests and packages that commit and creates the draft release.
 5. Publish the draft.
 
+## Submitting the release to winget
+
+Publishing the release (the draft made public; not a pre-release) starts
+[`winget.yml`](https://github.com/contour-terminal/contour/blob/master/.github/workflows/winget.yml). Its `manifest` job reads the published
+release and has Komac render the winget manifests for `contour-terminal.Contour` at the package version
+`<version>.<run>` from the two MSIs and the portable ZIP, with their scopes and UpgradeCodes. Komac cannot finish
+two things without a terminal, so `scripts/winget-release.py finalize` does: it gives the ZIP its nested
+installer (the program it runs, read from the ZIP itself) and an `InstallerLocale`, and it removes the VC++
+runtime dependency Komac carries over from older versions (Contour ships the runtime, and a dependency would make a
+per-user install ask for an administrator). `check` then verifies the finished files, and the `submit` job
+uploads exactly those files with `komac submit`; nothing is rendered a second time.
+
+**Setting it up**, once, before the first release (the workflow names the environment, and GitHub creates a missing
+one without any protection):
+
+1. Create the environment **`winget`** (Settings, Environments).
+2. Under *Deployment branches and tags* choose *Selected branches and tags* and add the tag rule `v*` and the
+   branch `master`. A branch dispatch of a changed workflow then cannot reach the token.
+3. Add the secret **`WINGET_TOKEN`** to the environment: a classic personal access token with `public_repo` scope.
+   Give it an expiry and put the renewal in your calendar. The token belongs to a **dedicated machine account**
+   that owns the `winget-pkgs` fork, has no access to the contour-terminal repositories, and has an expiry of
+   its own; a token of your personal account could write to every public repository you can, workflows included.
+4. Optional: add *Required reviewers*, to hold the submission until someone approves.
+
+- **What `winget install` picks.** `--scope user` the per-user MSI, `--scope machine` the per-machine MSI, and a
+  plain install the per-user MSI: winget's setting `installBehavior.preferences.scope` defaults to `user`, and it
+  ranks an installer of the preferred scope strongly above the other one, in whatever order the manifest lists them
+  (winget-cli `ManifestComparator.cpp` and `UserSettings.h`). The portable ZIP ignores `--scope` but ranks below an
+  MSI, and its `InstallerLocale` matches the MSIs', so it is never picked unasked (`--installer-type portable`).
+  `scripts/winget-release.py check` models that choice and fails when the finished manifest would pick otherwise;
+  `docs/install.md` promises exactly that.
+- **A dry run.** `gh workflow run winget.yml -f tag=v<version>` renders, finishes and checks the manifests of a
+  published release and submits nothing. They are the run's `winget-manifests` artifact (also kept when a step
+  failed).
+- **Submitting by hand**, for example after fixing the token: the same command with `-f submit=true`.
+- **A pull request that already exists** for that version, open or merged, is reported in the run's summary, and the
+  job opens none. A pull request that was closed without merging does not count: dispatching with `submit=true`
+  submits the version again.
+- **Releases made by a workflow.** A release published with the workflow `GITHUB_TOKEN` does not start
+  `winget.yml`; use the dispatch above.
+- **The first submission of 0.9.** Komac carries every field it does not render over from the newest version in
+  winget-pkgs. If you also want to catch the 0.8.0 release up, submit it **before** the first 0.9 submission: 0.8.0
+  does need the `Dependencies` entry that 0.9 drops, and the newest version is the one that is carried forward.
+- **Bumping Komac** means changing two lines in `scripts/ci/install-komac.sh`: the version and the SHA-256 of its
+  `.deb`.
+
 ## What `check_release` checks
 
 `scripts/check-release.py --tag NAME` reads the first `<release>` of `metainfo.xml` and fails unless:

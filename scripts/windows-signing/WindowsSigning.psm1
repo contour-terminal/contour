@@ -1331,8 +1331,13 @@ function Expand-MsiPayload {
     param([string]$Msi, [string]$Destination)
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-    $process = Start-Process -FilePath msiexec.exe -PassThru -NoNewWindow -ArgumentList @('/a', "`"$Msi`"", '/qn', "TARGETDIR=`"$Destination`"")
-    $null = $process.Handle
+    # A Process that holds its handle from the creation on: Start-Process -PassThru opens it only when asked, and an
+    # msiexec that has ended by then leaves ExitCode null.
+    $info = [System.Diagnostics.ProcessStartInfo]::new('msiexec.exe')
+    $info.Arguments = "/a `"$Msi`" /qn TARGETDIR=`"$Destination`""
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($info)
     if (-not $process.WaitForExit(600000)) {
         $process.Kill($true)
         throw "msiexec /a did not end within 600 s for ${Msi}: it was ended"

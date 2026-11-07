@@ -284,6 +284,28 @@ function Assert-Footprint {
     if ($wrong) { throw "expected $($Expect.ToLower()): $(@($wrong) -join '; ')" }
 }
 
+function Start-BoundedProcess {
+    <# Runs a program and waits for it, at most $TimeoutMilliseconds. Returns @{ ExitCode; Output; TimedOut }.
+       Through System.Diagnostics.Process, not Start-Process -PassThru: that hands back an object which opens its
+       handle only when asked, and a program that has ended by then leaves ExitCode null. Both streams are read
+       asynchronously, so that a program that fills a pipe cannot block while this waits for it. #>
+    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string]$Arguments, [Parameter(Mandatory)][int]$TimeoutMilliseconds)
+    $info = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
+    $info.Arguments = $Arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $timedOut = -not $process.WaitForExit($TimeoutMilliseconds)
+    if ($timedOut) { $process.Kill($true) }
+    # The parameterless wait returns once the streams are read to their end.
+    $process.WaitForExit()
+    return @{ ExitCode = $process.ExitCode; Output = ($stdout.Result + $stderr.Result); TimedOut = $timedOut }
+}
+
 function Invoke-Msiexec {
     <# Runs `msiexec <Action> <Target> <Properties>` quietly with a verbose log named after LogName, in $LogDir;
        fails unless it exits 0 and prints the log tail on failure. #>
@@ -295,13 +317,10 @@ function Invoke-Msiexec {
         [string[]]$Properties = @()
     )
     $Log = Join-Path $LogDir $LogName
-    # Bounded: an install that never ends must fail in minutes, not hold the runner for hours. The handle is taken
-    # now, or a process that ended would report no exit code.
-    $process = Start-Process -FilePath msiexec.exe -PassThru -NoNewWindow `
-        -ArgumentList (@($Action, $Target, '/qn', '/norestart', '/l*v', "`"$Log`"") + $Properties)
-    $null = $process.Handle
-    if (-not $process.WaitForExit($MsiexecTimeoutMilliseconds)) {
-        $process.Kill($true)
+    # Bounded: an install that never ends must fail in minutes, not hold the runner for hours.
+    $process = Start-BoundedProcess -FilePath msiexec.exe -TimeoutMilliseconds $MsiexecTimeoutMilliseconds `
+        -Arguments ((@($Action, $Target, '/qn', '/norestart', '/l*v', "`"$Log`"") + $Properties) -join ' ')
+    if ($process.TimedOut) {
         throw "$What did not end within $($MsiexecTimeoutMilliseconds / 1000) s: msiexec was ended"
     }
     if ($process.ExitCode -ne $ExitSuccess) {
@@ -321,16 +340,13 @@ function Invoke-Contour {
     $err = Join-Path $LogDir 'contour.err'
     # An argument with a space or a quote reaches the program as one, as the e2e script for the same verbs does it.
     $quoted = $Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }
-    $process = Start-Process -FilePath $Executable -ArgumentList ($quoted -join ' ') -PassThru -NoNewWindow `
-        -RedirectStandardOutput $out -RedirectStandardError $err
-    $null = $process.Handle
-    if (-not $process.WaitForExit($ContourTimeoutMilliseconds)) {
-        $process.Kill($true)
+    $process = Start-BoundedProcess -FilePath $Executable -Arguments ($quoted -join ' ') -TimeoutMilliseconds $ContourTimeoutMilliseconds
+    if ($process.TimedOut) {
         throw "contour $($Arguments -join ' ') did not end within $($ContourTimeoutMilliseconds / 1000) s: it was ended"
     }
-    $text = (Get-Content $out -Raw -ErrorAction SilentlyContinue) + (Get-Content $err -Raw -ErrorAction SilentlyContinue)
+    [System.IO.File]::WriteAllText($out, $process.Output)
     Write-Host "     $Executable $($Arguments -join ' ') -> $($process.ExitCode)"
-    return @{ ExitCode = $process.ExitCode; Output = "$text" }
+    return @{ ExitCode = $process.ExitCode; Output = "$($process.Output)" }
 }
 
 function Assert-Contour {
@@ -466,6 +482,17 @@ $preflight = @(
             if (($roots -join '|') -ne 'C:\a') { throw "the cleanup roots are '$($roots -join '|')', expected C:\a" }
             $roots = @(Get-CleanupRoot -Context @{ ExpectedRoot = 'C:\a'; FromRoot = 'C:\b'; OtherRoot = 'C:\c' })
             if (($roots -join '|') -ne 'C:\a|C:\b|C:\c') { throw "the cleanup roots are '$($roots -join '|')', expected C:\a|C:\b|C:\c" }
+        } }
+    @{ Name = 'a program is run with its exit code and its output, and ended when it overstays'; Run = {
+            # Fast programs, many times: the exit code of one that ended before it was asked for is what once came back null.
+            foreach ($round in 1..40) {
+                $ran = Start-BoundedProcess -FilePath cmd.exe -Arguments '/c echo done& exit 3' -TimeoutMilliseconds 30000
+                if ($null -eq $ran.ExitCode -or $ran.ExitCode -ne 3 -or $ran.Output.Trim() -ne 'done' -or $ran.TimedOut) {
+                    throw "round ${round}: a program that printed done and exited 3 came back as exit code '$($ran.ExitCode)', output '$($ran.Output.Trim())', timed out $($ran.TimedOut)"
+                }
+            }
+            $slow = Start-BoundedProcess -FilePath cmd.exe -Arguments '/c ping -n 30 127.0.0.1 > nul' -TimeoutMilliseconds 500
+            if (-not $slow.TimedOut) { throw 'a program that overstayed its time was not ended' }
         } }
     @{ Name = 'an UpgradeCode no installed product shares lists none'; Run = {
             # The empty answer must be a list of none, whatever Windows Installer hands back for it (the runner's
