@@ -20,7 +20,7 @@
     <!-- "Launch Contour" on the installer's last page. -->
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
   </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCTFEATURE">
