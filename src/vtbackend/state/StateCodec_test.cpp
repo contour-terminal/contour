@@ -57,6 +57,19 @@ struct Holder
     void visitFields(this auto& self, auto& visitor) { visitor(1, self.shape); }
 };
 
+/// Two char fields, as UserPreferredSupplementalSet has.
+struct CharPair
+{
+    char first = char {};
+    char second = char {};
+
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.first);
+        visitor(2, self.second);
+    }
+};
+
 template <typename T>
 std::vector<uint8_t> encodeSample(T const& sample)
 {
@@ -281,4 +294,33 @@ TEST_CASE("a varint whose tenth byte carries more than bit 63 is MalformedRecord
     bytes.back() = 0b0000'0001;
     auto valid = StateReader::ofPayload(bytes);
     CHECK(valid.varint().value() == UINT64_MAX);
+}
+
+TEST_CASE("a char crosses the wire as a signed byte whether or not char is signed", "[StateCodec]")
+{
+    // The v1 wire form is the one x86 wrote: a signed 8-bit value, zigzag coded. A char holding 0x25 is the
+    // varint 74; one holding 0xE9 (-23 as a signed byte) is 45. AArch64 Linux has an unsigned char, and wrote
+    // 37 and 233 there.
+    auto const pair = CharPair { .first = '%', .second = static_cast<char>(0xE9) };
+    auto const bytes = encodeSample(pair);
+    auto expected = StateWriter::payload();
+    expected.varint(detail::fieldKey(1, detail::WireKind::Varint));
+    expected.varint(74);
+    expected.varint(detail::fieldKey(2, detail::WireKind::Varint));
+    expected.varint(45);
+    auto const expectedBytes = std::move(expected).take();
+    CHECK(bytes == expectedBytes);
+
+    auto decoded = CharPair {};
+    REQUIRE(detail::decodeFields(bytes, decoded).has_value());
+    CHECK(decoded.first == '%');
+    CHECK(decoded.second == static_cast<char>(0xE9));
+
+    // A value outside a signed byte is not a char.
+    auto writer = StateWriter::payload();
+    writer.varint(detail::fieldKey(1, detail::WireKind::Varint));
+    writer.varint(0x1FF);
+    auto tooWide = CharPair {};
+    auto const wide = std::move(writer).take();
+    CHECK_FALSE(detail::decodeFields(wide, tooWide).has_value());
 }
