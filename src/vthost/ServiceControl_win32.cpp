@@ -136,6 +136,17 @@ namespace
         });
     }
 
+    /// @return What the Task Scheduler says of the task's state, as a run state.
+    [[nodiscard]] ServiceRunState runStateOf(TASK_STATE state) noexcept
+    {
+        switch (state)
+        {
+            case TASK_STATE_RUNNING: return ServiceRunState::Running;
+            case TASK_STATE_DISABLED: return ServiceRunState::Disabled;
+            default: return ServiceRunState::Stopped;
+        }
+    }
+
     [[nodiscard]] ServiceError comError(HRESULT hr, std::string context)
     {
         // Access-denied surfaces through several spellings; all mean the same thing to a user
@@ -516,8 +527,7 @@ namespace
                         }
                     }
 
-        return ServiceStatus { .state = state == TASK_STATE_RUNNING ? ServiceRunState::Running
-                                                                    : ServiceRunState::Stopped,
+        return ServiceStatus { .state = runStateOf(state),
                                .mode = ServiceStartMode::Logon,
                                .commandLine = std::move(commandLine) };
     }

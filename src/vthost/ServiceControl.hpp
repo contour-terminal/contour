@@ -94,6 +94,7 @@ enum class ServiceRunState : std::uint8_t
     NotInstalled, ///< No registration exists.
     Stopped,      ///< Registered, not running.
     Running,      ///< Registered and running.
+    Disabled,     ///< Registered, but switched off: it cannot start (the Task Scheduler's disabled task).
 };
 
 /// How each run state reads in `daemon-service status`. One table rather than a chain of
@@ -102,6 +103,7 @@ inline constexpr auto ServiceRunStateNames = std::array {
     std::pair { std::string_view { "not installed" }, ServiceRunState::NotInstalled },
     std::pair { std::string_view { "installed, stopped" }, ServiceRunState::Stopped },
     std::pair { std::string_view { "running" }, ServiceRunState::Running },
+    std::pair { std::string_view { "installed, disabled" }, ServiceRunState::Disabled },
 };
 
 /// @param state The run state to name.

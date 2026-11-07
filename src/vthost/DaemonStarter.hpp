@@ -27,12 +27,12 @@ namespace vthost
 /// Scheduler task that ran `--background` reads "Ready" while its daemon serves.
 /// @param registered What the service manager reports.
 /// @param live Whether a daemon accepts connections.
-/// @return NotInstalled stays NotInstalled; otherwise Serving is Running and Absent is Stopped.
+/// @return NotInstalled and Disabled stay as they are; otherwise Serving is Running and Absent is Stopped.
 [[nodiscard]] constexpr ServiceRunState effectiveRunState(ServiceRunState registered,
                                                           DaemonPresence live) noexcept
 {
-    if (registered == ServiceRunState::NotInstalled)
-        return ServiceRunState::NotInstalled;
+    if (registered == ServiceRunState::NotInstalled || registered == ServiceRunState::Disabled)
+        return registered;
     return live == DaemonPresence::Serving ? ServiceRunState::Running : ServiceRunState::Stopped;
 }
 

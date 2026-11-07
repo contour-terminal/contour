@@ -94,6 +94,9 @@ std::unique_ptr<DaemonStarter> chooseDaemonStarter(std::optional<RegisteredServi
     if (registered)
     {
         auto const status = registered->backend->status();
+        // A registration the user disabled cannot start anything: spawn on demand rather than run it.
+        if (status && status->state == ServiceRunState::Disabled)
+            return std::make_unique<OnDemandDaemonStarter>(std::move(onDemand));
         auto const served =
             (status ? registeredSocketPath(status->commandLine) : std::nullopt).value_or(labelDefaultSocket);
         if (isSameSocketPath(served, onDemand.endpoint.socketPath))
