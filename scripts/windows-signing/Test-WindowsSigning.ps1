@@ -215,6 +215,301 @@ Test-Case 'plan verb' {
     }
 }
 
+# ---- Signing and verifying, with a throwaway certificate -------------------------------------------------------------
+
+$toolsDirectory = Join-Path $WorkDirectory 'tools'
+$fixtureRoot = Join-Path $WorkDirectory 'signing fixture'
+
+function Get-TestTable {
+    # The shipped table, fresh, with no waiting between attempts and a PowerShell tool for the cases that need a
+    # program that does something simple.
+    $fresh = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot 'signers.psd1')
+    $fresh.RetryDelaySeconds = @(0, 0)
+    $fresh.Tools.pwsh = @{ Source = 'Path'; Executable = 'pwsh' }
+    return $fresh
+}
+
+function New-FixtureTree {
+    # bin/contour.exe and bin/plugins/second.dll (copies of the unsigned executable) and bin/notes.txt.
+    param([string]$Name)
+    $tree = Join-Path $fixtureRoot $Name
+    New-Item -ItemType Directory -Force -Path (Join-Path $tree 'bin/plugins') | Out-Null
+    Copy-Item -LiteralPath $UnsignedPe -Destination (Join-Path $tree 'bin/contour.exe')
+    Copy-Item -LiteralPath $UnsignedPe -Destination (Join-Path $tree 'bin/plugins/second.dll')
+    [System.IO.File]::WriteAllText((Join-Path $tree 'bin/notes.txt'), 'not an executable')
+    return $tree
+}
+
+function Use-Certificate {
+    # Makes a throwaway certificate and points the dry-run row's two variables at it.
+    param([string]$Name)
+    $certificate = New-ThrowawayCodeSigningCertificate -Directory (Join-Path $WorkDirectory "cert-$Name")
+    $env:CONTOUR_SIGNING_PFX = $certificate.PfxPath
+    $env:CONTOUR_SIGNING_PFX_PASSWORD = $certificate.Password
+    return $certificate
+}
+
+function Clear-Certificate {
+    Remove-Item Env:CONTOUR_SIGNING_PFX, Env:CONTOUR_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
+}
+
+function Test-OnlineCase {
+    # A case that needs a timestamp server: mandatory on CI, elsewhere skipped, with a notice, where none answers.
+    param([string]$Name, [scriptblock]$Body)
+    if ($env:CI -ne 'true') {
+        try {
+            $null = Invoke-WebRequest -Uri 'http://timestamp.digicert.com' -Method Head -TimeoutSec 10 -SkipHttpErrorCheck
+        } catch {
+            Write-Host "skipped (no timestamp server reachable): $Name"
+            return
+        }
+    }
+    Test-Case $Name $Body
+}
+
+function Get-SignedSingleFile {
+    # Signs a copy of the executable with the throwaway certificate; returns its path.
+    param([string]$Name, [switch]$Timestamped)
+    $path = Join-Path $WorkDirectory "single-$Name.exe"
+    Copy-Item -LiteralPath $UnsignedPe -Destination $path -Force
+    $signtool = Resolve-SigningTool -Name signtool -Table (Get-TestTable) -ToolsDirectory $toolsDirectory
+    $arguments = @('sign', '/fd', 'sha256', '/f', $env:CONTOUR_SIGNING_PFX, '/p', $env:CONTOUR_SIGNING_PFX_PASSWORD)
+    if ($Timestamped) { $arguments += @('/td', 'sha256', '/tr', 'http://timestamp.digicert.com') }
+    & $signtool @arguments $path | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "signtool exited $LASTEXITCODE" }
+    return $path
+}
+
+Test-Case 'throwaway certificate' {
+    $before = @(Get-ChildItem Cert:\CurrentUser\My).Count
+    $certificate = New-ThrowawayCodeSigningCertificate -Directory (Join-Path $WorkDirectory 'cert-plain')
+    if (-not (Test-Path -LiteralPath $certificate.PfxPath)) { throw 'no .pfx was written' }
+    if ($certificate.Thumbprint -notmatch '^[0-9A-F]{40}$') { throw "the thumbprint is '$($certificate.Thumbprint)'" }
+    Assert-Equal $before @(Get-ChildItem Cert:\CurrentUser\My).Count 'the number of certificates in the current user''s store'
+    $loaded = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate.PfxPath, $certificate.Password)
+    if ($loaded.Subject -ne 'CN=Contour signing dry run (throwaway)') { throw "the subject is '$($loaded.Subject)'" }
+    if ($loaded.NotAfter -gt [DateTime]::UtcNow.AddDays(1.1)) { throw 'the certificate lives longer than a day' }
+}
+
+Test-Case 'unsigned file' {
+    $tree = New-FixtureTree 'unsigned'
+    $problem = Get-SignatureProblem -Path (Join-Path $tree 'bin/contour.exe') -Trust System
+    if ($problem -notlike '*NotSigned*') { throw "the problem is '$problem'" }
+}
+
+Test-Case 'missing secret' {
+    $table = Get-TestTable
+    $table.Signers.dryrun.Secrets = @('CONTOUR_TEST_UNSET', 'CONTOUR_TEST_UNSET_TOO')
+    $table.Signers.dryrun.PayloadStep.Tool = 'nosuchtool'
+    $table.Tools.nosuchtool = @{ Source = 'Path'; Executable = 'nosuchtool-that-is-not-there' }
+    $tree = New-FixtureTree 'secret'
+    Assert-Throws { Invoke-SignBatch -Root $tree -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-secret') -ToolsDirectory $toolsDirectory } @('CONTOUR_TEST_UNSET', 'CONTOUR_TEST_UNSET_TOO') 'a missing secret'
+}
+
+Test-Case 'failing tool' {
+    $table = Get-TestTable
+    $step = @{ Tool = 'pwsh'; Invocation = 'InPlace'; Arguments = @('-NoProfile', '-Command', 'exit 3') }
+    $tree = New-FixtureTree 'failing'
+    Assert-Throws { Invoke-SigningStep -Root $tree -Files @('bin/contour.exe') -Step $step -Table $table -ToolsDirectory $toolsDirectory -WorkDirectory (Join-Path $WorkDirectory 'work-failing') } @('pwsh', 'exit code 3', '3 attempts') 'a failing tool'
+}
+
+Test-Case 'all timestamp servers down' {
+    $certificate = Use-Certificate 'down'
+    try {
+        $table = Get-TestTable
+        $table.Attempts = 2
+        $table.Signers.dryrun.PayloadStep.TimestampUrls = @('http://127.0.0.1:9/', 'http://127.0.0.1:10/')
+        $tree = New-FixtureTree 'down'
+        Assert-Throws { Invoke-SigningStep -Root $tree -Files @('bin/contour.exe') -Step $table.Signers.dryrun.PayloadStep -Table $table -ToolsDirectory $toolsDirectory -WorkDirectory (Join-Path $WorkDirectory 'work-down') } @('http://127.0.0.1:9/', 'http://127.0.0.1:10/') 'servers that are down'
+    } finally { Clear-Certificate }
+}
+
+Test-Case 'untimestamped signature' {
+    $certificate = Use-Certificate 'untimestamped'
+    try {
+        $table = Get-TestTable
+        $table.Signers.dryrun.PayloadStep.Arguments = @('sign', '/fd', 'sha256', '/f', '{env:CONTOUR_SIGNING_PFX}', '/p', '{env:CONTOUR_SIGNING_PFX_PASSWORD}', '{file}')
+        $table.Signers.dryrun.PayloadStep.Remove('TimestampUrls')
+        $tree = New-FixtureTree 'untimestamped'
+        Assert-Throws { Invoke-SignBatch -Root $tree -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-untimestamped') -ToolsDirectory $toolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint } @('not timestamped') 'a signature without a timestamp'
+    } finally { Clear-Certificate }
+}
+
+Test-Case 'selection' {
+    $table = Get-TestTable
+    $tree = New-FixtureTree 'selection'
+    $selected = @(Select-SigningFile -Root $tree -Policy Unsigned -OwnBinaries @('bin/contour.exe'))
+    Assert-Equal 'bin/contour.exe|bin/plugins/second.dll' ($selected -join '|') 'the unsigned selection'
+    Assert-Equal 'bin/contour.exe' (@(Select-SigningFile -Root $tree -Policy Own -OwnBinaries @('bin/contour.exe')) -join '|') 'the own selection'
+    Assert-Throws { Select-SigningFile -Root $tree -Policy Own -OwnBinaries @('bin/missing.exe') } @('bin/missing.exe', 'is this a staged install tree?') 'a missing own binary'
+
+    # A Microsoft-signed program is skipped; a tree of nothing else has nothing to sign.
+    $signtool = Resolve-SigningTool -Name signtool -Table $table -ToolsDirectory $toolsDirectory
+    $signedOnly = Join-Path $WorkDirectory 'only signed'
+    New-Item -ItemType Directory -Force -Path $signedOnly | Out-Null
+    Copy-Item -LiteralPath $signtool -Destination (Join-Path $signedOnly 'signtool.exe')
+    Assert-Throws { Select-SigningFile -Root $signedOnly -Policy Unsigned -OwnBinaries @() } @('stage afresh') 'a tree of signed files'
+    Copy-Item -LiteralPath $signtool -Destination (Join-Path $tree 'bin/signtool.exe')
+    $withSigned = @(Select-SigningFile -Root $tree -Policy Unsigned -OwnBinaries @('bin/contour.exe'))
+    if ('bin/signtool.exe' -in $withSigned) { throw 'a file with a valid signature was selected' }
+
+    # A file signed with a certificate Windows does not trust has no valid signature: it is signed again.
+    $certificate = Use-Certificate 'selection'
+    try {
+        $path = Get-SignedSingleFile 'selection'
+        Copy-Item -LiteralPath $path -Destination (Join-Path $tree 'bin/plugins/second.dll') -Force
+        $again = @(Select-SigningFile -Root $tree -Policy Unsigned -OwnBinaries @('bin/contour.exe'))
+        if ('bin/plugins/second.dll' -notin $again) { throw 'a file signed by an untrusted certificate was not selected again' }
+    } finally { Clear-Certificate }
+}
+
+Test-Case 'download pin' {
+    $table = Get-TestTable
+    $source = Join-Path $WorkDirectory 'download source'
+    New-Item -ItemType Directory -Force -Path $source | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $source 'tool.exe'), 'a tool')
+    $zip = Join-Path $WorkDirectory 'tool.zip'
+    Compress-Archive -Path (Join-Path $source 'tool.exe') -DestinationPath $zip -Force
+    $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+    $table.Tools.pinned = @{ Source = 'GitHubRelease'; Repository = 'a/b'; Tag = 'v1'; Asset = 'tool.zip'; Sha256 = $hash.ToLowerInvariant(); Executable = 'tool.exe' }
+    $tools = Join-Path $WorkDirectory 'pinned tools'
+    $copy = { param($Url, $OutFile) if ($Url -notmatch '^https://github.com/a/b/releases/download/v[12]/tool\.zip$') { throw "unexpected URL $Url" }; Copy-Item -LiteralPath $zip -Destination $OutFile }.GetNewClosure()
+    $path = Resolve-SigningTool -Name pinned -Table $table -ToolsDirectory $tools -Download $copy
+    if (-not (Test-Path -LiteralPath $path) -or -not $path.EndsWith('tool.exe')) { throw "the path is '$path'" }
+    # A verified directory is reused: this download would fail.
+    $path = Resolve-SigningTool -Name pinned -Table $table -ToolsDirectory $tools -Download { throw 'downloaded again' }
+
+    $table.Tools.wrong = @{ Source = 'GitHubRelease'; Repository = 'a/b'; Tag = 'v2'; Asset = 'tool.zip'; Sha256 = ('00' * 32); Executable = 'tool.exe' }
+    Assert-Throws { Resolve-SigningTool -Name wrong -Table $table -ToolsDirectory $tools -Download $copy } @(('00' * 32), $hash.ToLowerInvariant()) 'a download with the wrong hash'
+    if (Test-Path -LiteralPath (Join-Path $tools 'wrong-v2')) { throw 'an expanded directory is left after the wrong hash' }
+}
+
+Test-Case 'flat collision' {
+    $table = Get-TestTable
+    $tree = New-FixtureTree 'collision'
+    New-Item -ItemType Directory -Force -Path (Join-Path $tree 'bin/other') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $tree 'bin/plugins/second.dll') -Destination (Join-Path $tree 'bin/other/second.dll')
+    $marker = Join-Path $WorkDirectory 'collision-marker'
+    $step = @{ Tool = 'pwsh'; Invocation = 'Directory'; Arguments = @('-NoProfile', '-Command', "New-Item -ItemType File '$marker'; exit 0", '{inputDir}', '{outputDir}') }
+    Assert-Throws { Invoke-SigningStep -Root $tree -Files @('bin/plugins/second.dll', 'bin/other/second.dll') -Step $step -Table $table -ToolsDirectory $toolsDirectory -WorkDirectory (Join-Path $WorkDirectory 'work-collision') } @('second.dll') 'two files of one name'
+    if (Test-Path -LiteralPath $marker) { throw 'the tool ran before the collision was found' }
+}
+
+# ---- Online: a timestamp server answers --------------------------------------------------------------------------------
+
+Test-OnlineCase 'payload batch' {
+    $certificate = Use-Certificate 'payload'
+    try {
+        $table = Get-TestTable
+        $tree = New-FixtureTree 'payload'
+        $notes = Get-FileSha256 -Path (Join-Path $tree 'bin/notes.txt')
+        $manifest = Join-Path $WorkDirectory 'payload-manifest.txt'
+        $rows = @(Invoke-SignBatch -Root $tree -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-payload') -ToolsDirectory $toolsDirectory -Manifest $manifest -Trust Pinned -Thumbprint $certificate.Thumbprint)
+        Assert-Equal 2 $rows.Count 'the number of signed files'
+        foreach ($row in $rows) { if ($row.Before -eq $row.After) { throw "$($row.RelativePath) is unchanged" } }
+        Assert-Equal $notes (Get-FileSha256 -Path (Join-Path $tree 'bin/notes.txt')) 'the hash of notes.txt'
+        Assert-Equal 2 @(Read-SigningManifest -Path $manifest).Count 'the number of manifest rows'
+
+        # Tampered: one byte of the header changed.
+        $path = Join-Path $tree 'bin/contour.exe'
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        $bytes[0x4E] = $bytes[0x4E] -bxor 0xFF
+        [System.IO.File]::WriteAllBytes($path, $bytes)
+        $problem = Get-SignatureProblem -Path $path -Trust Pinned -Thumbprint $certificate.Thumbprint
+        if ($problem -notlike '*HashMismatch*') { throw "the problem of a tampered file is '$problem'" }
+
+        # Another certificate's signature is not this one's.
+        $other = New-ThrowawayCodeSigningCertificate -Directory (Join-Path $WorkDirectory 'cert-other')
+        $problem = Get-SignatureProblem -Path (Join-Path $tree 'bin/plugins/second.dll') -Trust Pinned -Thumbprint $other.Thumbprint
+        if ($problem -notlike "*$($certificate.Thumbprint)*" -or $problem -notlike "*$($other.Thumbprint)*") { throw "the problem of another certificate is '$problem'" }
+    } finally { Clear-Certificate }
+}
+
+Test-OnlineCase 'timestamp rotation' {
+    $certificate = Use-Certificate 'rotation'
+    try {
+        $table = Get-TestTable
+        $table.Signers.dryrun.PayloadStep.TimestampUrls = @('http://127.0.0.1:9/', 'http://timestamp.digicert.com')
+        $tree = New-FixtureTree 'rotation'
+        $rows = @(Invoke-SignBatch -Root $tree -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-rotation') -ToolsDirectory $toolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint)
+        Assert-Equal 2 $rows.Count 'the number of signed files'
+    } finally { Clear-Certificate }
+}
+
+function New-WrapperScript {
+    # A small script that stands in for a vendor tool of the InOut or Directory shape: copies, then signs the copies.
+    param([ValidateSet('InOut', 'Directory')][string]$Shape)
+    $script = Join-Path $WorkDirectory "wrapper-$Shape.ps1"
+    $body = if ($Shape -eq 'InOut') {
+        @'
+param($Signtool, $Timestamp, $In, $Out)
+Copy-Item -LiteralPath $In -Destination $Out -Force
+& $Signtool sign /fd sha256 /td sha256 /tr $Timestamp /f $env:CONTOUR_SIGNING_PFX /p $env:CONTOUR_SIGNING_PFX_PASSWORD $Out
+exit $LASTEXITCODE
+'@
+    } else {
+        @'
+param($Signtool, $Timestamp, $InputDir, $OutputDir)
+foreach ($file in Get-ChildItem -LiteralPath $InputDir -File) {
+    $copy = Join-Path $OutputDir $file.Name
+    Copy-Item -LiteralPath $file.FullName -Destination $copy -Force
+    & $Signtool sign /fd sha256 /td sha256 /tr $Timestamp /f $env:CONTOUR_SIGNING_PFX /p $env:CONTOUR_SIGNING_PFX_PASSWORD $copy
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+exit 0
+'@
+    }
+    [System.IO.File]::WriteAllText($script, $body)
+    return $script
+}
+
+foreach ($shape in 'InOut', 'Directory') {
+    Test-OnlineCase "$($shape.ToLowerInvariant()) shape" {
+        $certificate = Use-Certificate "shape-$shape"
+        try {
+            $table = Get-TestTable
+            $script = New-WrapperScript -Shape $shape
+            $names = if ($shape -eq 'InOut') { @('{in}', '{out}') } else { @('{inputDir}', '{outputDir}') }
+            $table.Signers.dryrun.PayloadStep = @{
+                Tool          = 'pwsh'
+                Invocation    = $shape
+                TimestampUrls = @('http://timestamp.digicert.com')
+                Arguments     = @('-NoProfile', '-File', $script, '{tool:signtool}', '{timestamp}') + $names
+            }
+            $tree = New-FixtureTree "shape-$shape"
+            if ($shape -eq 'Directory') { Remove-Item -LiteralPath (Join-Path $tree 'bin/plugins/second.dll') ; Copy-Item -LiteralPath $UnsignedPe -Destination (Join-Path $tree 'bin/second.dll') }
+            $rows = @(Invoke-SignBatch -Root $tree -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory "work-shape-$shape") -ToolsDirectory $toolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint)
+            Assert-Equal 2 $rows.Count 'the number of signed files'
+        } finally { Clear-Certificate }
+    }
+}
+
+Test-OnlineCase 'export import' {
+    $certificate = Use-Certificate 'export'
+    try {
+        $table = Get-TestTable
+        # A signer that signs elsewhere: only the own binaries go out.
+        $table.Signers.elsewhere = @{ Transport = 'SignPath'; Payload = 'Own'; AllowedBuilds = @('releases') }
+        $tree = New-FixtureTree 'export'
+        $before = Get-FileSha256 -Path (Join-Path $tree 'bin/contour.exe')
+        $out = Join-Path $WorkDirectory 'exported'
+        $manifest = Join-Path $WorkDirectory 'export-manifest.txt'
+        $rows = @(Export-SigningBatch -Root $tree -Kind Payload -Signer elsewhere -Table $table -Destination $out -Manifest $manifest)
+        Assert-Equal 1 $rows.Count 'the number of exported files'
+        Assert-Equal '' @(Read-SigningManifest -Path $manifest)[0].After 'After in the exported manifest'
+        Assert-Throws { Invoke-SignBatch -Root $tree -Kind Payload -Signer elsewhere -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-elsewhere') -ToolsDirectory $toolsDirectory } @('export/import') 'a SignPath signer'
+
+        # Signed over there, with the throwaway certificate.
+        $null = Invoke-SignBatch -Root $out -Kind Payload -Signer dryrun -Table $table -WorkDirectory (Join-Path $WorkDirectory 'work-over-there') -ToolsDirectory $toolsDirectory -Trust Pinned -Thumbprint $certificate.Thumbprint
+        $imported = @(Import-SigningBatch -Root $tree -From $out -Manifest $manifest -Trust Pinned -Thumbprint $certificate.Thumbprint)
+        Assert-Equal 1 $imported.Count 'the number of imported files'
+        if ($imported[0].After -eq $before) { throw 'the staged file was not replaced' }
+        Assert-Equal $imported[0].After (Get-FileSha256 -Path (Join-Path $tree 'bin/contour.exe')) 'the staged file'
+        Assert-Equal $imported[0].After @(Read-SigningManifest -Path $manifest)[0].After 'After in the completed manifest'
+        Assert-Throws { Import-SigningBatch -Root $tree -From $out -Manifest $manifest -Trust Pinned -Thumbprint $certificate.Thumbprint } @('not the one that was exported') 'a second import'
+    } finally { Clear-Certificate }
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host $_ }
     exit 1
