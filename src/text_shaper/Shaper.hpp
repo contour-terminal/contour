@@ -76,6 +76,10 @@ struct GlyphPosition
     crispy::Point advance;
 
     unicode::PresentationStyle presentation {};
+
+    /// The cluster value shape() was handed for the codepoint this glyph begins, i.e. the grid cell the
+    /// glyph belongs to. Glyphs of one ligature or one grapheme cluster share it.
+    unsigned cluster = 0;
 };
 
 using ShapeResult = std::vector<GlyphPosition>;

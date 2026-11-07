@@ -18,6 +18,7 @@
 
 #include <ft2build.h>
 #include FT_BITMAP_H
+#include FT_COLOR_H
 #include FT_ERRORS_H
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
@@ -92,6 +93,33 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 static void cleanupCairoFontFace(void*)
 {
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
+}
+
+/// @return Whether the glyph @p glyphIndex, just loaded into @p face's slot from a font with color
+///         tables, is a vector color glyph that only Cairo draws. A color bitmap (CBDT, sbix) needs no
+///         drawing, and a plain outline -- a color font has those too -- FreeType rasterizes like any
+///         other glyph: Cairo would paint it in its default source color, opaque black, into a color
+///         bitmap that is never tinted (#452).
+[[nodiscard]] static bool needsCairo(FT_Face face, FT_UInt glyphIndex) noexcept
+{
+    auto const format = face->glyph->format;
+    if (format == FT_GLYPH_FORMAT_BITMAP)
+        return false;
+    if (format != FT_GLYPH_FORMAT_OUTLINE)
+        return true; // OpenType-SVG, and anything else FreeType cannot rasterize on its own
+
+    auto layers = FT_LayerIterator {}; // a null `p` asks for the first layer
+    auto layerGlyph = FT_UInt {};
+    auto paletteIndex = FT_UInt {};
+    if (FT_Get_Color_Glyph_Layer(face, glyphIndex, &layerGlyph, &paletteIndex, &layers))
+        return true;
+
+    #if FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 11)
+    auto paint = FT_OpaquePaint { .p = nullptr, .insert_root_transform = 0 };
+    return FT_Get_Color_Glyph_Paint(face, glyphIndex, FT_COLOR_NO_ROOT_TRANSFORM, &paint) != 0;
+    #else
+    return false; // COLR version 1 arrived with FreeType 2.11; an older one sees no paint graph at all
+    #endif
 }
 
 static std::optional<text::RasterizedGlyph> rasterizeWithCairo(FT_Face ftFace,
@@ -648,6 +676,7 @@ namespace
             gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0);
             gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0);
             gpos.presentation = presentation;
+            gpos.cluster = info[i].cluster;
 
             auto const missing = glyphMissing(gpos);
             output.anyMissing = output.anyMissing || missing;
@@ -1681,19 +1710,16 @@ optional<RasterizedGlyph> OpenShaper::rasterize(GlyphKey glyph, RenderMode mode,
     }
 
     // NB: color bitmap fonts (like Noto Color Emoji) are bitmap fonts, they do not need rendering
-    // But vector color fonts (like Noto COLRv1) do.
-    if (FT_HAS_COLOR(ftFace))
-    {
-        if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
-        {
+    // But vector color glyphs (like Noto COLRv1's) do. @see needsCairo
 #ifdef CONTOUR_HAS_CAIRO
-            if (auto result = rasterizeWithCairo(ftFace, glyph, mode))
-                return result;
-            // If Cairo fails, fall through to FreeType rendering (which might produce outlines or empty
-            // bitmaps)
-#endif
-        }
+    if (FT_HAS_COLOR(ftFace) && needsCairo(ftFace, glyphIndex.value))
+    {
+        if (auto result = rasterizeWithCairo(ftFace, glyph, mode))
+            return result;
+        // If Cairo fails, fall through to FreeType rendering (which might produce outlines or empty
+        // bitmaps)
     }
+#endif
 
     if (ftFace->glyph->format != FT_GLYPH_FORMAT_BITMAP)
     {
