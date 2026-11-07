@@ -25,6 +25,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
@@ -36,11 +38,6 @@ void signalHandler(int signo)
 {
     running = false;
     signal(signo, SIG_DFL);
-}
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
 }
 
 /// Parses a DECLRP report from raw input.

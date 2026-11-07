@@ -271,8 +271,7 @@ TEST_CASE("a varint whose tenth byte carries more than bit 63 is MalformedRecord
 {
     // Nine groups of seven bits, then a tenth whose second bit would be bit 64: dropped by a lax decoder,
     // which then decodes another value than the one written.
-    auto bytes = std::vector<uint8_t>(9, 0xFF);
-    bytes.push_back(0b0000'0011);
+    auto bytes = std::vector<uint8_t> { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0b0000'0011 };
     auto reader = StateReader::ofPayload(bytes);
     auto const value = reader.varint();
     REQUIRE_FALSE(value.has_value());

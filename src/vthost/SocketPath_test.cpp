@@ -49,9 +49,10 @@ TEST_CASE("the socket path is read as UTF-8, as the command line and the environ
     CHECK(muxSocketPath(MuxSocketPathInputs { .explicitPath = explicitPath, .user = TestUser })
           == std::filesystem::path { u8"/tmp/" } / Awkward);
 
+    auto labelledDirectory = std::u8string { u8"contour-" };
+    labelledDirectory.append(Awkward);
     CHECK(muxSocketPath(MuxSocketPathInputs { .label = awkward, .user = awkward })
-          == std::filesystem::temp_directory_path()
-                 / (std::u8string { u8"contour-" } + std::u8string { Awkward }) / Awkward);
+          == std::filesystem::temp_directory_path() / labelledDirectory / Awkward);
 }
 
 TEST_CASE("$CONTOUR_MUX overrides the derived path", "[vthost][socketpath]")

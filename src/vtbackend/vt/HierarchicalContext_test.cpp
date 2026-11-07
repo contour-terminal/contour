@@ -283,8 +283,9 @@ TEST_CASE("HierarchicalContext.a malformed identifier is rejected", "[context]")
 
 TEST_CASE("HierarchicalContext.an oversized payload is rejected", "[context]")
 {
-    CHECK(errorOf("start=id;cwd=" + std::string(MaxContextPayloadLength, 'a'))
-          == ContextParseError::PayloadTooLong);
+    auto payload = std::string { "start=id;cwd=" };
+    payload.append(MaxContextPayloadLength, 'a');
+    CHECK(errorOf(payload) == ContextParseError::PayloadTooLong);
 }
 
 TEST_CASE("HierarchicalContext.an unknown field is ignored and the rest survives", "[context]")

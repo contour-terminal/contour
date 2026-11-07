@@ -150,6 +150,7 @@ option(CONTOUR_VERIFY_STATE "Enables expensive internal terminal-state invariant
 option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" "OFF")
+option(CONTOUR_PRODUCTION_BUILD "Builds Contour's own code with link-time optimization and the platform's exploit mitigations, as the packages are built [default: OFF]" OFF)
 option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
 option(CONTOUR_BUILD_WITH_MIMALLOC "Builds with mimalloc [default: OFF]" OFF)
 option(CONTOUR_INSTALL_TOOLS "Installs tools, if built [default: OFF]" OFF)
@@ -226,6 +227,12 @@ else()
     message(STATUS "No sanitizer enabled.")
 endif()
 
+# A production build refuses the configurations that are not the shipped one now, before the dependencies
+# are fetched.
+if(CONTOUR_PRODUCTION_BUILD)
+    include(ProductionBuildRefusals)
+endif()
+
 if(CONTOUR_TESTING)
     enable_testing()
 
@@ -262,6 +269,10 @@ if(CONTOUR_TESTING)
         # full build; the rule CPack enforces (each fragment Id once) is checked here on every platform.
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)
         contour_add_lint_gate(check_wix_patch_selftest check-wix-patch.py --self-test)
+
+        # The production-build check, tested against inline fixtures; the real check, which reads a
+        # build's compile database and binary, is registered beside the binary it reads.
+        contour_add_lint_gate(check_production_build_selftest check-production-build.py --self-test)
 
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
@@ -372,6 +383,8 @@ if(CONTOUR_FRONTEND_GUI)
     include(NerdFontSymbols)
 endif()
 set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
+# Everything added below is first-party: the production flags (LTO, hardening) reach only these targets.
+include(ProductionBuild)
 if(CONTOUR_WASM_GUESTS)
     add_subdirectory(extensions)
 endif()
@@ -412,6 +425,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "C++ standard:                                       C++${CMAKE_CXX_STANDARD} (${CMAKE_CXX_COMPILER_ID})")
     message(STATUS "Compiler cache:                                     ${USING_COMPILER_CACHE_STRING}")
     message(STATUS "Build with sanitizer:                               ${CONTOUR_SANITIZE}")
+    message(STATUS "Production build (LTO, hardening):                  ${CONTOUR_PRODUCTION_BUILD}")
     message(STATUS "Build unit tests:                                   ${CONTOUR_TESTING}")
     message(STATUS "Verify terminal state invariants:                   ${CONTOUR_VERIFY_STATE}")
     message(STATUS "Enable with code coverage:                          ${CONTOUR_CODE_COVERAGE_ENABLED}")

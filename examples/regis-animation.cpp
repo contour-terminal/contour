@@ -13,6 +13,8 @@
 
 #include <unistd.h>
 
+#include "WriteToTTY.hpp"
+
 using namespace std::string_view_literals;
 
 namespace
@@ -23,11 +25,6 @@ std::atomic<bool> running { true };
 void onSignal(int) noexcept
 {
     running = false;
-}
-
-void writeToTTY(std::string_view s) noexcept
-{
-    ::write(STDOUT_FILENO, s.data(), s.size());
 }
 
 void regis(std::string const& commands)

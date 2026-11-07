@@ -357,6 +357,7 @@ jobs:
               -D CONTOUR_PACKAGE_TERMINFO=OFF \
               -D PEDANTIC_COMPILER_WERROR=OFF \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
+              -D CONTOUR_PRODUCTION_BUILD=ON \
               -D CONTOUR_LINK_JOBS=1 \
               -D CMAKE_C_COMPILER="clang-${LLVM_VERSION}" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
@@ -385,6 +386,10 @@ jobs:
     # ordinary GUI builds, where they assert the other half.
     - name: "tests"
       run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration|contour_e2e_packaging_rules" --output-on-failure
+    # Its own step: inside the regex above, a check that was never registered (no Python, tests off) would
+    # vanish without a failure. --no-tests=error makes its absence one.
+    - name: "Check the production build"
+      run: ctest --test-dir build -R '^check_production_build$' --no-tests=error --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.
@@ -1419,6 +1424,24 @@ jobs:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           retention-days: 7
+      # The debug symbols of the production build are not in the image; they are published beside it, so a
+      # crash report from a release can be symbolicated.
+      - name: "Collect the debug symbols"
+        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
+        run: |
+          set -euo pipefail
+          cmake --install out/macos-package --component debug_symbols --prefix symbols
+          test -d symbols/contour.dSYM
+          ditto -c -k --keepParent symbols/contour.dSYM "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
+      - name: "upload to artifact store (dSYM)"
+        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
   # }}}
   # {{{ Windows
   windows:
@@ -1774,6 +1797,26 @@ jobs:
           name: "msi-upgrade-check-logs"
           path: ${{ runner.temp }}/msi-*
           if-no-files-found: ignore
+          retention-days: 7
+      # The PDBs of the production build are not in the MSI or the zip; they are published beside them.
+      - name: "Collect the debug symbols"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        shell: pwsh
+        run: |
+          cmake --install out/build/${{ env.CMAKE_PRESET }} --component debug_symbols --prefix symbols
+          if (-not (Test-Path symbols/contour.pdb)) {
+            Write-Host "::error::the debug_symbols component installed no contour.pdb"
+            exit 1
+          }
+          Compress-Archive -Path symbols/* -DestinationPath "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+      - name: "Uploading PDB zip to artifact store"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+          path: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+          if-no-files-found: error
+          compression-level: 0
           retention-days: 7
   # }}}
   # {{{ Ubuntu 24.04 CC matrix
@@ -2194,11 +2237,18 @@ jobs:
       - name: "build the AppImage"
         run: |
           set -euo pipefail
+          CC=gcc-15 \
           CXX=g++-15 \
           VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}" \
           OUTPUT_DIR="$PWD" \
               ./scripts/build-appimage.sh
           ls -lh ./*.AppImage
+      # The AppImage is a package build like the others: its binary must carry the production flags.
+      - name: "Check the production build"
+        run: |
+          python3 scripts/check-production-build.py \
+              --manifest out/appimage/build/production-build.json \
+              --binary out/appimage/build/src/contour/contour
       # Run the bundle itself, not the build tree: a missing library, plugin or QML module is only
       # visible here. No FUSE on the runner, hence --appimage-extract-and-run, and no display either,
       # so only commands that open no window run.
@@ -3018,6 +3068,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+      - name: "fetch artifact: Windows (PDB)"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
+      - name: "fetch artifact: MacOS (dSYM)"
+        uses: actions/download-artifact@v4
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
       - name: "fetch artifact: AppImage"
         uses: actions/download-artifact@v4
         with:

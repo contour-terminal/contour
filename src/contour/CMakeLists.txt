@@ -123,6 +123,10 @@ if(CONTOUR_FRONTEND_GUI)
         contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "Linux and Windows only")
     elseif(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         set(CONTOUR_WITH_GPU_SELECTION ON)
+        # ContourGuiApp.hpp adds a member under this definition, and every target in src/contour that
+        # includes it (contour_core, the display library, the tests) must see the same class. Defined here,
+        # where it is decided, for this directory and the ones added after it.
+        add_compile_definitions(CONTOUR_WITH_GPU_SELECTION)
     else()
         contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "requires Qt 6.10")
     endif()
@@ -720,6 +724,7 @@ else()
 endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
+contour_production_executable(contour)
 
 # LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
 # 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and
@@ -745,9 +750,6 @@ if(CONTOUR_FRONTEND_GUI)
     set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
     # Disable all deprecated Qt functions prior to Qt 6.0.
     target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
-    if(CONTOUR_WITH_GPU_SELECTION)
-        target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_GPU_SELECTION)
-    endif()
 endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -2236,6 +2238,15 @@ if(UNIX)
         REQUIRED
     )
 endif()
+
+# debug_symbols (the PDB, the dSYM) is published beside the packages, never inside one. EXCLUDE_FROM_ALL
+# only keeps a component out of an unnamed install: CPack installs every component it lists by name, and
+# without a list of its own it lists them all. So name the components of the package here, for every
+# generator; scripts/check-production-build.py checks the generated CPackConfig.cmake.
+if(NOT DEFINED CPACK_COMPONENTS_ALL)
+    get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
+endif()
+list(REMOVE_ITEM CPACK_COMPONENTS_ALL debug_symbols)
 
 include(CPack)
 

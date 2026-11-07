@@ -109,7 +109,10 @@ void writeSearchRows(vtbackend::Terminal& terminal, int count, RowText rowText)
 {
     auto text = std::string {};
     for (auto const row: std::views::iota(0, count))
-        text += rowText(row) + "\r\n";
+    {
+        text += rowText(row);
+        text += "\r\n";
+    }
     terminal.writeToScreen(text);
 }
 
@@ -1489,7 +1492,7 @@ TEST_CASE("TerminalSession: a catastrophic pattern ends in a word, not a hang", 
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     allowHistory(*session, Rows + 100);
-    writeSearchRows(session->terminal(), Rows, [](int) { return std::string(60, 'a') + "b"; });
+    writeSearchRows(session->terminal(), Rows, [](int) { return std::string(60, 'a').append(1, 'b'); });
     session->searchBarOpened();
     session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
 
@@ -1700,7 +1703,7 @@ TEST_CASE("TerminalSession: a pattern too complex to draw says so in the count s
     auto& terminal = session->terminal();
     allowHistory(*session, 3000);
     writeSearchRows(terminal, 2000, [](int) { return std::string("hay"); });
-    writeSearchRows(terminal, 10, [](int) { return std::string(60, 'a') + "b"; });
+    writeSearchRows(terminal, 10, [](int) { return std::string(60, 'a').append(1, 'b'); });
     // Opening the bar from Insert mode puts the vi cursor on the terminal's; it is moved after.
     session->searchBarOpened();
     session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
