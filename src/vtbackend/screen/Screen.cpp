@@ -582,7 +582,11 @@ void Screen::writeText(string_view text, size_t cellCount)
     auto const _ = core::Finally { [&]() { _logCharTrace = true; } };
 #endif
 
-    assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
+    // At a pending wrap the run starts on the next row, which the gate measured in full.
+    assert(std::cmp_less_equal(cellCount,
+                               _cursor.wrapPending
+                                   ? pageSize().columns.value
+                                   : pageSize().columns.value - _cursor.position.column.value));
 
     // Asked once per run: nothing the run writes changes the modes or the charsets.
     auto const stretches = canBulkWriteAscii() ? AsciiStretches::InBulk : AsciiStretches::PerCodepoint;
@@ -595,8 +599,9 @@ void Screen::writeText(string_view text, size_t cellCount)
         // a function of its own: clang inlines no function this size, and the call costs every run of
         // the ascii and tui workloads about 12 instructions.
         crlfIfWrapPending();
+        // What bulkTextRunColumns() promised at a pending wrap, the wrap must now have delivered.
+        assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
 
-        auto const columnsAvailable = unbox<size_t>(pageSize().columns - _cursor.position.column);
         auto& line = currentLine();
         auto& soa = line.materializedStorage();
         auto const startCol = unbox<size_t>(_cursor.position.column);
@@ -612,28 +617,13 @@ void Screen::writeText(string_view text, size_t cellCount)
 
         auto const written = writeTextToSoA(
             soa, startCol, text, _cursor.graphicsRendition, _cursor.hyperlink, /*asciiHint=*/true);
+        // The parser's gate lets a run reach the margin's column, which leaves the wrap pending. A run the
+        // trace handler replays was measured before the sequences queued ahead of it moved the cursor, and
+        // may reach it from further right; writeTextToSoA() clips it at the line's end. REP (CSI Ps b)
+        // repeats the run's last character: the parser records it after every bulk print
+        // (@see REP.after_bulk_text).
         if (written > 0)
-        {
-            // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a
-            // variation selector -- is the last one this run wrote, not the one it started at.
-            _lastCursorPosition = CellLocation { .line = _cursor.position.line,
-                                                 .column = ColumnOffset::cast_from(startCol + written - 1) };
-
-            // The parser's gate keeps a run left of the margin. A run the trace handler replays was
-            // measured before the sequences queued ahead of it moved the cursor, and may reach it.
-            if (written < columnsAvailable)
-                _cursor.position.column += ColumnOffset::cast_from(written);
-            else if (_terminal->isModeEnabled(DECMode::AutoWrap))
-            {
-                _cursor.position.column = ColumnOffset::cast_from(startCol + written - 1);
-                _cursor.wrapPending = true;
-            }
-            else
-                _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-
-            // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
-            // print (@see REP.after_bulk_text).
-        }
+            advanceCursorPastBulkWrite(startCol, written);
         _terminal->markCellDirty(_cursor.position);
         bulkWrittenUntil = text.size();
     }
@@ -659,6 +649,59 @@ bool Screen::canBulkWriteAscii() const noexcept
            && _cursor.charsets.isPlainUSASCII();
 }
 
+void Screen::advanceCursorPastBulkWrite(size_t startColumn, size_t written) noexcept
+{
+    // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a variation
+    // selector -- is the last one written, not the one the write started at.
+    auto const lastColumn = ColumnOffset::cast_from(startColumn + written - 1);
+    _lastCursorPosition = CellLocation { .line = _cursor.position.line, .column = lastColumn };
+
+    if (std::cmp_less(startColumn + written, unbox(pageSize().columns)))
+        _cursor.position.column = lastColumn + 1;
+    else if (_terminal->isModeEnabled(DECMode::AutoWrap))
+    {
+        _cursor.position.column = lastColumn;
+        _cursor.wrapPending = true;
+    }
+    else
+        _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+}
+
+LineFeedTarget Screen::lineFeedTarget() const noexcept
+{
+    // Asked before the carriage-return half of a line feed moves the cursor: under LNM that half snaps it
+    // into the band, which would make the margin test vacuously true. xterm keeps the same order:
+    // xtermIndex() reads screen->cur_col, and CASE_VMOT applies CarriageReturn only afterwards.
+    auto const line = _cursor.position.line;
+    if (line == margin().vertical.to)
+        // A line feed scrolls only within the left and right margins -- xterm's `!ScrnIsColInMargins`
+        // guard in xtermIndex(), whose CursorDown() then clamps to the bottom margin.
+        return isCursorInsideHorizontalMargins() ? LineFeedTarget::ScrollsIn : LineFeedTarget::Stays;
+    if (line + 1 < boxed_cast<LineOffset>(pageSize().lines))
+        return LineFeedTarget::MovesDown;
+    // The last row of the page but below the scrolling region: nothing to scroll, nowhere to move.
+    return LineFeedTarget::Stays;
+}
+
+size_t Screen::bulkWritableColumnsAfterPendingWrap() const noexcept
+{
+    // The wrap lands on column 0 of the landing row only without a left margin; isFullHorizontalMargins()
+    // asks about the right one alone.
+    if (!_terminal->isModeEnabled(DECMode::AutoWrap) || !isFullHorizontalMargins()
+        || margin().horizontal.from != ColumnOffset(0) || _cursor.position.column != margin().horizontal.to)
+        return 0;
+
+    auto const width = unbox<size_t>(pageSize().columns);
+    switch (lineFeedTarget())
+    {
+        case LineFeedTarget::ScrollsIn: return width;
+        case LineFeedTarget::MovesDown:
+            return grid().lineAt(_cursor.position.line + 1).isBulkWritable() ? width : 0;
+        case LineFeedTarget::Stays: return 0;
+    }
+    std::unreachable();
+}
+
 bool Screen::canBulkWriteAsciiStretch(size_t length) const noexcept
 {
     return length <= bulkWritableColumns();
@@ -674,9 +717,7 @@ void Screen::writeAsciiInterior(std::string_view interior)
                                         _cursor.hyperlink,
                                         /*asciiHint=*/true);
     assert(written == interior.size() && "canBulkWriteAsciiStretch() let through more than fits");
-    _lastCursorPosition = CellLocation { .line = _cursor.position.line,
-                                         .column = ColumnOffset::cast_from(startCol + written - 1) };
-    _cursor.position.column += ColumnOffset::cast_from(written);
+    advanceCursorPastBulkWrite(startCol, written);
     _terminal->markCellDirty(_cursor.position);
 }
 
@@ -844,7 +885,7 @@ void Screen::crlfIfWrapPending()
             margin().horizontal.from != ColumnOffset(0) || !isFullHorizontalMargins();
         // A line feed that went nowhere -- the cursor below the scrolling region, or outside its left and
         // right margins -- leaves the text wrapping over its own row, which is no continuation either.
-        if (crlf() == LineFeedOutcome::SameRow || !lineWrappable || wrapsWithinBand)
+        if (crlf() == LineFeedTarget::Stays || !lineWrappable || wrapsWithinBand)
             return;
 
         // A wrap that does not scroll lands on a row already holding a line of its own, and makes it a
@@ -1281,26 +1322,18 @@ void Screen::moveCursorTo(LineOffset line, ColumnOffset column)
     updateCursorIterator();
 }
 
-LineFeedOutcome Screen::linefeed(ColumnOffset newColumn)
+LineFeedTarget Screen::linefeed(ColumnOffset newColumn)
 {
-    // Where the cursor *is* decides whether this scrolls -- asked before the carriage-return half of the
-    // line feed moves it. Under LNM (and on the stdout fast pipe) newColumn is the left margin, which would
-    // snap the cursor into the band and make the test below vacuously true. xterm keeps the same order:
-    // xtermIndex() reads screen->cur_col, and CASE_VMOT applies CarriageReturn only afterwards.
-    auto const scrollsOnIndex = isCursorInsideHorizontalMargins();
+    // Decided before the carriage-return half moves the cursor (@see lineFeedTarget).
+    auto const target = lineFeedTarget();
 
     _cursor.wrapPending = false;
     _cursor.position.column = newColumn;
     if (unbox(historyLineCount()) > 0)
         _terminal->addLineOffsetToJumpHistory(LineOffset { 1 });
-    if (*realCursorPosition().line == *margin().vertical.to)
+    switch (target)
     {
-        // A line feed only scrolls when the cursor is within the left/right margins. Outside that band
-        // (DECLRMM on, cursor left of the left margin or right of the right margin) it neither scrolls
-        // nor advances past the bottom margin -- xterm's `!ScrnIsColInMargins` guard in xtermIndex(),
-        // whose CursorDown() then clamps to the bottom margin, leaving the cursor where it was.
-        if (scrollsOnIndex)
-        {
+        case LineFeedTarget::ScrollsIn:
             // TODO(perf) if we know that we text is following this LF
             // (i.e. parser state will be ground state),
             // then invoke scrollUpUninitialized instead
@@ -1308,29 +1341,18 @@ LineFeedOutcome Screen::linefeed(ColumnOffset newColumn)
             // possibly also reset remaining grid cells in that line
             // if the incoming text did not write to the full line
             scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
-            return LineFeedOutcome::NextRow;
-        }
-        return LineFeedOutcome::SameRow;
+            break;
+        case LineFeedTarget::MovesDown:
+            // Incrementally, rather than through moveCursorTo(), which recalculates every iterator.
+            _cursor.position.line++;
+            updateCursorIterator();
+            break;
+        case LineFeedTarget::Stays:
+            // Never past the page: a cursor below the scrolling region used to be incremented
+            // unconditionally, and every further line feed walked it further off the end of the page.
+            break;
     }
-    if (*realCursorPosition().line + 1 < *pageSize().lines)
-    {
-        // using moveCursorTo() would embrace code reusage,
-        // but due to the fact that it's fully recalculating iterators,
-        // it may be faster to just incrementally update them.
-        // moveCursorTo({logicalCursorPosition().line + 1, margin().horizontal.from});
-        _cursor.position.line++;
-        updateCursorIterator();
-        return LineFeedOutcome::NextRow;
-    }
-    // Otherwise the cursor is on the last line of the page but *outside* the scrolling region, so
-    // there is neither anything to scroll nor anywhere to move: a line feed there does nothing.
-    //
-    // The page bound is what makes this safe. Only a cursor exactly on the bottom *margin* scrolls,
-    // so a cursor below the region used to be incremented unconditionally — and every further line
-    // feed walked it further off the end of the page. That is reachable from any application: set a
-    // scrolling region, put the cursor below it, and hold down Return. verifyState() catches it in a
-    // debug build; in a release build it is simply a cursor pointing outside the grid.
-    return LineFeedOutcome::SameRow;
+    return target;
 }
 
 void Screen::followRowMove(std::optional<RowMove> const& move)

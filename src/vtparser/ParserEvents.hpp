@@ -40,11 +40,9 @@ class ParserEvents
     virtual void printEnd() = 0;
 
     /**
-     * Returns the number of terminal columns (cells) that are still available in the current line
-     * until the right page margin would be hit.
-     *
-     * This accessor is used to determine whether or not bulk text processing can
-     * be used or not.
+     * Returns how many terminal columns (cells) a run of text starting now may take in one print():
+     * up to and including the right margin's column, or a whole row where a pending wrap lands the
+     * run on the next one. 0 has every character printed on its own.
      */
     [[nodiscard]] virtual size_t maxBulkTextSequenceWidth() const noexcept = 0;
 

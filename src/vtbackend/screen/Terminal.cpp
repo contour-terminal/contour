@@ -2851,7 +2851,7 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 {
     // Measured on the display the text lands on: a status line selected with DECSASD has margins and a
     // line of its own.
-    return activeDisplay().bulkWritableColumns();
+    return activeDisplay().bulkTextRunColumns();
 }
 
 // {{{ SimpleSequenceHandler
