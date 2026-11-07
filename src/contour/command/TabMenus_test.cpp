@@ -51,8 +51,8 @@ TEST_CASE("tabMenu.rowsInOrder", "[tabmenu]")
 {
     auto const menu = buildTabContextMenu(threeTabs());
     CHECK(titles(menu)
-          == std::vector<std::string> { "Rename…",
-                                        "Tab Color",
+          == std::vector<std::string> { "Tab Color",
+                                        "Rename…",
                                         "Move Tab to New Window",
                                         "",
                                         "Close Tab",

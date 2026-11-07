@@ -14,9 +14,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <vector>
 
 using namespace contour::command;
@@ -87,7 +89,9 @@ TEST_CASE("the outline mirrors the tree", "[nativemenu][cocoa]")
     CHECK(swatchCount(outline) == 3);
 
     // The tab's own colour is the ticked swatch.
-    auto const& colors = outline.at(1);
+    auto const colorsRow = std::ranges::find(outline, std::string { "Tab Color" }, &NativeMenuOutline::title);
+    REQUIRE(colorsRow != outline.end());
+    auto const& colors = *colorsRow;
     REQUIRE(colors.kind == ContextMenuEntryKind::Submenu);
     REQUIRE(colors.children.size() >= 3);
     CHECK(colors.children[0].check == RowCheck::None);

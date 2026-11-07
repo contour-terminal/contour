@@ -114,6 +114,7 @@
           <li>Fixes the terminal hanging or crashing on binary or garbage input that happens to start an image (a lone 0x90 is DCS) before the cell size in pixels is known; such images are dropped and logged once (#1062)</li>
           <li>Fixes an incomplete UTF-8 character swallowing the next printable byte after a control function or a reset; it now ends as U+FFFD at the first byte that cannot continue it (#2209)</li>
           <li>Fixes dragging a tab on macOS moving the whole window instead of the tab; the empty part of the title bar still moves the window</li>
+          <li>Changes the tab context menu to list Tab Color before Rename…</li>
           <li>Fixes UTF-8 decoding accepting overlong encodings, surrogates and values above U+10FFFF: an overlong ESC (<code>C0 9B</code>) no longer prints as an escape character, and each ill-formed sequence is replaced by U+FFFD per maximal subpart (#2211)</li>
           <li>Fixes the kitty graphics protocol ignoring placement ids: placing an image again under the same image id and placement id (<code>p=</code>) now replaces that placement instead of adding another, and <code>a=d,d=i</code> / <code>d=I</code> with a <code>p=</code> deletes only that placement, freeing the image data (upper case) only once no placement of it remains</li>
           <li>Fixes building on older macOS SDKs that lack <code>aligned_alloc</code> (#2005)</li>
