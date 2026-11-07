@@ -99,6 +99,8 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 
 %build
+# rpmbuild exports Fedora's hardened flags and LTO (CXXFLAGS, LDFLAGS) before this runs, and CMake takes
+# them from the environment, so CONTOUR_PRODUCTION_BUILD stays off here rather than applying them twice.
 # The bundled status-line extensions are not built: cargo fetches their crates (wit-bindgen) from
 # crates.io, and mock/koji build offline. Vendoring the crates into the SRPM is a packaging follow-up;
 # until then the package ships the extension runtime without the bundled modules.
