@@ -366,7 +366,7 @@ TEST_CASE("a captured terminal state decodes to the screen the session shows",
                                         std::function<void()> {},
                                         std::function<void()> {},
                                         SessionNotifyCallback {},
-                                        std::function<void(std::string)> {},
+                                        vthost::SessionClipboardCallback {},
                                         std::function<void()> {},
                                         SessionSignalCallback {} };
         auto& terminal = restored.terminal();

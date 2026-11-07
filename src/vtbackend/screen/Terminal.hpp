@@ -4,6 +4,7 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/CaptureLineMode.hpp>
+#include <vtbackend/core/ClipboardTarget.hpp>
 #include <vtbackend/core/ClipboardWriter.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
@@ -740,8 +741,16 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
-        /// @p data is to go on the clipboard; @p writer says who put it there.
-        virtual void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) {}
+        /// A copy is to go on the desktop's clipboard.
+        /// @param data What to copy.
+        /// @param writer Who copies it.
+        /// @param targets Where it lands; a frontend without one of them (no primary selection off X11 and
+        ///                Wayland) skips that one and still lands the rest.
+        virtual void copyToClipboard(std::string_view /*data*/,
+                                     ClipboardWriter /*writer*/,
+                                     ClipboardTargets /*targets*/)
+        {
+        }
 
         /// The application asked for a different mouse pointer shape, by CSS name (`OSC 22`).
         /// @see vtbackend::pointer_shape::SupportedNames.
@@ -974,7 +983,11 @@ class Terminal: public IStatusLinePublishTarget
         void pageResized() override {}
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
-        void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) override {}
+        void copyToClipboard(std::string_view /*data*/,
+                             ClipboardWriter /*writer*/,
+                             ClipboardTargets /*targets*/) override
+        {
+        }
         void setPointerShape(std::string_view /*cssName*/) override {}
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
@@ -3643,7 +3656,8 @@ class Terminal: public IStatusLinePublishTarget
     /// program's goes out at once.
     /// @param data What to copy.
     /// @param writer Who copies it.
-    void copyToClipboard(std::string_view data, ClipboardWriter writer);
+    /// @param targets Where it lands.
+    void copyToClipboard(std::string_view data, ClipboardWriter writer, ClipboardTargets targets);
 
     // {{{ Mouse pointer shape (OSC 22)
     /// @return the CSS name of the shape currently in effect.
@@ -3672,9 +3686,12 @@ class Terminal: public IStatusLinePublishTarget
     /// Answers an OSC 52 clipboard read (`OSC 52 ; Pc ; ? ST`) by replying with the current clipboard,
     /// base64-encoded, as `OSC 52 ; Pc ; <base64> ST`. Does nothing when Settings::allowClipboardRead is
     /// false (the default), so an application cannot read the clipboard unless the user opts in.
-    /// @param pc The selection parameter from the request; an empty Pc is reported back as "s0", xterm's
-    ///           default selection.
-    void requestClipboardRead(std::string_view pc);
+    /// Only the clipboard can be read back -- the frontend hands over nothing else --, so a request whose
+    /// @p targets do not name it goes unanswered rather than answered with the clipboard.
+    /// @param pc The selection parameter from the request, echoed in the reply; an empty Pc is reported back
+    ///           as "s0", xterm's default selection.
+    /// @param targets What @p pc names.
+    void requestClipboardRead(std::string_view pc, ClipboardTargets targets);
 
     /// @return the clipboard's current contents, for a protocol that formats its own reply.
     ///

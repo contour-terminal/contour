@@ -27,6 +27,7 @@
 /// daemon-control and control requests and the control events it subscribed to, and nothing else — no
 /// layout, no snapshot, no screen of the host's — and it counts as no client.
 
+#include <vtbackend/core/ClipboardTarget.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
@@ -95,7 +96,8 @@ struct HandshakePolicy
                                                                    proto::Capability::MoveNode,
                                                                    proto::Capability::LayoutBatch,
                                                                    proto::Capability::TabEditAcks,
-                                                                   proto::Capability::ColorPreference });
+                                                                   proto::Capability::ColorPreference,
+                                                                   proto::Capability::ClipboardTargets });
 };
 
 /// When a connection sends a session's program-status set.
@@ -104,6 +106,17 @@ enum class ProgramStatusPush : uint8_t
     Always = 0, ///< It changed: even an empty set is news, since it says the records are gone.
     IfAny,      ///< A snapshot: an empty set says nothing a fresh mirror does not already hold.
 };
+
+/// Decides where a session's clipboard write may land on a client, given what the connection shares.
+///
+/// A client sharing Capability::ClipboardTargets lands each write where it names. One predating it puts every
+/// write on the clipboard, so it gets only a write that names the clipboard, narrowed to that; a write to
+/// the primary selection alone would overwrite what its user copied, and is not sent at all.
+/// @param targets Where the session's application asked the copy to land.
+/// @param shared The capabilities both ends of the connection share.
+/// @return The targets to send, or nothing when the write is not to be sent.
+[[nodiscard]] std::optional<vtbackend::ClipboardTargets> forwardedClipboardTargets(
+    vtbackend::ClipboardTargets targets, proto::CapabilitySet const& shared);
 
 /// The collaborators and policy a native connection is constructed with.
 ///
@@ -231,7 +244,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                        std::string const& title,
                        std::string const& body,
                        std::optional<vtbackend::DisplayOccasion> occasion) override;
-    void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
+    void sessionCopyToClipboard(vtworkspace::SessionId session,
+                                std::string const& data,
+                                vtbackend::ClipboardTargets targets) override;
 
     /// A session's program-status records changed: marked, and pushed whole by the next debounced flush to a
     /// viewer sharing Capability::ProgramStatus. Every other signal is the control service's.

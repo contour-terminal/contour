@@ -27,6 +27,7 @@ set(vtbackend_HEADERS
     core/Color.hpp
     core/ContextId.hpp
     core/CaptureLineMode.hpp
+    core/ClipboardTarget.hpp
     core/ClipboardWriter.hpp
     core/CommandBlockId.hpp
     core/BlockPill.hpp
@@ -71,6 +72,7 @@ set(vtbackend_HEADERS
     input/HeldModifiers.hpp
     input/InputHandler.hpp
     input/vi/JumpHistory.hpp
+    vt/ClipboardSelection.hpp
     vt/KittyClipboard.hpp
     graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
@@ -223,6 +225,7 @@ set(vtbackend_SOURCES
     render/RenderBuffer.cpp
     screen/PreeditPlacement.cpp
     screen/RenderBufferBuilder.cpp
+    vt/ClipboardSelection.cpp
     vt/KittyClipboard.cpp
     graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
@@ -408,6 +411,7 @@ if(LIBTERMINAL_TESTING)
         vt/ModifyKeys_test.cpp
         vt/VTType_test.cpp
         vt/RectangularAreaChecksum_test.cpp
+        vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
         vt/MacroDefinition_test.cpp
         vt/PointerShape_test.cpp

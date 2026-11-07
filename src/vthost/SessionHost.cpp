@@ -77,7 +77,7 @@ HostedSession::HostedSession(SessionId id,
                              std::function<void()> onKittyAnimationDeadlineMoved,
                              std::function<void()> onBell,
                              SessionNotifyCallback onNotify,
-                             std::function<void(std::string)> onCopyToClipboard,
+                             SessionClipboardCallback onCopyToClipboard,
                              std::function<void()> onClosed,
                              SessionSignalCallback onSignal,
                              HostedSessionExtensions extensions,
@@ -766,8 +766,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
                 id, &SessionStreamEvents::sessionNotify, std::move(title), std::move(body), occasion);
         },
         /*onCopyToClipboard=*/
-        [this, id](std::string data) {
-            postStreamEvent(id, &SessionStreamEvents::sessionCopyToClipboard, std::move(data));
+        [this, id](std::string data, vtbackend::ClipboardTargets targets) {
+            postStreamEvent(id, &SessionStreamEvents::sessionCopyToClipboard, std::move(data), targets);
         },
         /*onClosed=*/
         [this, id] {

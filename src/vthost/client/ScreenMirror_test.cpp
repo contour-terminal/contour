@@ -133,11 +133,15 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
     {
         shownNotifications.push_back(notification);
     }
-    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
+    void copyToClipboard(std::string_view data,
+                         vtbackend::ClipboardWriter /*writer*/,
+                         vtbackend::ClipboardTargets targets) override
     {
         clipboard = data;
+        clipboardTargets = targets;
     }
-    int screenUpdates = 0; ///< Frames that brought output.
+    vtbackend::ClipboardTargets clipboardTargets {}; ///< Where the last copy landed.
+    int screenUpdates = 0;                           ///< Frames that brought output.
     int screenReplays = 0; ///< Frames that repainted what the mirror showed already.
     void screenUpdated() override { ++screenUpdates; }
     void screenReplayed() override { ++screenReplays; }
@@ -217,9 +221,11 @@ struct MirrorHarness
         client = std::make_unique<NativeClient>(
             loop,
             std::move(pair.second),
-            // ProgramStatus, as the GUI offers it: the set rides only a connection that shares it.
+            // ProgramStatus and ClipboardTargets, as the GUI offers them: each rides only a connection that
+            // shares it.
             NativeClient::HandshakeOptions {
-                .capabilities = proto::CapabilitySet::of({ proto::Capability::ProgramStatus }) },
+                .capabilities = proto::CapabilitySet::of(
+                    { proto::Capability::ProgramStatus, proto::Capability::ClipboardTargets }) },
             mirrorBlockLimits,
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
@@ -2545,6 +2551,17 @@ TEST_CASE("bell, notification and clipboard events reach the mirror", "[vthost][
         serverWrites(h, session, std::format("\033]52;c;{}\033\\", encoded));
         co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.clipboard == "clip-text"; });
         CHECK(h->mirrorEvents.clipboard == "clip-text");
+        CHECK(h->mirrorEvents.clipboardTargets
+              == vtbackend::ClipboardTargets { vtbackend::ClipboardTarget::Clipboard });
+
+        // Where it lands travels too: `cp` reaches the client's clipboard AND its primary selection.
+        serverWrites(h,
+                     session,
+                     std::format("\033]52;cp;{}\033\\", core::base64::encode(std::string_view { "both" })));
+        co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.clipboard == "both"; });
+        CHECK(h->mirrorEvents.clipboardTargets
+              == vtbackend::ClipboardTargets { vtbackend::ClipboardTarget::Clipboard,
+                                               vtbackend::ClipboardTarget::PrimarySelection });
 
         h->client->detach();
     }(&h, session);

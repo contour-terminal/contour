@@ -37,7 +37,7 @@
 :material-check-bold:{.check-mark}  [Synchronized rendering](vt-extensions/synchronized-output.md) (via `SM ? 2026` / `RM ? 2026`) <br/>
 :material-check-bold:{.check-mark}  Text reflow (configurable via `SM ? 2028` / `RM ? 2028`) <br/>
 :material-check-bold:{.check-mark}  Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) <br/>
-:material-check-bold:{.check-mark}  Clipboard setting via OSC 52 <br/>
+:material-check-bold:{.check-mark}  Clipboard and primary selection setting via OSC 52, advertised as the [Clipboard Extension](https://github.com/contour-terminal/vt-extensions/blob/master/clipboard-extension.md) (`DA1` `52`) <br/>
 :material-check-bold:{.check-mark}  [Sixel Image support](demo/images.md) <br/>
 :material-check-bold:{.check-mark}  [ReGIS vector graphics](demo/regis-graphics.md) <br/>
 :material-check-bold:{.check-mark}  Terminal page [buffer capture VT extension](vt-extensions/buffer-capture.md) to quickly extract contents. <br/>

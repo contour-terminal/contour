@@ -7464,3 +7464,28 @@ TEST_CASE("a daemon no longer offers panes-reprojected", "[vthost][native][size]
     REQUIRE(hello != nullptr);
     CHECK_FALSE(hello->capabilities.contains(proto::Capability::PanesReprojected));
 }
+
+TEST_CASE("a clipboard write reaches a client only where it can land it", "[vthost][native][clipboard]")
+{
+    using vtbackend::ClipboardTarget;
+    using vtbackend::ClipboardTargets;
+    using vthost::forwardedClipboardTargets;
+    auto const clipboard = ClipboardTargets { ClipboardTarget::Clipboard };
+    auto const primary = ClipboardTargets { ClipboardTarget::PrimarySelection };
+    auto const both = ClipboardTargets { ClipboardTarget::Clipboard, ClipboardTarget::PrimarySelection };
+
+    SECTION("a client sharing the capability gets every target")
+    {
+        auto const shared = proto::CapabilitySet::of({ proto::Capability::ClipboardTargets });
+        CHECK(forwardedClipboardTargets(both, shared) == both);
+        CHECK(forwardedClipboardTargets(primary, shared) == primary);
+    }
+
+    SECTION("a client predating it, which puts everything on the clipboard")
+    {
+        auto const shared = proto::CapabilitySet {};
+        CHECK(forwardedClipboardTargets(clipboard, shared) == clipboard);
+        CHECK(forwardedClipboardTargets(both, shared) == clipboard); // narrowed, so its `selection` reads "c"
+        CHECK_FALSE(forwardedClipboardTargets(primary, shared));     // never moved onto its user's clipboard
+    }
+}
