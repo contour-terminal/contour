@@ -158,3 +158,4 @@ nav:
     - internals/vt-conformance.md
     - internals/macos-code-signing.md
     - internals/releasing.md
+    - internals/release-signing.md
