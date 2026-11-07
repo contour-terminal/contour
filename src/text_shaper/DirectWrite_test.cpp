@@ -2,6 +2,7 @@
 #include <text_shaper/DirectWriteLocator.hpp>
 #include <text_shaper/DirectWriteShaper.hpp>
 #include <text_shaper/FontLocator.hpp>
+#include <text_shaper/OneFileTestLocator.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,23 +19,6 @@ namespace
 
 /// Bytes that are not UTF-8: a stray continuation byte, then one that starts no sequence at all.
 constexpr auto NotUtf8 = std::string_view { "\x80\xff" };
-
-/// Answers every query with the one file it was given, so a shaper loads the path a case chose.
-class OneFileLocator final: public FontLocator
-{
-  public:
-    /// @param path The font file every query answers with.
-    explicit OneFileLocator(std::string path): _path { std::move(path) } {}
-
-    [[nodiscard]] FontSourceList all() override { return { FontPath { .value = _path } }; }
-
-    [[nodiscard]] FontSourceList locate(FontDescription const& /*description*/) override { return all(); }
-
-    [[nodiscard]] FontSourceList resolve(gsl::span<char32_t const> /*codepoints*/) override { return all(); }
-
-  private:
-    std::string _path;
-};
 
 } // namespace
 
@@ -89,7 +73,7 @@ TEST_CASE("DirectWriteShaper.loadFont")
 {
     SECTION("a font path that is not UTF-8 loads no font")
     {
-        auto locator = OneFileLocator { std::string { NotUtf8 } };
+        auto locator = test::OneFileLocator { std::string { NotUtf8 } };
         auto shaper = DirectWriteShaper { DPI { .x = 96, .y = 96 }, locator };
         auto font = std::optional<FontKey> {};
         REQUIRE_NOTHROW(font = shaper.loadFont(FontDescription {}, FontSize { 12.0 }));

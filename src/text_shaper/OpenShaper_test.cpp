@@ -2,6 +2,7 @@
 #include <text_shaper/BDFTestFont.hpp>
 #include <text_shaper/FontLocator.hpp>
 #include <text_shaper/MockFontLocator.hpp>
+#include <text_shaper/OneFileTestLocator.hpp>
 #include <text_shaper/OpenShaper.hpp>
 
 #include <core/Utils.hpp>
@@ -578,22 +579,7 @@ TEST_CASE("OpenShaper.COLRv1", "[OpenShaper]")
         return;
     }
 
-    struct TestFontLocator: public FontLocator
-    {
-        filesystem::path path;
-        explicit TestFontLocator(filesystem::path p): path(std::move(p)) {}
-
-        FontSourceList locate(FontDescription const& /*fd*/) override
-        {
-            return { FontPath { .value = path.string() } };
-        }
-
-        FontSourceList all() override { return {}; }
-
-        FontSourceList resolve(gsl::span<char32_t const /*codepoints*/>) override { return {}; }
-    };
-
-    auto testLocator = TestFontLocator { fontPath };
+    auto testLocator = OneFileLocator { fontPath.string() };
     auto shaper = OpenShaper(DPI { .x = 96, .y = 96 }, testLocator);
 
     auto const fd = FontDescription { .familyName = "Noto Color Emoji" };
@@ -620,6 +606,46 @@ TEST_CASE("OpenShaper.COLRv1", "[OpenShaper]")
     CHECK(glyph.bitmapSize.width > vtbackend::Width(0));
     CHECK(glyph.bitmapSize.height > vtbackend::Height(0));
     CHECK(!glyph.bitmap.empty());
+}
+
+TEST_CASE("OpenShaper.color_font", "[OpenShaper]")
+{
+    auto const fontPath = filesystem::path("C:/Windows/Fonts/seguiemj.ttf");
+    if (!filesystem::exists(fontPath))
+    {
+        WARN("Test skipped. Font file not found: " << fontPath << "\n");
+        return;
+    }
+
+    auto locator = OneFileLocator { fontPath.string() };
+    auto shaper = OpenShaper(DPI { .x = 96, .y = 96 }, locator);
+    auto const fontKey =
+        shaper.loadFont(FontDescription { .familyName = "Segoe UI Emoji" }, FontSize { 12.0 });
+    REQUIRE(fontKey.has_value());
+
+    auto const rasterize = [&](char32_t codepoint) {
+        auto const position = shaper.shape(*fontKey, codepoint);
+        REQUIRE(position.has_value());
+        auto glyph = shaper.rasterize(position->glyph, RenderMode::Gray);
+        REQUIRE(glyph.has_value());
+        return std::move(*glyph);
+    };
+
+    SECTION("a glyph without colors of its own is drawn like any other glyph")
+    {
+        // Issue #452: Segoe UI Emoji is a COLR v1 font, but its U+21B3 is a plain outline with no color
+        // definition at all. Sent down the color path anyway, it was painted in Cairo's default source
+        // color, opaque black, into a color bitmap -- which is never tinted, so it drew as a black arrow
+        // whatever the text's color was. A mask takes the text's color.
+        auto const glyph = rasterize(0x21B3);
+        CHECK(glyph.format == BitmapFormat::AlphaMask);
+        CHECK(std::ranges::any_of(glyph.bitmap, [](uint8_t coverage) { return coverage != 0; }));
+    }
+
+    SECTION("a glyph with colors of its own stays a color bitmap")
+    {
+        CHECK(rasterize(0x23F1).format == BitmapFormat::RGBA); // STOPWATCH
+    }
 }
 
 TEST_CASE("OpenShaper.coverage.resolves_a_codepoint_the_chain_cannot", "[OpenShaper][fallback]")
