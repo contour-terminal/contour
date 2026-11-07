@@ -19,7 +19,8 @@ namespace vtbackend::test
 /// The page height the workloads assume: the TUI workload repaints this many rows per frame.
 constexpr auto WorkloadPageLines = 50;
 
-/// The page width the workloads assume: wider than the longest line any of them writes (180 columns).
+/// The page width the workloads assume: wider than the longest line any of them writes (180 columns), but for
+/// longlines, whose lines wrap on it by design.
 constexpr auto WorkloadPageColumns = 200;
 
 /// The seed every workload is generated from.
@@ -133,6 +134,14 @@ namespace detail
             out += "\033[K";
         }
     }
+
+    /// A line several page widths long, as a minified file, a JSON document or a long log record writes:
+    /// 201 to 1000 columns, so that every line wraps one to five times on the workloads' page.
+    inline void writeLongLine(std::string& out, std::mt19937& rng)
+    {
+        appendPrintable(out, rng, drawBetween(rng, WorkloadPageColumns + 1, 5 * WorkloadPageColumns));
+        out += "\r\n";
+    }
 } // namespace detail
 
 /// Every workload the benchmarks know, in the order they report them. A new workload is a new row. What each
@@ -144,6 +153,7 @@ inline constexpr auto Workloads = std::array {
     Workload { .name = "utf8", .writeUnit = &detail::writeUtf8Line },
     Workload { .name = "utf8sparse", .writeUnit = &detail::writeUtf8SparseLine },
     Workload { .name = "tui", .writeUnit = &detail::writeTuiFrame },
+    Workload { .name = "longlines", .writeUnit = &detail::writeLongLine },
 };
 
 /// Generates @p workload until it holds at least @p targetBytes, ending on a whole line or frame.
