@@ -118,6 +118,16 @@
           <li>Fixes a client reporting an unchanged window area to the daemon discarding the per-pane sizes other attached clients had reported, which put their split panes back on the daemon's estimate (#2227)</li>
           <li>Fixes a release build on Windows, started by <code>cmd.exe</code> with its output redirected (<code>contour version &gt; out.txt</code>, a pipe, or <code>NUL</code>), writing to the console instead of where it was redirected (#2239)</li>
           <li>Fixes a Windows installer needing the installed Contour uninstalled first: every build now upgrades it in place</li>
+          <li>Adds a per-user Windows installer (<code>contour-&lt;version&gt;-win64-user.msi</code>) beside the per-machine one: it needs no administrator, installs into <code>%LOCALAPPDATA%\Programs\Contour</code>, and the two are separate products that never upgrade each other</li>
+          <li>Installs the Windows packages into a folder named <code>Contour</code> that upgrades keep, a folder chosen at install time included, instead of a folder per version</li>
+          <li>Adds the switches <code>ADD_TO_PATH=0</code> and <code>DESKTOP_SHORTCUT=0</code> to the Windows installers, beside <code>INSTALL_ROOT</code>, for unattended installs, documented in the installation guide with <code>winget --scope machine|user</code> examples</li>
+          <li>Closes a running Contour window when the Windows installer replaces it and opens it again with the same arguments; the sessions a daemon hosts keep running, and a window that hosts its sessions in its own process loses them</li>
+          <li>Adds <code>contour daemon relocate</code>, which the Windows installer runs to move a hand-started daemon onto its staged copy before replacing files, so that an upgrade no longer ends its sessions; a daemon started with <code>--in-place</code>, on a custom <code>--socket</code> path or of another user is left alone, and nothing here ever fails the install</li>
+          <li>Tells a Windows daemon's console which process takes over when a live upgrade or a move hands it over</li>
+          <li>Names the publisher, icon and links in the Windows installers' Add/Remove Programs entry, and gives <code>contour.exe</code> a version resource</li>
+          <li>Ships the Visual C++ runtime beside <code>contour.exe</code> in the Windows packages, and the vcpkg libraries in a package built without the GUI</li>
+          <li>Points a registered daemon task whose program an upgrade removed at the installed <code>contour.exe</code> the next time Contour starts, or the task is started with <code>contour daemon-service start</code>, instead of failing to start</li>
+          <li>Fixes <code>contour daemon-service install</code> registering the path it was started as instead of the running executable, a disabled daemon task stopping the daemon from starting on demand, and daemon tasks of different users on one machine sharing a name</li>
           <li>Fixes the first window waiting for a daemon start that had been given up on before it opened</li>
           <li>Fixes the Windows package missing Qt's SVG support, which left SVG icons blank</li>
           <li>Fixes the Windows package shipping build and test leftovers: test executables, debug symbols and the Qt Test and offscreen libraries</li>
