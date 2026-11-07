@@ -98,6 +98,9 @@ set(vtbackend_HEADERS
     screen/PrintedLinks.hpp
     Logging.hpp
     vt/MacroDefinition.hpp
+    vt/SoftFont.hpp
+    vt/SoftFontStore.hpp
+    core/SoftGlyphRef.hpp
     shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
@@ -220,6 +223,8 @@ set(vtbackend_SOURCES
     shell/LivePromptMarks.cpp
     screen/LocalTime.cpp
     vt/MacroDefinition.cpp
+    vt/SoftFont.cpp
+    vt/SoftFontStore.cpp
     graphics/MessageParser.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
@@ -414,6 +419,8 @@ if(LIBTERMINAL_TESTING)
         vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
         vt/MacroDefinition_test.cpp
+        vt/SoftFont_test.cpp
+        vt/SoftFontStore_test.cpp
         vt/PointerShape_test.cpp
         graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
