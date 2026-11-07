@@ -109,6 +109,15 @@ std::string serviceNameForLabel(std::string_view label)
     return std::format("contour-daemon-{}", label);
 }
 
+std::vector<std::string> taskNamesFor(std::string_view name, std::string_view userKey)
+{
+    auto names = std::vector<std::string> {};
+    if (!userKey.empty())
+        names.push_back(std::format("{}-{}", name, userKey));
+    names.emplace_back(name);
+    return names;
+}
+
 std::vector<std::string> registrationNamesForLabel(std::string_view label)
 {
     auto names = std::vector { serviceNameForLabel(label) };

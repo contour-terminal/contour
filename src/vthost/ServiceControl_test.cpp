@@ -181,6 +181,17 @@ TEST_CASE("on Linux without a home directory the backend refuses and says why", 
 }
 #endif
 
+TEST_CASE("a task is named for its user, and the machine-wide name is still looked up", "[vthost][service]")
+{
+    CHECK(taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1001")
+          == std::vector<std::string> { "contour-daemon-S-1-5-21-1-2-3-1001", "contour-daemon" });
+    // Two accounts never share the name a task is created under.
+    CHECK(taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1001").front()
+          != taskNamesFor("contour-daemon", "S-1-5-21-1-2-3-1002").front());
+    // Without a user key (systemd and launchd units are per-user already) the name is the registration's own.
+    CHECK(taskNamesFor("contour-daemon-work", "") == std::vector<std::string> { "contour-daemon-work" });
+}
+
 TEST_CASE("a disabled registration is named as such", "[vthost][service]")
 {
     CHECK(nameOf(ServiceRunState::Disabled) == "installed, disabled");
