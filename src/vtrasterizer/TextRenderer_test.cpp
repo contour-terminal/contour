@@ -72,8 +72,7 @@ class TextRendererTest
                                                    gsl::span<unsigned> clusters,
                                                    TextStyle style)
     {
-        return renderer.getOrCreateCachedGlyphPositions(
-            renderer.shapingCacheKeyFor(codepoints, style), codepoints, clusters, style);
+        return renderer.getOrCreateCachedGlyphPositions(codepoints, clusters, style);
     }
 };
 
@@ -761,7 +760,8 @@ TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[r
     auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
 
     auto const text = std::u32string { U"Building" };
-    auto const before = renderer.shapingCacheKeyFor(text, TextStyle::Regular);
+    auto const clusters = std::vector<unsigned> { 0, 1, 2, 3, 4, 5, 6, 7 }; // one codepoint per cell
+    auto const before = renderer.shapingCacheKeyFor(text, clusters, TextStyle::Regular);
 
     SECTION("reloading the font changes the key for the same text")
     {
@@ -774,23 +774,38 @@ TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[r
         REQUIRE(reloaded->value != firstKey->value); // keys are never reissued
 
         fontKeys.regular = *reloaded; // held by reference; this is the live font the renderer shapes with
-        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+        CHECK(renderer.shapingCacheKeyFor(text, clusters, TextStyle::Regular) != before);
     }
 
     SECTION("changing the font size changes the key for the same text")
     {
         fontDescriptions.size = text::FontSize { fontDescriptions.size.pt + 3.0 };
-        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+        CHECK(renderer.shapingCacheKeyFor(text, clusters, TextStyle::Regular) != before);
     }
 
     SECTION("the style still separates runs of identical text")
     {
-        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Bold) != before);
+        CHECK(renderer.shapingCacheKeyFor(text, clusters, TextStyle::Bold) != before);
+    }
+
+    SECTION("a cell holding several codepoints separates runs of identical text")
+    {
+        // A cached shaping names the cell of every glyph, and the renderer draws each glyph on that cell
+        // (issue #452), so the same text laid out across cells differently must not share an entry.
+        auto const firstTwoInOneCell = std::vector<unsigned> { 0, 0, 1, 2, 3, 4, 5, 6 };
+        CHECK(renderer.shapingCacheKeyFor(text, firstTwoInOneCell, TextStyle::Regular) != before);
+    }
+
+    SECTION("a run whose first cluster is not 0 does not pass for one cell per codepoint")
+    {
+        // The last cluster being the run's length minus one implies 0..n-1 only when the first is 0.
+        auto const shifted = std::vector<unsigned> { 1, 1, 2, 3, 4, 5, 6, 7 };
+        CHECK(renderer.shapingCacheKeyFor(text, shifted, TextStyle::Regular) != before);
     }
 
     SECTION("nothing changed means the same key, or the cache would never hit")
     {
-        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) == before);
+        CHECK(renderer.shapingCacheKeyFor(text, clusters, TextStyle::Regular) == before);
     }
 }
 
@@ -1651,6 +1666,7 @@ namespace
 
 constexpr auto Ornament = char32_t { 0x276F };     ///< The prompt ornament from issue #1939.
 constexpr auto NoBreakSpace = char32_t { 0x00A0 }; ///< Follows it, and does not break the run.
+constexpr auto Stopwatch = char32_t { 0x23F1 };    ///< One cell on the grid, nearly two in a fallback font.
 constexpr auto CellWidth = 10;
 
 /// Renders each of @p cells as its own grid cell of one text group, and returns the X coordinate every
@@ -1795,8 +1811,13 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     // The fallback is proportional and covers everything the primary is missing -- DejaVu Sans. Its
     // non-breaking space advances a mere 3px against a 10px cell, which is what used to round away to
     // nothing and drag the rest of the run one cell to the left.
+    //
+    // It also has the stopwatch from issue #452, which Segoe UI Emoji draws 27px wide in a 12px cell: here
+    // 19px against 10px, which is as close to two cells as rounding goes.
     auto fallback = text::test::BDFFont {
-        "fallback", false, { { Ornament, 12 }, { NoBreakSpace, 3 }, { U'A', 7 }, { U'B', 7 } }
+        "fallback",
+        false,
+        { { Ornament, 12 }, { NoBreakSpace, 3 }, { Stopwatch, 19 }, { U'A', 7 }, { U'B', 7 } }
     };
 
     auto description = text::FontDescription {};
@@ -1871,6 +1892,21 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
         CHECK(positions[1] == 1 * CellWidth);
         CHECK(positions[2] == 2 * CellWidth);
         CHECK(positions[3] == 3 * CellWidth);
+    }
+
+    SECTION("a wide fallback advance does not push the rest of the run right")
+    {
+        // Issue #452: "⏱9ms" in a PowerShell prompt drew as "⏱ 9m", the "s" hidden under the powerline
+        // arrow that follows it. The stopwatch occupies ONE cell on the grid, but its fallback glyph
+        // advanced the pen by two, so every later glyph of the run was drawn a cell to the right of the
+        // cell it belongs to.
+        auto const positions =
+            renderedGlyphPositions(renderer, renderTarget, { std::u32string { Stopwatch }, U"A", U"B" });
+
+        REQUIRE(positions.size() == 3);
+        CHECK(positions[0] == 0);
+        CHECK(positions[1] == 1 * CellWidth);
+        CHECK(positions[2] == 2 * CellWidth);
     }
 
     SECTION("a run the primary font covers is unaffected")

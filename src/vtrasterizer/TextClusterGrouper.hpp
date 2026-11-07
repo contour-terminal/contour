@@ -68,23 +68,16 @@ class TextClusterGrouper
     void endFrame();
 
   private:
-    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
+    /// Puts a sequence of codepoints that belong to the same grid cell at @p position
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view codepoints,
+    void appendCellTextToClusterGroup(vtbackend::CellLocation position,
+                                      std::u32string_view codepoints,
                                       TextStyle style,
                                       vtbackend::RGBColor color,
                                       vtbackend::LineFlags flags,
                                       vtbackend::GlyphSizing const& sizing);
 
     void flushTextClusterGroup();
-
-    void resetAndMovePenForward(vtbackend::ColumnOffset penIncrementInX) noexcept
-    {
-        _codepoints.clear();
-        _clusters.clear();
-        _cellCount = 0;
-        _initialPenPosition.column += penIncrementInX;
-    }
 
     Events& _events;
 
@@ -102,11 +95,8 @@ class TextClusterGrouper
     // uniform unicode properties (script, language, direction).
     std::vector<char32_t> _codepoints;
 
-    // cluster indices for each codepoint
+    // For each codepoint, the column its cell starts at, counted from the group's first. @see RunPen
     std::vector<unsigned> _clusters;
-
-    // number of grid cells processed
-    int _cellCount = 0; // FIXME: EA width vs actual cells
 
     /// The scale the current group is being drawn at. Part of the group's identity: a cell drawn at
     /// a different size cannot share a shaping run with its neighbours.

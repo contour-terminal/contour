@@ -576,6 +576,7 @@ void DirectWriteShaper::shapeWithFont(FontKey font,
         if (refs[i].cluster != std::numeric_limits<unsigned>::max())
             cluster = refs[i].cluster;
         refs[i] = { .cluster = cluster, .missing = result[i].glyph.index.value == 0 };
+        result[i].cluster = cluster;
     }
 }
 

@@ -30,6 +30,7 @@
 #include <gsl/span>
 #include <gsl/span_ext>
 
+#include <span>
 #include <vector>
 
 namespace vtrasterizer
@@ -96,16 +97,24 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
 
     void updateFontMetrics();
 
-    /// The shaping-cache key for @p text in @p style under the renderer's CURRENT fonts and size.
+    /// The shaping-cache key for @p text laid out as @p clusters in @p style under the renderer's
+    /// CURRENT fonts and size.
     ///
     /// Exposed so the property the key exists for can be asserted directly: a font or size change must
     /// change the key, so entries cached against the previous font become unreachable rather than
     /// resolvable. The cached values are shape_results naming a specific font, and resolving one after
     /// that font has been unloaded throws inside the shaper.
-    /// @param text  The codepoints being shaped.
-    /// @param style The text style the run is drawn in.
+    ///
+    /// A shape_result also names the column of every glyph, so the cluster layout is part of the key --
+    /// but only where it is not 0..n-1, one codepoint per column, which is what the text alone implies
+    /// for the overwhelming majority of runs and costs nothing to recognise. A cell holding several
+    /// codepoints, a wide character, or a double-width line hashes its layout in.
+    /// @param text     The codepoints being shaped.
+    /// @param clusters The column of each codepoint's cell, as TextClusterGrouper numbers them.
+    /// @param style    The text style the run is drawn in.
     /// @return The cache key.
     [[nodiscard]] crispy::StrongHash shapingCacheKeyFor(std::u32string_view text,
+                                                        std::span<unsigned const> clusters,
                                                         TextStyle style) const noexcept;
 
     void setPressure(bool pressure) noexcept { _pressure = pressure; }
@@ -169,8 +178,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     void initializeDirectMapping();
 
     /// Gets the text shaping result of the current text cluster group
-    text::ShapeResult const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash,
-                                                             std::u32string_view codepoints,
+    text::ShapeResult const& getOrCreateCachedGlyphPositions(std::u32string_view codepoints,
                                                              gsl::span<unsigned> clusters,
                                                              TextStyle style);
     text::ShapeResult createTextShapedGlyphPositions(std::u32string_view codepoints,
