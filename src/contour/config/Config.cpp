@@ -5750,14 +5750,16 @@ static std::string createKeyMapping(Config const& c)
         std::string { documentation::Text<documentation::InputMappings>::Config }));
     {
         auto const _ = typename Writer::Offset {};
-        for (auto&& entry: c.inputMappings.value().keyMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
-
-        for (auto&& entry: c.inputMappings.value().charMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
-
-        for (auto&& entry: c.inputMappings.value().mouseMappings)
-            doc.append(Writer::addOffset(writer.format(entry), Writer::Offset::Levels * Writer::OneOffset));
+        // Each table spelled so that no two of its rows land on one chord on another platform.
+        auto const writeTable = [&](auto const& rows) {
+            auto const spellings = portablePrimarySpellings(std::span { rows }, c.keyboardPlatformKind);
+            for (auto const& [entry, spelling]: std::views::zip(rows, spellings))
+                doc.append(Writer::addOffset(writer.format(entry, spelling),
+                                             Writer::Offset::Levels * Writer::OneOffset));
+        };
+        writeTable(c.inputMappings.value().keyMappings);
+        writeTable(c.inputMappings.value().charMappings);
+        writeTable(c.inputMappings.value().mouseMappings);
     }
 
     return doc;

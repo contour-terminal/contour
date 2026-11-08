@@ -167,9 +167,19 @@ TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[c
     REQUIRE(bound != mappings.charMappings.end());
     CHECK(bound->input == U'P');
     // Primary+Shift: Ctrl+Shift on the desktop, Command+Shift on a Mac.
-    CHECK(bound->modifiers
-          == contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
-                 .with(vtbackend::Modifier::Shift));
+    auto const primaryShift = contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
+                                  .with(vtbackend::Modifier::Shift);
+    if constexpr (contour::config::BuildKeyboardPlatformKind == contour::config::KeyboardPlatformKind::Mac)
+    {
+        // A Mac lists Command+P first, the chord the menus show, and keeps Shift+Command+P beside it.
+        CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Super });
+        CHECK(std::ranges::any_of(mappings.charMappings, [&](auto const& mapping) {
+            return mapping.input == U'P' && mapping.modifiers == primaryShift && !mapping.binding.empty()
+                   && std::holds_alternative<contour::actions::OpenCommandPalette>(mapping.binding.at(0));
+        }));
+    }
+    else
+        CHECK(bound->modifiers == primaryShift);
 }
 
 TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
@@ -560,9 +570,9 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
         CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
     }
 
-    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt, on the primary screen only")
+    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt on macOS, on the primary screen only")
     {
-        auto const config = Config {};
+        auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
 
         auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
         REQUIRE(up != nullptr);
@@ -585,6 +595,27 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
             return (mapping.input == Key::UpArrow || mapping.input == Key::DownArrow)
                    && mapping.modifiers == ctrlShift;
         }));
+    }
+
+    SECTION("Ctrl+Shift+Up and Down select a command's output on the desktop, on the primary screen only")
+    {
+        // VS Code's chords; the desktop jumps from prompt to prompt with Ctrl+Alt+K and J.
+        auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
+
+        auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
+        REQUIRE(up != nullptr);
+        REQUIRE(up->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SelectPreviousCommandOutput>(up->front()));
+
+        auto const* down =
+            contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags);
+        REQUIRE(down != nullptr);
+        REQUIRE(down->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SelectNextCommandOutput>(down->front()));
+
+        auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
+        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, alternateScreen)
+              == nullptr);
     }
 
     SECTION("matching is on the exact chord")
@@ -2493,8 +2524,7 @@ using contour::config::KeyboardPlatformKind;
 using vtbackend::Modifier;
 using vtbackend::Modifiers;
 
-constexpr auto PlatformKinds =
-    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+constexpr auto const& PlatformKinds = contour::config::AllKeyboardPlatformKinds;
 
 /// The `input_mapping:` section a document with one row stating @p mods and nothing else.
 [[nodiscard]] std::string oneRowConfig(std::string_view mods)
@@ -2562,6 +2592,16 @@ TEST_CASE("the writer spells a row containing the Primary set as Primary", "[con
     CHECK(canonicalModifierSpellings(Modifiers { Modifier::Super }, KeyboardPlatformKind::Xkb)
           == Spellings { "Super" });
     CHECK(canonicalModifierSpellings(Modifiers {}, KeyboardPlatformKind::Mac).empty());
+    // A chord whose other modifiers another platform's Primary already holds is written literally:
+    // Control+Command as [Primary, Control] would read back on the desktop as Ctrl+Shift, a different chord
+    // taken by another command. Shift is the one exception, as [Primary, Shift] means the same command
+    // everywhere.
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Super },
+                                     KeyboardPlatformKind::Mac)
+          == Spellings { "Control", "Super" });
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Shift, Modifier::Super },
+                                     KeyboardPlatformKind::Xkb)
+          == Spellings { "Shift", "Control", "Super" });
 
     SECTION("a written configuration says Primary where the host's set is")
     {
@@ -2603,6 +2643,28 @@ TEST_CASE("a written config round-trips on its own platform", "[config][primary]
         CHECK(chords(reloaded.inputMappings.value().mouseMappings)
               == chords(original.inputMappings.value().mouseMappings));
     }
+}
+
+TEST_CASE("a generated config folds no two rows into one on another platform", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // A contour.yml generated on a Mac and copied to Linux (or the reverse) must keep every row its own: two
+    // rows the loader folds into one binding run both actions, e.g. Command+W and Shift+Command+W both read
+    // as Ctrl+Shift+W, closing the pane and then the whole tab.
+    auto const rowCount = [](contour::config::InputMappings const& mappings) {
+        return mappings.keyMappings.size() + mappings.charMappings.size() + mappings.mouseMappings.size();
+    };
+    for (auto const from: PlatformKinds)
+        for (auto const to: PlatformKinds)
+        {
+            CAPTURE(static_cast<int>(from), static_cast<int>(to));
+            auto const original = contour::config::Config { .keyboardPlatformKind = from };
+            auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(original);
+            auto const reloaded = loadFromYaml(dir, written, to);
+            CHECK(rowCount(reloaded.inputMappings.value()) == rowCount(original.inputMappings.value()));
+        }
 }
 
 TEST_CASE("Primary+Shift and Primary collide on the desktop", "[config][primary]")

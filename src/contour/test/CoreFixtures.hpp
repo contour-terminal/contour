@@ -55,7 +55,7 @@ namespace contour::test
 }
 
 /// Gives @p config the desktop's built-in bindings and fallbacks whatever the host: for a test of a chord
-/// only the desktop binds (Ctrl+Shift+G, ClosePane, Ctrl+0), which a Mac's defaults leave to the shell or
+/// only the desktop binds (Ctrl+Shift+G, Ctrl+Shift+X, Ctrl+0), which a Mac's defaults leave to the shell or
 /// move to Command. The keyboard platform is fixed when a Config is built, so this swaps both it and the
 /// table.
 /// @param config The configuration to pin.

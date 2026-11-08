@@ -6,6 +6,9 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/BindingCollisions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/DefaultBindings.hpp>
+#include <contour/config/ModifierNames.hpp>
+#include <contour/config/PortableSpelling.hpp>
 
 #include <vtbackend/input/InputGenerator.hpp>
 
@@ -17,8 +20,10 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 using namespace contour;
 using namespace contour::config;
@@ -29,8 +34,7 @@ using vtbackend::Modifiers;
 namespace
 {
 /// Every keyboard platform kind.
-constexpr auto AllKinds =
-    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+constexpr auto const& AllKinds = AllKeyboardPlatformKinds;
 
 MatchModes modesOf(std::initializer_list<MatchModes::Flag> on,
                    std::initializer_list<MatchModes::Flag> off = {})
@@ -60,6 +64,105 @@ std::string describe(InputMappings const& mappings)
                             collision.second,
                             collision.chord);
     return text;
+}
+
+/// Action names, in table order.
+using Names = std::vector<std::string_view>;
+
+/// Appends to @p out the action of every row of @p rows on one chord, skipping repeats.
+/// @param modes When not empty, only rows requiring exactly these modes.
+template <typename Rows, typename Input>
+void appendActions(Rows const& rows, Modifiers modifiers, Input input, MatchModes modes, Names& out)
+{
+    for (auto const& row: rows)
+    {
+        if (row.modifiers != modifiers || row.input != input || row.binding.empty())
+            continue;
+        if (modes != MatchModes {} && row.modes != modes)
+            continue;
+        auto const name = actions::name(row.binding.front());
+        if (std::ranges::find(out, name) == out.end())
+            out.push_back(name);
+    }
+}
+
+/// The fallback rows of @p fallbacks as plain bindings.
+template <typename Input>
+[[nodiscard]] auto mappingsOf(std::vector<FallbackMapping<Input>> const& fallbacks)
+{
+    return fallbacks | std::views::transform(&FallbackMapping<Input>::mapping);
+}
+
+/// The actions bound to a character chord on @p kind, in either edition's defaults or the fallbacks.
+/// @param modes When not empty, only rows requiring exactly these modes.
+[[nodiscard]] Names charActions(KeyboardPlatformKind kind,
+                                Modifiers modifiers,
+                                char32_t input,
+                                MatchModes modes = {})
+{
+    auto result = Names {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        appendActions(defaultInputMappings(edition, kind).charMappings, modifiers, input, modes, result);
+    appendActions(mappingsOf(builtinFallbackCharMappings(kind)), modifiers, input, modes, result);
+    return result;
+}
+
+/// The actions bound to a key chord on @p kind, in either edition's defaults or the fallbacks.
+/// @param modes When not empty, only rows requiring exactly these modes.
+[[nodiscard]] Names keyActions(KeyboardPlatformKind kind,
+                               Modifiers modifiers,
+                               vtbackend::Key input,
+                               MatchModes modes = {})
+{
+    auto result = Names {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        appendActions(defaultInputMappings(edition, kind).keyMappings, modifiers, input, modes, result);
+    appendActions(mappingsOf(builtinFallbackKeyMappings(kind)), modifiers, input, modes, result);
+    return result;
+}
+
+/// The actions bound to a character chord on @p kind in the fallback table only.
+[[nodiscard]] Names fallbackCharActions(KeyboardPlatformKind kind, Modifiers modifiers, char32_t input)
+{
+    auto result = Names {};
+    appendActions(mappingsOf(builtinFallbackCharMappings(kind)), modifiers, input, MatchModes {}, result);
+    return result;
+}
+
+/// The first character fallback row on a chord on @p kind, or nullptr.
+[[nodiscard]] FallbackCharMapping const* fallbackCharRow(KeyboardPlatformKind kind,
+                                                         Modifiers modifiers,
+                                                         char32_t input)
+{
+    auto const& rows = builtinFallbackCharMappings(kind);
+    auto const found = std::ranges::find_if(rows, [&](auto const& row) {
+        return row.mapping.modifiers == modifiers && row.mapping.input == input;
+    });
+    return found != rows.end() ? &*found : nullptr;
+}
+
+/// @p rows as a configuration written on @p from reads them back on @p to (@see portablePrimarySpellings).
+template <typename Input>
+[[nodiscard]] std::vector<vtbackend::InputBinding<Input, ActionList>> carried(
+    std::vector<vtbackend::InputBinding<Input, ActionList>> rows,
+    KeyboardPlatformKind from,
+    KeyboardPlatformKind to)
+{
+    auto const spellings =
+        portablePrimarySpellings(std::span<vtbackend::InputBinding<Input, ActionList> const> { rows }, from);
+    for (auto&& [row, spelling]: std::views::zip(rows, spellings))
+        row.modifiers = modifiersReadOn(row.modifiers, from, spelling, to);
+    return rows;
+}
+
+/// A configuration's bindings, written on @p from and read back on @p to.
+[[nodiscard]] InputMappings carriedMappings(InputMappings const& mappings,
+                                            KeyboardPlatformKind from,
+                                            KeyboardPlatformKind to)
+{
+    return InputMappings { .keyMappings = carried(mappings.keyMappings, from, to),
+                           .charMappings = carried(mappings.charMappings, from, to),
+                           .mouseMappings = carried(mappings.mouseMappings, from, to) };
 }
 } // namespace
 
@@ -342,4 +445,145 @@ TEST_CASE("every platform opens the Connect picker with its New Window to… cho
             CHECK(claimed == 1);
         }
     }
+}
+
+TEST_CASE("macOS opens the command palette with Command+P and Shift+Command+P", "[bindings][palette]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    CHECK(charActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
+    CHECK(charActions(mac, Modifiers { Modifier::Super, Modifier::Shift }, U'P')
+          == Names { "OpenCommandPalette" });
+    // A configuration written before Command+P existed lists Shift+Command+P only; Command+P reaches it as a
+    // fallback.
+    CHECK(fallbackCharActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
+}
+
+TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][panes]")
+{
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'W') == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Win32, ctrlShift, U'W') == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Mac, Modifiers { Modifier::Super }, U'W')
+          == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Mac, Modifiers { Modifier::Super, Modifier::Shift }, U'W')
+          == Names { "CloseTab" });
+    // The desktop keeps Ctrl+Shift+X.
+    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'X') == Names { "ClosePane" });
+}
+
+TEST_CASE("the desktop copies with Ctrl+Shift+C and enlarges the font with Ctrl+Shift+=", "[bindings]")
+{
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        INFO("platform " << static_cast<int>(kind));
+        CHECK(charActions(kind, ctrlShift, U'C') == Names { "CopySelection" });
+        CHECK(charActions(kind, ctrlShift, U'=') == Names { "IncreaseFontSize" });
+        CHECK(charActions(kind, ctrlShift, U'+') == Names { "IncreaseFontSize" });
+        // Copying clears the selection, as Ctrl+C in select mode does.
+        auto const* copy = fallbackCharRow(kind, ctrlShift, U'C');
+        REQUIRE(copy != nullptr);
+        REQUIRE(copy->mapping.binding.size() == 2);
+        CHECK(std::holds_alternative<actions::CancelSelection>(copy->mapping.binding.at(1)));
+    }
+}
+
+TEST_CASE("macOS answers the desktop's Ctrl+Alt chords with Control+Command", "[bindings]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    auto const ctrlCmd = Modifiers { Modifier::Control, Modifier::Super };
+    CHECK(charActions(mac, ctrlCmd, U'.') == Names { "ToggleStatusLine" });
+    CHECK(charActions(mac, ctrlCmd, U'O') == Names { "OpenFileManager" });
+    CHECK(charActions(mac, ctrlCmd, U'S') == Names { "ScreenshotVT" });
+    CHECK(charActions(mac, ctrlCmd, U',') == Names { "ToggleInputMethodHandling" });
+    CHECK(charActions(mac, ctrlCmd, U'V') == Names { "PasteClipboard" });
+    auto const* paste = fallbackCharRow(mac, ctrlCmd, U'V');
+    REQUIRE(paste != nullptr);
+    CHECK(std::get<actions::PasteClipboard>(paste->mapping.binding.front()).strip);
+}
+
+TEST_CASE("macOS opens the last command's output with Shift+Command+O at the prompt only", "[bindings]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    auto const chord = Modifiers { Modifier::Super, Modifier::Shift };
+    CHECK(fallbackCharActions(mac, chord, U'O') == Names { "OpenCommandOutput" });
+    auto const* row = fallbackCharRow(mac, chord, U'O');
+    REQUIRE(row != nullptr);
+    CHECK(row->mapping.modes == MatchModes { 0, MatchModes::AlternateScreen });
+    CHECK(row->declined == DeclinedInput::Consume);
+}
+
+TEST_CASE("the desktop steps between commands as VS Code does", "[bindings]")
+{
+    using vtbackend::Key;
+    auto const prompt = MatchModes { 0, MatchModes::AlternateScreen };
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        INFO("platform " << static_cast<int>(kind));
+        CHECK(keyActions(kind, ctrl, Key::UpArrow) == Names { "FocusPreviousCommand" });
+        CHECK(keyActions(kind, ctrl, Key::DownArrow) == Names { "FocusNextCommand" });
+        CHECK(keyActions(kind, ctrlShift, Key::UpArrow) == Names { "SelectPreviousCommandOutput" });
+        CHECK(keyActions(kind, ctrlShift, Key::DownArrow) == Names { "SelectNextCommandOutput" });
+        // At the prompt only: every row on these chords requires the primary screen, so an alternate-screen
+        // application keeps them.
+        for (auto const key: { Key::UpArrow, Key::DownArrow })
+        {
+            CHECK(keyActions(kind, ctrl, key, prompt) == keyActions(kind, ctrl, key));
+            CHECK(keyActions(kind, ctrlShift, key, prompt) == keyActions(kind, ctrlShift, key));
+        }
+        CHECK(fallbackCharActions(kind, ctrlShift, U'L') == Names { "ClearToPrompt" });
+        auto const* clear = fallbackCharRow(kind, ctrlShift, U'L');
+        REQUIRE(clear != nullptr);
+        CHECK(clear->mapping.modes == prompt);
+        CHECK(clear->declined == DeclinedInput::Consume);
+    }
+    // The jump between prompts moved off Ctrl+Shift+Up/Down onto Ctrl+Alt+K/J, which must reach a
+    // configuration that predates them, or such a configuration loses the jump altogether.
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        auto const ctrlAlt = Modifiers { Modifier::Control, Modifier::Alt };
+        CHECK(fallbackCharActions(kind, ctrlAlt, U'K') == Names { "ScrollMarkUp" });
+        CHECK(fallbackCharActions(kind, ctrlAlt, U'J') == Names { "ScrollMarkDown" });
+    }
+    // macOS keeps Control+Shift+Up/Down as the jump between prompts.
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow) == Names { "ScrollMarkUp" });
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow) == Names { "ScrollMarkDown" });
+}
+
+TEST_CASE("a configuration generated on one platform binds no chord twice on another", "[bindings][primary]")
+{
+    // Primary exists so that one contour.yml works on every machine. A generated file whose rows fold onto
+    // one chord elsewhere runs both actions there (the loader merges them), e.g. Command+W and
+    // Shift+Command+W both reading back as Ctrl+Shift+W, closing the pane and then the whole tab.
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const from: AllKinds)
+            for (auto const to: AllKinds)
+            {
+                INFO("edition " << token << ", written on " << static_cast<int>(from) << ", read on "
+                                << static_cast<int>(to));
+                auto const mappings = carriedMappings(defaultInputMappings(edition, from), from, to);
+                INFO(describe(mappings));
+                CHECK(findBindingCollisions(mappings).empty());
+            }
+}
+
+TEST_CASE("portablePrimarySpellings respells whichever row of a folding pair holds Primary",
+          "[bindings][primary]")
+{
+    // Written on a Mac, Command+C (Primary) and a literal Ctrl+Shift+C both read back as Ctrl+Shift+C on the
+    // desktop. The later row has no Primary to give up, so the earlier one is written literally.
+    auto const rows = std::vector<CharInputMapping> {
+        CharInputMapping { .modes = {},
+                           .modifiers = Modifiers { Modifier::Super },
+                           .input = U'C',
+                           .binding = { actions::CopySelection {} } },
+        CharInputMapping { .modes = {},
+                           .modifiers = Modifiers { Modifier::Control, Modifier::Shift },
+                           .input = U'C',
+                           .binding = { actions::ToggleFullscreen {} } },
+    };
+    CHECK(portablePrimarySpellings(std::span<CharInputMapping const> { rows }, KeyboardPlatformKind::Mac)
+          == std::vector { PrimarySpelling::Literal, PrimarySpelling::Canonical });
 }

@@ -56,6 +56,9 @@ namespace
         ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt } };
     constexpr auto SuperShift = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Shift } };
     constexpr auto SuperAlt = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Alt } };
+    /// Control+Command: the macOS counterpart of a desktop Ctrl+Alt row. Option composes characters, so an
+    /// Option chord on a character cannot fire; Control+Command is the Mac's own second tier.
+    constexpr auto CtrlSuper = ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Super } };
     /// The host's Primary set: Command on macOS, Ctrl+Shift elsewhere.
     constexpr auto Primary = ChordSpec { .primary = PrimaryUse::Present };
     /// Primary plus Shift: Shift+Command on macOS, which is where macOS spells these chords, and still
@@ -200,9 +203,10 @@ namespace
             // the jumps from one command's prompt to the next, as Ghostty's jump_to_prompt binds them. Bound
             // nowhere in the defaults when they were added -- Shift alone scrolls a line, Alt+Shift focuses a
             // pane, Ctrl+Alt swaps one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the
-            // prompts are; an alternate-screen application keeps the chord.
-            fallback(All, CtrlShift, Key::UpArrow, PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
-            fallback(All, CtrlShift, Key::DownArrow, PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
+            // prompts are; an alternate-screen application keeps the chord. macOS only since the desktop gave
+            // the chord to VS Code's SelectCommandOutput (below); the desktop jumps with Ctrl+Alt+K/J.
+            fallback(MacOnly, CtrlShift, Key::UpArrow, PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
+            fallback(MacOnly, CtrlShift, Key::DownArrow, PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             // The chords that move keyboard focus through a window's chrome (Native2026 only, so a Classic
             // user's Ctrl+F6 still reaches the shell). A bare F6 is never bound: mc, vim and htop use it.
             // macOS: Control+F6 between areas (Shift reversed) and Control+F5 for the toolbar -- the chords
@@ -218,6 +222,22 @@ namespace
             both(All, Shift, Key::F10, RequiresBlockFocus, { actions::OpenBlockMenu {} }),
             both(All, NoMods, Key::Enter, RequiresBlockFocus, { actions::ToggleFold {} }),
             both(All, NoMods, Key::Escape, BlockFocusOutsideSelect, { actions::ClearCommandBlockFocus {} }),
+            // Linux and Windows: the same commands as VS Code's integrated terminal binds them --
+            // Ctrl+Up/Down step to the previous and next command, Ctrl+Shift+Up/Down do so and select its
+            // output. On the primary screen only, so an alternate-screen application keeps the chords.
+            // Ctrl+Shift+Up/Down jumped between prompts before; that stays on Ctrl+Alt+K/J.
+            both(DesktopOnly, Ctrl, Key::UpArrow, PrimaryScreenOnly, { actions::FocusPreviousCommand {} }),
+            both(DesktopOnly, Ctrl, Key::DownArrow, PrimaryScreenOnly, { actions::FocusNextCommand {} }),
+            both(DesktopOnly,
+                 CtrlShift,
+                 Key::UpArrow,
+                 PrimaryScreenOnly,
+                 { actions::SelectPreviousCommandOutput {} }),
+            both(DesktopOnly,
+                 CtrlShift,
+                 Key::DownArrow,
+                 PrimaryScreenOnly,
+                 { actions::SelectNextCommandOutput {} }),
             // macOS: Command+Up/Down step to the previous and next command, Shift+Command+Up/Down do so and
             // select its output. Fallbacks, on the primary screen only, where an application keeps the chord
             // on the alternate one.
@@ -295,16 +315,35 @@ namespace
     {
         static auto const rows = std::vector<DefaultBindingRow<char32_t>> {
             written(DesktopOnly, CtrlAlt, U',', Any, { actions::ToggleInputMethodHandling {} }),
+            both(MacOnly, CtrlSuper, U',', Any, { actions::ToggleInputMethodHandling {} }),
             written(DesktopOnly, CtrlShift, U'-', Any, { actions::DecreaseFontSize {} }),
             written(DesktopOnly, CtrlShift, U'_', Any, { actions::DecreaseFontSize {} }),
+            // Primary+= enlarges the font: Ctrl+Shift+= as in kitty and GNOME Terminal, Command+= on a Mac.
+            // Plus is Shift+equals on a US layout, so it arrives as '+' (with Shift, retried under its
+            // unshifted base).
+            both(All, Primary, U'=', Any, { actions::IncreaseFontSize {} }),
+            both(All, Primary, U'+', Any, { actions::IncreaseFontSize {} }),
+            // Primary+C copies: Ctrl+Shift+C as every Linux and Windows terminal, Command+C on a Mac. Copying
+            // with nothing selected claims the press without touching the clipboard, so it never declines.
+            both(All, Primary, U'C', Any, { actions::CopySelection {}, actions::CancelSelection {} }),
             written(All, Primary, U'N', Any, { actions::NewTerminal {} }),
             written(DesktopOnly, CtrlAlt, U'V', Any, { actions::PasteClipboard { .strip = true } }),
+            both(MacOnly, CtrlSuper, U'V', Any, { actions::PasteClipboard { .strip = true } }),
             written(All, Primary, U'V', Any, { actions::PasteClipboard { .strip = false } }),
             written(DesktopOnly, CtrlAlt, U'S', Any, { actions::ScreenshotVT {} }),
+            both(MacOnly, CtrlSuper, U'S', Any, { actions::ScreenshotVT {} }),
             written(DesktopOnly, Ctrl, U'0', Any, { actions::ResetFontSize {} }),
             written(All, Primary, U'T', Any, { actions::CreateNewTab {} }),
             written(DesktopOnly, Primary, U'S', Any, { actions::SpeakSelection {} }),
+            // Primary+W closes the active pane, and the tab with its last pane: Ctrl+Shift+W as GNOME
+            // Terminal, kitty and Windows Terminal close, Command+W as iTerm2 and Ghostty close a split.
+            // First, so it is the chord the menus show; the desktop keeps Ctrl+Shift+X beside it.
+            both(All, Primary, U'W', Any, { actions::ClosePane {} }),
             written(DesktopOnly, Primary, U'X', Any, { actions::ClosePane {} }),
+            // macOS: Command+P opens the palette, as the Primary translation of Ctrl+Shift+P gives it
+            // (Contour has no Print to lose). Shift+Command+P stays bound below for VS Code, Zed and Ghostty
+            // muscle memory. This row comes first, so the menus and the palette show Command+P.
+            both(PlatformScope::MacOnly, Primary, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, PrimaryShift, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, CtrlShift, U'\\', Any, { actions::ToggleSplitOrientation {} }),
             written(DesktopOnly, Primary, U'Z', Any, { actions::TogglePaneZoom {} }),
@@ -329,11 +368,16 @@ namespace
             written(All, CtrlShift, U',', Any, { actions::OpenConfiguration {} }),
             // macOS: the menu bar owns Quit (⌘Q), so no default binding takes it.
             written(DesktopOnly, Primary, U'Q', Any, { actions::Quit {} }),
-            written(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
-            written(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
+            // Fallbacks too: they took over the prompt jump from Ctrl+Shift+Up/Down, which a configuration
+            // that predates them must not lose.
+            both(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
+            both(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             written(DesktopOnly, CtrlAlt, U'O', Any, { actions::OpenFileManager {} }),
+            both(MacOnly, CtrlSuper, U'O', Any, { actions::OpenFileManager {} }),
             written(DesktopOnly, CtrlAlt, U'.', Any, { actions::ToggleStatusLine {} }),
+            both(MacOnly, CtrlSuper, U'.', Any, { actions::ToggleStatusLine {} }),
             written(All, Primary, U'F', Any, { actions::SearchReverse {} }),
+            // Shift on macOS because Command+H hides the application.
             written(All, PrimaryShift, U'H', Any, { actions::NoSearchHighlight {} }),
             written(All,
                     Primary,
@@ -351,6 +395,14 @@ namespace
                      PrimaryScreenOnly,
                      { actions::OpenCommandOutput {} },
                      DeclinedInput::Consume),
+            // macOS: Shift+Command+O ("open output"), since Command+G steps to the next search match. As the
+            // desktop row: at the prompt only, and consumed when it declines.
+            fallback(MacOnly,
+                     PrimaryShift,
+                     U'O',
+                     PrimaryScreenOnly,
+                     { actions::OpenCommandOutput {} },
+                     DeclinedInput::Consume),
             // The macOS find chords: Command+F opens the find bar, Command+G and Shift+Command+G step to the
             // next and previous match, Command+E uses the selection. In every mode, so Command+G with no
             // search reaches the session, which opens the bar.
@@ -358,11 +410,14 @@ namespace
             fallback(PlatformScope::MacOnly, Super, U'G', Any, { actions::FocusNextSearchMatch {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U'G', Any, { actions::FocusPreviousSearchMatch {} }),
             fallback(PlatformScope::MacOnly, Super, U'E', Any, { actions::SearchSelection {} }),
-            // The macOS tab chords: Command+T opens a tab, Command+W closes it, Shift+Command+[ and ] step to
+            // The macOS tab chords: Command+T opens a tab, Shift+Command+[ and ] step to
             // the previous and next tab, and Command+1 ... 9 select the tab at that position. Shift+[ arrives
             // as '{': TerminalSession retries a Shift chord under its unshifted base.
             fallback(PlatformScope::MacOnly, Super, U'T', Any, { actions::CreateNewTab {} }),
-            fallback(PlatformScope::MacOnly, Super, U'W', Any, { actions::CloseTab {} }),
+            // Shift+Command+W closes the whole tab, splits and all (Command+W is ClosePane, above). The
+            // desktop has no CloseTab chord: its Primary already holds Shift, so Primary+Shift+W is
+            // Ctrl+Shift+W.
+            both(PlatformScope::MacOnly, PrimaryShift, U'W', Any, { actions::CloseTab {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U'[', Any, { actions::SwitchToTabLeft {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U']', Any, { actions::SwitchToTabRight {} }),
             fallback(PlatformScope::MacOnly, Super, U'1', Any, { actions::SwitchToTab { .position = 1 } }),
@@ -375,16 +430,7 @@ namespace
             fallback(PlatformScope::MacOnly, Super, U'8', Any, { actions::SwitchToTab { .position = 8 } }),
             fallback(PlatformScope::MacOnly, Super, U'9', Any, { actions::SwitchToTab { .position = 9 } }),
             // The Command chords macOS users expect, none of them one the menu bar owns (Command+Q, H and M).
-            // Copy is consumed when nothing is selected, so the chord never reaches the application as a bare
-            // letter. Command+plus is Shift+Command+equals on a US layout, which arrives as '+' with Shift
-            // and is retried under its unshifted base. Fallbacks, so an explicit binding of the chord still
-            // wins.
-            fallback(MacOnly,
-                     Super,
-                     U'C',
-                     Any,
-                     { actions::CopySelection {}, actions::CancelSelection {} },
-                     DeclinedInput::Consume),
+            // Fallbacks, so an explicit binding of the chord still wins.
             fallback(MacOnly, Super, U'V', Any, { actions::PasteClipboard { .strip = false } }),
             // Command+K clears to the prompt (a hard reset would destroy a running vim or tmux), on the
             // primary screen only; consumed when it declines, so it never types a 'k'.
@@ -394,9 +440,16 @@ namespace
                      PrimaryScreenOnly,
                      { actions::ClearToPrompt {} },
                      DeclinedInput::Consume),
+            // Linux and Windows: Ctrl+Shift+L, the shell's Ctrl+L clear plus Shift for the terminal's own,
+            // which drops the scrollback too (Ctrl+Shift+K, the literal translation of Command+K, is
+            // NewWindowTo).
+            fallback(DesktopOnly,
+                     Primary,
+                     U'L',
+                     PrimaryScreenOnly,
+                     { actions::ClearToPrompt {} },
+                     DeclinedInput::Consume),
             fallback(MacOnly, Super, U'N', Any, { actions::NewTerminal {} }),
-            fallback(MacOnly, Super, U'+', Any, { actions::IncreaseFontSize {} }),
-            fallback(MacOnly, Super, U'=', Any, { actions::IncreaseFontSize {} }),
             fallback(MacOnly, SuperShift, U'=', Any, { actions::IncreaseFontSize {} }),
             fallback(MacOnly, Super, U'-', Any, { actions::DecreaseFontSize {} }),
             fallback(MacOnly, Super, U'0', Any, { actions::ResetFontSize {} }),
@@ -409,6 +462,7 @@ namespace
             both(DesktopOnly, Primary, U'K', Any, { actions::NewWindowTo {} }),
             both(PlatformScope::MacOnly, Primary, U'D', Any, { actions::SplitVertical {} }),
             both(PlatformScope::MacOnly, PrimaryShift, U'D', Any, { actions::SplitHorizontal {} }),
+            // Shift on macOS because Command+K clears to the prompt.
             both(PlatformScope::MacOnly, PrimaryShift, U'K', Any, { actions::NewWindowTo {} }),
         };
         return rows;

@@ -2355,9 +2355,8 @@ TEST_CASE("Config: the tab chords follow the platform", "[config][input-mapping]
     auto const shiftSuper = Modifiers { Modifier::Super, Modifier::Shift };
 
     auto rows = std::vector<std::tuple<Modifiers, char32_t, actions::Action>> {
-        { super, U'T', actions::CreateNewTab {} },
-        { super, U'W', actions::CloseTab {} },
-        { shiftSuper, U'[', actions::SwitchToTabLeft {} },
+        { super, U'T', actions::CreateNewTab {} },          { super, U'W', actions::ClosePane {} },
+        { shiftSuper, U'W', actions::CloseTab {} },         { shiftSuper, U'[', actions::SwitchToTabLeft {} },
         { shiftSuper, U']', actions::SwitchToTabRight {} },
     };
     for (auto const position: std::views::iota(1, 10))

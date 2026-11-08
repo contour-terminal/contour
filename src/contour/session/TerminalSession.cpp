@@ -2133,6 +2133,11 @@ int TerminalSession::cursorLine() const
 
 void TerminalSession::copyExplicitly(std::string_view text)
 {
+    // A user's copy of nothing is not a copy: the clipboard keeps what it held, so pressing the copy chord
+    // twice does not wipe what the first press copied. (A program's empty OSC 52 write does clear it, and
+    // goes through copyToClipboard directly.)
+    if (text.empty())
+        return;
     copyToClipboard(text, vtbackend::ClipboardWriter::User, vtbackend::ClipboardTarget::Clipboard);
 }
 

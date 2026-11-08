@@ -1491,6 +1491,7 @@ if(CONTOUR_TESTING)
         test/core_test_main.cpp
         config/Actions_test.cpp
         config/BindingCollisions_test.cpp
+        config/ChordParity_test.cpp
         config/ChromeTokenGroups_test.cpp
         config/ControlsStyle_test.cpp
         config/ShellKind_test.cpp

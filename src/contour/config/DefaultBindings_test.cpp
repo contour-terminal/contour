@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -354,6 +355,29 @@ TEST_CASE("no macOS default takes a chord the menu bar owns", "[config][defaults
         CHECK(std::ranges::any_of(desktop.charMappings, [](auto const& row) {
             return row.input == U'Q' && row.modifiers == Modifiers { Modifier::Control, Modifier::Shift };
         }));
+    }
+}
+
+TEST_CASE("no macOS default takes a Control+Command chord the system owns", "[config][defaults]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    // macOS owns Control+Command+Q (lock screen), F (full screen), D (look up) and Space (character viewer).
+    auto const controlCommand = Modifiers { Modifier::Control, Modifier::Super };
+    auto const owned = std::array { U'Q', U'F', U'D', U' ' };
+    for (auto const edition: { DefaultsEdition::Classic, DefaultsEdition::Native2026 })
+    {
+        auto const mappings = makeDefaultInputMappings(edition, KeyboardPlatformKind::Mac);
+        for (auto const input: owned)
+        {
+            CHECK_FALSE(std::ranges::any_of(mappings.charMappings, [&](auto const& row) {
+                return row.modifiers == controlCommand && row.input == input;
+            }));
+            CHECK_FALSE(std::ranges::any_of(
+                builtinFallbackCharMappings(KeyboardPlatformKind::Mac), [&](auto const& row) {
+                    return row.mapping.modifiers == controlCommand && row.mapping.input == input;
+                }));
+        }
     }
 }
 

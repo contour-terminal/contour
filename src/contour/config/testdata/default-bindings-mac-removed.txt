@@ -61,3 +61,4 @@
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
+[fallbacks] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no

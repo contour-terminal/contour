@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -109,24 +110,45 @@ inline constexpr std::string_view PrimaryModifierName = "Primary";
     return std::nullopt;
 }
 
+/// The modifiers that must not sit beside a written `Primary`: those some platform's Primary set holds,
+/// Shift excepted. `[Primary, Control]` written on macOS would read back on the desktop as Ctrl+Shift, a
+/// different chord, while `[Primary, Shift]` means the same command everywhere by design.
+/// @return The union of every platform's Primary set, without Shift.
+[[nodiscard]] constexpr vtbackend::Modifiers modifiersAmbiguousBesidePrimary() noexcept
+{
+    auto result = vtbackend::Modifiers {};
+    for (auto const kind: AllKeyboardPlatformKinds)
+        result |= primaryModifiers(kind);
+    return result.without(vtbackend::Modifiers { vtbackend::Modifier::Shift });
+}
+
+/// Every modifier of @p modifiers by its own canonical name, in ChordModifierTable order.
+/// @param modifiers The chord's modifiers.
+/// @return The spellings, in the order they are written.
+[[nodiscard]] inline std::vector<std::string_view> literalModifierSpellings(vtbackend::Modifiers modifiers)
+{
+    auto result = std::vector<std::string_view> {};
+    for (auto const& row: vtbackend::ChordModifierTable)
+        if (modifiers.contains(row.modifier))
+            result.push_back(row.name);
+    return result;
+}
+
 /// The spellings a writer emits for @p modifiers on @p kind: "Primary" first when they contain the Primary
 /// set, then each remaining modifier by its canonical name. So a row means the same on every platform it is
-/// carried to, and a config written on one OS works on another.
+/// carried to, and a config written on one OS works on another. A chord whose remaining modifiers another
+/// platform's Primary set holds is written literally instead (@see modifiersAmbiguousBesidePrimary).
 /// @param modifiers The chord's modifiers.
 /// @param kind The keyboard platform the configuration is written for.
 /// @return The spellings, in the order they are written.
 [[nodiscard]] inline std::vector<std::string_view> canonicalModifierSpellings(vtbackend::Modifiers modifiers,
                                                                               KeyboardPlatformKind kind)
 {
-    auto result = std::vector<std::string_view> {};
     auto const primary = primaryModifiers(kind);
-    auto const hasPrimary = modifiers.contains(primary);
-    if (hasPrimary)
-        result.push_back(PrimaryModifierName);
-    auto const rest = hasPrimary ? modifiers.without(primary) : modifiers;
-    for (auto const& row: vtbackend::ChordModifierTable)
-        if (rest.contains(row.modifier))
-            result.push_back(row.name);
+    if (!modifiers.contains(primary) || modifiers.without(primary).any(modifiersAmbiguousBesidePrimary()))
+        return literalModifierSpellings(modifiers);
+    auto result = std::vector<std::string_view> { PrimaryModifierName };
+    std::ranges::copy(literalModifierSpellings(modifiers.without(primary)), std::back_inserter(result));
     return result;
 }
 
