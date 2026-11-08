@@ -716,8 +716,8 @@ std::expected<void, StateDecodeError> Terminal::restoreState(TerminalState const
 void Terminal::commitRestore(TerminalState const& state,
                              RestoredImageTable const& images,
                              std::span<StagedScreen> screens,
-                             std::array<std::shared_ptr<SoftFont const>, 3> softFonts,
-                             std::array<uint8_t, 3> softFontLoadRanks)
+                             std::array<std::shared_ptr<SoftFont const>, SoftFontCount> softFonts,
+                             std::array<uint8_t, SoftFontCount> softFontLoadRanks)
 {
     // Nothing here can be refused: validateRestore() and the staging checked all of it.
     auto const succeeded = [](std::expected<void, StateDecodeError> const& result) {

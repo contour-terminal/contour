@@ -177,7 +177,8 @@ struct SoftGlyphInput
 /// @param declaration The font's header.
 /// @param designator The Dscs.
 /// @param geometry The font's cell.
-/// @param glyphs The defined glyphs, ascending by position.
+/// @param glyphs The defined glyphs, ascending by position. Consumed: each glyph's coverage may be moved
+///               out, even when the font is then refused, so the caller must not read them afterwards.
 /// @return The font, with identities stamped and the error glyph built, or why it is refused.
 [[nodiscard]] std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration const& declaration,
                                                                       std::string designator,

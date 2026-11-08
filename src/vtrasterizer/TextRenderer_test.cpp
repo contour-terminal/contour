@@ -2899,6 +2899,8 @@ TEST_CASE("Renderer.softGlyphs.drawnFromTheFrameInEveryPass", "[renderer][softfo
         smooth = true;
     }
 
+    // The page's cells move by the offset the renderer reads from the terminal; the status line does not.
+    auto const smoothShift = static_cast<int>(mc.terminal.smoothScrollPixelOffset());
     (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
 
     auto& backend = fixture.renderTarget.getMockBackend();
@@ -2917,7 +2919,6 @@ TEST_CASE("Renderer.softGlyphs.drawnFromTheFrameInEveryPass", "[renderer][softfo
     REQUIRE(greens.size() == 2);
 
     // Page cells at line 1, columns 3 and 4; the status line below the five page rows, columns 0 and 1.
-    auto const smoothShift = smooth ? reds[0].y.value - 20 : 0;
     INFO("smooth shift " << smoothShift << ", red y " << reds[0].y.value);
     CHECK(reds[0].x.value == 30);
     CHECK(reds[0].y.value == 20 + smoothShift);
@@ -2927,8 +2928,7 @@ TEST_CASE("Renderer.softGlyphs.drawnFromTheFrameInEveryPass", "[renderer][softfo
     CHECK(reds[1].y.value == 100);
     CHECK(greens[1].x.value == 10);
     CHECK(greens[1].y.value == 100);
-    if (smooth)
-        CHECK(smoothShift != 0);
+    CHECK((smoothShift != 0) == smooth);
 }
 
 int main(int argc, char* argv[])
