@@ -51,6 +51,7 @@
 #include <vthost/NotifyWire.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/SoftFontWire.hpp>
 #include <vthost/TabEdits.hpp>
 #include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
@@ -237,6 +238,19 @@ namespace
         }
     }
 
+    /// Collects the soft-glyph cell side-table entries of one row.
+    void appendSoftGlyphCells(std::vector<proto::SoftGlyphCellEntry>& out,
+                              int64_t stableId,
+                              vtbackend::Line const& line)
+    {
+        auto const& glyphs = line.storage().softGlyphs;
+        if (!glyphs)
+            return;
+        for (auto const& [column, ref]: *glyphs)
+            out.push_back(proto::SoftGlyphCellEntry {
+                .stableId = stableId, .column = column, .font = ref.font, .position = ref.position });
+    }
+
     /// The answer to a hello refused for its version or its token -- the same for both, so a peer
     /// probing the daemon cannot tell which it got wrong.
     /// @param hello The refused hello.
@@ -268,6 +282,31 @@ namespace
             if (core::net::constantTimeEquals(token, entry.token) && !matched)
                 matched = entry.grants;
         return matched;
+    }
+
+    /// Entries of a snapshot's per-cell side table, grouped by the stable id of the row they sit on.
+    template <typename Entry>
+    using EntriesByRow = std::unordered_map<int64_t, std::vector<Entry>>;
+
+    /// @return @p entries grouped by their row's stable id.
+    template <typename Entry>
+    [[nodiscard]] EntriesByRow<Entry> groupByRow(std::vector<Entry> const& entries)
+    {
+        auto grouped = EntriesByRow<Entry> {};
+        for (auto const& entry: entries)
+            grouped[entry.stableId].push_back(entry);
+        return grouped;
+    }
+
+    /// Appends to @p out the entries of every row in @p lines, in the order of the rows.
+    template <typename Entry>
+    void appendRowEntries(std::vector<Entry>& out,
+                          EntriesByRow<Entry> const& byRow,
+                          std::span<proto::WireLine const> lines)
+    {
+        for (auto const& line: lines)
+            if (auto const found = byRow.find(line.stableId); found != byRow.end())
+                out.insert(out.end(), found->second.begin(), found->second.end());
     }
 
 } // namespace
@@ -403,6 +442,7 @@ void NativeSession::sessionClosed(SessionId session)
     _programStatusPending.erase(session.value);
     _inputEchoPending.erase(session.value);
     _inputEchoSent.erase(session.value);
+    _softFontsSent.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
@@ -493,6 +533,33 @@ void NativeSession::pushProgramStatus(SessionId session, ProgramStatusPush when)
     }
     if (pdu.records.empty() && when == ProgramStatusPush::IfAny)
         return;
+    emitSessionEvent(std::move(pdu));
+}
+
+bool NativeSession::mirrorsSoftFonts() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::SoftFonts);
+}
+
+void NativeSession::pushSoftFonts(SessionId session)
+{
+    if (!mirrorsSoftFonts())
+        return;
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+        return;
+    auto pdu = proto::SoftFontState { .session = session.value, .generation = 0, .fonts = {} };
+    // One lookup: a session never told about fonts starts at generation 0, which is the store's own.
+    auto const sent = _softFontsSent.try_emplace(session.value, uint64_t { 0 }).first;
+    {
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
+        auto const& store = terminal->softFonts();
+        pdu.generation = store.generation();
+        if (pdu.generation == sent->second)
+            return;
+        pdu.fonts = softFontsToWire(store);
+    }
+    sent->second = pdu.generation;
     emitSessionEvent(std::move(pdu));
 }
 
@@ -1223,9 +1290,12 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
         // not needing a snapshot, and Forced never needs anything else.
         auto const snapshot = mode == SnapshotMode::Forced;
 
+        auto const sharesSoftFonts = mirrorsSoftFonts();
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
             appendImageCells(delta.imageCells, delta.lines.back().stableId, line);
+            if (sharesSoftFonts)
+                appendSoftGlyphCells(delta.softGlyphCells, delta.lines.back().stableId, line);
             // Collect every referenced id (deduped within this delta), NOT only
             // never-sent ones: the send loop below decides per id whether its URI
             // actually needs (re)sending, which is what catches an id reused for a
@@ -1408,6 +1478,8 @@ void NativeSession::pushDelta(SessionId session)
 {
     // Asked before buildPush, which records the displayed page even when it bails: a follow never pushed
     // has none yet, and its bail is its first snapshot -- a tab opened after attaching -- not a resync.
+    // Ahead of the delta, which may name a glyph of a font this connection has not been given.
+    pushSoftFonts(session);
     auto const followed = _followed.find(session.value);
     auto const firstPush = followed == _followed.end() || !followed->second.lastDisplayedPage;
     auto built = buildPush(session, SnapshotMode::Delta);
@@ -1549,6 +1621,8 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
         // Before the rows, so that the screen holds the set by the time the completing piece replays it.
         if (mirrorsProgramStatus())
             pushProgramStatus(session, ProgramStatusPush::IfAny);
+        // And the soft fonts, for the same reason: the rows that follow name their glyphs.
+        pushSoftFonts(session);
         // A snapshot states the echo too, for a client that attached while a prompt waits.
         pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older
@@ -1587,12 +1661,11 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
 
     // Index the image cells by the row they sit on. The mirror clears a row's image cells when it
     // takes the row and refills them from the same PDU's side table, so an entry that travelled in
-    // a different piece than its row would be dropped on arrival.
-    // ImageCellEntry is trivially copyable, so these are copies however they are spelled; only the
-    // grouping matters.
-    auto imagesByRow = std::unordered_map<int64_t, std::vector<proto::ImageCellEntry>> {};
-    for (auto const& entry: std::exchange(delta.imageCells, {}))
-        imagesByRow[entry.stableId].push_back(entry);
+    // a different piece than its row would be dropped on arrival. The soft-glyph cells travel with
+    // their rows for the same reason. Both entry types are trivially copyable, so these are copies
+    // however they are spelled; only the grouping matters.
+    auto const imagesByRow = groupByRow(std::exchange(delta.imageCells, {}));
+    auto const softGlyphsByRow = groupByRow(std::exchange(delta.softGlyphCells, {}));
 
     for (auto const& part: proto::partitionSnapshotRows(lines, _snapshotPieceBytes))
     {
@@ -1606,9 +1679,8 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
         // grid is 4000 allocations and megabytes of element-wise copy construction.
         auto const rows = std::span { lines }.subspan(part.begin, part.count);
         piece.lines.assign(std::make_move_iterator(rows.begin()), std::make_move_iterator(rows.end()));
-        for (auto const& line: piece.lines)
-            if (auto const images = imagesByRow.find(line.stableId); images != imagesByRow.end())
-                piece.imageCells.insert(piece.imageCells.end(), images->second.begin(), images->second.end());
+        appendRowEntries(piece.imageCells, imagesByRow, piece.lines);
+        appendRowEntries(piece.softGlyphCells, softGlyphsByRow, piece.lines);
 
         // Handed over with `exchange` rather than `move`: the piece that takes each is decided by
         // the SAME predicates the receiver uses, and leaving an emptied source behind means a

@@ -825,9 +825,9 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
         if (auto const font = _cursor.charsets.activeDRCSFont();
             font.has_value() && writeSoftFontGlyph(*font, rawCp) == SoftFontGlyph::Written) [[unlikely]]
         {
-            // What seeding from the glyph's cell would replay: a space, alone.
-            run.previousCodepoint = U' ';
-            unicode::grapheme_process_init(U' ', run.segmenter);
+            // What seeding from the glyph's cell would replay: the source character, alone.
+            run.previousCodepoint = rawCp;
+            unicode::grapheme_process_init(rawCp, run.segmenter);
             return;
         }
 
@@ -926,30 +926,23 @@ void Screen::writeText(char32_t codepoint)
 
 Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepoint)
 {
-    auto const* charset = _terminal->drcsCharset(font);
-    if (charset == nullptr)
+    // A designated set never covers SP (0x20) or DEL (0x7F) in GL (DEC STD 070), nor anything beyond
+    // ASCII: those take the ordinary path. (GR, where a 96-set would reach 0xA0..0xFF, is not routed to
+    // soft fonts: the text paths ask only for the font invoked into GL.)
+    if (sourceCodepoint < FirstSoftCellPosition || sourceCodepoint > LastSoftCellPosition
+        || _terminal->softFonts().font(static_cast<uint8_t>(font)) == nullptr)
         return SoftFontGlyph::Absent;
 
-    auto const glyphIt = charset->glyphs.find(static_cast<int>(sourceCodepoint));
-    if (glyphIt == charset->glyphs.end())
-        return SoftFontGlyph::Absent;
-
-    // Create an RGBA image from the monochrome DRCS glyph, in the foreground color.
-    auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                          _cursor.graphicsRendition.foregroundColor,
-                                          ColorTarget::Foreground,
-                                          ColorMode::Normal);
-    auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
-
-    // Write a space as placeholder, attach the DRCS image, then advance cursor.
+    // The cell keeps the character as received, so copy, search and the accessibility tree see what the
+    // application wrote; the reference makes the renderer draw the font's glyph instead. An undefined
+    // position is still a reference: the renderer shows the font's error glyph. It goes through the
+    // ordinary write, so insert mode and the overlap of wide and scaled cells are handled alike.
+    writeCharToCurrentAndAdvance(sourceCodepoint);
     {
-        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
-        cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
-        cell.setImageFragment(rasterizedImage,
-                              CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-        _lastCursorPosition = _cursor.position;
-        advanceCursorAfterWrite(ColumnCount(1));
-        _terminal->markCellDirty(_lastCursorPosition);
+        // The write left the cell at _lastCursorPosition, and the cursor already past it.
+        auto cell = useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
+        cell.setSoftGlyph(SoftGlyphRef { .font = static_cast<uint8_t>(font),
+                                         .position = static_cast<uint8_t>(sourceCodepoint) });
     }
     (void) _cursor.charsets.map(sourceCodepoint); // Consume the single shift, now that a glyph used it.
     return SoftFontGlyph::Written;
@@ -2301,6 +2294,10 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
                     // the width alone.
                     (void) targetCell.appendCharacter(sourceCell.codepoint(ci),
                                                       ClusterWidthPolicy::FirstCodepoint);
+                // The write dropped any glyph the target wore; the copy wears the source's, or soft text
+                // would turn into the plain characters it stands for.
+                if (auto const softGlyph = sourceCell.softGlyph())
+                    targetCell.setSoftGlyph(*softGlyph);
             }
             else
             {
@@ -2979,47 +2976,87 @@ void Screen::applicationKeypadMode(bool enable)
     _terminal->setApplicationkeypadMode(enable);
 }
 
-bool Screen::tryHandleSCS(Sequence const& seq)
+namespace
 {
-    auto const& intermediates = seq.intermediateCharacters();
-    if (intermediates.empty())
-        return false;
-
-    // First intermediate selects the G-set and its size:
-    //   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
-    //   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
-    struct GSetDesignation
+    /// An SCS sequence's target: the G-set, the size of the sets it holds, and the Dscs.
+    struct ScsRequest
     {
         CharsetTable table;
-        bool is96;
+        SoftCharsetSize size;
+        std::string designator;
     };
-    auto const gSet = [&]() -> std::optional<GSetDesignation> {
-        switch (intermediates[0])
+
+    /// The G-set an SCS first intermediate selects, and its size:
+    ///   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
+    ///   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
+    struct ScsGSet
+    {
+        CharsetTable table;
+        SoftCharsetSize size;
+    };
+
+    constexpr std::optional<ScsGSet> scsGSetOf(char intermediate) noexcept
+    {
+        switch (intermediate)
         {
-            case '(': return GSetDesignation { CharsetTable::G0, false };
-            case ')': return GSetDesignation { CharsetTable::G1, false };
-            case '*': return GSetDesignation { CharsetTable::G2, false };
-            case '+': return GSetDesignation { CharsetTable::G3, false };
-            case '-': return GSetDesignation { CharsetTable::G1, true };
-            case '.': return GSetDesignation { CharsetTable::G2, true };
-            case '/': return GSetDesignation { CharsetTable::G3, true };
+            case '(': return ScsGSet { CharsetTable::G0, SoftCharsetSize::Size94 };
+            case ')': return ScsGSet { CharsetTable::G1, SoftCharsetSize::Size94 };
+            case '*': return ScsGSet { CharsetTable::G2, SoftCharsetSize::Size94 };
+            case '+': return ScsGSet { CharsetTable::G3, SoftCharsetSize::Size94 };
+            case '-': return ScsGSet { CharsetTable::G1, SoftCharsetSize::Size96 };
+            case '.': return ScsGSet { CharsetTable::G2, SoftCharsetSize::Size96 };
+            case '/': return ScsGSet { CharsetTable::G3, SoftCharsetSize::Size96 };
             default: return std::nullopt;
         }
-    }();
-    if (!gSet)
-        return false;
+    }
 
-    // Build the designator string from remaining intermediates + final character.
-    // Single-byte designator: intermediates has 1 char, final is the designator.
-    // Two-byte designator (DRCS): intermediates has 2 chars, second is the intermediate, final is the
-    // designator.
-    auto const designator = [&]() -> std::string {
-        auto result = std::string {};
-        for (size_t i = 1; i < intermediates.size(); ++i)
-            result += intermediates[i];
-        result += seq.finalChar();
-        return result;
-    }();
+    /// Decodes an ESC sequence as SCS.
+    /// @return The request, or nullopt when the sequence names no G-set.
+    std::optional<ScsRequest> decodeSCS(Sequence const& seq)
+    {
+        auto const& intermediates = seq.intermediateCharacters();
+        if (intermediates.empty())
+            return std::nullopt;
+        auto const gSet = scsGSetOf(intermediates[0]);
+        if (!gSet)
+            return std::nullopt;
+
+        // The designator is the remaining intermediates plus the final character: one byte for a standard
+        // set, an intermediate and a final for a DRCS one.
+        auto designator = std::ranges::to<std::string>(intermediates | std::views::drop(1));
+        designator += seq.finalChar();
+        return ScsRequest { .table = gSet->table, .size = gSet->size, .designator = std::move(designator) };
+    }
+} // namespace
+
+bool Screen::tryDesignateSoftFont(Sequence const& seq)
+{
+    // Every ESC sequence asks first, and a terminal with no soft font (nearly all) has nothing to name.
+    if (!_terminal->softFonts().hasFonts())
+        return false;
+    auto const request = decodeSCS(seq);
+    if (!request)
+        return false;
+    // The SCS names the set's size (DEC STD 070: ESC ( ) * + take a 94-character set, ESC - . / a
+    // 96-character one, and the same Dscs may name one of each), so a font of that size wins. Like Windows
+    // Terminal, a font of the other size is taken when it is the only one under that Dscs: software
+    // designates DRCS sets through either SCS, and refusing it would leave the font unreachable.
+    auto const& fonts = _terminal->softFonts();
+    auto const fontNumber = fonts.fontForDesignator(request->designator, request->size).or_else([&] {
+        return fonts.fontForDesignator(request->designator);
+    });
+    if (!fontNumber)
+        return false;
+    _cursor.charsets.selectDRCS(request->table, *fontNumber);
+    return true;
+}
+
+bool Screen::tryHandleSCS(Sequence const& seq)
+{
+    auto const request = decodeSCS(seq);
+    if (!request)
+        return false;
+    auto const& designator = request->designator;
 
     // `<` designates the User-Preferred Supplemental Set (xterm's nrc_DEC_UPSS). It is unlike every
     // other designator in naming no fixed set: it resolves to whatever DECAUPSS last assigned.
@@ -3034,7 +3071,7 @@ bool Screen::tryHandleSCS(Sequence const& seq)
     if (designator == "<")
     {
         if (conformanceLevelOf(_terminal->operatingLevel()) >= conformanceLevelOf(VTType::VT320))
-            _cursor.charsets.selectUserPreferred(gSet->table, _terminal->userPreferredSupplementalSet());
+            _cursor.charsets.selectUserPreferred(request->table, _terminal->userPreferredSupplementalSet());
         return true;
     }
 
@@ -3042,7 +3079,7 @@ bool Screen::tryHandleSCS(Sequence const& seq)
     auto const standardCharset = [&]() -> std::optional<CharsetId> {
         if (designator.size() != 1)
             return std::nullopt;
-        if (gSet->is96)
+        if (request->size == SoftCharsetSize::Size96)
         {
             // 96-character sets (invoked into GR). Only ISO Latin-1 supplemental ('A') is defined here.
             switch (designator[0])
@@ -3072,17 +3109,10 @@ bool Screen::tryHandleSCS(Sequence const& seq)
 
     if (standardCharset)
     {
-        if (gSet->is96)
-            _cursor.charsets.select96(gSet->table, *standardCharset);
+        if (request->size == SoftCharsetSize::Size96)
+            _cursor.charsets.select96(request->table, *standardCharset);
         else
-            designateCharset(gSet->table, *standardCharset);
-        return true;
-    }
-
-    // For DRCS designators: look up the font number from the Terminal's designator map.
-    if (auto const fontNumber = _terminal->drcsDesignatorToFont(designator); fontNumber.has_value())
-    {
-        _cursor.charsets.selectDRCS(gSet->table, *fontNumber);
+            designateCharset(request->table, *standardCharset);
         return true;
     }
 
@@ -6971,6 +7001,11 @@ void Screen::processSequence(Sequence const& seq)
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal->incrementInstructionCounter();
+    // A loaded soft font takes over its designator, a standard one included (DEC STD 070: a downloaded set
+    // is selected by the Dscs it was loaded under), so it is asked before the function table is.
+    if (seq.category() == FunctionCategory::ESC && tryDesignateSoftFont(seq))
+        return;
+
     if (Function const* funcSpec = seq.functionDefinition(_terminal->supportedSequences());
         funcSpec != nullptr)
     {
@@ -9143,49 +9178,26 @@ unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
 {
     // DECDLD — Down-Line-Load Character Set (DRCS)
     // DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs Sxbp1;Sxbp2;...ST
-    auto const fontNumber = seq.paramOr(0, 0);
-    auto const startingChar = seq.paramOr(1, 0);
-    auto const eraseControl = seq.paramOr(2, 0);
-    auto const charMatrixWidth = seq.paramOr(3, 0);
-    auto const fontWidth = seq.paramOr(4, 0);
-    auto const textOrFullCell = seq.paramOr(5, 0);
-    auto const charMatrixHeight = seq.paramOr(6, 0);
-    auto const charsetSize = seq.paramOr(7, 0);
+    // Only the first eight parameters mean anything; the rest are ignored, as real fonts send a trailing `;`
+    // (the vt100.net .fnt files do) and the function table admits up to sixteen.
+    auto const parameters = DecdldParameters { .pfn = seq.paramOr(0, 0),
+                                               .pcn = seq.paramOr(1, 0),
+                                               .pe = seq.paramOr(2, 0),
+                                               .pcmw = seq.paramOr(3, 0),
+                                               .pss = seq.paramOr(4, 0),
+                                               .pt = seq.paramOr(5, 0),
+                                               .pcmh = seq.paramOr(6, 0),
+                                               .pcss = seq.paramOr(7, 0) };
 
-    return make_unique<SimpleStringCollector>([this,
-                                               fontNumber,
-                                               startingChar,
-                                               eraseControl,
-                                               charMatrixWidth,
-                                               fontWidth,
-                                               textOrFullCell,
-                                               charMatrixHeight,
-                                               charsetSize](string_view data) {
-        // Data starts with Dscs (charset designator), followed by sixel glyph data.
-        // Dscs is either 1 byte (final only) or 2 bytes (intermediate 0x20-0x2F + final).
-        auto designator = string_view {};
-        auto glyphData = data;
-        if (data.size() >= 2 && data[0] >= 0x20 && data[0] <= 0x2F)
+    // The body opens with Dscs; the store decodes it along with the glyphs.
+    return make_unique<SimpleStringCollector>([this, parameters](string_view data) {
+        if (auto const defined = _terminal->softFonts().define(parameters, data); !defined)
         {
-            // Two-byte designator: intermediate + final
-            designator = data.substr(0, 2);
-            glyphData = data.substr(2);
+            if (vtParserLog)
+                vtParserLog()("Ignoring DECDLD: {}", toString(defined.error()));
+            return;
         }
-        else if (!data.empty())
-        {
-            designator = data.substr(0, 1);
-            glyphData = data.substr(1);
-        }
-        _terminal->defineDRCS(fontNumber,
-                              startingChar,
-                              eraseControl,
-                              charMatrixWidth,
-                              fontWidth,
-                              textOrFullCell,
-                              charMatrixHeight,
-                              charsetSize,
-                              designator,
-                              glyphData);
+        _terminal->markScreenDirty();
     });
 }
 

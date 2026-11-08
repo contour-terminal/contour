@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -25,10 +26,12 @@
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/ImageWire.hpp>
+#include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
 #include <vthost/NotifyWire.hpp>
 #include <vthost/ProgressWire.hpp>
+#include <vthost/SoftFontWire.hpp>
 #include <vthost/StatusWire.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/client/ViewportOrigin.hpp>
@@ -147,6 +150,7 @@ void ScreenMirror::restart()
     _headCandidates.clear();
     _evictedHeads.clear();
     _images.clear();
+    _softFontGeneration.reset();
 }
 
 vtbackend::Screen& ScreenMirror::activePage() const noexcept
@@ -574,6 +578,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
             if (auto const progress = progressOf(delta.progressState, delta.progressPercentage))
                 _terminal->setProgress(*progress);
         applyImages(screen);
+        applySoftGlyphCells(screen, std::span<proto::WireLine const> { delta.lines });
         finish(screen);
         anchorPrimaryPage(screen);
     }
@@ -618,6 +623,7 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         // Not grid state, but a replay re-asserts everything: after a reconnect the set the old connection
         // left may be one the host has since emptied.
         syncProgramStatus(screen.programStatus);
+        syncSoftFonts(screen.softFonts, screen.softFontGeneration);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -712,6 +718,7 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         applyStatusLines(screen);
         syncInputEncoding(screen);
         applyImages(screen);
+        applySoftGlyphCells(screen);
         finish(screen);
         anchorPrimaryPage(screen);
     }
@@ -986,6 +993,77 @@ void ScreenMirror::applyImages(RemoteScreen const& screen)
     }
 }
 
+void ScreenMirror::applySoftGlyphCells(RemoteScreen const& screen,
+                                       std::optional<std::span<proto::WireLine const>> rewritten)
+{
+    if (screen.softGlyphCells.empty())
+        return;
+    auto& page = activePage();
+    auto& grid = page.grid();
+    auto const base = pageTop();
+    auto const lines = unbox<int64_t>(page.pageSize().lines);
+    auto const historyLines = unbox<int64_t>(grid.historyLineCount());
+
+    auto const applyRow = [&](int64_t stableId,
+                              std::map<uint16_t, proto::SoftGlyphCellEntry> const& columns) {
+        // Rows above the viewport only where this grid holds them at their arithmetic offset
+        // (@see _alignedFloor); a row outside what the mirror holds has nowhere to go.
+        auto const target = stableId - base;
+        if (target >= lines || target < -historyLines || stableId < _alignedFloor)
+            return;
+        auto const offset = vtbackend::LineOffset::cast_from(target);
+        auto& line = target < 0 ? grid.changingLineAt(offset) : grid.lineAt(offset);
+        // Shifted as the page row it lies on is (@see writeRow).
+        auto const firstColumn = stableId < screen.viewportBase ? vtbackend::ColumnOffset(0) : _origin.column;
+        for (auto const& [column, entry]: columns)
+        {
+            auto const at = vtbackend::ColumnOffset::cast_from(column) - firstColumn;
+            if (at < vtbackend::ColumnOffset(0) || at >= vtbackend::ColumnOffset::cast_from(line.size()))
+                continue;
+            line.useCellAt(at).setSoftGlyph(
+                vtbackend::SoftGlyphRef { .font = entry.font, .position = entry.position });
+        }
+    };
+
+    if (!rewritten)
+    {
+        for (auto const& [stableId, columns]: screen.softGlyphCells)
+            applyRow(stableId, columns);
+        return;
+    }
+    // An update touches the history rows it names and nothing else there: restamping every soft glyph row of
+    // a deep scrollback on each echoed keystroke would mark them all changed again. The page is a handful of
+    // rows and is restated whole, as the images are.
+    for (auto const& [stableId, columns]:
+         std::ranges::subrange(screen.softGlyphCells.lower_bound(base), screen.softGlyphCells.end()))
+        applyRow(stableId, columns);
+    for (auto const& row: *rewritten)
+        if (row.stableId < base)
+            if (auto const it = screen.softGlyphCells.find(row.stableId); it != screen.softGlyphCells.end())
+            {
+                auto const& [stableId, columns] = *it;
+                applyRow(stableId, columns);
+            }
+}
+
+void ScreenMirror::syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uint64_t generation)
+{
+    if (_softFontGeneration == generation)
+        return;
+    auto staged = softFontsFromWire(fonts);
+    if (!staged)
+    {
+        clientLog()(
+            "attach: refusing the daemon's soft fonts (generation {}, reason {}); keeping the ones held",
+            generation,
+            std::to_underlying(staged.error()));
+        return;
+    }
+    _terminal->softFonts().replaceAll(*std::move(staged));
+    _softFontGeneration = generation;
+    _terminal->markScreenDirty();
+}
+
 void ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageId)
 {
     {
@@ -1048,6 +1126,14 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                    // The device's, not the grid's: the frontend that owns the pane's device stores it there
                    // (contour's NativeController, on its ChannelPty), and the session reads it from there.
                    [](proto::SessionInputEcho const&) {},
+                   [this](proto::SoftFontState const& fonts) {
+                       {
+                           auto const guard = std::lock_guard { *_terminal };
+                           syncSoftFonts(fonts.fonts, fonts.generation);
+                       }
+                       // The cells showing a redefined glyph are not rewritten by anything else.
+                       _terminal->screenUpdated();
+                   },
                },
                event);
 }

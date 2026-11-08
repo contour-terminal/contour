@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/state/ScreenState.hpp>
 
+#include <vtbackend/core/SoftGlyphRef.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/state/StateFields.hpp>
@@ -10,7 +11,9 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <ranges>
+#include <utility>
 
 namespace vtbackend
 {
@@ -60,8 +63,14 @@ std::expected<void, StateDecodeError> CharsetMapping::restoreState(CharsetState 
     constexpr auto IsKnownSet = [](CharsetId id) {
         return id <= CharsetId::ISOLatin1Supplemental;
     };
+    // A DRCS font number names one of the soft fonts. Out of range, it would alias another one when
+    // narrowed to the byte a soft glyph reference carries.
+    constexpr auto IsKnownFont = [](std::optional<int> font) {
+        return !font || (*font >= 0 && std::cmp_less(*font, SoftFontCount));
+    };
     if (!std::ranges::all_of(state.charsetIds, IsKnownSet) || !IsKnownTable(state.tableForNextGraphic)
-        || !IsKnownTable(state.selectedTable) || !IsKnownTable(state.selectedTableGR))
+        || !IsKnownTable(state.selectedTable) || !IsKnownTable(state.selectedTableGR)
+        || !std::ranges::all_of(state.drcsFontNumber, IsKnownFont))
         return StateFailure { StateDecodeError::InvalidValue };
 
     _charsetIds = state.charsetIds;

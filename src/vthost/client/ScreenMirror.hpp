@@ -326,6 +326,22 @@ class ScreenMirror
     /// fragments of images the server released.
     void applyImages(RemoteScreen const& screen);
 
+    /// Puts the soft glyph references of @p screen's cells on the mirror's grid, for the rows it holds. A row
+    /// the update rewrote lost its references with its cells, and the screen restates them, so this runs
+    /// after the rows are written and is idempotent. The caller holds the terminal lock.
+    /// @param screen The mirrored screen holding the references.
+    /// @param rewritten The rows an incremental update carried: of the history, only those are restated (the
+    ///        page always is). Absent for a replay, which restates every row.
+    void applySoftGlyphCells(RemoteScreen const& screen,
+                             std::optional<std::span<proto::WireLine const>> rewritten = std::nullopt);
+
+    /// Replaces the mirror terminal's soft fonts with the set @p fonts states, unless the set is not one
+    /// DECDLD could have produced -- in which case the fonts the mirror holds stand. The caller holds the
+    /// terminal lock.
+    /// @param fonts The daemon's whole set.
+    /// @param generation The store generation the daemon captured it at.
+    void syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uint64_t generation);
+
     /// Places the cursor and publishes the frame. Every entry point ends here.
     void finish(RemoteScreen const& screen);
 
@@ -473,6 +489,9 @@ class ScreenMirror
     /// them once. Holding the reference is also what keeps the pool entry alive: `ImagePool`'s id
     /// index is weak, so an image nothing holds is collected.
     std::unordered_map<uint32_t, std::shared_ptr<vtbackend::Image const>> _images;
+    /// The daemon-store generation of the soft fonts the mirror holds, so a replay that finds the set
+    /// unchanged rebuilds nothing. Empty until the daemon stated one.
+    std::optional<uint64_t> _softFontGeneration;
 };
 
 } // namespace vthost::client

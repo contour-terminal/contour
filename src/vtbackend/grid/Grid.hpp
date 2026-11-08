@@ -1370,7 +1370,7 @@ template <typename RendererT>
             auto const& storage = line.storage();
             auto const cols = unbox<size_t>(line.size());
 
-            render.startLine(y, line.flags(), line.contextId());
+            render.startLine(y, line);
             for (size_t col = 0; col < cols; ++col)
             {
                 auto const proxy = ConstCellProxy(storage, col);

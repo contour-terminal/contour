@@ -11,6 +11,7 @@
 #include <libunicode/utf8.h>
 #include <libunicode/width.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -73,7 +74,7 @@ inline void writeCellToSoA(LineSoA& line,
     if (oldClusterSize > 1)
         clearClusterExtras(line, col);
 
-    clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
+    clearReplacedSideTables(line, static_cast<uint16_t>(col));
 
     // Otherwise a rendition or hyperlink differing from another cell's mixes. A spanning cell already
     // left the line Spanning above, so this test skips it.
@@ -101,6 +102,13 @@ inline void fillWideCharContinuation(LineSoA& line,
         line.sgr[col + i] = contAttrs;
         line.hyperlinks[col + i] = hyperlink;
     }
+
+    // The continuation replaces what the cells showed, a soft glyph or a Replace-layer image included. A
+    // line is rarely spanning with a side table, and a wide-text line always is spanning, so the tables are
+    // asked first.
+    if ((line.softGlyphs || line.imageFragments) && col < line.codepoints.size())
+        clearReplacedSideTables(
+            line, static_cast<uint16_t>(col), std::min(count, line.codepoints.size() - col));
 
     // A continuation cell belongs to the head before it, so the line now spans.
     if (count > 0)

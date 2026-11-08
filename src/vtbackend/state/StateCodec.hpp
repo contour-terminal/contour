@@ -19,7 +19,10 @@ namespace vtbackend
 /// The format is tolerant (@see detail::FieldEncoder): a field added or dropped later is not a new version.
 /// Only a change an older reader cannot skip over -- a field whose meaning changes under the same id, a
 /// new framing -- is.
-inline constexpr uint32_t TerminalStateFormatVersion = 1;
+///
+/// Version 2 retired the DRCS fields of KeyStringsState (6 and 7, which were never filled with anything
+/// displayable) and added the DECDLD soft fonts and the per-cell soft-glyph references.
+inline constexpr uint32_t TerminalStateFormatVersion = 2;
 
 /// The oldest terminal-state format this build can still read.
 inline constexpr uint32_t OldestReadableTerminalStateFormat = 1;

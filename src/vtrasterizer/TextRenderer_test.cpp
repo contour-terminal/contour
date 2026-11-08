@@ -682,6 +682,44 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(cmdA.x.value == 40);
     }
 
+    SECTION("a soft glyph replaces its cell's text and is drawn in order")
+    {
+        auto const textCell = [](char32_t codepoint, int column) {
+            auto cell = vtbackend::RenderCell {};
+            cell.position = vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) };
+            cell.codepoints = std::u32string(1, codepoint);
+            cell.attributes.foregroundColor = vtbackend::RGBColor(0x10, 0x20, 0x30);
+            return cell;
+        };
+        auto glyph = vtbackend::SoftGlyph {
+            .id = crispy::StrongHash { 1, 2, 3, 4 }, .width = 2, .height = 2, .coverage = { 1, 0, 0, 1 }
+        };
+        auto& backend = renderTarget.getMockBackend();
+        backend.renderCommands.clear();
+        backend.uploadCommands.clear();
+
+        renderer.beginFrame();
+        renderer.renderCell(textCell(U'A', 0));
+        renderer.renderCell(textCell(U'B', 1), glyph);
+        renderer.renderCell(textCell(U'A', 2));
+        renderer.endFrame();
+
+        // 'A' (one tile), the soft glyph (one tile, not also 'B'), 'A' again, in cell order.
+        REQUIRE(backend.renderCommands.size() == 3);
+        CHECK(backend.renderCommands[0].x.value == 0);
+        CHECK(backend.renderCommands[1].x.value == 10);
+        CHECK(backend.renderCommands[2].x.value == 20);
+        CHECK(backend.renderCommands[1].color
+              == vtrasterizer::atlas::normalize(vtbackend::RGBColor(0x10, 0x20, 0x30)));
+
+        // The glyph's tile is the only upload of the cell's size in the frame: its coverage, scaled to 10x20.
+        auto const glyphUploads = std::ranges::count_if(backend.uploadCommands, [&](auto const& upload) {
+            return upload.bitmapSize == gridMetrics.cellSize && upload.bitmap.size() == 10 * 20
+                   && upload.bitmap.front() == 0xFF && upload.bitmap.back() == 0xFF;
+        });
+        CHECK(glyphUploads == 1);
+    }
+
     SECTION("Double Height Vertical Placement")
     {
         // Test vertical placement for 'A' (Ascent 10, Descent 2) and 'g' (Ascent 10, Descent 2 but usually
@@ -2801,6 +2839,96 @@ TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", 
     REQUIRE(cursorTile != tiles.end());
     CHECK(cursorTile->x.value == expected.x);
     CHECK(cursorTile->y.value == expected.y);
+}
+
+namespace
+{
+using namespace std::string_view_literals;
+
+/// A 10x20 text font (the seeded cell size): '!' is a block in the cell's top-left corner, five columns wide
+/// and twelve rows tall, and '"' is five columns of its first and seventh rows. Neither is symmetric, so a
+/// flip on either axis shows.
+constexpr auto SoftFontLoad = "\033P1;0;1;10;0;0;20;0{ A~~~~~/~~~~~;@@@@@/@@@@@\033\\"sv;
+
+/// @return The picture of a 10x20 tile with ink in @p inkRows' first five columns, top row first.
+[[nodiscard]] std::vector<std::string> tileWithInk(std::initializer_list<size_t> inkRows)
+{
+    auto rows = std::vector<std::string>(20, std::string(10, '.'));
+    for (auto const row: inkRows)
+        rows[row].replace(0, 5, std::string(5, '#'));
+    return rows;
+}
+
+/// @return The tiles drawn in @p color, in the order they were drawn.
+[[nodiscard]] std::vector<atlas::RenderTile> tilesColoured(MockAtlasBackend const& backend, RGBColor color)
+{
+    return std::ranges::to<std::vector>(backend.renderCommands | std::views::filter([&](auto const& tile) {
+                                            return tile.color == atlas::normalize(color, 1.0f);
+                                        }));
+}
+} // namespace
+
+TEST_CASE("Renderer.softGlyphs.drawnFromTheFrameInEveryPass", "[renderer][softfont]")
+{
+    // The frame's soft glyphs reach the soft font renderer from the page and the status line, in one pass
+    // and in two: the right glyph in the right cell, top row first, in the cell's own colour.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(200), Height(120) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    vtbackend::test::printLines(mc, "out", 20); // scrollback, for the smooth scroll to move through
+    mc.writeToScreen(SoftFontLoad);
+    // Three cells on line 2 of the page, then the same two glyphs in the host-writable status line.
+    constexpr auto Red = RGBColor { 250, 10, 20 };
+    constexpr auto Green = RGBColor { 10, 250, 20 };
+    mc.writeToScreen("\033[2;4H\033) A\x0E\033[38;2;250;10;20m!\033[38;2;10;250;20m\"\x0F");
+    mc.writeToScreen("\033[2$~");
+    mc.terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+    mc.writeToScreen("\033[1$}\033) A\x0E\033[38;2;250;10;20m!\033[38;2;10;250;20m\"\x0F\033[0$}");
+
+    auto smooth = false;
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        scrollPartway(mc);
+        smooth = true;
+    }
+
+    // The page's cells move by the offset the renderer reads from the terminal; the status line does not.
+    auto const smoothShift = static_cast<int>(mc.terminal.smoothScrollPixelOffset());
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto& backend = fixture.renderTarget.getMockBackend();
+    // One tile per distinct glyph, shared by the page and the status line (the frame uploads other tiles
+    // too).
+    auto const uploadsOf = [&](std::vector<std::string> const& picture) {
+        return std::ranges::count_if(backend.uploadCommands,
+                                     [&](auto const& upload) { return bitmapRows(upload) == picture; });
+    };
+    CHECK(uploadsOf(tileWithInk({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 })) == 1);
+    CHECK(uploadsOf(tileWithInk({ 0, 6 })) == 1);
+
+    auto const reds = tilesColoured(backend, Red);
+    auto const greens = tilesColoured(backend, Green);
+    REQUIRE(reds.size() == 2);
+    REQUIRE(greens.size() == 2);
+
+    // Page cells at line 1, columns 3 and 4; the status line below the five page rows, columns 0 and 1.
+    INFO("smooth shift " << smoothShift << ", red y " << reds[0].y.value);
+    CHECK(reds[0].x.value == 30);
+    CHECK(reds[0].y.value == 20 + smoothShift);
+    CHECK(greens[0].x.value == 40);
+    CHECK(greens[0].y.value == 20 + smoothShift);
+    CHECK(reds[1].x.value == 0);
+    CHECK(reds[1].y.value == 100);
+    CHECK(greens[1].x.value == 10);
+    CHECK(greens[1].y.value == 100);
+    CHECK((smoothShift != 0) == smooth);
 }
 
 int main(int argc, char* argv[])

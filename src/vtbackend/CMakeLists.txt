@@ -98,6 +98,9 @@ set(vtbackend_HEADERS
     screen/PrintedLinks.hpp
     Logging.hpp
     vt/MacroDefinition.hpp
+    vt/SoftFont.hpp
+    vt/SoftFontStore.hpp
+    core/SoftGlyphRef.hpp
     shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
@@ -220,6 +223,8 @@ set(vtbackend_SOURCES
     shell/LivePromptMarks.cpp
     screen/LocalTime.cpp
     vt/MacroDefinition.cpp
+    vt/SoftFont.cpp
+    vt/SoftFontStore.cpp
     graphics/MessageParser.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
@@ -414,6 +419,8 @@ if(LIBTERMINAL_TESTING)
         vt/ClipboardSelection_test.cpp
         vt/KittyClipboard_test.cpp
         vt/MacroDefinition_test.cpp
+        vt/SoftFont_test.cpp
+        vt/SoftFontStore_test.cpp
         vt/PointerShape_test.cpp
         graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
@@ -427,6 +434,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_rect_test.cpp
         screen/Screen_modes_test.cpp
         screen/Screen_osc_test.cpp
+        screen/Screen_softfont_test.cpp
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
@@ -475,6 +483,7 @@ if(LIBTERMINAL_TESTING)
         state/ScreenState_test.cpp
         state/TerminalState_test.cpp
         state/StateCodec_test.cpp
+        state/SoftFontState_test.cpp
         state/StateRoundTrip_test.cpp
         testing/CounterColumns_test.cpp
         testing/Workloads_test.cpp

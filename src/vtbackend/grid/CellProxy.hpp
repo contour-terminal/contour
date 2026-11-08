@@ -126,6 +126,19 @@ class BasicCellProxy
         return {};
     }
 
+    /// The soft font glyph this cell shows in place of its codepoint's own glyph, if any.
+    [[nodiscard]] std::optional<SoftGlyphRef> softGlyph() const noexcept
+    {
+        if (_line->softGlyphs)
+        {
+            if (auto const it = _line->softGlyphs->find(static_cast<uint16_t>(_col));
+                it != _line->softGlyphs->end())
+                return it->second;
+        }
+        return std::nullopt;
+    }
+
+    // A soft glyph cell always carries a codepoint, so emptiness needs no look at the soft glyph table.
     [[nodiscard]] bool empty() const noexcept { return _line->codepoints[_col] == 0 && !imageFragment(); }
 
     [[nodiscard]] std::string toUtf8() const
@@ -170,6 +183,8 @@ class BasicCellProxy
         _line->clusterSize[_col] = (ch != 0) ? uint8_t { 1 } : uint8_t { 0 };
         if (oldClusterSize > 1)
             clearClusterExtras(*_line, _col);
+        // New text replaces whatever the cell showed instead of it, a soft glyph included.
+        clearReplacedSideTables(*_line, static_cast<uint16_t>(_col));
     }
 
     void reset() noexcept
@@ -217,7 +232,7 @@ class BasicCellProxy
         _line->scales[_col] = 1;
         _line->textScaleExtras[_col] = 0;
 
-        clearReplacedImageFragment(_line->imageFragments, static_cast<uint16_t>(_col));
+        clearReplacedSideTables(*_line, static_cast<uint16_t>(_col));
     }
 
     /// Sets the per-cell vertical scale (kitty text sizing protocol).
@@ -323,6 +338,30 @@ class BasicCellProxy
             _line->imageFragments->erase(static_cast<uint16_t>(_col));
     }
 
+    /// Makes this cell show the given soft font glyph in place of its codepoint's own glyph.
+    ///
+    /// Per-cell rendering, like an image fragment, so the line leaves the bulk-write fast paths. Any
+    /// later write to the cell drops the reference again.
+    void setSoftGlyph(SoftGlyphRef ref)
+        requires(!IsConst)
+    {
+        markDirty();
+        _line->softGlyphs.ensure()[static_cast<uint16_t>(_col)] = ref;
+        degradeShape(*_line, LineShape::Spanning);
+    }
+
+    /// Removes this cell's soft glyph reference while leaving its text and rendition untouched.
+    void clearSoftGlyph() noexcept
+        requires(!IsConst)
+    {
+        markDirty();
+        if (_line->softGlyphs)
+        {
+            _line->softGlyphs->erase(static_cast<uint16_t>(_col));
+            dropEmptySoftGlyphs(*_line);
+        }
+    }
+
     void setGraphicsRendition(GraphicsRendition sgr) noexcept
         requires(!IsConst)
     {
@@ -355,8 +394,11 @@ class BasicCellProxy
         _line->clusterSize[_col] = 0;
         if (oldClusterSize > 1)
             clearClusterExtras(*_line, _col);
-        if (_line->imageFragments)
-            _line->imageFragments->erase(static_cast<uint16_t>(_col));
+        if (_line->shape == LineShape::Spanning)
+        {
+            forEachSideTable(*_line, [&](auto& map) { map.erase(static_cast<uint16_t>(_col)); });
+            dropEmptySoftGlyphs(*_line);
+        }
     }
 
     /// Degrades the line's shape to what this cell now requires. @see degradeShapeForCell

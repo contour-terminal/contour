@@ -280,6 +280,7 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                                                    "Text shaping cache") },
     _textShaper { &textShaper },
     _boxDrawingRenderer { gridMetrics },
+    _softFontRenderer { gridMetrics },
     _glyphScaler { &glyphScaler }
 {
 }
@@ -300,6 +301,7 @@ void TextRenderer::inspect(ostream& textOutput) const
     textOutput << "TextRenderer:\n";
     _textShapingCache->inspect(textOutput);
     _boxDrawingRenderer.inspect(textOutput);
+    _softFontRenderer.inspect(textOutput);
 }
 
 void TextRenderer::setRenderTarget(
@@ -308,6 +310,7 @@ void TextRenderer::setRenderTarget(
     _directMapping = directMappingAllocator.allocate(DirectMappedCharsCount);
     Renderable::setRenderTarget(renderTarget, directMappingAllocator);
     _boxDrawingRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+    _softFontRenderer.setRenderTarget(renderTarget, directMappingAllocator);
     clearCache();
 }
 
@@ -315,6 +318,7 @@ void TextRenderer::setTextureAtlas(TextureAtlas& atlas)
 {
     Renderable::setTextureAtlas(atlas);
     _boxDrawingRenderer.setTextureAtlas(atlas);
+    _softFontRenderer.setTextureAtlas(atlas);
 
     if (_directMapping)
         initializeDirectMapping();
@@ -328,6 +332,7 @@ void TextRenderer::clearCache()
     _textShapingCache->clear();
 
     _boxDrawingRenderer.clearCache();
+    _softFontRenderer.clearCache();
 }
 
 void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData)
@@ -492,6 +497,21 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 
     if (cell.groupEnd)
         _textClusterGrouper.forceGroupEnd();
+}
+
+void TextRenderer::renderCell(vtbackend::RenderCell const& cell, vtbackend::SoftGlyph const& glyph)
+{
+    CONTOUR_TRACY_CELL_ZONE();
+
+    // The glyph is a tile of its own, not a shaped run: whatever text was gathered so far is flushed first
+    // so the draw order is the cell order, and the next cell starts a run of its own.
+    _textClusterGrouper.forceGroupEnd();
+    auto const drawn = _softFontRenderer.render(
+        cell.position, glyph, cell.attributes.foregroundColor, cell.attributes.lineFlags);
+    _textClusterGrouper.forceGroupStart();
+
+    if (drawn == SoftGlyphDraw::AtlasFull)
+        renderCell(cell);
 }
 
 void TextRenderer::endFrame()

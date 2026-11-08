@@ -38,7 +38,7 @@ namespace
     /// The line-level state of a fresh line, blank or materialized, however its arrays were set.
     void resetLineMetadata(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
     {
-        line.imageFragments.reset();
+        dropSideTables(line);
         line.lineFlags = {};
         line.usedColumns = {};
         line.shape = LineShape::Uniform;
@@ -87,6 +87,14 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     auto const n = unbox<size_t>(newCols);
     forEachCellArray(fillAttrs, [&](auto array, auto const& empty) { (line.*array).resize(n, empty); });
 
+    // Side tables are keyed by column; an entry at or beyond the new width would outlive its cell
+    // (a ghost glyph on regrow, and a column the state codec rejects).
+    if (n < oldSize)
+    {
+        forEachSideTable(line, [&](auto& map) { eraseColumnRange(map, n, oldSize - n); });
+        dropEmptySoftGlyphs(line);
+    }
+
     // Clamp usedColumns to new size
     if (line.usedColumns > newCols)
         line.usedColumns = newCols;
@@ -98,6 +106,22 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
         degradeShape(line, LineShape::Mixed);
 }
 
+void dropSideTablesOfSpanningLine(LineSoA& line) noexcept
+{
+    line.imageFragments.reset();
+    line.softGlyphs.reset();
+}
+
+void clearReplacedSideTablesOfSpanningLine(LineSoA& line, uint16_t startCol, size_t count)
+{
+    clearReplacedImageFragments(line.imageFragments, startCol, count);
+    if (line.softGlyphs)
+    {
+        eraseColumnRange(*line.softGlyphs, startCol, count);
+        dropEmptySoftGlyphs(line);
+    }
+}
+
 void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes const& attrs)
 {
     assert(!line.codepoints.empty() || count == 0);
@@ -107,16 +131,11 @@ void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes con
         std::fill_n((line.*array).data() + from, count, empty);
     });
 
-    // Remove image fragments in the cleared range
-    if (line.imageFragments)
+    // Remove side table entries in the cleared range (only a Spanning line has any).
+    if (line.shape == LineShape::Spanning)
     {
-        for (auto it = line.imageFragments->begin(); it != line.imageFragments->end();)
-        {
-            if (it->first >= from && it->first < from + count)
-                it = line.imageFragments->erase(it);
-            else
-                ++it;
-        }
+        forEachSideTable(line, [&](auto& map) { eraseColumnRange(map, from, count); });
+        dropEmptySoftGlyphs(line);
     }
 
     // Partial clear may break SGR uniformity.
@@ -154,7 +173,7 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
     }
 
     line.clusterPool.clear();
-    line.imageFragments.reset();
+    dropSideTables(line);
     line.usedColumns = {};
     line.shape = LineShape::Uniform;
     line.fillAttrs = fillAttrs;
@@ -200,19 +219,25 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
         }
     }
 
-    // Transfer image fragments in the copied range
-    if (src.imageFragments)
-    {
-        for (auto const& [col, frag]: *src.imageFragments)
-        {
-            if (col >= srcCol && col < srcCol + count)
+    // Transfer side table entries in the copied range
+    // A table is only created in the destination when the copied range brings an entry to put in it.
+    auto const transfer = [&](auto const& srcTable, auto& dstTable, auto ensure) {
+        if (srcTable)
+            if (auto const entries = entriesInRange(*srcTable, srcCol, count); !entries.empty())
             {
-                if (!dst.imageFragments)
-                    dst.imageFragments.emplace();
-                (*dst.imageFragments)[static_cast<uint16_t>(dstCol + (col - srcCol))] = frag;
+                placeColumnEntries(entries, ensure(dstTable), srcCol, dstCol, count);
+                return;
             }
-        }
-    }
+        if (dstTable)
+            eraseColumnRange(*dstTable, dstCol, count);
+    };
+    transfer(src.imageFragments, dst.imageFragments, [](auto& table) -> auto& {
+        if (!table)
+            table.emplace();
+        return *table;
+    });
+    transfer(src.softGlyphs, dst.softGlyphs, [](auto& table) -> auto& { return table.ensure(); });
+    dropEmptySoftGlyphs(dst);
 
     // Copied cells may break the destination's uniformity, and they bring their own line's spans.
     if (count > 0)
@@ -231,7 +256,11 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
         std::memmove(data + dstCol, data + srcCol, count * sizeof(*data));
     });
 
-    // Note: moveColumns does NOT handle cluster pool or image fragment reindexing.
+    // The column-keyed side tables follow their cells.
+    forEachSideTable(line, [&](auto& map) { moveColumnRange(map, srcCol, dstCol, count); });
+    dropEmptySoftGlyphs(line);
+
+    // Note: moveColumns does NOT handle cluster pool reindexing.
     // Callers must handle cluster pool entries if source cells have extras.
     // For insert/delete operations, the cluster pool entries remain valid
     // because the pool indices move with the clusterPoolIndex array.
@@ -404,9 +433,7 @@ LineShape shapeImpliedByCells(LineSoA const& line) noexcept
     auto shape = LineShape::Uniform;
     for (auto const col: std::views::iota(size_t { 0 }, line.codepoints.size()))
     {
-        auto const hasImage =
-            line.imageFragments && line.imageFragments->contains(static_cast<uint16_t>(col));
-        if (hasImage || isSpanningCell(line.sgr[col].flags, line.scales[col]))
+        if (hasSideTableEntryAt(line, col) || isSpanningCell(line.sgr[col].flags, line.scales[col]))
             return LineShape::Spanning;
         if (line.sgr[col] != line.sgr[0] || line.hyperlinks[col] != line.hyperlinks[0]
             || line.clusterSize[col] > 1 || line.textScaleExtras[col] != 0)

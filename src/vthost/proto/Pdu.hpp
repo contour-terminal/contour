@@ -89,6 +89,7 @@ enum class PduType : uint8_t
     UpgradeDaemonReply = 42,
     DaemonUpgrading = 43,
     PanesReprojected = 44,
+    SoftFontState = 45,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -740,6 +741,25 @@ struct ImageCellEntry
     bool operator==(ImageCellEntry const&) const = default;
 };
 
+/// How many soft fonts DECDLD has (Pfn 0..2), and the positions of a set: a font defines 0x20..0x7F, and a
+/// cell shows one of 0x21..0x7E. The numbers the decoder judges a peer's against.
+inline constexpr uint8_t MaxSoftFonts = 3;
+inline constexpr uint8_t FirstSoftGlyphPosition = 0x20;
+inline constexpr uint8_t LastSoftGlyphPosition = 0x7F;
+inline constexpr uint8_t FirstSoftCellPosition = 0x21;
+inline constexpr uint8_t LastSoftCellPosition = 0x7E;
+
+/// One cell showing a soft font glyph in place of its character: which row and column shows which glyph of
+/// which font. The cell's real character travels in the row, as it does for a client without the capability.
+struct SoftGlyphCellEntry
+{
+    int64_t stableId = 0; ///< Row.
+    uint16_t column = 0;
+    uint8_t font = 0;     ///< DECDLD Pfn, 0..2.
+    uint8_t position = 0; ///< 0x21..0x7E: a cell's character is never the set's space or DEL.
+    bool operator==(SoftGlyphCellEntry const&) const = default;
+};
+
 /// Where one PDU sits in a snapshot that was too large to travel as a single frame.
 ///
 /// A full-grid snapshot of a deep scrollback is legitimately megabytes, and a producer that
@@ -879,6 +899,10 @@ struct Delta
     /// before both, which reads as unchanged.
     uint8_t tabNameChanged = 0;
     std::string tabName = {};
+    /// The soft-glyph cells of this delta's rows (Capability::SoftFonts), in the shape @ref imageCells has: a
+    /// row's entries travel with the row, and the receiver clears a row's before it takes the entries.
+    /// Appended by a later version, so an older sender's body ends before it, which reads as none.
+    std::vector<SoftGlyphCellEntry> softGlyphCells = {};
 
     /// Whether this delta says anything about the SESSION at all — a snapshot, changed rows, or any
     /// of the gated fields above.
@@ -1033,11 +1057,60 @@ struct SessionInputEcho
     bool operator==(SessionInputEcho const&) const = default;
 };
 
+/// @return The bytes a bitmap row of @p width pixels takes on the wire: one bit per pixel, padded to a
+///         whole byte.
+[[nodiscard]] constexpr std::size_t softGlyphRowBytes(std::size_t width) noexcept
+{
+    return (width + 7) / 8;
+}
+
+/// One glyph of a soft font: a bitmap of the font's full cell, one bit per pixel, most significant bit
+/// leftmost, each row padded to a whole byte.
+struct WireSoftGlyph
+{
+    uint8_t position = 0; ///< 0x20..0x7F in the set.
+    uint8_t width = 0;
+    uint8_t height = 0;
+    std::vector<std::byte> bits = {}; ///< `height * ceil(width / 8)` bytes, which the decoder checks.
+    bool operator==(WireSoftGlyph const&) const = default;
+};
+
+/// One soft font on the wire. Nothing about identity travels: a glyph's atlas id is a hash of its content
+/// and the receiver derives it, as it does the error glyph of an undefined position, and the declaration's
+/// parameters that only a DECDLD sender needs (the erase control, the page geometry) are not the mirror's to
+/// know.
+struct WireSoftFont
+{
+    uint8_t fontNumber = 0;      ///< DECDLD Pfn, 0..2.
+    std::string designator = {}; ///< Dscs: up to two intermediates and a final.
+    uint8_t charsetSize = 0;     ///< vtbackend::SoftCharsetSize: 0 94, 1 96.
+    uint8_t usage = 0;           ///< vtbackend::SoftFontUsage: 0 text, 1 full cell.
+    uint8_t fullWidth = 0;       ///< The cell the glyphs fill, in pixels.
+    uint8_t fullHeight = 0;
+    uint8_t textWidth = 0; ///< Pixels of the cell a text glyph occupies; 0 = unclipped.
+    /// Where the font sits in load order, 0 the first loaded: of two fonts sharing a designator the later
+    /// loaded is the one a designation selects.
+    uint8_t loadRank = 0;
+    std::vector<WireSoftGlyph> glyphs = {}; ///< The defined glyphs, ascending by position.
+    bool operator==(WireSoftFont const&) const = default;
+};
+
+/// Server→client push (Capability::SoftFonts): a session's whole set of soft fonts, replacing what the client
+/// mirrored. Sent on attach when the session has fonts, and whenever they change; always ahead of a Delta
+/// that may reference them. An empty list says there are none.
+struct SoftFontState
+{
+    uint64_t session = 0;    ///< The session the fonts belong to.
+    uint64_t generation = 0; ///< vtbackend::SoftFontStore::generation() when it was captured.
+    std::vector<WireSoftFont> fonts = {};
+    bool operator==(SoftFontState const&) const = default;
+};
+
 /// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
 /// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
 /// without enumerating the catalog's tags itself.
-using SessionEventPdu =
-    std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho>;
+using SessionEventPdu = std::
+    variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho, SoftFontState>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -1577,7 +1650,8 @@ using DecodedPdu = std::variant<Invalid,
                                 UpgradeDaemon,
                                 UpgradeDaemonReply,
                                 DaemonUpgrading,
-                                PanesReprojected>;
+                                PanesReprojected,
+                                SoftFontState>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

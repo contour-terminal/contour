@@ -908,7 +908,7 @@ constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v'
 
 // DCS functions
 constexpr inline auto DECAUPSS    = detail::DCS(std::nullopt, 0, 1, '!', 'u', VTType::VT320, documentation::DECAUPSS);
-constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 8, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
+constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 16, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
 constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
 constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);

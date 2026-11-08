@@ -209,6 +209,13 @@ struct RemoteScreen
     /// (pool-local id + in-image cell offset + layer) is shown at that cell.
     /// Replaced per row as deltas redraw it; trimmed with the row eviction.
     std::map<int64_t, std::map<uint16_t, proto::ImageCellEntry>> imageCells;
+    /// Soft-glyph cells, keyed like @ref imageCells: which soft font glyph a cell shows in place of its
+    /// character. Empty unless both ends negotiated Capability::SoftFonts.
+    std::map<int64_t, std::map<uint16_t, proto::SoftGlyphCellEntry>> softGlyphCells;
+    /// The session's soft fonts as the daemon last stated them, kept for a mirror bound later (as
+    /// @ref programStatus is) and for a replay.
+    std::vector<proto::WireSoftFont> softFonts;
+    uint64_t softFontGeneration = 0; ///< The daemon's store generation @ref softFonts was captured at.
     /// Fetched image pixels by pool-local image id. The id pool is per session,
     /// so this map is already session-scoped. Filled on ImageData, dropped on
     /// ImageGone.
@@ -245,6 +252,9 @@ struct RemoteScreen
 
     /// Replaces the program-status records with the set @p status states.
     void apply(proto::ProgramStatus const& status);
+
+    /// Replaces the soft fonts with the set @p fonts states.
+    void apply(proto::SoftFontState const& fonts);
 
     /// @return The row currently at viewport row @p line (0-based), or nullptr
     ///         for a row the client has no data for (render as blank).

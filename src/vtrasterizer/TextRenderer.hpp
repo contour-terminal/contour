@@ -10,6 +10,7 @@
 #include <vtrasterizer/GlyphScaling.hpp>
 #include <vtrasterizer/GlyphSlicing.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
+#include <vtrasterizer/SoftFontRenderer.hpp>
 #include <vtrasterizer/TextClusterGrouper.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
@@ -78,6 +79,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     {
         Renderable::setSmoothScrollOffset(offset);
         _boxDrawingRenderer.setSmoothScrollOffset(offset);
+        _softFontRenderer.setSmoothScrollOffset(offset);
     }
 
     void inspect(std::ostream& textOutput) const override;
@@ -125,6 +127,12 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Renders a given terminal's grid cell that has been
     /// transformed into a RenderCell.
     void renderCell(vtbackend::RenderCell const& cell);
+
+    /// Renders @p cell with a soft font glyph (DECDLD) in place of its text. When the glyph cannot be had
+    /// from the atlas, the cell's text is rendered instead.
+    /// @param cell The cell.
+    /// @param glyph The glyph the cell shows.
+    void renderCell(vtbackend::RenderCell const& cell, vtbackend::SoftGlyph const& glyph);
 
     void renderLine(vtbackend::RenderLine const& renderLine);
 
@@ -300,6 +308,7 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     // sub-renderer
     //
     BoxDrawingRenderer _boxDrawingRenderer;
+    SoftFontRenderer _softFontRenderer;
 
     /// How a glyph is enlarged for a scaled text-sizing block. Injected so that a second strategy --
     /// re-rasterizing at the larger point size for a crisper result -- is a new implementation

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <format>
 #include <memory>
 #include <span>
@@ -841,7 +842,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         _gridMetrics.pageMargin.left -= shift;
         auto const restore = core::Finally { [&] { _gridMetrics.pageMargin.left += shift; } };
         renderPass(false, [&] {
-            renderCells(split.statusCells);
+            renderCells(split.statusCells, buffer.softGlyphs);
             renderLines(split.statusLines);
         });
     };
@@ -867,7 +868,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             if (auto const& bar = buffer.statusBar)
                 renderStatusBar(*bar);
-            renderCells(split.mainCells);
+            renderCells(split.mainCells, buffer.softGlyphs);
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
             renderBlockHighlight(buffer.blockHighlight, mainPageSize.columns, 0);
             renderLines(split.mainLines);
@@ -895,7 +896,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         auto const split = splitStatus(renderBuffer.get());
 
         renderPass(primaryPressure, [&] {
-            renderCells(split.mainCells, smoothPixelOffset);
+            renderCells(split.mainCells, renderBuffer.get().softGlyphs, smoothPixelOffset);
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
             renderBlockHighlight(renderBuffer.get().blockHighlight, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
@@ -1003,19 +1004,29 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     return consumeFontReconfigApplied();
 }
 
-void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
+void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
+                           std::span<vtbackend::RenderSoftGlyph const> softGlyphs,
+                           int yPixelOffset)
 {
     ZoneScoped;
     // Instrumentation: the span this pass actually walks, to reconcile the per-cell zone counts
     // against the render buffer's own size.
     ZoneValue(static_cast<int64_t>(cells.size()));
+
+    // The soft glyphs are sorted by position, as the cells of a line are: one cursor, advanced alongside the
+    // cells, finds each cell's glyph.
+    assert(std::ranges::is_sorted(softGlyphs, {}, &vtbackend::RenderSoftGlyph::position));
+    auto glyphCursor = SoftGlyphCursor { softGlyphs };
     for (auto const& cell: cells)
     {
         try
         {
             _backgroundRenderer.renderCell(cell);
             _decorationRenderer.renderCell(cell);
-            _textRenderer.renderCell(cell);
+            if (auto const* const glyph = glyphCursor.find(cell.position))
+                _textRenderer.renderCell(cell, *glyph);
+            else
+                _textRenderer.renderCell(cell);
             if (cell.image)
                 _imageRenderer.renderImage(_gridMetrics.map(cell.position, yPixelOffset), *cell.image);
         }
@@ -1235,8 +1246,8 @@ void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,
     _renderTarget->renderRectangle(
         top.x, top.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(header.background, Opaque));
     // Laid out by the terminal, the chip included: nothing here decides where a glyph goes.
-    renderCells(header.cells);
-    renderCells(header.chip);
+    renderCells(header.cells, {});
+    renderCells(header.chip, {});
 
     _renderTarget->renderRectangle(
         top.x, bottom.y - 1, width, vtbackend::Height(1), vtbackend::RGBAColor(header.separator, Opaque));

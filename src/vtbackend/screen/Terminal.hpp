@@ -58,6 +58,7 @@
 #include <vtbackend/vt/ProgressState.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
+#include <vtbackend/vt/SoftFontStore.hpp>
 #include <vtbackend/vt/UserVar.hpp>
 
 #include <vtparser/Parser.hpp>
@@ -1238,69 +1239,10 @@ class Terminal: public IStatusLinePublishTarget
     }
     // }}}
 
-    // {{{ DRCS (DECDLD — Dynamically Redefinable Character Sets)
-    struct DRCSGlyph
-    {
-        int width = 0;               ///< Glyph width in pixels
-        int height = 0;              ///< Glyph height in pixels
-        std::vector<uint8_t> bitmap; ///< Row-major pixel data (1=set, 0=clear)
-
-        /// Lists the fields for the state codec.
-        void visitFields(this auto& self, auto& visitor)
-        {
-            visitor(1, self.width);
-            visitor(2, self.height);
-            visitor(3, self.bitmap);
-        }
-    };
-
-    struct DRCSCharset
-    {
-        std::unordered_map<int, DRCSGlyph> glyphs; ///< Position (0x21-0x7E) → glyph data
-
-        /// Lists the fields for the state codec.
-        void visitFields(this auto& self, auto& visitor) { visitor(1, self.glyphs); }
-    };
-
-    /// Defines DRCS glyphs from DECDLD DCS payload.
-    void defineDRCS(int fontNumber,
-                    int startingCharacter,
-                    int eraseControl,
-                    int charMatrixWidth,
-                    int fontWidth,
-                    int textOrFullCell,
-                    int charMatrixHeight,
-                    int charsetSize,
-                    std::string_view designator,
-                    std::string_view data);
-
-    /// Returns the DRCS charset for the given font number, or nullptr.
-    [[nodiscard]] DRCSCharset const* drcsCharset(int fontNumber) const noexcept
-    {
-        if (auto const it = _drcsCharsets.find(fontNumber); it != _drcsCharsets.end())
-            return &it->second;
-        return nullptr;
-    }
-
-    /// Clears all DRCS charsets and designator mappings.
-    void clearDRCS() noexcept
-    {
-        _drcsCharsets.clear();
-        _drcsDesignatorMap.clear();
-    }
-
-    /// Maps a DRCS designator string (from DECDLD Dscs field) to a font number.
-    [[nodiscard]] std::optional<int> drcsDesignatorToFont(std::string_view designator) const noexcept
-    {
-        auto const key = std::string(designator);
-        if (auto const it = _drcsDesignatorMap.find(key); it != _drcsDesignatorMap.end())
-            return it->second;
-        return std::nullopt;
-    }
-
-    /// Creates an RGBA ImageFragment from a DRCS glyph bitmap using the given foreground color.
-    [[nodiscard]] std::shared_ptr<RasterizedImage> createDRCSImage(DRCSGlyph const& glyph,
-                                                                   RGBColor foregroundColor);
+    // {{{ DRCS (DECDLD -- Dynamically Redefinable Character Sets)
+    /// The DECDLD soft fonts.
+    [[nodiscard]] SoftFontStore const& softFonts() const noexcept { return _softFonts; }
+    [[nodiscard]] SoftFontStore& softFonts() noexcept { return _softFonts; }
     // }}}
 
     // {{{ DEC Locator (DECELR / DECLRP / DECSLE / DECRQLP)
@@ -5768,8 +5710,7 @@ class Terminal: public IStatusLinePublishTarget
     /// The locator's buttons, in _locatorButtonsHeld's bits, whose press was the application's: their up is
     /// reported, and only theirs, so the host never sees an up without its down or a down without its up.
     uint8_t _locatorButtonsOwnedByApp = 0;
-    std::unordered_map<int, DRCSCharset> _drcsCharsets;
-    std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
+    SoftFontStore _softFonts;
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
@@ -5977,9 +5918,11 @@ class Terminal: public IStatusLinePublishTarget
     /// @param state   The state, validated.
     /// @param images  Its image table, built.
     /// @param screens Its sixteen pages, then the host-writable and the indicator status line, staged.
+    /// @param softFonts Its DECDLD soft fonts, rebuilt, with their load order.
     void commitRestore(TerminalState const& state,
                        RestoredImageTable const& images,
-                       std::span<StagedScreen> screens);
+                       std::span<StagedScreen> screens,
+                       SoftFontSet softFonts);
 
     /// Tells the listener every fact it keeps a copy of, as a restore replaced them all. Defined in
     /// state/TerminalState.cpp.

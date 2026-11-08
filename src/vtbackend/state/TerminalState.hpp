@@ -31,6 +31,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -346,16 +347,79 @@ struct MacrosState
     }
 };
 
-/// UDKs, the DEC locator and DRCS.
+/// One defined glyph of a persisted soft font.
+struct SoftGlyphState
+{
+    uint8_t position = 0; ///< 7-bit position in the set, 0x20..0x7F.
+    uint8_t width = 0;    ///< Pixels; equals the font's full cell width.
+    uint8_t height = 0;   ///< Pixels; equals the font's full cell height.
+    std::vector<uint8_t>
+        packedCoverage; ///< Row-major, top row first, 1 bit per pixel, least significant first.
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.position);
+        visitor(2, self.width);
+        visitor(3, self.height);
+        visitor(4, self.packedCoverage);
+    }
+};
+
+/// One persisted DECDLD soft font. The glyph ids are content hashes, so nothing about identity travels: the
+/// decoder rebuilds the glyphs, and the error glyph, from this.
+struct SoftFontState
+{
+    uint8_t number = 0;     ///< Pfn, 0..2.
+    std::string designator; ///< Dscs.
+    uint8_t loadRank = 0;   ///< 0 = loaded first; decides which of two fonts sharing a designator wins.
+    // The SoftFontDeclaration, enumerators as their numbers.
+    uint8_t startPosition = 0x21;
+    uint8_t erase = 0;
+    uint8_t declaredWidth = 0;
+    uint8_t declaredHeight = 0;
+    uint8_t sizeSource = 0;
+    uint16_t columnsPerPage = 80;
+    uint8_t linesPerPage = 24;
+    uint8_t usage = 0;
+    uint8_t charsetSize = 0;
+    // The SoftCellGeometry.
+    uint8_t fullWidth = 0;
+    uint8_t fullHeight = 0;
+    uint8_t textWidth = 0;
+    std::vector<SoftGlyphState> glyphs; ///< The defined positions, ascending.
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.number);
+        visitor(2, self.designator);
+        visitor(3, self.loadRank);
+        visitor(4, self.startPosition);
+        visitor(5, self.erase);
+        visitor(6, self.declaredWidth);
+        visitor(7, self.declaredHeight);
+        visitor(8, self.sizeSource);
+        visitor(9, self.columnsPerPage);
+        visitor(10, self.linesPerPage);
+        visitor(11, self.usage);
+        visitor(12, self.charsetSize);
+        visitor(13, self.fullWidth);
+        visitor(14, self.fullHeight);
+        visitor(15, self.textWidth);
+        visitor(16, self.glyphs);
+    }
+};
+
+/// UDKs, the DEC locator and the DECDLD soft fonts.
 struct KeyStringsState
 {
-    std::map<int, std::string> userDefinedKeys {};        ///< DECUDK strings, by key.
-    bool isUdkLocked = false;                             ///< DECUDK lock.
-    Terminal::LocatorState locator {};                    ///< DECELR / DECSLE.
-    uint8_t locatorButtonsHeld = 0;                       ///< The buttons down, DECLRP's bits.
-    uint8_t locatorButtonsOwnedByApp = 0;                 ///< Those whose press was the application's.
-    std::map<int, Terminal::DRCSCharset> drcsCharsets {}; ///< DECDLD fonts, by number.
-    std::map<std::string, int> drcsDesignators {};        ///< Dscs designator to font number.
+    std::map<int, std::string> userDefinedKeys {}; ///< DECUDK strings, by key.
+    bool isUdkLocked = false;                      ///< DECUDK lock.
+    Terminal::LocatorState locator {};             ///< DECELR / DECSLE.
+    uint8_t locatorButtonsHeld = 0;                ///< The buttons down, DECLRP's bits.
+    uint8_t locatorButtonsOwnedByApp = 0;          ///< Those whose press was the application's.
+    std::vector<SoftFontState> softFonts {};       ///< The loaded DECDLD fonts, by number.
 
     /// Lists the fields for the state codec.
     void visitFields(this auto& self, auto& visitor)
@@ -365,8 +429,9 @@ struct KeyStringsState
         visitor(3, self.locator);
         visitor(4, self.locatorButtonsHeld);
         visitor(5, self.locatorButtonsOwnedByApp);
-        visitor(6, self.drcsCharsets);
-        visitor(7, self.drcsDesignators);
+        // 6 and 7 held the v1 encoding's DRCS charsets and designators, which were stored under wrong
+        // positions and never displayed. They are retired: not written, and a v1 stream's are skipped.
+        visitor(8, self.softFonts);
     }
 };
 

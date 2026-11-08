@@ -115,8 +115,8 @@ TEST_CASE("round-trip at every byte offset of a DECDMAC macro definition", "[InF
 
 TEST_CASE("round-trip at every byte offset of a DECDLD soft font", "[InFlightTail][StateRoundTrip]")
 {
-    requireExactAtEveryOffset("\033P1;0;0;10;10;0;20;0{ A@\033\\"
-                              "\033P1;1;1;10;10;0;20;0{ A~~~~~/~~~~~;@@@@@/@@@@@\033\\"
+    requireExactAtEveryOffset("\033P1;0;0;10;0;0;20;0{ A@\033\\"
+                              "\033P1;1;1;10;0;0;20;0{ A~~~~~/~~~~~;@@@@@/@@@@@\033\\"
                               "\033) A\x0E!\"#\x0F text"sv);
 }
 

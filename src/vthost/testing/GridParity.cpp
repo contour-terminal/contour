@@ -120,6 +120,19 @@ namespace
         return out;
     }
 
+    /// @return The soft font glyph @p column shows, as "font:position", or "none".
+    ///
+    /// Read off the storage, like an image: the reference travels beside the row, not inside it.
+    [[nodiscard]] std::string describeSoftGlyph(vtbackend::LineSoA const& soa, std::size_t column)
+    {
+        if (!soa.softGlyphs)
+            return "none";
+        auto const it = soa.softGlyphs->find(static_cast<uint16_t>(column));
+        if (it == soa.softGlyphs->end())
+            return "none";
+        return std::format("{}:{:#x}", it->second.font, it->second.position);
+    }
+
     /// One comparable property of a wire row, and how to render it for the report.
     ///
     /// A TABLE rather than a chain of `if (a != b) note(...)`, for the reason the rest of this
@@ -319,6 +332,12 @@ std::vector<ParityGap> compareGrids(vtbackend::Terminal const& server,
             if (auto const want = describeImage(expectedSoa, column), got = describeImage(actualSoa, column);
                 want != got)
                 note(gaps, maxGaps, row, col, "image", want, got);
+
+            // Beside the image, for the same reason: the glyph reference is not part of the wire cell.
+            if (auto const want = describeSoftGlyph(expectedSoa, column),
+                got = describeSoftGlyph(actualSoa, column);
+                want != got)
+                note(gaps, maxGaps, row, col, "softGlyph", want, got);
 
             for (auto const& field: CellFields)
                 if (auto const want = field.render(expectedCells[column]),

@@ -221,11 +221,12 @@ struct MirrorHarness
         client = std::make_unique<NativeClient>(
             loop,
             std::move(pair.second),
-            // ProgramStatus and ClipboardTargets, as the GUI offers them: each rides only a connection that
-            // shares it.
+            // ProgramStatus, ClipboardTargets and SoftFonts, as the GUI offers them: each rides only a
+            // connection that shares it.
             NativeClient::HandshakeOptions {
-                .capabilities = proto::CapabilitySet::of(
-                    { proto::Capability::ProgramStatus, proto::Capability::ClipboardTargets }) },
+                .capabilities = proto::CapabilitySet::of({ proto::Capability::ProgramStatus,
+                                                           proto::Capability::ClipboardTargets,
+                                                           proto::Capability::SoftFonts }) },
             mirrorBlockLimits,
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
@@ -2459,6 +2460,33 @@ TEST_CASE("inline images round-trip into the mirror via GIP", "[vthost][mirror]"
             CHECK(mirrorRow.imageFragments->contains(column));
         }
 
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("soft glyph cells mirror with parity", "[vthost][mirror][softfont]")
+{
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    // Font 1 under " A" with a glyph for '!', designated into G1 and shifted out; two glyph cells around
+    // text.
+    h.serverTerminal(session)->writeToScreen("\033P1;0;0;10;0;0;20;0{ A@\033\\\033) A\x0E!!\x0F text");
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            auto const& row = h->mirror->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
+            return row.softGlyphs && row.softGlyphs->contains(1) && h->mirror->softFonts().font(1) != nullptr;
+        });
+        auto const& mirrorRow = h->mirror->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).storage();
+        REQUIRE(mirrorRow.softGlyphs);
+        CHECK(mirrorRow.softGlyphs->size() == 2);
+        CHECK(mirrorRow.softGlyphs->at(0) == vtbackend::SoftGlyphRef { .font = 1, .position = 0x21 });
+
+        auto const gaps = vthost::testing::compareGrids(*h->serverTerminal(session), *h->mirror);
+        INFO(vthost::testing::describeGaps(gaps));
+        CHECK(gaps.empty());
         h->client->detach();
     }(&h, session);
 

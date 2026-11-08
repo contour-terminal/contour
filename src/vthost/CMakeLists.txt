@@ -178,6 +178,8 @@ add_library(vthost STATIC
     client/ViewportOrigin.hpp
     GridWire.cpp
     GridWire.hpp
+    SoftFontWire.cpp
+    SoftFontWire.hpp
     handover/HandoverCapture.cpp
     handover/HandoverCapture.hpp
     handover/HandoverCodec.cpp
@@ -311,6 +313,8 @@ if(VTHOST_TESTING)
         DaemonStarter_test.cpp
         Daemon_test.cpp
         ImageWire_test.cpp
+        SoftFontWire_test.cpp
+        DaemonSoftFont_test.cpp
         NotifyWire_test.cpp
         TimeWire_test.cpp
         WireEnum_test.cpp

@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -79,15 +80,47 @@ TEST_CASE("every readable format version has a golden", "[StateGolden]")
     }
 }
 
-TEST_CASE("the encoder still writes the format v1 golden byte for byte", "[StateGolden]")
+TEST_CASE("a v1 state with DECDLD fields still decodes", "[StateGolden]")
+{
+    // The v1 golden predates the soft fonts: its retired DRCS fields (6 and 7 of the key strings) are
+    // skipped, and the terminal it restores has no soft font.
+    auto const decoded = decodeTerminalState(goldenBytes(1));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->keyStrings.softFonts.empty());
+
+    auto const setup = test::goldenSetup();
+    auto target = setup.makeTerminal(*settingsFor(*decoded, setup.settings()));
+    REQUIRE(target->terminal.restoreState(*decoded).has_value());
+    CHECK(std::ranges::none_of(target->terminal.softFonts().fonts(),
+                               [](auto const& font) { return static_cast<bool>(font); }));
+}
+
+TEST_CASE("format v2 golden decodes and restores to the recorded screen", "[StateGolden]")
+{
+    auto const decoded = decodeTerminalState(goldenBytes(2));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->keyStrings.softFonts.size() == 1);
+
+    auto const setup = test::goldenSetup();
+    auto target = setup.makeTerminal(*settingsFor(*decoded, setup.settings()));
+    REQUIRE(target->terminal.restoreState(*decoded).has_value());
+    CHECK(static_cast<bool>(target->terminal.softFonts().font(1)));
+    CHECK(target->terminal.windowTitle() == "golden session");
+
+    auto const expected = readGolden(2, "txt");
+    REQUIRE(expected.has_value());
+    CHECK(test::describeTerminal(*target) == *expected);
+}
+
+TEST_CASE("the encoder still writes the format v2 golden byte for byte", "[StateGolden]")
 {
     // The current format is the one the checked-in stream was written in; a change of its bytes is a new
     // format version, with a new golden, not an edit of this one.
-    STATIC_REQUIRE(TerminalStateFormatVersion == 1);
+    STATIC_REQUIRE(TerminalStateFormatVersion == 2);
     auto const mock = test::goldenSetup().makeTerminal();
     mock->writeToScreen(test::goldenSession());
     mock->terminal.flushInput();
-    CHECK(encodeTerminalState(mock->terminal.captureState()) == goldenBytes(1));
+    CHECK(encodeTerminalState(mock->terminal.captureState()) == goldenBytes(2));
 }
 
 namespace

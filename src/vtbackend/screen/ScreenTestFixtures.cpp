@@ -25,7 +25,7 @@ Image::Data const& white10x10()
     return data;
 }
 
-void TextRenderBuilder::startLine(LineOffset lineOffset, LineFlags /*flags*/, ContextId /*contextId*/)
+void TextRenderBuilder::startLine(LineOffset lineOffset, Line const& /*row*/)
 {
     if (!*lineOffset)
         text.clear();

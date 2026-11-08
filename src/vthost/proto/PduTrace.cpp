@@ -527,6 +527,15 @@ namespace
                                           core::escape(std::get<DaemonUpgrading>(pdu).toRelease));
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
+        TraceRow { PduType::SoftFontState,
+                   "SoftFontState",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SoftFontState>(pdu);
+                       return std::format("session={} generation={} fonts={}",
+                                          value.session,
+                                          value.generation,
+                                          value.fonts.size());
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

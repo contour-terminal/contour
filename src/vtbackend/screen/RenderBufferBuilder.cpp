@@ -255,6 +255,8 @@ void RenderBufferBuilder::renderDetachedLine(std::vector<RenderCell>& output,
                                          rapidBlink,
                                          std::nullopt);
 
+        // Soft-font glyphs are not resolved here: this copy has no render buffer to keep one alive, so it
+        // shows the cell's own codepoint.
         // The row's own line flags stay behind: the copy is drawn single width and single height.
         output.emplace_back(
             makeRenderCell(palette, cell, LineFlags {}, fg, bg, screenRow, ColumnOffset::cast_from(column)));
@@ -825,17 +827,21 @@ LinkDecorationRole RenderBufferBuilder::linkRoleAt(HyperlinkId hyperlink, Column
     return role != LinkDecorationRole::None ? role : detectedRoleAt(column);
 }
 
-void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId contextId)
+void RenderBufferBuilder::startLine(LineOffset line, Line const& row)
 {
     _lineNr = line;
-    _currentLineFlags = flags;
+    _currentLineFlags = row.flags();
     _prevWidth = 0;
     _prevHasCursor = false;
 
     _useCursorlineColoring = isCursorLine(line);
-    _currentContextTint = tintFor(contextId);
+    _currentContextTint = tintFor(row.contextId());
 
     auto const gridLine = gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line;
+    _lineFirstCell = _output->cells.size();
+    _lineGridLine = gridLine;
+    auto const& softGlyphs = row.storage().softGlyphs;
+    _lineSoftGlyphs = softGlyphs ? &*softGlyphs : nullptr;
     prepareSearchHighlights(gridLine);
     prepareLinkOverlay(gridLine);
 }
@@ -846,8 +852,14 @@ bool RenderBufferBuilder::isCursorLine(LineOffset line) const
            && line == screenLineOf(_cursorPosition->line);
 }
 
-void RenderBufferBuilder::endLine() noexcept
+void RenderBufferBuilder::endLine()
 {
+    if (_lineSoftGlyphs != nullptr) [[unlikely]]
+    {
+        attachSoftGlyphs(*_lineSoftGlyphs);
+        _lineSoftGlyphs = nullptr;
+    }
+
     if (!_output->cells.empty())
     {
         _output->cells.back().groupEnd = true;
@@ -1080,6 +1092,57 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
     // Skipping grid cells that have already been rendered due to IME.
     _inputMethodSkipColumns--;
     return true;
+}
+
+void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
+{
+    // The input method's preedit takes over the cursor line's cells from its first column on; the
+    // cells there are its text, not what the grid holds, so the grid's soft glyphs do not apply. The
+    // placement is made once a frame (@see preeditPlacement), so a line only reads it.
+    auto const preeditColumns = [&] {
+        if (!_cursorPosition || _inputMethodData.preeditString.empty()
+            || _lineGridLine != _cursorPosition->line)
+            return std::pair<size_t, size_t> { 0, 0 };
+        auto const& placement = preeditPlacement();
+        return std::pair { unbox<size_t>(placement.start),
+                           unbox<size_t>(placement.start) + unbox<size_t>(placement.columns) };
+    }();
+
+    // Appended straight to the output; the map is unordered, and the rasterizer walks cells and glyphs side
+    // by side, so what this line appended is put in cell order.
+    auto& output = _output->softGlyphs;
+    auto const first = output.size();
+    for (auto const& [column, ref]: glyphs)
+    {
+        if (column >= preeditColumns.first && column < preeditColumns.second)
+            continue;
+        // A font that is gone resolves to no glyph, so the cell falls back to drawing its codepoints.
+        auto glyph = _terminal->softFonts().resolve(ref);
+        if (!glyph)
+            continue;
+        output.push_back(RenderSoftGlyph {
+            .position = CellLocation { .line = _baseLine + _lineNr,
+                                       .column = displayColumn(ColumnOffset::cast_from(column)) },
+            .glyph = std::move(glyph) });
+    }
+    auto const appended = std::span { output }.subspan(first);
+    std::ranges::sort(appended, {}, &RenderSoftGlyph::position);
+
+    // A cell the line did not render has nothing to attach to. The line's cells are in column order, so
+    // one merge pass keeps the glyphs that have a cell, compacting them to the front of what was appended.
+    auto cell = _output->cells.begin() + static_cast<std::ptrdiff_t>(_lineFirstCell);
+    auto const cellsEnd = _output->cells.end();
+    auto kept = first;
+    for (auto& entry: appended)
+    {
+        cell = std::ranges::find_if(
+            cell, cellsEnd, [&](RenderCell const& c) { return c.position >= entry.position; });
+        if (cell == cellsEnd)
+            break;
+        if (cell->position == entry.position)
+            output[kept++] = std::move(entry);
+    }
+    output.resize(kept);
 }
 
 void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line, ColumnOffset column)

@@ -147,15 +147,15 @@ int main()
 
     // DECDLD: DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs data ST
     //   Pfn=1 (font number 1)
-    //   Pcn=0 (starting character = 0x21 = '!')
+    //   Pcn=0 (default start: starting character = 0x21 = '!')
     //   Pe=0  (erase all characters in the set first)
     //   Pcmw=10 (character matrix width = 10 pixels)
-    //   Pw=10   (font width = 10 pixels)
+    //   Pss=0   (80 columns, 24 lines)
     //   Pt=0    (text cell)
     //   Pcmh=20 (character matrix height = 20 pixels)
     //   Pcss=0  (94-character set)
     //   Dscs = designator character (space + 'A' for a user-defined 94-set)
-    auto decdld = std::string("\033P1;0;0;10;10;0;20;0{ A");
+    auto decdld = std::string("\033P1;0;0;10;0;0;20;0{ A");
     decdld += smiley; // Position 0x21 ('!')
     decdld += ';';
     decdld += heart; // Position 0x22 ('"')
