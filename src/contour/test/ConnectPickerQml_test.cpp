@@ -202,7 +202,7 @@ TEST_CASE("ConnectPicker: every row shows its quick-select key, per platform", "
 }
 
 TEST_CASE("ConnectPicker: Alt+digit connects at once and plain digits stay typable",
-          "[contour][connect][qml]")
+          "[contour][connect][qml][threading]")
 {
     auto fixture = PickerFixture {};
 
@@ -240,7 +240,7 @@ TEST_CASE("ConnectPicker: Alt+digit connects at once and plain digits stay typab
     }
 }
 
-TEST_CASE("ConnectPicker: the keyboard moves, connects and cancels", "[contour][connect][qml]")
+TEST_CASE("ConnectPicker: the keyboard moves, connects and cancels", "[contour][connect][qml][threading]")
 {
     auto fixture = PickerFixture {};
     CHECK(fixture.picker->currentIndex() == 0);
@@ -286,7 +286,7 @@ TEST_CASE("ConnectPicker: a typed address adds a leading connect row", "[contour
 }
 
 TEST_CASE("ConnectPicker: a failed connection stays under its row with Retry and Edit Host…",
-          "[contour][connect][qml]")
+          "[contour][connect][qml][threading]")
 {
     auto fixture = PickerFixture {};
     fixture.failure = "Contour isn't installed on starfive (contour: command not found).";
@@ -332,7 +332,8 @@ TEST_CASE("ConnectPicker: the footer manages hosts and stores the start-up switc
     CHECK(fixture.prompts == std::vector<window::StartPrompt> { window::StartPrompt::Ask });
 }
 
-TEST_CASE("ConnectPicker: Return on the first row connects to the daemon", "[contour][connect][qml]")
+TEST_CASE("ConnectPicker: Return on the first row connects to the daemon",
+          "[contour][connect][qml][threading]")
 {
     auto fixture = PickerFixture {};
     QTest::keyClick(fixture.window.get(), Qt::Key_Return);
@@ -340,7 +341,7 @@ TEST_CASE("ConnectPicker: Return on the first row connects to the daemon", "[con
     CHECK(fixture.launched == std::vector<std::string> { "daemon" });
 }
 
-TEST_CASE("ConnectPicker: cancelling a check in flight starts nothing", "[contour][connect][qml]")
+TEST_CASE("ConnectPicker: cancelling a check in flight starts nothing", "[contour][connect][qml][threading]")
 {
     auto release = std::make_shared<std::atomic<bool>>(false);
     // A host whose check waits until released, as a slow ssh does.
@@ -368,7 +369,8 @@ TEST_CASE("ConnectPicker: the start-up switch moves when it is toggled", "[conto
     CHECK_FALSE(toggle->property("checked").toBool());
 }
 
-TEST_CASE("ConnectPicker: a daemon that never answers does not hold the picker", "[contour][connect][qml]")
+TEST_CASE("ConnectPicker: a daemon that never answers does not hold the picker",
+          "[contour][connect][qml][threading]")
 {
     auto release = std::make_shared<std::atomic<bool>>(false);
     auto fixture = PickerFixture { config::ChromeStyle::ContourLinux, cli::QuickSelectKey::Alt, release };
