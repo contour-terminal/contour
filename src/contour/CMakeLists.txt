@@ -298,6 +298,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/PaneProxy.hpp
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
+        session/WindowBinding.hpp
         window/SettingsController.hpp
         window/QtString.hpp
         window/SettingsFields.hpp
@@ -354,6 +355,8 @@ if(CONTOUR_FRONTEND_GUI)
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         remote/DaemonDriftFollower.hpp
+        remote/DaemonLink.hpp
+        remote/DaemonLinkHost.hpp
         remote/NativeController.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
@@ -405,6 +408,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
+        remote/DaemonLink.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
@@ -1100,6 +1104,7 @@ if(CONTOUR_FRONTEND_GUI)
             config/ConfigBlocksAndLinks_test.cpp
             display/DisplayRendering_test.cpp
             display/SettingsPreviewRendering_test.cpp
+            remote/DaemonLink_test.cpp
             remote/NativeController_test.cpp
             session/TerminalSessionBlocks_test.cpp
             session/TerminalSessionManager_test.cpp

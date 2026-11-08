@@ -41,7 +41,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/platform/SecureInput.hpp>
-#include <contour/remote/DaemonDriftFollower.hpp>
+#include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
@@ -425,7 +425,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::ApplicationRestart> applicationRestart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
-    _attachedHostLabel(std::move(shellIntegration.attachedHostLabel)),
+    _injectedHostLabel(std::move(shellIntegration.attachedHostLabel)),
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(cli::makeBackgroundExecutor(StatusLineCommandThreads)),
@@ -602,37 +602,6 @@ void ContourGuiApp::releaseRetiredExtensionsSoon()
     });
 }
 
-void ContourGuiApp::askHostedExtensions()
-{
-    if (!_nativeController)
-        return;
-    if (!_daemonGrants)
-    {
-        auto replies = std::make_unique<vthost::client::DaemonGrantReplies>(
-            [this](std::string_view hostId, std::string_view digest, vthost::GrantState answer) {
-                if (_nativeController)
-                    _nativeController->answerPermission(
-                        std::string { hostId }, std::string { digest }, answer);
-            });
-        _daemonGrants = { replies.release(), [](vtextension::IGrantStore* made) {
-                             std::default_delete<vtextension::IGrantStore> {}(made);
-                         } };
-    }
-    for (auto& [pty, request]: _nativeController->takePermissionRequests())
-    {
-        auto* session = _sessionManager.sessionForPty(pty);
-        if (!session)
-            continue;
-        if (auto consent = vthost::client::consentRequestOf(request))
-            session->askForHostedExtension(std::move(*consent), *_daemonGrants);
-        else
-            // A newer daemon's permission this client cannot phrase: asking without it would have the
-            // user grant what they were not shown. Asked again on the next attach.
-            errorLog()("Extension {} asks for a control permission this version of Contour cannot show; "
-                       "not asking.",
-                       request.hostId);
-    }
-}
 #endif
 
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
@@ -961,35 +930,25 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
-std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(std::chrono::milliseconds budget,
-                                                                  std::string hostLabel)
+std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::DaemonLink& link,
+                                                                  std::chrono::milliseconds budget)
 {
-    // Given up, not destroyed: see awaitConnectedOrAbandon(). Kept until the app ends instead.
-    if (auto attached = remote::awaitConnectedOrAbandon(_nativeController, _givenUpAttach, budget, this);
-        !attached)
+    if (auto attached = link.awaitAttached(budget); !attached)
         return attached;
-    _attachedHostLabel = std::move(hostLabel);
-    _routingFactory->setDelegate(_nativeController.get());
+    _routingFactory->setDelegate(link.liveController());
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
     // can restart -- a local one, which is what _restartDaemon is set for -- is offered anything.
-    offerDaemonRestartIfDrifted(*_nativeController);
+    link.offerDaemonRestartIfDrifted();
     return {};
 }
 
-void ContourGuiApp::showDaemonDrift(remote::NativeController const& controller)
+std::string_view ContourGuiApp::attachedHostLabel() const noexcept
 {
-    auto const negotiated = controller.negotiated();
-    auto const layout = negotiated.transform(vthost::client::layoutSurvivesRestart)
-                            .value_or(vthost::client::LayoutAfterRestart::Lost);
-    _shownDaemonRelease = controller.daemonRelease();
-    auto notice = vthost::client::assessDrift(CONTOUR_VERSION_STRING, _shownDaemonRelease, layout);
-    auto const offer =
-        window::driftOfferFor(notice.kind,
-                              _restartDaemon ? window::DaemonLocality::Local : window::DaemonLocality::Remote,
-                              negotiated ? negotiated->shared : vthost::proto::CapabilitySet {});
-    // A daemon that is not ours to touch shows no badge: there is nothing the user could do about it.
-    _daemonDrift.show(offer == window::DriftOffer::None ? vthost::client::DriftNotice {} : std::move(notice),
-                      offer);
+    // One link at most per launch: the label is the attached one's, else what a test injected.
+    for (auto const& link: _daemonLinks)
+        if (link->isAttached())
+            return link->hostLabel();
+    return _injectedHostLabel;
 }
 
 std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
@@ -1009,85 +968,87 @@ std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgrad
     return vthost::client::upgradeDaemonTo(*control, *settling, *binary, pacer);
 }
 
-void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController& controller)
+void ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
 {
-    showDaemonDrift(controller);
-    // An upgrade closes this client's connection and holds it for the daemon's return; the badge says so
-    // meanwhile, and shows what the new daemon runs once the connection is back. Whichever client asked, and
-    // whether or not the daemon is ours to upgrade: its windows wait all the same.
-    remote::followDaemonDrift(
-        controller, _daemonDrift, [this, &controller](window::DriftReassessment reassessment) {
-            if (reassessment == window::DriftReassessment::Reassess
-                || controller.daemonRelease() != _shownDaemonRelease)
-                showDaemonDrift(controller);
-        });
+    if (!_upgradeDaemon)
+        return;
+    // The model asks for no other upgrade or restart until this one reports back, so no worker still
+    // running is joined here, on the GUI thread. On shutdown the settling stops waiting at once; a
+    // control call already under way is not interrupted, and ends within its timeout
+    // (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request itself).
+    _daemonRestartThread = std::jthread { [this, &drift = link.drift()](std::stop_token const& stop) {
+        auto const upgraded = _upgradeDaemon(stop);
+        QMetaObject::invokeMethod(
+            &drift,
+            [&drift,
+             reason = upgraded ? QString {}
+                               : QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
+                // On success the connection comes back to the upgraded daemon, and the badge follows it.
+                if (reason.isEmpty())
+                    drift.noteUpgradeRequestDone();
+                else
+                    drift.noteUpgradeFailed(reason);
+            },
+            Qt::QueuedConnection);
+    } };
+}
+
+void ContourGuiApp::restartDaemon(remote::DaemonLink& link)
+{
     if (!_restartDaemon)
         return;
-    connect(&_daemonDrift, &window::DaemonDriftModel::upgradeRequested, this, [this] {
-        // The model asks for no other upgrade or restart until this one reports back, so no worker still
-        // running is joined here, on the GUI thread. On shutdown the settling stops waiting at once; a
-        // control call already under way is not interrupted, and ends within its timeout
-        // (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request itself).
-        _daemonRestartThread = std::jthread { [this](std::stop_token const& stop) {
-            auto const upgraded = _upgradeDaemon(stop);
-            QMetaObject::invokeMethod(
-                &_daemonDrift,
-                [this,
-                 reason = upgraded
-                              ? QString {}
-                              : QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
-                    // On success the connection comes back to the upgraded daemon, and the badge follows it.
-                    if (reason.isEmpty())
-                        _daemonDrift.noteUpgradeRequestDone();
-                    else
-                        _daemonDrift.noteUpgradeFailed(reason);
-                },
-                Qt::QueuedConnection);
-        } };
-    });
-    connect(&_daemonDrift, &window::DaemonDriftModel::restartRequested, this, [this] {
-        // Stopping the daemon drops this client's connection, which closes every window. Without this
-        // the last window closing would quit the app before the queued hand-off below ever ran.
-        QGuiApplication::setQuitOnLastWindowClosed(false);
-        // Ended here, rather than lost when the daemon stops: a lost connection is sought again, and a
-        // reconnect would start a daemon of its own while the restart below waits for none to accept.
-        // Before stop(), which closes every mirror pty -- @see TerminalSession::noteTransportLost
-        if (_nativeController)
-        {
-            _sessionManager.noteTransportLost();
-            _nativeController->stop();
-        }
-        _daemonRestartThread = std::jthread { [this] {
-            auto result = _restartDaemon();
-            QMetaObject::invokeMethod(
-                &_daemonDrift,
-                [this, result = std::move(result)] {
-                    QGuiApplication::setQuitOnLastWindowClosed(true);
-                    if (!result)
-                    {
-                        _daemonDrift.noteRestartFailed(QString::fromStdString(result.error()));
-                        quitIfWindowless();
-                        return;
-                    }
-                    // Until the client reconnects by itself, the new process is what attaches to the
-                    // new daemon.
-                    auto arguments = QStringList {};
-                    for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
-                        arguments.push_back(QString::fromUtf8(argument));
-                    if (auto const started =
-                            externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
-                        !started)
-                    {
-                        _daemonDrift.noteRestartFailed(
-                            tr("the daemon restarted, but this window could not be reopened"));
-                        quitIfWindowless();
-                        return;
-                    }
-                    QCoreApplication::quit();
-                },
-                Qt::QueuedConnection);
-        } };
-    });
+    // Stopping the daemon drops this client's connection, which closes every window. Without this
+    // the last window closing would quit the app before the queued hand-off below ever ran.
+    QGuiApplication::setQuitOnLastWindowClosed(false);
+    link.stopForDaemonRestart();
+    _daemonRestartThread = std::jthread { [this, &drift = link.drift()] {
+        auto result = _restartDaemon();
+        QMetaObject::invokeMethod(
+            &drift,
+            [this, &drift, result = std::move(result)] {
+                QGuiApplication::setQuitOnLastWindowClosed(true);
+                if (!result)
+                {
+                    drift.noteRestartFailed(QString::fromStdString(result.error()));
+                    quitIfWindowless();
+                    return;
+                }
+                // Until the client reconnects by itself, the new process is what attaches to the
+                // new daemon.
+                auto arguments = QStringList {};
+                for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
+                    arguments.push_back(QString::fromUtf8(argument));
+                if (auto const started =
+                        externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
+                    !started)
+                {
+                    drift.noteRestartFailed(
+                        tr("the daemon restarted, but this window could not be reopened"));
+                    quitIfWindowless();
+                    return;
+                }
+                QCoreApplication::quit();
+            },
+            Qt::QueuedConnection);
+    } };
+}
+
+void ContourGuiApp::openWindowFor(remote::DaemonLink& /*link*/, QScreen* screen)
+{
+    // The window's Main.qml claims the daemon workspace the link staged, through the attach-window binder.
+    newWindow(screen);
+}
+
+void ContourGuiApp::closeWindow(vtworkspace::WorkspaceId window)
+{
+    if (auto* controller = _sessionManager.controllerFor(window))
+        controller->closeWindow();
+}
+
+void ContourGuiApp::postNotice(remote::DaemonLink& /*link*/, window::Notice notice)
+{
+    // One link per process: its windows are every window.
+    _sessionManager.postNoticeToEveryWindow(notice);
 }
 
 std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string const& label,
@@ -1386,6 +1347,22 @@ namespace
     }
 } // namespace
 
+void ContourGuiApp::releaseHosting()
+{
+    // A spawn still held back is let go, so that stopping the attach below finds nothing waiting.
+    openDaemonSpawnGate();
+    _awaitAttach = nullptr;
+    _onGuiBooted = nullptr;
+    auto const anyLive =
+        std::ranges::any_of(_daemonLinks, [](auto const& link) { return link->liveController() != nullptr; });
+    if (anyLive || _tmuxController)
+        _routingFactory->setDelegate(nullptr);
+    for (auto const& link: _daemonLinks)
+        link->stop();
+    if (_tmuxController)
+        _tmuxController->stop();
+}
+
 void ContourGuiApp::openDaemonSpawnGate() noexcept
 {
     _daemonSpawnGate->store(DaemonSpawnGate::Open);
@@ -1400,6 +1377,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // to five seconds for it to accept before the connect's own share of the budget begins.
     auto budget = std::chrono::milliseconds { std::chrono::seconds(10) };
     auto hostLabel = std::string {};
+    // A remote daemon is not ours to restart or upgrade; the local one is.
+    auto locality = window::DaemonLocality::Remote;
     if (_clientRequest && _clientRequest->host)
     {
         // A remote daemon is started by the remote relay, never from here; a client follows every window.
@@ -1442,6 +1421,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
                                           : parameters().get<string>("contour.terminal.profile"),
             .sizePolicy = *sizePolicy,
         };
+        locality = window::DaemonLocality::Local;
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
         };
@@ -1528,113 +1508,39 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         }
     }
 
-    _nativeController = std::make_unique<remote::NativeController>(
-        std::move(target->transport),
-        std::move(target->intent),
-        profileName(),
-        attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory")),
-        std::move(attachSettings),
-        [this] { return currentEmulationSettings(); },
-        _colorPreference,
-        core::platform::defaultSteadyClock(),
-        _startupTimeline,
-        _powerMonitor.get());
-    // A window spawned to host a daemon workspace binds itself here (from its Main.qml, via
-    // consumeAttachWindow) instead of creating a fresh first tab.
-    _sessionManager.setAttachWindowBinder(
-        [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
-    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree (B2/B4): whenever a
-    // layout arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by
-    // another client), map each daemon workspace onto an OS window and realize any tab not yet shown, each
-    // pane bound to its remote session. Incremental — what is already shown is left untouched.
-    _onGuiBooted = [this] {
-        reconcileAttachWindows();
-        expireRestoreSummaryAfterLayout();
+    auto& link = *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
+        remote::DaemonLink::Id { _nextDaemonLinkId++ },
+        remote::DaemonLinkConfig {
+            .transport = std::move(target->transport),
+            .intent = std::move(target->intent),
+            .hostLabel = std::move(hostLabel),
+            .locality = locality,
+            .profileName = profileName(),
+            .workingDirectory =
+                attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory")),
+            .attachSettings = std::move(attachSettings),
+            .sessionSettings = [this] { return currentEmulationSettings(); },
+            .colorPreference = _colorPreference,
+            .clientRelease = CONTOUR_VERSION_STRING,
+            .clock = &core::platform::defaultSteadyClock(),
+            .timeline = &_startupTimeline,
+            .powerMonitor = _powerMonitor.get(),
+            .backoff = {},
+        },
+        *this,
+        _sessionManager));
+    // Attach mode adopts the daemon's workspaces into the windows once the first one booted, and on every
+    // layout change after (which the link wires itself).
+    _onGuiBooted = [&link] {
+        link.reconcile();
+        link.expireRestoreSummaryAfterLayout();
     };
-    // First: a Reconnect from a footer has the panes lost with the connection take their sessions back
-    // before the layout is reconciled, which would otherwise find no live pane for them and realize them
-    // again beside the ended ones.
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::layoutChanged,
-        this,
-        [this] { _sessionManager.rebindDisconnected(); },
-        Qt::QueuedConnection);
-    connect(_nativeController.get(),
-            &remote::NativeController::layoutChanged,
-            this,
-            _onGuiBooted,
-            Qt::QueuedConnection);
-    // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
-    // window of that layout is realized or reconciled, and says it there.
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::workspaceRestored,
-        this,
-        [this](quint32 workspaces, quint32 tabs) {
-            _sessionManager.noteWorkspaceRestored(
-                vthost::RestoredCounts { .workspaces = workspaces, .tabs = tabs });
-        },
-        Qt::QueuedConnection);
-    connectReconnectSignals();
-    // A dying connection ends every mirror session (stop() closes the ptys), closing the tabs through the
-    // shell-exit teardown.
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::connectionClosed,
-        this,
-        [this] {
-            // Null once a connect that failed has been given up on (see _awaitAttach).
-            if (!_nativeController)
-                return;
-            // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
-            // that ends here did not bring the daemon back: the panes it was for say so, with the
-            // connection's own words. @see TerminalSessionManager::connectionClosed
-            _sessionManager.connectionClosed(_nativeController->failure());
-            _nativeController->stop();
-        },
-        Qt::QueuedConnection);
-    // A drop the daemon refused did nothing there, and nothing local follows: say so.
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::tabMergeRefused,
-        this,
-        [this] {
-            _sessionManager.postNoticeToEveryWindow(
-                window::Notice { .kind = window::NoticeKind::DropRefused,
-                                 .text = std::string { window::TabMergeRefusedText } });
-        },
-        Qt::QueuedConnection);
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::moveRefused,
-        this,
-        [this](int reason, int modelReason, quint64 request) {
-            _sessionManager.remoteMoveRefused(request);
-            // A drop onto itself, or one that would leave everything where it is, has nothing to tell.
-            if (auto const text = window::moveRefusedText(reason, modelReason); !text.empty())
-                _sessionManager.postNoticeToEveryWindow(
-                    window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { text } });
-        },
-        Qt::QueuedConnection);
-#ifdef CONTOUR_EXTENSIONS
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::extensionPermissionRequested,
-        this,
-        [this] { askHostedExtensions(); },
-        Qt::QueuedConnection);
-#endif
-
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
     // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
-    // has already spent part of the budget, and settles the hosting there. The signals above are connected
-    // first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part of the
-    // connect, in the transport's ensureDaemon, on a worker thread of the transport's own while the GUI
-    // boots.
-    _nativeController->startConnecting();
-    _awaitAttach = [this, budget, hostLabel = std::move(hostLabel)] {
-        return awaitNativeAttach(budget, hostLabel);
+    // has already spent part of the budget, and settles the hosting there.
+    link.start();
+    _awaitAttach = [this, &link, budget] {
+        return awaitNativeAttach(link, budget);
     };
     return {};
 }
@@ -2712,18 +2618,7 @@ int ContourGuiApp::terminalGuiAction()
     // Where the sessions live: decided, and an attach started, before anything else boots, so the connect
     // runs beside the boot. Whatever it set up is undone on every return -- after `app` below is gone, as the
     // attach engines' ptys outlive the windows.
-    auto const releaseHosting = core::Finally { [this] {
-        // A spawn still held back is let go, so that stopping the attach below finds nothing waiting.
-        openDaemonSpawnGate();
-        _awaitAttach = nullptr;
-        _onGuiBooted = nullptr;
-        if (_nativeController || _tmuxController)
-            _routingFactory->setDelegate(nullptr);
-        if (_nativeController)
-            _nativeController->stop();
-        if (_tmuxController)
-            _tmuxController->stop();
-    } };
+    auto const hostingReleased = core::Finally { [this] { releaseHosting(); } };
     if (auto const hosting = establishHosting(); !hosting)
     {
         cerr << hosting.error() << '\n';
@@ -2989,7 +2884,9 @@ int ContourGuiApp::terminalGuiAction()
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
-        context->setContextProperty("daemonDrift", &_daemonDrift);
+        // The drift badge of the launch's daemon; none is set without one, which the badge reads as no badge.
+        if (!_daemonLinks.empty())
+            context->setContextProperty("daemonDrift", &_daemonLinks.front()->drift());
         // The new-defaults banner's decision: "Use New" writes settings.yml through the one Settings save
         // model, which reloads; "Keep Mine" remembers the answer in the GUI state file beside contour.yml.
         _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
@@ -3432,191 +3329,6 @@ window::DragEndProbe& ContourGuiApp::dragEndProbe()
 bool ContourGuiApp::requestRemoteWorkspace(session::RemoteSpawn const& spawn)
 {
     return _routingFactory != nullptr && _routingFactory->requestRemoteWorkspace(spawn);
-}
-
-void ContourGuiApp::reconcileAttachWindows()
-{
-    if (!_nativeController)
-        return;
-
-    // Taken before the settled layouts are read, so they are at least as new as the push of each move named.
-    auto const landedMoves = _nativeController->takeLandedMoves();
-    _sessionManager.noteRemoteMovesLanded(landedMoves);
-
-    // Whether every window was placed: one whose OS window is still spawning is skipped, and a move landing
-    // in it is placed by the reconcile that gets to it.
-    auto reach = session::TerminalSessionManager::ReconcileReach::Whole;
-
-    // One snapshot of the layouts for every window: a move between two windows is then seen in both, however
-    // the push that made it is read meanwhile. As of the last push's end, as applyRemoteLayout realizes
-    // them: a window the next push's first frame adds would otherwise get an OS window that stays blank
-    // until that push ends.
-    auto const layouts = _nativeController->settledLayouts();
-    _reconcilingLayouts = &layouts;
-
-    // Daemon workspace ids come ascending, so the primary (lowest-id) workspace is handled
-    // first — it maps to the boot window; the rest each get their own OS window. One already shown is brought
-    // up to date; this places the others.
-    auto const openWindow = [&](contour::remote::ReconciledWorkspace const& workspace) {
-        auto const& [daemonWorkspace, tabs, sessions] = workspace;
-        if (_pendingAttachWorkspace == daemonWorkspace)
-        {
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return; // an OS window is already spawning for this daemon workspace
-        }
-
-        if (_attachBoot == session::AttachBoot::Pending)
-        {
-            // The primary daemon workspace adopts the boot window (already created before
-            // the first layout arrived). A missing focused window (mid-boot) stages
-            // the daemon workspace so bindPendingAttachWindow can bind it once the boot
-            // window becomes ready, instead of hoping for another layout push.
-            // Never the quick terminal, which is no daemon workspace: an ordinary window adopts it.
-            if (auto const* const boot = _sessionManager.applicationController())
-                bindDaemonWorkspace(daemonWorkspace, boot->windowId());
-            else if (!_pendingAttachWorkspace)
-                _pendingAttachWorkspace = daemonWorkspace;
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return;
-        }
-
-        // A daemon workspace holding no tab is nothing to show yet -- one a reconnect found emptied, under a
-        // client that follows every window -- and gets its OS window once it holds one.
-        if (tabs == contour::remote::DaemonWorkspaceTabs::None)
-            return;
-
-        // A new daemon workspace: spawn an OS window to host it. Its Main.qml claims the
-        // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
-        // and reconciles — so it never creates a stray fresh tab. The QML load is
-        // synchronous, so the stage is consumed before this returns. A window a move of this process asked
-        // for opens where the pane was dropped.
-        _pendingAttachWorkspace = daemonWorkspace;
-        newWindow(_sessionManager.stageRemoteMoveWindow(sessions));
-    };
-    contour::remote::reconcileAttachWindows(
-        _sessionManager, *_nativeController, layouts, _attachWindowMap, openWindow);
-    _reconcilingLayouts = nullptr;
-    // A tab closed since it was paired names nothing: its pairing goes, whatever the daemon hands out next.
-    contour::remote::forgetClosedTabPairings(_sessionManager, *_nativeController);
-    // Every window is reconciled: what a landing move moved is in place, to raise, focus and announce.
-    _sessionManager.completeRemoteMoves(reach);
-}
-
-std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds)
-{
-    if (anyWindowMapped || daemonWorkspaceIds.empty())
-        return std::nullopt;
-    return daemonWorkspaceIds.front(); // workspaceIds() is ascending, so front() is the primary workspace
-}
-
-bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller)
-{
-    if (!_nativeController || controller == nullptr)
-        return false;
-
-    // A reconcile-spawned secondary OS window claims the daemon workspace staged for it.
-    if (_pendingAttachWorkspace)
-    {
-        auto const daemonWorkspace = *_pendingAttachWorkspace;
-        _pendingAttachWorkspace.reset();
-        bindDaemonWorkspace(daemonWorkspace, controller->windowId());
-        return true;
-    }
-
-    // The boot (first) OS window in attach mode ADOPTS the daemon's primary workspace instead of
-    // authoring a fresh tab. Claiming it here makes Main.qml skip win.createNewTab(), which in
-    // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
-    // Bind the primary workspace now if the daemon already reported one; otherwise still claim the boot
-    // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
-    if (_attachBoot == session::AttachBoot::Pending)
-    {
-        // As of the last push's end, as every reconcile reads them: the next push's first frame may name a
-        // window whose layout is not complete yet.
-        auto const settled =
-            std::ranges::to<std::vector>(_nativeController->settledLayouts() | std::views::keys);
-        if (auto const adopt = primaryDaemonWorkspaceToAdopt(false, settled))
-            bindDaemonWorkspace(*adopt, controller->windowId());
-        return true;
-    }
-
-    return false;
-}
-
-void ContourGuiApp::connectReconnectSignals()
-{
-    // Every pane says it is reconnecting while the connection is sought again, rather than showing a
-    // grid that merely stopped.
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::connectionStateChanged,
-        this,
-        [this] {
-            if (_nativeController)
-                _sessionManager.setHostConnection(_nativeController->connectionState());
-        },
-        Qt::QueuedConnection);
-    connect(
-        _nativeController.get(),
-        &remote::NativeController::workspacesLost,
-        this,
-        [this](std::vector<std::uint64_t> const& daemonWorkspaces) {
-            closeLostAttachWindows(daemonWorkspaces);
-        },
-        Qt::QueuedConnection);
-}
-
-void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWorkspaces)
-{
-    if (!_nativeController)
-        return;
-    auto doomed = std::vector<window::WindowController*> {};
-    for (auto const daemonWorkspace: daemonWorkspaces)
-    {
-        auto const mapped = _attachWindowMap.find(daemonWorkspace);
-        if (mapped == _attachWindowMap.end())
-            continue;
-        // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
-        // @see TerminalSession::noteTransportLost
-        if (auto* workspace = _sessionManager.model().workspace(mapped->second))
-            for (auto const index: std::views::iota(0, workspace->tabCount()))
-                for (auto* session: _sessionManager.sessionsOfTab(workspace->tabAt(index)))
-                    session->noteTransportLost();
-        if (auto* controller = _sessionManager.controllerFor(mapped->second))
-            doomed.push_back(controller);
-        _attachWindowMap.erase(mapped);
-    }
-    // The windows that came instead first: closing the last stale window before would end the application.
-    reconcileAttachWindows();
-    for (auto* controller: doomed)
-        controller->closeWindow();
-}
-
-void ContourGuiApp::bindDaemonWorkspace(std::uint64_t daemonWorkspace,
-                                        vtworkspace::WorkspaceId localWorkspace)
-{
-    _attachBoot = session::AttachBoot::Adopted;
-    _attachWindowMap.emplace(daemonWorkspace, localWorkspace);
-    if (_reconcilingLayouts != nullptr)
-        contour::remote::applyRemoteLayout(
-            _sessionManager, localWorkspace, *_nativeController, *_reconcilingLayouts, daemonWorkspace);
-    else
-        contour::remote::applyRemoteLayout(
-            _sessionManager, localWorkspace, *_nativeController, daemonWorkspace);
-    _sessionManager.deliverRestoreSummaryTo(localWorkspace);
-}
-
-void ContourGuiApp::expireRestoreSummaryAfterLayout()
-{
-    if (!_nativeController)
-        return;
-    auto const layout = _nativeController->workspaceIds().empty() ? session::LayoutWorkspaces::None
-                                                                  : session::LayoutWorkspaces::Some;
-    auto const spawn = _pendingAttachWorkspace ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
-    if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
-        == session::RestoreSummaryFate::Keep)
-        return;
-    _sessionManager.expireRestoreSummary();
 }
 
 window::SettingsController& ContourGuiApp::settingsController()

@@ -414,7 +414,8 @@ void WindowController::runSurfaceAction(MenuSurface surface,
 
 QString WindowController::hostLabel() const
 {
-    return QString::fromStdString(_manager.app().attachedHostLabel());
+    auto const label = _manager.app().attachedHostLabel();
+    return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
 }
 
 QString WindowController::shortcutText(QString const& commandName) const

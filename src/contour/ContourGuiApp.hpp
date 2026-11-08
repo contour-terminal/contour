@@ -23,6 +23,7 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/remote/DaemonLinkHost.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
@@ -147,6 +148,7 @@ namespace platform
 
 namespace remote
 {
+    class DaemonLink;
     class NativeController;
     class RoutingSessionFactory;
     class TmuxController;
@@ -197,17 +199,6 @@ struct ShellIntegrationServices
     /// run on every machine. The chrome keeps using the detected host.
     std::optional<config::HostPlatform> host {};
 };
-
-/// The daemon workspace the boot (first) OS window should adopt when attaching, rather than authoring
-/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) workspace; a
-/// later OS window is not a boot window (@p anyWindowMapped is then true). Pure so the boot-adoption
-/// rule is unit-testable without the QML boot flow.
-/// @param anyWindowMapped True if at least one OS window is already bound to a daemon workspace.
-/// @param daemonWorkspaceIds The daemon's known workspace ids, ascending (workspaceIds() ordering).
-/// @return The daemon workspace to adopt, or nullopt if this is not the boot window, or the daemon has
-///         not reported a workspace yet.
-[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds);
 
 /// Whether @p configHome holds QML overrides in the pre-module layout, which nothing loads.
 ///
@@ -272,7 +263,7 @@ enum class DaemonSpawnGate : std::uint8_t
 };
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp: public QObject, public cli::ContourApp
+class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDaemonLinkHost
 {
     Q_OBJECT
 
@@ -604,11 +595,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// that runners retired: a runner destroyed now retires its engine only once its lane ran its last job.
     void releaseRetiredExtensionsSoon();
 
-    /// Asks the questions the attached daemon's status-line extensions ask, each in the pane its extension
-    /// runs for and through the prompt that pane's own extensions ask through; the answers go back to the
-    /// daemon, which keeps them. GUI thread; a no-op unless attached.
-    void askHostedExtensions();
-
     /// What every session's link detection runs on: the status-line pool for matching, a thread of its own
     /// for existence checks (a hung mount stalls it alone), fileSystem(), and the steady clock of
     /// terminalClocks().
@@ -667,8 +653,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The remote host this process is attached to, as `contour client --host` named it: the host's name
     /// under `hosts:`, or the URL of an ad-hoc host.
     /// @return Empty unless `contour client --host` attached; fixed once its connect succeeded, as a
-    ///         process attaches to one daemon for its life.
-    [[nodiscard]] std::string const& attachedHostLabel() const noexcept { return _attachedHostLabel; }
+    ///         process attaches to one daemon for its life. The label a test injected while no link attached.
+    [[nodiscard]] std::string_view attachedHostLabel() const noexcept;
+
+    // remote::IDaemonLinkHost
+    void openWindowFor(remote::DaemonLink& link, QScreen* screen) override;
+    void closeWindow(vtworkspace::WorkspaceId window) override;
+    void postNotice(remote::DaemonLink& link, window::Notice notice) override;
+    void upgradeDaemon(remote::DaemonLink& link) override;
+    void restartDaemon(remote::DaemonLink& link) override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }
@@ -1091,6 +1084,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
     [[nodiscard]] std::expected<void, std::string> establishHosting();
 
+    /// Undoes what establishHosting() set up, on every return of the GUI verb: lets a held spawn go, drops
+    /// the launch hooks, unroutes session creation, and stops every link and the tmux attach.
+    void releaseHosting();
+
     /// Lets a daemon spawned on demand fork. @see _daemonSpawnGate
     void openDaemonSpawnGate() noexcept;
     /// Tells the operating system how to start this application again after an installer closed it. A failure
@@ -1114,49 +1111,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] std::expected<void, std::string> settleHosting(
         std::expected<void, std::string> const& attached);
 
-    /// Native attach: brings the local OS windows in line with the daemon's workspaces (B4). Maps the
-    /// primary daemon workspace onto the boot window and, for each additional daemon workspace, spawns an OS
-    /// window (which binds itself via bindPendingAttachWindow) then reconciles each window's tab/pane
-    /// tree. Idempotent — re-run on every layoutChanged. No-op when not attached.
-    void reconcileAttachWindows();
-
-    /// Attach-window binder installed on the manager: called from a freshly-spawned window's Main.qml
-    /// (via consumeAttachWindow). If a daemon workspace is staged for it, records the daemon→OS-window
-    /// mapping, reconciles that window's layout into it, and returns true so the window does NOT create
-    /// its own first tab.
-    /// @param controller The freshly-created controller of the just-spawned OS window.
-    /// @return true if @p controller's window was bound to a pending daemon workspace.
-    bool bindPendingAttachWindow(window::WindowController* controller);
-
     /// Waits for the native attach started before the GUI booted, with what remains of its budget, then
-    /// routes session creation to the controller and offers a restart to a drifted local daemon.
+    /// routes session creation to its controller and offers a restart to a drifted local daemon.
+    /// @param link The link of the attach.
     /// @param budget How long the attach may take since it started; never less than MinimumConnectAwait.
-    /// @param hostLabel The remote host it attaches to (`--host`), which attachedHostLabel() reports once
-    ///        attached; empty for the local daemon or `--connect-tcp`.
     /// @return Nothing once attached; why not, the controller given up, otherwise.
-    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(std::chrono::milliseconds budget,
-                                                                     std::string hostLabel);
-
-    /// After a reconnect: closes the OS windows of the daemon workspaces the daemon no longer has for this
-    /// client, once the windows that came instead are shown, so that closing them never closes the last one.
-    /// @param daemonWorkspaces The lost daemon workspaces.
-    void closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWorkspaces);
-
-    /// Connects what the native controller says about a lost connection: every pane's reconnecting state,
-    /// and the windows a reconnect did not bring back.
-    void connectReconnectSignals();
-
-    /// Shows the daemon-drift badge when the daemon @p controller met runs another release than this
-    /// client, and wires the badge's actions: the live upgrade (upgradeLocalDaemon()) where the daemon
-    /// announced it, else the restart (restartLocalDaemon()). Follows the daemon through an upgrade: the
-    /// badge reads "Upgrading daemon…" while the connection is held, and shows the drift anew once it is
-    /// back.
-    /// @param controller The controller connected to the daemon.
-    void offerDaemonRestartIfDrifted(remote::NativeController& controller);
-
-    /// Shows what @p controller's daemon runs against this client's release, and what may be done about it.
-    /// @param controller The controller connected to the daemon.
-    void showDaemonDrift(remote::NativeController const& controller);
+    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(remote::DaemonLink& link,
+                                                                     std::chrono::milliseconds budget);
 
     /// Upgrades the local daemon in place to this release, keeping every hosted program running. Runs off the
     /// GUI thread.
@@ -1177,17 +1138,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::filesystem::path const& controlPath,
         vthost::DaemonSpawnOptions const& options);
 
-    /// Records the daemon-workspace → OS-window mapping and immediately reconciles that daemon workspace's
-    /// tab/pane tree into @p localWorkspace — the one place the "a mapping always implies a reconcile"
-    /// invariant lives (shared by the primary-window and spawned-window paths).
-    /// @param daemonWorkspace The daemon workspace id.
-    /// @param osWindow The OS window that mirrors it.
-    void bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId localWorkspace);
-
-    /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
-    /// still to be bound: a toast about a restore must not surface in a window opened later.
-    void expireRestoreSummaryAfterLayout();
-
     /// The installed log destination for the GUI verbs. Categories hold a reference into it, so it
     /// must outlive every one of them -- hence a member rather than a local of the verb handler.
     /// Separate from app::_logOutput, which is private to the base and serves the client/daemon
@@ -1205,13 +1155,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Why _powerMonitor could not be created, so a failed creation is logged once and not retried.
     std::optional<core::platform::PlatformError> _powerMonitorFailure;
 
-    /// The attach engines, declared FIRST so they are destroyed LAST: remote-
-    /// backed sessions hold ptys that unregister from them on destruction.
-    std::unique_ptr<remote::NativeController> _nativeController;
-    /// The attach given up on at startup, stopped: kept rather than destroyed then, because its destruction
-    /// waits for a daemon start still under way (see awaitNativeAttach()), and the app's exit waits for it
-    /// instead. Null otherwise.
-    std::unique_ptr<remote::NativeController> _givenUpAttach;
+    /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
+    /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
+    std::vector<std::unique_ptr<remote::DaemonLink>> _daemonLinks;
+    /// The id the next link is given.
+    uint32_t _nextDaemonLinkId = 1;
     std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —
@@ -1223,24 +1171,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return Nothing once attached; the message to report, the controller given up, otherwise.
     std::function<std::expected<void, std::string>()> _awaitAttach;
 
-    /// Native attach (B4): each daemon workspace id mapped to the OS window that mirrors it. The primary
-    /// daemon workspace maps to the boot window; additional ones map to spawned windows.
-    std::unordered_map<uint64_t, vtworkspace::WorkspaceId> _attachWindowMap;
-    /// The daemon workspace whose OS window is being spawned right now: reconcileAttachWindows stages it
-    /// just before newWindow(), and that window's Main.qml claims it via bindPendingAttachWindow.
-    /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
-    /// stage is always consumed before the next is made.
-    std::optional<uint64_t> _pendingAttachWorkspace;
-    /// The layouts of the reconcile under way, one snapshot for every window of it -- one whose OS window
-    /// opens meanwhile (bindDaemonWorkspace) included -- so that all of them are brought to the same push.
-    /// Null between reconciles. Points at reconcileAttachWindows()' own.
-    remote::LayoutSnapshot const* _reconcilingLayouts = nullptr;
-
-    /// Whether the boot window has adopted the daemon's primary window yet.
-    /// Not "the map is empty": after a reconnect lost every window, the windows that came instead are new
-    /// OS windows, never the stale one about to be closed.
-    session::AttachBoot _attachBoot = session::AttachBoot::Pending;
-
     /// What `contour client` asked for; empty for a plain launch. @see establishHosting
     std::optional<ClientRequest> _clientRequest;
     /// Whether `contour connect` was run without a target, which opens the app on the Connect picker.
@@ -1250,8 +1180,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// What the first window tells the user when the daemon this launch wanted could not be had and its
     /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
     std::string _hostingNotice;
-    /// @see attachedHostLabel
-    std::string _attachedHostLabel;
+    /// The host label a test injected (ShellIntegrationServices::attachedHostLabel); attachedHostLabel()
+    /// reports it while no link has attached.
+    std::string _injectedHostLabel;
     /// The PATH `contour client --host` looks ssh up on. A member fixed at construction, as every spawner's
     /// vtpty::ProgramSearch holds a view of it for as long as its attach reconnects.
     std::string _sshSearchPath;
@@ -1327,11 +1258,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // a translation unit without CONTOUR_EXTENSIONS, which never makes one.
     std::unique_ptr<vtextension::ExtensionRuntime, void (*)(vtextension::ExtensionRuntime*)>
         _extensionRuntime { nullptr, nullptr };
-    // Where the answers to the attached daemon's extensions are recorded, and so sent; made with the first
-    // question. Declared before _sessionManager, whose sessions' prompts hold it, and after
-    // _nativeController, which it sends through. Opaque for the reason _extensionRuntime is.
-    std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _daemonGrants { nullptr,
-                                                                                                   nullptr };
     // The material the OS draws behind each window's title band, built from the appearance services.
     // Declared before _sessionManager and _qmlEngine, unlike the appearance sources below, so it is destroyed
     // after them: the manager's window controllers, and the windows they drive, borrow it.
@@ -1435,8 +1361,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     int _argc = 0;
     char const** _argv = nullptr;
 
-    /// What the daemon-drift badge shows; fed after the native controller connects to a local daemon.
-    window::DaemonDriftModel _daemonDrift;
     /// Restarts the local daemon on this release (stop, then start the way a client would); empty
     /// unless this run attaches to a local daemon, since a remote one is not ours to restart. Runs
     /// on @ref _daemonRestartThread, so it touches nothing the GUI thread owns.
@@ -1446,8 +1370,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::function<std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>(
         std::stop_token)>
         _upgradeDaemon;
-    /// The daemon release the drift badge was last assessed for, to notice a daemon that came back changed.
-    std::string _shownDaemonRelease;
     /// Whether a daemon spawned on demand may fork yet. The local attach starts beside the boot, but Apple's
     /// libc deadlocks a fork() made while another thread is inside setlocale(), which QApplication's
     /// construction calls: its at-fork handler and setlocale() take the locale and malloc locks in opposite

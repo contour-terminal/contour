@@ -182,23 +182,6 @@ TEST_CASE("hasStrandedQmlOverrides only fires on a customization that has actual
     }
 }
 
-TEST_CASE("the attach boot window adopts the primary daemon workspace", "[contour][app][attach]")
-{
-    using contour::primaryDaemonWorkspaceToAdopt;
-
-    // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon workspace,
-    // so Main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
-    CHECK(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
-
-    // A later OS window (one already mapped) is NOT the boot window — it adopts nothing here (it is
-    // handled by the staged _pendingAttachWorkspace path instead).
-    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/true, { 7, 12 }).has_value());
-
-    // No daemon workspace reported yet: nothing to bind now — the caller still claims the boot window
-    // and reconcileAttachWindows binds it once the first layout arrives.
-    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, {}).has_value());
-}
-
 TEST_CASE("onExit records no exit status for a non-process session", "[contour][app]")
 {
     // A MockPty-backed session is neither a local vtpty::Process nor an SSH session: onExit must
