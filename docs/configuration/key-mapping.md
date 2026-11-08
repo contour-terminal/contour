@@ -4,7 +4,8 @@ To customize key mappings, you need to configure `input_mapping` yaml entry
 !!! warning "Defining `input_mapping` replaces the built-in bindings — it does not add to them"
 
     As soon as an `input_mapping` section is present in your `contour.yml`, Contour's built-in
-    defaults (`Ctrl+Shift+V`, the `Ctrl+Shift+P` command palette, the tab shortcuts, …) are discarded, and only the entries you list are active. Writing an
+    defaults (`Ctrl+Shift+V`, the `Ctrl+Shift+P` command palette, the tab shortcuts, …) are discarded,
+    and only the entries you list are active. Writing an
     `input_mapping` section is a declaration that you are defining the full set of bindings.
 
     The `contour.yml` that Contour generates on first run already contains every default binding

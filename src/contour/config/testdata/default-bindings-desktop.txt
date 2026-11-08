@@ -207,6 +207,8 @@ char modes=[Any] mods=[Shift|Control] input=U+003D clicks=- -> IncreaseFontSize 
 char modes=[Any] mods=[Shift|Control] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
 char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 char modes=[~AltScreen] mods=[Shift|Control] input=U+004C clicks=- -> ClearToPrompt declined=consume gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no

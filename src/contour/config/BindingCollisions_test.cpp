@@ -539,6 +539,14 @@ TEST_CASE("the desktop steps between commands as VS Code does", "[bindings]")
         CHECK(clear->mapping.modes == prompt);
         CHECK(clear->declined == DeclinedInput::Consume);
     }
+    // The jump between prompts moved off Ctrl+Shift+Up/Down onto Ctrl+Alt+K/J, which must reach a
+    // configuration that predates them, or such a configuration loses the jump altogether.
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        auto const ctrlAlt = Modifiers { Modifier::Control, Modifier::Alt };
+        CHECK(fallbackCharActions(kind, ctrlAlt, U'K') == Names { "ScrollMarkUp" });
+        CHECK(fallbackCharActions(kind, ctrlAlt, U'J') == Names { "ScrollMarkDown" });
+    }
     // macOS keeps Control+Shift+Up/Down as the jump between prompts.
     CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow) == Names { "ScrollMarkUp" });
     CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow) == Names { "ScrollMarkDown" });

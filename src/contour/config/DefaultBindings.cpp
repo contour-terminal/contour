@@ -368,8 +368,10 @@ namespace
             written(All, CtrlShift, U',', Any, { actions::OpenConfiguration {} }),
             // macOS: the menu bar owns Quit (⌘Q), so no default binding takes it.
             written(DesktopOnly, Primary, U'Q', Any, { actions::Quit {} }),
-            written(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
-            written(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
+            // Fallbacks too: they took over the prompt jump from Ctrl+Shift+Up/Down, which a configuration
+            // that predates them must not lose.
+            both(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
+            both(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             written(DesktopOnly, CtrlAlt, U'O', Any, { actions::OpenFileManager {} }),
             both(MacOnly, CtrlSuper, U'O', Any, { actions::OpenFileManager {} }),
             written(DesktopOnly, CtrlAlt, U'.', Any, { actions::ToggleStatusLine {} }),
