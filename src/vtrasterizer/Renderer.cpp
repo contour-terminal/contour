@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <format>
 #include <memory>
 #include <span>
@@ -1014,6 +1015,7 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
 
     // The soft glyphs are sorted by position, as the cells of a line are: one cursor, advanced alongside the
     // cells, finds each cell's glyph, and a frame without any pays this one test.
+    assert(std::ranges::is_sorted(softGlyphs, {}, &vtbackend::RenderSoftGlyph::position));
     auto const hasSoftGlyphs = !softGlyphs.empty();
     auto glyphCursor = SoftGlyphCursor { softGlyphs };
     for (auto const& cell: cells)

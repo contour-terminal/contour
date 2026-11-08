@@ -299,7 +299,8 @@ struct RenderBuffer
     std::vector<RenderGutterCell> gutter {};
 
     /// The soft-font glyphs (DECDLD) cells of this frame draw instead of their codepoints, one entry per such
-    /// cell, in no particular order (find a cell's by its position). A cell with no entry draws its
+    /// cell, sorted by position (line, then column): the renderer walks this list beside the cells with a
+    /// cursor, so an unsorted list silently drops glyphs. A cell with no entry draws its
     /// codepoints: its font is gone, or it never had a soft glyph. The entry owns the glyph, so the bitmap
     /// outlives a redefinition of its font for as long as this frame is on display.
     ///

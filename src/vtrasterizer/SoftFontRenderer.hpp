@@ -76,6 +76,7 @@ class SoftFontRenderer: public Renderable
 class SoftGlyphCursor
 {
   public:
+    /// @param glyphs The pass's soft glyphs, sorted by position; they must outlive the cursor.
     explicit SoftGlyphCursor(std::span<vtbackend::RenderSoftGlyph const> glyphs) noexcept:
         _glyphs { glyphs }, _next { glyphs.begin() }
     {

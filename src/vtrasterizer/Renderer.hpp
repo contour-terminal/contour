@@ -396,10 +396,6 @@ class Renderer
     /// @param offset  Y pixel offset for smooth scrolling.
     void setSmoothScrollOffset(int offset);
 
-    /// Renders a span of cells to the background, decoration, text, and image renderers.
-    ///
-    /// @param cells          Contiguous sub-range of RenderCell entries to render.
-    /// @param yPixelOffset   Sub-cell Y pixel offset for smooth scrolling (default: 0).
     /// Renders @p cells, each with the soft font glyph @p softGlyphs holds for its position, if any.
     /// @param cells The cells to render.
     /// @param softGlyphs The frame's soft glyphs, sorted by position; empty for a frame without any.
