@@ -15,21 +15,6 @@
 namespace vtbackend
 {
 
-/// What a SoftGlyphRef resolved to.
-enum class SoftGlyphLookup : uint8_t
-{
-    FontGone,  ///< The font is not loaded (or the ref is out of range).
-    Undefined, ///< The font is loaded but never defined this position.
-    Defined,
-};
-
-/// The outcome of SoftFontStore::resolve.
-struct SoftGlyphResolution
-{
-    SoftGlyphLookup lookup = SoftGlyphLookup::FontGone;
-    std::shared_ptr<SoftGlyph const> glyph; ///< The error glyph when Undefined; null when FontGone.
-};
-
 /// The three DECDLD soft fonts of a terminal.
 ///
 /// Fonts are immutable once published: every load makes a fresh SoftFont, so pointers held elsewhere
@@ -56,9 +41,11 @@ class SoftFontStore
     /// @return The font number whose designator is @p dscs; the most recently loaded wins.
     [[nodiscard]] std::optional<uint8_t> fontForDesignator(std::string_view dscs) const noexcept;
 
-    /// Looks a glyph up. An out-of-range ref (font > 2, position outside
-    /// FirstSoftGlyphPosition..LastSoftGlyphPosition) is FontGone.
-    [[nodiscard]] SoftGlyphResolution resolve(SoftGlyphRef ref) const noexcept;
+    /// Looks a glyph up.
+    /// @return The glyph; the font's error glyph when the font never defined that position; null when the
+    ///         font is gone (not loaded, or the ref is out of range: font > 2, position outside
+    ///         FirstSoftGlyphPosition..LastSoftGlyphPosition).
+    [[nodiscard]] std::shared_ptr<SoftGlyph const> resolve(SoftGlyphRef ref) const noexcept;
 
     /// @return A counter that increases on every change.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }

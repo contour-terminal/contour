@@ -55,17 +55,15 @@ std::optional<uint8_t> SoftFontStore::fontForDesignator(std::string_view dscs) c
     return best;
 }
 
-SoftGlyphResolution SoftFontStore::resolve(SoftGlyphRef ref) const noexcept
+std::shared_ptr<SoftGlyph const> SoftFontStore::resolve(SoftGlyphRef ref) const noexcept
 {
     if (ref.position < FirstSoftGlyphPosition || ref.position > LastSoftGlyphPosition)
-        return { .lookup = SoftGlyphLookup::FontGone, .glyph = nullptr };
+        return nullptr;
     auto const loaded = font(ref.font);
     if (!loaded)
-        return { .lookup = SoftGlyphLookup::FontGone, .glyph = nullptr };
+        return nullptr;
     auto const& glyph = loaded->glyphs[static_cast<size_t>(ref.position - FirstSoftGlyphPosition)];
-    if (!glyph)
-        return { .lookup = SoftGlyphLookup::Undefined, .glyph = loaded->errorGlyph };
-    return { .lookup = SoftGlyphLookup::Defined, .glyph = glyph };
+    return glyph ? glyph : loaded->errorGlyph;
 }
 
 void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, SoftFontCount> fonts,

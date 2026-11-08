@@ -1115,7 +1115,7 @@ void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
         if (column >= preeditColumns.first && column < preeditColumns.second)
             continue;
         // A font that is gone resolves to no glyph, so the cell falls back to drawing its codepoints.
-        auto glyph = _terminal->softFonts().resolve(ref).glyph;
+        auto glyph = _terminal->softFonts().resolve(ref);
         if (!glyph)
             continue;
         pending.push_back(RenderSoftGlyph {

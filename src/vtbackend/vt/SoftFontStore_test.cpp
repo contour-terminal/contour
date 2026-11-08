@@ -31,18 +31,16 @@ TEST_CASE("SoftFontStore: define then resolve", "[SoftFontStore]")
     REQUIRE(store.define(FullCell, body('B', '@')).has_value());
 
     auto const defined = store.resolve({ .font = 0, .position = 0x21 });
-    CHECK(defined.lookup == SoftGlyphLookup::Defined);
-    REQUIRE(defined.glyph != nullptr);
-    CHECK(defined.glyph->width == 15);
+    REQUIRE(defined != nullptr);
+    CHECK(defined != store.font(0)->errorGlyph);
+    CHECK(defined->width == 15);
 
     auto const undefined = store.resolve({ .font = 0, .position = 0x22 });
-    CHECK(undefined.lookup == SoftGlyphLookup::Undefined);
-    REQUIRE(undefined.glyph != nullptr);
-    CHECK(undefined.glyph == store.font(0)->errorGlyph);
+    REQUIRE(undefined != nullptr);
+    CHECK(undefined == store.font(0)->errorGlyph);
 
     auto const gone = store.resolve({ .font = 1, .position = 0x21 });
-    CHECK(gone.lookup == SoftGlyphLookup::FontGone);
-    CHECK(gone.glyph == nullptr);
+    CHECK(gone == nullptr);
 }
 
 TEST_CASE("SoftFontStore: Pe=2 erases every font", "[SoftFontStore]")
@@ -85,16 +83,16 @@ TEST_CASE("SoftFontStore: redefinition is copy-on-write", "[SoftFontStore]")
     REQUIRE(store.define(FullCell, body('B', '@')).has_value());
     auto const held = store.resolve({ .font = 0, .position = 0x21 });
     auto const heldFont = store.font(0);
-    auto const heldCoverage = held.glyph->coverage;
-    auto const heldId = held.glyph->id;
+    auto const heldCoverage = held->coverage;
+    auto const heldId = held->id;
 
     REQUIRE(store.define(FullCell, body('B', 'A')).has_value());
 
-    CHECK(held.glyph->coverage == heldCoverage);
-    CHECK(held.glyph->id == heldId);
+    CHECK(held->coverage == heldCoverage);
+    CHECK(held->id == heldId);
     CHECK(store.font(0) != heldFont);
     auto const redefined = store.resolve({ .font = 0, .position = 0x21 });
-    CHECK(redefined.glyph->id != heldId);
+    CHECK(redefined->id != heldId);
 }
 
 TEST_CASE("SoftFontStore: identical glyphs share an id, different ones do not", "[SoftFontStore]")
@@ -106,7 +104,7 @@ TEST_CASE("SoftFontStore: identical glyphs share an id, different ones do not", 
     REQUIRE(store.define(forFont(1), body('B', '@')).has_value());
 
     auto const id = [&](uint8_t font, uint8_t position) {
-        return store.resolve({ .font = font, .position = position }).glyph->id;
+        return store.resolve({ .font = font, .position = position })->id;
     };
     CHECK(id(0, 0x21) == id(0, 0x22));
     CHECK(id(0, 0x21) == id(1, 0x21)); // across fonts, too: it is the atlas key
@@ -117,11 +115,11 @@ TEST_CASE("SoftFontStore: an out-of-range ref resolves as FontGone", "[SoftFontS
 {
     auto store = SoftFontStore {};
     REQUIRE(store.define(FullCell, body('B', '@')).has_value());
-    CHECK(store.resolve({ .font = 3, .position = 0x21 }).lookup == SoftGlyphLookup::FontGone);
-    CHECK(store.resolve({ .font = 0, .position = 0x10 }).lookup == SoftGlyphLookup::FontGone);
-    CHECK(store.resolve({ .font = 0, .position = 0x80 }).lookup == SoftGlyphLookup::FontGone);
-    CHECK(store.resolve({ .font = 0, .position = 0x20 }).lookup == SoftGlyphLookup::Undefined);
-    CHECK(store.resolve({ .font = 0, .position = 0x7F }).lookup == SoftGlyphLookup::Undefined);
+    CHECK(store.resolve({ .font = 3, .position = 0x21 }) == nullptr);
+    CHECK(store.resolve({ .font = 0, .position = 0x10 }) == nullptr);
+    CHECK(store.resolve({ .font = 0, .position = 0x80 }) == nullptr);
+    CHECK(store.resolve({ .font = 0, .position = 0x20 }) == store.font(0)->errorGlyph);
+    CHECK(store.resolve({ .font = 0, .position = 0x7F }) == store.font(0)->errorGlyph);
 }
 
 TEST_CASE("SoftFontStore: an invalid DECDLD leaves the store unchanged", "[SoftFontStore]")

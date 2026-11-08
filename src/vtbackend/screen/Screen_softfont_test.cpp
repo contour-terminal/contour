@@ -166,9 +166,9 @@ TEST_CASE("a raw 8-bit DECDLD (0x90 ... 0x9C) loads like the 7-bit form", "[scre
             sevenBit.terminal.softFonts().resolve({ .font = 0, .position = static_cast<uint8_t>(position) });
         auto const rb =
             eightBit.terminal.softFonts().resolve({ .font = 0, .position = static_cast<uint8_t>(position) });
-        REQUIRE(ra.glyph != nullptr);
-        REQUIRE(rb.glyph != nullptr);
-        CHECK(ra.glyph->id == rb.glyph->id);
+        REQUIRE(ra != nullptr);
+        REQUIRE(rb != nullptr);
+        CHECK(ra->id == rb->id);
     }
 }
 
@@ -305,8 +305,8 @@ TEST_CASE("render cell carries the defined glyph", "[screen][softfont]")
     REQUIRE(rendered.found);
     REQUIRE(rendered.glyph.has_value());
     auto const expected = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x21 });
-    CHECK(expected.lookup == SoftGlyphLookup::Defined);
-    CHECK(rendered.glyph == expected.glyph->id);
+    REQUIRE(expected != nullptr);
+    CHECK(rendered.glyph == expected->id);
 }
 
 TEST_CASE("render cell carries the error glyph for an undefined position", "[screen][softfont]")
@@ -315,10 +315,11 @@ TEST_CASE("render cell carries the error glyph for an undefined position", "[scr
     mock.writeToScreen(sevenBitFont());
     mock.writeToScreen("\033(B0"); // 0x30: the font defines only 0x21 and 0x22
     auto const undefined = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x30 });
-    REQUIRE(undefined.lookup == SoftGlyphLookup::Undefined);
+    REQUIRE(undefined != nullptr);
+    CHECK(undefined == mock.terminal.softFonts().font(0)->errorGlyph);
     auto const rendered = renderedCellAt(mock, 0);
     REQUIRE(rendered.glyph.has_value());
-    CHECK(rendered.glyph == undefined.glyph->id);
+    CHECK(rendered.glyph == undefined->id);
 }
 
 TEST_CASE("render cell has no soft glyph after RIS, and shows its codepoint", "[screen][softfont]")
