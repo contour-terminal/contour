@@ -24,9 +24,9 @@ enum class TabMergeError : uint8_t
 {
     UnknownSession = 0, ///< No pane hosts a session it names: it closed, or never existed.
     UnknownSide,        ///< The side is not one this host knows, as from a newer client.
-    CrossWindow,        ///< The tab and the target are in different windows: no client reconciles that yet.
-    StaleTab,           ///< The tab no longer holds exactly the sessions the request named.
-    Refused,            ///< The model refused: both sessions are in the same tab.
+    CrossWorkspace, ///< The tab and the target are in different workspaces: no client reconciles that yet.
+    StaleTab,       ///< The tab no longer holds exactly the sessions the request named.
+    Refused,        ///< The model refused: both sessions are in the same tab.
 };
 
 /// @param error The refusal.
@@ -37,7 +37,7 @@ enum class TabMergeError : uint8_t
     {
         case TabMergeError::UnknownSession: return "unknown session";
         case TabMergeError::UnknownSide: return "unknown side";
-        case TabMergeError::CrossWindow: return "the tab and the target are in different windows";
+        case TabMergeError::CrossWorkspace: return "the tab and the target are in different workspaces";
         case TabMergeError::StaleTab: return "the tab no longer holds the sessions the request named";
         case TabMergeError::Refused: return "the model refused the merge";
     }
@@ -60,8 +60,8 @@ enum class TabMergeError : uint8_t
 /// event the merge fires).
 /// @param model The daemon's model.
 /// @param merge The client's request.
-/// @return Success, or why nothing changed. Refused: a window other than the target's (CrossWindow), a tab
-/// whose
+/// @return Success, or why nothing changed. Refused: a workspace other than the target's (CrossWorkspace), a
+/// tab whose
 ///         sessions are no longer the ones named (StaleTab), and what the model itself refuses.
 [[nodiscard]] std::expected<void, TabMergeError> applyTabMerge(vtworkspace::SessionModel& model,
                                                                proto::MergeTabIntoSplit const& merge);

@@ -164,7 +164,7 @@ class DaemonSpawner;
                                          std::chrono::milliseconds timeout);
 
 /// Starts a daemon process, and asks whether one serves: the two operating-system effects of
-/// ensureDaemon(), behind an interface so the window between them is testable.
+/// ensureDaemon(), behind an interface so the workspace between them is testable.
 class DaemonSpawner
 {
   public:

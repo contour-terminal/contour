@@ -17,7 +17,7 @@
 /// So @ref ServiceStartMode selects the backend rather than merely configuring one, and
 /// `Logon` is the default: a terminal multiplexer is a per-user, per-session thing, and the
 /// session-0 isolation a boot service lives under is the wrong shape for it (a shell spawned
-/// there runs in the service's window station, where any GUI program it launches is invisible).
+/// there runs in the service's workspace station, where any GUI program it launches is invisible).
 
 #include <core/Environment.hpp>
 #include <core/platform/FileSystem.hpp>

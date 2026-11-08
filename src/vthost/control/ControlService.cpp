@@ -43,7 +43,7 @@ namespace
     /// The operating system the daemon runs on, as `daemon.info` names it.
     constexpr auto PlatformName = std::string_view {
 #ifdef _WIN32
-        "windows"
+        "workspaces"
 #elifdef __APPLE__
         "macos"
 #elifdef __linux__
@@ -90,7 +90,7 @@ namespace
     constexpr auto MinimumSplitPercent = uint8_t { 5 };
     constexpr auto MaximumSplitPercent = uint8_t { 95 };
 
-    /// @return The text of a window, tab or pane reference.
+    /// @return The text of a workspace, tab or pane reference.
     [[nodiscard]] std::string idOf(ObjectKind kind, vtcontrol::Uuid uuid)
     {
         return vtcontrol::toString(ObjectRef { .kind = kind, .uuid = uuid });
@@ -189,28 +189,28 @@ std::vector<TargetCandidate> ControlService::paneCandidates() const
 std::vector<TargetCandidate> ControlService::tabCandidates(WorkspaceId positioned) const
 {
     auto candidates = std::vector<TargetCandidate> {};
-    _host.model().forEachTab([&](vtworkspace::Workspace& window, vtworkspace::Tab& tab) {
+    _host.model().forEachTab([&](vtworkspace::Workspace& workspace, vtworkspace::Tab& tab) {
         auto const uuid = _host.objects().uuidOf(tab.id());
         if (!uuid)
             return;
         auto const ref = ObjectRef { .kind = ObjectKind::Tab, .uuid = *uuid };
         auto position = std::optional<uint32_t> {};
-        if (window.id() == positioned)
-            position = static_cast<uint32_t>(window.indexOf(tab.id()) + 1);
+        if (workspace.id() == positioned)
+            position = static_cast<uint32_t>(workspace.indexOf(tab.id()) + 1);
         candidates.push_back(TargetCandidate {
             .ref = ref, .label = std::string { _host.objects().labelOf(ref) }, .position = position });
     });
     return candidates;
 }
 
-std::vector<TargetCandidate> ControlService::windowCandidates() const
+std::vector<TargetCandidate> ControlService::workspaceCandidates() const
 {
     auto candidates = std::vector<TargetCandidate> {};
     auto const& model = _host.model();
     for (auto const index: std::views::iota(0, model.workspaceCount()))
     {
-        auto const* window = model.workspaceAt(index);
-        auto const uuid = _host.objects().uuidOf(window->id());
+        auto const* workspace = model.workspaceAt(index);
+        auto const uuid = _host.objects().uuidOf(workspace->id());
         if (!uuid)
             continue;
         auto const ref = ObjectRef { .kind = ObjectKind::Workspace, .uuid = *uuid };
@@ -229,8 +229,8 @@ std::expected<ControlService::PaneTarget, ControlError> ControlService::resolveP
     auto const named = spec.empty() ? context.caller() : spec;
     if (named.empty())
     {
-        auto const* window = _host.model().workspace(_host.windowId());
-        auto const* tab = window != nullptr ? window->activeTab() : nullptr;
+        auto const* workspace = _host.model().workspace(_host.workspaceId());
+        auto const* tab = workspace != nullptr ? workspace->activeTab() : nullptr;
         auto const* leaf = tab != nullptr ? tab->activePane() : nullptr;
         if (leaf == nullptr)
             return std::unexpected(notFound("there is no active pane"));
@@ -267,13 +267,13 @@ std::expected<TabId, ControlError> ControlService::resolveTab(vtcontrol::CallCon
     if (spec.empty())
         return resolvePane(context, {})
             .and_then([&](PaneTarget const& pane) -> std::expected<TabId, ControlError> {
-                auto const [window, tab, leaf] = _host.model().findSessionLeaf(pane.session);
+                auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(pane.session);
                 if (tab == nullptr)
                     return std::unexpected(notFound("the pane is in no tab"));
                 return tab->id();
             });
 
-    auto const positioned = resolveWindow(context, {}).value_or(_host.windowId());
+    auto const positioned = resolveWorkspace(context, {}).value_or(_host.workspaceId());
     auto const candidates = tabCandidates(positioned);
     return vtcontrol::resolveTarget(ObjectKind::Tab, spec, candidates)
         .and_then([&](ObjectRef const& ref) -> std::expected<TabId, ControlError> {
@@ -285,31 +285,31 @@ std::expected<TabId, ControlError> ControlService::resolveTab(vtcontrol::CallCon
         });
 }
 
-std::expected<WorkspaceId, ControlError> ControlService::resolveWindow(vtcontrol::CallContext const& context,
-                                                                       std::string_view spec) const
+std::expected<WorkspaceId, ControlError> ControlService::resolveWorkspace(
+    vtcontrol::CallContext const& context, std::string_view spec) const
 {
     if (spec.empty())
     {
         auto const pane = resolvePane(context, {});
-        // A daemon whose window holds no pane yet still has a window to put a tab in; a caller whose pane
-        // is gone has none.
+        // A daemon whose workspace holds no pane yet still has a workspace to put a tab in; a caller whose
+        // pane is gone has none.
         if (!pane)
-            return context.caller().empty() ? std::expected<WorkspaceId, ControlError> { _host.windowId() }
+            return context.caller().empty() ? std::expected<WorkspaceId, ControlError> { _host.workspaceId() }
                                             : std::unexpected(pane.error());
-        auto const [window, tab, leaf] = _host.model().findSessionLeaf(pane->session);
-        if (window == nullptr)
-            return std::unexpected(notFound("the pane is in no window"));
-        return window->id();
+        auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(pane->session);
+        if (workspace == nullptr)
+            return std::unexpected(notFound("the pane is in no workspace"));
+        return workspace->id();
     }
 
-    auto const candidates = windowCandidates();
+    auto const candidates = workspaceCandidates();
     return vtcontrol::resolveTarget(ObjectKind::Workspace, spec, candidates)
         .and_then([&](ObjectRef const& ref) -> std::expected<WorkspaceId, ControlError> {
             auto const handle = _host.objects().find(ref);
-            auto const* window = handle ? std::get_if<WorkspaceId>(&*handle) : nullptr;
-            if (window == nullptr || _host.model().workspace(*window) == nullptr)
-                return std::unexpected(notFound(std::format("window '{}' is gone", spec)));
-            return *window;
+            auto const* workspace = handle ? std::get_if<WorkspaceId>(&*handle) : nullptr;
+            if (workspace == nullptr || _host.model().workspace(*workspace) == nullptr)
+                return std::unexpected(notFound(std::format("workspace '{}' is gone", spec)));
+            return *workspace;
         });
 }
 
@@ -341,16 +341,16 @@ vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session,
     return info;
 }
 
-vtcontrol::WorkspaceInfo ControlService::windowInfoOf(vtworkspace::Workspace const& window,
-                                                      uint32_t position,
-                                                      vtcontrol::ControlGrants grants) const
+vtcontrol::WorkspaceInfo ControlService::workspaceInfoOf(vtworkspace::Workspace const& workspace,
+                                                         uint32_t position,
+                                                         vtcontrol::ControlGrants grants) const
 {
-    auto const windowRef =
+    auto const workspaceRef =
         ObjectRef { .kind = ObjectKind::Workspace,
-                    .uuid = _host.objects().uuidOf(window.id()).value_or(vtcontrol::Uuid {}) };
+                    .uuid = _host.objects().uuidOf(workspace.id()).value_or(vtcontrol::Uuid {}) };
     auto info = vtcontrol::WorkspaceInfo {};
-    info.id = vtcontrol::toString(windowRef);
-    info.label = std::string { _host.objects().labelOf(windowRef) };
+    info.id = vtcontrol::toString(workspaceRef);
+    info.label = std::string { _host.objects().labelOf(workspaceRef) };
     info.position = position;
 
     auto const titleOf = [&](SessionId session) -> std::string {
@@ -360,9 +360,9 @@ vtcontrol::WorkspaceInfo ControlService::windowInfoOf(vtworkspace::Workspace con
         auto const guard = std::lock_guard { std::as_const(*terminal) };
         return terminal->windowTitle();
     };
-    for (auto const index: std::views::iota(0, window.tabCount()))
+    for (auto const index: std::views::iota(0, workspace.tabCount()))
     {
-        auto const* tab = window.tabAt(index);
+        auto const* tab = workspace.tabAt(index);
         auto const tabRef =
             ObjectRef { .kind = ObjectKind::Tab,
                         .uuid = _host.objects().uuidOf(tab->id()).value_or(vtcontrol::Uuid {}) };
@@ -371,7 +371,7 @@ vtcontrol::WorkspaceInfo ControlService::windowInfoOf(vtworkspace::Workspace con
         tabInfo.label = std::string { _host.objects().labelOf(tabRef) };
         tabInfo.title = vtcontrol::toValidUtf8(tab->title(titleOf));
         tabInfo.position = static_cast<uint32_t>(index + 1);
-        tabInfo.isActive = window.activeTab() == tab;
+        tabInfo.isActive = workspace.activeTab() == tab;
         forEachLeaf(*tab, [&](vtworkspace::Pane const& leaf) {
             tabInfo.panes.push_back(paneInfoOf(leaf.session(), *tab, grants));
         });
@@ -529,7 +529,7 @@ std::expected<vtcontrol::ListReply, ControlError> ControlService::list(
     auto only = std::optional<WorkspaceId> {};
     if (!request.workspace.empty())
     {
-        auto const workspace = resolveWindow(context, request.workspace);
+        auto const workspace = resolveWorkspace(context, request.workspace);
         if (!workspace)
             return std::unexpected(workspace.error());
         only = *workspace;
@@ -538,10 +538,10 @@ std::expected<vtcontrol::ListReply, ControlError> ControlService::list(
     auto const& model = _host.model();
     for (auto const index: std::views::iota(0, model.workspaceCount()))
     {
-        auto const* window = model.workspaceAt(index);
-        if (!only || window->id() == *only)
+        auto const* workspace = model.workspaceAt(index);
+        if (!only || workspace->id() == *only)
             reply.workspaces.push_back(
-                windowInfoOf(*window, static_cast<uint32_t>(index + 1), context.grants()));
+                workspaceInfoOf(*workspace, static_cast<uint32_t>(index + 1), context.grants()));
     }
     return reply;
 }
@@ -645,7 +645,7 @@ std::expected<ObjectRef, ControlError> ControlService::resolveObject(vtcontrol::
     if (!kind)
         return std::unexpected(ControlError {
             .code = ControlErrorCode::BadRequest,
-            .message = std::format("'{}' names no window, tab or pane; write <kind>:<target>", object),
+            .message = std::format("'{}' names no workspace, tab or pane; write <kind>:<target>", object),
             .candidates = {} });
     auto const spec = vtcontrol::parseObjectRef(object) ? object : object.substr(colon + 1);
     switch (*kind)
@@ -659,8 +659,9 @@ std::expected<ObjectRef, ControlError> ControlService::resolveObject(vtcontrol::
                 return ObjectRef { .kind = ObjectKind::Tab, .uuid = *_host.objects().uuidOf(tab) };
             });
         case ObjectKind::Workspace:
-            return resolveWindow(context, spec).transform([&](WorkspaceId window) {
-                return ObjectRef { .kind = ObjectKind::Workspace, .uuid = *_host.objects().uuidOf(window) };
+            return resolveWorkspace(context, spec).transform([&](WorkspaceId workspace) {
+                return ObjectRef { .kind = ObjectKind::Workspace,
+                                   .uuid = *_host.objects().uuidOf(workspace) };
             });
     }
     return std::unexpected(notFound(std::format("'{}' names no object", object)));
@@ -738,20 +739,21 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
     auto* tab = static_cast<vtworkspace::Tab*>(nullptr);
     if (request.placement == vtcontrol::WorkspacePlacement::New)
     {
-        // No client claims it, so the primary viewer -- the GUI whose launch took every window -- shows it.
-        auto* window = _host.createWindow(spawn, nullptr);
-        if (window == nullptr)
-            return std::unexpected(failed("the new window's shell could not be started"));
-        tab = window->activeTab();
+        // No client claims it, so the primary viewer -- the GUI whose launch took every workspace -- shows
+        // it.
+        auto* workspace = _host.createWorkspace(spawn, nullptr);
+        if (workspace == nullptr)
+            return std::unexpected(failed("the new workspace's shell could not be started"));
+        tab = workspace->activeTab();
     }
     else
     {
-        auto const windowId = resolveWindow(context, request.workspace);
-        if (!windowId)
-            return std::unexpected(windowId.error());
-        auto* window = _host.model().workspace(*windowId);
-        auto const* previous = window->activeTab();
-        // The host names a window by a session it holds.
+        auto const workspaceId = resolveWorkspace(context, request.workspace);
+        if (!workspaceId)
+            return std::unexpected(workspaceId.error());
+        auto* workspace = _host.model().workspace(*workspaceId);
+        auto const* previous = workspace->activeTab();
+        // The host names a workspace by a session it holds.
         auto beside = std::optional<SessionId> {};
         if (previous != nullptr)
             beside = previous->rootPane()->firstLeaf()->session();
@@ -759,17 +761,17 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
         if (tab == nullptr)
             return std::unexpected(failed("the new tab's shell could not be started"));
         if (request.focus == vtcontrol::FocusPolicy::Keep && previous != nullptr)
-            _host.model().activateTab(*windowId, previous->id());
+            _host.model().activateTab(*workspaceId, previous->id());
     }
 
     auto const session = tab->rootPane()->session();
-    auto const windowId = _host.model().workspaceOfTab(tab->id());
+    auto const workspaceId = _host.model().workspaceOfTab(tab->id());
     auto const tabRef = ObjectRef { .kind = ObjectKind::Tab, .uuid = *_host.objects().uuidOf(tab->id()) };
     if (!request.label.empty())
         _host.objects().setLabel(tabRef, request.label);
     return vtcontrol::CreateTabReply {
         .workspace =
-            idOf(ObjectKind::Workspace, _host.objects().uuidOf(windowId).value_or(vtcontrol::Uuid {})),
+            idOf(ObjectKind::Workspace, _host.objects().uuidOf(workspaceId).value_or(vtcontrol::Uuid {})),
         .tab = vtcontrol::toString(tabRef),
         .pane = idOf(ObjectKind::Pane, *_host.objects().uuidOf(session)),
     };
@@ -789,7 +791,7 @@ std::expected<vtcontrol::SplitReply, ControlError> ControlService::split(
     if (!anchor)
         return std::unexpected(anchor.error());
 
-    auto const [window, tab, leaf] = _host.model().findSessionLeaf(anchor->session);
+    auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(anchor->session);
     if (tab == nullptr)
         return std::unexpected(notFound("the pane is in no tab"));
     auto const previous = tab->activePane()->id();
@@ -1006,19 +1008,19 @@ vtcontrol::EventOrigin ControlService::originOf(SessionId session) const
     auto origin = vtcontrol::EventOrigin {};
     if (auto const uuid = _host.objects().uuidOf(session))
         origin.pane = idOf(ObjectKind::Pane, *uuid);
-    if (auto const [window, tab, leaf] = _host.model().findSessionLeaf(session); tab != nullptr)
+    if (auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(session); tab != nullptr)
     {
-        auto const owner = originOf(window->id(), tab->id());
+        auto const owner = originOf(workspace->id(), tab->id());
         origin.workspace = owner.workspace;
         origin.tab = owner.tab;
     }
     return origin;
 }
 
-vtcontrol::EventOrigin ControlService::originOf(WorkspaceId window, TabId tab) const
+vtcontrol::EventOrigin ControlService::originOf(WorkspaceId workspace, TabId tab) const
 {
     auto origin = vtcontrol::EventOrigin {};
-    if (auto const uuid = _host.objects().uuidOf(window))
+    if (auto const uuid = _host.objects().uuidOf(workspace))
         origin.workspace = idOf(ObjectKind::Workspace, *uuid);
     if (auto const uuid = _host.objects().uuidOf(tab))
         origin.tab = idOf(ObjectKind::Tab, *uuid);
@@ -1127,8 +1129,8 @@ void ControlService::sessionClosing(SessionId session)
 
 void ControlService::sessionClosed(SessionId session)
 {
-    // The pane has left the model already, so its tab and window are what sessionClosing() saw; its UUID is
-    // forgotten only after this.
+    // The pane has left the model already, so its tab and workspace are what sessionClosing() saw; its UUID
+    // is forgotten only after this.
     auto const uuid = _host.objects().uuidOf(session);
     auto origin = _closing && _closing->session == session ? std::move(_closing->origin) : originOf(session);
     _closing.reset();
@@ -1137,9 +1139,9 @@ void ControlService::sessionClosed(SessionId session)
         _waiters.paneClosed(*uuid);
 }
 
-void ControlService::tabAdded(WorkspaceId window, TabId tab, int /*index*/)
+void ControlService::tabAdded(WorkspaceId workspace, TabId tab, int /*index*/)
 {
-    auto origin = originOf(window, tab);
+    auto origin = originOf(workspace, tab);
     _hub.publish(vtcontrol::Event { .origin = origin, .payload = vtcontrol::TabCreatedEvent {} });
     if (auto const* created = _host.model().findTab(tab))
         if (auto const uuid = _host.objects().uuidOf(created->rootPane()->session()))
@@ -1157,10 +1159,10 @@ void ControlService::paneSplit(TabId tab, vtworkspace::PaneId /*splitNode*/, vtw
                                         .payload = vtcontrol::PaneCreatedEvent {} });
 }
 
-void ControlService::tabClosed(WorkspaceId window, TabId tab, int /*index*/)
+void ControlService::tabClosed(WorkspaceId workspace, TabId tab, int /*index*/)
 {
     _hub.publish(
-        vtcontrol::Event { .origin = originOf(window, tab), .payload = vtcontrol::TabClosedEvent {} });
+        vtcontrol::Event { .origin = originOf(workspace, tab), .payload = vtcontrol::TabClosedEvent {} });
 }
 
 // }}}

@@ -66,7 +66,8 @@ namespace
                 tab.activePane = pane;
     }
 
-    /// Lays an unserved ActivateTab over @p layout: the tab hosting its session is the window's active one.
+    /// Lays an unserved ActivateTab over @p layout: the tab hosting its session is the workspace's active
+    /// one.
     void overlayActivateTab(proto::LayoutState& layout, proto::EditTab const& edit)
     {
         for (auto const [index, tab]: std::views::zip(std::views::iota(uint32_t { 0 }), layout.tabs))

@@ -1043,7 +1043,8 @@ void TerminalSessionManager::deliverRestoreSummaryTo(vtworkspace::WorkspaceId wi
         return;
     controller->notices().post(window::Notice {
         .kind = window::NoticeKind::RestoreSummary,
-        .text = window::restoreSummaryText(_pendingRestoreSummary->windows, _pendingRestoreSummary->tabs) });
+        .text =
+            window::restoreSummaryText(_pendingRestoreSummary->workspaces, _pendingRestoreSummary->tabs) });
     _pendingRestoreSummary.reset();
 }
 

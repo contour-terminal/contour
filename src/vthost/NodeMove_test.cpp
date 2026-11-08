@@ -22,17 +22,17 @@ using vtworkspace::SplitSide;
 namespace
 {
 
-/// Two windows. The first holds a tab of sessions 1 and 2, and a tab of session 3; the second a tab of
+/// Two workspaces. The first holds a tab of sessions 1 and 2, and a tab of session 3; the second a tab of
 /// session 4.
-struct TwoWindows
+struct TwoWorkspaces
 {
     vtworkspace::test::RecordingEvents events;
     uint64_t nextSession = 1;
     vtworkspace::SessionModel model { events, [this] { return vtworkspace::SessionId { nextSession++ }; } };
-    /// A new window as the model alone makes it, and takes it back.
-    vthost::MoveWindowHooks hooks {
+    /// A new workspace as the model alone makes it, and takes it back.
+    vthost::MoveWorkspaceHooks hooks {
         .create = [this] { return model.createWorkspace()->id(); },
-        .discard = [this](vtworkspace::WorkspaceId window) { model.removeWorkspace(window); },
+        .discard = [this](vtworkspace::WorkspaceId workspace) { model.removeWorkspace(workspace); },
     };
     vtworkspace::WorkspaceId first = model.createWorkspace()->id();
     vtworkspace::Tab* pair = model.createTab(first);
@@ -41,9 +41,9 @@ struct TwoWindows
     vtworkspace::WorkspaceId other = model.createWorkspace()->id();
     vtworkspace::Tab* lone = model.createTab(other);
 
-    TwoWindows() { events.log.clear(); }
+    TwoWorkspaces() { events.log.clear(); }
 
-    [[nodiscard]] vtworkspace::Workspace* windowOf(uint64_t session) const
+    [[nodiscard]] vtworkspace::Workspace* workspaceOf(uint64_t session) const
     {
         return std::get<0>(model.findSessionLeaf(vtworkspace::SessionId { session }));
     }
@@ -58,7 +58,7 @@ struct TwoWindows
 
 TEST_CASE("an edge move grafts the pane beside the target", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 3 },
@@ -68,7 +68,7 @@ TEST_CASE("an edge move grafts the pane beside the target", "[vthost][move]")
                                      h.hooks);
     REQUIRE(moved.has_value());
     CHECK(moved->focused.value == 3);
-    CHECK(h.windowOf(3) == h.windowOf(4));
+    CHECK(h.workspaceOf(3) == h.workspaceOf(4));
     CHECK(h.lone->paneCount() == 2);
     CHECK_FALSE(h.events.log.empty());
 }
@@ -77,7 +77,7 @@ TEST_CASE("an edge move onto the only sibling re-splits the tab along that edge"
 {
     // The pair is 1 above 2. Session 2 dropped on session 1's right edge keeps the leaf order and changes
     // only the axis: 1 | 2.
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 2 },
@@ -97,7 +97,7 @@ TEST_CASE("an edge move onto the only sibling re-splits the tab along that edge"
 
 TEST_CASE("a swap trades the sessions of two panes", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 1 },
@@ -105,13 +105,13 @@ TEST_CASE("a swap trades the sessions of two panes", "[vthost][move]")
                                                 .targetSession = 4 },
                                      h.hooks);
     REQUIRE(moved.has_value());
-    CHECK(h.windowOf(1) == h.model.workspace(h.other));
-    CHECK(h.windowOf(4) == h.model.workspace(h.first));
+    CHECK(h.workspaceOf(1) == h.model.workspace(h.other));
+    CHECK(h.workspaceOf(4) == h.model.workspace(h.first));
 }
 
-TEST_CASE("a whole tab moves into another window's tab well, the index clamped", "[vthost][move]")
+TEST_CASE("a whole tab moves into another workspace's tab well, the index clamped", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Tab),
                                                 .sourceSessions = { 1, 2 },
@@ -121,30 +121,30 @@ TEST_CASE("a whole tab moves into another window's tab well, the index clamped",
                                      h.hooks);
     REQUIRE(moved.has_value());
     CHECK(moved->workspace == h.other);
-    CHECK(h.windowOf(1) == h.model.workspace(h.other));
-    CHECK(h.windowOf(2) == h.model.workspace(h.other));
+    CHECK(h.workspaceOf(1) == h.model.workspace(h.other));
+    CHECK(h.workspaceOf(2) == h.model.workspace(h.other));
     CHECK(h.model.workspace(h.other)->tabCount() == 2);
 }
 
-TEST_CASE("a pane moves to a new window and keeps its session", "[vthost][move]")
+TEST_CASE("a pane moves to a new workspace and keeps its session", "[vthost][move]")
 {
-    auto h = TwoWindows {};
-    auto const windows = h.model.workspaceCount();
+    auto h = TwoWorkspaces {};
+    auto const workspaces = h.model.workspaceCount();
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 2 },
                                                 .targetKind = raw(MoveTargetKind::NewWorkspace) },
                                      h.hooks);
     REQUIRE(moved.has_value());
-    CHECK(h.model.workspaceCount() == windows + 1);
+    CHECK(h.model.workspaceCount() == workspaces + 1);
     CHECK(moved->focused.value == 2);
-    CHECK(h.windowOf(2)->id() == moved->workspace);
+    CHECK(h.workspaceOf(2)->id() == moved->workspace);
     CHECK(moved->workspace != h.first);
 }
 
 TEST_CASE("a source or target kind this host does not know is refused and changes nothing", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const badSource = applyMoveNode(h.model,
                                          MoveNode { .sourceKind = 0xEE,
                                                     .sourceSessions = { 3 },
@@ -163,7 +163,7 @@ TEST_CASE("a source or target kind this host does not know is refused and change
 
 TEST_CASE("a pane source not naming exactly one session is malformed", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 1, 2 },
@@ -173,16 +173,16 @@ TEST_CASE("a pane source not naming exactly one session is malformed", "[vthost]
     CHECK(moved.error().error == NodeMoveError::UnknownKind);
 }
 
-TEST_CASE("a refused move to a new window gives the made window back", "[vthost][move]")
+TEST_CASE("a refused move to a new workspace gives the made workspace back", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto discarded = std::vector<vtworkspace::WorkspaceId> {};
-    // The model refuses nothing a validated request names, so a window the model does not know stands in
-    // for a move that fails after its window was made.
+    // The model refuses nothing a validated request names, so a workspace the model does not know stands in
+    // for a move that fails after its workspace was made.
     auto const ghost = vtworkspace::WorkspaceId { 9999 };
-    auto const hooks = vthost::MoveWindowHooks {
+    auto const hooks = vthost::MoveWorkspaceHooks {
         .create = [&] { return ghost; },
-        .discard = [&](vtworkspace::WorkspaceId window) { discarded.push_back(window); }
+        .discard = [&](vtworkspace::WorkspaceId workspace) { discarded.push_back(workspace); }
     };
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
@@ -192,13 +192,13 @@ TEST_CASE("a refused move to a new window gives the made window back", "[vthost]
     REQUIRE_FALSE(moved.has_value());
     CHECK(moved.error().error == NodeMoveError::Model);
     CHECK(discarded == std::vector { ghost });
-    CHECK(h.windowOf(3) == h.model.workspace(h.first));
+    CHECK(h.workspaceOf(3) == h.model.workspace(h.first));
     CHECK(h.events.log.empty());
 }
 
 TEST_CASE("a side no enumerator names is refused", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 3 },
@@ -213,7 +213,7 @@ TEST_CASE("a side no enumerator names is refused", "[vthost][move]")
 
 TEST_CASE("a closed session is refused as unknown, as source and as target", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const source = applyMoveNode(h.model,
                                       MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                  .sourceSessions = { 999 },
@@ -242,7 +242,7 @@ TEST_CASE("a closed session is refused as unknown, as source and as target", "[v
 
 TEST_CASE("a request made of a stale view of the tab moves nothing", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     // The client saw the tab as holding only session 1; it holds 1 and 2 now.
     auto const fewer = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Tab),
@@ -263,7 +263,7 @@ TEST_CASE("a request made of a stale view of the tab moves nothing", "[vthost][m
 
 TEST_CASE("what the model refuses is carried as the model's reason", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto const onto = applyMoveNode(h.model,
                                     MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                .sourceSessions = { 3 },
@@ -277,19 +277,19 @@ TEST_CASE("what the model refuses is carried as the model's reason", "[vthost][m
     CHECK(h.events.log.empty());
 }
 
-TEST_CASE("a move taking a window's last tab removes the window, and only that one", "[vthost][move]")
+TEST_CASE("a move taking a workspace's last tab removes the workspace, and only that one", "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto discarded = std::vector<vtworkspace::WorkspaceId> {};
-    auto const hooks = vthost::MoveWindowHooks {
+    auto const hooks = vthost::MoveWorkspaceHooks {
         .create = [&] { return h.model.createWorkspace()->id(); },
         .discard =
-            [&](vtworkspace::WorkspaceId window) {
-                discarded.push_back(window);
-                h.model.removeWorkspace(window);
+            [&](vtworkspace::WorkspaceId workspace) {
+                discarded.push_back(workspace);
+                h.model.removeWorkspace(workspace);
             },
     };
-    // The second window's only pane beside one of the first's: the second is left with no tab.
+    // The second workspace's only pane beside one of the first's: the second is left with no tab.
     auto const moved = applyMoveNode(h.model,
                                      MoveNode { .sourceKind = raw(MoveSourceKind::Pane),
                                                 .sourceSessions = { 4 },
@@ -301,7 +301,7 @@ TEST_CASE("a move taking a window's last tab removes the window, and only that o
     CHECK(discarded == std::vector { h.other });
     CHECK(h.model.workspace(h.other) == nullptr);
 
-    // A tab of several leaving its window, which keeps another: nothing is removed.
+    // A tab of several leaving its workspace, which keeps another: nothing is removed.
     discarded.clear();
     REQUIRE(applyMoveNode(h.model,
                           MoveNode { .sourceKind = raw(MoveSourceKind::Tab),
@@ -311,21 +311,22 @@ TEST_CASE("a move taking a window's last tab removes the window, and only that o
     CHECK(discarded.empty());
 }
 
-// A window of its own for what already is a window's whole content would tear that window down and build it
-// again for every client: refused as the model's NoOp, before a window is made.
-TEST_CASE("a new window for a window's whole content is refused before any window is made", "[vthost][move]")
+// A workspace of its own for what already is a workspace's whole content would tear that workspace down and
+// build it again for every client: refused as the model's NoOp, before a workspace is made.
+TEST_CASE("a new workspace for a workspace's whole content is refused before any workspace is made",
+          "[vthost][move]")
 {
-    auto h = TwoWindows {};
+    auto h = TwoWorkspaces {};
     auto made = 0;
-    auto const hooks = vthost::MoveWindowHooks {
+    auto const hooks = vthost::MoveWorkspaceHooks {
         .create =
             [&] {
                 ++made;
                 return h.model.createWorkspace()->id();
             },
-        .discard = [&](vtworkspace::WorkspaceId window) { h.model.removeWorkspace(window); },
+        .discard = [&](vtworkspace::WorkspaceId workspace) { h.model.removeWorkspace(workspace); },
     };
-    auto const windows = h.model.workspaceCount();
+    auto const workspaces = h.model.workspaceCount();
     auto const kinds = std::vector<std::pair<MoveSourceKind, char const*>> {
         { MoveSourceKind::Pane, "the only pane of the only tab" },
         { MoveSourceKind::Tab, "the only tab" },
@@ -343,7 +344,7 @@ TEST_CASE("a new window for a window's whole content is refused before any windo
         CHECK(moved.error().model == vtworkspace::MoveError::NoOp);
     }
     CHECK(made == 0);
-    CHECK(h.model.workspaceCount() == windows);
-    CHECK(h.windowOf(4)->id() == h.other);
+    CHECK(h.model.workspaceCount() == workspaces);
+    CHECK(h.workspaceOf(4)->id() == h.other);
     CHECK(h.events.log.empty());
 }

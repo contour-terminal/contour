@@ -1073,13 +1073,15 @@ Task<void> driveCreateTab(core::net::EventLoop* loop, NativeClient* client, int 
     client->detach();
 }
 
-/// Awaits the initial single-window layout, authors a new window, and waits for
-/// the daemon to push a layout for the SECOND window before detaching.
-Task<void> driveCreateWindow(core::net::EventLoop* loop, NativeClient* client, std::set<uint64_t>* windows)
+/// Awaits the initial single-workspace layout, authors a new workspace, and waits for
+/// the daemon to push a layout for the SECOND workspace before detaching.
+Task<void> driveCreateWorkspace(core::net::EventLoop* loop,
+                                NativeClient* client,
+                                std::set<uint64_t>* workspaces)
 {
-    co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
-    client->createWindow({});
-    co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 2; });
+    co_await core::net::testing::waitUntil(loop, [workspaces] { return workspaces->size() == 1; });
+    client->createWorkspace({});
+    co_await core::net::testing::waitUntil(loop, [workspaces] { return workspaces->size() == 2; });
     client->detach();
 }
 
@@ -1165,8 +1167,8 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     loop.blockOn(
         core::net::testing::allOf(server.run(), client.run(), driveCreateTab(&loop, &client, &mirroredTabs)));
 
-    CHECK(mirroredTabs == 2);                                        // the mirrored layout grew
-    CHECK(host.model().workspace(host.windowId())->tabCount() == 2); // the daemon really created the tab
+    CHECK(mirroredTabs == 2);                                           // the mirrored layout grew
+    CHECK(host.model().workspace(host.workspaceId())->tabCount() == 2); // the daemon really created the tab
 }
 
 namespace
@@ -1407,7 +1409,7 @@ TEST_CASE("a dark client's hello has the host build its sessions dark from the f
     }
 }
 
-TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost][attach]")
+TEST_CASE("a client authors a new workspace, honored by the daemon (B4)", "[vthost][attach]")
 {
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
@@ -1418,14 +1420,14 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
                               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
-    host.createTab(); // the daemon starts with one window (with one tab)
+    host.createTab(); // the daemon starts with one workspace (with one tab)
 
     auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
-    // Every LayoutState the client receives names its window; collect the ids.
-    auto windows = std::set<uint64_t> {};
+    // Every LayoutState the client receives names its workspace; collect the ids.
+    auto workspaces = std::set<uint64_t> {};
     auto client =
         NativeClient { loop,
                        std::move(pair.second),
@@ -1434,15 +1436,15 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
                        NativeClient::UpdateHandler {},
                        NativeClient::ImageHandler {},
                        NativeClient::SessionEventHandler {},
-                       NativeClient::LayoutHandler { [&windows](proto::LayoutState const& received) {
-                           windows.insert(received.window);
+                       NativeClient::LayoutHandler { [&workspaces](proto::LayoutState const& received) {
+                           workspaces.insert(received.workspace);
                        } } };
 
-    loop.blockOn(
-        core::net::testing::allOf(server.run(), client.run(), driveCreateWindow(&loop, &client, &windows)));
+    loop.blockOn(core::net::testing::allOf(
+        server.run(), client.run(), driveCreateWorkspace(&loop, &client, &workspaces)));
 
-    CHECK(windows.size() == 2);                // the client saw two distinct windows' layouts
-    CHECK(host.model().workspaceCount() == 2); // the daemon really created a second window
+    CHECK(workspaces.size() == 2);             // the client saw two distinct workspaces' layouts
+    CHECK(host.model().workspaceCount() == 2); // the daemon really created a second workspace
 }
 
 TEST_CASE("RemoteScreen replaces its block table on a snapshot and stamps only what changed",
@@ -2447,19 +2449,20 @@ Task<void> detachOnLayout(IntentHarness* h)
 
 } // namespace
 
-TEST_CASE("the client states its intent and profile and learns its windows", "[vthost][attach][intent]")
+TEST_CASE("the client states its intent and profile and learns its workspaces", "[vthost][attach][intent]")
 {
     auto services = vthost::NativeSessionServices {};
     services.handshake.capabilities = thinClientCapabilities();
-    auto h = IntentHarness { std::move(services),
-                             NativeClient::HandshakeOptions {
-                                 .capabilities = thinClientCapabilities(),
-                                 .attachIntent = { .kind = proto::AttachIntentKind::Launch, .windows = {} },
-                                 .profileName = "main" },
-                             mainOnly() };
+    auto h =
+        IntentHarness { std::move(services),
+                        NativeClient::HandshakeOptions {
+                            .capabilities = thinClientCapabilities(),
+                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
+                            .profileName = "main" },
+                        mainOnly() };
     h.drive(detachOnLayout(&h));
 
-    CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
+    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
     CHECK(h.client->namesProfiles());
     CHECK(h.profiles() == std::vector<std::string> { "main" }); // the attach's first session, under it
 }
@@ -2491,7 +2494,7 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
             co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
             *delivery = client->editTab({ .session = 1, .kind = proto::TabEditKind::SetTitle, .title = "x" });
             client->createTab(0, "x");
-            client->createWindow("y");
+            client->createWorkspace("y");
             client->splitPane(1, 1, 5000, "z");
             co_await core::net::testing::waitUntil(
                 loop, [&] { return std::ranges::any_of(*seen, carries<proto::SplitPane>); });
@@ -2509,9 +2512,9 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
         auto const created = std::ranges::find_if(seen, carries<proto::CreateTab>);
         REQUIRE(created != seen.end());
         CHECK(std::get<proto::CreateTab>(created->pdu).profileName.empty());
-        auto const window = std::ranges::find_if(seen, carries<proto::NewWindow>);
-        REQUIRE(window != seen.end());
-        CHECK(std::get<proto::NewWindow>(window->pdu).profileName.empty());
+        auto const workspace = std::ranges::find_if(seen, carries<proto::NewWorkspace>);
+        REQUIRE(workspace != seen.end());
+        CHECK(std::get<proto::NewWorkspace>(workspace->pdu).profileName.empty());
         auto const split = std::ranges::find_if(seen, carries<proto::SplitPane>);
         REQUIRE(split != seen.end());
         CHECK(std::get<proto::SplitPane>(split->pdu).profileName.empty());
@@ -2531,9 +2534,9 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
                                                                   .profileName = "main" },
                                  mainOnly() };
         h.drive(detachOnLayout(&h));
-        auto const session = h.host.model().workspace(h.host.windowId())->tabAt(0)->rootPane()->session();
+        auto const session = h.host.model().workspace(h.host.workspaceId())->tabAt(0)->rootPane()->session();
         CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
-        CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
+        CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
     }
 }
 
@@ -2773,7 +2776,7 @@ TEST_CASE("a daemon's LayoutBatchEnd reaches the client's handler after the layo
                                  NativeClient::ImageHandler {},
                                  NativeClient::SessionEventHandler {},
                                  NativeClient::LayoutHandler { [&](proto::LayoutState const& layout) {
-                                     heard.push_back(std::format("layout {}", layout.window));
+                                     heard.push_back(std::format("layout {}", layout.workspace));
                                  } },
                                  NativeClient::PermissionHandler {},
                                  vthost::client::LivenessPolicy {},
@@ -2782,13 +2785,13 @@ TEST_CASE("a daemon's LayoutBatchEnd reaches the client's handler after the layo
                                  NativeClient::LayoutBatchEndHandler { [&](proto::LayoutBatchEnd const& end) {
                                      heard.push_back(std::format("end {}", end.causeSerial));
                                  } } };
-    // One push across two windows, as a daemon sharing layout-batch ends it.
+    // One push across two workspaces, as a daemon sharing layout-batch ends it.
     auto const pushing = ScriptFor { [](proto::DecodedFrame const& frame) {
         if (std::holds_alternative<proto::ClientHello>(frame.pdu))
             return Script { { std::nullopt,
                               acceptingHello(proto::CapabilitySet::of({ proto::Capability::LayoutBatch })) },
-                            { std::nullopt, proto::LayoutState { .window = 1, .tabs = {} } },
-                            { std::nullopt, proto::LayoutState { .window = 2, .tabs = {} } },
+                            { std::nullopt, proto::LayoutState { .workspace = 1, .tabs = {} } },
+                            { std::nullopt, proto::LayoutState { .workspace = 2, .tabs = {} } },
                             { std::nullopt, proto::LayoutBatchEnd { .causeSerial = 4 } } };
         return Script {};
     } };
@@ -3266,7 +3269,7 @@ TEST_CASE("against a daemon without TabEditAcks a push is shown as it came",
     split.children = { proto::WirePane { .paneId = 11, .session = 1 },
                        proto::WirePane { .paneId = 12, .session = 2 } };
     auto const layout =
-        proto::LayoutState { .window = 1,
+        proto::LayoutState { .workspace = 1,
                              .activeTab = 0,
                              .tabs = { proto::WireTab { .tabId = 1, .activePane = 11, .root = split } } };
     auto const answer = [layout](proto::DecodedFrame const& frame) -> Script {

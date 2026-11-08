@@ -530,8 +530,8 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
                }
                return SessionId { _nextSessionId++ };
            }),
-    // A handover brings its windows back with the ids they had, into a model that holds none yet.
-    _window(config.handover ? vtworkspace::WorkspaceId {} : _model.createWorkspace()->id())
+    // A handover brings its workspaces back with the ids they had, into a model that holds none yet.
+    _workspace(config.handover ? vtworkspace::WorkspaceId {} : _model.createWorkspace()->id())
 {
     // 0 is SessionId{}, the sentinel for none: a session minted with it could never be named.
     Require(config.firstSessionId != 0);
@@ -541,10 +541,10 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
         _handoverOutcome = restoreHandover(*std::move(config.handover));
         return;
     }
-    // The first window is named before anything is spawned into it: its UUID is part of every pane's
+    // The first workspace is named before anything is spawned into it: its UUID is part of every pane's
     // environment.
-    _objects.bind(_window, _objects.mint());
-    // Realized here, in the BODY: _window is the last member to construct, so this is the
+    _objects.bind(_workspace, _objects.mint());
+    // Realized here, in the BODY: _workspace is the last member to construct, so this is the
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
     // listener, so the layout is in place before a client could possibly attach. A restored workspace
     // replaces the startup layout, unless it brought nothing back.
@@ -554,10 +554,10 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     if (realized.panes > 0)
     {
         _restoreOutcome = RestoreOutcome::Realized;
-        _restoreAnnouncement = realized.windows;
+        _restoreAnnouncement = realized.workspaces;
     }
     else
-        realizeStartupLayout(_window, config.startupLayout);
+        realizeStartupLayout(_workspace, config.startupLayout);
 }
 
 SessionHost::~SessionHost()
@@ -633,9 +633,9 @@ Uuid SessionHost::tabUuidFor(SessionSpawnRequest const& request)
     return _objects.mint();
 }
 
-Uuid SessionHost::windowUuid(WorkspaceId window) const
+Uuid SessionHost::workspaceUuid(WorkspaceId workspace) const
 {
-    return _objects.uuidOf(window).value_or(Uuid {});
+    return _objects.uuidOf(workspace).value_or(Uuid {});
 }
 
 void SessionHost::reapOrphan(SessionId session)
@@ -654,7 +654,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     auto request = incoming;
     if (!request.commandOverride)
         request.commandOverride.emplace();
-    for (auto const& [name, value]: paneEnvironment(ids.window, ids.tab, ids.pane))
+    for (auto const& [name, value]: paneEnvironment(ids.workspace, ids.tab, ids.pane))
         request.commandOverride->env.insert_or_assign(name, value);
 
     auto spawn = resolveSpawn(request, id);
@@ -785,8 +785,8 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         std::move(profileName),
         origin,
         _git.services());
-    // Neither pumped nor restored yet, so the application's first look at its window already sees the host's
-    // cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.
+    // Neither pumped nor restored yet, so the application's first look at its workspace already sees the
+    // host's cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.
     pushCellPixelSize(hosted->terminal());
     return hosted;
 }
@@ -805,12 +805,12 @@ void SessionHost::installSession(std::unique_ptr<HostedSession> session)
     _sessions.emplace(id.value, std::move(session));
 }
 
-void SessionHost::realizeStartupLayout(vtworkspace::WorkspaceId window, vtworkspace::Layout const& layout)
+void SessionHost::realizeStartupLayout(vtworkspace::WorkspaceId workspace, vtworkspace::Layout const& layout)
 {
     for (auto const& tabSpec: layout.tabs)
     {
-        // Every pane of the tab names this tab and window in its environment; the tab's UUID is minted with
-        // its first pane and bound when the model announces the tab.
+        // Every pane of the tab names this tab and workspace in its environment; the tab's UUID is minted
+        // with its first pane and bound when the model announces the tab.
         auto tabUuid = std::optional<Uuid> {};
         // A pane's profile (else its tab's) is resolved in the host's profile catalog; a host without
         // one has nothing to look it up in, and warns once per such pane so a user who wrote one is not
@@ -858,12 +858,13 @@ void SessionHost::realizeStartupLayout(vtworkspace::WorkspaceId window, vtworksp
                 tabUuid = _objects.mint();
                 _stagedTab = StagedTab { .uuid = *tabUuid, .label = {} };
             }
-            return seedSession(SessionSpawnRequest { .commandOverride = std::move(commandOverride),
-                                                     .profileName = std::move(profile) },
-                               SpawnIds { .window = windowUuid(window), .tab = *tabUuid, .pane = pane })
+            return seedSession(
+                       SessionSpawnRequest { .commandOverride = std::move(commandOverride),
+                                             .profileName = std::move(profile) },
+                       SpawnIds { .workspace = workspaceUuid(workspace), .tab = *tabUuid, .pane = pane })
                 .has_value();
         };
-        std::ignore = vtworkspace::realizeLayoutTab(_model, window, tabSpec, seeder);
+        std::ignore = vtworkspace::realizeLayoutTab(_model, workspace, tabSpec, seeder);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         _stagedTab.reset();        // bound by tabAdded, unless the tab was never created
     }
@@ -950,39 +951,40 @@ Uuid SessionHost::restoredUuid(ObjectKind kind, std::optional<ObjectIdentityReco
 SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
 {
     auto realized = RealizedRestore {};
-    for (auto const& window: restore.snapshot.windows)
+    for (auto const& workspace: restore.snapshot.workspaces)
     {
-        // The first window that brings anything back is the host's own, which never stays empty while a
+        // The first workspace that brings anything back is the host's own, which never stays empty while a
         // later one fills.
-        auto const id = realized.panes == 0 ? _window : _model.createWorkspace()->id();
-        // The host's own window takes the identity of each one that tries to fill it, the last such one
+        auto const id = realized.panes == 0 ? _workspace : _model.createWorkspace()->id();
+        // The host's own workspace takes the identity of each one that tries to fill it, the last such one
         // keeping it.
-        auto const uuid = restoredUuid(ObjectKind::Workspace, window.identity);
+        auto const uuid = restoredUuid(ObjectKind::Workspace, workspace.identity);
         _objects.bind(id, uuid);
         _objects.setLabel(ObjectRef { .kind = ObjectKind::Workspace, .uuid = uuid },
-                          labelOf(window.identity));
-        auto const inWindow = realizeRestoredWindow(id, window, restore);
-        // A window none of whose panes came back is not left behind empty.
-        if (inWindow.panes == 0 && id != _window)
+                          labelOf(workspace.identity));
+        auto const inWorkspace = realizeRestoredWorkspace(id, workspace, restore);
+        // A workspace none of whose panes came back is not left behind empty.
+        if (inWorkspace.panes == 0 && id != _workspace)
         {
             _objects.forget(id);
             _model.removeWorkspace(id);
         }
-        realized.panes += inWindow.panes;
-        if (inWindow.tabs > 0)
-            realized.windows.push_back(RestoredWindow { .window = id.value, .tabs = inWindow.tabs });
+        realized.panes += inWorkspace.panes;
+        if (inWorkspace.tabs > 0)
+            realized.workspaces.push_back(
+                RestoredWorkspace { .workspace = id.value, .tabs = inWorkspace.tabs });
     }
-    sessionLog()("restore: {} pane(s) of a snapshot of {} window(s) came back",
+    sessionLog()("restore: {} pane(s) of a snapshot of {} workspace(s) came back",
                  realized.panes,
-                 restore.snapshot.windows.size());
+                 restore.snapshot.workspaces.size());
     return realized;
 }
 
-SessionHost::RealizedWindow SessionHost::realizeRestoredWindow(WorkspaceId window,
-                                                               WindowSnapshot const& snapshot,
-                                                               WorkspaceRestore const& restore)
+SessionHost::RealizedWorkspace SessionHost::realizeRestoredWorkspace(WorkspaceId workspace,
+                                                                     WorkspaceLayoutSnapshot const& snapshot,
+                                                                     WorkspaceRestore const& restore)
 {
-    auto realized = RealizedWindow {};
+    auto realized = RealizedWorkspace {};
     auto tabs = std::vector<Tab*> {};
     for (auto const& tabSnapshot: snapshot.tabs)
     {
@@ -1025,13 +1027,14 @@ SessionHost::RealizedWindow SessionHost::realizeRestoredWindow(WorkspaceId windo
                 _stagedTab = StagedTab { .uuid = *tabUuid, .label = labelOf(tabSnapshot.identity) };
             }
             auto const seeded =
-                seedSession(request,
-                            SpawnIds { .window = windowUuid(window), .tab = *tabUuid, .pane = paneUuid })
+                seedSession(
+                    request,
+                    SpawnIds { .workspace = workspaceUuid(workspace), .tab = *tabUuid, .pane = paneUuid })
                     .has_value();
             realized.panes += seeded ? 1 : 0;
             return seeded;
         };
-        auto* const tab = vtworkspace::realizeLayoutTab(_model, window, restored->layout, seeder);
+        auto* const tab = vtworkspace::realizeLayoutTab(_model, workspace, restored->layout, seeder);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
         _stagedTab.reset();        // bound by tabAdded, unless the tab was never created
         if (tab == nullptr)
@@ -1045,7 +1048,7 @@ SessionHost::RealizedWindow SessionHost::realizeRestoredWindow(WorkspaceId windo
             _model.toggleActivePaneZoom(tab->id());
     }
     if (snapshot.activeTab < tabs.size())
-        _model.activateTab(window, tabs[snapshot.activeTab]->id());
+        _model.activateTab(workspace, tabs[snapshot.activeTab]->id());
     return realized;
 }
 
@@ -1054,12 +1057,13 @@ std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
 {
     auto const restored = std::exchange(_restoreAnnouncement, {});
     auto counts = RestoredCounts {};
-    for (auto const& entry: restored | std::views::filter([&](auto const& w) { return follows(w.window); }))
+    for (auto const& entry:
+         restored | std::views::filter([&](auto const& w) { return follows(w.workspace); }))
     {
-        ++counts.windows;
+        ++counts.workspaces;
         counts.tabs += entry.tabs;
     }
-    return counts.windows > 0 ? std::optional { counts } : std::nullopt;
+    return counts.workspaces > 0 ? std::optional { counts } : std::nullopt;
 }
 
 std::vector<SessionId> SessionHost::takeUnrestoredScreens(std::function<bool(SessionId)> const& follows)
@@ -1176,26 +1180,26 @@ void SessionHost::initialInputFallbackExpired(void* pending)
 
 Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<SessionId> beside)
 {
-    // The window the request names, resolved through the session hosting it — exactly as
-    // splitActivePane's caller resolves one. Falling back to `_window` unconditionally is what put
-    // every client's "new tab" into the daemon's FIRST window, however many it hosts.
-    auto const window = [&] {
+    // The workspace the request names, resolved through the session hosting it — exactly as
+    // splitActivePane's caller resolves one. Falling back to `_workspace` unconditionally is what put
+    // every client's "new tab" into the daemon's FIRST workspace, however many it hosts.
+    auto const workspace = [&] {
         if (!beside)
-            return _window;
+            return _workspace;
         auto const [owner, tab, leaf] = _model.findSessionLeaf(*beside);
-        return owner != nullptr ? owner->id() : _window;
+        return owner != nullptr ? owner->id() : _workspace;
     }();
 
     auto const pane = paneUuidFor(request);
     auto const tabUuid = tabUuidFor(request);
-    auto const seeded =
-        seedSession(request, SpawnIds { .window = windowUuid(window), .tab = tabUuid, .pane = pane });
+    auto const seeded = seedSession(
+        request, SpawnIds { .workspace = workspaceUuid(workspace), .tab = tabUuid, .pane = pane });
     if (!seeded)
         return nullptr;
 
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
-    auto* tab = _model.createTab(window);
+    auto* tab = _model.createTab(workspace);
     _stagedTab.reset();
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (tab == nullptr)
@@ -1208,75 +1212,79 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
     return tab;
 }
 
-vtworkspace::Workspace* SessionHost::createWindow(SessionSpawnRequest const& request,
-                                                  SessionStreamEvents const* creator)
+vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& request,
+                                                     SessionStreamEvents const* creator)
 {
     auto const pane = paneUuidFor(request);
     auto const tabUuid = tabUuidFor(request);
-    auto const newWindow =
-        request.presetIds && request.presetIds->window ? *request.presetIds->window : _objects.mint();
-    auto const seeded = seedSession(request, SpawnIds { .window = newWindow, .tab = tabUuid, .pane = pane });
+    auto const newWorkspace =
+        request.presetIds && request.presetIds->workspace ? *request.presetIds->workspace : _objects.mint();
+    auto const seeded =
+        seedSession(request, SpawnIds { .workspace = newWorkspace, .tab = tabUuid, .pane = pane });
     if (!seeded)
         return nullptr;
 
-    auto* window = &createEmptyWindow(creator, newWindow);
+    auto* workspace = &createEmptyWorkspace(creator, newWorkspace);
     if (request.presetIds)
-        _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWindow }, request.presetIds->windowLabel);
+        _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace },
+                          request.presetIds->workspaceLabel);
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
-    auto* tab = _model.createTab(window->id());
+    auto* tab = _model.createTab(workspace->id());
     _stagedTab.reset();
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (tab == nullptr)
     {
-        // The model refused the tab: drop the orphaned session and the empty window.
-        errorLog()("model refused the first tab of window {}; reaping orphaned session {}",
-                   window->id().value,
+        // The model refused the tab: drop the orphaned session and the empty workspace.
+        errorLog()("model refused the first tab of workspace {}; reaping orphaned session {}",
+                   workspace->id().value,
                    seeded->value);
         reapOrphan(*seeded);
-        discardWindow(window->id());
+        discardWorkspace(workspace->id());
         return nullptr;
     }
-    return window;
+    return workspace;
 }
 
-vtworkspace::Workspace& SessionHost::createEmptyWindow(SessionStreamEvents const* creator)
+vtworkspace::Workspace& SessionHost::createEmptyWorkspace(SessionStreamEvents const* creator)
 {
-    return createEmptyWindow(creator, _objects.mint());
+    return createEmptyWorkspace(creator, _objects.mint());
 }
 
-vtworkspace::Workspace& SessionHost::createEmptyWindow(SessionStreamEvents const* creator,
-                                                       vtcontrol::Uuid name)
+vtworkspace::Workspace& SessionHost::createEmptyWorkspace(SessionStreamEvents const* creator,
+                                                          vtcontrol::Uuid name)
 {
-    auto* window = _model.createWorkspace();
-    _objects.bind(window->id(), name);
-    // Claimed before any event names the window -- every client re-decides what it follows on its first
-    // tab -- so the primary viewer does not take an unclaimed window that is this creator's own.
+    auto* workspace = _model.createWorkspace();
+    _objects.bind(workspace->id(), name);
+    // Claimed before any event names the workspace -- every client re-decides what it follows on its first
+    // tab -- so the primary viewer does not take an unclaimed workspace that is this creator's own.
     if (creator != nullptr)
-        _windowCreators.insert_or_assign(window->id().value, creator);
-    return *window;
+        _workspaceCreators.insert_or_assign(workspace->id().value, creator);
+    return *workspace;
 }
 
-void SessionHost::discardWindow(WorkspaceId window)
+void SessionHost::discardWorkspace(WorkspaceId workspace)
 {
-    auto const* found = _model.workspace(window);
+    auto const* found = _model.workspace(workspace);
     if (found == nullptr || found->tabCount() != 0)
         return;
-    _windowCreators.erase(window.value);
-    _objects.forget(window);
-    _model.removeWorkspace(window);
-    // The host's own window is what a creation naming no window lands in: another takes its place. A move
-    // empties a window only by filling another, so one is left.
-    if (window == _window && _model.workspaceCount() > 0)
-        _window = _model.workspaceAt(0)->id();
+    _workspaceCreators.erase(workspace.value);
+    _objects.forget(workspace);
+    _model.removeWorkspace(workspace);
+    // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
+    // move empties a workspace only by filling another, so one is left.
+    if (workspace == _workspace && _model.workspaceCount() > 0)
+        _workspace = _model.workspaceAt(0)->id();
 }
 
-WindowClaim SessionHost::windowClaim(WorkspaceId window, SessionStreamEvents const* client) const noexcept
+WorkspaceClaim SessionHost::workspaceClaim(WorkspaceId workspace,
+                                           SessionStreamEvents const* client) const noexcept
 {
-    auto const creator = _windowCreators.find(window.value);
-    if (creator == _windowCreators.end())
-        return WindowClaim::Unclaimed;
-    return creator->second != nullptr && creator->second == client ? WindowClaim::Yours : WindowClaim::Others;
+    auto const creator = _workspaceCreators.find(workspace.value);
+    if (creator == _workspaceCreators.end())
+        return WorkspaceClaim::Unclaimed;
+    return creator->second != nullptr && creator->second == client ? WorkspaceClaim::Yours
+                                                                   : WorkspaceClaim::Others;
 }
 
 void SessionHost::noteClientAttached(SessionStreamEvents const* client)
@@ -1291,13 +1299,13 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
         return;
     if (_primaryViewer == client)
         _primaryViewer = nullptr;
-    // Still claimed, by nobody present: a window a GUI left behind waits for the next launch that takes
-    // every window, rather than appearing in another GUI. The address is forgotten, so a connection
+    // Still claimed, by nobody present: a workspace a GUI left behind waits for the next launch that takes
+    // every workspace, rather than appearing in another GUI. The address is forgotten, so a connection
     // constructed where this one was is not taken for its creator. Windows gone from the model go too.
-    std::erase_if(_windowCreators, [this](auto const& entry) {
+    std::erase_if(_workspaceCreators, [this](auto const& entry) {
         return _model.workspace(WorkspaceId { entry.first }) == nullptr;
     });
-    for (auto& [window, creator]: _windowCreators)
+    for (auto& [workspace, creator]: _workspaceCreators)
         if (creator == client)
             creator = nullptr;
 }
@@ -1315,7 +1323,7 @@ void SessionHost::splitActivePane(TabId tab,
 {
     auto const pane = paneUuidFor(request);
     auto const seeded = seedSession(request,
-                                    SpawnIds { .window = windowUuid(_model.workspaceOfTab(tab)),
+                                    SpawnIds { .workspace = workspaceUuid(_model.workspaceOfTab(tab)),
                                                .tab = _objects.uuidOf(tab).value_or(Uuid {}),
                                                .pane = pane });
     if (!seeded)
@@ -1648,7 +1656,7 @@ SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& bac
 
     // Outside the guard above: an observer resyncs the session, which takes the very lock this
     // function was holding. Announced unconditionally rather than by the requesting connection —
-    // every attached client renders this grid, not only the one whose window moved.
+    // every attached client renders this grid, not only the one whose workspace moved.
     fanOutStream(&SessionStreamEvents::sessionResized, session);
     return SizeChange::Applied;
 }
@@ -1659,8 +1667,8 @@ SizeChange SessionHost::reprojectLayouts()
     // what the earlier ones reported.
     auto moved = false;
 
-    // Every window's panes track the (daemon-wide) client area — a client resize
-    // must reach the PTYs of secondary windows too, or their apps keep rendering
+    // Every workspace's panes track the (daemon-wide) client area — a client resize
+    // must reach the PTYs of secondary workspaces too, or their apps keep rendering
     // at stale dimensions while the layout advertises the new geometry.
     _model.forEachTab([&](vtworkspace::Workspace&, vtworkspace::Tab& tab) {
         moved |= reprojectTab(tab) == SizeChange::Applied;
@@ -2117,16 +2125,16 @@ void SessionHost::endSession(SessionId session, SessionEnd cause)
     if (it == _sessions.end())
         return;
 
-    // Told first, while the pane still has a tab and a window to name.
+    // Told first, while the pane still has a tab and a workspace to name.
     for (auto* observer: _streamSubscribers)
         observer->sessionClosing(session);
 
     // Prune the pane from the model FIRST (prune-then-terminate): closing the
     // pane may fire paneClosed or tabClosed to subscribers while the session
     // still exists; only then destroy the terminal. The session may live in ANY
-    // window (a client-created secondary window included).
-    if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
-        _model.closePane(window->id(), tab->id(), leaf->id());
+    // workspace (a client-created secondary workspace included).
+    if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
+        _model.closePane(workspace->id(), tab->id(), leaf->id());
 
     auto const hadExtensions = it->second->hasExtensions();
     eraseSession(session.value);
@@ -2455,7 +2463,7 @@ void SessionHost::bindUnnamed(TabId tab)
         _objects.bind(tab, _objects.mint());
 }
 
-void SessionHost::tabAdded(WorkspaceId window, TabId tab, int index)
+void SessionHost::tabAdded(WorkspaceId workspace, TabId tab, int index)
 {
     // Named before the fan-out, so an observer told of the tab can already look its UUID up.
     if (_stagedTab)
@@ -2464,24 +2472,24 @@ void SessionHost::tabAdded(WorkspaceId window, TabId tab, int index)
         _objects.setLabel(ObjectRef { ObjectKind::Tab, _stagedTab->uuid }, _stagedTab->label);
         _stagedTab.reset();
     }
-    // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every window
-    // was, a move's own included (MoveWindowHooks).
+    // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every
+    // workspace was, a move's own included (MoveWorkspaceHooks).
     bindUnnamed(tab);
     // Re-fitted first: the pane may come from a split and be half the size its new tab gives it.
     reprojectTab(tab);
-    fanOut(&vtworkspace::ModelEvents::tabAdded, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::tabAdded, workspace, tab, index);
 }
 
-void SessionHost::tabClosed(WorkspaceId window, TabId tab, int index)
+void SessionHost::tabClosed(WorkspaceId workspace, TabId tab, int index)
 {
-    fanOut(&vtworkspace::ModelEvents::tabClosed, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::tabClosed, workspace, tab, index);
     // Forgotten after the fan-out, so an observer told of the close can still name the tab.
     _objects.forget(tab);
 }
 
-void SessionHost::tabMoved(WorkspaceId window, TabId tab, int fromIndex, int toIndex)
+void SessionHost::tabMoved(WorkspaceId workspace, TabId tab, int fromIndex, int toIndex)
 {
-    fanOut(&vtworkspace::ModelEvents::tabMoved, window, tab, fromIndex, toIndex);
+    fanOut(&vtworkspace::ModelEvents::tabMoved, workspace, tab, fromIndex, toIndex);
 }
 
 void SessionHost::tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, WorkspaceId to, int toIndex)
@@ -2491,14 +2499,14 @@ void SessionHost::tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, 
 
 void SessionHost::tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex, WorkspaceId to, int toIndex)
 {
-    // The tab lands in a window of another size: its shells are resized before observers advertise it.
+    // The tab lands in a workspace of another size: its shells are resized before observers advertise it.
     reprojectTab(tab);
     fanOut(&vtworkspace::ModelEvents::tabMovedToWorkspace, from, tab, fromIndex, to, toIndex);
 }
 
-void SessionHost::activeTabChanged(WorkspaceId window, TabId tab, int index)
+void SessionHost::activeTabChanged(WorkspaceId workspace, TabId tab, int index)
 {
-    fanOut(&vtworkspace::ModelEvents::activeTabChanged, window, tab, index);
+    fanOut(&vtworkspace::ModelEvents::activeTabChanged, workspace, tab, index);
 }
 
 void SessionHost::paneSplit(TabId tab, PaneId splitNode, PaneId newLeaf)

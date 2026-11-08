@@ -349,8 +349,8 @@ void ScreenMirror::writeRow(vtbackend::Screen& page,
 {
     auto const offset = vtbackend::LineOffset::cast_from(target);
     auto const* row = rowOrNull(screen, stableId);
-    // A page row is shifted left by the origin, so the window into a wider grid shows the cursor's region; a
-    // row of the host's history is not, as the history above the page is where the user reads back from.
+    // A page row is shifted left by the origin, so the workspace into a wider grid shows the cursor's region;
+    // a row of the host's history is not, as the history above the page is where the user reads back from.
     auto const firstColumn = stableId < screen.viewportBase ? vtbackend::ColumnOffset(0) : _origin.column;
 
     if (offset < vtbackend::LineOffset(0))
@@ -469,7 +469,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
                floorOutranScroll ? ReplayCause::HistoryCleared : ReplayCause::Reset);
         return;
     }
-    // A window into a larger grid that has to move with the cursor rewrites the whole page: every row it
+    // A workspace into a larger grid that has to move with the cursor rewrites the whole page: every row it
     // shows is another one now, and shifted by another amount.
     auto const origin = [&] {
         auto const guard = std::lock_guard { *_terminal };
@@ -512,7 +512,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
         //    logical line's head, which for a wrapped prompt has scrolled off the page). Bounding
         //    this at the old viewport top dropped those silently, so semantic-block selection and
         //    prompt navigation over such a command answered from stale marks in attach mode while
-        //    the same session in a local window behaved correctly.
+        //    the same session in a local workspace behaved correctly.
         //
         //    `_alignedFloor` is how far up the arithmetic offset `stableId - oldBase` is still the
         //    row the id names; below it the mirror's history no longer corresponds to the server's
@@ -526,7 +526,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
         //
         //    BOUNDED, because the iteration count is peer-announced: `stableViewportBase` is a wire
         //    field, and each row costs a Screen::scrollUp plus a writeRow — on the reactor thread,
-        //    under the terminal lock — so a base naming a far-away row would freeze the window for
+        //    under the terminal lock — so a base naming a far-away row would freeze the workspace for
         //    as long as the arithmetic says. The bound loses nothing: a row is skipped only when it
         //    is BOTH older than the deepest row this terminal will still be holding when the loop
         //    ends (evicted by the rows behind it) AND unnamed by the server, which means it would
@@ -623,7 +623,7 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         if (_terminal->isAlternateScreen() != wantAlternate)
             _terminal->setMode(vtbackend::DECMode::ExtendedAltScreen, wantAlternate);
         _screenType = screen.screenType;
-        // With the page picked, as the page's size is what the window into the host's grid is cut to.
+        // With the page picked, as the page's size is what the workspace into the host's grid is cut to.
         _origin = originFor(screen);
 
         auto& page = activePage();
@@ -684,14 +684,14 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
                 else
                     scrollInRow(page, screen, id);
             };
-            // The host's history, then the window of its page this mirror shows: the page rows above the
-            // window are on the host's page, not in its history, and are not copied into this one.
+            // The host's history, then the workspace of its page this mirror shows: the page rows above the
+            // workspace are on the host's page, not in its history, and are not copied into this one.
             for (auto const id: std::views::iota(firstId, screen.viewportBase))
                 stream(id);
             for (auto const id: std::views::iota(top, top + lines))
                 stream(id);
             // Everything from firstId down was just streamed through the page, so the whole of it
-            // sits at its arithmetic offset -- unless the window skipped the rows above it, which moves
+            // sits at its arithmetic offset -- unless the workspace skipped the rows above it, which moves
             // every history row that many lines off it.
             _alignedFloor = _origin.line == vtbackend::LineOffset(0) ? firstId : top;
         }
@@ -1058,7 +1058,7 @@ void ScreenMirror::finish(RemoteScreen const& screen)
     // numbers are the server's, whatever its own floor saw.
     auto& grid = activePage().grid();
     grid.adoptEvictedRowCount(mirroredEvictedRowCount(screen, pageTop(), grid.addressableTop()));
-    // Where the host's cursor is in the window this mirror shows -- inside it, as viewportOrigin keeps it.
+    // Where the host's cursor is in the workspace this mirror shows -- inside it, as viewportOrigin keeps it.
     activePage().moveCursorTo(vtbackend::LineOffset::cast_from(screen.cursorLine) - _origin.line,
                               vtbackend::ColumnOffset::cast_from(screen.cursorColumn) - _origin.column);
     // And the application hears of a click on the cell it drew there, not on this terminal's own cell.

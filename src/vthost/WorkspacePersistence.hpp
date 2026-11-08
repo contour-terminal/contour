@@ -182,9 +182,9 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
     void sessionEnded(vtworkspace::SessionId session, SessionEnd cause) override;
 
     // vtworkspace::ModelEvents: every change is a layout change.
-    void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
-    void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
-    void tabMoved(vtworkspace::WorkspaceId window,
+    void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
+    void tabMoved(vtworkspace::WorkspaceId workspace,
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
@@ -193,7 +193,7 @@ class WorkspacePersistence final: public vtworkspace::ModelEvents, public Sessio
                              int fromIndex,
                              vtworkspace::WorkspaceId to,
                              int toIndex) override;
-    void activeTabChanged(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void activeTabChanged(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
                    vtworkspace::PaneId newLeaf) override;

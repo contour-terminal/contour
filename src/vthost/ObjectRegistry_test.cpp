@@ -31,15 +31,15 @@ TEST_CASE("ObjectRegistry mints distinct, increasing uuids", "[vthost][ids]")
 TEST_CASE("ObjectRegistry maps ids to uuids and back, per kind", "[vthost][ids]")
 {
     auto registry = makeRegistry();
-    auto const window = registry.mint();
+    auto const workspace = registry.mint();
     auto const tab = registry.mint();
     auto const pane = registry.mint();
-    registry.bind(WorkspaceId { 1 }, window);
+    registry.bind(WorkspaceId { 1 }, workspace);
     registry.bind(TabId { 1 }, tab);
     registry.bind(SessionId { 1 }, pane);
 
     // The same small integer in three kinds names three objects.
-    CHECK(registry.uuidOf(WorkspaceId { 1 }) == window);
+    CHECK(registry.uuidOf(WorkspaceId { 1 }) == workspace);
     CHECK(registry.uuidOf(TabId { 1 }) == tab);
     CHECK(registry.uuidOf(SessionId { 1 }) == pane);
     CHECK_FALSE(registry.uuidOf(SessionId { 2 }));
@@ -48,7 +48,7 @@ TEST_CASE("ObjectRegistry maps ids to uuids and back, per kind", "[vthost][ids]"
     REQUIRE(found);
     CHECK(std::get<SessionId>(*found) == SessionId { 1 });
     CHECK(std::get<TabId>(*registry.find(ObjectRef { ObjectKind::Tab, tab })) == TabId { 1 });
-    CHECK(std::get<WorkspaceId>(*registry.find(ObjectRef { ObjectKind::Workspace, window }))
+    CHECK(std::get<WorkspaceId>(*registry.find(ObjectRef { ObjectKind::Workspace, workspace }))
           == WorkspaceId { 1 });
 
     // A uuid of one kind is not found under another.

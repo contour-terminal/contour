@@ -151,7 +151,7 @@ struct DaemonConfig
     /// selects any of them, and `--exit-with-last-session` is the alias for `ExitWhenEmpty`.
     DaemonLifecycle lifecycle = DaemonLifecycle::Persistent;
     /// How the authoritative client area is resolved when several attached clients report
-    /// different ones. `Latest` by default, matching tmux's `window-size` — the window you just
+    /// different ones. `Latest` by default, matching tmux's `window-size` — the workspace you just
     /// resized is the one you are looking at.
     ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
     /// The cell size in pixels images are laid out on before any client has reported one; never

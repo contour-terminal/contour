@@ -111,8 +111,8 @@ Task<void> scenario(LoopbackHarness* h)
     CHECK(listing.front().starts_with("0: @"));
 
     // 5. sendKeys lands in the pane's PTY, quoted through send-keys -l.
-    auto const paneId = h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->id().value;
-    auto const session = h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->session();
+    auto const paneId = h->host.model().workspace(h->host.workspaceId())->activeTab()->rootPane()->id().value;
+    auto const session = h->host.model().workspace(h->host.workspaceId())->activeTab()->rootPane()->session();
     h->gateway->sendKeys(paneId, "echo 'hi'");
     auto& tapped = dynamic_cast<vthost::TappingPty&>(h->host.terminal(session)->device());
     auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
@@ -181,7 +181,7 @@ TEST_CASE("the gateway drives our control-mode server end to end", "[vthost][gat
     h.loop.blockOn(driveLoopback(&h));
 
     CHECK(h.events.sawExit);
-    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == 1);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == 1);
 }
 
 namespace

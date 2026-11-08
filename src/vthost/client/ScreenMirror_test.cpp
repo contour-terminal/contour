@@ -434,7 +434,7 @@ vtbackend::CellLocation cellAt(int line, int column)
 TEST_CASE("a mirror smaller than the remote grid shows the cursor's region", "[vthost][mirror][viewport]")
 {
     // The host's grid is 40x20 (another client's size); this one shows 10x5 of it. The cursor at the
-    // bottom-right corner puts the window at the grid's last 5 rows and last 10 columns.
+    // bottom-right corner puts the workspace at the grid's last 5 rows and last 10 columns.
     auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
                                                .columns = vtbackend::ColumnCount(10) } };
     auto screen = vthost::client::RemoteScreen {};
@@ -445,7 +445,7 @@ TEST_CASE("a mirror smaller than the remote grid shows the cursor's region", "[v
     CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
     CHECK(page.cursor().position == cellAt(4, 9));
     CHECK(bare.terminal->reportedCellOrigin() == cellAt(15, 30));
-    // Nothing of the host's page above the window went into history.
+    // Nothing of the host's page above the workspace went into history.
     CHECK(bare.historyLines() == 0);
 }
 
@@ -478,7 +478,7 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
     CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
     CHECK_FALSE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
     CHECK(page.cursor().position == cellAt(4, 9));
-    // The pan is the window moving, not the program's output: a repaint, not news.
+    // The pan is the workspace moving, not the program's output: a repaint, not news.
     CHECK(bare.events.screenReplays == 2);
     CHECK(bare.events.screenUpdates == 0);
 }
@@ -1245,7 +1245,7 @@ TEST_CASE("a peer-announced viewport jump cannot spin the mirror", "[vthost][mir
 {
     // `stableViewportBase` is a wire field, and every row of the announced advance costs a
     // Screen::scrollUp plus a writeRow — on the reactor thread, under the terminal lock. Unbounded,
-    // a base naming a far-away row froze the attached window for as long as the arithmetic said.
+    // a base naming a far-away row froze the attached workspace for as long as the arithmetic said.
     // The bound loses nothing: the skipped rows are neither named by the server (so they would be
     // written as blanks) nor still held by this terminal when the loop ends.
     auto bare = BareMirror { vtbackend::LineCount(100) };
@@ -1758,7 +1758,7 @@ TEST_CASE("a resize keeps scrollback the server can no longer name", "[vthost][m
 {
     // The resize case of the same bug, and the one that needed a rule of its own. A resize makes the
     // server reflow, which destroys its row identity and bumps the generation — and "the generation
-    // changed" used to mean "discard local scrollback". So resizing the window truncated the user's
+    // changed" used to mean "discard local scrollback". So resizing the workspace truncated the user's
     // history to the daemon's depth, every time.
     //
     // It is sound to keep it precisely because this terminal reflowed the very same rows at the very
@@ -2784,13 +2784,13 @@ TEST_CASE("ScreenMirror.extension.applied", "[vthost][mirror][extensions]")
         // Nothing takes the row over any more: the mirror's own template is back.
         hosting->sessions.front()->fake.takeOver(std::nullopt);
         auto& server = *h->host.terminal(
-            h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->session());
+            h->host.model().workspace(h->host.workspaceId())->activeTab()->rootPane()->session());
         {
             auto const guard = std::lock_guard { server };
             server.statusLineExtensionsReplaced();
         }
         h->server->sessionScreenUpdated(
-            h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->session());
+            h->host.model().workspace(h->host.workspaceId())->activeTab()->rootPane()->session());
         co_await waitUntil(&h->loop, [&] { return indicatorText() != "NEXT"; });
         CHECK(indicatorText() != "NEXT");
         CHECK_FALSE(indicatorText().empty());
@@ -3002,7 +3002,7 @@ std::function<bool()> mirrorShows(MirrorHarness* h, std::string needle)
 /// Writes @p bytes, then resizes BOTH ends and records the gaps once they settle.
 ///
 /// This is the case the whole design rests on. Reflow runs twice — once on the daemon's grid, once
-/// on the client's — and nothing synchronizes them: the client reflows because its window changed,
+/// on the client's — and nothing synchronizes them: the client reflows because its workspace changed,
 /// the daemon because the client told it the new area. They agree only if both grids were faithful
 /// copies to begin with, wrap flags included, since reflow is deterministic in
 /// (content, flags, old size, new size). That is why this probe exists rather than an argument.
@@ -3572,7 +3572,7 @@ TEST_CASE("a trailing run equal to a flag-carrying fill is still trimmed", "[vth
 // reach the mirror's own history. Bounding the incremental path at the old viewport top dropped
 // those rows silently — they were stored in RemoteScreen::rows and never written anywhere — so
 // prompt navigation and semantic-block selection answered from stale marks in attach mode while the
-// same session in a local window behaved correctly.
+// same session in a local workspace behaved correctly.
 TEST_CASE("an in-place scrollback change reaches the mirror's history", "[vthost][mirror]")
 {
     auto bare = BareMirror { vtbackend::LineCount(100) };

@@ -90,7 +90,7 @@ std::string renderAgentSkill(std::string_view version)
     line();
     line("- `$CONTOUR_PANE`: your own pane, `pane:<uuid>`. The default target of every verb.");
     line("- `$CONTOUR_TAB`: your tab.");
-    line("- `$CONTOUR_WINDOW`: your window.");
+    line("- `$CONTOUR_WORKSPACE`: your workspace.");
     line("- `$CONTOUR_DAEMON`: the daemon's socket.");
     line();
     line("## Targets");

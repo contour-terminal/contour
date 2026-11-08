@@ -9,8 +9,8 @@
 /// ```
 /// File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
 /// Magic    := the 8 bytes "CTRSNAP\n"
-/// Body     := TakenAt:svarint(unix seconds) WindowCount:varint Window{WindowCount}
-/// Window   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+/// Body     := TakenAt:svarint(unix seconds) WorkspaceCount:varint Workspace{WorkspaceCount}
+/// Workspace   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
 /// Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
 /// Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
 /// Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?
@@ -64,8 +64,8 @@ enum class SnapshotError : std::uint8_t
 inline constexpr std::uint64_t SnapshotFormatVersion = 1;
 /// The largest snapshot file written or accepted.
 inline constexpr std::size_t MaxSnapshotFileBytes = std::size_t { 64 } * 1024 * 1024;
-inline constexpr std::size_t MaxSnapshotWindows = 64;
-inline constexpr std::size_t MaxTabsPerWindow = 512;
+inline constexpr std::size_t MaxSnapshotWorkspaces = 64;
+inline constexpr std::size_t MaxTabsPerWorkspace = 512;
 inline constexpr std::size_t MaxLeavesPerTab = 256;
 /// The deepest nesting of splits along one path.
 inline constexpr std::size_t MaxPaneDepth = 32;

@@ -51,7 +51,7 @@ struct WireLayout
 
 /// Converts the daemon's whole layout into a realizable `vtworkspace::Layout` (one
 /// `LayoutTab` per wire tab) and records each leaf's remote session.
-/// @param state The daemon's window layout.
+/// @param state The daemon's workspace layout.
 /// @return The converted layout plus its leaf → remote-session map.
 [[nodiscard]] WireLayout wireToLayout(proto::LayoutState const& state);
 
@@ -80,14 +80,14 @@ using LeafCellSize = std::function<std::optional<vtpty::PageSize>(uint64_t sessi
 [[nodiscard]] std::optional<vtpty::PageSize> composeClientArea(proto::WirePane const& root,
                                                                LeafCellSize const& leafSize);
 
-/// Picks WHICH tab @ref composeClientArea is applied to, across every window a client mirrors.
+/// Picks WHICH tab @ref composeClientArea is applied to, across every workspace a client mirrors.
 ///
 /// The wire carries one client area per CLIENT (`proto::ResizeRequest`), while a client may mirror
-/// several daemon windows — so one tab has to speak for all of them. The anchor names the session
+/// several daemon workspaces — so one tab has to speak for all of them. The anchor names the session
 /// whose pane just resized, and the tab hosting it is the one whose extent actually changed; any
 /// other tab would report an area no one asked about. When the anchor resolves to nothing — no pane
 /// has reported yet, or the anchoring pane has since been unbound — the first tab that composes
-/// stands in, which is the right answer for the single-window case (every tab of a window fills the
+/// stands in, which is the right answer for the single-workspace case (every tab of a workspace fills the
 /// same content area) and a stable guess otherwise.
 ///
 /// @param roots     Every mirrored tab's wire pane tree, in a deterministic order.
@@ -122,7 +122,7 @@ template <std::ranges::input_range Roots>
 
 /// How the daemon presents @p tab.
 /// @param tab The daemon's tab.
-/// @param activity Whether it is its window's active tab (proto::LayoutState::activeTab names it).
+/// @param activity Whether it is its workspace's active tab (proto::LayoutState::activeTab names it).
 /// @return The sessions of its active and zoomed panes -- the leaves those pane ids name, 0 where none
 ///         does -- its title (none when empty) and its colour (none when `hasColor` is 0).
 [[nodiscard]] TabPresentation presentationOf(proto::WireTab const& tab, TabActivity activity);

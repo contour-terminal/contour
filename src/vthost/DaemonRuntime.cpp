@@ -28,7 +28,7 @@ namespace
         {
             case proto::StopReason::User: return ShutdownCause::StopRequested;
             case proto::StopReason::UpgradeRestart: return ShutdownCause::UpgradeRestart;
-            case proto::StopReason::UserKeepingWorkspace: return ShutdownCause::StopRequestedKeepingWorkspace;
+            case proto::StopReason::UserKeepingWorkspaces: return ShutdownCause::StopRequestedKeepingWorkspace;
         }
         return ShutdownCause::StopRequested;
     }

@@ -357,8 +357,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                     _daemonInstance = _client->daemonInstance();
                     // Asked for windows the daemon does not have, a first attach would wait out its budget
                     // for a session that never comes: it ends now, saying which.
-                    missingWindows = _intent.kind == vthost::proto::AttachIntentKind::Windows
-                                     && _client->followedWindows().empty();
+                    missingWindows = _intent.kind == vthost::proto::AttachIntentKind::Workspaces
+                                     && _client->followedWorkspaces().empty();
                 }
                 ++_acceptedConnections;
                 _inputConnection = _acceptedConnections;
@@ -404,11 +404,11 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     }
     _connected.notify_all();
     if (missingWindows)
-        failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.windows)));
+        failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.workspaces)));
     // After the lock is released, and ahead of the layout that follows the hello, so the GUI holds the
     // summary by the time it realizes the windows it is for.
     if (restored)
-        emit workspaceRestored(restored->windows, restored->tabs);
+        emit workspaceRestored(restored->workspaces, restored->tabs);
     emit connectionStateChanged();
     if (closed)
         emit connectionClosed();
@@ -475,7 +475,7 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
             && client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
             _lostWindows = std::ranges::to<std::vector>(mapped | std::views::filter([&](uint64_t window) {
                                                             return !std::ranges::contains(
-                                                                client->followedWindows(), window);
+                                                                client->followedWorkspaces(), window);
                                                         }));
         // The same sessions, re-snapshotted: each mirror takes the new connection's first snapshot as a
         // first.
@@ -615,8 +615,8 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         // each frame as it comes, as before there were batches.
         batched = layoutBatchShared();
         if (!batched)
-            _settledLayouts[layout.window] = held;
-        _layouts[layout.window] = std::move(held);
+            _settledLayouts[layout.workspace] = held;
+        _layouts[layout.workspace] = std::move(held);
         // The daemon's word on these tabs is newer than what was reported for them.
         for (auto const& tab: layout.tabs)
             _reportedPresentations.erase(tab.tabId);
@@ -772,10 +772,10 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
         // The new run is Connecting from here on: a reactor that dies before it enters Connecting itself
         // must not find the previous run's Failed and swallow its own death (@see reactorDied).
         _connection = vthost::client::ConnectionState::Connecting;
-        if (_intent.kind != vthost::proto::AttachIntentKind::AllWindows)
+        if (_intent.kind != vthost::proto::AttachIntentKind::AllWorkspaces)
             _intent = vthost::proto::AttachIntent {
                 .kind = vthost::proto::AttachIntentKind::Resume,
-                .windows = std::ranges::to<std::vector>(_layouts | std::views::keys),
+                .workspaces = std::ranges::to<std::vector>(_layouts | std::views::keys),
             };
     }
     restartConnecting();
@@ -901,7 +901,7 @@ void NativeController::requestCreateTab(vtpty::Pty const* actingPty,
 void NativeController::requestCreateWindow(contour::session::RemoteSpawn const& spawn)
 {
     postSessionCreation([profile = spawn.profileName](NativeClient& client) mutable {
-        client.createWindow(std::move(profile));
+        client.createWorkspace(std::move(profile));
     });
 }
 

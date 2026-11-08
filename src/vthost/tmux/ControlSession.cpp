@@ -504,7 +504,7 @@ std::vector<ControlSession::CommandEntry> const& ControlSession::commandCatalog(
 
 std::expected<Tab*, std::string> ControlSession::resolveTab(std::vector<std::string> const& arguments) const
 {
-    auto* window = _host.model().workspace(_host.windowId());
+    auto* window = _host.model().workspace(_host.workspaceId());
     if (auto const target = targetOf(arguments))
     {
         auto const id = parseIdSuffix(*target, '@');
@@ -534,7 +534,7 @@ std::expected<Pane*, std::string> ControlSession::resolvePane(std::vector<std::s
             return pane;
         return std::unexpected(std::format("pane not found: {}", *target));
     }
-    auto* active = _host.model().workspace(_host.windowId())->activeTab();
+    auto* active = _host.model().workspace(_host.workspaceId())->activeTab();
     if (active == nullptr || active->activePane() == nullptr)
         return std::unexpected("no current pane");
     return active->activePane();
@@ -542,7 +542,7 @@ std::expected<Pane*, std::string> ControlSession::resolvePane(std::vector<std::s
 
 ControlSession::HandlerResult ControlSession::commandListSessions(std::vector<std::string> const& /*args*/)
 {
-    auto const* window = _host.model().workspace(_host.windowId());
+    auto const* window = _host.model().workspace(_host.workspaceId());
     return std::vector<std::string> { std::format("0: 0 [{} windows] (attached)", window->tabCount()) };
 }
 
@@ -550,7 +550,7 @@ ControlSession::HandlerResult ControlSession::commandListWindows(std::vector<std
 {
     auto const formats = valuesOf(arguments, "-F");
     auto lines = std::vector<std::string> {};
-    auto const* window = _host.model().workspace(_host.windowId());
+    auto const* window = _host.model().workspace(_host.workspaceId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
     {
         auto const* tab = window->tabAt(tabIndex);
@@ -638,7 +638,7 @@ ControlSession::HandlerResult ControlSession::commandSelectPane(std::vector<std:
     auto pane = resolvePane(arguments);
     if (!pane)
         return std::unexpected(pane.error());
-    auto* window = _host.model().workspace(_host.windowId());
+    auto* window = _host.model().workspace(_host.workspaceId());
     for (auto const tabIndex: std::views::iota(0, window->tabCount()))
     {
         auto* tab = window->tabAt(tabIndex);
@@ -661,7 +661,7 @@ ControlSession::HandlerResult ControlSession::commandSelectWindow(std::vector<st
     auto tab = resolveTab(arguments);
     if (!tab)
         return std::unexpected(tab.error());
-    _host.model().activateTab(_host.windowId(), (*tab)->id());
+    _host.model().activateTab(_host.workspaceId(), (*tab)->id());
     return std::vector<std::string> {};
 }
 
@@ -852,7 +852,7 @@ ControlSession::HandlerResult ControlSession::commandRefreshClient(std::vector<s
                                                     .columns = vtpty::ColumnCount(static_cast<int>(*width)) },
                                   std::nullopt); // control mode states no cell size
         // The server decides: answer the proposal with authoritative layouts.
-        auto const* window = _host.model().workspace(_host.windowId());
+        auto const* window = _host.model().workspace(_host.workspaceId());
         for (auto const tabIndex: std::views::iota(0, window->tabCount()))
             notifyLayoutChanged(window->tabAt(tabIndex)->id());
     }

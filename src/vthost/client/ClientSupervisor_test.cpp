@@ -199,7 +199,8 @@ struct Supervised
     Supervised(Daemon& daemon,
                std::vector<Step> steps,
                BackoffSchedule backoff = { .first = 1ms, .ceiling = 4ms },
-               proto::AttachIntent firstIntent = { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+               proto::AttachIntent firstIntent = { .kind = proto::AttachIntentKind::Launch,
+                                                   .workspaces = {} },
                vthost::client::LivenessPolicy liveness = {}):
         loop(daemon.loop), transport(std::make_shared<ScriptedTransport>(std::move(steps)))
     {
@@ -303,7 +304,7 @@ TEST_CASE("a first connect the daemon refuses ends Failed", "[vthost][reconnect]
     CHECK(h.transport->calls() == 1);
 }
 
-TEST_CASE("a lost connection reconnects with Resume of the followed windows", "[vthost][reconnect]")
+TEST_CASE("a lost connection reconnects with Resume of the followed workspaces", "[vthost][reconnect]")
 {
     auto daemon = Daemon {};
     auto h = Supervised { daemon, { daemon.serving() } };
@@ -326,17 +327,18 @@ TEST_CASE("a lost connection reconnects with Resume of the followed windows", "[
     CHECK(h.intents[0].kind == proto::AttachIntentKind::Launch);
     CHECK(h.intents[1]
           == proto::AttachIntent { .kind = proto::AttachIntentKind::Resume,
-                                   .windows = { daemon.host->windowId().value } });
+                                   .workspaces = { daemon.host->workspaceId().value } });
 }
 
-TEST_CASE("a client that follows every window keeps following every window", "[vthost][reconnect]")
+TEST_CASE("a client that follows every workspace keeps following every workspace", "[vthost][reconnect]")
 {
-    // Resume would narrow it to the windows it had; a window another client creates later must reach it.
+    // Resume would narrow it to the workspaces it had; a workspace another client creates later must reach
+    // it.
     auto daemon = Daemon {};
     auto h = Supervised { daemon,
                           { daemon.serving() },
                           { .first = 1ms, .ceiling = 4ms },
-                          { .kind = proto::AttachIntentKind::AllWindows, .windows = {} } };
+                          { .kind = proto::AttachIntentKind::AllWorkspaces, .workspaces = {} } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
         auto const connected = co_await h->reached(ConnectionState::Connected);
         REQUIRE(connected);
@@ -347,19 +349,20 @@ TEST_CASE("a client that follows every window keeps following every window", "[v
     }(&h, &daemon));
 
     REQUIRE(h.intents.size() == 2);
-    CHECK(h.intents[1] == proto::AttachIntent { .kind = proto::AttachIntentKind::AllWindows, .windows = {} });
+    CHECK(h.intents[1]
+          == proto::AttachIntent { .kind = proto::AttachIntentKind::AllWorkspaces, .workspaces = {} });
 }
 
-TEST_CASE("a window created during the connection is resumed too", "[vthost][reconnect]")
+TEST_CASE("a workspace created during the connection is resumed too", "[vthost][reconnect]")
 {
     auto daemon = Daemon {};
     auto h = Supervised { daemon, { daemon.serving() } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
         auto const connected = co_await h->reached(ConnectionState::Connected);
         REQUIRE(connected);
-        h->supervisor->current()->createWindow({});
+        h->supervisor->current()->createWorkspace({});
         auto const followed = co_await core::net::testing::waitUntil(
-            &h->loop, [h] { return h->supervisor->current()->followedWindows().size() == 2; });
+            &h->loop, [h] { return h->supervisor->current()->followedWorkspaces().size() == 2; });
         REQUIRE(followed);
         daemon->dropConnection();
         auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
@@ -369,7 +372,7 @@ TEST_CASE("a window created during the connection is resumed too", "[vthost][rec
 
     REQUIRE(h.intents.size() == 2);
     CHECK(h.intents[1].kind == proto::AttachIntentKind::Resume);
-    CHECK(h.intents[1].windows.size() == 2);
+    CHECK(h.intents[1].workspaces.size() == 2);
 }
 
 TEST_CASE("transport failures during reconnect keep retrying", "[vthost][reconnect]")
@@ -401,7 +404,7 @@ TEST_CASE("a reconnect the daemon accepts and never answers is retried", "[vthos
     auto h = Supervised { daemon,
                           { daemon.serving(), daemon.silent(), daemon.serving() },
                           { .first = 1ms, .ceiling = 4ms },
-                          { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+                          { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
                           { .idleBeforeProbe = 5s, .deadAfter = 15s, .handshakeDeadline = 50ms } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
         auto const connected = co_await h->reached(ConnectionState::Connected);
@@ -520,7 +523,7 @@ TEST_CASE("stop during a slow daemon start ends run promptly", "[vthost][reconne
         [](std::unique_ptr<Connection>, proto::AttachIntent const&) -> std::unique_ptr<NativeClient> {
             return nullptr;
         },
-        { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+        { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
         { .first = 1ms, .ceiling = 4ms },
         [&states](ConnectionState state, std::string const&) { states.push_back(state); }
     };
@@ -652,7 +655,7 @@ struct UpgradeRun
                     NativeClient::SessionEventHandler {},
                     NativeClient::LayoutHandler {});
             },
-            proto::AttachIntent { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+            proto::AttachIntent { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
             BackoffSchedule { .first = 1ms, .ceiling = 4ms },
             [this](ConnectionState state, std::string const& reason) {
                 states.push_back(Entered { .state = state, .reason = reason });

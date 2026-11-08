@@ -127,7 +127,8 @@ struct ControllerOptions
 {
     return std::make_unique<contour::remote::NativeController>(
         std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                      .workspaces = {} },
         std::string {},
         std::move(options.attachSettings),
         std::move(options.sessionSettings),
@@ -461,7 +462,7 @@ class GatedSocket final: public core::net::testing::SocketDecorator
                 break;
             }
             passing += decoded->consumed;
-            if (layout != nullptr && layout->window == *_holdAfter)
+            if (layout != nullptr && layout->workspace == *_holdAfter)
                 _holding = true;
         }
         auto chunk = std::vector<std::byte>(_stream.begin(), _stream.begin() + static_cast<long>(passing));
@@ -762,7 +763,7 @@ struct DaemonFixture
     {
         return onDaemon([this, text = std::move(text)] {
             host->createTab();
-            auto const id = host->model().workspace(host->windowId())->activeTab()->rootPane()->session();
+            auto const id = host->model().workspace(host->workspaceId())->activeTab()->rootPane()->session();
             host->terminal(id)->writeToScreen(text);
             return id;
         });
@@ -789,7 +790,7 @@ struct DaemonFixture
     void splitActive(vtworkspace::SplitState state, double ratio)
     {
         onDaemon([this, state, ratio] {
-            auto* tab = host->model().workspace(host->windowId())->activeTab();
+            auto* tab = host->model().workspace(host->workspaceId())->activeTab();
             host->splitActivePane(tab->id(), state, ratio);
             return 0;
         });
@@ -1037,7 +1038,7 @@ TEST_CASE("NativeController.interruption.postedToTheSessionsThread", "[attach][c
     // thread; the session it belongs to is told on the GUI thread (this one), by a posted call.
     auto const snapshot = vthost::WorkspaceSnapshot {
         .takenAt = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } },
-        .windows = { vthost::WindowSnapshot {
+        .workspaces = { vthost::WorkspaceLayoutSnapshot {
             .tabs = { vthost::TabSnapshot {
                 .root = vthost::PaneNode { .pane = vthost::PaneSnapshot { .runningCommandLine =
                                                                               "make test" } } } } } }
@@ -1412,7 +1413,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session(); // the new (active) pane's session
     });
@@ -2276,7 +2277,7 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
     // The daemon's split ratio, or nullopt while its root is still a single leaf.
     auto daemonRatio = [&daemon]() -> std::optional<double> {
         return daemon.onDaemon([&daemon]() -> std::optional<double> {
-            auto* root = daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane();
+            auto* root = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab()->rootPane();
             return root->isLeaf() ? std::nullopt : std::optional { root->ratio() };
         });
     };
@@ -2397,7 +2398,7 @@ void requireDelivered(DaemonFixture& daemon, AttachedGui& gui, std::string const
 void requirePushed(DaemonFixture& daemon, AttachedGui& gui, std::string const& title)
 {
     daemon.onDaemon([&daemon, &title] {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->model().setTabTitle(tab->id(), title);
         return 0;
     });
@@ -2646,7 +2647,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
 
     // What a SECOND client's ResizeSplit does to the daemon's model.
     auto const moved = daemon.onDaemon([&daemon] {
-        auto* daemonTab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* daemonTab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->model().setPaneRatio(daemonTab->id(), daemonTab->rootPane()->id(), 0.3);
         return true;
     });
@@ -2665,7 +2666,8 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
     CHECK_FALSE(waitUntil(
         [&] {
             return daemon.onDaemon([&daemon] {
-                auto* root = daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane();
+                auto* root =
+                    daemon.host->model().workspace(daemon.host->workspaceId())->activeTab()->rootPane();
                 return root->ratio() != 0.3;
             });
         },
@@ -2814,11 +2816,11 @@ TEST_CASE("a session the client creates gets the profile the GUI holds in memory
 
     auto const tabCount = [&] {
         return daemon.onDaemon(
-            [&] { return daemon.host->model().workspace(daemon.host->windowId())->tabCount(); });
+            [&] { return daemon.host->model().workspace(daemon.host->workspaceId())->tabCount(); });
     };
     auto const terminalIdOfTab = [&](int index) {
         return daemon.onDaemon([&] {
-            auto const* window = daemon.host->model().workspace(daemon.host->windowId());
+            auto const* window = daemon.host->model().workspace(daemon.host->workspaceId());
             return daemon.host->terminal(window->tabAt(index)->rootPane()->session())->terminalId();
         });
     };
@@ -3337,7 +3339,7 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     auto daemon = DaemonFixture {};
     auto const stays = daemon.seedSession("stays");
     auto const dragged = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -3805,7 +3807,7 @@ TEST_CASE("a swap within one tab pushed by the daemon keeps both TerminalSession
     auto daemon = DaemonFixture {};
     auto const left = daemon.seedSession("left");
     auto const right = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -4046,7 +4048,7 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
     auto daemon = DaemonFixture {};
     auto const splitActive = [&daemon] {
         return daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-            auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+            auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
             daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
             return tab->activePane()->session();
         });
@@ -4140,8 +4142,8 @@ struct FollowingGui
     {
         auto owned = std::make_unique<contour::remote::NativeController>(
             std::make_shared<vthost::TlsTransportFactory>(daemon.endpoint()),
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Windows,
-                                          .windows = { followed } },
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
+                                          .workspaces = { followed } },
             std::string {},
             std::nullopt,
             contour::remote::NativeController::SessionSettingsSource {},
@@ -4206,15 +4208,15 @@ TEST_CASE("a pane moved into another GUI process's window appears there, on ever
             auto daemon = DaemonFixture {};
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-                auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+                auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
                 daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
-            auto const receiving = daemon.onDaemon([&daemon] { return daemon.host->windowId().value; });
+            auto const receiving = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
             // The pane's window keeps a tab of its own once the pane left: it stays open there.
             auto const [sending, moved] =
                 daemon.onDaemon([&daemon]() -> std::pair<uint64_t, vtworkspace::SessionId> {
-                    auto* window = daemon.host->createWindow();
+                    auto* window = daemon.host->createWorkspace();
                     auto const pane = window->tabAt(0)->rootPane()->session();
                     std::ignore = daemon.host->createTab({}, pane);
                     return { window->id().value, pane };
@@ -4339,11 +4341,11 @@ TEST_CASE("a pane dropped on an edge of its only sibling over a daemon re-splits
             auto daemon = DaemonFixture {};
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-                auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+                auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
                 daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
-            auto const followed = daemon.onDaemon([&daemon] { return daemon.host->windowId().value; });
+            auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
             auto const panes = std::array { first.value, second.value };
 
             auto gui = FollowingGui { daemon, followed };
@@ -4390,11 +4392,11 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
     auto daemon = DaemonFixture {};
     auto const first = daemon.seedSession("first");
     auto const tabId = daemon.onDaemon([&daemon]() -> vtworkspace::TabId {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->id();
     });
-    auto const followed = daemon.onDaemon([&daemon] { return daemon.host->windowId().value; });
+    auto const followed = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
     auto const daemonAxis = [&] {
         return daemon.onDaemon([&] { return daemon.host->model().findTab(tabId)->rootPane()->splitState(); });
     };
@@ -4446,12 +4448,12 @@ TEST_CASE("a window a pass empties stays open for the pass that fills it again",
             auto const seeded = daemon.onDaemon([&daemon, losingFirst]() -> Seeded {
                 auto& host = *daemon.host;
                 auto* const firstTab = host.createTab();
-                auto* const second = host.createWindow();
+                auto* const second = host.createWorkspace();
                 auto* const secondTab = second->tabAt(0);
                 auto* const keepingTab = losingFirst ? secondTab : firstTab;
                 auto* const losingTab = losingFirst ? firstTab : secondTab;
                 host.splitActivePane(keepingTab->id(), vtworkspace::SplitState::Vertical, 0.5);
-                auto const firstWindow = host.windowId().value;
+                auto const firstWindow = host.workspaceId().value;
                 return Seeded { .losing = losingFirst ? firstWindow : second->id().value,
                                 .keeping = losingFirst ? second->id().value : firstWindow,
                                 .lone = losingTab->rootPane()->session(),
@@ -4733,7 +4735,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     auto daemon = DaemonFixture { {}, servicesWithoutLayoutBatch() };
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -5382,7 +5384,7 @@ TEST_CASE("a wake probes the daemon", "[attach][controller][power]")
     // now.
     auto const before = controller.settledLayout();
     daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->workspaceId())->activeTab();
         daemon.host->model().setTabTitle(tab->id(), "awake");
         return 0;
     });
@@ -5579,7 +5581,7 @@ TEST_CASE("windows the daemon no longer has are reported lost", "[attach][contro
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("old run");
-    auto const window = daemon.onDaemon([&] { return daemon.host->windowId().value; });
+    auto const window = daemon.onDaemon([&] { return daemon.host->workspaceId().value; });
 
     auto timeline = TestTimeline {};
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
@@ -5615,7 +5617,7 @@ TEST_CASE("windows the daemon no longer has are reported lost", "[attach][contro
     // The old pane is detached: what it is sent goes nowhere, least of all to the new session of its id.
     std::ignore = pane.pty().write("stale\r");
     auto const fresh = daemon.onDaemon([&] {
-        return daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane()->session();
+        return daemon.host->model().workspace(daemon.host->workspaceId())->activeTab()->rootPane()->session();
     });
     std::this_thread::sleep_for(50ms);
     CHECK_FALSE(daemon.ptyInput(fresh).contains("stale"));
@@ -5647,7 +5649,7 @@ TEST_CASE("a client following every window still gets new windows after a reconn
     // Claimed by another client: a client following only listed windows would never see it.
     auto const otherClient = vthost::SessionStreamEvents {};
     auto const created =
-        daemon.onDaemon([&] { return daemon.host->createWindow({}, &otherClient)->id().value; });
+        daemon.onDaemon([&] { return daemon.host->createWorkspace({}, &otherClient)->id().value; });
     CHECK(waitUntil([&] { return std::ranges::contains(controller.windowIds(), created); }));
     CHECK(log.windowsLost().empty());
 
@@ -5662,8 +5664,8 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("kept");
-    auto const kept = daemon.onDaemon([&] { return daemon.host->windowId().value; });
-    auto const gone = daemon.onDaemon([&] { return daemon.host->createWindow()->id().value; });
+    auto const kept = daemon.onDaemon([&] { return daemon.host->workspaceId().value; });
+    auto const gone = daemon.onDaemon([&] { return daemon.host->createWorkspace()->id().value; });
 
     auto timeline = TestTimeline {};
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
@@ -5727,7 +5729,7 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
     auto timeline = TestTimeline {};
     auto controller = contour::remote::NativeController {
         transport,
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .windows = {} },
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
         std::string {},
         std::nullopt,
         {},
@@ -6056,8 +6058,8 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
         auto timeline = TestTimeline {};
         auto controller = contour::remote::NativeController {
             std::make_shared<FailingTransportFactory>("ssh://me@homepc", row.message),
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
-                                          .windows = {} },
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                          .workspaces = {} },
             std::string {},
             std::nullopt,
             {},
@@ -6126,7 +6128,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
             vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
             std::make_shared<SilentStdioSpawner>(),
             TransportBound),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                      .workspaces = {} },
         std::string {},
         std::nullopt,
         {},
@@ -6332,9 +6335,9 @@ namespace
     auto snapshot = vthost::WorkspaceSnapshot {};
     for (auto const tabs: { 3, 4 })
     {
-        auto window = vthost::WindowSnapshot {};
+        auto window = vthost::WorkspaceLayoutSnapshot {};
         window.tabs.resize(static_cast<size_t>(tabs));
-        snapshot.windows.push_back(std::move(window));
+        snapshot.workspaces.push_back(std::move(window));
     }
     return vthost::WorkspaceRestore { .snapshot = std::move(snapshot) };
 }
@@ -6467,7 +6470,7 @@ TEST_CASE("a client attaching to a titled multi-pane layout shows each tab's own
     std::this_thread::sleep_for(100ms);
     CHECK(editTabsReceived(capture.text()) == 0);
     auto const titles = daemon.onDaemon([&daemon] {
-        auto const* window = daemon.host->model().workspace(daemon.host->windowId());
+        auto const* window = daemon.host->model().workspace(daemon.host->workspaceId());
         return window->tabAt(0)->runtimeTitle().value_or("") + ","
                + window->tabAt(1)->runtimeTitle().value_or("");
     });
@@ -6528,7 +6531,8 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
                 gate->enterAndWait();
                 return {};
             }),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                      .workspaces = {} },
         std::string {},
         std::nullopt,
         contour::remote::NativeController::SessionSettingsSource {},

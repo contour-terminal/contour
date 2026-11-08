@@ -4111,7 +4111,7 @@ TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and t
     auto& manager = app.manager();
 
     // Nothing to post it in yet.
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
 
     contour::test::ScopedController const first { manager };
     contour::test::ScopedController const second { manager };
@@ -4130,7 +4130,7 @@ TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     contour::test::ScopedController const window { app.manager() };
-    app.manager().noteWorkspaceRestored(vthost::RestoredCounts { .windows = 1, .tabs = 1 });
+    app.manager().noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
     app.manager().deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 1 window, 1 tab");
 }
@@ -4140,7 +4140,7 @@ TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
     manager.expireRestoreSummary();
 
     contour::test::ScopedController const later { manager };
@@ -4153,8 +4153,8 @@ TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still he
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 5, .tabs = 5 });
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 5, .tabs = 5 });
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
     contour::test::ScopedController const window { manager };
     manager.deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");

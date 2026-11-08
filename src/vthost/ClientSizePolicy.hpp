@@ -38,7 +38,7 @@ namespace vthost
 enum class ClientSizePolicy : uint8_t
 {
     /// The size of the client that reported most recently. tmux's default, and the least
-    /// surprising: the window you just resized is the one you are looking at. Other clients see a
+    /// surprising: the workspace you just resized is the one you are looking at. Other clients see a
     /// grid that is not their size and letterbox or pan it.
     Latest,
 
@@ -94,7 +94,7 @@ struct ClientArea
 /// @param policy Which client's size wins.
 /// @param areas Every attached client's reported area, in any order. A range rather than a span so
 ///        a caller holding them in a map can pass a view of its values without copying them out —
-///        this runs on every reported area, and a window drag reports one per frame.
+///        this runs on every reported area, and a workspace drag reports one per frame.
 /// @return The area to project the pane trees into, or nullopt when no client has reported one —
 ///         in which case the caller keeps whatever it had, since a daemon with no attached client
 ///         still hosts sessions that must stay some size.

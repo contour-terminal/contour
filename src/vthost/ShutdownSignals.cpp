@@ -174,7 +174,7 @@ namespace
         return TRUE;
     }
 
-    /// Ctrl+C, Ctrl+Break, closing the console window, logging off and shutting the system down.
+    /// Ctrl+C, Ctrl+Break, closing the console workspace, logging off and shutting the system down.
     class ConsoleControlWatch final: public ShutdownSignals::Watch
     {
       public:
@@ -193,7 +193,7 @@ namespace
         ~ConsoleControlWatch() override
         {
             // The slot first: a handler the console thread starts from here on finds nothing to call. One
-            // that loaded the pointer just before may still call onSignal as it is destroyed — a window
+            // that loaded the pointer just before may still call onSignal as it is destroyed — a workspace
             // SetConsoleCtrlHandler offers no way to close, since it does not wait for running handlers.
             consoleShutdown = nullptr;
             ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);

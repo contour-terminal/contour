@@ -61,7 +61,7 @@ enum class PduType : uint8_t
     CreateTab = 14,
     SplitPane = 15,
     ClosePane = 16,
-    NewWindow = 17,
+    NewWorkspace = 17,
     ResizePane = 18,
     ResizeSplit = 19,
     SessionSettingsChanged = 20,
@@ -221,24 +221,25 @@ struct WireCellPixelSize
     bool operator==(WireCellPixelSize const&) const = default;
 };
 
-/// Which of the daemon's windows a connection wants to follow, and whether attaching creates one.
-/// Decoding is lenient: a byte no enumerator names reads as AllWindows, which is what a daemon without
+/// Which of the daemon's workspaces a connection wants to follow, and whether attaching creates one.
+/// Decoding is lenient: a byte no enumerator names reads as AllWorkspaces, which is what a daemon without
 /// Capability::AttachIntent does anyway.
 enum class AttachIntentKind : uint8_t
 {
-    AllWindows = 0, ///< Every window, including those created later: the behaviour before intents existed.
-    Launch = 1,     ///< A fresh launch: every window when no other client is attached, else a new one.
-    NewWindow = 2,  ///< A new window of its own, mirroring none of the existing ones.
-    Windows = 3,    ///< Exactly the listed windows (those that exist).
-    Resume = 4,     ///< The listed windows after a reconnect; when none survives, as Launch.
+    AllWorkspaces =
+        0,      ///< Every workspace, including those created later: the behaviour before intents existed.
+    Launch = 1, ///< A fresh launch: every workspace when no other client is attached, else a new one.
+    NewWorkspace = 2, ///< A new workspace of its own, mirroring none of the existing ones.
+    Workspaces = 3,   ///< Exactly the listed workspaces (those that exist).
+    Resume = 4,       ///< The listed workspaces after a reconnect; when none survives, as Launch.
 };
 
 /// What a ClientHello asks to be shown.
 struct AttachIntent
 {
-    AttachIntentKind kind = AttachIntentKind::AllWindows;
-    /// The daemon windows named; meaningful for Windows and Resume only.
-    std::vector<uint64_t> windows = {};
+    AttachIntentKind kind = AttachIntentKind::AllWorkspaces;
+    /// The daemon workspaces named; meaningful for Workspaces and Resume only.
+    std::vector<uint64_t> workspaces = {};
     bool operator==(AttachIntent const&) const = default;
 };
 
@@ -274,7 +275,7 @@ struct ClientHello
     /// absent means "the daemon's default", and the client's ResizeRequest corrects it. Honoured on
     /// an Attach connection only.
     std::optional<WireClientArea> clientArea = std::nullopt;
-    /// Which windows to follow; honoured only when both ends negotiated Capability::AttachIntent.
+    /// Which workspaces to follow; honoured only when both ends negotiated Capability::AttachIntent.
     AttachIntent attachIntent = {};
     /// The profile the connection's sessions run under, resolved by the daemon in its own configuration;
     /// empty means the daemon's default. Honoured only with Capability::ProfileByName.
@@ -321,22 +322,23 @@ struct ServerHello
     std::string hostname = {}; ///< The daemon's host name; empty when unknown.
     /// The daemon's release (e.g. "0.8.1"); empty when unknown, and in every refusal.
     std::string releaseVersion = {};
-    /// The daemon windows this connection follows, ascending; empty in a refusal and from a daemon that
+    /// The daemon workspaces this connection follows, ascending; empty in a refusal and from a daemon that
     /// predates attach intents.
-    std::vector<uint64_t> followedWindows = {};
+    std::vector<uint64_t> followedWorkspaces = {};
     /// Which run of the daemon answers: drawn at random as the daemon starts, so it differs across a
-    /// restart. Window and session ids count from 1 in every run, so this is how a reconnecting client tells
-    /// a daemon that restarted -- whose window 1 is not the window 1 it showed -- from the one it lost. 0 is
-    /// unknown: in a refusal, and from a daemon that predates the field.
+    /// restart. Workspace and session ids count from 1 in every run, so this is how a reconnecting client
+    /// tells a daemon that restarted -- whose workspace 1 is not the workspace 1 it showed -- from the one it
+    /// lost. 0 is unknown: in a refusal, and from a daemon that predates the field.
     ///
     /// A daemon that restores a saved workspace after a restart (phase 6) is a new instance all the same: a
-    /// client that stayed connected sees its old windows lost, and the restored ones arrive as new windows.
+    /// client that stayed connected sees its old workspaces lost, and the restored ones arrive as new
+    /// workspaces.
     uint64_t daemonInstance = 0;
-    /// The windows a restore of the daemon's saved workspace brought back, told once: to the first accepted
-    /// Attach connection after it, and zero to every other connection and in every refusal. Zero reads as
-    /// "nothing to tell", also from a daemon that predates the field. @see vthost::RestoredCounts
-    uint32_t restoredWindows = 0;
-    /// The tabs of those windows; zero as @ref restoredWindows is.
+    /// The workspaces a restore of the daemon's saved workspace brought back, told once: to the first
+    /// accepted Attach connection after it, and zero to every other connection and in every refusal. Zero
+    /// reads as "nothing to tell", also from a daemon that predates the field. @see vthost::RestoredCounts
+    uint32_t restoredWorkspaces = 0;
+    /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
     uint32_t restoredTabs = 0;
     bool operator==(ServerHello const&) const = default;
 };
@@ -1066,12 +1068,12 @@ struct WireTab
     bool operator==(WireTab const&) const = default;
 };
 
-/// The window's whole tab/pane layout — replayed on attach and re-pushed on
+/// The workspace's whole tab/pane layout — replayed on attach and re-pushed on
 /// every model change, so a client reproduces the daemon's tabs and split trees
 /// instead of flattening to one tab per session.
 struct LayoutState
 {
-    uint64_t window = 0;
+    uint64_t workspace = 0;
     uint32_t activeTab = 0; ///< The active tab's INDEX within `tabs`.
     std::vector<WireTab> tabs;
     /// The serial of the last EditTab of this connection the daemon had served when it composed this push;
@@ -1081,17 +1083,17 @@ struct LayoutState
     bool operator==(LayoutState const&) const = default;
 };
 
-/// Client→server: create a new tab (with a fresh session) in a daemon window.
+/// Client→server: create a new tab (with a fresh session) in a daemon workspace.
 /// The resulting model change re-pushes LayoutState to every attached client.
 struct CreateTab
 {
     /// Which WINDOW to create the tab in, named — like every other client→server verb — by a
-    /// session it hosts; 0 means "the daemon's own first window".
+    /// session it hosts; 0 means "the daemon's own first workspace".
     ///
-    /// The daemon really does host several windows (@see NewWindow), so a request naming none put
-    /// every client's "+" into the first one: click it in a second window and the tab appeared in
-    /// the first, while the window clicked in gained nothing. Named by session rather than by
-    /// window id for the reason SplitPane is: window ids are minted per model and the two ends
+    /// The daemon really does host several workspaces (@see NewWorkspace), so a request naming none put
+    /// every client's "+" into the first one: click it in a second workspace and the tab appeared in
+    /// the first, while the workspace clicked in gained nothing. Named by session rather than by
+    /// workspace id for the reason SplitPane is: workspace ids are minted per model and the two ends
     /// have their own.
     uint64_t session = 0;
     /// The profile the new tab's session runs under; empty means the connection's profile.
@@ -1099,14 +1101,14 @@ struct CreateTab
     bool operator==(CreateTab const&) const = default;
 };
 
-/// Client→server: create a new daemon window (with a first tab + session). The
-/// daemon then pushes that window's LayoutState; the client opens a GUI window for
+/// Client→server: create a new daemon workspace (with a first tab + session). The
+/// daemon then pushes that workspace's LayoutState; the client opens a GUI window for
 /// it (B4).
-struct NewWindow
+struct NewWorkspace
 {
-    /// The profile the new window's first session runs under; empty means the connection's profile.
+    /// The profile the new workspace's first session runs under; empty means the connection's profile.
     std::string profileName = {};
-    bool operator==(NewWindow const&) const = default;
+    bool operator==(NewWorkspace const&) const = default;
 };
 
 /// Client→server: split the pane hosting @p session (the daemon activates it
@@ -1314,7 +1316,7 @@ enum class StopReason : uint8_t
     UpgradeRestart = 1, ///< It is replaced by a newer release.
     /// The user asked, and the daemon keeps its workspace for its next start. Sent only to a daemon that
     /// offers Capability::WorkspaceRestore: an older one refuses the byte.
-    UserKeepingWorkspace = 2,
+    UserKeepingWorkspaces = 2,
 };
 
 /// Client→server: asks the daemon to shut down. Served on a connection of either role, as a
@@ -1371,7 +1373,7 @@ enum class TabEditKind : uint8_t
     ClearTitle = 4,   ///< Return the tab to its automatic title.
     SetColor = 5,     ///< Set the tab's colour to `color`.
     ClearColor = 6,   ///< Return the tab to its default colour.
-    ActivateTab = 7,  ///< Make the tab holding `session` the window's active tab.
+    ActivateTab = 7,  ///< Make the tab holding `session` the workspace's active tab.
 };
 
 /// Client→server: the user changed how a tab is presented, and the daemon's model follows so every other
@@ -1418,20 +1420,21 @@ struct TabMergeRefused
 };
 
 /// Client→server (Capability::MoveNode): move a pane or a whole tab to an edge of a pane, onto a pane (swap),
-/// into a window's tab well or into a new window. Nothing is spawned or closed: every session keeps running.
-/// Both ends are named by session, like every other client→server layout verb, because tab and pane ids are
-/// minted per model and the two ends have their own. A move the daemon performs is answered by the layout
-/// pushes to every attached client alone.
+/// into a workspace's tab well or into a new workspace. Nothing is spawned or closed: every session keeps
+/// running. Both ends are named by session, like every other client→server layout verb, because tab and pane
+/// ids are minted per model and the two ends have their own. A move the daemon performs is answered by the
+/// layout pushes to every attached client alone.
 struct MoveNode
 {
     uint8_t sourceKind = 0; ///< A vtworkspace::MoveSourceKind as the wire spells it.
     /// A pane source: its session. A tab source: EVERY session of the tab as the client sees it, the first
     /// naming the tab; the daemon refuses a request whose sessions are not exactly the tab's now.
     std::vector<uint64_t> sourceSessions = {};
-    uint8_t targetKind = 0;     ///< A vtworkspace::MoveTargetKind as the wire spells it.
-    uint64_t targetSession = 0; ///< Edge/swap: the pane. Tab well: any session of the window. New window: 0.
-    uint8_t side = 0;           ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
-    uint64_t index = 0;         ///< Tab well only: the position among the window's tabs.
+    uint8_t targetKind = 0; ///< A vtworkspace::MoveTargetKind as the wire spells it.
+    uint64_t targetSession =
+        0;              ///< Edge/swap: the pane. Tab well: any session of the workspace. New workspace: 0.
+    uint8_t side = 0;   ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
+    uint64_t index = 0; ///< Tab well only: the position among the workspace's tabs.
     bool operator==(MoveNode const&) const = default;
 };
 
@@ -1459,9 +1462,10 @@ struct MoveNodeRefused
 };
 
 /// Server→client (Capability::LayoutBatch): every LayoutState pushed for one change has gone out. The daemon
-/// pushes each followed window's layout once per model event, and one change -- a move -- fires several, some
-/// of them between its halves; this follows the last, so the layouts a client holds when it arrives are the
-/// state the change left, across every window, and a session none of them names is gone, not still in flight.
+/// pushes each followed workspace's layout once per model event, and one change -- a move -- fires several,
+/// some of them between its halves; this follows the last, so the layouts a client holds when it arrives are
+/// the state the change left, across every workspace, and a session none of them names is gone, not still in
+/// flight.
 struct LayoutBatchEnd
 {
     /// The serial of the MoveNode request whose effects this batch completes, so the client that asked can
@@ -1540,7 +1544,7 @@ using DecodedPdu = std::variant<Invalid,
                                 CreateTab,
                                 SplitPane,
                                 ClosePane,
-                                NewWindow,
+                                NewWorkspace,
                                 ResizePane,
                                 ResizeSplit,
                                 SessionSettingsChanged,

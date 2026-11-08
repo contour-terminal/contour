@@ -35,7 +35,7 @@ class StagingFileSystem final: public ForwardingFileSystem
     static constexpr auto FixedWriteTime = std::filesystem::file_time_type {};
 
     /// Runs at the start of every rename(), with its source and destination: another launcher,
-    /// acting in the window before this rename.
+    /// acting in the workspace before this rename.
     mutable std::function<void(std::filesystem::path const& from, std::filesystem::path const& to)>
         beforeRename;
 

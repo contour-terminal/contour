@@ -180,13 +180,13 @@ template <typename Condition>
     return true;
 }
 
-/// Opens a tab in @p host's window.
+/// Opens a tab in @p host's workspace.
 /// @param host The host to open it in.
 /// @return The session of the tab's one pane.
 [[nodiscard]] inline vtworkspace::SessionId newSession(SessionHost& host)
 {
     host.createTab();
-    return host.model().workspace(host.windowId())->activeTab()->rootPane()->session();
+    return host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
 }
 
 /// When every record promptingWire() and its siblings build was prompted, in nanoseconds since the Unix

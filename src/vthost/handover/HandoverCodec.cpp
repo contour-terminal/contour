@@ -313,12 +313,12 @@ static void visitStateFields(Visitor& visitor, T& tab)
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceState>
-static void visitStateFields(Visitor& visitor, T& window)
+static void visitStateFields(Visitor& visitor, T& workspace)
 {
-    visitor(1, window.id);
-    visitor(2, window.tabs);
-    visitor(3, window.activeTabIndex);
-    visitor(4, window.previousActiveTabIndex);
+    visitor(1, workspace.id);
+    visitor(2, workspace.tabs);
+    visitor(3, workspace.activeTabIndex);
+    visitor(4, workspace.previousActiveTabIndex);
 }
 
 template <typename Visitor, typename T>

@@ -190,19 +190,19 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
 {
     auto snapshot = WorkspaceSnapshot { .takenAt = now, .cellPixelSize = host.learnedCellPixelSize() };
     auto const& model = host.model();
-    for (auto const windowIndex: std::views::iota(0, model.workspaceCount()))
+    for (auto const workspaceIndex: std::views::iota(0, model.workspaceCount()))
     {
-        auto const* const window = model.workspaceAt(windowIndex);
-        if (window == nullptr || window->empty())
+        auto const* const workspace = model.workspaceAt(workspaceIndex);
+        if (workspace == nullptr || workspace->empty())
             continue;
-        auto captured =
-            WindowSnapshot { .identity = identityOf(host.objects(),
-                                                    vtcontrol::ObjectKind::Workspace,
-                                                    host.objects().uuidOf(window->id())),
-                             .activeTab = static_cast<std::uint32_t>(std::max(window->activeTabIndex(), 0)) };
-        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+        auto captured = WorkspaceLayoutSnapshot {
+            .identity = identityOf(
+                host.objects(), vtcontrol::ObjectKind::Workspace, host.objects().uuidOf(workspace->id())),
+            .activeTab = static_cast<std::uint32_t>(std::max(workspace->activeTabIndex(), 0))
+        };
+        for (auto const tabIndex: std::views::iota(0, workspace->tabCount()))
         {
-            auto const* const tab = window->tabAt(tabIndex);
+            auto const* const tab = workspace->tabAt(tabIndex);
             if (tab == nullptr || tab->rootPane() == nullptr)
                 continue;
             auto tree = TreeCapture { host, options, tab->activePane() };
@@ -217,7 +217,7 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
             captured.tabs.push_back(std::move(entry));
         }
         if (!captured.tabs.empty())
-            snapshot.windows.push_back(std::move(captured));
+            snapshot.workspaces.push_back(std::move(captured));
     }
     return snapshot;
 }

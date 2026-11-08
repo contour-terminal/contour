@@ -1354,8 +1354,8 @@ namespace
         }
         return NativeAttachTarget {
             .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(tcp)),
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
-                                                    .windows = {} },
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                    .workspaces = {} },
         };
     }
 } // namespace
@@ -1382,8 +1382,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         hostLabel = host.label;
         target = NativeAttachTarget {
             .transport = host.factory,
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
-                                                    .windows = {} },
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                    .workspaces = {} },
         };
     }
     else if (_clientRequest && !_clientRequest->connectTcp.empty())
@@ -1456,10 +1456,10 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         // A plain launch opens one new window beside whatever the daemon already shows, or brings them all
         // back when no other client does; `--window` shows exactly one.
         auto intent =
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .windows = {} };
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} };
         if (_clientRequest && _clientRequest->window)
-            intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Windows,
-                                                   .windows = { *_clientRequest->window } };
+            intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
+                                                   .workspaces = { *_clientRequest->window } };
         target = NativeAttachTarget {
             .transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, std::move(ensureDaemon)),
             .intent = std::move(intent),
@@ -1546,7 +1546,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         this,
         [this](quint32 windows, quint32 tabs) {
             _sessionManager.noteWorkspaceRestored(
-                vthost::RestoredCounts { .windows = windows, .tabs = tabs });
+                vthost::RestoredCounts { .workspaces = windows, .tabs = tabs });
         },
         Qt::QueuedConnection);
     connectReconnectSignals();

@@ -398,14 +398,14 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
     if (options.disposition == StopDisposition::KeepSnapshot)
     {
         if (status->capabilities.contains(vthost::proto::Capability::WorkspaceRestore))
-            reason = vthost::proto::StopReason::UserKeepingWorkspace;
+            reason = vthost::proto::StopReason::UserKeepingWorkspaces;
         else
             err << "contour daemon: this daemon keeps no workspace\n";
     }
 
     if (auto const stopped = control.stop(reason); !stopped)
         return fail(stopped.error());
-    out << (reason == vthost::proto::StopReason::UserKeepingWorkspace
+    out << (reason == vthost::proto::StopReason::UserKeepingWorkspaces
                 ? "daemon stopped; its workspace is kept\n"
                 : "daemon stopped\n");
     return ExitStatus::Ok;

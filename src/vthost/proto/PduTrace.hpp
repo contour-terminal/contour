@@ -46,7 +46,7 @@ enum class Direction : std::uint8_t
 /// reported only as present or absent — it is authentication material.
 ///
 /// @param pdu The PDU to describe.
-/// @return The fragment; empty for the payloadless PDUs (CreateTab, NewWindow).
+/// @return The fragment; empty for the payloadless PDUs (CreateTab, NewWorkspace).
 [[nodiscard]] std::string summarize(DecodedPdu const& pdu);
 
 /// Names @p pdu and its identifying fields: `"Delta session=1 gen=3 …"`, or just `"CreateTab"`

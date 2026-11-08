@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// The UUIDs and labels of the daemon's windows, tabs and panes.
+/// The UUIDs and labels of the daemon's workspaces, tabs and panes.
 ///
 /// The control API names objects by UUID, never by the `vtworkspace` ids, which are small integers that
 /// restart with every daemon. An API pane is one hosted session, so a pane's UUID is keyed by its
@@ -28,15 +28,15 @@ namespace vthost
 /// The ids and labels a restored or pre-named object comes back with, instead of freshly minted ones.
 struct PresetObjectIds
 {
-    vtcontrol::Uuid pane {};                  ///< The pane's UUID.
-    std::optional<vtcontrol::Uuid> tab {};    ///< The tab's, when the spawn creates one.
-    std::optional<vtcontrol::Uuid> window {}; ///< The window's, when the spawn creates one.
-    std::string paneLabel {};                 ///< The pane's label; empty for none.
-    std::string tabLabel {};                  ///< The tab's label; empty for none.
-    std::string windowLabel {};               ///< The window's label; empty for none.
+    vtcontrol::Uuid pane {};                     ///< The pane's UUID.
+    std::optional<vtcontrol::Uuid> tab {};       ///< The tab's, when the spawn creates one.
+    std::optional<vtcontrol::Uuid> workspace {}; ///< The workspace's, when the spawn creates one.
+    std::string paneLabel {};                    ///< The pane's label; empty for none.
+    std::string tabLabel {};                     ///< The tab's label; empty for none.
+    std::string workspaceLabel {};               ///< The workspace's label; empty for none.
 };
 
-/// One window, tab or pane of the object registry, with the UUID it is known by.
+/// One workspace, tab or pane of the object registry, with the UUID it is known by.
 struct BoundObject
 {
     uint64_t id = 0;         ///< The model's id (WorkspaceId, TabId or SessionId, by the list it sits in).
@@ -64,19 +64,19 @@ struct LabeledObject
     }
 };
 
-/// The UUIDs and labels of the daemon's windows, tabs and panes, as plain data: what crosses a live upgrade,
-/// so that a client holding a reference from before it still finds its object afterwards.
+/// The UUIDs and labels of the daemon's workspaces, tabs and panes, as plain data: what crosses a live
+/// upgrade, so that a client holding a reference from before it still finds its object afterwards.
 struct ObjectRegistrySnapshot
 {
-    std::vector<BoundObject> windows;  ///< Windows by WorkspaceId, ascending.
-    std::vector<BoundObject> tabs;     ///< Tabs by TabId, ascending.
-    std::vector<BoundObject> panes;    ///< Panes by SessionId, ascending.
-    std::vector<LabeledObject> labels; ///< Every label, ordered by object.
+    std::vector<BoundObject> workspaces; ///< Workspaces by WorkspaceId, ascending.
+    std::vector<BoundObject> tabs;       ///< Tabs by TabId, ascending.
+    std::vector<BoundObject> panes;      ///< Panes by SessionId, ascending.
+    std::vector<LabeledObject> labels;   ///< Every label, ordered by object.
 
     /// Lists the fields for the handover codec.
     void visitFields(this auto& self, auto& visitor)
     {
-        visitor(1, self.windows);
+        visitor(1, self.workspaces);
         visitor(2, self.tabs);
         visitor(3, self.panes);
         visitor(4, self.labels);
@@ -124,7 +124,7 @@ class ObjectRegistry
     [[nodiscard]] std::optional<vtcontrol::Uuid> uuidOf(vtworkspace::SessionId id) const;
     /// @}
 
-    /// @param ref A window, tab or pane reference.
+    /// @param ref A workspace, tab or pane reference.
     /// @return The model's handle for it, or nothing when it is gone or never was.
     [[nodiscard]] std::optional<Handle> find(vtcontrol::ObjectRef const& ref) const;
 
@@ -160,7 +160,7 @@ class ObjectRegistry
     [[nodiscard]] Table const& tableOf(vtcontrol::ObjectKind kind) const noexcept;
 
     std::shared_ptr<vtcontrol::UuidSource> _uuids;
-    Table _windows;
+    Table _workspaces;
     Table _tabs;
     Table _panes;
     std::map<vtcontrol::ObjectRef, std::string> _labels;

@@ -252,7 +252,7 @@ TEST_CASE("a handover keeps every program, its input, its output and its screen"
     auto const uuids = std::ranges::to<std::vector>(
         ids | std::views::transform([&](SessionId id) { return old->host.objects().uuidOf(id); }));
     auto const modelIds = old->host.model().idState();
-    auto const window = old->host.windowId();
+    auto const workspace = old->host.workspaceId();
 
     // Typed while quiesced: carried across, not lost.
     auto const image =
@@ -263,7 +263,7 @@ TEST_CASE("a handover keeps every program, its input, its output and its screen"
 
     CHECK(host.handoverOutcome().has_value());
     REQUIRE(host.sessionIds() == ids);
-    CHECK(host.windowId() == window);
+    CHECK(host.workspaceId() == workspace);
     CHECK(host.model().idState().nextPane == modelIds.nextPane);
     CHECK(host.model().idState().nextTab == modelIds.nextTab);
     CHECK(host.model().idState().nextWorkspace == modelIds.nextWorkspace);
@@ -427,7 +427,7 @@ TEST_CASE("a refused workspace tree still adopts every session, each in a tab of
     REQUIRE(host.sessionIds() == ids);
     for (auto const id: ids)
     {
-        auto const [window, tab, leaf] = host.model().findSessionLeaf(id);
+        auto const [workspace, tab, leaf] = host.model().findSessionLeaf(id);
         REQUIRE(leaf != nullptr);
         CHECK(tab->paneCount() == 1);
     }

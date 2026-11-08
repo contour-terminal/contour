@@ -32,12 +32,12 @@ namespace
         return text;
     }
 
-    /// @return @p windows as `[1,3]`.
-    [[nodiscard]] std::string formatWindows(std::vector<uint64_t> const& windows)
+    /// @return @p workspaces as `[1,3]`.
+    [[nodiscard]] std::string formatWorkspaces(std::vector<uint64_t> const& workspaces)
     {
         auto text = std::string {};
-        for (auto const window: windows)
-            text += std::format("{}{}", text.empty() ? "" : ",", window);
+        for (auto const workspace: workspaces)
+            text += std::format("{}{}", text.empty() ? "" : ",", workspace);
         return std::format("[{}]", text);
     }
 
@@ -56,10 +56,10 @@ namespace
     };
 
     constexpr auto IntentNames = std::array {
-        IntentName { .kind = AttachIntentKind::AllWindows, .name = "all-windows" },
+        IntentName { .kind = AttachIntentKind::AllWorkspaces, .name = "all-workspaces" },
         IntentName { .kind = AttachIntentKind::Launch, .name = "launch" },
-        IntentName { .kind = AttachIntentKind::NewWindow, .name = "new-window" },
-        IntentName { .kind = AttachIntentKind::Windows, .name = "windows" },
+        IntentName { .kind = AttachIntentKind::NewWorkspace, .name = "new-workspace" },
+        IntentName { .kind = AttachIntentKind::Workspaces, .name = "workspaces" },
         IntentName { .kind = AttachIntentKind::Resume, .name = "resume" },
     };
 
@@ -118,7 +118,7 @@ namespace
                        // session settings get the same treatment for a different reason -- they are
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
-                           "versions={} caps={} token={} settings={} role={} area={} intent={} windows={} "
+                           "versions={} caps={} token={} settings={} role={} area={} intent={} workspaces={} "
                            "profile=\"{}\"{}{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
@@ -129,7 +129,7 @@ namespace
                                ? std::format("{}x{}", value.clientArea->columns, value.clientArea->lines)
                                : std::string { "none" },
                            std::ranges::find(IntentNames, value.attachIntent.kind, &IntentName::kind)->name,
-                           formatWindows(value.attachIntent.windows),
+                           formatWorkspaces(value.attachIntent.workspaces),
                            value.profileName,
                            // Only a stated one, so a hello that states none reads as it always did.
                            value.colorPreference == WireColorPreference::Unstated
@@ -157,9 +157,9 @@ namespace
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
                                           value.releaseVersion.empty() ? "unknown" : value.releaseVersion,
-                                          formatWindows(value.followedWindows),
+                                          formatWorkspaces(value.followedWorkspaces),
                                           value.daemonInstance,
-                                          value.restoredWindows,
+                                          value.restoredWorkspaces,
                                           value.restoredTabs);
                    } },
         TraceRow { PduType::Input,
@@ -290,8 +290,8 @@ namespace
                    "LayoutState",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<LayoutState>(pdu);
-                       return std::format("window={} tabs={} activetab={}",
-                                          value.window,
+                       return std::format("workspace={} tabs={} activetab={}",
+                                          value.workspace,
                                           value.tabs.size(),
                                           value.activeTab);
                    } },
@@ -316,11 +316,12 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("session={}", std::get<ClosePane>(pdu).session);
                    } },
-        TraceRow { PduType::NewWindow,
-                   "NewWindow",
+        TraceRow { PduType::NewWorkspace,
+                   "NewWorkspace",
                    +[](DecodedPdu const& pdu) {
-                       // Empty for the connection's own profile, which keeps a plain NewWindow's trace bare.
-                       return profileField(std::get<NewWindow>(pdu).profileName);
+                       // Empty for the connection's own profile, which keeps a plain NewWorkspace's trace
+                       // bare.
+                       return profileField(std::get<NewWorkspace>(pdu).profileName);
                    } },
         TraceRow { PduType::ResizeSplit,
                    "ResizeSplit",

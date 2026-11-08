@@ -25,27 +25,27 @@ struct NodeMoveFailure
     std::optional<vtworkspace::MoveError> model = {};    ///< Set exactly when @c error is Model.
 };
 
-/// How applyMoveNode makes the window a NewWindow target lands in, and removes a window a move leaves empty:
-/// the host's own path (SessionHost::createEmptyWindow, discardWindow), which names and claims the window and
-/// forgets both again, so that no window of the host's is ever unnamed and none a move emptied lingers. Both
-/// are required.
-struct MoveWindowHooks
+/// How applyMoveNode makes the workspace a NewWorkspace target lands in, and removes a workspace a move
+/// leaves empty: the host's own path (SessionHost::createEmptyWorkspace, discardWorkspace), which names and
+/// claims the workspace and forgets both again, so that no workspace of the host's is ever unnamed and none a
+/// move emptied lingers. Both are required.
+struct MoveWorkspaceHooks
 {
-    /// Makes an empty window.
+    /// Makes an empty workspace.
     std::function<vtworkspace::WorkspaceId()> create;
-    /// Removes a window that holds no tab: one made by @c create that the move did not fill, or the window
-    /// the move took its last tab out of.
+    /// Removes a workspace that holds no tab: one made by @c create that the move did not fill, or the
+    /// workspace the move took its last tab out of.
     std::function<void(vtworkspace::WorkspaceId)> discard;
 };
 
 /// Moves the pane or tab @p move names to the target it names. No session is spawned or closed; the
-/// model's observers are told, so every client is pushed the new layout -- the window the move emptied, if
-/// any, among it with no tab -- and that window is then removed (@p windows).
+/// model's observers are told, so every client is pushed the new layout -- the workspace the move emptied, if
+/// any, among it with no tab -- and that workspace is then removed (@p workspaces).
 /// @param model The daemon's model.
 /// @param move The client's request.
-/// @param windows Makes the window of a NewWindow target, and removes a window the move empties.
+/// @param workspaces Makes the workspace of a NewWorkspace target, and removes a workspace the move empties.
 /// @return Where focus landed, or why nothing changed.
 [[nodiscard]] std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(
-    vtworkspace::SessionModel& model, proto::MoveNode const& move, MoveWindowHooks const& windows);
+    vtworkspace::SessionModel& model, proto::MoveNode const& move, MoveWorkspaceHooks const& workspaces);
 
 } // namespace vthost

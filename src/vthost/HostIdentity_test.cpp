@@ -80,10 +80,10 @@ TEST_CASE("a daemon with a machine id and a client without one are two machines"
     // A daemon in WSL and the Windows GUI attached to it share a host name, but not a filesystem: the
     // daemon's /home/u/proj must not be opened on Windows.
     auto const wsl = HostIdentity { .machineId = std::string { MachineId }, .hostname = "DESKTOP-ABC" };
-    auto const windows = HostIdentity { .machineId = {}, .hostname = "DESKTOP-ABC" };
+    auto const workspaces = HostIdentity { .machineId = {}, .hostname = "DESKTOP-ABC" };
 
-    CHECK(vthost::daemonMachineOf(stated(wsl), windows.view()) == vthost::DaemonMachine::Other);
-    CHECK(vthost::daemonMachineOf(stated(windows), wsl.view()) == vthost::DaemonMachine::Other);
+    CHECK(vthost::daemonMachineOf(stated(wsl), workspaces.view()) == vthost::DaemonMachine::Other);
+    CHECK(vthost::daemonMachineOf(stated(workspaces), wsl.view()) == vthost::DaemonMachine::Other);
 }
 
 TEST_CASE("the host names decide whether a daemon is this machine, when neither id is known",

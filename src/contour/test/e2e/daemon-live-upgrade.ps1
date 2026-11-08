@@ -50,7 +50,7 @@ $Contour = Join-Path $Install 'bin\contour.exe'
 # The developer's own configuration and state stay out of it; and so does the pane this may be run from, whose
 # CONTOUR_* variables would otherwise name it as the target of every verb below.
 $env:LOCALAPPDATA = Join-Path $Out 'appdata'
-foreach ($name in 'CONTOUR_WINDOW', 'CONTOUR_TAB', 'CONTOUR_PANE', 'CONTOUR_MUX', 'CONTOUR_DAEMON', 'CONTOUR_PROFILE') {
+foreach ($name in 'CONTOUR_WORKSPACE', 'CONTOUR_TAB', 'CONTOUR_PANE', 'CONTOUR_MUX', 'CONTOUR_DAEMON', 'CONTOUR_PROFILE') {
     Remove-Item "env:$name" -ErrorAction SilentlyContinue
 }
 $Config = Join-Path $env:LOCALAPPDATA 'contour\contour.yml'

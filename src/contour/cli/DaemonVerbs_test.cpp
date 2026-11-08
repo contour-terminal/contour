@@ -381,7 +381,7 @@ struct SavedWorkspace
     SavedWorkspace()
     {
         auto workspace = vthost::WorkspaceSnapshot {};
-        workspace.windows.emplace_back().tabs.emplace_back();
+        workspace.workspaces.emplace_back().tabs.emplace_back();
         REQUIRE(store.write(workspace));
     }
 };
@@ -499,7 +499,7 @@ TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspace", "
     {
         CHECK(contour::cli::daemonStopVerb(port, "/run/c/default", keep, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
-        CHECK(port.stops == std::vector { vthost::proto::StopReason::UserKeepingWorkspace });
+        CHECK(port.stops == std::vector { vthost::proto::StopReason::UserKeepingWorkspaces });
         CHECK(out.str() == "daemon stopped; its workspace is kept\n");
     }
     SECTION("a plain stop")

@@ -215,7 +215,7 @@ class SessionStreamEvents
     virtual void sessionEnded(vtworkspace::SessionId /*session*/, SessionEnd /*cause*/) {}
 
     /// @p session is about to be destroyed: fires before the host prunes its pane from the model, the last
-    /// moment its tab and window can be named, and is always followed by sessionClosed() for it.
+    /// moment its tab and workspace can be named, and is always followed by sessionClosed() for it.
     virtual void sessionClosing(vtworkspace::SessionId /*session*/) {}
 
     /// @p session's grid changed size, and the resize has already been applied.
@@ -265,12 +265,12 @@ class SessionStreamEvents
     }
 };
 
-/// Whose a window is, as one attached client asks about it.
+/// Whose a workspace is, as one attached client asks about it.
 ///
-/// A window an Attach connection's attach or NewWindow created is that connection's own — and stays
-/// claimed after it leaves, so a second GUI never inherits a first one's window. A window anything else
+/// A workspace an Attach connection's attach or NewWorkspace created is that connection's own — and stays
+/// claimed after it leaves, so a second GUI never inherits a first one's workspace. A workspace anything else
 /// created (the startup layout, a control connection) is unclaimed: the primary viewer follows it.
-enum class WindowClaim : uint8_t
+enum class WorkspaceClaim : uint8_t
 {
     Unclaimed = 0, ///< No client's: created by the host itself, or through a control connection.
     Yours = 1,     ///< Created for the client asking.
@@ -303,8 +303,8 @@ struct HostedSessionExtensions
 enum class QuiesceError : uint8_t
 {
     /// Its child has not set its terminal up yet, which flushes away input written before it: nothing written
-    /// in that window could be carried. @see vtpty::Process::spawnProgress(). The session is left as it was,
-    /// and a later quiesce() can succeed.
+    /// in that workspace could be carried. @see vtpty::Process::spawnProgress(). The session is left as it
+    /// was, and a later quiesce() can succeed.
     SpawnInProgress,
     /// The escape sequence in flight outgrew what a capture keeps of it (Settings::inFlightTailLimit). The
     /// session is left as it was, and a later quiesce() can succeed.
@@ -821,7 +821,7 @@ inline constexpr std::chrono::milliseconds DaemonMinimumFrameInterval { 100 };
 /// A workspace snapshot for a host to bring back as it starts, and what it re-runs in it.
 struct WorkspaceRestore
 {
-    WorkspaceSnapshot snapshot;                ///< The windows, tabs and panes to bring back.
+    WorkspaceSnapshot snapshot;                ///< The workspaces, tabs and panes to bring back.
     std::vector<std::string> rerunPrograms {}; ///< The programs a restored pane may re-run (rerunInputFor).
     RestoreDivider divider {}; ///< What every restored pane's divider says (@see seedRestoredHistory).
     RestoreSource source = RestoreSource::Snapshot; ///< Which file it came from, for endRestore().
@@ -862,7 +862,7 @@ struct SessionHostConfig
     /// The profile's configured startup layout. A pane's `command`/`arguments`/`directory` are
     /// honored (see @ref SessionSpawnRequest::commandOverride), and so is its `profile` (else its tab's)
     /// when @ref profiles is set; without a catalog a pane naming one is logged and otherwise ignored.
-    /// Empty `tabs` (the default) keeps today's behavior: the window starts with no tab at all.
+    /// Empty `tabs` (the default) keeps today's behavior: the workspace starts with no tab at all.
     vtworkspace::Layout startupLayout {};
     /// The machine the daemon runs on, as every session it spawns reports it. The default knows
     /// nothing, so only an OSC 7 URL with no host counts as local.
@@ -916,7 +916,7 @@ struct SessionHostConfig
     /// @ref restore and @ref startupLayout, neither of which is realized, and over @ref firstSessionId.
     /// Nothing in it is refused as a whole: whatever can be adopted is (@see SessionHost::handoverOutcome()).
     std::optional<handover::HandoverImage> handover {};
-    /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
+    /// Where the UUIDs of workspaces, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
 };
 
@@ -931,7 +931,7 @@ struct QuiescedHostSession
 /// moment.
 struct QuiescedHost
 {
-    vtworkspace::WorkspaceTreeState tree {};    ///< The windows, tabs and panes.
+    vtworkspace::WorkspaceTreeState tree {};    ///< The workspaces, tabs and panes.
     vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
     vtworkspace::SessionId nextSessionId { 1 }; ///< The id the host mints its next session with.
     std::vector<QuiescedHostSession> sessions;  ///< Every session still running, by id ascending.
@@ -1020,15 +1020,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Which run of the daemon this host is; 0 when none was stated. @see SessionHostConfig::instance
     [[nodiscard]] uint64_t instance() const noexcept { return _instance; }
 
-    /// @return The host's window (the daemon starts with exactly one): where a creation naming no window
-    /// lands.
-    ///         One a move emptied is removed, and another window takes this role (@see discardWindow).
-    [[nodiscard]] vtworkspace::WorkspaceId windowId() const noexcept { return _window; }
+    /// @return The host's workspace (the daemon starts with exactly one): where a creation naming no
+    /// workspace lands.
+    ///         One a move emptied is removed, and another workspace takes this role (@see discardWorkspace).
+    [[nodiscard]] vtworkspace::WorkspaceId workspaceId() const noexcept { return _workspace; }
 
-    /// @return The UUIDs and labels of this host's windows, tabs and panes.
+    /// @return The UUIDs and labels of this host's workspaces, tabs and panes.
     [[nodiscard]] ObjectRegistry& objects() noexcept { return _objects; }
 
-    /// @return The UUIDs and labels of this host's windows, tabs and panes.
+    /// @return The UUIDs and labels of this host's workspaces, tabs and panes.
     [[nodiscard]] ObjectRegistry const& objects() const noexcept { return _objects; }
 
     /// @return The authoritative client area, in cells: layout projection and
@@ -1107,9 +1107,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// applyPaneSize() instead, so a pane resizes its PTY once for both.
     ///
     /// A report counts as the client's latest word only when it differs from what the client last reported
-    /// (or is its first): clients re-assert their sizes on every attach and window event, and such a repeat
-    /// must not take the cell back from a client that reported a new one since. A client that never reports
-    /// one (tmux control mode, an older peer) takes no part.
+    /// (or is its first): clients re-assert their sizes on every attach and workspace event, and such a
+    /// repeat must not take the cell back from a client that reported a new one since. A client that never
+    /// reports one (tmux control mode, an older peer) takes no part.
     /// @param client The reporting client, identified by its stream observer; must not be null, and must be
     ///               subscribed (subscribeStream), as unsubscribeStream() forgets its report.
     /// @param cell The client's cell size; each extent positive (Require), bounded by the caller
@@ -1136,48 +1136,48 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// using the same pre-mint handshake as the GUI: the backing session is
     /// created first, then the model's allocator hands its id back.
     /// @param request What this creation overrides about the session it spawns.
-    /// @param beside  Which WINDOW to create the tab in, named by a session it already hosts —
+    /// @param beside  Which WORKSPACE to create the tab in, named by a session it already hosts —
     ///        the addressing every other layout verb uses (@see proto::SplitPane), because a
-    ///        window id is minted per model and a client's are not the host's. Unset, or naming a
-    ///        session this host does not hold, falls back to @ref windowId().
+    ///        workspace id is minted per model and a client's are not the host's. Unset, or naming a
+    ///        session this host does not hold, falls back to @ref workspaceId().
     /// @return The created tab, or nullptr on failure (nothing is leaked).
     vtworkspace::Tab* createTab(SessionSpawnRequest const& request = {},
                                 std::optional<vtworkspace::SessionId> beside = std::nullopt);
 
-    /// Creates a NEW window with a first tab (an empty window is useless), backed by
-    /// a fresh session — the daemon side of a client "new window" (B4).
+    /// Creates a NEW workspace with a first tab (an empty workspace is useless), backed by
+    /// a fresh session — the daemon side of a client "new workspace" (B4).
     /// @param request What this creation overrides about the session it spawns.
-    /// @param creator The attached client the window is created for, which then claims it (@see
-    ///        windowClaim) before its first tab is announced; null for a window no client claims.
-    /// @return The created window, or nullptr on failure (nothing is leaked).
-    vtworkspace::Workspace* createWindow(SessionSpawnRequest const& request = {},
-                                         SessionStreamEvents const* creator = nullptr);
+    /// @param creator The attached client the workspace is created for, which then claims it (@see
+    ///        workspaceClaim) before its first tab is announced; null for a workspace no client claims.
+    /// @return The created workspace, or nullptr on failure (nothing is leaked).
+    vtworkspace::Workspace* createWorkspace(SessionSpawnRequest const& request = {},
+                                            SessionStreamEvents const* creator = nullptr);
 
-    /// Creates a NEW window with no tab and no session, named and claimed: the one way every window of this
-    /// host is made -- createWindow() fills it with its first tab, a move lands its source in it. The caller
-    /// either fills it or hands it back to discardWindow().
-    /// @param creator The attached client the window is created for, which then claims it; null for none.
-    /// @return The created, empty window.
-    [[nodiscard]] vtworkspace::Workspace& createEmptyWindow(SessionStreamEvents const* creator = nullptr);
+    /// Creates a NEW workspace with no tab and no session, named and claimed: the one way every workspace of
+    /// this host is made -- createWorkspace() fills it with its first tab, a move lands its source in it. The
+    /// caller either fills it or hands it back to discardWorkspace().
+    /// @param creator The attached client the workspace is created for, which then claims it; null for none.
+    /// @return The created, empty workspace.
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace(SessionStreamEvents const* creator = nullptr);
 
-    /// Removes a window that holds no tab -- one createEmptyWindow() made and nothing filled, or one a move
-    /// emptied -- forgetting its name and claim. The host's own window (windowId()) removed, the first window
-    /// left becomes it.
-    /// @param window The window; one that holds a tab is left alone.
-    void discardWindow(vtworkspace::WorkspaceId window);
+    /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, or one a
+    /// move emptied -- forgetting its name and claim. The host's own workspace (workspaceId()) removed, the
+    /// first workspace left becomes it.
+    /// @param workspace The workspace; one that holds a tab is left alone.
+    void discardWorkspace(vtworkspace::WorkspaceId workspace);
 
-    /// @param window The window asked about.
+    /// @param workspace The workspace asked about.
     /// @param client The attached client asking.
-    /// @return Whether @p window was created for @p client, for another client, or for none.
-    [[nodiscard]] WindowClaim windowClaim(vtworkspace::WorkspaceId window,
-                                          SessionStreamEvents const* client) const noexcept;
+    /// @return Whether @p workspace was created for @p client, for another client, or for none.
+    [[nodiscard]] WorkspaceClaim workspaceClaim(vtworkspace::WorkspaceId workspace,
+                                                SessionStreamEvents const* client) const noexcept;
 
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
     /// Idempotent.
     /// @param client The connection, by its stream observer.
     void noteClientAttached(SessionStreamEvents const* client);
 
-    /// Stops counting @p client, releases its primary-viewer role, and leaves the windows it claimed
+    /// Stops counting @p client, releases its primary-viewer role, and leaves the workspaces it claimed
     /// claimed by nobody present (still not unclaimed). Idempotent, and a no-op for a client never counted.
     /// @param client The connection, by its stream observer.
     void noteClientDetached(SessionStreamEvents const* client);
@@ -1186,8 +1186,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
     [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
 
-    /// Makes @p client the primary viewer — the client whose launch took every window, which also follows
-    /// the windows no client claims, created later — unless another client holds that role.
+    /// Makes @p client the primary viewer — the client whose launch took every workspace, which also follows
+    /// the workspaces no client claims, created later — unless another client holds that role.
     /// @param client An attached client.
     void claimPrimaryViewer(SessionStreamEvents const* client);
 
@@ -1355,8 +1355,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] RestoreOutcome restoreOutcome() const noexcept { return _restoreOutcome; }
 
     /// Hands over, once, what the restore realized, for the first client to be told.
-    /// @param follows Whether the asking client follows a window, by its id: only those windows are counted.
-    /// @return The windows and tabs SessionHostConfig::restore brought back that @p follows names, the first
+    /// @param follows Whether the asking client follows a workspace, by its id: only those workspaces are
+    /// counted.
+    /// @return The workspaces and tabs SessionHostConfig::restore brought back that @p follows names, the
+    /// first
     ///         time this is called after it brought something back, and nullopt every time after, and when it
     ///         brought nothing, or nothing @p follows names.
     [[nodiscard]] std::optional<RestoredCounts> takeRestoreAnnouncement(
@@ -1453,9 +1455,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
 
     // vtworkspace::ModelEvents — every completed change fans out to subscribers.
-    void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
-    void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
-    void tabMoved(vtworkspace::WorkspaceId window,
+    void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
+    void tabMoved(vtworkspace::WorkspaceId workspace,
                   vtworkspace::TabId tab,
                   int fromIndex,
                   int toIndex) override;
@@ -1468,7 +1470,7 @@ class SessionHost final: public vtworkspace::ModelEvents
                              int fromIndex,
                              vtworkspace::WorkspaceId to,
                              int toIndex) override;
-    void activeTabChanged(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void activeTabChanged(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
                    vtworkspace::PaneId newLeaf) override;
@@ -1487,9 +1489,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     void paneTreeRestructured(vtworkspace::TabId tab) override;
 
   private:
-    /// createEmptyWindow(), named @p name.
-    [[nodiscard]] vtworkspace::Workspace& createEmptyWindow(SessionStreamEvents const* creator,
-                                                            vtcontrol::Uuid name);
+    /// createEmptyWorkspace(), named @p name.
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace(SessionStreamEvents const* creator,
+                                                               vtcontrol::Uuid name);
     /// Gives @p tab a name if no creation path did, as for a tab a move made.
     void bindUnnamed(vtworkspace::TabId tab);
 
@@ -1498,13 +1500,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///
     /// The single funnel every creation path goes through, which is why the host invariants are
     /// re-applied here to a request's settings rather than trusted from the caller.
-    /// The UUIDs a spawn carries into the shell's environment: the pane's own and those of the tab and window
-    /// it lands in.
+    /// The UUIDs a spawn carries into the shell's environment: the pane's own and those of the tab and
+    /// workspace it lands in.
     struct SpawnIds
     {
-        vtcontrol::Uuid window {}; ///< The window the pane lands in.
-        vtcontrol::Uuid tab {};    ///< The tab the pane lands in.
-        vtcontrol::Uuid pane {};   ///< The pane itself, bound to the session once it is spawned.
+        vtcontrol::Uuid workspace {}; ///< The workspace the pane lands in.
+        vtcontrol::Uuid tab {};       ///< The tab the pane lands in.
+        vtcontrol::Uuid pane {};      ///< The pane itself, bound to the session once it is spawned.
     };
 
     /// A tab UUID waiting for the model's `tabAdded`, which binds it before observers hear of the tab.
@@ -1542,7 +1544,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Takes over what a previous image of this daemon handed over (SessionHostConfig::handover): the object
     /// registry, the model with its ids, then every session (adoptHandoverSession()), and last the host's
     /// profiles, as a configuration reload applies them (replaceProfiles()). Called once, from the
-    /// constructor body, into a model holding no window. Defined in handover/HandoverRestore.cpp.
+    /// constructor body, into a model holding no workspace. Defined in handover/HandoverRestore.cpp.
     /// @param image The image.
     /// @return Nothing; or Malformed when the workspace tree was refused, every session then laid out in a
     ///         tab of its own.
@@ -1552,7 +1554,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// state over settings its profile makes up afresh, what was carried queued ahead of everything, its pump
     /// started. Never closes the PTY: a terminal state that is refused leaves the session a fresh terminal,
     /// and is announced (takeUnrestoredScreens()). A session the restored tree has no leaf for gets a tab of
-    /// its own in the host's window. Defined in handover/HandoverRestore.cpp.
+    /// its own in the host's workspace. Defined in handover/HandoverRestore.cpp.
     /// @param session The session as it crossed the exec.
     void adoptHandoverSession(handover::HandoverSession& session);
 
@@ -1583,9 +1585,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The tab's UUID: the preset one, or a fresh one.
     [[nodiscard]] vtcontrol::Uuid tabUuidFor(SessionSpawnRequest const& request);
 
-    /// @param window A window of the model.
+    /// @param workspace A workspace of the model.
     /// @return Its UUID, or the nil UUID for one the registry does not know.
-    [[nodiscard]] vtcontrol::Uuid windowUuid(vtworkspace::WorkspaceId window) const;
+    [[nodiscard]] vtcontrol::Uuid workspaceUuid(vtworkspace::WorkspaceId workspace) const;
 
     /// Destroys a session the model refused, and forgets its pane's UUID.
     /// @param session The session that was just seeded.
@@ -1618,49 +1620,49 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param session The id of the session to drop; an unknown one is a no-op.
     void eraseSession(uint64_t session);
 
-    /// Realizes @p layout's tabs into @p window in order, via the shared
+    /// Realizes @p layout's tabs into @p workspace in order, via the shared
     /// vtworkspace::realizeLayoutTab. Called once from the constructor body (never the
-    /// initializer list — @c _window is the LAST member to construct). Each leaf's
+    /// initializer list — @c _workspace is the LAST member to construct). Each leaf's
     /// command/arguments/directory become a @ref SessionSpawnRequest::commandOverride, and its
     /// profile (else its tab's) the @ref SessionSpawnRequest::profileName.
-    /// @param window The window to realize every tab into (the host's own, freshly created).
+    /// @param workspace The workspace to realize every tab into (the host's own, freshly created).
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
-    void realizeStartupLayout(vtworkspace::WorkspaceId window, vtworkspace::Layout const& layout);
+    void realizeStartupLayout(vtworkspace::WorkspaceId workspace, vtworkspace::Layout const& layout);
 
-    /// A window a restore brought back.
-    struct RestoredWindow
+    /// A workspace a restore brought back.
+    struct RestoredWorkspace
     {
-        uint64_t window = 0; ///< Its id.
-        uint32_t tabs = 0;   ///< The tabs of it with at least one spawned pane.
+        uint64_t workspace = 0; ///< Its id.
+        uint32_t tabs = 0;      ///< The tabs of it with at least one spawned pane.
     };
 
-    /// What realizing one window of a restore brought back.
-    struct RealizedWindow
+    /// What realizing one workspace of a restore brought back.
+    struct RealizedWorkspace
     {
         std::size_t panes = 0; ///< The panes that spawned.
         uint32_t tabs = 0;     ///< The tabs with at least one such pane.
     };
 
-    /// What a restore realized: the panes that spawned, and the windows holding at least one tab of them.
+    /// What a restore realized: the panes that spawned, and the workspaces holding at least one tab of them.
     struct RealizedRestore
     {
-        std::size_t panes = 0;               ///< The panes that spawned.
-        std::vector<RestoredWindow> windows; ///< Each window with a tab, in snapshot order.
+        std::size_t panes = 0;                     ///< The panes that spawned.
+        std::vector<RestoredWorkspace> workspaces; ///< Each workspace with a tab, in snapshot order.
     };
 
-    /// Realizes @p restore's windows: the first into the host's own window, each further one into a new
-    /// window, every tab via vtworkspace::realizeLayoutTab, then each tab's active pane and zoom and each
-    /// window's active tab. A pane's saved directory is used only while it still exists. Called once, from
+    /// Realizes @p restore's workspaces: the first into the host's own workspace, each further one into a new
+    /// workspace, every tab via vtworkspace::realizeLayoutTab, then each tab's active pane and zoom and each
+    /// workspace's active tab. A pane's saved directory is used only while it still exists. Called once, from
     /// the constructor body.
     /// @param restore The snapshot, and what its panes re-run.
     /// @return What was realized.
     RealizedRestore realizeRestoredWorkspace(WorkspaceRestore const& restore);
 
-    /// Realizes one window of a restore into @p window.
+    /// Realizes one workspace of a restore into @p workspace.
     /// @return What was realized.
-    RealizedWindow realizeRestoredWindow(vtworkspace::WorkspaceId window,
-                                         WindowSnapshot const& snapshot,
-                                         WorkspaceRestore const& restore);
+    RealizedWorkspace realizeRestoredWorkspace(vtworkspace::WorkspaceId workspace,
+                                               WorkspaceLayoutSnapshot const& snapshot,
+                                               WorkspaceRestore const& restore);
 
     /// @param kind What the object is.
     /// @param identity What a snapshot captured of it.
@@ -2070,13 +2072,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<SessionStreamEvents*> _streamSubscribers;
     /// The handshaken native Attach connections. @see connectedClients
     std::vector<SessionStreamEvents const*> _attachedClients;
-    /// The client whose launch took every window; null while none is attached. @see claimPrimaryViewer
+    /// The client whose launch took every workspace; null while none is attached. @see claimPrimaryViewer
     SessionStreamEvents const* _primaryViewer = nullptr;
     /// What serves the extensions' control calls. @see attachExtensionControl
     std::reference_wrapper<vtcontrol::ControlApi> _extensionControl;
-    /// Every window created for a client, by window id: that client while it is attached, null once it
-    /// left. A window absent here is unclaimed. @see windowClaim
-    std::unordered_map<uint64_t, SessionStreamEvents const*> _windowCreators;
+    /// Every workspace created for a client, by workspace id: that client while it is attached, null once it
+    /// left. A workspace absent here is unclaimed. @see workspaceClaim
+    std::unordered_map<uint64_t, SessionStreamEvents const*> _workspaceCreators;
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;
@@ -2092,16 +2094,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<vtworkspace::SessionId> _unrestoredScreens;
     /// What the daemon could not start as configured, not yet told to a client. Loop thread.
     std::vector<std::string> _degradations;
-    std::vector<RestoredWindow>
+    std::vector<RestoredWorkspace>
         _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
 
-    /// The UUIDs and labels of windows, tabs and panes. Declared before the model, whose events bind into it.
+    /// The UUIDs and labels of workspaces, tabs and panes. Declared before the model, whose events bind into
+    /// it.
     ObjectRegistry _objects;
     /// The UUID of the tab a creation path is about to add; bound by `tabAdded`, then cleared.
     std::optional<StagedTab> _stagedTab;
 
     vtworkspace::SessionModel _model; ///< Last member: its callbacks reach into the host.
-    vtworkspace::WorkspaceId _window;
+    vtworkspace::WorkspaceId _workspace;
 };
 
 /// Scoped subscription: keeps @p Observer subscribed to @p Host for this object's

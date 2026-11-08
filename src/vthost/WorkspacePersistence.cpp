@@ -455,7 +455,8 @@ std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store
             std::format("workspace restore: the history of {} pane(s) did not decode; they come back blank",
                         loaded.droppedHistories));
     auto snapshot = *std::move(loaded.snapshot);
-    report(std::format("workspace restore: restoring {} window(s) from {}", snapshot.windows.size(), name));
+    report(std::format(
+        "workspace restore: restoring {} workspace(s) from {}", snapshot.workspaces.size(), name));
     auto const divider = RestoreDivider {
         .sessionEndedAt = localTimeOf(snapshot.takenAt),
         .today = std::chrono::floor<std::chrono::days>(

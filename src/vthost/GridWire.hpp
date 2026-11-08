@@ -150,7 +150,7 @@ using ContextIdMap = std::unordered_map<uint16_t, MirroredContext>;
 /// @param hyperlinks Wire hyperlink id → this terminal's own id. Ids are per-terminal counters, so
 ///        a cell's id is meaningless until translated; an unmapped id becomes "no hyperlink".
 /// @param contexts Wire context id → what the mirror adopted for it. @see MirroredContext.
-/// @param firstColumn The wire column that lands in @p line's first column: a mirror showing a window
+/// @param firstColumn The wire column that lands in @p line's first column: a mirror showing a workspace
 ///        into a wider grid shifts the row left by its origin (@see vthost::client::viewportOrigin), and
 ///        the prompt and command end offsets with it, saturated at the line's start. Zero by default.
 void applyWireLine(vtbackend::Line& line,

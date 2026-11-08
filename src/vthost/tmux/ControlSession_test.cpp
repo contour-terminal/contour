@@ -317,7 +317,7 @@ TEST_CASE("new-window creates a tab and notifies %window-add + %layout-change", 
     auto h = ControlHarness {};
     auto const lines = h.exchange({ "new-window" });
 
-    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == 1);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == 1);
     CHECK(contains(lines, "%window-add @"));
     CHECK(contains(lines, "%layout-change @"));
     // The command's guard block used command number 1 (0 was the opening one).
@@ -330,14 +330,14 @@ TEST_CASE("a tab moved to another window re-announces its layout and the session
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE(other != nullptr);
-    auto const* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const tabId = tab->id();
 
     auto emitted = std::vector<std::string> {};
     h.loop.blockOn(driveMoveEvents(
-        h.session.get(), h.pair.second.get(), h.host.windowId(), other->id(), tabId, &emitted));
+        h.session.get(), h.pair.second.get(), h.host.workspaceId(), other->id(), tabId, &emitted));
 
     CHECK(contains(emitted, "%sessions-changed"));
     CHECK(contains(emitted, std::format("%layout-change @{}", tabId.value)));
@@ -348,7 +348,7 @@ TEST_CASE("split-window adds a pane and re-emits the layout", "[vthost][control]
     auto h = ControlHarness {};
     auto const lines = h.exchange({ "new-window", "split-window -h" });
 
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(tab->paneCount() == 2);
     // The second %layout-change carries a side-by-side container.
@@ -377,7 +377,7 @@ TEST_CASE("send-keys writes into the target pane's PTY", "[vthost][control]")
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto const session = tab->rootPane()->session();
 
@@ -396,7 +396,7 @@ TEST_CASE("capture-pane returns the visible text, without SGR by default", "[vth
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto const session = tab->rootPane()->session();
     h.host.terminal(session)->writeToScreen("\033[1;31mRED\033[0m plain\r\n");
@@ -416,7 +416,7 @@ TEST_CASE("capture-pane trims each row unless -J or -N is given", "[vthost][cont
     // selecting a replayed region copied lines padded to the pane width.
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     h.host.terminal(tab->rootPane()->session())->writeToScreen("hi");
 
@@ -439,7 +439,7 @@ TEST_CASE("a resize another client asked for is announced to this one", "[vthost
     // wrong rectangle, until the user happened to resize their own window.
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     h.host.subscribeStream(h.session.get()); // as the daemon's serveControlClient does
     auto other = OtherClient {};
@@ -464,7 +464,7 @@ TEST_CASE("capture-pane stays race-free while the pane is written concurrently",
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto* terminal = h.host.terminal(tab->rootPane()->session());
     REQUIRE(terminal != nullptr);
@@ -500,7 +500,7 @@ TEST_CASE("capture-pane -e preserves each cell's SGR rendition", "[vthost][contr
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto const session = tab->rootPane()->session();
     h.host.terminal(session)->writeToScreen("\033[1;31mRED\033[0m plain\r\n");
@@ -519,7 +519,7 @@ TEST_CASE("capture-pane -S - includes scrollback beyond the visible page", "[vth
     settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(1000));
     auto h = ControlHarness { {}, settings };
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto const session = tab->rootPane()->session();
 
@@ -533,7 +533,7 @@ TEST_CASE("capture-pane -S - includes scrollback beyond the visible page", "[vth
     // A second harness for the history capture (exchange() closes the session).
     auto h2 = ControlHarness { {}, settings };
     h2.host.createTab();
-    auto* tab2 = h2.host.model().workspace(h2.host.windowId())->activeTab();
+    auto* tab2 = h2.host.model().workspace(h2.host.workspaceId())->activeTab();
     auto const paneId2 = tab2->rootPane()->id().value;
     auto* terminal2 = h2.host.terminal(tab2->rootPane()->session());
     terminal2->writeToScreen("MARKER-FIRST\r\n");
@@ -549,7 +549,7 @@ TEST_CASE("%output escapes control bytes and never breaks a guard block", "[vtho
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
 
     // Wire the byte tap exactly like the daemon glue (the pump thread is
@@ -568,7 +568,7 @@ TEST_CASE("refresh-client -C resizes the client area and answers with layouts", 
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto const session = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
 
     auto const lines = h.exchange({ "refresh-client -C 100x50" });
 
@@ -615,7 +615,7 @@ TEST_CASE("refresh-client -A pauses and resumes a pane over the wire", "[vthost]
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto const paneId = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->id().value;
+    auto const paneId = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->id().value;
 
     auto const lines = h.exchange({ std::format("refresh-client -A %{}:pause", paneId),
                                     std::format("refresh-client -A %{}:continue", paneId) });
@@ -652,7 +652,7 @@ TEST_CASE("an output burst drains fully after the PTY goes silent", "[vthost][co
 {
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto const sessionId = tab->rootPane()->session();
     auto const tabId = tab->id();
@@ -696,7 +696,7 @@ TEST_CASE("a control client that overflows the write queue is disconnected", "[v
     // a burst overflows it — the session must disconnect, not drop-and-continue.
     auto h = ControlHarness { ControlSession::Options { .writeQueueMaxBytes = 256 } };
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     auto const tabId = tab->id();
 
@@ -718,7 +718,7 @@ TEST_CASE("capture-pane reads the DISPLAYED page, not the primary one", "[vthost
     // native path already mirrors the displayed page for exactly this reason.
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto* terminal = h.host.terminal(tab->rootPane()->session());
     REQUIRE(terminal != nullptr);
@@ -741,7 +741,7 @@ TEST_CASE("capture-pane -e keeps the fill rendition of an erased region", "[vtho
     // capture painted a default-background screen instead of the red one the pane shows.
     auto h = ControlHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     auto const paneId = tab->rootPane()->id().value;
     auto* terminal = h.host.terminal(tab->rootPane()->session());
     REQUIRE(terminal != nullptr);

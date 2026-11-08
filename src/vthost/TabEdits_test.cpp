@@ -38,17 +38,17 @@ struct CountingEvents final: vtworkspace::ModelEvents
     void tabColorChanged(vtworkspace::TabId) override { ++count; }
 };
 
-/// A window of two tabs: the first split in two (sessions 1 and 2, the second pane active), the second
+/// A workspace of two tabs: the first split in two (sessions 1 and 2, the second pane active), the second
 /// holding session 3 and active.
 struct TwoPaneTab
 {
     CountingEvents events;
     uint64_t nextSession = 1;
     vtworkspace::SessionModel model { events, [this] { return vtworkspace::SessionId { nextSession++ }; } };
-    vtworkspace::WorkspaceId window = model.createWorkspace()->id();
-    vtworkspace::Tab* first = model.createTab(window);
+    vtworkspace::WorkspaceId workspace = model.createWorkspace()->id();
+    vtworkspace::Tab* first = model.createTab(workspace);
     vtworkspace::Pane* second = model.splitActivePane(first->id(), vtworkspace::SplitState::Horizontal);
-    vtworkspace::Tab* other = model.createTab(window);
+    vtworkspace::Tab* other = model.createTab(workspace);
 
     TwoPaneTab() { model.setActivePane(first->id(), *paneOf(2)); }
 
@@ -115,7 +115,7 @@ TEST_CASE("each tab edit changes the model once and is idempotent", "[vthost][ta
         { .name = "ActivateTab",
           .edit = { .session = 1, .kind = TabEditKind::ActivateTab },
           .prepare = nothing,
-          .holds = [](TwoPaneTab& t) { return t.model.workspace(t.window)->activeTab() == t.first; } },
+          .holds = [](TwoPaneTab& t) { return t.model.workspace(t.workspace)->activeTab() == t.first; } },
     };
     CHECK(rows.size() == 8); // every TabEditKind
 
