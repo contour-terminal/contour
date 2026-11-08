@@ -284,6 +284,31 @@ namespace
         return matched;
     }
 
+    /// Entries of a snapshot's per-cell side table, grouped by the stable id of the row they sit on.
+    template <typename Entry>
+    using EntriesByRow = std::unordered_map<int64_t, std::vector<Entry>>;
+
+    /// @return @p entries grouped by their row's stable id.
+    template <typename Entry>
+    [[nodiscard]] EntriesByRow<Entry> groupByRow(std::vector<Entry> const& entries)
+    {
+        auto grouped = EntriesByRow<Entry> {};
+        for (auto const& entry: entries)
+            grouped[entry.stableId].push_back(entry);
+        return grouped;
+    }
+
+    /// Appends to @p out the entries of every row in @p lines, in the order of the rows.
+    template <typename Entry>
+    void appendRowEntries(std::vector<Entry>& out,
+                          EntriesByRow<Entry> const& byRow,
+                          std::span<proto::WireLine const> lines)
+    {
+        for (auto const& line: lines)
+            if (auto const found = byRow.find(line.stableId); found != byRow.end())
+                out.insert(out.end(), found->second.begin(), found->second.end());
+    }
+
 } // namespace
 
 NativeSession::NativeSession(core::net::EventLoop& loop,
@@ -524,15 +549,17 @@ void NativeSession::pushSoftFonts(SessionId session)
     if (terminal == nullptr)
         return;
     auto pdu = proto::SoftFontState { .session = session.value, .generation = 0, .fonts = {} };
+    // One lookup: a session never told about fonts starts at generation 0, which is the store's own.
+    auto const sent = _softFontsSent.try_emplace(session.value, uint64_t { 0 }).first;
     {
         auto const guard = std::lock_guard { std::as_const(*terminal) };
         auto const& store = terminal->softFonts();
         pdu.generation = store.generation();
-        if (pdu.generation == _softFontsSent[session.value])
+        if (pdu.generation == sent->second)
             return;
         pdu.fonts = softFontsToWire(store);
     }
-    _softFontsSent[session.value] = pdu.generation;
+    sent->second = pdu.generation;
     emitSessionEvent(std::move(pdu));
 }
 
@@ -1634,16 +1661,11 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
 
     // Index the image cells by the row they sit on. The mirror clears a row's image cells when it
     // takes the row and refills them from the same PDU's side table, so an entry that travelled in
-    // a different piece than its row would be dropped on arrival.
-    // ImageCellEntry is trivially copyable, so these are copies however they are spelled; only the
-    // grouping matters.
-    auto imagesByRow = std::unordered_map<int64_t, std::vector<proto::ImageCellEntry>> {};
-    for (auto const& entry: std::exchange(delta.imageCells, {}))
-        imagesByRow[entry.stableId].push_back(entry);
-    // The soft-glyph cells travel with their rows for the same reason.
-    auto softGlyphsByRow = std::unordered_map<int64_t, std::vector<proto::SoftGlyphCellEntry>> {};
-    for (auto const& entry: std::exchange(delta.softGlyphCells, {}))
-        softGlyphsByRow[entry.stableId].push_back(entry);
+    // a different piece than its row would be dropped on arrival. The soft-glyph cells travel with
+    // their rows for the same reason. Both entry types are trivially copyable, so these are copies
+    // however they are spelled; only the grouping matters.
+    auto const imagesByRow = groupByRow(std::exchange(delta.imageCells, {}));
+    auto const softGlyphsByRow = groupByRow(std::exchange(delta.softGlyphCells, {}));
 
     for (auto const& part: proto::partitionSnapshotRows(lines, _snapshotPieceBytes))
     {
@@ -1657,13 +1679,8 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
         // grid is 4000 allocations and megabytes of element-wise copy construction.
         auto const rows = std::span { lines }.subspan(part.begin, part.count);
         piece.lines.assign(std::make_move_iterator(rows.begin()), std::make_move_iterator(rows.end()));
-        for (auto const& line: piece.lines)
-            if (auto const images = imagesByRow.find(line.stableId); images != imagesByRow.end())
-                piece.imageCells.insert(piece.imageCells.end(), images->second.begin(), images->second.end());
-        for (auto const& line: piece.lines)
-            if (auto const glyphs = softGlyphsByRow.find(line.stableId); glyphs != softGlyphsByRow.end())
-                piece.softGlyphCells.insert(
-                    piece.softGlyphCells.end(), glyphs->second.begin(), glyphs->second.end());
+        appendRowEntries(piece.imageCells, imagesByRow, piece.lines);
+        appendRowEntries(piece.softGlyphCells, softGlyphsByRow, piece.lines);
 
         // Handed over with `exchange` rather than `move`: the piece that takes each is decided by
         // the SAME predicates the receiver uses, and leaving an emptied source behind means a
