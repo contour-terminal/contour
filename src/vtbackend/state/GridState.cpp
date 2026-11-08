@@ -142,6 +142,7 @@ namespace
         ClusterPoolIndices = 27,
         ClusterPool = 28,
         ImageFragments = 29,
+        SoftGlyphs = 30, ///< (column, font, position) triples, by column.
     };
 
     [[nodiscard]] constexpr uint64_t keyOf(LineField field, WireKind kind) noexcept
@@ -476,6 +477,25 @@ void Line::encodeState(StateWriter& out, LineEncodeContext& context) const
         }
         out.endFrame(fragments);
     }
+
+    if (_storage.softGlyphs && !_storage.softGlyphs->empty())
+    {
+        auto columns = std::vector<uint16_t> {};
+        columns.reserve(_storage.softGlyphs->size());
+        for (auto const column: *_storage.softGlyphs | std::views::keys)
+            columns.push_back(column);
+        std::ranges::sort(columns);
+        out.varint(keyOf(LineField::SoftGlyphs, WireKind::Framed));
+        auto const glyphs = out.beginFrame();
+        for (auto const column: columns)
+        {
+            auto const ref = _storage.softGlyphs->at(column);
+            out.varint(column);
+            out.varint(ref.font);
+            out.varint(ref.position);
+        }
+        out.endFrame(glyphs);
+    }
     out.endFrame(frame);
 }
 
@@ -559,6 +579,39 @@ namespace
             if (!fragment)
                 return StateFailure { StateDecodeError::InvalidValue };
             map.emplace(static_cast<uint16_t>(*column), std::move(fragment));
+        }
+        return {};
+    }
+
+    /// Reads the soft-glyph references of a line of @p columns into @p storage.
+    [[nodiscard]] std::expected<void, StateDecodeError> getSoftGlyphs(std::span<uint8_t const> payload,
+                                                                      uint32_t columns,
+                                                                      LineSoA& storage)
+    {
+        constexpr auto LastFont = uint64_t { 2 };
+        constexpr auto FirstPosition = uint64_t { 0x20 };
+        constexpr auto LastPosition = uint64_t { 0x7F };
+        auto& map = storage.softGlyphs.ensure();
+        auto in = StateReader::ofPayload(payload);
+        auto previous = std::optional<uint64_t> {};
+        while (!in.atEnd())
+        {
+            auto const column = in.varint();
+            if (!column)
+                return StateFailure { column.error() };
+            auto const font = in.varint();
+            if (!font)
+                return StateFailure { font.error() };
+            auto const position = in.varint();
+            if (!position)
+                return StateFailure { position.error() };
+            if (*column >= uint64_t { columns } || (previous && *previous >= *column) || *font > LastFont
+                || *position < FirstPosition || *position > LastPosition)
+                return StateFailure { StateDecodeError::InvalidValue };
+            previous = *column;
+            map.emplace(static_cast<uint16_t>(*column),
+                        SoftGlyphRef { .font = static_cast<uint8_t>(*font),
+                                       .position = static_cast<uint8_t>(*position) });
         }
         return {};
     }
@@ -674,6 +727,13 @@ std::expected<Line, StateDecodeError> Line::decodeState(StateReader& in, LineDec
         return StateFailure { fragments.error() };
     if (*fragments)
         if (auto const done = getFragments(**fragments, scalars->columns, storage, context); !done)
+            return StateFailure { done.error() };
+
+    auto const softGlyphs = getFramed(*fields, LineField::SoftGlyphs);
+    if (!softGlyphs)
+        return StateFailure { softGlyphs.error() };
+    if (*softGlyphs)
+        if (auto const done = getSoftGlyphs(**softGlyphs, scalars->columns, storage); !done)
             return StateFailure { done.error() };
     return line;
 }

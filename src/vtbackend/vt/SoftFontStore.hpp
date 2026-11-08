@@ -55,8 +55,17 @@ class SoftFontStore
     /// @return A counter that increases on every change.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
 
-    /// Replaces every font (daemon mirror and state codec); index order stands in for load order.
+    /// Replaces every font (daemon mirror); index order stands in for load order.
     void replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts);
+
+    /// Replaces every font (state codec), keeping the order they were loaded in, which decides which of two
+    /// fonts sharing a designator fontForDesignator() answers.
+    /// @param fonts     The fonts, by number.
+    /// @param loadRanks Per number, the font's place in load order, 0 = loaded first. Unused for a null font.
+    void replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts, std::array<uint8_t, 3> loadRanks);
+
+    /// @return Per number, the font's place in load order, 0 = loaded first; 0 for an absent font.
+    [[nodiscard]] std::array<uint8_t, 3> loadRanks() const noexcept;
 
     [[nodiscard]] std::array<std::shared_ptr<SoftFont const>, 3> const& fonts() const noexcept
     {

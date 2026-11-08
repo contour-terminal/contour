@@ -113,9 +113,7 @@ TEST_CASE("round-trip at every byte offset of a DECDMAC macro definition", "[InF
                                           hexEncoded("\033P4;0;0!z")));
 }
 
-// Hidden until the state codec carries the soft fonts and their per-cell references (the DECDLD rework's
-// state task): a font defined before, or while, a handover is in flight is not part of the snapshot yet.
-TEST_CASE("round-trip at every byte offset of a DECDLD soft font", "[.][InFlightTail][StateRoundTrip]")
+TEST_CASE("round-trip at every byte offset of a DECDLD soft font", "[InFlightTail][StateRoundTrip]")
 {
     requireExactAtEveryOffset("\033P1;0;0;10;0;0;20;0{ A@\033\\"
                               "\033P1;1;1;10;0;0;20;0{ A~~~~~/~~~~~;@@@@@/@@@@@\033\\"

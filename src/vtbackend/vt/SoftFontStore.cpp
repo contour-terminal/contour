@@ -82,4 +82,24 @@ void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fo
     ++_generation;
 }
 
+void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts,
+                               std::array<uint8_t, 3> loadRanks)
+{
+    _fonts = std::move(fonts);
+    for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
+        _loadedAt[number] = _fonts[number] ? _nextTicket + loadRanks[number] : 0;
+    _nextTicket += _fonts.size();
+    ++_generation;
+}
+
+std::array<uint8_t, 3> SoftFontStore::loadRanks() const noexcept
+{
+    auto ranks = std::array<uint8_t, 3> {};
+    for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
+        if (_fonts[number])
+            ranks[number] = static_cast<uint8_t>(std::ranges::count_if(
+                _loadedAt, [&](uint64_t other) { return other != 0 && other < _loadedAt[number]; }));
+    return ranks;
+}
+
 } // namespace vtbackend

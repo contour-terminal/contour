@@ -281,6 +281,132 @@ std::expected<void, StateDecodeError> HyperlinkStorage::restoreState(HyperlinkSt
 
 // {{{ Terminal
 
+namespace
+{
+    constexpr auto FirstSoftPosition = uint8_t { 0x20 };
+    constexpr auto SoftFontCount = size_t { 3 };
+    constexpr auto SoftFontGlyphCount = size_t { 96 };
+    constexpr auto MaxDesignatorLength = size_t { 3 }; ///< Up to two intermediates and a final.
+
+    /// @return @p coverage (one byte per pixel, 0 or 1) at one bit per pixel, least significant bit first.
+    std::vector<uint8_t> packCoverage(std::span<uint8_t const> coverage)
+    {
+        auto packed = std::vector<uint8_t>((coverage.size() + 7) / 8, uint8_t { 0 });
+        for (auto const pixel: std::views::iota(size_t { 0 }, coverage.size()))
+            if (coverage[pixel])
+                packed[pixel / 8] |= static_cast<uint8_t>(1U << (pixel % 8));
+        return packed;
+    }
+
+    /// @return The bits of @p packed as @p pixels bytes of 0 or 1.
+    std::vector<uint8_t> unpackCoverage(std::span<uint8_t const> packed, size_t pixels)
+    {
+        auto coverage = std::vector<uint8_t>(pixels, uint8_t { 0 });
+        for (auto const pixel: std::views::iota(size_t { 0 }, pixels))
+            coverage[pixel] = (packed[pixel / 8] >> (pixel % 8)) & 1U;
+        return coverage;
+    }
+
+    /// @return The soft fonts @p store holds, as the state carries them.
+    std::vector<SoftFontState> captureSoftFonts(SoftFontStore const& store)
+    {
+        auto result = std::vector<SoftFontState> {};
+        auto const ranks = store.loadRanks();
+        for (auto const number: std::views::iota(size_t { 0 }, SoftFontCount))
+        {
+            auto const& font = store.fonts()[number];
+            if (!font)
+                continue;
+            auto& out = result.emplace_back(SoftFontState {
+                .number = static_cast<uint8_t>(number),
+                .designator = font->designator,
+                .loadRank = ranks[number],
+                .startPosition = font->declaration.startPosition,
+                .erase = static_cast<uint8_t>(font->declaration.erase),
+                .declaredWidth = font->declaration.declaredWidth,
+                .declaredHeight = font->declaration.declaredHeight,
+                .sizeSource = static_cast<uint8_t>(font->declaration.sizeSource),
+                .columnsPerPage = font->declaration.columnsPerPage,
+                .linesPerPage = font->declaration.linesPerPage,
+                .usage = static_cast<uint8_t>(font->declaration.usage),
+                .charsetSize = static_cast<uint8_t>(font->declaration.charsetSize),
+                .fullWidth = font->geometry.fullWidth,
+                .fullHeight = font->geometry.fullHeight,
+                .textWidth = font->geometry.textWidth,
+            });
+            for (auto const index: std::views::iota(size_t { 0 }, font->glyphs.size()))
+                if (auto const& glyph = font->glyphs[index])
+                    out.glyphs.push_back(
+                        SoftGlyphState { .position = static_cast<uint8_t>(FirstSoftPosition + index),
+                                         .width = glyph->width,
+                                         .height = glyph->height,
+                                         .packedCoverage = packCoverage(glyph->coverage) });
+        }
+        return result;
+    }
+
+    /// The soft fonts of a state, built and checked aside, for the commit to put in place.
+    struct StagedSoftFonts
+    {
+        std::array<std::shared_ptr<SoftFont const>, SoftFontCount> fonts {};
+        std::array<uint8_t, SoftFontCount> loadRanks {};
+    };
+
+    /// Rebuilds the soft fonts @p states describe.
+    /// @return The fonts, or why a font is not one this build could have written.
+    std::expected<StagedSoftFonts, StateDecodeError> stageSoftFonts(std::span<SoftFontState const> states)
+    {
+        auto staged = StagedSoftFonts {};
+        for (auto const& state: states)
+        {
+            if (state.number >= SoftFontCount || staged.fonts[state.number]
+                || state.designator.size() > MaxDesignatorLength || state.loadRank >= SoftFontCount
+                || state.erase > static_cast<uint8_t>(SoftFontErase::AllRenditions)
+                || state.sizeSource > static_cast<uint8_t>(SoftFontSizeSource::Matrix)
+                || state.usage > static_cast<uint8_t>(SoftFontUsage::FullCell)
+                || state.charsetSize > static_cast<uint8_t>(SoftCharsetSize::Size96)
+                || state.glyphs.size() > SoftFontGlyphCount)
+                return StateFailure { StateDecodeError::InvalidValue };
+
+            auto glyphs = std::array<std::shared_ptr<SoftGlyph const>, 96> {};
+            auto previous = std::optional<uint8_t> {};
+            for (auto const& glyph: state.glyphs)
+            {
+                auto const pixels = size_t { glyph.width } * glyph.height;
+                if (glyph.position < FirstSoftPosition || glyph.position >= FirstSoftPosition + glyphs.size()
+                    || (previous && *previous >= glyph.position) || glyph.width != state.fullWidth
+                    || glyph.height != state.fullHeight
+                    || pixels == 0
+                    // The packed bits are exactly the pixels, padded to a byte.
+                    || glyph.packedCoverage.size() != (pixels + 7) / 8)
+                    return StateFailure { StateDecodeError::InvalidValue };
+                previous = glyph.position;
+                glyphs[glyph.position - FirstSoftPosition] =
+                    makeSoftGlyph(glyph.width, glyph.height, unpackCoverage(glyph.packedCoverage, pixels));
+            }
+
+            auto const declaration =
+                SoftFontDeclaration { .fontNumber = state.number,
+                                      .startPosition = state.startPosition,
+                                      .erase = static_cast<SoftFontErase>(state.erase),
+                                      .declaredWidth = state.declaredWidth,
+                                      .declaredHeight = state.declaredHeight,
+                                      .sizeSource = static_cast<SoftFontSizeSource>(state.sizeSource),
+                                      .columnsPerPage = state.columnsPerPage,
+                                      .linesPerPage = state.linesPerPage,
+                                      .usage = static_cast<SoftFontUsage>(state.usage),
+                                      .charsetSize = static_cast<SoftCharsetSize>(state.charsetSize) };
+            auto const geometry = SoftCellGeometry { .fullWidth = state.fullWidth,
+                                                     .fullHeight = state.fullHeight,
+                                                     .textWidth = state.textWidth };
+            staged.fonts[state.number] = std::make_shared<SoftFont const>(
+                makeSoftFont(declaration, state.designator, geometry, std::move(glyphs)));
+            staged.loadRanks[state.number] = state.loadRank;
+        }
+        return staged;
+    }
+} // namespace
+
 TerminalState Terminal::captureState() const
 {
     // Not captured, deliberately: what a client owns and sends again when it reattaches -- whether the
@@ -365,6 +491,7 @@ TerminalState Terminal::captureState() const
         .locator = _locatorState,
         .locatorButtonsHeld = _locatorButtonsHeld,
         .locatorButtonsOwnedByApp = _locatorButtonsOwnedByApp,
+        .softFonts = captureSoftFonts(_softFonts),
     };
 
     if (_sixelColorPalette)
@@ -551,6 +678,7 @@ std::expected<void, StateDecodeError> Terminal::restoreState(TerminalState const
     // images built aside drop out of the pool's index again with their last reference.
     auto images = std::optional<RestoredImageTable> {};
     auto screens = std::vector<StagedScreen> {};
+    auto softFonts = StagedSoftFonts {};
     try
     {
         if (auto const valid = validateRestore(state); !valid)
@@ -559,6 +687,10 @@ std::expected<void, StateDecodeError> Terminal::restoreState(TerminalState const
         if (!table)
             return StateFailure { table.error() };
         images = std::move(*table);
+        auto fonts = stageSoftFonts(state.keyStrings.softFonts);
+        if (!fonts)
+            return StateFailure { fonts.error() };
+        softFonts = std::move(*fonts);
         screens.reserve(_pages.size() + 2);
         auto const stage = [&](Screen const& screen, ScreenState const& screenState) {
             auto staged = screen.stageRestore(screenState, *images);
@@ -581,14 +713,16 @@ std::expected<void, StateDecodeError> Terminal::restoreState(TerminalState const
         return StateFailure { StateDecodeError::TooLarge };
     }
 
-    commitRestore(state, *images, screens);
+    commitRestore(state, *images, screens, softFonts.fonts, softFonts.loadRanks);
     announceRestoredState();
     return {};
 }
 
 void Terminal::commitRestore(TerminalState const& state,
                              RestoredImageTable const& images,
-                             std::span<StagedScreen> screens)
+                             std::span<StagedScreen> screens,
+                             std::array<std::shared_ptr<SoftFont const>, 3> softFonts,
+                             std::array<uint8_t, 3> softFontLoadRanks)
 {
     // Nothing here can be refused: validateRestore() and the staging checked all of it.
     auto const succeeded = [](std::expected<void, StateDecodeError> const& result) {
@@ -596,6 +730,7 @@ void Terminal::commitRestore(TerminalState const& state,
     };
     succeeded(_modes.restoreState(state.modes));
     images.commit(_imagePool);
+    _softFonts.replaceAll(std::move(softFonts), softFontLoadRanks);
     for (auto const index: std::views::iota(size_t { 0 }, _pages.size()))
         _pages[index]->commitRestore(std::move(screens[index]));
     _hostWritableStatusLineScreen.commitRestore(std::move(screens[_pages.size()]));

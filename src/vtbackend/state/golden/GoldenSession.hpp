@@ -23,7 +23,8 @@ inline HandoverSetup goldenSetup()
 }
 
 /// The bytes the golden session's terminal parses: a title, coloured text enough to scroll twelve lines
-/// into the history, a Sixel image, a kitty image, a hyperlink and a sequence left half-way.
+/// into the history, a Sixel image, a kitty image, a hyperlink, a DECDLD soft font with cells drawn in it,
+/// and a sequence left half-way.
 /// @return The same bytes on every call.
 inline std::string goldenSession()
 {
@@ -33,6 +34,8 @@ inline std::string goldenSession()
     session += "\033Pq\"1;1;12;6#1;2;100;0;0#1~~~~~~~~~~~~\033\\\r\n";
     session += "\033_Ga=T,f=24,s=2,v=1,i=7;AAAA/wAA\033\\\r\n";
     session += "\033]8;;https://example.com/golden\033\\a link\033]8;;\033\\ and text\r\n";
+    // Format v2: a soft font, and two cells of the page drawn with it.
+    session += "\033P1;1;1;10;0;0;20;0{ A~~~~~/~~~~~;@@@@@/@@@@@\033\\\033) A\x0E!\"\x0F soft\r\n";
     session += "last line, then a CSI left open\033[3";
     return session;
 }

@@ -5918,9 +5918,13 @@ class Terminal: public IStatusLinePublishTarget
     /// @param state   The state, validated.
     /// @param images  Its image table, built.
     /// @param screens Its sixteen pages, then the host-writable and the indicator status line, staged.
+    /// @param softFonts        Its DECDLD soft fonts, by number, rebuilt.
+    /// @param softFontLoadRanks Per number, the font's place in load order.
     void commitRestore(TerminalState const& state,
                        RestoredImageTable const& images,
-                       std::span<StagedScreen> screens);
+                       std::span<StagedScreen> screens,
+                       std::array<std::shared_ptr<SoftFont const>, 3> softFonts,
+                       std::array<uint8_t, 3> softFontLoadRanks);
 
     /// Tells the listener every fact it keeps a copy of, as a restore replaced them all. Defined in
     /// state/TerminalState.cpp.

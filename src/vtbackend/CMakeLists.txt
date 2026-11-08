@@ -483,6 +483,7 @@ if(LIBTERMINAL_TESTING)
         state/ScreenState_test.cpp
         state/TerminalState_test.cpp
         state/StateCodec_test.cpp
+        state/SoftFontState_test.cpp
         state/StateRoundTrip_test.cpp
         testing/CounterColumns_test.cpp
         testing/Workloads_test.cpp
