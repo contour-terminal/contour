@@ -103,6 +103,21 @@ template <typename Input, typename Written, typename Fallbacks>
         modes);
 }
 
+/// The actions bound to a key chord on @p kind, in either edition's defaults or the fallbacks.
+/// @param modes When not empty, only rows requiring exactly these modes.
+[[nodiscard]] std::vector<std::string_view> keyActions(KeyboardPlatformKind kind,
+                                                       Modifiers modifiers,
+                                                       vtbackend::Key input,
+                                                       MatchModes modes = {})
+{
+    return actionsOn(
+        [kind](DefaultsEdition edition) { return makeDefaultInputMappings(edition, kind).keyMappings; },
+        builtinFallbackKeyMappings(kind),
+        modifiers,
+        input,
+        modes);
+}
+
 /// The actions bound to a character chord on @p kind in the fallback table only.
 [[nodiscard]] std::vector<std::string_view> fallbackCharActions(KeyboardPlatformKind kind,
                                                                 Modifiers modifiers,
@@ -484,4 +499,35 @@ TEST_CASE("macOS opens the last command's output with Shift+Command+O at the pro
     REQUIRE(row != nullptr);
     CHECK(row->mapping.modes == MatchModes { 0, MatchModes::AlternateScreen });
     CHECK(row->declined == DeclinedInput::Consume);
+}
+
+TEST_CASE("the desktop steps between commands as VS Code does", "[bindings]")
+{
+    using vtbackend::Key;
+    auto const prompt = MatchModes { 0, MatchModes::AlternateScreen };
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        INFO("platform " << static_cast<int>(kind));
+        CHECK(keyActions(kind, ctrl, Key::UpArrow) == Names { "FocusPreviousCommand" });
+        CHECK(keyActions(kind, ctrl, Key::DownArrow) == Names { "FocusNextCommand" });
+        CHECK(keyActions(kind, ctrlShift, Key::UpArrow) == Names { "SelectPreviousCommandOutput" });
+        CHECK(keyActions(kind, ctrlShift, Key::DownArrow) == Names { "SelectNextCommandOutput" });
+        // At the prompt only: every row on these chords requires the primary screen, so an alternate-screen
+        // application keeps them.
+        for (auto const key: { Key::UpArrow, Key::DownArrow })
+        {
+            CHECK(keyActions(kind, ctrl, key, prompt) == keyActions(kind, ctrl, key));
+            CHECK(keyActions(kind, ctrlShift, key, prompt) == keyActions(kind, ctrlShift, key));
+        }
+        CHECK(fallbackCharActions(kind, ctrlShift, U'L') == Names { "ClearToPrompt" });
+        auto const* clear = fallbackCharRow(kind, ctrlShift, U'L');
+        REQUIRE(clear != nullptr);
+        CHECK(clear->mapping.modes == prompt);
+        CHECK(clear->declined == DeclinedInput::Consume);
+    }
+    // macOS keeps Control+Shift+Up/Down as the jump between prompts.
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow) == Names { "ScrollMarkUp" });
+    CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow) == Names { "ScrollMarkDown" });
 }

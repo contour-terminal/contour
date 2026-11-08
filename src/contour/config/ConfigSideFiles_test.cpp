@@ -570,9 +570,9 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
         CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
     }
 
-    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt, on the primary screen only")
+    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt on macOS, on the primary screen only")
     {
-        auto const config = Config {};
+        auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
 
         auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
         REQUIRE(up != nullptr);
@@ -595,6 +595,27 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
             return (mapping.input == Key::UpArrow || mapping.input == Key::DownArrow)
                    && mapping.modifiers == ctrlShift;
         }));
+    }
+
+    SECTION("Ctrl+Shift+Up and Down select a command's output on the desktop, on the primary screen only")
+    {
+        // VS Code's chords; the desktop jumps from prompt to prompt with Ctrl+Alt+K and J.
+        auto const config = Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
+
+        auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
+        REQUIRE(up != nullptr);
+        REQUIRE(up->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SelectPreviousCommandOutput>(up->front()));
+
+        auto const* down =
+            contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags);
+        REQUIRE(down != nullptr);
+        REQUIRE(down->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::SelectNextCommandOutput>(down->front()));
+
+        auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
+        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, alternateScreen)
+              == nullptr);
     }
 
     SECTION("matching is on the exact chord")

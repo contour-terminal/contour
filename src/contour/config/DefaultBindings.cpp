@@ -203,9 +203,10 @@ namespace
             // the jumps from one command's prompt to the next, as Ghostty's jump_to_prompt binds them. Bound
             // nowhere in the defaults when they were added -- Shift alone scrolls a line, Alt+Shift focuses a
             // pane, Ctrl+Alt swaps one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the
-            // prompts are; an alternate-screen application keeps the chord.
-            fallback(All, CtrlShift, Key::UpArrow, PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
-            fallback(All, CtrlShift, Key::DownArrow, PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
+            // prompts are; an alternate-screen application keeps the chord. macOS only since the desktop gave
+            // the chord to VS Code's SelectCommandOutput (below); the desktop jumps with Ctrl+Alt+K/J.
+            fallback(MacOnly, CtrlShift, Key::UpArrow, PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
+            fallback(MacOnly, CtrlShift, Key::DownArrow, PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             // The chords that move keyboard focus through a window's chrome (Native2026 only, so a Classic
             // user's Ctrl+F6 still reaches the shell). A bare F6 is never bound: mc, vim and htop use it.
             // macOS: Control+F6 between areas (Shift reversed) and Control+F5 for the toolbar -- the chords
@@ -221,6 +222,22 @@ namespace
             both(All, Shift, Key::F10, RequiresBlockFocus, { actions::OpenBlockMenu {} }),
             both(All, NoMods, Key::Enter, RequiresBlockFocus, { actions::ToggleFold {} }),
             both(All, NoMods, Key::Escape, BlockFocusOutsideSelect, { actions::ClearCommandBlockFocus {} }),
+            // Linux and Windows: the same commands as VS Code's integrated terminal binds them --
+            // Ctrl+Up/Down step to the previous and next command, Ctrl+Shift+Up/Down do so and select its
+            // output. On the primary screen only, so an alternate-screen application keeps the chords.
+            // Ctrl+Shift+Up/Down jumped between prompts before; that stays on Ctrl+Alt+K/J.
+            both(DesktopOnly, Ctrl, Key::UpArrow, PrimaryScreenOnly, { actions::FocusPreviousCommand {} }),
+            both(DesktopOnly, Ctrl, Key::DownArrow, PrimaryScreenOnly, { actions::FocusNextCommand {} }),
+            both(DesktopOnly,
+                 CtrlShift,
+                 Key::UpArrow,
+                 PrimaryScreenOnly,
+                 { actions::SelectPreviousCommandOutput {} }),
+            both(DesktopOnly,
+                 CtrlShift,
+                 Key::DownArrow,
+                 PrimaryScreenOnly,
+                 { actions::SelectNextCommandOutput {} }),
             // macOS: Command+Up/Down step to the previous and next command, Shift+Command+Up/Down do so and
             // select its output. Fallbacks, on the primary screen only, where an application keeps the chord
             // on the alternate one.
@@ -427,6 +444,15 @@ namespace
             fallback(MacOnly,
                      Super,
                      U'K',
+                     PrimaryScreenOnly,
+                     { actions::ClearToPrompt {} },
+                     DeclinedInput::Consume),
+            // Linux and Windows: Ctrl+Shift+L, the shell's Ctrl+L clear plus Shift for the terminal's own,
+            // which drops the scrollback too (Ctrl+Shift+K, the literal translation of Command+K, is
+            // NewWindowTo).
+            fallback(DesktopOnly,
+                     Primary,
+                     U'L',
                      PrimaryScreenOnly,
                      { actions::ClearToPrompt {} },
                      DeclinedInput::Consume),
