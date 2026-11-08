@@ -182,14 +182,35 @@ TEST_CASE("copy yields the underlying characters", "[screen][softfont]")
 {
     auto mock = MockTerm { OneLine };
     mock.writeToScreen(sevenBitFont());
-    mock.writeToScreen("\033(B!\"\033(B#"); // all three are soft cells
+    mock.writeToScreen("A\033)B\x0E!\x0F"
+                       "B"); // plain, soft (G1 shifted out), plain
     mock.terminal.setSelector(
         std::make_unique<LinearSelection>(mock.terminal.selectionHelper(),
                                           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
                                           [] {}));
     (void) mock.terminal.selector()->extend(
         CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
-    CHECK(mock.terminal.extractSelectionText() == "!\"#");
+    CHECK(mock.terminal.extractSelectionText() == "A!B");
+}
+
+TEST_CASE("space, DEL and non-ASCII stay plain while a soft set is active", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!"
+                       " "
+                       "\x7f"
+                       "\"" // 0x22
+                       "世");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).codepoint(0) == U' ');
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(2)).softGlyph().has_value()); // DEL
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x22 });
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(4)).softGlyph().has_value());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).codepoint(0) == U'世');
 }
 
 TEST_CASE("overwriting a soft cell with plain text drops the reference", "[screen][softfont]")

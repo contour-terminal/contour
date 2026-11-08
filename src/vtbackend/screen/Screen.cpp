@@ -926,7 +926,11 @@ void Screen::writeText(char32_t codepoint)
 
 Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepoint)
 {
-    if (_terminal->softFonts().font(static_cast<uint8_t>(font)) == nullptr)
+    // A designated set never covers SP (0x20) or DEL (0x7F) in GL (DEC STD 070), nor anything beyond
+    // ASCII: those take the ordinary path. (GR, where a 96-set would reach 0xA0..0xFF, is not routed to
+    // soft fonts: the text paths ask only for the font invoked into GL.)
+    if (sourceCodepoint < 0x21 || sourceCodepoint > 0x7E
+        || _terminal->softFonts().font(static_cast<uint8_t>(font)) == nullptr)
         return SoftFontGlyph::Absent;
 
     // The cell keeps the character as received, so copy, search and the accessibility tree see what the
@@ -936,7 +940,7 @@ Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepo
         auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
         cell.write(_cursor.graphicsRendition, sourceCodepoint, 1, _cursor.hyperlink);
         cell.setSoftGlyph(SoftGlyphRef { .font = static_cast<uint8_t>(font),
-                                         .position = static_cast<uint8_t>(sourceCodepoint & 0x7F) });
+                                         .position = static_cast<uint8_t>(sourceCodepoint) });
         _lastCursorPosition = _cursor.position;
         advanceCursorAfterWrite(ColumnCount(1));
         _terminal->markCellDirty(_lastCursorPosition);
