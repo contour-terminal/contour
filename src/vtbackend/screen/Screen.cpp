@@ -3038,9 +3038,13 @@ bool Screen::tryDesignateSoftFont(Sequence const& seq)
     if (!request)
         return false;
     // The SCS names the set's size (DEC STD 070: ESC ( ) * + take a 94-character set, ESC - . / a
-    // 96-character one, and the same Dscs may name one of each), so a font of the other size is not
-    // meant and the designator falls through to the standard sets.
-    auto const fontNumber = _terminal->softFonts().fontForDesignator(request->designator, request->size);
+    // 96-character one, and the same Dscs may name one of each), so a font of that size wins. Like Windows
+    // Terminal, a font of the other size is taken when it is the only one under that Dscs: software
+    // designates DRCS sets through either SCS, and refusing it would leave the font unreachable.
+    auto const& fonts = _terminal->softFonts();
+    auto const fontNumber = fonts.fontForDesignator(request->designator, request->size).or_else([&] {
+        return fonts.fontForDesignator(request->designator);
+    });
     if (!fontNumber)
         return false;
     _cursor.charsets.selectDRCS(request->table, *fontNumber);

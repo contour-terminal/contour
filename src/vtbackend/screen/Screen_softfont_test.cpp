@@ -544,28 +544,34 @@ TEST_CASE("soft text over a scaled block erases the whole block", "[screen][soft
     CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoint(0) == 0);
 }
 
-TEST_CASE("a 94-character soft font is not designated by a 96-character SCS", "[screen][softfont]")
+TEST_CASE("a soft font of the SCS's set size wins over one of the other size", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont()); // Pcss 0: a 94-character set under Dscs B
+    mock.writeToScreen(std::format("\033P2;1;1;0;0;2;0;1{{B{}\033\\", Glyph)); // Pfn 2, Pcss 1, same Dscs
+    auto& screen = mock.terminal.primaryScreen();
+    auto const sizeAt = [&](int column) {
+        auto const ref = screen.at(LineOffset(0), ColumnOffset(column)).softGlyph();
+        REQUIRE(ref.has_value());
+        auto const font = mock.terminal.softFonts().font(ref->font);
+        REQUIRE(font);
+        return font->declaration.charsetSize;
+    };
+
+    mock.writeToScreen("\033)B\x0E!"); // G1 as a 94-set
+    CHECK(sizeAt(0) == SoftCharsetSize::Size94);
+
+    mock.writeToScreen("\033-B!"); // G1 as a 96-set, still shifted out
+    CHECK(sizeAt(1) == SoftCharsetSize::Size96);
+}
+
+TEST_CASE("a soft font alone under its Dscs is designated by either SCS size", "[screen][softfont]")
 {
     auto mock = MockTerm { OneLine };
     mock.writeToScreen(sevenBitFont()); // Pcss 0: a 94-character set under Dscs B
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen("\033-B\x0E!"); // G1 as a 96-set, invoked with SO
-    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
-
-    mock.writeToScreen("\033)B\x0E\"");
-    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
-}
-
-TEST_CASE("a 96-character soft font is not designated by a 94-character SCS", "[screen][softfont]")
-{
-    auto mock = MockTerm { OneLine };
-    mock.writeToScreen(std::format("\033P0;1;1;0;0;2;0;1{{B{}\033\\", Glyph)); // Pcss 1
-    auto& screen = mock.terminal.primaryScreen();
-
-    mock.writeToScreen("\033(B!");
-    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
-
-    mock.writeToScreen("\033-B\x0E!");
-    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
+    mock.writeToScreen(
+        "\033-B\x0E!"); // G1 as a 96-set: no 96-set font, so the 94-set one (as Windows Terminal)
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
 }
