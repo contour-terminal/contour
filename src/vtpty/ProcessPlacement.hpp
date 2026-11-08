@@ -144,17 +144,30 @@ struct Gate
 /// @return The gate, or why the socket pair could not be created.
 [[nodiscard]] std::expected<Gate, std::error_code> makeGate();
 
-/// Blocks a child parked on its gate until the parent releases it: a byte, end-of-file, or any error but
-/// EINTR. Async-signal-safe -- read() alone -- for a child between fork() and exec().
+/// How a child's wait on its gate ended.
+enum class GateRelease : std::uint8_t
+{
+    /// End-of-file or an error, without the release byte: the parent's end closed before it said anything --
+    /// on a path that gave up on the child, or with the parent itself gone.
+    Abandoned,
+    /// The release byte arrived: ParkedChild::release(), placed or not.
+    Released,
+};
+
+/// Blocks a child parked on its gate until the parent releases it, or the gate tells it nothing will: a
+/// byte, or end-of-file or any error but EINTR. Async-signal-safe -- read() alone -- for the spawn
+/// trampoline, or the program it forks, before the program's exec().
 /// @param fd The child's end of the gate.
-void awaitGateRelease(int fd) noexcept;
+/// @return Whether the release byte arrived. Every path of the parent that lets a child run sends it.
+[[nodiscard]] GateRelease awaitGateRelease(int fd) noexcept;
 #endif
 
 /// @param pid The process.
 /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
 [[nodiscard]] OwnedFd openPidFd(int pid) noexcept;
 
-/// Moves a freshly forked, still-parked child into its own resource domain before it runs.
+/// Moves a freshly spawned, still-parked child -- a spawn trampoline, or the program it forked -- into its
+/// own resource domain before its program runs.
 ///
 /// The seam exists because a child sharing Contour's cgroup takes Contour down with it when systemd
 /// stops a unit over an out-of-memory kill inside it (OOMPolicy=stop). @see SystemdScopePlacement.

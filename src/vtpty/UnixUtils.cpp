@@ -20,6 +20,8 @@
 #endif
 
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -181,6 +183,47 @@ void closeDescriptorsAbove(int keepFd, int limit, DescriptorSweep first) noexcep
     }
 }
 
+void configureTerminal(int fd) noexcept
+{
+    applyTerminalSettings(fd, constructTerminalSettings(fd));
+}
+
+std::expected<void, std::error_code> writeAll(int fd, DescriptorKind kind, std::string_view bytes) noexcept
+{
+#ifdef MSG_NOSIGNAL
+    constexpr auto NoSigPipeSendFlags = MSG_NOSIGNAL;
+#else
+    constexpr auto NoSigPipeSendFlags = 0; // makeGate() set SO_NOSIGPIPE on its sockets instead
+#endif
+    auto const writeSome = [&]() -> ssize_t {
+        switch (kind)
+        {
+            case DescriptorKind::Stream: return ::write(fd, bytes.data(), bytes.size());
+            case DescriptorKind::Socket: return ::send(fd, bytes.data(), bytes.size(), NoSigPipeSendFlags);
+        }
+        return ::write(fd, bytes.data(), bytes.size());
+    };
+    while (!bytes.empty())
+    {
+        auto const written = writeSome();
+        if (written < 0 && errno == EINTR)
+            continue;
+        if (written <= 0)
+            return std::unexpected(written < 0 ? lastError() : std::make_error_code(std::errc::broken_pipe));
+        bytes.remove_prefix(static_cast<std::size_t>(written));
+    }
+    return {};
+}
+
+std::expected<int, std::error_code> waitForExit(pid_t pid) noexcept
+{
+    auto status = 0;
+    while (::waitpid(pid, &status, 0) < 0)
+        if (errno != EINTR)
+            return std::unexpected(lastError());
+    return status;
+}
+
 std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTerminal ctty) noexcept
 {
     // This is doing what login_tty() is doing, too.
@@ -200,9 +243,12 @@ std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTermi
 
     setsid();
 
+    // A failure to take the terminal on as the controlling one is reported once the standard streams are on
+    // it regardless, which are the program's way to its terminal either way.
+    auto controlling = std::expected<void, std::error_code> {};
 #ifdef TIOCSCTTY
     if (ctty == ControllingTerminal::Acquire && ioctl(slaveFd, TIOCSCTTY, nullptr) == -1)
-        return std::unexpected(lastError());
+        controlling = std::unexpected(lastError());
 #else
     (void) ctty;
 #endif
@@ -214,7 +260,7 @@ std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTermi
         saveDup2(slaveFd, fd);
     }
 
-    return {};
+    return controlling;
 }
 
 } // namespace vtpty::util

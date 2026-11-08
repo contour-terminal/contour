@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/ExecutablePath.hpp>
 #include <vtpty/SpawnTrampoline.hpp>
 
 #include <core/Environment.hpp>
@@ -163,7 +164,7 @@ class BenchLatency final: public core::cli::App
 
     int serve()
     {
-        auto const self = vthost::currentExecutablePath();
+        auto const self = vtpty::currentExecutablePath();
         if (!self)
         {
             std::cerr << "bench-latency: cannot find its own executable\n";

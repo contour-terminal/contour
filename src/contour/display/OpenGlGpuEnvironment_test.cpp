@@ -93,6 +93,18 @@ TEST_CASE("OpenGL GPU fallback: the relaunched Contour gets the user's environme
               "CONTOUR_GPU_FALLBACK=NVIDIA GeForce RTX 4070", "HOME=/home/u", "PATH=/usr/bin" });
 }
 
+TEST_CASE("OpenGL GPU environment: the boot removes the fallback request and a parent's choice", "[gpu]")
+{
+    CHECK(bootRemovedGpuVariables(std::nullopt) == std::vector<std::string> { "CONTOUR_GPU_FALLBACK" });
+    CHECK(bootRemovedGpuVariables("")
+          == std::vector<std::string> { "CONTOUR_GPU_FALLBACK", "CONTOUR_SELF_SET_ENVIRONMENT" });
+    CHECK(bootRemovedGpuVariables("__NV_PRIME_RENDER_OFFLOAD, __GLX_VENDOR_LIBRARY_NAME")
+          == std::vector<std::string> { "CONTOUR_GPU_FALLBACK",
+                                        "CONTOUR_SELF_SET_ENVIRONMENT",
+                                        "__NV_PRIME_RENDER_OFFLOAD",
+                                        "__GLX_VENDOR_LIBRARY_NAME" });
+}
+
 TEST_CASE("OpenGL GPU fallback: the GPU now in use is the one driving the display", "[gpu]")
 {
     auto const gpus = std::vector<GpuCandidate> {

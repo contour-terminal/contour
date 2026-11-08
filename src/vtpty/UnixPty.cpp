@@ -155,9 +155,7 @@ bool UnixPty::Slave::isClosed() const noexcept
 
 bool UnixPty::Slave::configure() noexcept
 {
-    auto const tio = util::constructTerminalSettings(_slaveFd);
-    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
-        tcflush(_slaveFd, TCIOFLUSH);
+    util::configureTerminal(_slaveFd);
     return true;
 }
 
@@ -220,10 +218,22 @@ UnixPty::~UnixPty()
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
 }
 
-PtySlaveHandle UnixPty::slaveHandle() const noexcept
+std::optional<Pty::SpawnDescriptors> UnixPty::spawnDescriptors() const noexcept
 {
     assert(started());
-    return _slave->handle();
+    auto const terminal = unbox<int>(_slave->handle());
+    if (terminal == -1)
+        return std::nullopt;
+    auto const writer = _stdoutFastPipe.writer();
+    return SpawnDescriptors { .terminal = terminal,
+                              .stdoutFastPipeWriter =
+                                  writer != -1 ? std::optional { writer } : std::nullopt };
+}
+
+void UnixPty::closeSpawnDescriptors()
+{
+    _slave->close();
+    _stdoutFastPipe.closeWriter();
 }
 
 PtySlave& UnixPty::slave() noexcept

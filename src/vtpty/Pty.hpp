@@ -206,6 +206,26 @@ class Pty
         return std::unexpected(AdoptError::Unsupported);
     }
 
+    /// What a program spawned onto this device is handed: its terminal, and the writer of the stdout fast
+    /// pipe where there is one.
+    struct SpawnDescriptors
+    {
+        int terminal;                            ///< The slave end, to be the program's terminal.
+        std::optional<int> stdoutFastPipeWriter; ///< Where the program's fast output goes, if anywhere.
+    };
+
+    /// @return What a program spawned onto this device takes, while this process holds it; nothing for a
+    ///         device no program is spawned onto by descriptor (anything but a Unix PTY), as this default
+    ///         says.
+    [[nodiscard]] virtual std::optional<SpawnDescriptors> spawnDescriptors() const noexcept
+    {
+        return std::nullopt;
+    }
+
+    /// Closes this process's copies of spawnDescriptors() once the program holds its own: until then the
+    /// master would not see the program's side close.
+    virtual void closeSpawnDescriptors() {}
+
     /// @returns current underlying window size in characters width and height.
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 

@@ -63,6 +63,11 @@ class TappingPty final: public vtpty::Pty
     {
         return _inner->releaseHandover();
     }
+    [[nodiscard]] std::optional<SpawnDescriptors> spawnDescriptors() const noexcept override
+    {
+        return _inner->spawnDescriptors();
+    }
+    void closeSpawnDescriptors() override { _inner->closeSpawnDescriptors(); }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _inner->pageSize(); }
 
     void resizeScreen(vtpty::PageSize cells, std::optional<vtpty::ImageSize> pixels = std::nullopt) override

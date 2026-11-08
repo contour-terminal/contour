@@ -6,11 +6,15 @@
 /// gets, and the probe-and-spawn loop behind `ensureDaemon`. Split from Daemon.hpp, which holds what
 /// *serving* needs, so a client that only attaches does not parse DaemonConfig and the settings it carries.
 
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 
+#include <core/Environment.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/FileSystem.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -183,8 +187,50 @@ class DaemonSpawner
     [[nodiscard]] virtual DaemonPresence probe(std::filesystem::path const& socketPath) = 0;
 };
 
-/// @return The operating system's spawner: a detached process, and a connect to its native socket.
+/// @return The operating system's spawner: a detached process, and a connect to its native socket. A daemon
+///         it spawns inherits this process's environment as it stands at the spawn.
 [[nodiscard]] std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner();
+
+/// The operating system's spawner, for a caller whose other threads may change the environment while it
+/// spawns: the daemon runs under @p environment, and the spawn reads nothing of this process's.
+/// @param environment What every daemon it spawns runs under ("NAME=VALUE"), as daemonEnvironment() makes
+///        it from a snapshot.
+/// @return The spawner.
+[[nodiscard]] std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner(std::vector<std::string> environment);
+
+/// The variables a daemon a client spawns never inherits from it: the startup-notification tokens -- X11
+/// startup notification's and xdg-activation's -- the desktop handed the client for its own first window.
+/// Each is good for one activation, which is the client's; the daemon outlives that window, and a shell it
+/// hosts would hand the spent token on to whatever it starts.
+inline constexpr auto ClientActivationVariables = std::array<std::string_view, 2> {
+    "DESKTOP_STARTUP_ID",
+    "XDG_ACTIVATION_TOKEN",
+};
+
+/// The environment a daemon spawned by a client runs under.
+/// @param inherited The client's environment ("NAME=VALUE"), snapshotted where nothing changes it.
+/// @param clientOnly Names the client keeps to its own process -- what it sets or removes there for its GPU,
+///        say -- which the shells the daemon hosts must not inherit, as the client's own shells do not.
+/// @return @p inherited without @p clientOnly and without #ClientActivationVariables.
+[[nodiscard]] std::vector<std::string> daemonEnvironment(std::span<std::string_view const> inherited,
+                                                         std::span<std::string const> clientOnly);
+
+#ifndef _WIN32
+/// What a daemon is started as: @p argv, detached from the caller's session, its standard streams on
+/// /dev/null, placed as the daemon it is.
+/// @param argv The full argv (daemonSpawnArgs()); not empty. argv[0] is looked up on the PATH the daemon
+///        runs under, where it is a bare name.
+/// @param environment What the daemon runs under ("NAME=VALUE"); std::nullopt for this process's own.
+/// @param processEnvironment This process's environment, whose PATH is searched where @p environment is
+///        std::nullopt.
+/// @param fileSystem Where argv[0] is looked up.
+/// @return The command.
+[[nodiscard]] vtpty::DetachedCommand daemonDetachedCommand(
+    std::span<std::string const> argv,
+    std::optional<std::vector<std::string>> environment,
+    core::Environment const& processEnvironment,
+    core::platform::FileSystem const& fileSystem);
+#endif
 
 /// Ensures a daemon is running at @p endpoint. For Unix sockets, spawns
 /// `contour daemon` in the background if the socket isn't already accepting

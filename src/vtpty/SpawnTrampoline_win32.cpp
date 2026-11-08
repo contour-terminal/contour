@@ -10,8 +10,4 @@ void runSpawnTrampolineIfRequested(int /*argc*/, char const* const* /*argv*/) no
 {
 }
 
-void runSpawnTrampolineIfRequested(int /*argc*/, char* const* /*argv*/) noexcept
-{
-}
-
 } // namespace vtpty

@@ -1180,6 +1180,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     ConnectLaunch _connectLaunch = ConnectLaunch::Targeted;
     /// The `daemon.mode` this launch runs under, as establishHosting() resolved it.
     config::DaemonMode _daemonMode = config::DaemonMode::InProcess;
+    /// What a daemon this launch spawns on demand, and the service commands (systemctl, launchctl) that find
+    /// or start its unit, run under ("NAME=VALUE"): this process's environment as it started, snapshotted on
+    /// the main thread before the attach starts, and before the boot edits it -- less what those edits remove
+    /// (the GPU fallback request, a parent Contour's GPU choice: display::bootRemovedGpuVariables()) and the
+    /// desktop's activation tokens (vthost::daemonEnvironment()). What the boot sets for its own rendering
+    /// (#_selfOnlyEnvironment) was unset before it, so the snapshot never holds it. They run on the attach's
+    /// worker, where the live environment may be changing.
+    std::vector<std::string> _daemonEnvironment;
     /// What the first window tells the user when the daemon this launch wanted could not be had and its
     /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
     std::string _hostingNotice;

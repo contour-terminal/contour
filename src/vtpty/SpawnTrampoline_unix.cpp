@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ErrnoText.hpp>
 #include <vtpty/OwnedFd.hpp>
+#include <vtpty/PosixSpawn.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SpawnTrampoline.hpp>
 #include <vtpty/UnixUtils.hpp>
+
+#include <core/Overloaded.hpp>
+#include <core/Utils.hpp>
 
 #include <array>
 #include <bit>
@@ -13,7 +17,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -23,22 +26,26 @@
 #include <system_error>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #ifdef __APPLE__
-    #include <mach-o/dyld.h>
+    #include <util.h>
+#elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
+    #include <libutil.h>
+#else
+    #include <pty.h>
 #endif
 
-#ifdef __FreeBSD__
-    #include <sys/sysctl.h>
+#ifdef __linux__
+    #include <sys/prctl.h>
 #endif
-
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include <fcntl.h>
-#include <spawn.h>
+#include <poll.h>
 #include <unistd.h>
 
 // POSIX requires no header to declare `environ`; see Process_unix.cpp for why each platform is spelled out.
@@ -64,104 +71,16 @@ namespace
     constexpr auto FirstTemporaryFd = 10;
     static_assert(trampolineFd(static_cast<TrampolineSlot>(TrampolineSlotCount - 1)) < FirstTemporaryFd);
 
-    /// Where a session's program finds the writer of its stdout fast pipe.
-    constexpr auto StdoutFastPipeFd = 3;
+    /// How long spawnPlaced() waits, in milliseconds, for a detached program's trampoline to name the
+    /// program: no time at all once it has reaped the trampoline, which sent the name before it exited.
+    constexpr auto DetachedHandoverTimeout = 5000;
 
-    /// The size of the length that precedes the encoded spec on the spec socket.
-    constexpr auto SpecLengthSize = sizeof(std::uint32_t);
+    /// The longest spec the trampoline accepts, which it allocates up front: a length above it is garbage,
+    /// not a spec. Well above the 2 MiB exec() takes on Linux under the default 8 MiB stack limit, a quarter
+    /// of which argv and the environment may fill together.
+    constexpr auto MaxSpecLength = std::uint32_t { 16U * 1024U * 1024U };
 
-    /// The longest spec the trampoline accepts; a length above it is garbage, not a spec.
-    constexpr auto MaxSpecLength = std::uint32_t { 256U * 1024U * 1024U };
-
-// {{{ parent side
-#ifdef MSG_NOSIGNAL
-    constexpr auto NoSigPipeSendFlags = MSG_NOSIGNAL;
-#else
-    constexpr auto NoSigPipeSendFlags = 0; // makeGate() set SO_NOSIGPIPE on the socket instead
-#endif
-
-    /// @return @p payload preceded by its length, a little-endian u32: what the trampoline reads.
-    [[nodiscard]] std::string framed(std::string const& payload)
-    {
-        auto const length = static_cast<std::uint32_t>(payload.size());
-        auto frame = std::string {};
-        frame.reserve(SpecLengthSize + payload.size());
-        for (auto const index: std::views::iota(std::size_t { 0 }, SpecLengthSize))
-            frame.push_back(static_cast<char>((length >> (8U * index)) & 0xFFU));
-        frame += payload;
-        return frame;
-    }
-
-    /// Sends @p bytes in full on @p socket, which raises no SIGPIPE.
-    [[nodiscard]] std::expected<void, std::error_code> sendAll(int socket, std::string_view bytes) noexcept
-    {
-        while (!bytes.empty())
-        {
-            auto const sent = ::send(socket, bytes.data(), bytes.size(), NoSigPipeSendFlags);
-            if (sent < 0 && errno == EINTR)
-                continue;
-            if (sent <= 0)
-                return std::unexpected(sent < 0 ? util::lastError()
-                                                : std::make_error_code(std::errc::broken_pipe));
-            bytes.remove_prefix(static_cast<std::size_t>(sent));
-        }
-        return {};
-    }
-
-    /// posix_spawn_file_actions_t, destroyed when it goes.
-    class FileActions
-    {
-      public:
-        FileActions() noexcept: _error { ::posix_spawn_file_actions_init(&_actions) } {}
-        ~FileActions()
-        {
-            if (_error == 0)
-                ::posix_spawn_file_actions_destroy(&_actions);
-        }
-        FileActions(FileActions const&) = delete;
-        FileActions& operator=(FileActions const&) = delete;
-        FileActions(FileActions&&) = delete;
-        FileActions& operator=(FileActions&&) = delete;
-
-        /// @return The error init reported, or 0.
-        [[nodiscard]] int error() const noexcept { return _error; }
-        [[nodiscard]] posix_spawn_file_actions_t* get() noexcept { return &_actions; }
-
-      private:
-        posix_spawn_file_actions_t _actions {};
-        int _error;
-    };
-
-    /// posix_spawnattr_t, destroyed when it goes.
-    class SpawnAttributes
-    {
-      public:
-        SpawnAttributes() noexcept: _error { ::posix_spawnattr_init(&_attributes) } {}
-        ~SpawnAttributes()
-        {
-            if (_error == 0)
-                ::posix_spawnattr_destroy(&_attributes);
-        }
-        SpawnAttributes(SpawnAttributes const&) = delete;
-        SpawnAttributes& operator=(SpawnAttributes const&) = delete;
-        SpawnAttributes(SpawnAttributes&&) = delete;
-        SpawnAttributes& operator=(SpawnAttributes&&) = delete;
-
-        /// @return The error init reported, or 0.
-        [[nodiscard]] int error() const noexcept { return _error; }
-        [[nodiscard]] posix_spawnattr_t* get() noexcept { return &_attributes; }
-
-      private:
-        posix_spawnattr_t _attributes {};
-        int _error;
-    };
-
-    /// @return @p error, a posix_spawn*() result, as an error code.
-    [[nodiscard]] std::error_code spawnError(int error) noexcept
-    {
-        return std::error_code { error, std::generic_category() };
-    }
-
+    // {{{ parent side
     /// A source descriptor's close-on-exec copy, and the number it takes in the trampoline.
     struct SlotMapping
     {
@@ -178,47 +97,62 @@ namespace
         return SlotMapping { .copy = std::move(copy), .target = target };
     }
 
-    /// @return The slots a spec of @p mode cannot do without.
-    [[nodiscard]] constexpr TrampolineSlots requiredSlots(SpawnMode mode) noexcept
+    /// @return The slots a launch cannot do without.
+    [[nodiscard]] constexpr TrampolineSlots requiredSlots(TerminalLaunch const& /*launch*/) noexcept
     {
-        switch (mode)
-        {
-            // Without its terminal the program would stay in this process's session, on its stdio.
-            case SpawnMode::Terminal: return TrampolineSlots {}.with(TrampolineSlot::Terminal);
-            case SpawnMode::Detached: return TrampolineSlots {};
-        }
+        // Without its terminal the program would stay in this process's session, on its stdio.
+        return TrampolineSlots {}.with(TrampolineSlot::Terminal);
+    }
+
+    [[nodiscard]] constexpr TrampolineSlots requiredSlots(DetachedLaunch const& /*launch*/) noexcept
+    {
         return TrampolineSlots {};
     }
 
-    /// Waits for @p pid to end, retrying on EINTR.
-    void reap(pid_t pid) noexcept
+    /// Waits for a detached program's trampoline to end, and reads the program's pid from the gate it was
+    /// written into.
+    /// @param trampoline The trampoline, a child of this process.
+    /// @param gate The parent's end of the program's gate.
+    /// @return The program's pid; or why it is not known.
+    [[nodiscard]] std::expected<pid_t, std::error_code> awaitDetachedProgram(pid_t trampoline, int gate)
     {
-        auto status = 0;
-        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+        if (auto const status = util::waitForExit(trampoline); status && WIFEXITED(*status))
+            switch (static_cast<TrampolineExit>(WEXITSTATUS(*status)))
+            {
+                case TrampolineExit::UnsupportedVersion:
+                    return std::unexpected(std::make_error_code(std::errc::protocol_not_supported));
+                case TrampolineExit::SpecUnreadable:
+                    return std::unexpected(std::make_error_code(std::errc::bad_message));
+            }
+        // Once the trampoline is reaped, what it sent is there to read, or never comes. Waited for all the
+        // same, briefly, should a SIGCHLD handler have reaped it first; a program left waiting on the gate
+        // then sees its end close without the release byte on the way out, and exits without running.
+        auto ready = pollfd { .fd = gate, .events = POLLIN, .revents = 0 };
+        while (::poll(&ready, 1, DetachedHandoverTimeout) < 0 && errno == EINTR)
             ;
+        auto received = std::array<char, sizeof(pid_t)> {};
+        auto const length = ::recv(gate, received.data(), received.size(), MSG_DONTWAIT);
+        auto const pid = std::bit_cast<pid_t>(received);
+        if (std::cmp_not_equal(length, received.size()) || pid == 0)
+            return std::unexpected(std::make_error_code(std::errc::no_child_process));
+        if (pid < 0)
+            return std::unexpected(std::error_code { -pid, std::generic_category() });
+        return pid;
     }
     // }}}
 
     // {{{ trampoline side
-    /// Writes @p text to @p fd in full, retrying on short writes and EINTR.
-    void writeAll(int fd, std::string_view text) noexcept
-    {
-        while (!text.empty())
-        {
-            auto const written = ::write(fd, text.data(), text.size());
-            if (written > 0)
-                text.remove_prefix(static_cast<std::size_t>(written));
-            else if (written < 0 && errno == EINTR)
-                continue;
-            else
-                break;
-        }
-    }
-
-    /// Reports @p message on stderr and ends the trampoline with @p status.
+    /// Reports @p message on stderr and ends the trampoline with @p status. Where the Terminal slot holds a
+    /// terminal -- a session's tab, which would otherwise just show its shell gone -- it is reported there
+    /// too. Asked of the descriptor rather than of the spec, which may be what could not be read.
     [[noreturn]] void abandon(TrampolineExit status, std::string_view message) noexcept
     {
-        writeAll(STDERR_FILENO, std::format("contour: spawn trampoline: {}\n", message));
+        std::ignore = util::writeAll(STDERR_FILENO,
+                                     util::DescriptorKind::Stream,
+                                     std::format("contour: spawn trampoline: {}\n", message));
+        if (auto const terminal = trampolineFd(TrampolineSlot::Terminal); ::isatty(terminal) == 1)
+            std::ignore = util::writeAll(
+                terminal, util::DescriptorKind::Stream, std::format("\r\ncontour: {}\r\n", message));
         ::_exit(static_cast<int>(status));
     }
 
@@ -242,17 +176,15 @@ namespace
     /// @return The spec the parent wrote to SpawnSpecFd: its length, then that many bytes.
     [[nodiscard]] SpawnSpec readSpec()
     {
-        auto const prefix = readExactly(SpawnSpecFd, SpecLengthSize);
-        if (!prefix)
+        auto const prefix = readExactly(SpawnSpecFd, SpawnSpecLengthSize);
+        auto const length =
+            prefix ? decodeSpawnSpecLength(*prefix) : std::unexpected { SpawnSpecError::Truncated };
+        if (!length)
             abandon(TrampolineExit::SpecUnreadable, "no spawn spec arrived");
-        auto length = std::uint32_t { 0 };
-        for (auto const index: std::views::iota(std::size_t { 0 }, SpecLengthSize))
-            length |=
-                static_cast<std::uint32_t>(static_cast<unsigned char>((*prefix)[index])) << (8U * index);
-        if (length > MaxSpecLength)
+        if (*length > MaxSpecLength)
             abandon(TrampolineExit::SpecUnreadable,
-                    std::format("a spawn spec of {} bytes is refused", length));
-        auto const payload = readExactly(SpawnSpecFd, length);
+                    std::format("a spawn spec of {} bytes is refused", *length));
+        auto const payload = readExactly(SpawnSpecFd, *length);
         if (!payload)
             abandon(TrampolineExit::SpecUnreadable, "the spawn spec arrived incomplete");
         auto spec = decodeSpawnSpec(*payload);
@@ -291,17 +223,19 @@ namespace
             return;
         auto const fd = OwnedFd { ::open("/proc/self/oom_score_adj", O_WRONLY | O_CLOEXEC) };
         if (fd.isOpen())
-            writeAll(fd.get(), std::to_string(*value));
+            std::ignore = util::writeAll(fd.get(), util::DescriptorKind::Stream, std::to_string(*value));
     }
 
     /// Parks on the gate slot, if there is one, until the parent's placement releases it; then closes it.
-    void awaitPlacement(SpawnSpec const& spec) noexcept
+    /// @return How the wait ended; Released where there is no gate to wait on.
+    [[nodiscard]] GateRelease awaitPlacement(SpawnSpec const& spec) noexcept
     {
-        if (auto const gate = slotFd(spec, TrampolineSlot::Gate))
-        {
-            awaitGateRelease(*gate);
-            ::close(*gate);
-        }
+        auto const gate = slotFd(spec, TrampolineSlot::Gate);
+        if (!gate)
+            return GateRelease::Released;
+        auto const release = awaitGateRelease(*gate);
+        ::close(*gate);
+        return release;
     }
 
     /// @return Pointers to @p strings, then a null pointer: the layout exec() takes.
@@ -347,21 +281,21 @@ namespace
     }
 
     /// @return The status a trampoline ends with when the program cannot run.
-    [[nodiscard]] constexpr int failureStatus(FailureReport report) noexcept
+    [[nodiscard]] constexpr int failureStatus(FailureExit exit) noexcept
     {
-        switch (report)
+        switch (exit)
         {
-            case FailureReport::Silent: return 127;
-            case FailureReport::OnTerminal: return EXIT_FAILURE;
+            case FailureExit::Failure: return EXIT_FAILURE;
+            case FailureExit::NotFound: return 127;
         }
         return EXIT_FAILURE;
     }
 
     /// Writes @p text onto the program's terminal, where failures are reported there.
-    void report(SpawnSpec const& spec, std::string_view text) noexcept
+    void report(TerminalLaunch const& launch, std::string_view text) noexcept
     {
-        if (spec.failureReport == FailureReport::OnTerminal)
-            writeAll(STDOUT_FILENO, text);
+        if (launch.failureReport == FailureReport::OnTerminal)
+            std::ignore = util::writeAll(STDOUT_FILENO, util::DescriptorKind::Stream, text);
     }
 
     /// @return The text for @p error.
@@ -372,17 +306,21 @@ namespace
     }
 
     /// The program on a terminal, as a session's shell: Process::start()'s child.
-    [[noreturn]] void runOnTerminal(SpawnSpec& spec)
+    [[noreturn]] void runOnTerminal(SpawnSpec& spec, TerminalLaunch& launch)
     {
         writeOwnOomScoreAdjust(spec.oomScoreAdjust);
-        awaitPlacement(spec);
+        // A gate closed without the byte lets the program run all the same: spawnPlaced() hands every
+        // session's trampoline to a ParkedChild, which sends it, so only a parent gone before that closes the
+        // gate silently -- and its terminal's master went with it.
+        std::ignore = awaitPlacement(spec);
 
         if (auto const terminal = slotFd(spec, TrampolineSlot::Terminal))
         {
-            if (spec.terminalSettings == TerminalSettings::Configure)
-                util::applyTerminalSettings(*terminal, util::constructTerminalSettings(*terminal));
-            // A terminal it cannot make the controlling one is still the program's best chance at one.
-            std::ignore = util::loginTerminal(*terminal, spec.controllingTerminal);
+            if (launch.terminalSettings == TerminalSettings::Configure)
+                util::configureTerminal(*terminal);
+            // A terminal it cannot make the controlling one is still the program's standard streams, and
+            // its best chance at one: loginTerminal() puts them on it either way, so the failure is ignored.
+            std::ignore = util::loginTerminal(*terminal, launch.controllingTerminal);
             ::close(*terminal);
         }
 
@@ -396,12 +334,13 @@ namespace
             ::close(*settle);
         }
 
-        if (!spec.workingDirectory.empty() && ::chdir(spec.workingDirectory.c_str()) != 0)
+        if (!launch.workingDirectory.empty() && ::chdir(launch.workingDirectory.c_str()) != 0)
         {
             auto const failure = errno;
-            report(spec,
-                   std::format("Failed to chdir to \"{}\". {}\n", spec.workingDirectory, errorText(failure)));
-            ::_exit(failureStatus(spec.failureReport));
+            report(
+                launch,
+                std::format("Failed to chdir to \"{}\". {}\n", launch.workingDirectory, errorText(failure)));
+            ::_exit(failureStatus(launch.failureExit));
         }
 
         auto keepFd = STDERR_FILENO;
@@ -420,20 +359,20 @@ namespace
         auto failure = execute(program, spec.lookup);
 
         // Fallback: Try login shell.
-        report(spec,
+        report(launch,
                std::format("\r\033[31;1mFailed to spawn {}\033[m\r\nTrying login shell: {}\n",
                            program.image,
-                           spec.fallbackText));
-        if (!spec.fallbackArgv.empty())
+                           core::joinHumanReadableQuoted(launch.fallbackArgv, " ")));
+        if (!launch.fallbackArgv.empty())
         {
-            auto fallbackArgv = pointersTo(spec.fallbackArgv);
+            auto fallbackArgv = pointersTo(launch.fallbackArgv);
             ::execvp(fallbackArgv[0], fallbackArgv.data());
             failure = errno;
         }
 
         // Bad luck.
-        report(spec, std::format("\r\nOut of luck. {}\r\n\n", errorText(failure)));
-        ::_exit(failureStatus(spec.failureReport));
+        report(launch, std::format("\r\nOut of luck. {}\r\n\n", errorText(failure)));
+        ::_exit(failureStatus(launch.failureExit));
     }
 
     /// The program on its own, in a session of its own: startDetached()'s two levels, with this process as
@@ -447,9 +386,13 @@ namespace
         auto const forkError = errno;
         if (program == 0)
         {
-            // Parked first, as a session's shell is. @see ProcessPlacement.
+            // Parked first, as a session's shell is. @see ProcessPlacement. A gate closed without the byte is
+            // a parent that gave up on the program -- its pid never reached it, so the caller was told the
+            // spawn failed (awaitDetachedProgram()) -- and the program never runs, rather than run unplaced
+            // and unknown to it.
             writeOwnOomScoreAdjust(spec.oomScoreAdjust);
-            awaitPlacement(spec);
+            if (awaitPlacement(spec) == GateRelease::Abandoned)
+                ::_exit(127);
             if (auto const input = slotFd(spec, TrampolineSlot::Input))
                 util::saveDup2(*input, STDIN_FILENO);
             if (auto const output = slotFd(spec, TrampolineSlot::Output))
@@ -474,7 +417,8 @@ namespace
         {
             auto const placed =
                 std::bit_cast<std::array<char, sizeof(pid_t)>>(program > 0 ? program : -forkError);
-            writeAll(*gate, std::string_view { placed.data(), placed.size() });
+            std::ignore = util::writeAll(
+                *gate, util::DescriptorKind::Socket, std::string_view { placed.data(), placed.size() });
         }
         ::_exit(program > 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
@@ -482,6 +426,12 @@ namespace
     /// Runs this process as the trampoline: reads the spec, and starts its program.
     [[noreturn]] void runTrampoline()
     {
+#ifdef __linux__
+        // Named as its argv[0] says rather than "exe", the name of the /proc/self/exe it was spawned from,
+        // so that ps, top and the OOM killer's report say what the parked process is.
+        auto const name = std::string { TrampolineProgramName };
+        ::prctl(PR_SET_NAME, name.c_str());
+#endif
         // posix_spawn() reset SIGPIPE to its default, where a child forked from the GUI or the daemon kept
         // their SIG_IGN until just before its exec. Ignored again until then: a write to a channel whose
         // parent end has gone -- the settle byte, the detached program's pid -- fails with EPIPE, as it did,
@@ -491,11 +441,11 @@ namespace
         auto spec = readSpec();
         ::close(SpawnSpecFd);
         closeStrangers(spec);
-        switch (spec.mode)
-        {
-            case SpawnMode::Terminal: runOnTerminal(spec);
-            case SpawnMode::Detached: runDetached(spec);
-        }
+        std::visit(core::Overloaded {
+                       [&](TerminalLaunch& launch) { runOnTerminal(spec, launch); },
+                       [&](DetachedLaunch const&) { runDetached(spec); },
+                   },
+                   spec.launch);
         abandon(TrampolineExit::SpecUnreadable, "the spawn spec names no known mode");
     }
     // }}}
@@ -509,8 +459,9 @@ void runSpawnTrampolineIfRequested(int argc, char const* const* argv) noexcept
         case TrampolineInvocation::NotRequested: return;
         case TrampolineInvocation::UnsupportedVersion:
             abandon(TrampolineExit::UnsupportedVersion,
-                    std::format("{} is not a protocol this executable speaks ({}{}); was it replaced by "
-                                "another version while running? Restart it.",
+                    std::format("Contour was updated while it was running, and must be restarted to start "
+                                "new programs: it asked for {}, which this executable, speaking {}{}, does "
+                                "not understand.",
                                 arguments[1],
                                 SpawnTrampolineMarker,
                                 SpawnTrampolineProtocolVersion));
@@ -518,53 +469,19 @@ void runSpawnTrampolineIfRequested(int argc, char const* const* argv) noexcept
     }
 }
 
-void runSpawnTrampolineIfRequested(int argc, char* const* argv) noexcept
+std::expected<pid_t, std::error_code> spawnTrampoline(SpawnSpec spec,
+                                                      std::span<InheritedFd const> fds,
+                                                      TrampolineEnvironment environment)
 {
-    runSpawnTrampolineIfRequested(argc, static_cast<char const* const*>(argv));
-}
-
-std::expected<std::string, std::error_code> selfExecutablePath()
-{
-#ifdef __linux__
-    // Resolved by the spawned process, which still runs this image: the running file, even where an upgrade
-    // replaced or removed it on disk.
-    return std::string { "/proc/self/exe" };
-#elifdef __APPLE__
-    auto size = std::uint32_t { 0 };
-    std::ignore = ::_NSGetExecutablePath(nullptr, &size);
-    auto path = std::string(size, '\0');
-    if (::_NSGetExecutablePath(path.data(), &size) != 0)
-        return std::unexpected(std::make_error_code(std::errc::filename_too_long));
-    path.resize(std::string_view { path.c_str() }.size());
-    auto error = std::error_code {};
-    auto canonical = std::filesystem::canonical(path, error);
-    if (error)
-        return std::unexpected(error);
-    return canonical.string();
-#elifdef __FreeBSD__
-    auto name = std::array { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
-    auto size = std::size_t { 0 };
-    if (::sysctl(name.data(), name.size(), nullptr, &size, nullptr, 0) != 0)
-        return std::unexpected(util::lastError());
-    auto path = std::string(size, '\0');
-    if (::sysctl(name.data(), name.size(), path.data(), &size, nullptr, 0) != 0)
-        return std::unexpected(util::lastError());
-    path.resize(std::string_view { path.c_str() }.size());
-    return path;
-#else
-    return std::unexpected(std::make_error_code(std::errc::function_not_supported));
-#endif
-}
-
-std::expected<pid_t, std::error_code> spawnTrampoline(SpawnSpec spec, std::span<InheritedFd const> fds)
-{
-    return selfExecutablePath().and_then(
-        [&](std::string const& self) { return spawnTrampolineImage(self, std::move(spec), fds); });
+    return selfExecutablePath().and_then([&](std::string const& self) {
+        return spawnTrampolineImage(self, std::move(spec), fds, environment);
+    });
 }
 
 std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& image,
                                                            SpawnSpec spec,
-                                                           std::span<InheritedFd const> fds)
+                                                           std::span<InheritedFd const> fds,
+                                                           TrampolineEnvironment environment)
 {
     auto const invalid = std::unexpected(std::make_error_code(std::errc::invalid_argument));
     spec.inheritedSlots = TrampolineSlots {};
@@ -575,10 +492,11 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
         spec.inheritedSlots = spec.inheritedSlots.with(inherited.slot);
     }
     // Refused here, where the caller hears why, rather than by a trampoline that could only exit.
-    auto const required = requiredSlots(spec.mode);
-    if (spec.argv.empty() || (spec.inheritedSlots.raw() & required.raw()) != required.raw())
+    auto const required = std::visit([](auto const& launch) { return requiredSlots(launch); }, spec.launch);
+    if (spec.argv.empty() || (spec.inheritedSlots.raw() & required.raw()) != required.raw()
+        || (environment == TrampolineEnvironment::Program && !spec.environment))
         return invalid;
-    auto const frame = framed(encodeSpawnSpec(spec));
+    auto const frame = encodeFramedSpawnSpec(spec);
 
     auto channel = makeGate();
     if (!channel)
@@ -600,28 +518,20 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
         mappings.push_back(std::move(*mapped));
     }
 
-    auto actions = FileActions {};
-    if (actions.error() != 0)
-        return std::unexpected(spawnError(actions.error()));
+    auto actions = SpawnFileActions::create();
+    if (!actions)
+        return std::unexpected(actions.error());
     for (auto const& [copy, target]: mappings)
-        if (auto const error = ::posix_spawn_file_actions_adddup2(actions.get(), copy.get(), target);
+        if (auto const error = ::posix_spawn_file_actions_adddup2(actions->get(), copy.get(), target);
             error != 0)
             return std::unexpected(spawnError(error));
 
-    // Whatever this process blocks or ignores (a daemon blocks its shutdown signals, a GUI ignores SIGPIPE)
-    // is not the trampoline's to inherit, nor its program's.
-    auto attributes = SpawnAttributes {};
-    if (attributes.error() != 0)
-        return std::unexpected(spawnError(attributes.error()));
-    auto none = sigset_t {};
-    sigemptyset(&none);
-    auto catchable = sigset_t {};
-    sigfillset(&catchable);
-    sigdelset(&catchable, SIGKILL);
-    sigdelset(&catchable, SIGSTOP);
-    ::posix_spawnattr_setsigmask(attributes.get(), &none);
-    ::posix_spawnattr_setsigdefault(attributes.get(), &catchable);
-    ::posix_spawnattr_setflags(attributes.get(), POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+    // Not the trampoline's to inherit, nor its program's.
+    auto attributes = SpawnAttributes::create();
+    if (!attributes)
+        return std::unexpected(attributes.error());
+    if (auto const reset = resetSignals(*attributes); !reset)
+        return std::unexpected(reset.error());
 
     auto arguments = std::array {
         std::string { TrampolineProgramName },
@@ -629,22 +539,84 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
     };
     auto argv = std::array<char*, 3> { arguments[0].data(), arguments[1].data(), nullptr };
 
+    // Under the program's environment, the spawn reads nothing of this process's, which another thread may
+    // be changing (DetachedCommand::environment).
+    auto envp = environment == TrampolineEnvironment::Program
+                    ? std::optional { pointersTo(*spec.environment) }
+                    : std::nullopt;
+
     auto pid = pid_t {};
-    auto const spawned =
-        ::posix_spawn(&pid, image.c_str(), actions.get(), attributes.get(), argv.data(), environ);
+    auto const spawned = ::posix_spawn(
+        &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), envp ? envp->data() : environ);
     mappings.clear();
     channel->childEnd.reset();
     if (spawned != 0)
         return std::unexpected(spawnError(spawned));
 
     // Written after the spawn, not before: a spec larger than the socket's buffer is read as it is written.
-    if (auto sent = sendAll(channel->parentEnd.get(), frame); !sent)
+    if (auto sent = util::writeAll(channel->parentEnd.get(), util::DescriptorKind::Socket, frame); !sent)
     {
         channel->parentEnd.reset(); // end-of-file, for a trampoline still reading
-        reap(pid);
+        std::ignore = util::waitForExit(pid);
         return std::unexpected(sent.error());
     }
     return pid;
+}
+
+std::expected<pid_t, std::error_code> spawnPlaced(SpawnSpec spec,
+                                                  std::span<InheritedFd const> fds,
+                                                  ProcessPlacement& placement,
+                                                  ProcessRole role,
+                                                  TrampolineEnvironment environment)
+{
+    // The gate parks the program between its spawn and its exec() until the placement has moved it into its
+    // own resource domain, so everything it forks from then on is born there too. @see ProcessPlacement.
+    auto gate = makeGate();
+    if (!gate)
+        return std::unexpected(gate.error());
+    spec.oomScoreAdjust = placement.childOomScoreAdjust();
+    auto const detached = std::holds_alternative<DetachedLaunch>(spec.launch);
+    auto withGate = std::vector<InheritedFd>(fds.begin(), fds.end());
+    withGate.push_back({ .slot = TrampolineSlot::Gate, .fd = gate->childEnd.get() });
+
+    auto const trampoline = spawnTrampoline(std::move(spec), withGate, environment);
+    if (!trampoline)
+        return std::unexpected(trampoline.error());
+    gate->childEnd.reset();
+
+    // A detached program's trampoline starts a session of its own, forks the program, tells the gate the
+    // program's pid, and exits: the program is left to init, or to the nearest subreaper, to wait for -- not
+    // to this process. Not this process's child, yet its pid still names it: it waits on the gate, and only a
+    // signal from elsewhere could end it before the pidfd is opened.
+    auto const program = detached ? awaitDetachedProgram(*trampoline, gate->parentEnd.get())
+                                  : std::expected<pid_t, std::error_code> { *trampoline };
+    if (!program)
+        return std::unexpected(program.error());
+    placement.placeThenRelease(
+        ParkedChild { *program, openPidFd(*program), std::move(gate->parentEnd), role });
+    return *program;
+}
+
+std::expected<TerminalProgram, std::error_code> spawnOnNewTerminal(SpawnSpec spec,
+                                                                   ProcessPlacement& placement,
+                                                                   ProcessRole role)
+{
+    if (!std::holds_alternative<TerminalLaunch>(spec.launch))
+        return std::unexpected(std::make_error_code(std::errc::invalid_argument));
+    auto masterFd = -1;
+    auto slaveFd = -1;
+    if (::openpty(&masterFd, &slaveFd, nullptr, nullptr, nullptr) < 0)
+        return std::unexpected(util::lastError());
+    auto master = OwnedFd { masterFd };
+    auto const slave = OwnedFd { slaveFd };
+    if (auto const closing =
+            util::setCloseOnExec(master.get()).and_then([&] { return util::setCloseOnExec(slave.get()); });
+        !closing)
+        return std::unexpected(closing.error());
+
+    auto const fds = std::array { InheritedFd { .slot = TrampolineSlot::Terminal, .fd = slave.get() } };
+    return spawnPlaced(std::move(spec), fds, placement, role, TrampolineEnvironment::Inherited)
+        .transform([&](pid_t pid) { return TerminalProgram { .pid = pid, .master = std::move(master) }; });
 }
 
 } // namespace vtpty

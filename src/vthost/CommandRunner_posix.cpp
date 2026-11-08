@@ -3,11 +3,20 @@
 
 #ifndef _WIN32
 
+    #include <vtpty/EnvironmentBlock.hpp>
+    #include <vtpty/PosixSpawn.hpp>
+    #include <vtpty/ProgramLookup.hpp>
+
+    #include <core/platform/NativeFileSystem.hpp>
+
     #include <sys/wait.h>
 
     #include <array>
     #include <cerrno>
     #include <memory>
+    #include <optional>
+    #include <string>
+    #include <string_view>
     #include <utility>
     #include <vector>
 
@@ -74,26 +83,28 @@ namespace
         return ends;
     }
 
-    /// Owns a posix_spawn_file_actions_t.
-    class FileActions
+    /// @return Pointers to @p strings' characters, ended by a null pointer, as exec() takes them. The
+    ///         functions they are passed to take non-const pointers but never write through them.
+    [[nodiscard]] std::vector<char*> pointersTo(std::span<std::string const> strings)
     {
-      public:
-        FileActions() { ::posix_spawn_file_actions_init(&_actions); }
-        FileActions(FileActions const&) = delete;
-        FileActions& operator=(FileActions const&) = delete;
-        FileActions(FileActions&&) = delete;
-        FileActions& operator=(FileActions&&) = delete;
-        ~FileActions() { ::posix_spawn_file_actions_destroy(&_actions); }
-
-        [[nodiscard]] posix_spawn_file_actions_t* get() noexcept { return &_actions; }
-
-      private:
-        posix_spawn_file_actions_t _actions {};
-    };
+        auto pointers = std::vector<char*> {};
+        pointers.reserve(strings.size() + 1);
+        for (auto const& entry: strings)
+            pointers.push_back(const_cast<char*>(entry.c_str()));
+        pointers.push_back(nullptr);
+        return pointers;
+    }
 
     class NativeCommandRunner final: public CommandRunner
     {
       public:
+        /// @param environment What every command runs under ("NAME=VALUE"), its program looked up on that
+        ///        environment's PATH; std::nullopt for this process's own, as it stands at each run.
+        explicit NativeCommandRunner(std::optional<std::vector<std::string>> environment):
+            _environment { std::move(environment) }
+        {
+        }
+
         [[nodiscard]] std::expected<CommandOutcome, std::error_code> run(
             std::span<std::string const> argv) override
         {
@@ -105,20 +116,44 @@ namespace
                 return std::unexpected(pipe.error());
             auto& [readEnd, writeEnd] = *pipe;
 
-            auto actions = FileActions {};
-            ::posix_spawn_file_actions_adddup2(actions.get(), writeEnd.get(), STDOUT_FILENO);
-            ::posix_spawn_file_actions_addopen(actions.get(), STDIN_FILENO, "/dev/null", O_RDONLY, 0);
-            ::posix_spawn_file_actions_addopen(actions.get(), STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+            auto actions = vtpty::SpawnFileActions::create();
+            if (!actions)
+                return std::unexpected(actions.error());
+            ::posix_spawn_file_actions_adddup2(actions->get(), writeEnd.get(), STDOUT_FILENO);
+            ::posix_spawn_file_actions_addopen(actions->get(), STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+            ::posix_spawn_file_actions_addopen(actions->get(), STDERR_FILENO, "/dev/null", O_WRONLY, 0);
 
-            auto arguments = std::vector<char*> {};
-            for (auto const& argument: argv)
-                arguments.push_back(const_cast<char*>(
-                    argument.c_str())); // posix_spawnp takes a non-const argv but never writes it
-            arguments.push_back(nullptr);
+            // Neither the signals the calling thread blocks -- the daemon blocks SIGINT and SIGTERM -- nor
+            // what this process ignores are the command's to inherit.
+            auto attributes = vtpty::SpawnAttributes::create();
+            if (!attributes)
+                return std::unexpected(attributes.error());
+            if (auto const reset = vtpty::resetSignals(*attributes); !reset)
+                return std::unexpected(reset.error());
 
+            auto arguments = pointersTo(argv);
             auto pid = pid_t {};
-            auto const spawned =
-                ::posix_spawnp(&pid, arguments.front(), actions.get(), nullptr, arguments.data(), environ);
+            auto const spawned = [&] {
+                if (!_environment)
+                    return ::posix_spawnp(&pid,
+                                          arguments.front(),
+                                          actions->get(),
+                                          attributes->get(),
+                                          arguments.data(),
+                                          environ);
+                // posix_spawnp() would search the live PATH, not the given environment's: looked up here
+                // instead, and the result spawned as it is, so nothing of the live environment is read.
+                auto const image = imageFor(argv.front());
+                if (!image)
+                    return ENOENT;
+                auto environment = pointersTo(*_environment);
+                return ::posix_spawn(&pid,
+                                     image->c_str(),
+                                     actions->get(),
+                                     attributes->get(),
+                                     arguments.data(),
+                                     environment.data());
+            }();
             if (spawned != 0)
                 return std::unexpected(std::error_code { spawned, std::generic_category() });
             writeEnd.reset();
@@ -143,12 +178,38 @@ namespace
             outcome.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
             return outcome;
         }
+
+      private:
+        /// @param program The program as named, a bare name or a path.
+        /// @return The file to spawn for @p program, looked up on the given environment's PATH as execvp()
+        ///         would; std::nullopt for a bare name found nowhere on it.
+        [[nodiscard]] std::optional<std::string> imageFor(std::string const& program) const
+        {
+            auto const path =
+                vtpty::environmentValue(*_environment, "PATH", vtpty::EnvironmentNames::CaseSensitive);
+            auto image =
+                vtpty::resolveExecutablePath(program,
+                                             vtpty::execSearchPath(path.transform([](std::string_view value) {
+                                                 return std::string { value };
+                                             })),
+                                             core::platform::NativeFileSystem::instance());
+            if (image == program && !program.contains('/'))
+                return std::nullopt;
+            return image;
+        }
+
+        std::optional<std::vector<std::string>> _environment;
     };
 } // namespace
 
 std::unique_ptr<CommandRunner> makeNativeCommandRunner()
 {
-    return std::make_unique<NativeCommandRunner>();
+    return std::make_unique<NativeCommandRunner>(std::nullopt);
+}
+
+std::unique_ptr<CommandRunner> makeNativeCommandRunner(std::vector<std::string> environment)
+{
+    return std::make_unique<NativeCommandRunner>(std::move(environment));
 }
 
 } // namespace vthost

@@ -4,7 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <ranges>
+#include <string>
+#include <variant>
 
 using namespace vtpty;
 using namespace std::string_literals;
@@ -22,7 +27,6 @@ SpawnSpec fullSpec()
                             TrampolineSlot::Output })
         slots = slots.with(slot);
     return SpawnSpec {
-        .mode = SpawnMode::Detached,
         .image = "/usr/bin/my prog",
         .argv = { "prog",
                   "with space",
@@ -30,16 +34,40 @@ SpawnSpec fullSpec()
                   "e",
                   "" },
         .lookup = ExecLookup::SearchPath,
-        .fallbackArgv = { "-sh", "-l" },
-        .fallbackText = "/bin/sh -l",
-        .workingDirectory = "/tmp/w\xC3\xB6rk",
         .environment = std::vector<std::string> { "A=b=c", "EMPTY=", "TERM=xterm" },
         .oomScoreAdjust = -17,
-        .controllingTerminal = ControllingTerminal::Acquire,
-        .terminalSettings = TerminalSettings::Configure,
-        .failureReport = FailureReport::OnTerminal,
         .inheritedSlots = slots,
+        .launch =
+            TerminalLaunch {
+                .fallbackArgv = { "-sh", "-l" },
+                .workingDirectory = "/tmp/w\xC3\xB6rk",
+                .controllingTerminal = ControllingTerminal::Acquire,
+                .terminalSettings = TerminalSettings::Configure,
+                .failureReport = FailureReport::OnTerminal,
+                .failureExit = FailureExit::NotFound,
+            },
     };
+}
+
+/// The smallest spec there is, encoded: a terminal launch of argv { "a" }. Its bytes, by offset:
+/// 0 mode | 1-4 image | 5-13 argv | 14 lookup | 15 environment presence | 16 OOM presence | 17 slots |
+/// 18-21 fallback argv | 22-25 working directory | 26 controlling terminal | 27 terminal settings |
+/// 28 failure report | 29 failure exit.
+std::string minimalEncoding()
+{
+    auto encoded = encodeSpawnSpec(SpawnSpec { .argv = { "a" } });
+    REQUIRE(encoded.size() == 30);
+    return encoded;
+}
+
+/// @return Why @p encoded, with the byte at @p offset replaced by @p value, is not a spec.
+std::optional<SpawnSpecError> rejectionOf(std::string encoded, std::size_t offset, std::uint8_t value)
+{
+    encoded[offset] = static_cast<char>(value);
+    auto const decoded = decodeSpawnSpec(encoded);
+    if (decoded)
+        return std::nullopt;
+    return decoded.error();
 }
 } // namespace
 
@@ -49,6 +77,16 @@ TEST_CASE("SpawnSpec.round-trips every field", "[vtpty][spawnspec]")
     auto const decoded = decodeSpawnSpec(encodeSpawnSpec(spec));
     REQUIRE(decoded.has_value());
     CHECK(*decoded == spec);
+}
+
+TEST_CASE("SpawnSpec.round-trips a detached launch", "[vtpty][spawnspec]")
+{
+    auto spec = fullSpec();
+    spec.launch = DetachedLaunch {};
+    auto const decoded = decodeSpawnSpec(encodeSpawnSpec(spec));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == spec);
+    CHECK(std::holds_alternative<DetachedLaunch>(decoded->launch));
 }
 
 TEST_CASE("SpawnSpec.round-trips the defaults", "[vtpty][spawnspec]")
@@ -88,22 +126,71 @@ TEST_CASE("SpawnSpec.rejects trailing bytes", "[vtpty][spawnspec]")
     CHECK(decoded.error() == SpawnSpecError::TrailingBytes);
 }
 
+TEST_CASE("SpawnSpec.the minimal encoding decodes", "[vtpty][spawnspec]")
+{
+    // The baseline the rejection tests below alter one byte of.
+    auto const decoded = decodeSpawnSpec(minimalEncoding());
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == SpawnSpec { .argv = { "a" } });
+}
+
 TEST_CASE("SpawnSpec.rejects an unknown enumerator", "[vtpty][spawnspec]")
 {
-    auto encoded = encodeSpawnSpec(fullSpec());
-    encoded[0] = static_cast<char>(0xFF);
-    auto const decoded = decodeSpawnSpec(encoded);
-    REQUIRE_FALSE(decoded.has_value());
-    CHECK(decoded.error() == SpawnSpecError::UnknownEnumerator);
+    auto const encoded = minimalEncoding();
+    // Each enumerator byte, set just past its enum's last value.
+    SECTION("mode")
+    {
+        CHECK(rejectionOf(encoded, 0, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("lookup")
+    {
+        CHECK(rejectionOf(encoded, 14, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("controlling terminal")
+    {
+        CHECK(rejectionOf(encoded, 26, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("terminal settings")
+    {
+        CHECK(rejectionOf(encoded, 27, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("failure report")
+    {
+        CHECK(rejectionOf(encoded, 28, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("failure exit")
+    {
+        CHECK(rejectionOf(encoded, 29, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+}
+
+TEST_CASE("SpawnSpec.rejects a presence byte that is neither 0 nor 1", "[vtpty][spawnspec]")
+{
+    auto const encoded = minimalEncoding();
+    SECTION("environment")
+    {
+        CHECK(rejectionOf(encoded, 15, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+    SECTION("OOM score adjustment")
+    {
+        CHECK(rejectionOf(encoded, 16, 2) == SpawnSpecError::UnknownEnumerator);
+    }
+}
+
+TEST_CASE("SpawnSpec.a framed spec is its length, then the spec", "[vtpty][spawnspec]")
+{
+    auto const spec = fullSpec();
+    auto const encoded = encodeSpawnSpec(spec);
+    auto const framed = encodeFramedSpawnSpec(spec);
+    REQUIRE(framed.size() == SpawnSpecLengthSize + encoded.size());
+    CHECK(framed.substr(SpawnSpecLengthSize) == encoded);
+    CHECK(decodeSpawnSpecLength(framed) == static_cast<std::uint32_t>(encoded.size()));
+    CHECK(decodeSpawnSpecLength(framed.substr(0, 3)) == std::unexpected { SpawnSpecError::Truncated });
 }
 
 TEST_CASE("SpawnSpec.rejects slot bits past the last slot", "[vtpty][spawnspec]")
 {
-    auto encoded = encodeSpawnSpec(fullSpec());
-    encoded.back() = static_cast<char>(0xFF);
-    auto const decoded = decodeSpawnSpec(encoded);
-    REQUIRE_FALSE(decoded.has_value());
-    CHECK(decoded.error() == SpawnSpecError::UnknownEnumerator);
+    CHECK(rejectionOf(minimalEncoding(), 17, 0xFF) == SpawnSpecError::UnknownEnumerator);
 }
 
 TEST_CASE("SpawnSpec.rejects an empty argv", "[vtpty][spawnspec]")

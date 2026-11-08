@@ -90,8 +90,6 @@ namespace vtpty
 
 namespace
 {
-    constexpr auto StdoutFastPipeFd = 3;
-    constexpr auto StdoutFastPipeFdStr = "3"sv;
     constexpr auto StdoutFastPipeEnvironmentName = "STDOUT_FASTPIPE"sv;
 
     /// The id a Process holds while it has no child. @see Process::Private::pid.
@@ -99,10 +97,6 @@ namespace
 
     /// How often a HangupGrace looks whether the child has ended, and whether the grace has passed.
     constexpr auto HangupGraceStep = std::chrono::milliseconds { 10 };
-
-    /// How long startDetached() waits, in milliseconds, for its intermediate process to name the program's:
-    /// no time at all once it has reaped that process, which sent the name before it exited.
-    constexpr auto DetachedHandoverTimeout = 5000;
 
     /// @return The signal that asks a child to end as @p hint says.
     [[nodiscard]] constexpr int signalFor(Process::TerminationHint hint) noexcept
@@ -233,11 +227,11 @@ StartResult Process::start()
     if (auto started = _d->pty->start(); !started)
         return started;
 
-    UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
-        if (auto* p = dynamic_cast<UnixPty*>(_d->pty.get()))
-            return &p->stdoutFastPipe();
-        return nullptr;
-    }();
+    auto const descriptors = _d->pty->spawnDescriptors();
+    if (!descriptors)
+        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
+                                              .detail = "The terminal is not a Unix pseudo terminal." });
+    auto const hasStdoutFastPipe = descriptors->stdoutFastPipeWriter.has_value();
 
     // When escaping the sandbox, flatpak-spawn is handed the variables as --env= arguments and the
     // child keeps our environment untouched.
@@ -245,7 +239,7 @@ StartResult Process::start()
     auto const passesOwnEnvironment = host == ProgramHost::ThisMachine;
 
     // The environment is assembled here, so that the trampoline can install it as it is.
-    auto childEnvironment = [stdoutFastPipe, passesOwnEnvironment, this]() -> vector<string> {
+    auto childEnvironment = [hasStdoutFastPipe, passesOwnEnvironment, this]() -> vector<string> {
         if (!passesOwnEnvironment)
             return {};
 
@@ -254,8 +248,8 @@ StartResult Process::start()
             overrides["TERMINFO"] = "/app/share/terminfo";
         for (auto const& [name, value]: _d->env)
             overrides[name] = value;
-        if (stdoutFastPipe)
-            overrides[string { StdoutFastPipeEnvironmentName }] = string { StdoutFastPipeFdStr };
+        if (hasStdoutFastPipe)
+            overrides[string { StdoutFastPipeEnvironmentName }] = std::to_string(StdoutFastPipeFd);
         return buildEnvironmentBlock(
             inheritedEnvironment(), overrides, _d->removedEnvironment, EnvironmentNames::CaseSensitive);
     }();
@@ -275,7 +269,7 @@ StartResult Process::start()
                                     .workingDirectory = _d->cwd,
                                     .fileSystem = core::platform::NativeFileSystem::instance() }));
 
-    auto childArgv = [stdoutFastPipe, host, &invocation, this]() -> vector<string> {
+    auto childArgv = [hasStdoutFastPipe, host, &invocation, this]() -> vector<string> {
         if (host == ProgramHost::ThisMachine)
         {
             auto args = vector<string> { invocation.program };
@@ -291,18 +285,18 @@ StartResult Process::start()
         realArgs.emplace_back("--host");
         realArgs.emplace_back("--watch-bus");
         realArgs.emplace_back(std::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
-        if (stdoutFastPipe)
+        if (hasStdoutFastPipe)
         {
-            realArgs.emplace_back(std::format("--forward-fd={}", StdoutFastPipeFdStr));
+            realArgs.emplace_back(std::format("--forward-fd={}", StdoutFastPipeFd));
             realArgs.emplace_back(
-                std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
+                std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
         }
         if (!_d->cwd.empty())
             realArgs.emplace_back(std::format("--directory={}", _d->cwd.generic_string()));
         realArgs.emplace_back(std::format("--env=TERM={}", "contour"));
         for (auto&& [name, value]: _d->env)
             realArgs.emplace_back(std::format("--env={}={}", name, value));
-        if (stdoutFastPipe)
+        if (hasStdoutFastPipe)
             realArgs.emplace_back(
                 std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
         realArgs.push_back(invocation.program);
@@ -312,62 +306,47 @@ StartResult Process::start()
         return realArgs;
     }();
 
-    // The login shell the trampoline falls back to where the program cannot be executed.
-    auto const loginShellArgs = loginShell(_d->escapeSandbox);
-
-    // The gate parks the child between its spawn and exec() until the placement has moved it into its
-    // own resource domain, so everything it forks from then on is born there too. @see ProcessPlacement.
-    auto gate = makeGate();
-    if (!gate)
-        return std::unexpected(
-            StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
-    // The same kind of channel, the other way round: the child closes its end once its terminal is set up.
-    // @see Process::spawnProgress()
+    // The same kind of channel as the placement's gate, the other way round: the child closes its end once
+    // its terminal is set up. @see Process::spawnProgress()
     auto settle = makeGate();
     if (!settle)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = settle.error().message() });
-    auto* const unixPty = dynamic_cast<UnixPty*>(_d->pty.get());
-    if (unixPty == nullptr)
-        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
-                                              .detail = "The terminal is not a Unix pseudo terminal." });
 
-    auto const spec = SpawnSpec {
-        .mode = SpawnMode::Terminal,
+    auto spec = SpawnSpec {
         .argv = std::move(childArgv),
         .lookup = ExecLookup::SearchPath,
-        .fallbackArgv = loginShellArgs,
-        .fallbackText = core::joinHumanReadableQuoted(loginShellArgs, " "),
-        .workingDirectory = passesOwnEnvironment ? _d->cwd.generic_string() : string {},
         .environment = passesOwnEnvironment ? std::optional { std::move(childEnvironment) } : std::nullopt,
-        .oomScoreAdjust = _d->placement->childOomScoreAdjust(),
-        .controllingTerminal = isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire,
-        .terminalSettings = TerminalSettings::Configure,
-        .failureReport = FailureReport::OnTerminal,
+        .launch =
+            TerminalLaunch {
+                // The login shell the trampoline falls back to where the program cannot be executed.
+                .fallbackArgv = loginShell(_d->escapeSandbox),
+                .workingDirectory = passesOwnEnvironment ? _d->cwd.generic_string() : string {},
+                .controllingTerminal = isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire,
+                .terminalSettings = TerminalSettings::Configure,
+                .failureReport = FailureReport::OnTerminal,
+                .failureExit = FailureExit::Failure,
+            },
     };
     auto fds = vector<InheritedFd> {
-        { TrampolineSlot::Gate, gate->childEnd.get() },
-        { TrampolineSlot::Settle, settle->childEnd.get() },
-        { TrampolineSlot::Terminal, unbox<int>(unixPty->slaveHandle()) },
+        { .slot = TrampolineSlot::Settle, .fd = settle->childEnd.get() },
+        { .slot = TrampolineSlot::Terminal, .fd = descriptors->terminal },
     };
-    if (stdoutFastPipe && stdoutFastPipe->writer() != -1)
-        fds.push_back({ TrampolineSlot::FastPipe, stdoutFastPipe->writer() });
+    if (descriptors->stdoutFastPipeWriter)
+        fds.push_back({ .slot = TrampolineSlot::FastPipe, .fd = *descriptors->stdoutFastPipeWriter });
 
-    auto const spawned = spawnTrampoline(spec, fds);
+    auto const spawned = spawnPlaced(
+        std::move(spec), fds, *_d->placement, ProcessRole::Session, TrampolineEnvironment::Inherited);
     if (!spawned)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = spawned.error().message() });
-    auto const child = *spawned;
 
-    core::locked(_d->exitStatusMutex, [&] { _d->pid = child; });
-    gate->childEnd.reset();
+    // Known before the master can read end-of-file: until closeSpawnDescriptors(), this process holds the
+    // slave open, however soon the released program ends.
+    core::locked(_d->exitStatusMutex, [&] { _d->pid = *spawned; });
     settle->childEnd.reset();
     core::locked(_d->settleSignalMutex, [&] { _d->settleSignal = std::move(settle->parentEnd); });
-    _d->pty->slave().close();
-    if (stdoutFastPipe)
-        stdoutFastPipe->closeWriter();
-    _d->placement->placeThenRelease(
-        ParkedChild { child, openPidFd(child), std::move(gate->parentEnd), ProcessRole::Session });
+    _d->pty->closeSpawnDescriptors();
 
     // Nothing to report: a working directory that cannot be entered, or a program that cannot be
     // executed, is discovered by the trampoline, which writes its own diagnostic onto the pty and exits.
@@ -750,60 +729,26 @@ std::expected<int, std::error_code> startDetached(DetachedCommand const& command
     if (command.output == DetachedOutput::Discarded && !discard.isOpen())
         return lastError();
 
-    auto gate = makeGate();
-    if (!gate)
-        return std::unexpected(gate.error());
-
     // The trampoline starts a session of its own, parks the program as Process::start() parks a session's
-    // shell (@see ProcessPlacement), tells the gate the program's id, and exits: the program is left to
-    // init, or to the nearest subreaper, to wait for -- not to this process.
-    auto const spec = SpawnSpec {
-        .mode = SpawnMode::Detached,
+    // shell (@see ProcessPlacement), and leaves it to init, or to the nearest subreaper.
+    auto spec = SpawnSpec {
         .image = command.image,
         .argv = command.argv.empty() ? vector<string> { command.image } : command.argv,
         .lookup = ExecLookup::ExactPath,
-        .oomScoreAdjust = placement.childOomScoreAdjust(),
+        .environment = command.environment,
+        .launch = DetachedLaunch {},
     };
-    auto fds = vector<InheritedFd> { { TrampolineSlot::Gate, gate->childEnd.get() } };
+    auto fds = vector<InheritedFd> {};
     if (input.isOpen())
-        fds.push_back({ TrampolineSlot::Input, input.get() });
+        fds.push_back({ .slot = TrampolineSlot::Input, .fd = input.get() });
     if (discard.isOpen())
-        fds.push_back({ TrampolineSlot::Output, discard.get() });
-
-    auto const trampoline = spawnTrampoline(spec, fds);
-    if (!trampoline)
-        return std::unexpected(trampoline.error());
-
-    gate->childEnd.reset();
-    auto status = 0;
-    while (::waitpid(*trampoline, &status, 0) < 0 && errno == EINTR)
-        ;
-    if (WIFEXITED(status))
-        switch (static_cast<TrampolineExit>(WEXITSTATUS(status)))
-        {
-            case TrampolineExit::UnsupportedVersion:
-                return std::unexpected(std::make_error_code(std::errc::protocol_not_supported));
-            case TrampolineExit::SpecUnreadable:
-                return std::unexpected(std::make_error_code(std::errc::bad_message));
-        }
-    // Once the trampoline is reaped, what it sent is there to read, or never comes. Waited for all the
-    // same, briefly, should a SIGCHLD handler have reaped it first; a program left waiting on the gate
-    // then runs unplaced, as the gate's end closes on the way out.
-    auto ready = pollfd { .fd = gate->parentEnd.get(), .events = POLLIN, .revents = 0 };
-    while (::poll(&ready, 1, DetachedHandoverTimeout) < 0 && errno == EINTR)
-        ;
-    auto received = std::array<char, sizeof(pid_t)> {};
-    auto const length = ::recv(gate->parentEnd.get(), received.data(), received.size(), MSG_DONTWAIT);
-    auto const pid = std::bit_cast<pid_t>(received);
-    if (std::cmp_not_equal(length, received.size()) || pid == 0)
-        return std::unexpected(std::make_error_code(std::errc::no_child_process));
-    if (pid < 0)
-        return std::unexpected(std::error_code { -pid, std::generic_category() });
-
-    // Not this process's child, yet its pid still names it: it waits on the gate, and only a signal from
-    // elsewhere could end it before the pidfd is opened.
-    placement.placeThenRelease(ParkedChild { pid, openPidFd(pid), std::move(gate->parentEnd), command.role });
-    return pid;
+        fds.push_back({ .slot = TrampolineSlot::Output, .fd = discard.get() });
+    return spawnPlaced(std::move(spec),
+                       fds,
+                       placement,
+                       command.role,
+                       command.environment ? TrampolineEnvironment::Program
+                                           : TrampolineEnvironment::Inherited);
 }
 // }}}
 

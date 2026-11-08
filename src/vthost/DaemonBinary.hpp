@@ -132,7 +132,7 @@ enum class ImagePlacement : uint8_t
 /// What this process is, as its image store asks it.
 struct OwnProcess
 {
-    /// The running executable, absolute (currentExecutablePath()).
+    /// The running executable, absolute (vtpty::currentExecutablePath()).
     std::filesystem::path executable {};
 
     /// The application sandbox it runs in (vtpty::currentSandbox()).
@@ -206,10 +206,6 @@ class ProcessImageReplacer
 ///         no image of @p store.
 [[nodiscard]] std::expected<std::unique_ptr<ImageLease>, StagingError> leaseRunningImage(
     DaemonImageStore& store, ImageLeases& leases, StagingInputs const& inputs);
-
-/// @return The running executable's absolute path (`/proc/self/exe`, `_NSGetExecutablePath`,
-///         `GetModuleFileNameW`); `errc::not_supported` elsewhere.
-[[nodiscard]] std::expected<std::filesystem::path, std::error_code> currentExecutablePath();
 
 /// @return This process's id.
 [[nodiscard]] std::uint64_t currentProcessId() noexcept;

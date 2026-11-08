@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /// @file
-/// The operating system's half of DaemonBinary.hpp: the running executable, the process id, and the
-/// replacement of the process image.
+/// The operating system's half of DaemonBinary.hpp: the process id, and the replacement of the process
+/// image.
 
 // clang-format off
 #ifdef _WIN32
@@ -24,10 +24,6 @@
 
 #ifndef _WIN32
     #include <unistd.h>
-#endif
-
-#ifdef __APPLE__
-    #include <mach-o/dyld.h>
 #endif
 
 namespace vthost
@@ -75,46 +71,6 @@ std::unique_ptr<ProcessImageReplacer> makeNativeProcessImageReplacer()
     return std::make_unique<ExecReplacer>();
 #else
     return std::make_unique<UnsupportedReplacer>();
-#endif
-}
-
-std::expected<fs::path, std::error_code> currentExecutablePath()
-{
-#ifdef __linux__
-    auto ec = std::error_code {};
-    auto path = fs::read_symlink("/proc/self/exe", ec);
-    if (ec)
-        return std::unexpected(ec);
-    return path;
-#elifdef __APPLE__
-    auto size = std::uint32_t { 0 };
-    std::ignore = ::_NSGetExecutablePath(nullptr, &size);
-    auto buffer = std::string(size, '\0');
-    if (::_NSGetExecutablePath(buffer.data(), &size) != 0)
-        return std::unexpected(std::make_error_code(std::errc::value_too_large));
-    buffer = std::string { buffer.c_str() }; // the size counted the terminating NUL
-    auto ec = std::error_code {};
-    auto path = fs::canonical(buffer, ec); // it may name the executable through a symbolic link
-    if (ec)
-        return std::unexpected(ec);
-    return path;
-#elifdef _WIN32
-    auto buffer = std::wstring(MAX_PATH, L'\0');
-    while (true)
-    {
-        auto const length = ::GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (length == 0)
-            return std::unexpected(
-                std::error_code { static_cast<int>(::GetLastError()), std::system_category() });
-        if (length < buffer.size())
-        {
-            buffer.resize(length);
-            return fs::path { buffer };
-        }
-        buffer.resize(buffer.size() * 2); // truncated: GetModuleFileNameW does not say by how much
-    }
-#else
-    return std::unexpected(std::make_error_code(std::errc::not_supported));
 #endif
 }
 

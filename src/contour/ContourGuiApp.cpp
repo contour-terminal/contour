@@ -69,6 +69,8 @@
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
+#include <vtpty/EnvironmentBlock.hpp>
+#include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SandboxInfo.hpp>
@@ -281,6 +283,15 @@ namespace
             QCoreApplication::quit();
     }
 
+    /// @return This process's environment as it stands now, as "NAME=VALUE" entries.
+    [[nodiscard]] std::vector<std::string> currentEnvironmentEntries()
+    {
+        auto entries = std::vector<std::string> {};
+        for (auto const& entry: QProcessEnvironment::systemEnvironment().toStringList())
+            entries.push_back(entry.toStdString());
+        return entries;
+    }
+
     /// What starting this client's local daemon needs: this release's binary, the spawner, and the
     /// command runner the service backends reach the OS through. Shared by the first connect and by the
     /// drift badge's restart, so the two start a daemon the same way.
@@ -294,12 +305,15 @@ namespace
         /// @param env The process environment.
         /// @param fileSystem The file system the binary source reads.
         /// @param programPath The running executable as it was started.
+        /// @param daemonEnvironment What a daemon spawned on demand, and every service command (systemctl,
+        ///        launchctl), runs under: both run on the attach's worker. @see _daemonEnvironment
         LocalDaemonStart(core::Environment const& env,
                          core::platform::FileSystem const& fileSystem,
-                         std::string const& programPath):
+                         std::string const& programPath,
+                         std::vector<std::string> const& daemonEnvironment):
             binary { vthost::makeOwnDaemonBinary(env, fileSystem, CONTOUR_VERSION_STRING, programPath) },
-            spawner { vthost::makeNativeDaemonSpawner() },
-            commands { vthost::makeNativeCommandRunner() },
+            spawner { vthost::makeNativeDaemonSpawner(daemonEnvironment) },
+            commands { vthost::makeNativeCommandRunner(daemonEnvironment) },
             services { .fileSystem = core::platform::NativeFileSystem::instance(),
                        .commands = *commands,
                        .environment = env }
@@ -786,10 +800,7 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
         return;
     }
 
-    auto const inheritedEntries = QProcessEnvironment::systemEnvironment().toStringList();
-    auto inheritedStore = std::vector<std::string> {};
-    for (auto const& entry: inheritedEntries)
-        inheritedStore.push_back(entry.toStdString());
+    auto const inheritedStore = currentEnvironmentEntries();
     auto const inherited = std::vector<std::string_view>(inheritedStore.begin(), inheritedStore.end());
     auto environment = QStringList {};
     for (auto const& entry: display::gpuFallbackRelaunchEnvironment(inherited, _selfOnlyEnvironment, failed))
@@ -1082,7 +1093,7 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
                                                                    vthost::DaemonSpawnOptions const& options)
 {
     auto const endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
-    auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath() };
+    auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath(), _daemonEnvironment };
     auto const starter = start.starter(label, endpoint, *_processPlacement, options);
     // Never starts a daemon itself: the restart below starts the new one through the starter. The stop waits
     // for the old daemon to write the workspace the new one restores.
@@ -1459,13 +1470,13 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         // disturb the installed binary, and that copy held leased until the daemon serves. Runs on the
         // transport's worker thread, one call at a time, so the attach's reactor goes on serving -- and
         // stop() does not wait -- while a spawned daemon comes up; nothing else uses what it captures.
-        auto ensureDaemon =
-            [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
-             placement = _processPlacement,
-             repairOnce = std::make_shared<std::once_flag>(),
-             label,
-             controlPath,
-             daemonOptions]() -> std::expected<void, vthost::TransportError> {
+        auto ensureDaemon = [start = std::make_shared<LocalDaemonStart>(
+                                 processEnvironment(), fileSystem(), programPath(), _daemonEnvironment),
+                             placement = _processPlacement,
+                             repairOnce = std::make_shared<std::once_flag>(),
+                             label,
+                             controlPath,
+                             daemonOptions]() -> std::expected<void, vthost::TransportError> {
             if (start->spawner->probe(controlPath) == vthost::DaemonPresence::Serving)
             {
                 // Once per start, here on the transport's worker and not on the GUI thread: an upgrade that
@@ -2563,7 +2574,7 @@ bool ContourGuiApp::loadConfig(string const& target)
 void ContourGuiApp::registerBundledFonts() const
 {
     // Qt-free, so the headless verbs need no QCoreApplication to find the fonts shipped beside them.
-    auto const executable = vthost::currentExecutablePath();
+    auto const executable = vtpty::currentExecutablePath();
     if (!executable)
     {
         errorLog()("Bundled fonts not registered: cannot locate the executable: {}.",
@@ -2598,7 +2609,7 @@ text::FontLocator& ContourGuiApp::fontLocator(vtrasterizer::FontLocatorEngine en
         // was never installed and has no staged copy, or one built without the symbols font), the locator
         // wraps nothing and the platform's own is what is asked.
         auto symbolsFont = fs::path {};
-        if (auto const executable = vthost::currentExecutablePath())
+        if (auto const executable = vtpty::currentExecutablePath())
             if (auto const directories = bundledFontDirectories(executable->parent_path());
                 !directories.paths.empty())
                 symbolsFont = directories.paths.front() / text::NerdFontSymbolsFileName;
@@ -2657,6 +2668,26 @@ int ContourGuiApp::terminalGuiAction()
     // runs beside the boot. Whatever it set up is undone on every return -- after `app` below is gone, as the
     // attach engines' ptys outlive the windows.
     auto const hostingReleased = core::Finally { [this] { releaseHosting(); } };
+    // The one environment a daemon this launch spawns, and the service commands that look for or start its
+    // unit, run under: snapshotted first, while this is the only thread, as the attach runs them on a worker
+    // beside the boot, which goes on changing the environment -- the GPU edits below, a QApplication
+    // constructor that unsets the activation tokens, later a quick-terminal panel that sets and unsets
+    // XDG_ACTIVATION_TOKEN. What those edits remove is taken out of the snapshot here instead
+    // (bootRemovedGpuVariables(), vthost::ClientActivationVariables); what they set was not set before, so
+    // the snapshot never had it.
+    {
+        auto const entries = currentEnvironmentEntries();
+        auto const inherited = std::vector<std::string_view>(entries.begin(), entries.end());
+#ifdef __linux__
+        // Only Linux chooses its OpenGL GPU through the environment, and takes back what a parent set.
+        auto const parentSelfSet = vtpty::environmentValue(
+            entries, display::SelfSetEnvironmentMarker, vtpty::PlatformEnvironmentNames);
+#else
+        auto const parentSelfSet = std::optional<std::string_view> {};
+#endif
+        _daemonEnvironment =
+            vthost::daemonEnvironment(inherited, display::bootRemovedGpuVariables(parentSelfSet));
+    }
     if (auto const hosting = establishHosting(); !hosting)
     {
         cerr << hosting.error() << '\n';
@@ -2719,10 +2750,12 @@ int ContourGuiApp::terminalGuiAction()
 
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
 
-    // The driver stack reads its GPU-selection variables when the display connection opens.
+    // The driver stack reads its GPU-selection variables when the display connection opens. After the
+    // attach has started, so that enumerating the GPUs does not delay it; its threads read none of what
+    // these change (the daemon's environment is the snapshot above).
     takeGpuFallbackRequest();
     applyOpenGlGpuSelection();
-    // Before the multimedia warm-up below loads the backend, and while this is the only thread.
+    // Before the multimedia warm-up below loads the backend.
     keepMultimediaOffTheGpus();
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.

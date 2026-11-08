@@ -4,6 +4,7 @@
 #ifndef _WIN32
 
     #include <vtpty/OwnedFd.hpp>
+    #include <vtpty/PosixSpawn.hpp>
 
     #include <core/net/Sockets.hpp>
 
@@ -243,40 +244,22 @@ namespace
                 argv.push_back(argument.data());
             argv.push_back(nullptr);
 
-            auto actions = posix_spawn_file_actions_t {};
-            if (auto const error = ::posix_spawn_file_actions_init(&actions); error != 0)
-                return error;
-            auto attributes = posix_spawnattr_t {};
-            if (auto const error = ::posix_spawnattr_init(&attributes); error != 0)
-            {
-                ::posix_spawn_file_actions_destroy(&actions);
-                return error;
-            }
+            auto actions = vtpty::SpawnFileActions::create();
+            if (!actions)
+                return actions.error().value();
+            auto attributes = vtpty::SpawnAttributes::create();
+            if (!attributes)
+                return attributes.error().value();
+            if (auto const reset = vtpty::resetSignals(*attributes); !reset)
+                return reset.error().value();
 
             // dup2 clears close-on-exec on the copy only: the originals still close at exec.
-            ::posix_spawn_file_actions_adddup2(&actions, stdio, STDIN_FILENO);
-            ::posix_spawn_file_actions_adddup2(&actions, stdio, STDOUT_FILENO);
-            ::posix_spawn_file_actions_adddup2(&actions, stderrFd, STDERR_FILENO);
+            ::posix_spawn_file_actions_adddup2(actions->get(), stdio, STDIN_FILENO);
+            ::posix_spawn_file_actions_adddup2(actions->get(), stdio, STDOUT_FILENO);
+            ::posix_spawn_file_actions_adddup2(actions->get(), stderrFd, STDERR_FILENO);
 
-            // Whatever this process blocks or ignores (a daemon blocks its shutdown signals, a GUI
-            // ignores SIGPIPE) is not the child's to inherit.
-            auto none = sigset_t {};
-            sigemptyset(&none);
-            auto defaults = sigset_t {};
-            sigemptyset(&defaults);
-            sigaddset(&defaults, SIGPIPE);
-            sigaddset(&defaults, SIGINT);
-            sigaddset(&defaults, SIGTERM);
-            sigaddset(&defaults, SIGHUP);
-            ::posix_spawnattr_setsigmask(&attributes, &none);
-            ::posix_spawnattr_setsigdefault(&attributes, &defaults);
-            ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
-
-            auto const error =
-                ::posix_spawn(&pid, image.c_str(), &actions, &attributes, argv.data(), environ);
-            ::posix_spawnattr_destroy(&attributes);
-            ::posix_spawn_file_actions_destroy(&actions);
-            return error;
+            return ::posix_spawn(
+                &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), environ);
         }
 
         vtpty::ProgramSearch _search;

@@ -4,6 +4,10 @@
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SpawnTrampoline.hpp>
 
+#ifndef _WIN32
+    #include <vtpty/UnixUtils.hpp>
+#endif
+
 #include <core/net/Sockets.hpp>
 
 #include <format>
@@ -12,21 +16,11 @@
     #include <sys/wait.h>
 
     #include <algorithm>
-    #include <array>
-    #include <cerrno>
     #include <csignal>
     #include <ranges>
+    #include <tuple>
     #include <vector>
 
-    #include <fcntl.h>
-
-    #ifdef __APPLE__
-        #include <util.h>
-    #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
-        #include <libutil.h>
-    #else
-        #include <pty.h>
-    #endif
     #include <unistd.h>
 #endif
 
@@ -59,52 +53,35 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::Event
         return std::unexpected(std::format("tmux was not found on PATH ({})", search.path));
 
     // Parked on a gate, as a session's shell is, until the placement has moved it into a scope of its own.
-    auto gate = vtpty::makeGate();
-    if (!gate)
-        return std::unexpected(
-            std::format("could not make the tmux client's gate: {}", gate.error().message()));
-
-    auto master = -1;
-    auto slave = -1;
-    if (::openpty(&master, &slave, nullptr, nullptr, nullptr) < 0)
-        return std::unexpected(std::format("openpty failed: errno {}", errno));
-    for (auto const fd: { master, slave })
-        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
-
-    auto spec = vtpty::SpawnSpec {};
-    spec.mode = vtpty::SpawnMode::Terminal;
-    spec.image = *image;
-    spec.argv = controlModeArguments(tmuxSocket);
-    spec.lookup = vtpty::ExecLookup::ExactPath;
-    spec.controllingTerminal = vtpty::ControllingTerminal::Acquire;
-    spec.terminalSettings = vtpty::TerminalSettings::Keep;
-    spec.failureReport = vtpty::FailureReport::Silent;
-    auto const fds = std::array {
-        vtpty::InheritedFd { vtpty::TrampolineSlot::Gate, gate->childEnd.get() },
-        vtpty::InheritedFd { vtpty::TrampolineSlot::Terminal, slave },
-    };
-    auto const spawned = vtpty::spawnTrampoline(std::move(spec), fds);
-    ::close(slave);
+    auto spawned = vtpty::spawnOnNewTerminal(
+        vtpty::SpawnSpec {
+            .image = *image,
+            .argv = controlModeArguments(tmuxSocket),
+            .lookup = vtpty::ExecLookup::ExactPath,
+            .launch =
+                vtpty::TerminalLaunch {
+                    .controllingTerminal = vtpty::ControllingTerminal::Acquire,
+                    .terminalSettings = vtpty::TerminalSettings::Keep,
+                    .failureReport = vtpty::FailureReport::Silent,
+                    .failureExit = vtpty::FailureExit::NotFound,
+                },
+        },
+        placement,
+        vtpty::ProcessRole::TmuxClient);
     if (!spawned)
-    {
-        ::close(master);
         return std::unexpected(std::format("could not spawn the tmux client: {}", spawned.error().message()));
-    }
-    auto const pid = *spawned;
-    gate->childEnd.reset();
-    placement.placeThenRelease(vtpty::ParkedChild {
-        pid, vtpty::openPidFd(pid), std::move(gate->parentEnd), vtpty::ProcessRole::TmuxClient });
+    auto const pid = spawned->pid;
 
-    auto transport = core::net::adoptFd(loop, master);
+    auto transport = core::net::adoptFd(loop, spawned->master.get());
     if (!transport)
     {
-        ::close(master);
+        spawned->master.reset();
         reapControlMode(pid);
         return std::unexpected("could not adopt the tmux pty: " + transport.error().toString());
     }
+    std::ignore = spawned->master.release(); // the transport's now
     return SpawnedControlMode { .pid = pid, .transport = std::move(*transport) };
 }
-
 void reapControlMode(int pid)
 {
     if (pid <= 0)
@@ -124,8 +101,7 @@ void reapControlMode(int pid)
         return;
     ::kill(pid, SIGKILL);
     // Waited for until reaped: a signal that interrupts the wait would leave it a zombie.
-    while (::waitpid(pid, &status, 0) == -1 && errno == EINTR)
-        ;
+    std::ignore = vtpty::util::waitForExit(pid);
 }
 
 #else

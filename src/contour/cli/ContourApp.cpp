@@ -23,6 +23,7 @@
 #include <vtparser/Parser.hpp>
 
 #include <vtpty/CommandCapture.hpp>
+#include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProgramLookup.hpp>
 
@@ -1871,7 +1872,7 @@ int ContourApp::daemonRelocateAction()
 {
     // Every label's daemon of this user lies in the one directory the default label's socket does; a daemon
     // on a `--socket` path elsewhere is not found.
-    auto const installation = vthost::currentExecutablePath();
+    auto const installation = vtpty::currentExecutablePath();
     if (!installation)
     {
         cerr << std::format("contour daemon: cannot locate this executable: {}\n",
@@ -2154,7 +2155,7 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
     // auto-spawn builds its command line the same way, so a daemon option cannot end up forwarded
     // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
     // daemon exists precisely to still be there for the next client.
-    auto const program = daemonServiceProgram(vthost::currentExecutablePath(), commandLine().front());
+    auto const program = daemonServiceProgram(vtpty::currentExecutablePath(), commandLine().front());
     auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(program),
                                              socketPath,
                                              vthost::DaemonSpawnOptions {

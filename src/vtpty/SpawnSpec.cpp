@@ -1,68 +1,142 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/SpawnSpec.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
 #include <ranges>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 namespace vtpty
 {
 
 namespace
 {
-    /// The number of enumerators of each wire enum; the decoder rejects anything at or past it.
+    /// The number of enumerators of each wire enum, from its last one; the decoder rejects anything at or
+    /// past it.
     template <typename E>
     inline constexpr std::uint8_t EnumeratorCount = 0;
 
     template <>
-    inline constexpr std::uint8_t EnumeratorCount<SpawnMode> = 2;
+    inline constexpr std::uint8_t EnumeratorCount<ExecLookup> =
+        std::to_underlying(ExecLookup::SearchPath) + 1;
     template <>
-    inline constexpr std::uint8_t EnumeratorCount<ExecLookup> = 2;
+    inline constexpr std::uint8_t EnumeratorCount<ControllingTerminal> =
+        std::to_underlying(ControllingTerminal::Acquire) + 1;
     template <>
-    inline constexpr std::uint8_t EnumeratorCount<ControllingTerminal> = 2;
+    inline constexpr std::uint8_t EnumeratorCount<TerminalSettings> =
+        std::to_underlying(TerminalSettings::Configure) + 1;
     template <>
-    inline constexpr std::uint8_t EnumeratorCount<TerminalSettings> = 2;
+    inline constexpr std::uint8_t EnumeratorCount<FailureReport> =
+        std::to_underlying(FailureReport::OnTerminal) + 1;
     template <>
-    inline constexpr std::uint8_t EnumeratorCount<FailureReport> = 2;
+    inline constexpr std::uint8_t EnumeratorCount<FailureExit> =
+        std::to_underlying(FailureExit::NotFound) + 1;
 
-    static_assert(static_cast<int>(SpawnMode::Detached) + 1 == EnumeratorCount<SpawnMode>);
-    static_assert(static_cast<int>(ExecLookup::SearchPath) + 1 == EnumeratorCount<ExecLookup>);
-    static_assert(static_cast<int>(ControllingTerminal::Acquire) + 1 == EnumeratorCount<ControllingTerminal>);
-    static_assert(static_cast<int>(TerminalSettings::Configure) + 1 == EnumeratorCount<TerminalSettings>);
-    static_assert(static_cast<int>(FailureReport::OnTerminal) + 1 == EnumeratorCount<FailureReport>);
-    static_assert(static_cast<int>(TrampolineSlot::Output) + 1 == TrampolineSlotCount);
+    template <typename Launch, typename Variant>
+    struct IndexIn;
+
+    template <typename Launch, typename... Alternatives>
+    struct IndexIn<Launch, std::variant<Alternatives...>>
+    {
+        static constexpr auto Matches = std::array { std::is_same_v<Launch, Alternatives>... };
+        static constexpr auto Value =
+            static_cast<std::uint8_t>(std::ranges::find(Matches, true) - Matches.begin());
+    };
+
+    /// The index of @p Launch in SpawnLaunch: the mode byte that names it.
+    template <typename Launch>
+    inline constexpr std::uint8_t LaunchIndex = IndexIn<Launch, SpawnLaunch>::Value;
 
     constexpr std::uint8_t AllSlotBits = static_cast<std::uint8_t>((1U << TrampolineSlotCount) - 1U);
 
-    void putU32(std::string& out, std::uint32_t value)
+    /// Counts what an encoding appends, so that the string it is then written into is allocated once.
+    struct SizeCounter
+    {
+        std::size_t size = 0;
+
+        void byte(char /*value*/) noexcept { ++size; }
+        void bytes(std::string_view value) noexcept { size += value.size(); }
+    };
+
+    /// Appends what an encoding writes to a string.
+    struct StringSink
+    {
+        std::string& out;
+
+        void byte(char value) { out.push_back(value); }
+        void bytes(std::string_view value) { out.append(value); }
+    };
+
+    template <typename Sink>
+    void putU32(Sink& out, std::uint32_t value)
     {
         for (auto const shift: std::views::iota(0U, 4U))
-            out.push_back(static_cast<char>((value >> (8U * shift)) & 0xFFU));
+            out.byte(static_cast<char>((value >> (8U * shift)) & 0xFFU));
     }
 
-    void putByte(std::string& out, std::uint8_t value)
+    template <typename Sink>
+    void putByte(Sink& out, std::uint8_t value)
     {
-        out.push_back(static_cast<char>(value));
+        out.byte(static_cast<char>(value));
     }
 
-    template <typename E>
-    void putEnum(std::string& out, E value)
+    template <typename Sink, typename E>
+    void putEnum(Sink& out, E value)
     {
-        putByte(out, static_cast<std::uint8_t>(value));
+        putByte(out, std::to_underlying(value));
     }
 
-    void putString(std::string& out, std::string_view value)
+    template <typename Sink>
+    void putString(Sink& out, std::string_view value)
     {
         putU32(out, static_cast<std::uint32_t>(value.size()));
-        out.append(value);
+        out.bytes(value);
     }
 
-    void putStrings(std::string& out, std::span<std::string const> values)
+    template <typename Sink>
+    void putStrings(Sink& out, std::span<std::string const> values)
     {
         putU32(out, static_cast<std::uint32_t>(values.size()));
         for (auto const& value: values)
             putString(out, value);
+    }
+
+    template <typename Sink>
+    void putLaunch(Sink& out, TerminalLaunch const& launch)
+    {
+        putStrings(out, launch.fallbackArgv);
+        putString(out, launch.workingDirectory);
+        putEnum(out, launch.controllingTerminal);
+        putEnum(out, launch.terminalSettings);
+        putEnum(out, launch.failureReport);
+        putEnum(out, launch.failureExit);
+    }
+
+    template <typename Sink>
+    void putLaunch(Sink& /*out*/, DetachedLaunch const& /*launch*/)
+    {
+    }
+
+    /// Appends @p spec's encoding to @p out.
+    template <typename Sink>
+    void putSpec(Sink& out, SpawnSpec const& spec)
+    {
+        putByte(out, static_cast<std::uint8_t>(spec.launch.index()));
+        putString(out, spec.image);
+        putStrings(out, spec.argv);
+        putEnum(out, spec.lookup);
+        putByte(out, spec.environment.has_value() ? 1 : 0);
+        if (spec.environment)
+            putStrings(out, *spec.environment);
+        putByte(out, spec.oomScoreAdjust.has_value() ? 1 : 0);
+        if (spec.oomScoreAdjust)
+            putU32(out, std::bit_cast<std::uint32_t>(*spec.oomScoreAdjust));
+        putByte(out, spec.inheritedSlots.raw());
+        std::visit([&](auto const& launch) { putLaunch(out, launch); }, spec.launch);
     }
 
     /// Consumes a byte string front to back; every read reports Truncated rather than overrunning.
@@ -111,7 +185,7 @@ namespace
                 return std::unexpected { count.error() };
             std::vector<std::string> result;
             // Each element needs at least its 4-byte length, which bounds a hostile count.
-            for (auto const _: std::views::iota(0U, *count))
+            for ([[maybe_unused]] auto const _: std::views::iota(0U, *count))
             {
                 auto item = string();
                 if (!item)
@@ -148,25 +222,30 @@ namespace
 
 std::string encodeSpawnSpec(SpawnSpec const& spec)
 {
-    std::string out;
-    putEnum(out, spec.mode);
-    putString(out, spec.image);
-    putStrings(out, spec.argv);
-    putEnum(out, spec.lookup);
-    putStrings(out, spec.fallbackArgv);
-    putString(out, spec.fallbackText);
-    putString(out, spec.workingDirectory);
-    putByte(out, spec.environment.has_value() ? 1 : 0);
-    if (spec.environment)
-        putStrings(out, *spec.environment);
-    putByte(out, spec.oomScoreAdjust.has_value() ? 1 : 0);
-    if (spec.oomScoreAdjust)
-        putU32(out, std::bit_cast<std::uint32_t>(*spec.oomScoreAdjust));
-    putEnum(out, spec.controllingTerminal);
-    putEnum(out, spec.terminalSettings);
-    putEnum(out, spec.failureReport);
-    putByte(out, spec.inheritedSlots.raw());
+    auto counter = SizeCounter {};
+    putSpec(counter, spec);
+    auto out = std::string {};
+    out.reserve(counter.size);
+    auto sink = StringSink { out };
+    putSpec(sink, spec);
     return out;
+}
+
+std::string encodeFramedSpawnSpec(SpawnSpec const& spec)
+{
+    auto counter = SizeCounter {};
+    putSpec(counter, spec);
+    auto out = std::string {};
+    out.reserve(SpawnSpecLengthSize + counter.size);
+    auto sink = StringSink { out };
+    putU32(sink, static_cast<std::uint32_t>(counter.size));
+    putSpec(sink, spec);
+    return out;
+}
+
+std::expected<std::uint32_t, SpawnSpecError> decodeSpawnSpecLength(std::string_view prefix)
+{
+    return Reader { prefix.substr(0, std::min(prefix.size(), SpawnSpecLengthSize)) }.u32();
 }
 
 std::expected<SpawnSpec, SpawnSpecError> decodeSpawnSpec(std::string_view bytes)
@@ -195,22 +274,43 @@ std::expected<SpawnSpec, SpawnSpecError> decodeSpawnSpec(std::string_view bytes)
         });
     };
 
-    return into(spec.mode, reader.enumerator<SpawnMode>())
+    // The launch's fields are read into the alternative its mode byte names, once the shared ones are.
+    auto const readLaunch = [&](std::uint8_t mode) -> Step {
+        switch (mode)
+        {
+            case LaunchIndex<TerminalLaunch>: {
+                auto& launch = spec.launch.emplace<TerminalLaunch>();
+                return into(launch.fallbackArgv, reader.strings())
+                    .and_then([&] { return into(launch.workingDirectory, reader.string()); })
+                    .and_then([&] {
+                        return into(launch.controllingTerminal, reader.enumerator<ControllingTerminal>());
+                    })
+                    .and_then(
+                        [&] { return into(launch.terminalSettings, reader.enumerator<TerminalSettings>()); })
+                    .and_then([&] { return into(launch.failureReport, reader.enumerator<FailureReport>()); })
+                    .and_then([&] { return into(launch.failureExit, reader.enumerator<FailureExit>()); });
+            }
+            case LaunchIndex<DetachedLaunch>: spec.launch.emplace<DetachedLaunch>(); return {};
+            default: return std::unexpected { SpawnSpecError::UnknownEnumerator };
+        }
+    };
+
+    auto mode = std::uint8_t { 0 };
+    return into(mode, reader.byte())
+        .and_then([&]() -> Step {
+            if (mode >= std::variant_size_v<SpawnLaunch>)
+                return std::unexpected { SpawnSpecError::UnknownEnumerator };
+            return {};
+        })
         .and_then([&] { return into(spec.image, reader.string()); })
         .and_then([&] { return into(spec.argv, reader.strings()); })
         .and_then([&] { return into(spec.lookup, reader.enumerator<ExecLookup>()); })
-        .and_then([&] { return into(spec.fallbackArgv, reader.strings()); })
-        .and_then([&] { return into(spec.fallbackText, reader.string()); })
-        .and_then([&] { return into(spec.workingDirectory, reader.string()); })
         .and_then([&] { return optionalInto(spec.environment, [&] { return reader.strings(); }); })
         .and_then([&] {
             return optionalInto(spec.oomScoreAdjust, [&]() -> std::expected<int, SpawnSpecError> {
                 return reader.u32().transform([](std::uint32_t raw) { return std::bit_cast<int>(raw); });
             });
         })
-        .and_then([&] { return into(spec.controllingTerminal, reader.enumerator<ControllingTerminal>()); })
-        .and_then([&] { return into(spec.terminalSettings, reader.enumerator<TerminalSettings>()); })
-        .and_then([&] { return into(spec.failureReport, reader.enumerator<FailureReport>()); })
         .and_then([&] {
             return reader.byte().and_then([&](std::uint8_t bits) -> Step {
                 if ((bits & ~AllSlotBits) != 0)
@@ -219,6 +319,7 @@ std::expected<SpawnSpec, SpawnSpecError> decodeSpawnSpec(std::string_view bytes)
                 return {};
             });
         })
+        .and_then([&] { return readLaunch(mode); })
         .and_then([&]() -> Step {
             if (!reader.atEnd())
                 return std::unexpected { SpawnSpecError::TrailingBytes };

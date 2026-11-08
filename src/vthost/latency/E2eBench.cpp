@@ -2,6 +2,8 @@
 
 #include <vthost/latency/E2eBench.hpp>
 
+#include <vtpty/ExecutablePath.hpp>
+
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
@@ -240,7 +242,7 @@ int runE2eBench(E2eOptions const& given, std::ostream& out, std::ostream& err)
     // Absolute, as the children start in the temporary directory.
     auto options = given;
     options.contour = std::filesystem::absolute(given.contour);
-    auto const self = currentExecutablePath();
+    auto const self = vtpty::currentExecutablePath();
     if (!self)
     {
         err << "bench-latency: cannot find its own executable\n";

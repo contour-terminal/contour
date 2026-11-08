@@ -20,11 +20,11 @@ struct ErrnoName
     std::string_view text; ///< What it means, as strerror() says it in English.
 };
 
-/// What a child between fork() and exec() says for the errno values chdir() and exec report. A table rather
-/// than strerror(), strerror_r() or std::generic_category(): none of those is async-signal-safe -- glibc's
-/// strerror_r() translates through dcgettext(), which takes the locale lock and may load a catalogue -- and
-/// the child of a multi-threaded process may call only async-signal-safe functions until it execs (fork(2)
-/// NOTES; POSIX XSH fork()).
+/// What the spawn trampoline says, before its program's exec(), for the errno values chdir() and exec report.
+/// A table rather than strerror(), strerror_r() or std::generic_category(): none of those is
+/// async-signal-safe -- glibc's strerror_r() translates through dcgettext(), which takes the locale lock and
+/// may load a catalogue -- and the table stays fit for a child forked from a multi-threaded process, which
+/// may call only async-signal-safe functions until it execs (fork(2) NOTES; POSIX XSH fork()).
 inline constexpr auto ErrnoNames = std::array {
     ErrnoName { .code = ENOENT, .text = "No such file or directory" },
     ErrnoName { .code = EACCES, .text = "Permission denied" },

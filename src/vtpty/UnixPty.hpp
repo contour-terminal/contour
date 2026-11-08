@@ -56,8 +56,9 @@ class UnixPty final: public Pty
 
     [[nodiscard]] PtyMasterHandle handle() const noexcept;
 
-    /// @return The slave's descriptor, for a spawn to hand to the child; -1 once closed. Only after start().
-    [[nodiscard]] PtySlaveHandle slaveHandle() const noexcept;
+    /// @return The slave and the fast pipe's writer, while this process holds them. Only after start().
+    [[nodiscard]] std::optional<SpawnDescriptors> spawnDescriptors() const noexcept override;
+    void closeSpawnDescriptors() override;
     [[nodiscard]] StartResult start() override;
     void close() override;
     void waitForClosed() override;

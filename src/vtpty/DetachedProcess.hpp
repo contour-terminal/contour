@@ -8,6 +8,7 @@
     #include <cstdint>
     #include <expected>
     #include <filesystem>
+    #include <optional>
     #include <string>
     #include <system_error>
     #include <vector>
@@ -39,6 +40,12 @@ struct DetachedCommand
 
     /// What the program is to Contour, as the placement's log and its scope tell.
     ProcessRole role = ProcessRole::Program;
+
+    /// The environment it runs under, as "NAME=value" entries; std::nullopt for this process's own, as it
+    /// stands when the trampoline is spawned. Given, it is the trampoline's environment too, so the spawn
+    /// reads nothing of this process's: a caller on a thread of its own passes a snapshot taken where the
+    /// environment cannot be changing, rather than racing whatever thread changes it.
+    std::optional<std::vector<std::string>> environment {};
 };
 
 /// Starts @p command detached, placed by @p placement before it runs -- as a session's shell is, so
@@ -52,7 +59,7 @@ struct DetachedCommand
 /// QProcess::startDetached(), which waits for the exec. A caller checks that the program is there first.
 ///
 /// Implemented in Process_unix.cpp, beside Process::start(). Like it, spawned through the spawn
-/// trampoline (spawnTrampoline()) rather than forked.
+/// trampoline (spawnPlaced()) rather than forked.
 ///
 /// @param command   What to run.
 /// @param placement Places the process before it runs, and releases it.
