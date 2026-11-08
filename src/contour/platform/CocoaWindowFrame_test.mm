@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The Cocoa frame adapter on a real NSWindow. Qt's ExpandedClientAreaHint owns the full-size content view
-// (Step 1d spike, D1 = Hint); the adapter only hides the title and keeps the shadow. Each case loads a
-// window shaped as Main.qml's root -- an ApplicationWindow whose `flags` carry the hint as Main.qml's
-// binding sets it -- so a Quick Controls padding for the safe area would show. Needs the cocoa platform
-// plugin, so every case runs in a display run (CONTOUR_TEST_DISPLAY=1) alone.
+// (Step 1d spike, D1 = Hint); the adapter only hides the title, keeps the shadow and turns AppKit's window
+// move off. Each case loads a window shaped as Main.qml's root -- an ApplicationWindow whose `flags` carry
+// the hint as Main.qml's binding sets it -- so a Quick Controls padding for the safe area would show. Needs
+// the cocoa platform plugin, so every case runs in a display run (CONTOUR_TEST_DISPLAY=1) alone.
 
 #include <contour/platform/CocoaWindowFrame.hpp>
 #include <contour/test/TestEnvironment.hpp>
@@ -104,6 +104,16 @@ struct ShownRoot
     return (window.styleMask & NSWindowStyleMaskFullSizeContentView) != 0;
 }
 
+/// What the client band leaves on @p window: a full-size content view, no title, the shadow, and no AppKit
+/// window move, as the band moves the window itself.
+void checkClientBandFrame(NSWindow* window)
+{
+    CHECK(hasFullSizeContentView(window));
+    CHECK(window.titleVisibility == NSWindowTitleHidden);
+    CHECK(window.hasShadow == YES);
+    CHECK(window.movable == NO);
+}
+
 } // namespace
 
 using contour::platform::WindowDecoration;
@@ -120,8 +130,7 @@ TEST_CASE("the client band keeps a full-size content view and the shadow", "[dis
     NSWindow* const nsWindow = root.nsWindow();
     REQUIRE(nsWindow != nil);
     CHECK(hasFullSizeContentView(nsWindow));
-    CHECK(nsWindow.titleVisibility == NSWindowTitleHidden);
-    CHECK(nsWindow.hasShadow == YES);
+    checkClientBandFrame(nsWindow);
 
     // The hint gives the band the title bar's area -- the bar is the window's safe area now -- and no Quick
     // Controls padding for that safe area takes it back.
@@ -167,6 +176,7 @@ TEST_CASE("the native title bar is an ordinary one", "[display][cocoa][frame]")
     REQUIRE(nsWindow != nil);
     CHECK_FALSE(hasFullSizeContentView(nsWindow));
     CHECK(nsWindow.titleVisibility == NSWindowTitleVisible);
+    CHECK(nsWindow.movable == YES);
 }
 
 TEST_CASE("a runtime title-bar toggle keeps the full-size content view", "[display][cocoa][frame]")
@@ -188,7 +198,5 @@ TEST_CASE("a runtime title-bar toggle keeps the full-size content view", "[displ
 
     NSWindow* const nsWindow = root.nsWindow();
     REQUIRE(nsWindow != nil);
-    CHECK(hasFullSizeContentView(nsWindow));
-    CHECK(nsWindow.titleVisibility == NSWindowTitleHidden);
-    CHECK(nsWindow.hasShadow == YES);
+    checkClientBandFrame(nsWindow);
 }

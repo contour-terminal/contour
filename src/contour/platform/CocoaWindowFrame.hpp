@@ -17,8 +17,9 @@ namespace contour::platform
 ///
 /// The full-size content view itself (`NSWindowStyleMaskFullSizeContentView`) is Qt's
 /// `Qt::ExpandedClientAreaHint`, which also reports the title bar as the window's safe area; this
-/// adapter leaves the style mask alone and only hides the title and keeps the shadow (Step 1d spike,
-/// D1 = Hint: one owner of the safe area). Nor does it touch the title bar's background: the controller
+/// adapter leaves the style mask alone and only hides the title, keeps the shadow and turns AppKit's own
+/// window move off, since the band moves the window itself (Step 1d spike, D1 = Hint: one owner of the
+/// safe area). Nor does it touch the title bar's background: the controller
 /// asks Qt to clear it (`Qt::NoTitleBarBackgroundHint`, set through Main.qml's `flags` while the band's
 /// backdrop is the client's own, which is the shipped band, ruling S6), and the title bar's appearance and
 /// toolbar are CocoaTitleBandMaterial's.
