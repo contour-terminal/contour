@@ -4016,7 +4016,7 @@ config::ShellKind TerminalSession::runningShell() const
     // window that is another machine's, nor for a profile that opens an SSH session (its shell is the remote
     // host's; on POSIX an empty name is a failed poll, never a reason to guess). Read as the spawn reads it,
     // so that `"C:\...\pwsh.exe" -NoLogo` or `bash -l` names its program.
-    if (_manager == nullptr || !_manager->app().attachedHostLabel().empty())
+    if (_manager == nullptr || !_manager->hostLabelOf(*this).empty())
         return config::ShellKind::Unknown;
     auto const profileRuns = [this] {
         switch (_hosting)
@@ -7591,7 +7591,9 @@ void TerminalSession::spawnNewTerminal(std::optional<std::string> const& request
         // binds the matching OS window. A local factory returns false and we open an ordinary window.
         // The profile the action named, else none: the daemon then runs the one this client named in its
         // hello, where a local window would run this session's own -- a name the daemon may not have.
-        if (_app.requestRemoteWorkspace(RemoteSpawn { .profileName = requestedProfile.value_or("") }))
+        if (_manager != nullptr
+            && _manager->requestRemoteWorkspace(*this,
+                                                RemoteSpawn { .profileName = requestedProfile.value_or("") }))
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory =

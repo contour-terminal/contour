@@ -32,6 +32,11 @@ class WindowBinding
     ///         local daemon, `--connect-tcp`, and until the attach succeeded.
     [[nodiscard]] virtual std::string_view hostLabel() const noexcept = 0;
 
+    /// Tells the binding that it serves @p window from now on (TerminalSessionManager::bindWindow). Told once
+    /// per window, however often the same window is bound to it again. GUI thread.
+    /// @param window The window bound to it.
+    virtual void windowBound(vtworkspace::WorkspaceId window) = 0;
+
     /// Tells the binding that a window it serves was closed. GUI thread.
     /// @param window The closed window.
     virtual void windowClosed(vtworkspace::WorkspaceId window) = 0;

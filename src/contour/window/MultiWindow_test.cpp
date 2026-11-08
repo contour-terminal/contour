@@ -18,6 +18,7 @@
 #include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/NodeDrag.hpp>
+#include <contour/window/RemoteChrome.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -149,6 +150,43 @@ TEST_CASE("a local window names no host in its chrome", "[contour][multiwindow][
     auto const& controller = *window.controller;
     CHECK(controller.hostLabel().isEmpty());
     CHECK(controller.windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+}
+
+TEST_CASE("WindowController: the title prefix comes from the window's own link",
+          "[contour][multiwindow][window][hosts]")
+{
+    // Declared before the app: the windows tell their bindings of their close.
+    contour::test::MockPtySessionFactory hosts;
+    contour::test::FactoryBinding home { hosts, "home" };
+    contour::test::FactoryBinding unnamed { hosts };
+    contour::test::TestApp app;
+    auto& manager = app.manager();
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    auto labelChanges = 0;
+    QObject::connect(first.controller, &contour::window::WindowController::hostLabelChanged, [&labelChanges] {
+        ++labelChanges;
+    });
+
+    manager.bindWindow(first.id, home);
+    manager.bindWindow(second.id, unnamed);
+    manager.bindWindow(first.id, home); // bound anew to the same: nothing changes
+
+    CHECK(labelChanges == 1);
+    CHECK(home.boundWindows == std::vector { first.id });
+    CHECK(first.controller->hostLabel() == QStringLiteral("home"));
+    CHECK(first.controller->windowTitle(QStringLiteral("vim"))
+          == QString::fromStdString(contour::window::remoteWindowTitle("home", "vim")));
+    CHECK(first.controller->windowTitle(QStringLiteral("vim")) != QStringLiteral("vim"));
+    CHECK(second.controller->hostLabel().isEmpty());
+    CHECK(second.controller->windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+
+    // Released, the window is local again, and says so.
+    manager.releaseBinding(home);
+    CHECK(labelChanges == 2);
+    CHECK(first.controller->hostLabel().isEmpty());
+    CHECK(first.controller->windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+    manager.releaseBinding(unnamed);
 }
 
 TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][tab-color]")

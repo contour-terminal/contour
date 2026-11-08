@@ -149,6 +149,7 @@ namespace platform
 namespace remote
 {
     class DaemonLink;
+    struct DaemonLinkConfig;
     class NativeController;
     class TmuxController;
 } // namespace remote
@@ -188,10 +189,6 @@ struct ShellIntegrationServices
     /// The running binary, which the line added to an rc file runs. Empty (the default) is
     /// `QCoreApplication::applicationFilePath()`.
     std::filesystem::path contourBinary {};
-
-    /// The remote host the app is attached to, for a test of a remote-hosted window. Empty (the default and
-    /// production) until awaitNativeAttach() fills in attachedHostLabel().
-    std::string attachedHostLabel {};
 
     /// The host the offer and the Install rows decide on (installBlockOf()). Empty (the default and
     /// production) is the detected host; a test sets it so the Linux behaviour and the Windows refusal both
@@ -396,14 +393,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// Consumes the pending spawn target screen staged by newWindow().
     /// @return The staged screen, or nullptr (already consumed / never staged / screen unplugged).
     [[nodiscard]] QScreen* takePendingSpawnScreen() noexcept;
-
-    /// Attach mode: authors a new workspace on the daemon (routed through the session factory's
-    /// requestRemoteWorkspace) instead of opening a purely local window. The daemon's new-workspace layout
-    /// push then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
-    /// @param spawn What the new workspace's first session runs, as the daemon is asked for it.
-    /// @return true if the request was routed to the daemon (do NOT open a local window); false for a
-    ///         local factory.
-    [[nodiscard]] bool requestRemoteWorkspace(session::RemoteSpawn const& spawn);
 
     /// The app-wide forced-font-DPI provider (single instance; see display/ContentScale.h), created
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
@@ -649,11 +638,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// @return The filesystem handed in at construction; this machine's by default.
     [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept { return _fileSystem; }
 
-    /// The remote host this process is attached to, as `contour client --host` named it: the host's name
-    /// under `hosts:`, or the URL of an ad-hoc host.
-    /// @return Empty unless `contour client --host` attached; fixed once its connect succeeded, as a
-    ///         process attaches to one daemon for its life. The label a test injected while no link attached.
-    [[nodiscard]] std::string_view attachedHostLabel() const noexcept;
+    /// Makes a link to a daemon on this app and its session manager, and starts its connect: the one way the
+    /// app makes a link (startNativeAttach() for a launch's). The link is destroyed once it ended
+    /// (linkEnded()), or when the app is.
+    /// @param config What the link connects with.
+    /// @return The link, owned by the app.
+    remote::DaemonLink& startDaemonLink(remote::DaemonLinkConfig config);
+
+    /// @return The app's links, in the order they were made, the ended ones not yet destroyed among them.
+    [[nodiscard]] std::span<std::unique_ptr<remote::DaemonLink> const> daemonLinks() const noexcept
+    {
+        return _daemonLinks;
+    }
 
     // remote::IDaemonLinkHost
     void openWindowFor(remote::DaemonLink& link, QScreen* screen) override;
@@ -661,6 +657,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     void postNotice(remote::DaemonLink& link, window::Notice notice) override;
     void upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
+    void linkEnded(remote::DaemonLink& link) override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }
@@ -1118,6 +1115,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(remote::DaemonLink& link,
                                                                      std::chrono::milliseconds budget);
 
+    /// @param id A link's id.
+    /// @return The link of that id; null once it was destroyed.
+    [[nodiscard]] remote::DaemonLink* daemonLink(remote::DaemonLinkId id) const noexcept;
+
+    /// Destroys every link that ended and whose controller binds no pane any more (@see linkEnded), and has
+    /// the drift badge read the first remaining link's model.
+    void destroyEndedLinks();
+
+    /// Sets the `daemonDrift` QML context property to the first link's drift model, or to none. No-op
+    /// before the QML engine exists.
+    void publishDaemonDrift();
+
     /// Upgrades the local daemon in place to this release, keeping every hosted program running. Runs off the
     /// GUI thread.
     /// @param controlPath The daemon's control socket.
@@ -1179,9 +1188,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// What the first window tells the user when the daemon this launch wanted could not be had and its
     /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
     std::string _hostingNotice;
-    /// The host label a test injected (ShellIntegrationServices::attachedHostLabel); attachedHostLabel()
-    /// reports it while no link has attached.
-    std::string _injectedHostLabel;
     /// The PATH `contour client --host` looks ssh up on. A member fixed at construction, as every spawner's
     /// vtpty::ProgramSearch holds a view of it for as long as its attach reconnects.
     std::string _sshSearchPath;

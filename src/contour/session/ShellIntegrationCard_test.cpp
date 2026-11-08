@@ -58,10 +58,14 @@ struct Rig
 {
     MockPtySessionFactory* factory = nullptr;
     TestApp app;
+    /// What the window is bound to: its label is the host the window is attached to. Declared before the
+    /// window, which tells it of its close.
+    contour::test::FactoryBinding binding;
     ScopedController window;
     TerminalSession* session = nullptr;
 
-    /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
+    /// @param attachedHostLabel The remote host the window is attached to; empty: this machine, and the
+    ///        window is bound to nothing.
     /// @param hosting Where the sessions the factory makes run: in this process, or in a daemon.
     /// @param profileShell The program the default profile starts as its shell.
     /// @param shellHost The host the offer decides on: a POSIX one, not the machine running the test.
@@ -83,10 +87,12 @@ struct Rig
               nullptr,
               contour::platform::nullAppearanceServices(),
               nullptr,
-              std::move(attachedHostLabel),
               shellHost },
+        binding { *factory, std::move(attachedHostLabel) },
         window { app.manager() }
     {
+        if (!binding.hostLabel().empty())
+            app.manager().bindWindow(window.id, binding);
         factory->reportedHosting = hosting;
         if (!profileShell.empty())
             app.app().config().profile().shell.value().program = std::move(profileShell);

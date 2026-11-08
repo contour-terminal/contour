@@ -302,6 +302,16 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// (never the client area), even though no display geometry changed. No-op otherwise.
     void reassertGeometryAfterReconcile();
 
+    /// GUI thread. Resolves the session settings anew -- after a configuration reload -- and states them:
+    /// to the daemon at once, for the sessions this connection creates from now on, and in the hello of
+    /// every later connection. Keeps the settings last stated when they cannot be resolved; no-op without
+    /// a session settings source.
+    void restateSessionSettings();
+
+    /// @return Whether any pane's pty still binds a remote session of this controller: the controller must
+    ///         outlive it, as its destruction unbinds it here. Takes _mutex. @see paneUnbound
+    [[nodiscard]] bool bindsPanes() const;
+
     /// @return Whether a layout realization is in progress (so a split it triggers
     ///         is built locally, not re-authored on the daemon).
     [[nodiscard]] bool isRealizingLayout() const;
@@ -520,6 +530,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// connectionState() changed (fires on the reactor thread; connect queued).
     void connectionStateChanged();
+
+    /// A pane's pty was destroyed and no longer binds its remote session (fires on whichever thread
+    /// destroyed it; connect queued). @see bindsPanes
+    void paneUnbound();
 
     /// After a reconnect: daemon workspaces this client showed that the daemon no longer has for it -- it
     /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread, ahead
@@ -752,6 +766,17 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// (@see requestRemoteClose, contour::SessionEnd).
     void unbind(uint64_t session, uint64_t serial);
 
+    /// Whether forgetBinding() forgot a binding.
+    enum class BindingForgotten : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+
+    /// unbind() under _mutex.
+    /// @return Whether the binding @p serial names was there to forget.
+    [[nodiscard]] BindingForgotten forgetBinding(uint64_t session, uint64_t serial);
+
     /// @return Whether @p session is bound, by the binding @p serial names. Takes _mutex.
     [[nodiscard]] bool isBinding(uint64_t session, uint64_t serial) const;
 
@@ -771,7 +796,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::string _profileName;                ///< Stated in every ClientHello.
     std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.
     /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
-    /// connection creates.
+    /// connection creates. Under _mutex: restateSessionSettings() replaces it on the GUI thread, and
+    /// makeClient() reads it on the reactor.
     std::optional<vtbackend::Settings> _attachSettings;
     /// This client's profile as it is now, restated before every session this connection creates.
     SessionSettingsSource _sessionSettings;

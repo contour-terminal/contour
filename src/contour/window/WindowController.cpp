@@ -414,7 +414,7 @@ void WindowController::runSurfaceAction(MenuSurface surface,
 
 QString WindowController::hostLabel() const
 {
-    auto const label = _manager.app().attachedHostLabel();
+    auto const label = _manager.hostLabelOf(_windowId);
     return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
 }
 
@@ -440,7 +440,7 @@ QString WindowController::applicationVersion() const
 QString WindowController::windowTitle(QString const& sessionTitle) const
 {
     return QString::fromStdString(
-        remoteWindowTitle(_manager.app().attachedHostLabel(), sessionTitle.toStdString()));
+        remoteWindowTitle(_manager.hostLabelOf(_windowId), sessionTitle.toStdString()));
 }
 
 void WindowController::openTitleBarContextMenu()
@@ -2253,7 +2253,7 @@ TitleBand WindowController::titleBand() const
         .mode = windowMode(),
         .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
         .position = _tabBarPosition,
-        .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
+        .notice = hostNoticeOf(hostChipPresence(_manager.hostLabelOf(_windowId)),
                                hostChipStateOf(_manager.hostConnection(_windowId))),
     });
 }

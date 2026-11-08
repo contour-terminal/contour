@@ -336,6 +336,8 @@ class TmuxController final:
         [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _controller; }
         /// @return Nothing: the tmux server runs on this machine.
         [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+        /// Nothing to note: a tmux window keeps no per-window state here.
+        void windowBound(vtworkspace::WorkspaceId /*window*/) override {}
         /// A tmux window keeps no per-window state here: its panes unregister as their sessions end.
         void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
 

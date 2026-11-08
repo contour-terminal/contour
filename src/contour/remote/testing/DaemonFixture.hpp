@@ -187,6 +187,8 @@ class ClientFrameCounts
             auto const lock = std::lock_guard { _areasMutex };
             _helloCells.push_back(hello->cellPixelSize);
             _helloDirectories.push_back(hello->workingDirectory);
+            _helloHistories.push_back(hello->sessionSettings.transform(
+                [](auto const& settings) { return settings.historyLineCount; }));
         }
     }
 
@@ -222,6 +224,15 @@ class ClientFrameCounts
         return _helloDirectories;
     }
 
+    /// @return The history limit each ClientHello's session settings stated so far (nullopt for no settings),
+    ///         in arrival order.
+    [[nodiscard]] std::vector<std::optional<int64_t>> helloHistories() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _helloHistories;
+    }
+
     /// @return Every client area a ResizeRequest stated so far, in arrival order.
     [[nodiscard]] std::vector<vtpty::PageSize> areas() const
     {
@@ -245,6 +256,7 @@ class ClientFrameCounts
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _paneCells {};    ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.
     std::vector<std::string> _helloDirectories {};                                 ///< Under _areasMutex.
+    std::vector<std::optional<int64_t>> _helloHistories {};                        ///< Under _areasMutex.
 };
 
 /// A daemon end of a connection that decodes the frames the client sends, keeping partial frames across

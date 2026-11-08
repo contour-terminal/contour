@@ -158,6 +158,29 @@ void NativeController::postSessionCreation(std::function<void(NativeClient&)> cr
     });
 }
 
+void NativeController::restateSessionSettings()
+{
+    if (!_sessionSettings)
+        return;
+    auto resolved = _sessionSettings();
+    if (!resolved)
+    {
+        errorLog()("attach: keeping the session settings last stated: {}", resolved.error());
+        return;
+    }
+    auto settings = vthost::toWireSessionSettings(*resolved);
+    {
+        // Read by makeClient() on the reactor, for the hello of every later connection.
+        auto const lock = std::lock_guard { _mutex };
+        _attachSettings = *std::move(resolved);
+    }
+    // NativeClient sends the restatement only when it differs from what the daemon already has.
+    _reactor.post([this, settings = std::move(settings)] {
+        if (_client != nullptr)
+            _client->restateSessionSettings(settings);
+    });
+}
+
 NativeController::~NativeController()
 {
     stop();
@@ -176,13 +199,16 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
     // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
     // A first connection composes nothing: no layout came in yet.
     auto helloCell = std::optional<vtpty::ImageSize> {};
+    // What the hello states of this client's profile, as restateSessionSettings() last replaced it.
+    auto attachSettings = std::optional<vtbackend::Settings> {};
     auto const helloArea = [&]() -> std::optional<vtpty::PageSize> {
         auto const lock = std::lock_guard { _mutex };
         auto const geometryLock = std::lock_guard { _geometryMutex };
+        attachSettings = _attachSettings;
         auto const area = composedClientArea()
                               .or_else([this] { return _lastStatedArea; })
-                              .or_else([this]() -> std::optional<vtpty::PageSize> {
-                                  return _attachSettings.transform([](auto const& s) { return s.pageSize; });
+                              .or_else([&attachSettings]() -> std::optional<vtpty::PageSize> {
+                                  return attachSettings.transform([](auto const& s) { return s.pageSize; });
                               });
         _helloArea = area;
         helloCell = _cellPixelSize;
@@ -199,7 +225,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // The daemon applies it to the sessions THIS connection goes on to create, and to nothing
             // that already exists; postSessionCreation() restates it when the configuration changed.
             .sessionSettings =
-                _attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
+                attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
             // ExtensionPermissions is offered because this client passes a PermissionHandler below: its
             // panes ask the user, ControlPermissions because their prompt lists the control permissions a
             // question asks for (vthost::client::consentRequestOf). InitialClientArea because the hello
@@ -255,7 +281,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
-        _attachSettings.transform([](auto const& s) { return s.commandBlockLimits; })
+        attachSettings.transform([](auto const& s) { return s.commandBlockLimits; })
             .value_or(vtbackend::CommandBlockStoreLimits {}),
         NativeClient::UpdateHandler { [this](RemoteScreen const& screen, vthost::proto::Delta const& delta) {
             onUpdate(screen, delta);
@@ -1499,11 +1525,24 @@ bool NativeController::isBinding(uint64_t session, uint64_t serial) const
 
 void NativeController::unbind(uint64_t session, uint64_t serial)
 {
+    if (forgetBinding(session, serial) == BindingForgotten::Yes)
+        // Outside the lock: a receiver asks bindsPanes(), which takes it.
+        emit paneUnbound();
+}
+
+bool NativeController::bindsPanes() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return !_bindings.empty();
+}
+
+NativeController::BindingForgotten NativeController::forgetBinding(uint64_t session, uint64_t serial)
+{
     auto const lock = std::lock_guard { _mutex };
     auto const binding = _bindings.find(session);
     // A detached binding's pty: the session id, if bound at all, is a new session's now.
     if (binding == _bindings.end() || binding->second.serial != serial)
-        return;
+        return BindingForgotten::No;
     _bindings.erase(binding);
     _inputEchoes.erase(session); // a session id is never reused within a run
     // The pane is gone: its grid must not keep contributing to a composed client area, and the
@@ -1529,6 +1568,7 @@ void NativeController::unbind(uint64_t session, uint64_t serial)
     // window destroy the user's shells.
     if (!_stopped)
         _closedSessions.insert(session);
+    return BindingForgotten::Yes;
 }
 
 void NativeController::closeAllBindings()

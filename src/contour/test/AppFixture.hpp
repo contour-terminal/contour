@@ -52,7 +52,6 @@ class TestApp
     ///                never reads the host's settings; pass test::appearanceServicesWith() to drive them.
     /// @param shellRcEditor The editor of the shells' startup files. A RecordingShellRcEditor by default,
     ///                so no test run reaches a real rc file; @see shellRcEditor().
-    /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
     /// @param shellHost The host the shell-integration offer decides on. A POSIX one by default, so the offer
     ///                behaves the same on every machine running the tests; pass HostPlatform::Windows to see
     ///                it refuse.
@@ -67,7 +66,6 @@ class TestApp
         std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
         contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
         std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
-        std::string attachedHostLabel = {},
         contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
@@ -88,7 +86,7 @@ class TestApp
              appearance,
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
-             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel), shellHost),
+             shellIntegrationServices(std::move(shellRcEditor), shellHost),
              scriptedDragEndProbe())
     {
         parseTerminalVerb();
@@ -339,11 +337,10 @@ class TestApp
     }
 
     /// What the offer to install shell integration reads and writes in a test app: a recording editor (or the
-    /// one a test handed), the in-memory GUI state, a fixed binary and, optionally, a remote host.
+    /// one a test handed), the in-memory GUI state, a fixed binary and the host it decides on.
     /// Runs in the member-initializer list, so the raw pointers are set before _app is constructed.
     [[nodiscard]] contour::ShellIntegrationServices shellIntegrationServices(
         std::unique_ptr<contour::platform::IShellRcEditor> own = nullptr,
-        std::string attachedHostLabel = {},
         contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other)
     {
         auto editor = own ? std::move(own) : std::make_unique<RecordingShellRcEditor>();
@@ -351,7 +348,6 @@ class TestApp
         return contour::ShellIntegrationServices { .editor = std::move(editor),
                                                    .state = _guiState,
                                                    .contourBinary = std::filesystem::path { ContourBinary },
-                                                   .attachedHostLabel = std::move(attachedHostLabel),
                                                    .host = shellHost };
     }
 

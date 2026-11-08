@@ -618,7 +618,12 @@ SessionFactory& TerminalSessionManager::factoryOf(TerminalSession const& session
 
 void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowBinding& binding)
 {
-    _bindingOfWindow[window.value] = &binding;
+    auto& bound = _bindingOfWindow[window.value];
+    if (bound == &binding)
+        return;
+    bound = &binding;
+    binding.windowBound(window);
+    notifyHostBindingChanged(window);
 }
 
 WindowBinding const* TerminalSessionManager::bindingOf(vtworkspace::WorkspaceId window) const noexcept
@@ -627,10 +632,43 @@ WindowBinding const* TerminalSessionManager::bindingOf(vtworkspace::WorkspaceId 
     return bound != _bindingOfWindow.end() ? bound->second : nullptr;
 }
 
-void TerminalSessionManager::releaseBinding(WindowBinding const& binding) noexcept
+void TerminalSessionManager::releaseBinding(WindowBinding const& binding)
 {
+    auto released = std::vector<vtworkspace::WorkspaceId> {};
+    for (auto const& [window, bound]: _bindingOfWindow)
+        if (bound == &binding)
+            released.emplace_back(window);
     std::erase_if(_bindingOfWindow, [&binding](auto const& entry) { return entry.second == &binding; });
     _linkStates.erase(&binding);
+    for (auto const window: released)
+        notifyHostBindingChanged(window);
+}
+
+void TerminalSessionManager::notifyHostBindingChanged(vtworkspace::WorkspaceId window) const
+{
+    if (auto* const controller = controllerFor(window))
+        controller->notifyHostBindingChanged();
+}
+
+std::string_view TerminalSessionManager::hostLabelOf(vtworkspace::WorkspaceId window) const noexcept
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->hostLabel() : std::string_view {};
+}
+
+std::string_view TerminalSessionManager::hostLabelOf(TerminalSession const& session) const noexcept
+{
+    auto const* const window = hostOf(&session).window;
+    return window != nullptr ? hostLabelOf(window->id()) : std::string_view {};
+}
+
+bool TerminalSessionManager::requestRemoteWorkspace(TerminalSession const& acting, RemoteSpawn const& spawn)
+{
+    // Only a window a host serves authors its new window there; a local one, the quick terminal among them,
+    // opens a local window.
+    auto const* const window = hostOf(&acting).window;
+    return window != nullptr && bindingOf(window->id()) != nullptr
+           && factoryFor(window->id()).requestRemoteWorkspace(spawn);
 }
 
 namespace
@@ -1062,8 +1100,8 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
     auto const binary = _app.locatedContourBinary();
     auto const offer =
         window::offerFor({ .shell = shell,
-                           .locality = _app.attachedHostLabel().empty() ? window::RcLocality::ThisMachine
-                                                                        : window::RcLocality::Remote,
+                           .locality = hostLabelOf(session).empty() ? window::RcLocality::ThisMachine
+                                                                    : window::RcLocality::Remote,
                            .host = _app.shellHostPlatform(),
                            .binary = binary.reach,
                            .dismissal = dismissal,

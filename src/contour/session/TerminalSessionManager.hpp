@@ -1322,7 +1322,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Binds @p window to @p binding: every session the window makes from then on is made through
     /// binding.sessions(), and every request about one of its sessions goes there, instead of to the factory
-    /// this manager was constructed with. A window bound already is bound anew. GUI thread.
+    /// this manager was constructed with. A window bound already is bound anew. The binding is told
+    /// (WindowBinding::windowBound) and the window's host label and chip are refreshed, whenever the window
+    /// was bound to something else before. GUI thread.
     ///
     /// Post-construction by necessity (cyclic wiring): the binding is built on this manager, and the window
     /// exists only once this manager made it, so each window is told to the manager once it is adopted.
@@ -1337,9 +1339,27 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] WindowBinding const* bindingOf(vtworkspace::WorkspaceId window) const noexcept;
 
     /// Unbinds every window bound to @p binding, which serves none of them any more: what they make from then
-    /// on is made by the factory this manager was constructed with. GUI thread.
+    /// on is made by the factory this manager was constructed with, and they show no host. GUI thread.
     /// @param binding The binding that stops.
-    void releaseBinding(WindowBinding const& binding) noexcept;
+    void releaseBinding(WindowBinding const& binding);
+
+    /// @param window A window of this manager.
+    /// @return The remote host @p window's binding is attached to (WindowBinding::hostLabel); empty for a
+    ///         window none claims, and so for every local one.
+    [[nodiscard]] std::string_view hostLabelOf(vtworkspace::WorkspaceId window) const noexcept;
+
+    /// @param session A session of this manager.
+    /// @return The remote host the window holding @p session is attached to; empty for a local window, and
+    /// for
+    ///         a session no window holds.
+    [[nodiscard]] std::string_view hostLabelOf(TerminalSession const& session) const noexcept;
+
+    /// Asks the host serving @p acting's window to author a new workspace, whose layout push then opens the
+    /// OS window showing it, instead of a local window opening.
+    /// @param acting The session the new window is asked from.
+    /// @param spawn What the new workspace's first session runs.
+    /// @return Whether the host took the request; false for a local window, which then opens a local one.
+    [[nodiscard]] bool requestRemoteWorkspace(TerminalSession const& acting, RemoteSpawn const& spawn);
 
     /// Installs the attach-mode window binder (ContourGuiApp installs it once attached). It decides
     /// whether a freshly-spawned OS window should adopt a pending daemon workspace's layout instead of
@@ -1591,6 +1611,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         else the one this manager was constructed with; for a panel window the one that spawns here
     ///         whatever host the app is attached to.
     [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
+
+    /// Has @p window's controller, if it has one yet, refresh what it reads of its binding: its host label
+    /// and chip.
+    /// @param window The window whose binding changed.
+    void notifyHostBindingChanged(vtworkspace::WorkspaceId window) const;
 
     /// @param source What a move moves.
     /// @return The window it is in; WorkspaceId {} for a pane no window shows.

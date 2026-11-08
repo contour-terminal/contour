@@ -54,7 +54,11 @@ DaemonLink::DaemonLink(Id id,
                                                      config.backoff);
 }
 
-DaemonLink::~DaemonLink() = default;
+DaemonLink::~DaemonLink()
+{
+    if (!isStopped())
+        _sessions.releaseBinding(*this);
+}
 
 void DaemonLink::requireGuiThread() const
 {
@@ -73,10 +77,33 @@ std::string_view DaemonLink::hostLabel() const noexcept
     return _state == AttachState::Attached ? std::string_view { _hostLabel } : std::string_view {};
 }
 
+bool DaemonLink::bindsPanes() const
+{
+    auto const* const controller = _controller ? _controller.get() : _givenUp.get();
+    return controller != nullptr && controller->bindsPanes();
+}
+
+bool DaemonLink::isFinished() const
+{
+    return _state == AttachState::Ended && !bindsPanes();
+}
+
+void DaemonLink::windowBound(vtworkspace::WorkspaceId window)
+{
+    requireGuiThread();
+    if (!isStopped() && !std::ranges::contains(_windows, window))
+        _windows.push_back(window);
+}
+
 void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
 {
     requireGuiThread();
-    std::erase(_windows, window);
+    if (std::erase(_windows, window) == 0 || !_windows.empty() || isStopped())
+        return;
+    // The last window it served closed: nothing is left for the connection to show.
+    stop();
+    _state = AttachState::Ended;
+    _host.linkEnded(*this);
 }
 
 void DaemonLink::start()
@@ -94,7 +121,10 @@ void DaemonLink::start()
         _controller.get(),
         &NativeController::layoutChanged,
         &_receiver,
-        [this] { _sessions.rebindDisconnected(*this); },
+        [this] {
+            if (!isStopped())
+                _sessions.rebindDisconnected(*this);
+        },
         Qt::QueuedConnection);
     // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree: whenever a layout
     // arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by another
@@ -105,6 +135,8 @@ void DaemonLink::start()
         &NativeController::layoutChanged,
         &_receiver,
         [this] {
+            if (isStopped())
+                return;
             reconcile();
             expireRestoreSummaryAfterLayout();
         },
@@ -116,6 +148,8 @@ void DaemonLink::start()
         &NativeController::workspaceRestored,
         &_receiver,
         [this](quint32 workspaces, quint32 tabs) {
+            if (isStopped())
+                return;
             _sessions.noteWorkspaceRestored(
                 *this, vthost::RestoredCounts { .workspaces = workspaces, .tabs = tabs });
         },
@@ -129,7 +163,7 @@ void DaemonLink::start()
         &_receiver,
         [this] {
             // Null once a connect that failed has been given up on (see awaitAttached()).
-            if (!_controller)
+            if (!_controller || isStopped())
                 return;
             // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
             // that ends here did not bring the daemon back: the panes it was for say so, with the
@@ -144,6 +178,8 @@ void DaemonLink::start()
         &NativeController::tabMergeRefused,
         &_receiver,
         [this] {
+            if (isStopped())
+                return;
             _host.postNotice(*this,
                              window::Notice { .kind = window::NoticeKind::DropRefused,
                                               .text = std::string { window::TabMergeRefusedText } });
@@ -154,6 +190,8 @@ void DaemonLink::start()
         &NativeController::moveRefused,
         &_receiver,
         [this](int reason, int modelReason, quint64 request) {
+            if (isStopped())
+                return;
             _sessions.remoteMoveRefused(request);
             // A drop onto itself, or one that would leave everything where it is, has nothing to tell.
             if (auto const text = window::moveRefusedText(reason, modelReason); !text.empty())
@@ -167,9 +205,23 @@ void DaemonLink::start()
         _controller.get(),
         &NativeController::extensionPermissionRequested,
         &_receiver,
-        [this] { askHostedExtensions(); },
+        [this] {
+            if (!isStopped())
+                askHostedExtensions();
+        },
         Qt::QueuedConnection);
 #endif
+    // An ended link waits for the last pane of its closed windows to let its controller go, and asks to be
+    // destroyed then.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::paneUnbound,
+        &_receiver,
+        [this] {
+            if (isFinished())
+                _host.linkEnded(*this);
+        },
+        Qt::QueuedConnection);
 
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots; the
     // application waits for them through awaitAttached() just before the first window. The signals above are
@@ -194,9 +246,20 @@ std::expected<void, std::string> DaemonLink::awaitAttached(std::chrono::millisec
 void DaemonLink::stop()
 {
     requireGuiThread();
+    if (isStopped())
+        return;
+    _state = AttachState::Stopped;
+    _windows.clear();
     _sessions.releaseBinding(*this);
     if (_controller)
         _controller->stop();
+}
+
+void DaemonLink::onConfigurationReloaded()
+{
+    requireGuiThread();
+    if (_controller && !isStopped())
+        _controller->restateSessionSettings();
 }
 
 void DaemonLink::stopForDaemonRestart()
@@ -205,7 +268,7 @@ void DaemonLink::stopForDaemonRestart()
     // Ended here, rather than lost when the daemon stops: a lost connection is sought again, and a
     // reconnect would start a daemon of its own while the restart waits for none to accept.
     // Before stop(), which closes every mirror pty -- @see TerminalSession::noteTransportLost
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
     _sessions.noteTransportLost(*this);
     _controller->stop();
@@ -229,7 +292,7 @@ void DaemonLink::showDaemonDrift()
 void DaemonLink::offerDaemonRestartIfDrifted()
 {
     requireGuiThread();
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
     showDaemonDrift();
     // An upgrade closes this client's connection and holds it for the daemon's return; the badge says so
@@ -245,17 +308,19 @@ void DaemonLink::offerDaemonRestartIfDrifted()
     if (_locality != window::DaemonLocality::Local)
         return;
     QObject::connect(&_drift, &window::DaemonDriftModel::upgradeRequested, &_receiver, [this] {
-        _host.upgradeDaemon(*this);
+        if (!isStopped())
+            _host.upgradeDaemon(*this);
     });
     QObject::connect(&_drift, &window::DaemonDriftModel::restartRequested, &_receiver, [this] {
-        _host.restartDaemon(*this);
+        if (!isStopped())
+            _host.restartDaemon(*this);
     });
 }
 
 void DaemonLink::reconcile()
 {
     requireGuiThread();
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
 
     // Taken before the settled layouts are read, so they are at least as new as the push of each move named.
@@ -323,7 +388,7 @@ void DaemonLink::reconcile()
 WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
 {
     requireGuiThread();
-    if (!_controller)
+    if (!_controller || isStopped())
         return WindowAdoption::Declined;
     // Before anything is realized in it: what it makes is made through this link.
     serve(window.windowId());
@@ -364,7 +429,7 @@ void DaemonLink::connectReconnectSignals()
         &NativeController::connectionStateChanged,
         &_receiver,
         [this] {
-            if (_controller)
+            if (_controller && !isStopped())
                 _sessions.setHostConnection(*this, _controller->connectionState());
         },
         Qt::QueuedConnection);
@@ -372,13 +437,16 @@ void DaemonLink::connectReconnectSignals()
         _controller.get(),
         &NativeController::workspacesLost,
         &_receiver,
-        [this](std::vector<std::uint64_t> const& daemonWorkspaces) { closeLostWindows(daemonWorkspaces); },
+        [this](std::vector<std::uint64_t> const& daemonWorkspaces) {
+            if (!isStopped())
+                closeLostWindows(daemonWorkspaces);
+        },
         Qt::QueuedConnection);
 }
 
 void DaemonLink::closeLostWindows(std::vector<std::uint64_t> const& daemonWorkspaces)
 {
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
     auto doomed = std::vector<vtworkspace::WorkspaceId> {};
     for (auto const daemonWorkspace: daemonWorkspaces)
@@ -416,15 +484,14 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
 
 void DaemonLink::serve(vtworkspace::WorkspaceId window)
 {
+    // The manager tells windowBound(), which records it among windows().
     _sessions.bindWindow(window, *this);
-    if (!std::ranges::contains(_windows, window))
-        _windows.push_back(window);
 }
 
 void DaemonLink::expireRestoreSummaryAfterLayout()
 {
     requireGuiThread();
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
     auto const layout = _controller->workspaceIds().empty() ? session::LayoutWorkspaces::None
                                                             : session::LayoutWorkspaces::Some;
@@ -438,7 +505,7 @@ void DaemonLink::expireRestoreSummaryAfterLayout()
 void DaemonLink::askHostedExtensions()
 {
 #ifdef CONTOUR_EXTENSIONS
-    if (!_controller)
+    if (!_controller || isStopped())
         return;
     if (!_grants)
     {

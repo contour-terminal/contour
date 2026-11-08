@@ -518,8 +518,11 @@ class FactoryBinding final: public contour::session::WindowBinding
 
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return _hostLabel; }
+    void windowBound(vtworkspace::WorkspaceId window) override { boundWindows.push_back(window); }
     void windowClosed(vtworkspace::WorkspaceId window) override { closedWindows.push_back(window); }
 
+    /// Every window windowBound() was told of, in order.
+    std::vector<vtworkspace::WorkspaceId> boundWindows;
     /// Every window windowClosed() was told of, in order.
     std::vector<vtworkspace::WorkspaceId> closedWindows;
 

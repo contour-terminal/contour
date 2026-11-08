@@ -7,6 +7,9 @@
 
 #include <contour/window/NoticeQueue.hpp>
 
+#include <cstdint>
+
+#include <boxed-cpp/boxed.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 class QScreen;
@@ -15,6 +18,16 @@ namespace contour::remote
 {
 
 class DaemonLink;
+
+namespace detail::tags
+{
+    struct DaemonLinkId
+    {
+    };
+} // namespace detail::tags
+
+/// Names a link among the application's.
+using DaemonLinkId = boxed::boxed<uint32_t, detail::tags::DaemonLinkId>;
 
 /// What a link needs from the application: OS windows opened and closed, notices posted, and the local
 /// daemon restarted or upgraded by the process resources the application owns.
@@ -53,6 +66,12 @@ class IDaemonLinkHost
     /// link whose daemon is window::DaemonLocality::Local; the outcome is reported to DaemonLink::drift().
     /// @param link The link whose daemon to restart.
     virtual void restartDaemon(DaemonLink& link) = 0;
+
+    /// @p link stopped because the last window it served closed, and asks to be destroyed. Not at once: the
+    /// application destroys it from its event loop, once its controller binds no pane any more, for the
+    /// ptys of the closed windows' sessions unregister from it as they go (DaemonLink::bindsPanes).
+    /// @param link The link that ended.
+    virtual void linkEnded(DaemonLink& link) = 0;
 };
 
 } // namespace contour::remote
