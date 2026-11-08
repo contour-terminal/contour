@@ -400,7 +400,13 @@ class Renderer
     ///
     /// @param cells          Contiguous sub-range of RenderCell entries to render.
     /// @param yPixelOffset   Sub-cell Y pixel offset for smooth scrolling (default: 0).
-    void renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset = 0);
+    /// Renders @p cells, each with the soft font glyph @p softGlyphs holds for its position, if any.
+    /// @param cells The cells to render.
+    /// @param softGlyphs The frame's soft glyphs, sorted by position; empty for a frame without any.
+    /// @param yPixelOffset The smooth scroll offset.
+    void renderCells(std::span<vtbackend::RenderCell const> cells,
+                     std::span<vtbackend::RenderSoftGlyph const> softGlyphs,
+                     int yPixelOffset = 0);
 
     /// Renders a span of lines to the background, decoration, and text renderers.
     ///

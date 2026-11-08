@@ -2,6 +2,7 @@ set(_header_files
     AtlasBudget.hpp
     BackgroundRenderer.hpp
     BoxDrawingRenderer.hpp
+    SoftFontRenderer.hpp
     ChipRenderer.hpp
     CursorRenderer.hpp
     DecorationRenderer.hpp
@@ -26,6 +27,7 @@ set(_header_files
 set(_source_files
     BackgroundRenderer.cpp
     BoxDrawingRenderer.cpp
+    SoftFontRenderer.cpp
     ChipRenderer.cpp
     CursorRenderer.cpp
     DecorationRenderer.cpp
@@ -44,6 +46,7 @@ set(_test_files
     AtlasBudget_test.cpp
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
+    SoftFontRenderer_test.cpp
     ChipRenderer_test.cpp
     DecorationRenderer_test.cpp
     RunPen_test.cpp

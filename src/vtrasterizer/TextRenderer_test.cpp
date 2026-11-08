@@ -682,6 +682,44 @@ TEST_CASE("TextRenderer", "[renderer]")
         CHECK(cmdA.x.value == 40);
     }
 
+    SECTION("a soft glyph replaces its cell's text and is drawn in order")
+    {
+        auto const textCell = [](char32_t codepoint, int column) {
+            auto cell = vtbackend::RenderCell {};
+            cell.position = vtbackend::CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) };
+            cell.codepoints = std::u32string(1, codepoint);
+            cell.attributes.foregroundColor = vtbackend::RGBColor(0x10, 0x20, 0x30);
+            return cell;
+        };
+        auto glyph = vtbackend::SoftGlyph {
+            .id = crispy::StrongHash { 1, 2, 3, 4 }, .width = 2, .height = 2, .coverage = { 1, 0, 0, 1 }
+        };
+        auto& backend = renderTarget.getMockBackend();
+        backend.renderCommands.clear();
+        backend.uploadCommands.clear();
+
+        renderer.beginFrame();
+        renderer.renderCell(textCell(U'A', 0));
+        renderer.renderCell(textCell(U'B', 1), glyph);
+        renderer.renderCell(textCell(U'A', 2));
+        renderer.endFrame();
+
+        // 'A' (one tile), the soft glyph (one tile, not also 'B'), 'A' again, in cell order.
+        REQUIRE(backend.renderCommands.size() == 3);
+        CHECK(backend.renderCommands[0].x.value == 0);
+        CHECK(backend.renderCommands[1].x.value == 10);
+        CHECK(backend.renderCommands[2].x.value == 20);
+        CHECK(backend.renderCommands[1].color
+              == vtrasterizer::atlas::normalize(vtbackend::RGBColor(0x10, 0x20, 0x30)));
+
+        // The glyph's tile is the only upload of the cell's size in the frame: its coverage, scaled to 10x20.
+        auto const glyphUploads = std::ranges::count_if(backend.uploadCommands, [&](auto const& upload) {
+            return upload.bitmapSize == gridMetrics.cellSize && upload.bitmap.size() == 10 * 20
+                   && upload.bitmap.front() == 0xFF && upload.bitmap.back() == 0xFF;
+        });
+        CHECK(glyphUploads == 1);
+    }
+
     SECTION("Double Height Vertical Placement")
     {
         // Test vertical placement for 'A' (Ascent 10, Descent 2) and 'g' (Ascent 10, Descent 2 but usually
