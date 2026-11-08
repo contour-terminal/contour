@@ -381,3 +381,33 @@ TEST_CASE("soft font redefinition races rendering", "[softfont][threading]")
     writer.join();
     CHECK(checked.load() > 0);
 }
+
+TEST_CASE("soft glyphs are listed by position, sorted by line and then column", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B");
+    // Written out of order, and away from line 0 and column 0, so an ordering by insertion or by hash
+    // bucket cannot pass by accident.
+    mock.writeToScreen("\033[3;2H!");
+    mock.writeToScreen("\033[2;7H\"");
+    mock.writeToScreen("\033[2;3H!");
+    mock.writeToScreen("\033[2;12H\"");
+
+    mock.terminal.markScreenDirty();
+    (void) mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    auto const positions = std::ranges::to<std::vector>(buffer.get().softGlyphs
+                                                        | std::views::transform(&RenderSoftGlyph::position));
+    auto const expected = std::vector<CellLocation> {
+        { .line = LineOffset(1), .column = ColumnOffset(2) },
+        { .line = LineOffset(1), .column = ColumnOffset(6) },
+        { .line = LineOffset(1), .column = ColumnOffset(11) },
+        { .line = LineOffset(2), .column = ColumnOffset(1) },
+    };
+    CHECK(positions == expected);
+    CHECK(std::ranges::is_sorted(positions));
+    CHECK(std::ranges::all_of(buffer.get().softGlyphs,
+                              [](auto const& entry) { return entry.glyph != nullptr; }));
+}
