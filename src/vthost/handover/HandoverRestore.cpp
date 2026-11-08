@@ -56,8 +56,8 @@ namespace
             for (auto const& child: node.children)
                 self(child);
         };
-        for (auto const& window: tree.windows)
-            for (auto const& tab: window.tabs)
+        for (auto const& workspace: tree.workspaces)
+            for (auto const& tab: workspace.tabs)
                 visit(tab.root);
         return sessions;
     }
@@ -89,13 +89,13 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
         std::max(image.nextSessionId.value, vtworkspace::firstUnusedSessionId(image.tree).value),
         [](uint64_t next, HandoverSession const& session) { return std::max(next, session.id.value + 1); });
 
-    if (_model.windowCount() > 0)
-        _window = _model.windowAt(0)->id();
+    if (_model.workspaceCount() > 0)
+        _workspace = _model.workspaceAt(0)->id();
     else
     {
-        _window = _model.createWindow()->id();
-        if (!_objects.uuidOf(_window))
-            _objects.bind(_window, _objects.mint());
+        _workspace = _model.createWorkspace()->id();
+        if (!_objects.uuidOf(_workspace))
+            _objects.bind(_workspace, _objects.mint());
     }
 
     for (auto& session: image.sessions)
@@ -104,8 +104,8 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
     // A leaf whose session could not be adopted shows nothing, and nothing would ever close it.
     for (auto const session: leafSessionsOf(image.tree))
         if (!_sessions.contains(session.value))
-            if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
-                _model.closePane(window->id(), tab->id(), leaf->id());
+            if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
+                _model.closePane(workspace->id(), tab->id(), leaf->id());
 
     // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
     // the configuration this image loaded applies to it now, before any client sees it, as a reload would.
@@ -247,10 +247,10 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
     }
 
     // A session the tree does not lay out still is a program: it gets a tab of its own.
-    if (auto const [window, tab, leaf] = _model.findSessionLeaf(id); leaf == nullptr)
+    if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(id); leaf == nullptr)
     {
         _pendingSessionId = id;
-        if (_model.createTab(_window) == nullptr)
+        if (_model.createTab(_workspace) == nullptr)
             errorLog()("handover: session {} could not be given a tab", id.value);
         _pendingSessionId.reset();
     }

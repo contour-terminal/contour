@@ -18,8 +18,8 @@ TEST_CASE("API JSON keeps the member spelling", "[vtcontrol][api]")
 TEST_CASE("API replies round-trip through JSON", "[vtcontrol][api]")
 {
     auto const reply = vtcontrol::ListReply {
-        .windows = { vtcontrol::WindowInfo {
-            .id = "window:w",
+        .workspaces = { vtcontrol::WorkspaceInfo {
+            .id = "workspace:w",
             .tabs = { vtcontrol::TabInfo {
                 .id = "tab:t",
                 .isActive = true,
@@ -28,9 +28,9 @@ TEST_CASE("API replies round-trip through JSON", "[vtcontrol][api]")
     };
     auto const back = vtcontrol::decodeJson<vtcontrol::ListReply>(vtcontrol::encodeJson(reply));
     REQUIRE(back);
-    REQUIRE(back->windows.size() == 1);
-    CHECK(back->windows[0].tabs[0].isActive);
-    CHECK(back->windows[0].tabs[0].panes[0].size.columns == 80);
+    REQUIRE(back->workspaces.size() == 1);
+    CHECK(back->workspaces[0].tabs[0].isActive);
+    CHECK(back->workspaces[0].tabs[0].panes[0].size.columns == 80);
 }
 
 TEST_CASE("DaemonInfoReply round-trips grants", "[vtcontrol][api]")

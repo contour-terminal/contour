@@ -53,7 +53,7 @@ expectRefusedBesideHost() {
     fi
 }
 expectRefusedBesideHost connect-tcp 127.0.0.1:1
-expectRefusedBesideHost window 3
+expectRefusedBesideHost workspace 3
 
 # An ssh host nothing answers for fails the same way, its reason naming the host once, from ssh's own words.
 if command -v ssh >/dev/null 2>&1; then

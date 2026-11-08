@@ -98,7 +98,7 @@ struct Rig
     TerminalSession* openTab(std::string foreground = "zsh")
     {
         window->createNewTab();
-        auto* const modelWindow = app.manager().model().window(window.id);
+        auto* const modelWindow = app.manager().model().workspace(window.id);
         REQUIRE(modelWindow != nullptr);
         auto* const tab = modelWindow->tabAt(window->activeTabIndex());
         REQUIRE(tab != nullptr);

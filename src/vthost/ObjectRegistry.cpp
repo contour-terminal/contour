@@ -25,7 +25,7 @@ ObjectRegistry::Table const& ObjectRegistry::tableOf(ObjectKind kind) const noex
 {
     switch (kind)
     {
-        case ObjectKind::Window: return _windows;
+        case ObjectKind::Workspace: return _workspaces;
         case ObjectKind::Tab: return _tabs;
         case ObjectKind::Pane: break;
     }
@@ -59,9 +59,9 @@ std::optional<Uuid> ObjectRegistry::uuidIn(Table const& table, uint64_t id)
     return std::nullopt;
 }
 
-void ObjectRegistry::bind(vtworkspace::WindowId id, Uuid uuid)
+void ObjectRegistry::bind(vtworkspace::WorkspaceId id, Uuid uuid)
 {
-    bindIn(_windows, ObjectKind::Window, id.value, uuid);
+    bindIn(_workspaces, ObjectKind::Workspace, id.value, uuid);
 }
 
 void ObjectRegistry::bind(vtworkspace::TabId id, Uuid uuid)
@@ -74,9 +74,9 @@ void ObjectRegistry::bind(vtworkspace::SessionId id, Uuid uuid)
     bindIn(_panes, ObjectKind::Pane, id.value, uuid);
 }
 
-void ObjectRegistry::forget(vtworkspace::WindowId id)
+void ObjectRegistry::forget(vtworkspace::WorkspaceId id)
 {
-    forgetIn(_windows, ObjectKind::Window, id.value);
+    forgetIn(_workspaces, ObjectKind::Workspace, id.value);
 }
 
 void ObjectRegistry::forget(vtworkspace::TabId id)
@@ -89,9 +89,9 @@ void ObjectRegistry::forget(vtworkspace::SessionId id)
     forgetIn(_panes, ObjectKind::Pane, id.value);
 }
 
-std::optional<Uuid> ObjectRegistry::uuidOf(vtworkspace::WindowId id) const
+std::optional<Uuid> ObjectRegistry::uuidOf(vtworkspace::WorkspaceId id) const
 {
-    return uuidIn(_windows, id.value);
+    return uuidIn(_workspaces, id.value);
 }
 
 std::optional<Uuid> ObjectRegistry::uuidOf(vtworkspace::TabId id) const
@@ -112,7 +112,7 @@ std::optional<ObjectRegistry::Handle> ObjectRegistry::find(ObjectRef const& ref)
         return std::nullopt;
     switch (ref.kind)
     {
-        case ObjectKind::Window: return Handle { vtworkspace::WindowId { known->second } };
+        case ObjectKind::Workspace: return Handle { vtworkspace::WorkspaceId { known->second } };
         case ObjectKind::Tab: return Handle { vtworkspace::TabId { known->second } };
         case ObjectKind::Pane: break;
     }
@@ -153,7 +153,7 @@ namespace
 ObjectRegistrySnapshot ObjectRegistry::snapshot() const
 {
     return ObjectRegistrySnapshot {
-        .windows = boundIn(_windows.byId),
+        .workspaces = boundIn(_workspaces.byId),
         .tabs = boundIn(_tabs.byId),
         .panes = boundIn(_panes.byId),
         .labels = std::ranges::to<std::vector>(_labels | std::views::transform([](auto const& entry) {
@@ -165,12 +165,12 @@ ObjectRegistrySnapshot ObjectRegistry::snapshot() const
 
 void ObjectRegistry::restore(ObjectRegistrySnapshot const& snapshot)
 {
-    _windows = {};
+    _workspaces = {};
     _tabs = {};
     _panes = {};
     _labels.clear();
-    for (auto const& window: snapshot.windows)
-        bind(vtworkspace::WindowId { window.id }, window.uuid);
+    for (auto const& workspace: snapshot.workspaces)
+        bind(vtworkspace::WorkspaceId { workspace.id }, workspace.uuid);
     for (auto const& tab: snapshot.tabs)
         bind(vtworkspace::TabId { tab.id }, tab.uuid);
     for (auto const& pane: snapshot.panes)

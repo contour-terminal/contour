@@ -349,8 +349,8 @@ void ScreenMirror::writeRow(vtbackend::Screen& page,
 {
     auto const offset = vtbackend::LineOffset::cast_from(target);
     auto const* row = rowOrNull(screen, stableId);
-    // A page row is shifted left by the origin, so the window into a wider grid shows the cursor's region; a
-    // row of the host's history is not, as the history above the page is where the user reads back from.
+    // A page row is shifted left by the origin, so the window into a wider grid shows the cursor's region;
+    // a row of the host's history is not, as the history above the page is where the user reads back from.
     auto const firstColumn = stableId < screen.viewportBase ? vtbackend::ColumnOffset(0) : _origin.column;
 
     if (offset < vtbackend::LineOffset(0))

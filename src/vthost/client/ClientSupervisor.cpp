@@ -63,12 +63,12 @@ void ClientSupervisor::expireUpgradeHold()
 
 proto::AttachIntent ClientSupervisor::resumeIntent() const
 {
-    // A client that follows every window keeps doing so: Resume would narrow it to the windows it had, and a
-    // window another client creates later would never reach it. The daemon's followedWindows still names
-    // which of its old windows came back.
-    if (_firstIntent.kind == proto::AttachIntentKind::AllWindows)
+    // A client that follows every workspace keeps doing so: Resume would narrow it to the workspaces it had,
+    // and a workspace another client creates later would never reach it. The daemon's followedWorkspaces
+    // still names which of its old workspaces came back.
+    if (_firstIntent.kind == proto::AttachIntentKind::AllWorkspaces)
         return _firstIntent;
-    return proto::AttachIntent { .kind = proto::AttachIntentKind::Resume, .windows = _followed };
+    return proto::AttachIntent { .kind = proto::AttachIntentKind::Resume, .workspaces = _followed };
 }
 
 void ClientSupervisor::stop()
@@ -172,7 +172,7 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
                                        .message = _current->lossReason().value_or(
                                            "the connection closed before the daemon answered") } };
     if (_current->connected())
-        _followed = _current->followedWindows();
+        _followed = _current->followedWorkspaces();
 
     // The client first, holding the socket, then what carries it.
     _current.reset();

@@ -124,9 +124,9 @@ struct EventOrigin
 {
     using ApiRecordTag = void;
 
-    std::string window {}; ///< The window's id.
-    std::string tab {};    ///< The tab's id.
-    std::string pane {};   ///< The pane's id.
+    std::string workspace {}; ///< The workspace's id.
+    std::string tab {};       ///< The tab's id.
+    std::string pane {};      ///< The pane's id.
 };
 
 /// An event as it travels.
@@ -143,11 +143,11 @@ struct EventEnvelope
 {
     using ApiRecordTag = void;
 
-    std::string type {};   ///< The catalog name of the payload.
-    std::string window {}; ///< The window's id.
-    std::string tab {};    ///< The tab's id.
-    std::string pane {};   ///< The pane's id.
-    RawJson payload {};    ///< The payload's JSON.
+    std::string type {};      ///< The catalog name of the payload.
+    std::string workspace {}; ///< The workspace's id.
+    std::string tab {};       ///< The tab's id.
+    std::string pane {};      ///< The pane's id.
+    RawJson payload {};       ///< The payload's JSON.
 };
 
 /// A row of the event catalog: the wire name, summary and required permission of one payload type.
@@ -189,7 +189,7 @@ inline constexpr auto EventCatalog = std::tuple {
 [[nodiscard]] std::string_view eventName(EventPayload const& payload);
 
 /// @param event An event.
-/// @return `{"type":...,"window":...,"tab":...,"pane":...,"payload":{...}}`, `type` first.
+/// @return `{"type":...,"workspace":...,"tab":...,"pane":...,"payload":{...}}`, `type` first.
 [[nodiscard]] std::string encodeEvent(Event const& event);
 
 /// @param text The JSON of one event.

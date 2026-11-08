@@ -19,10 +19,10 @@ namespace
     using vtworkspace::SessionModel;
     using vtworkspace::TabColorSource;
 
-    /// The pane an edit names, and the tab and window that hold it.
+    /// The pane an edit names, and the tab and workspace that hold it.
     struct EditTarget
     {
-        vtworkspace::Window& window;
+        vtworkspace::Workspace& workspace;
         vtworkspace::Tab& tab;
         vtworkspace::Pane& leaf;
     };
@@ -117,9 +117,9 @@ namespace
                                             EditTarget const& target,
                                             proto::EditTab const&)
     {
-        if (target.window.activeTab() == &target.tab)
+        if (target.workspace.activeTab() == &target.tab)
             return TabEditEffect::Unchanged;
-        model.activateTab(target.window.id(), target.tab.id());
+        model.activateTab(target.workspace.id(), target.tab.id());
         return TabEditEffect::Changed;
     }
 
@@ -137,13 +137,13 @@ namespace
 
 std::expected<TabEditEffect, TabEditError> applyTabEdit(SessionModel& model, proto::EditTab const& edit)
 {
-    auto const [window, tab, leaf] = model.findSessionLeaf(vtworkspace::SessionId { edit.session });
-    if (window == nullptr || tab == nullptr || leaf == nullptr)
+    auto const [workspace, tab, leaf] = model.findSessionLeaf(vtworkspace::SessionId { edit.session });
+    if (workspace == nullptr || tab == nullptr || leaf == nullptr)
         return std::unexpected { TabEditError::UnknownSession };
     auto const row = std::ranges::find(TabEditTable, edit.kind, &TabEditRow::kind);
     if (row == TabEditTable.end())
         return std::unexpected { TabEditError::UnknownKind };
-    return row->apply(model, EditTarget { .window = *window, .tab = *tab, .leaf = *leaf }, edit);
+    return row->apply(model, EditTarget { .workspace = *workspace, .tab = *tab, .leaf = *leaf }, edit);
 }
 
 } // namespace vthost

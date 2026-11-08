@@ -408,13 +408,13 @@ class SessionFactory
     /// @param presentation How the tab is presented here.
     virtual void reportTabPresentation(LocalTabPresentation const& /*presentation*/) {}
 
-    /// Attach mode: authors a new window on the DAEMON rather than opening a purely
-    /// local one — the daemon honors it and pushes the new window's layout, which the
+    /// Attach mode: authors a new workspace on the DAEMON rather than opening a purely
+    /// local window — the daemon honors it and pushes the new workspace's layout, which the
     /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
     /// opens an ordinary window.
-    /// @param spawn What the new window's first session runs, as the host is asked for it.
+    /// @param spawn What the new workspace's first session runs, as the host is asked for it.
     /// @return true if routed to the daemon; false for a local factory.
-    [[nodiscard]] virtual bool requestRemoteWindow(RemoteSpawn const& /*spawn*/) { return false; }
+    [[nodiscard]] virtual bool requestRemoteWorkspace(RemoteSpawn const& /*spawn*/) { return false; }
 
     /// Attach mode: authors the CLOSE of the pane backed by @p pty on the DAEMON, so a session the
     /// user really ended does not linger there headless.
@@ -468,7 +468,7 @@ class SessionFactory
         return ReconnectSupport::Unsupported;
     }
 
-    /// Starts a new supervised connection to the daemon after the last one ended, resuming the windows
+    /// Starts a new supervised connection to the daemon after the last one ended, resuming the workspaces
     /// followed. The outcome arrives as connection state changes, not as this result.
     /// @return Nothing once started; why none was.
     [[nodiscard]] virtual std::expected<void, ReconnectError> reconnect()

@@ -75,7 +75,7 @@ namespace
 /// The workspace the round trip and the recorded format-1 file both stand for.
 [[nodiscard]] WorkspaceSnapshot sampleWorkspace()
 {
-    auto const plain = WindowSnapshot { .tabs = { TabSnapshot { .root = leaf() } } };
+    auto const plain = WorkspaceLayoutSnapshot { .tabs = { TabSnapshot { .root = leaf() } } };
 
     auto editor = PaneSnapshot {};
     editor.workingDirectory = fs::path { u8"/home/me/Größe" };
@@ -98,15 +98,15 @@ namespace
     tab.activeLeaf = 2;
     tab.zoom = TabZoom::Zoomed;
 
-    auto second = WindowSnapshot {};
+    auto second = WorkspaceLayoutSnapshot {};
     second.identity = identityOf("api");
     second.tabs.push_back(std::move(tab));
     second.activeTab = 0;
 
     auto workspace = WorkspaceSnapshot {};
     workspace.takenAt = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } };
-    workspace.windows.push_back(plain);
-    workspace.windows.push_back(std::move(second));
+    workspace.workspaces.push_back(plain);
+    workspace.workspaces.push_back(std::move(second));
     return workspace;
 }
 
@@ -119,7 +119,7 @@ namespace
         for (auto const& child: node.children)
             self(child);
     };
-    walk(workspace.windows.at(1).tabs.at(0).root);
+    walk(workspace.workspaces.at(1).tabs.at(0).root);
     return leaves.at(index)->pane;
 }
 
@@ -138,18 +138,18 @@ namespace
     return file.take();
 }
 
-/// The body of a one-window, one-tab file whose tab blob is @p tab.
+/// The body of a one-workspace, one-tab file whose tab blob is @p tab.
 [[nodiscard]] std::vector<std::byte> oneTabFile(std::span<std::byte const> tab)
 {
-    auto window = proto::Writer {};
-    window.u8(0); // no identity
-    window.varint(0);
-    window.varint(1);
-    window.blob(tab);
+    auto workspace = proto::Writer {};
+    workspace.u8(0); // no identity
+    workspace.varint(0);
+    workspace.varint(1);
+    workspace.blob(tab);
     auto body = proto::Writer {};
     body.svarint(1000);
     body.varint(1);
-    body.blob(window.view());
+    body.blob(workspace.view());
     return fileAround(body.view());
 }
 
@@ -193,7 +193,8 @@ template <typename WriteLeaf>
 [[nodiscard]] WorkspaceSnapshot workspaceOf(PaneNode root)
 {
     auto workspace = WorkspaceSnapshot {};
-    workspace.windows.push_back(WindowSnapshot { .tabs = { TabSnapshot { .root = std::move(root) } } });
+    workspace.workspaces.push_back(
+        WorkspaceLayoutSnapshot { .tabs = { TabSnapshot { .root = std::move(root) } } });
     return workspace;
 }
 
@@ -214,7 +215,7 @@ TEST_CASE("a workspace round-trips through the codec", "[vthost][snapshot]")
     CHECK(decoded->droppedHistories == 0);
     CHECK(decoded->snapshot == original);
 
-    auto const& tab = decoded->snapshot.windows.at(1).tabs.at(0);
+    auto const& tab = decoded->snapshot.workspaces.at(1).tabs.at(0);
     CHECK(tab.title == "build");
     CHECK(tab.color == vtbackend::RGBColor { 0x336699U });
     CHECK(tab.activeLeaf == 2);
@@ -268,14 +269,14 @@ TEST_CASE("a damaged trailing cell size drops only the cell", "[vthost][snapshot
 {
     auto body = proto::Writer {};
     body.svarint(0);
-    body.varint(0); // no windows
+    body.varint(0); // no workspaces
 
     SECTION("a width and no height")
     {
         body.varint(9);
         auto const decoded = decodeSnapshot(fileAround(body.view()));
         REQUIRE(decoded);
-        CHECK(decoded->snapshot.windows.empty());
+        CHECK(decoded->snapshot.workspaces.empty());
         CHECK_FALSE(decoded->snapshot.cellPixelSize);
     }
     SECTION("an oversized extent decodes out of bounds, never negative")
@@ -331,15 +332,15 @@ TEST_CASE("decodeSnapshot names what is wrong with a damaged file", "[vthost][sn
     SECTION("a split node with one child")
     {
         auto lopsided = workspaceOf(split(vtworkspace::SplitState::Vertical, 0.5, leaf(), leaf()));
-        lopsided.windows[0].tabs[0].root.children.pop_back();
+        lopsided.workspaces[0].tabs[0].root.children.pop_back();
         CHECK(decodeSnapshot(encodeSnapshot(lopsided)).error() == SnapshotError::Malformed);
     }
-    SECTION("65 windows")
+    SECTION("65 workspaces")
     {
         auto many = WorkspaceSnapshot {};
-        many.windows.resize(MaxSnapshotWindows + 1);
+        many.workspaces.resize(MaxSnapshotWorkspaces + 1);
         CHECK(decodeSnapshot(encodeSnapshot(many)).error() == SnapshotError::Malformed);
-        many.windows.pop_back();
+        many.workspaces.pop_back();
         CHECK(decodeSnapshot(encodeSnapshot(many)));
     }
     SECTION("pane nesting deeper than 32")
@@ -378,21 +379,21 @@ TEST_CASE("a record's unknown trailing fields are skipped and absent ones defaul
         auto const file = oneTabFile(tabBlob([](proto::Writer& node) { node.u8(0); }, 3));
         auto const decoded = decodeSnapshot(file);
         REQUIRE(decoded);
-        CHECK(decoded->snapshot.windows.at(0).tabs.size() == 1);
-        CHECK(decoded->snapshot.windows[0].tabs[0].root.split == vtworkspace::SplitState::None);
+        CHECK(decoded->snapshot.workspaces.at(0).tabs.size() == 1);
+        CHECK(decoded->snapshot.workspaces[0].tabs[0].root.split == vtworkspace::SplitState::None);
     }
-    SECTION("a window that ends after its identity")
+    SECTION("a workspace that ends after its identity")
     {
-        auto window = proto::Writer {};
-        window.u8(0);
+        auto workspace = proto::Writer {};
+        workspace.u8(0);
         auto body = proto::Writer {};
         body.svarint(5);
         body.varint(1);
-        body.blob(window.view());
+        body.blob(workspace.view());
         auto const decoded = decodeSnapshot(fileAround(body.view()));
         REQUIRE(decoded);
-        CHECK(decoded->snapshot.windows.at(0).activeTab == 0);
-        CHECK(decoded->snapshot.windows[0].tabs.empty());
+        CHECK(decoded->snapshot.workspaces.at(0).activeTab == 0);
+        CHECK(decoded->snapshot.workspaces[0].tabs.empty());
     }
     SECTION("a leaf that ends after its working directory")
     {
@@ -403,7 +404,7 @@ TEST_CASE("a record's unknown trailing fields are skipped and absent ones defaul
         }));
         auto const decoded = decodeSnapshot(file);
         REQUIRE(decoded);
-        auto const& pane = decoded->snapshot.windows.at(0).tabs.at(0).root.pane;
+        auto const& pane = decoded->snapshot.workspaces.at(0).tabs.at(0).root.pane;
         CHECK(pane.workingDirectory == fs::path { "/tmp" });
         CHECK_FALSE(pane.profile);
         CHECK_FALSE(pane.history);
@@ -435,7 +436,7 @@ TEST_CASE("a pane whose history does not decode loses only its history", "[vthos
     auto const decoded = decodeSnapshot(file);
     REQUIRE(decoded);
     CHECK(decoded->droppedHistories == 1);
-    auto const& pane = decoded->snapshot.windows.at(0).tabs.at(0).root.pane;
+    auto const& pane = decoded->snapshot.workspaces.at(0).tabs.at(0).root.pane;
     CHECK_FALSE(pane.history.has_value());
     CHECK(pane.workingDirectory == fs::path { "/srv" });
 }

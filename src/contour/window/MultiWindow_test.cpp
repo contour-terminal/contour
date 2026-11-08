@@ -4,7 +4,7 @@
 // from test_main, no PTY: tabs are minted straight through the vtworkspace model, which never spawns a
 // backing session).
 //
-// The headline cases are REGRESSION PINS for the WindowId-routing refactor: before it, the manager
+// The headline cases are REGRESSION PINS for the WorkspaceId-routing refactor: before it, the manager
 // resolved every tab/pane write through the legacy single-window pointer, so a tab activation, move,
 // bulk close, rename, or pane-ratio drag issued from a SECOND OS window silently operated on the
 // FIRST window's model. Each pin drives the operation through window B's controller and asserts A is
@@ -115,7 +115,7 @@ TEST_CASE("a window says its notices only while accessibility_announcements allo
         said = announcer.get();
         return announcer;
     };
-    auto const* backing = manager.model().createWindow();
+    auto const* backing = manager.model().createWorkspace();
     auto controller = contour::window::WindowController { manager,
                                                           backing->id(),
                                                           contour::config::MenuPresentation::InScene,
@@ -158,7 +158,7 @@ TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][
     ScopedController window { manager };
     window->createNewTab();
     window->createNewTab();
-    auto* modelWindow = manager.model().window(window.id);
+    auto* modelWindow = manager.model().workspace(window.id);
     REQUIRE(modelWindow->tabCount() == 2);
     for (auto const index: { 0, 1 })
     {
@@ -225,7 +225,7 @@ TEST_CASE("taskbar progress follows background panes across window moves and clo
     CHECK(recording->windows.at(windowA.id.value).state == vtbackend::ProgressState::Error);
     CHECK(recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Paused);
 
-    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 0);
     QCoreApplication::processEvents();
     CHECK(recording->windows.at(windowA.id.value).state == vtbackend::ProgressState::Inactive);
     CHECK(recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Error);
@@ -279,7 +279,7 @@ TEST_CASE("application taskbar progress combines windows without resetting repor
     CHECK(
         recording->application
         == contour::platform::TaskbarProgress { .state = vtbackend::ProgressState::Error, .percentage = 60 });
-    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 0);
     QCoreApplication::processEvents();
     CHECK(recording->application.state == vtbackend::ProgressState::Error);
     manager.removeSession(*failed);
@@ -596,8 +596,8 @@ TEST_CASE("REGRESSION: pane-proxy writes (ratio, activate) target their own wind
     createTabs(manager, *windowB, 1);
 
     // Split BOTH windows' tabs so a mis-routed write would visibly land on A.
-    auto* tabA = manager.model().window(windowA.id)->activeTab();
-    auto* tabB = manager.model().window(windowB.id)->activeTab();
+    auto* tabA = manager.model().workspace(windowA.id)->activeTab();
+    auto* tabB = manager.model().workspace(windowB.id)->activeTab();
     REQUIRE(tabA != nullptr);
     REQUIRE(tabB != nullptr);
     REQUIRE(manager.model().splitActivePane(tabA->id(), vtworkspace::SplitState::Vertical) != nullptr);
@@ -725,7 +725,7 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     window->activateTab(0);
     REQUIRE(window->activeTabIndex() == 0);
 
-    auto* backgroundTab = manager.model().window(window.id)->tabAt(1);
+    auto* backgroundTab = manager.model().workspace(window.id)->tabAt(1);
     REQUIRE(backgroundTab != nullptr);
     auto* backgroundSession = manager.sessionForId(backgroundTab->activePane()->session());
     REQUIRE(backgroundSession != nullptr);
@@ -781,7 +781,7 @@ TEST_CASE("a tab whose label comes out empty is named after the program in front
             .toString();
     };
     auto* session =
-        manager.sessionForId(manager.model().window(window.id)->tabAt(0)->activePane()->session());
+        manager.sessionForId(manager.model().workspace(window.id)->tabAt(0)->activePane()->session());
     REQUIRE(session != nullptr);
     REQUIRE(session->resolvedWindowTitle().empty()); // the premise: the default label comes out empty
 
@@ -811,7 +811,7 @@ TEST_CASE("the default tab label shows the tab name an application sets, else th
             .toString();
     };
     auto* session =
-        manager.sessionForId(manager.model().window(window.id)->tabAt(0)->activePane()->session());
+        manager.sessionForId(manager.model().workspace(window.id)->tabAt(0)->activePane()->session());
     REQUIRE(session != nullptr);
 
     session->terminal().writeToScreen("\033]2;Window Title\033\\");
@@ -824,7 +824,7 @@ TEST_CASE("the default tab label shows the tab name an application sets, else th
     CHECK(titleAt(0) == QStringLiteral("Tab Title")); // the tab name wins over a later window title
 
     // An explicit {WindowTitle} template keeps showing the window title despite the tab name.
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     manager.model().setTabTitle(tab->id(), "{TabPosition}: {WindowTitle}");
     QCoreApplication::processEvents();
     CHECK(titleAt(0) == QStringLiteral("1: Another Window Title"));
@@ -855,7 +855,7 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto const sessionId = tab->activePane()->session();
     REQUIRE_FALSE(tab->color().has_value());
@@ -889,7 +889,7 @@ TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's 
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto const sessionId = tab->activePane()->session();
     REQUIRE_FALSE(tab->runtimeTitle().has_value());
@@ -924,7 +924,7 @@ TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's ta
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto const sessionId = tab->activePane()->session();
     auto* session = manager.sessionForId(sessionId);
@@ -1017,7 +1017,7 @@ TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto* session = manager.sessionForId(tab->activePane()->session());
     REQUIRE(session != nullptr);
@@ -1157,7 +1157,7 @@ TEST_CASE("a user's tab color outranks DECAC and survives a terminal reset", "[c
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* tab = manager.model().window(window.id)->tabAt(0);
+    auto* tab = manager.model().workspace(window.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto const sessionId = tab->activePane()->session();
 
@@ -1263,7 +1263,7 @@ TEST_CASE("TerminalSessionManager splits, focuses and closes panes through the a
 
     auto* acting = window->activeSession();
     REQUIRE(acting != nullptr);
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab != nullptr);
     REQUIRE(tab->rootPane()->isLeaf());
 
@@ -1293,7 +1293,7 @@ TEST_CASE("TerminalSessionManager swap/move/toggle/resize route through the acti
 
     auto* acting = window->activeSession();
     REQUIRE(acting != nullptr);
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab != nullptr);
 
     // Two vertical splits -> three side-by-side panes so every op has a neighbor to act on.
@@ -1339,7 +1339,7 @@ TEST_CASE("TerminalSessionManager zooming re-roots the rendered pane tree at the
     ScopedController window { manager };
     window->createNewTab();
 
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab != nullptr);
 
     manager.splitActivePane(/*vertical*/ true, window->activeSession());
@@ -1391,7 +1391,7 @@ TEST_CASE("TerminalSessionManager zoom follows focus and is cleared by restructu
     ScopedController window { manager };
     window->createNewTab();
 
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab != nullptr);
     manager.splitActivePane(/*vertical*/ true, window->activeSession());
     REQUIRE(tab->paneCount() == 2);
@@ -1433,7 +1433,7 @@ TEST_CASE("WindowController: the tab strip stops saying \"Multiple panes\" while
     ScopedController window { manager };
     window->createNewTab();
 
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab != nullptr);
 
     auto const label = [&] {
@@ -1483,7 +1483,7 @@ TEST_CASE("TerminalSessionManager moves a tab between windows, sessions survivin
     auto const movedSessionId = movedSession->modelSessionId();
 
     // Drag A's last tab (row 1) into window B at row 0.
-    manager.moveTabToWindow(windowA.id, 1, windowB.id, 0);
+    manager.moveTabToWorkspace(windowA.id, 1, windowB.id, 0);
 
     CHECK(windowA->count() == 1); // A lost the tab
     CHECK(windowB->count() == 2); // B gained it
@@ -1523,14 +1523,14 @@ TEST_CASE("moving a window's LAST tab into another window closes the now-empty s
     REQUIRE(manager.controllerFor(windowA.id) != nullptr);
 
     // Drag A's only tab into window B.
-    manager.moveTabToWindow(windowA.id, 0, windowB.id, 1);
+    manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 1);
     QCoreApplication::processEvents();
 
     // B now holds both tabs; A is empty and its window has been closed (model + controller + OS window).
     CHECK(windowB->count() == 2);
-    CHECK(manager.model().window(windowA.id) == nullptr); // model window gone
-    CHECK(manager.controllerFor(windowA.id) == nullptr);  // controller dropped
-    CHECK_FALSE(osWindowA.isVisible());                   // the OS window is gone, not a ghost
+    CHECK(manager.model().workspace(windowA.id) == nullptr); // model window gone
+    CHECK(manager.controllerFor(windowA.id) == nullptr);     // controller dropped
+    CHECK_FALSE(osWindowA.isVisible());                      // the OS window is gone, not a ghost
 
     // Drain the deferred controller delete so LeakSanitizer sees a clean teardown; ScopedController's
     // own removeWindowController(windowA) is then an idempotent no-op.
@@ -1642,7 +1642,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     manager.splitActivePane(/*vertical*/ true, acting);
     QCoreApplication::processEvents();
 
-    auto* tab = manager.model().window(window->windowId())->activeTab();
+    auto* tab = manager.model().workspace(window->windowId())->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(tab->hasMultiplePanes());
 
@@ -1662,14 +1662,14 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
 TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][multiwindow]")
 {
     // The manager's window/session-keyed entry points must degrade to safe no-ops for inputs that do
-    // not resolve — an unknown WindowId (a closed window) and a null acting session (a keybinding
+    // not resolve — an unknown WorkspaceId (a closed window) and a null acting session (a keybinding
     // firing during teardown). These are the guards every routing method rides.
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     TestApp app(std::move(factoryOwned));
     auto& manager = app.manager();
 
     // Creating a session in a window id that was never minted resolves to no model window -> nullptr.
-    CHECK(manager.createSessionInBackground(vtworkspace::WindowId { 9999 }) == nullptr);
+    CHECK(manager.createSessionInBackground(vtworkspace::WorkspaceId { 9999 }) == nullptr);
 
     // Tab/pane operations with a null acting session resolve to no target tab -> safe no-ops.
     CHECK_NOTHROW(manager.switchToTab(0, nullptr));
@@ -1762,11 +1762,11 @@ constexpr auto PaneHeight = 500.0;
 }
 
 /// The window and tab showing @p session, as the model has them.
-[[nodiscard]] std::pair<vtworkspace::WindowId, vtworkspace::Tab*> placeOf(
+[[nodiscard]] std::pair<vtworkspace::WorkspaceId, vtworkspace::Tab*> placeOf(
     contour::session::TerminalSessionManager const& manager, contour::session::TerminalSession const* session)
 {
     auto const [window, tab, leaf] = manager.model().findSessionLeaf(session->modelSessionId());
-    return { window != nullptr ? window->id() : vtworkspace::WindowId {}, tab };
+    return { window != nullptr ? window->id() : vtworkspace::WorkspaceId {}, tab };
 }
 
 /// A session alive where it was: the same pty, open, and what is written to it after a move shows.
@@ -1900,7 +1900,7 @@ TEST_CASE("parseNodeDrag reads what writeNodeDrag writes, and nothing else", "[c
 {
     auto const drag = NodeDrag { .payload = DropPayload::Tab,
                                  .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
-                                 .window = vtworkspace::WindowId { 3 },
+                                 .window = vtworkspace::WorkspaceId { 3 },
                                  .tabIndex = 1,
                                  .sessions = { 7, 9 } };
     CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(drag)) == drag);
@@ -1962,7 +1962,7 @@ TEST_CASE("parseNodeDrag refuses an oversized or duplicated session list", "[con
         return contour::window::writeNodeDrag(
             NodeDrag { .payload = DropPayload::Tab,
                        .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
-                       .window = vtworkspace::WindowId { 3 },
+                       .window = vtworkspace::WorkspaceId { 3 },
                        .tabIndex = 1,
                        .sessions = std::move(sessions) });
     };
@@ -1993,7 +1993,7 @@ TEST_CASE("a pane dropped on another window's pane edge moves there alive", "[co
     CHECK(window == f.b.id);
     REQUIRE(tab != nullptr);
     CHECK(f.manager.sessionsOfTab(tab) == std::vector { f.other, f.left });
-    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.manager.model().workspace(f.a.id)->tabAt(0)->paneCount() == 1);
     requireAlive(f.left, pty, "after the move");
     f.requireNothingRespawned();
     CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Pane moved to window %1").arg(f.b.id.value));
@@ -2128,7 +2128,7 @@ TEST_CASE("a pane released on a tab splits right of that tab's active pane", "[c
     auto f = TwoWindows {};
     f.b->dropNodeOnTab(0, f.paneOf(f.left));
 
-    auto const* const tab = f.manager.model().window(f.b.id)->tabAt(0);
+    auto const* const tab = f.manager.model().workspace(f.b.id)->tabAt(0);
     REQUIRE(tab->paneCount() == 2);
     CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
     CHECK(f.manager.sessionsOfTab(placeOf(f.manager, f.left).second) == std::vector { f.other, f.left });
@@ -2165,7 +2165,7 @@ TEST_CASE("a drop while the window's drag runs moves once the drag has returned,
 
     SECTION("a drop in the source's own window waits too: the pane's header outlives the drag loop")
     {
-        auto const* const tab = f.manager.model().window(f.a.id)->tabAt(0);
+        auto const* const tab = f.manager.model().workspace(f.a.id)->tabAt(0);
         auto const before = tab->rootPane()->splitState();
         f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitBottom), json);
         QCoreApplication::processEvents();
@@ -2214,9 +2214,9 @@ TEST_CASE("a pane dropped in a gap of a tab strip becomes a tab there", "[contou
     f.b->dropNodeInGap(1, f.paneOf(f.left));
 
     REQUIRE(f.b->count() == 2);
-    auto* const tab = f.manager.model().window(f.b.id)->tabAt(1);
+    auto* const tab = f.manager.model().workspace(f.b.id)->tabAt(1);
     CHECK(f.manager.sessionsOfTab(tab) == std::vector { f.left });
-    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.manager.model().workspace(f.a.id)->tabAt(0)->paneCount() == 1);
     f.requireNothingRespawned();
     CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Pane moved to new tab"));
 }
@@ -2257,7 +2257,7 @@ TEST_CASE("a pane dropped outside every window opens a window of its own, where 
 
     CHECK(placeOf(f.manager, f.left).first == c.id);
     CHECK(c->count() == 1);
-    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.manager.model().workspace(f.a.id)->tabAt(0)->paneCount() == 1);
     requireAlive(f.left, &f.left->terminal().device(), "in its own window");
     f.requireNothingRespawned();
     CHECK(TwoWindows::lastSaid(said) == QStringLiteral("Pane moved to new window"));
@@ -2275,7 +2275,7 @@ TEST_CASE("a tab of several panes moves alive to an edge, a tab, a gap or a wind
     {
         REQUIRE(zoneAt(*f.b, f.other, DropPayload::Tab, 50, 250, json) == DropZone::SplitLeft);
         f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitLeft), json);
-        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 3);
+        CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 3);
         CHECK(f.a->count() == 1);
         CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
     }
@@ -2285,14 +2285,14 @@ TEST_CASE("a tab of several panes moves alive to an edge, a tab, a gap or a wind
         CHECK(zoneAt(*f.b, f.other, DropPayload::Tab, 500, 250, json) == DropZone::PassThrough);
         f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::Swap), json);
         CHECK(f.a->count() == 2);
-        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+        CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 1);
         CHECK(f.saidB->said.empty());
     }
 
     SECTION("released on a tab, it splits right of that tab's active pane")
     {
         f.b->dropNodeOnTab(0, json);
-        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 3);
+        CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 3);
         CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
     }
 
@@ -2300,8 +2300,8 @@ TEST_CASE("a tab of several panes moves alive to an edge, a tab, a gap or a wind
     {
         f.b->dropNodeInGap(0, json);
         REQUIRE(f.b->count() == 2);
-        CHECK(placeOf(f.manager, f.left).second == f.manager.model().window(f.b.id)->tabAt(0));
-        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 2);
+        CHECK(placeOf(f.manager, f.left).second == f.manager.model().workspace(f.b.id)->tabAt(0));
+        CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 2);
         CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
     }
 
@@ -2309,7 +2309,7 @@ TEST_CASE("a tab of several panes moves alive to an edge, a tab, a gap or a wind
     {
         auto const tab = placeOf(f.manager, f.left).second;
         f.a->dropNodeInGap(2, json);
-        CHECK(f.manager.model().window(f.a.id)->tabAt(1) == tab);
+        CHECK(f.manager.model().workspace(f.a.id)->tabAt(1) == tab);
         CHECK(TwoWindows::lastSaid(f.saidA) == QStringLiteral("Tab moved"));
     }
 
@@ -2351,7 +2351,7 @@ TEST_CASE("a drag another process started is refused, and nothing moves", "[cont
     f.b->dropNodeInGap(0, foreign);
     CHECK(placeOf(f.manager, f.left).first == f.a.id);
     CHECK(f.b->count() == 1);
-    CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 1);
     CHECK(f.saidB->said.empty());
     f.requireNothingRespawned();
 }
@@ -2372,7 +2372,7 @@ TEST_CASE("a move nothing makes keeps the reason it was refused for", "[contour]
         {});
     REQUIRE_FALSE(beside.has_value());
     CHECK(beside.error() == refused);
-    auto const outOfEvery = f.manager.moveNode(*foreign, vtworkspace::NewWindowTarget {}, nullptr, {});
+    auto const outOfEvery = f.manager.moveNode(*foreign, vtworkspace::NewWorkspaceTarget {}, nullptr, {});
     REQUIRE_FALSE(outOfEvery.has_value());
     CHECK(outOfEvery.error() == refused);
 
@@ -2405,7 +2405,7 @@ TEST_CASE("a drag whose pane closed since it began is taken, and nothing moves",
     f.a->finishNodeDrag(Qt::IgnoreAction);
     QCoreApplication::processEvents();
     CHECK(f.b->count() == 1);
-    CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.manager.model().workspace(f.b.id)->tabAt(0)->paneCount() == 1);
     ScopedController c { f.manager };
     CHECK_FALSE(f.manager.consumePendingTransplant(c.controller));
     contour::test::closeAllTabs(*c);
@@ -2420,7 +2420,7 @@ TEST_CASE("moving out the last pane closes its window, and the app keeps running
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
-    CHECK(f.manager.model().window(f.b.id) == nullptr);
+    CHECK(f.manager.model().workspace(f.b.id) == nullptr);
     CHECK(f.manager.controllerFor(f.b.id) == nullptr);
     CHECK(f.manager.controllerFor(f.a.id) != nullptr);
     CHECK(placeOf(f.manager, f.other).first == f.a.id);
@@ -2463,7 +2463,7 @@ TEST_CASE("a pane over itself is a no-op, and its own tab never splits for its t
     f.a->dropNodeOnPane(f.left, static_cast<int>(DropZone::SplitRight), f.paneOf(f.left));
     f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitRight), f.splitTab());
     CHECK(f.a->count() == 2);
-    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 2);
+    CHECK(f.manager.model().workspace(f.a.id)->tabAt(0)->paneCount() == 2);
     CHECK(f.saidA->said.empty());
 }
 
@@ -2556,7 +2556,7 @@ TEST_CASE("a tmux window or an old daemon refuses a move with its reason", "[con
 
     f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitRight), f.a->paneDragPayload(f.left));
     CHECK(f.factory->requestedMoves.empty());
-    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 2);
+    CHECK(f.manager.model().workspace(f.a.id)->tabAt(0)->paneCount() == 2);
 }
 
 namespace
@@ -2593,7 +2593,7 @@ TEST_CASE("a daemon older than MoveNode keeps the tab moves it served, and refus
     SECTION("a tab reordered in its own strip")
     {
         f.a->dropNodeInGap(0, f.a->tabDragPayload(1));
-        CHECK(f.manager.model().window(f.a.id)->indexOf(placeOf(f.manager, f.lone).second->id()) == 0);
+        CHECK(f.manager.model().workspace(f.a.id)->indexOf(placeOf(f.manager, f.lone).second->id()) == 0);
     }
 
     SECTION("a tab dropped outside every window tears off")
@@ -2653,7 +2653,7 @@ TEST_CASE("a daemon that moves panes is not asked to tear off the whole of a win
     REQUIRE_FALSE(f.a->beginPaneDrag(f.left).isEmpty());
     f.a->finishNodeDrag(Qt::IgnoreAction);
     REQUIRE(f.factory->requestedMoves.size() == 1);
-    CHECK(f.factory->requestedMoves.front().target == vtworkspace::MoveTargetKind::NewWindow);
+    CHECK(f.factory->requestedMoves.front().target == vtworkspace::MoveTargetKind::NewWorkspace);
 }
 
 TEST_CASE("a daemon that moves panes is asked, by its ids, and nothing moves until it pushes",
@@ -2997,7 +2997,7 @@ TEST_CASE("WindowController: dropNodeOnPane moves on a split or swap zone and ch
     {
         f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitRight), tab);
         REQUIRE(f.a->count() == 1);
-        auto const* const merged = f.manager.model().window(f.a.id)->activeTab();
+        auto const* const merged = f.manager.model().workspace(f.a.id)->activeTab();
         REQUIRE(merged != nullptr);
         REQUIRE(merged->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
         CHECK(merged->rootPane()->first()->session() == loneId);
@@ -3006,7 +3006,7 @@ TEST_CASE("WindowController: dropNodeOnPane moves on a split or swap zone and ch
     SECTION("the zone names the side")
     {
         f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitTop), tab);
-        auto const* const merged = f.manager.model().window(f.a.id)->activeTab();
+        auto const* const merged = f.manager.model().workspace(f.a.id)->activeTab();
         REQUIRE(merged != nullptr);
         REQUIRE(merged->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
         CHECK(merged->rootPane()->second()->session() == loneId);
@@ -3027,7 +3027,7 @@ TEST_CASE("WindowController: dropNodeOnPane moves on a split or swap zone and ch
         f.a->dropNodeOnPane(nullptr, static_cast<int>(DropZone::SplitRight), tab);
         f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitRight), fromAnotherHost(tab));
         CHECK(f.a->count() == 2);
-        CHECK(f.manager.model().window(f.a.id)->tabAt(1)->paneCount() == 1);
+        CHECK(f.manager.model().workspace(f.a.id)->tabAt(1)->paneCount() == 1);
     }
 }
 

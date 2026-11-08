@@ -564,12 +564,12 @@ TEST_CASE("a hello that tells what a restore brought back reaches the client", "
     auto const hello = frameOf(1,
                                proto::ServerHello { .agreedVersion = proto::SupportedVersions.max,
                                                     .versions = proto::SupportedVersions,
-                                                    .restoredWindows = 2,
+                                                    .restoredWorkspaces = 2,
                                                     .restoredTabs = 7 });
     loop.blockOn(core::net::testing::allOf(client.run(), recordedDaemon(daemonSocket, hello)));
 
     REQUIRE(client.negotiated().has_value());
-    CHECK(client.restoredCounts() == vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    CHECK(client.restoredCounts() == vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
 }
 
 // Prints this build's attach PDUs in the layout of RecordedTranscripts.hpp, to record a NEW protocol
@@ -603,13 +603,14 @@ TEST_CASE("dump this build's transcripts", "[.dump]")
 TEST_CASE("the summary of a restore is told once, to the first Attach connection",
           "[vthost][daemon][restore]")
 {
-    // Two restored windows with three and four single-pane tabs.
+    // Two restored workspaces with three and four single-pane tabs.
     auto snapshot = vthost::WorkspaceSnapshot {};
     for (auto const tabs: { 3, 4 })
     {
-        auto window = vthost::WindowSnapshot {};
-        std::ranges::generate_n(std::back_inserter(window.tabs), tabs, [] { return vthost::TabSnapshot {}; });
-        snapshot.windows.push_back(std::move(window));
+        auto workspace = vthost::WorkspaceLayoutSnapshot {};
+        std::ranges::generate_n(
+            std::back_inserter(workspace.tabs), tabs, [] { return vthost::TabSnapshot {}; });
+        snapshot.workspaces.push_back(std::move(workspace));
     }
     auto source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
@@ -638,12 +639,12 @@ TEST_CASE("the summary of a restore is told once, to the first Attach connection
         loop.blockOn(
             core::net::testing::allOf(session.run(), helloWith(&loop, pair.second.get(), &bytes, &hello)));
         REQUIRE(hello.has_value());
-        return std::pair { hello->restoredWindows, hello->restoredTabs };
+        return std::pair { hello->restoredWorkspaces, hello->restoredTabs };
     };
     using Counts = std::pair<uint32_t, uint32_t>;
 
     // A probe or control caller is told nothing and leaves the summary for the first client that shows
-    // windows.
+    // workspaces.
     CHECK(helloOf(proto::ConnectionRole::Control) == Counts { 0, 0 });
     CHECK(helloOf(proto::ConnectionRole::Attach) == Counts { 2, 7 });
     // A second client, and a reconnect of the first, read zeros.

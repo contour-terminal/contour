@@ -59,7 +59,7 @@ enum class ShutdownWorkspace : std::uint8_t
         case ShutdownCause::LastSessionClosed:
         case ShutdownCause::Idle:
         case ShutdownCause::UpgradeRestart:
-        case ShutdownCause::StopRequestedKeepingWorkspace: return ShutdownWorkspace::Keep;
+        case ShutdownCause::StopRequestedKeepingWorkspaces: return ShutdownWorkspace::Keep;
     }
     return ShutdownWorkspace::Keep;
 }

@@ -21,7 +21,7 @@ using namespace vtworkspace::test;
 TEST_CASE("SessionModel: creating tabs notifies and tracks the active tab", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     REQUIRE(win != nullptr);
     CHECK(win->empty());
 
@@ -41,7 +41,7 @@ TEST_CASE("SessionModel: createTab fires tabAdded immediately followed by active
     // insert and activeTabChanged does the active-index signal + PaneProxy rebuild. If createTab ever
     // stopped firing activeTabChanged right after tabAdded, the new tab's proxies would never build.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
 
     auto* tab = f.model.createTab(win->id());
     auto const added = std::format("tabAdded:{}:0", tab->id().value);
@@ -62,7 +62,7 @@ TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtworksp
     // them to beginInsertRows/endInsertRows (etc.), whose contract requires the "begin" call while the
     // model still reports the OLD row count. Assert both the pairing and the ordering the host relies on.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
 
     // Insert: tabAboutToBeAdded must precede tabAdded, at the append index.
     auto* a = f.model.createTab(win->id());
@@ -100,7 +100,7 @@ TEST_CASE("SessionModel: structural tab events bracket the mutation", "[vtworksp
 TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id());
@@ -119,7 +119,7 @@ TEST_CASE("SessionModel: activateTab and closeTab keep the active index sane", "
 TEST_CASE("SessionModel: closeTabAt keeps the active index on the same tab", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id());
@@ -178,7 +178,7 @@ TEST_CASE("SessionModel: closeTabAt keeps the active index on the same tab", "[v
 TEST_CASE("SessionModel: closeOtherTabs and closeTabsToRight", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id());
@@ -234,9 +234,9 @@ TEST_CASE("SessionModel: closeOtherTabs and closeTabsToRight", "[vtworkspace][mo
 TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
 
-    SECTION("empty window: moveTab must not evaluate std::clamp with an inverted range")
+    SECTION("empty workspace: moveTab must not evaluate std::clamp with an inverted range")
     {
         // win->_tabs is empty, so size()-1 == -1. The buggy version called
         // std::clamp(toIndex, 0, -1) (lo > hi == undefined behavior) before the from<0 guard;
@@ -247,7 +247,7 @@ TEST_CASE("SessionModel: moveTab on an empty or unknown tab is a safe no-op", "[
         CHECK(f.events.log.empty());
     }
 
-    SECTION("unknown tab id in a non-empty window is a no-op")
+    SECTION("unknown tab id in a non-empty workspace is a no-op")
     {
         (void) f.model.createTab(win->id());
         (void) f.model.createTab(win->id());
@@ -269,7 +269,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs the way the manager's MoveTab* ac
     // This pins that contract at the model layer; before the fix those actions swapped a legacy
     // vector and never reached the model, so the visible (model-driven) tab order never changed.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id()); // order: [a, b, c]
@@ -307,7 +307,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts
     // the model is tab-space, so splitting a tab (raising its pane count above 1) must not perturb
     // how a tab-row move reorders the tabs.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* t0 = f.model.createTab(win->id());
     auto* t1 = f.model.createTab(win->id());
     auto* t2 = f.model.createTab(win->id()); // [t0, t1, t2]
@@ -330,7 +330,7 @@ TEST_CASE("SessionModel: moveTab reorders tabs regardless of per-tab pane counts
 TEST_CASE("SessionModel: moveTab preserves the active tab across reorder", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id());
@@ -347,7 +347,7 @@ TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index sh
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     auto* c = f.model.createTab(win->id());
@@ -394,7 +394,7 @@ TEST_CASE("SessionModel: moveTab fires activeTabChanged when the active index sh
 TEST_CASE("SessionModel: splitting a tab's pane fires the expected events", "[vtworkspace][model][split]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
 
     // Observe only the split's events: createTab above legitimately fired tabAdded.
@@ -418,7 +418,7 @@ TEST_CASE("SessionModel: pane ops target the named tab, not the active one", "[v
     // TabId, so a split must land in the named tab even while another tab is active — this is the
     // behavior the manager fix depends on (it must hand the right tab id to these methods).
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* target = f.model.createTab(win->id());
     auto* other = f.model.createTab(win->id()); // 'other' is created last, so it is active
     REQUIRE(win->activeTab() == other);
@@ -471,7 +471,7 @@ TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
     events.model = &model;
 
-    auto* win = model.createWindow();
+    auto* win = model.createWorkspace();
     auto* tab = model.createTab(win->id());
     auto const rootSession = tab->activePane()->session().value;
     events.log.clear();
@@ -491,7 +491,7 @@ TEST_CASE("SessionModel: a split assigns the new leaf's session before notifying
 TEST_CASE("SessionModel: closing the last pane closes the tab", "[vtworkspace][model][close]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     auto const rootPaneId = tab->rootPane()->id();
     auto const tabId = tab->id(); // capture before the tab is destroyed by the close
@@ -504,7 +504,7 @@ TEST_CASE("SessionModel: closing the last pane closes the tab", "[vtworkspace][m
 TEST_CASE("SessionModel: closing a non-last pane keeps the tab and absorbs", "[vtworkspace][model][close]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     auto* newLeaf = f.model.splitActivePane(tab->id(), SplitState::Horizontal);
     auto const newLeafId = newLeaf->id();
@@ -522,7 +522,7 @@ TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab",
     // tab's pane sessions): the model must keep the tab alive while panes survive and tear it down
     // only with the last pane. Contrast with closing a single pane, which must keep the tab.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     f.model.splitActivePane(tab->id(), SplitState::Vertical);
     f.model.splitActivePane(tab->id(), SplitState::Horizontal);
@@ -558,14 +558,14 @@ TEST_CASE("SessionModel: closing every leaf of a multi-pane tab closes the tab",
     }
 }
 
-TEST_CASE("SessionModel: removeWindow tears the whole window down", "[vtworkspace][model][window]")
+TEST_CASE("SessionModel: removeWorkspace tears the whole workspace down", "[vtworkspace][model][workspace]")
 {
-    // The manager's closeWindow() delegates the structural teardown to removeWindow and then clears
-    // its own registries. removeWindow must close every tab (firing tabClosed so the Qt rows are
-    // removed) regardless of how many panes each tab has, and drop the window itself.
+    // The manager's closeWindow() delegates the structural teardown to removeWorkspace and then clears
+    // its own registries. removeWorkspace must close every tab (firing tabClosed so the Qt rows are
+    // removed) regardless of how many panes each tab has, and drop the workspace itself.
     Fixture f;
-    auto* win = f.model.createWindow();
-    auto const windowId = win->id();
+    auto* win = f.model.createWorkspace();
+    auto const workspaceId = win->id();
     auto* t0 = f.model.createTab(win->id());
     auto* t1 = f.model.createTab(win->id());
     auto const t0Id = t0->id();
@@ -574,24 +574,24 @@ TEST_CASE("SessionModel: removeWindow tears the whole window down", "[vtworkspac
     REQUIRE(win->tabCount() == 2);
     f.events.log.clear();
 
-    f.model.removeWindow(windowId);
+    f.model.removeWorkspace(workspaceId);
 
-    // Every tab reported closed, and the window no longer resolves.
+    // Every tab reported closed, and the workspace no longer resolves.
     CHECK(f.events.sawPrefix(std::format("tabClosed:{}", t0Id.value)));
     CHECK(f.events.sawPrefix(std::format("tabClosed:{}", t1Id.value)));
     CHECK(f.model.findTab(t0Id) == nullptr);
     CHECK(f.model.findTab(t1Id) == nullptr);
 
-    // Removing a window that is already gone is a safe no-op.
+    // Removing a workspace that is already gone is a safe no-op.
     f.events.log.clear();
-    f.model.removeWindow(windowId);
+    f.model.removeWorkspace(workspaceId);
     CHECK(f.events.log.empty());
 }
 
 TEST_CASE("SessionModel: setPaneRatio updates the split node", "[vtworkspace][model][split]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     f.model.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
     auto const splitNodeId = tab->rootPane()->id();
@@ -604,7 +604,7 @@ TEST_CASE("SessionModel: setPaneRatio updates the split node", "[vtworkspace][mo
 TEST_CASE("SessionModel: tab title and color mutations notify", "[vtworkspace][model][title][color]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
 
     f.model.setTabTitle(tab->id(), "build");
@@ -626,7 +626,7 @@ TEST_CASE("SessionModel: a tab color is tracked per source, and both changes are
     // Both sources reach the same tab and both fire tabColorChanged, but they write different slots, so
     // an application's DECAC color and a color the user picked never overwrite one another.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
 
     auto constexpr AppColor = vtbackend::RGBColor { 0x11, 0x22, 0x33 };
@@ -656,7 +656,7 @@ TEST_CASE("SessionModel: an empty or blank tab title resets to the default templ
     // as a runtime override, which takes precedence over the '{WindowTitle}' default and left the
     // tab permanently unlabeled with no UI to recover.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
 
     f.model.setTabTitle(tab->id(), "");
@@ -697,17 +697,17 @@ TEST_CASE("SessionModel: color palette is non-empty and shared", "[vtworkspace][
 
 namespace
 {
-/// Builds a window + single-pane tab and returns (windowId, tabId, rootLeafId).
+/// Builds a workspace + single-pane tab and returns (workspaceId, tabId, rootLeafId).
 struct TabSetup
 {
-    WindowId window;
+    WorkspaceId workspace;
     TabId tab;
     PaneId rootLeaf;
 };
 
 [[nodiscard]] TabSetup makeTab(SessionModel& model)
 {
-    auto* win = model.createWindow();
+    auto* win = model.createWorkspace();
     auto* tab = model.createTab(win->id());
     return { win->id(), tab->id(), tab->rootPane()->id() };
 }
@@ -1013,19 +1013,19 @@ TEST_CASE("SessionModel: a second split preserves every earlier leaf's id and se
     (void) secondId;
 }
 
-// {{{ Multi-window contract (safety net for the per-OS-window refactor)
+// {{{ Multi-workspace contract (safety net for the per-OS-window refactor)
 //
-// The GUI is moving from one shared vtworkspace::Window (all OS windows rendered the same tabs) to one Window
-// per OS window. These tests lock the model's per-window isolation and teardown contract BEFORE the
-// TerminalSessionManager/WindowController start depending on it for N windows. All assertions read the
-// model directly (each Window's own tabCount/activeTab), so they do not depend on the shared event log.
+// The GUI is moving from one shared vtworkspace::Workspace (all OS windows rendered the same tabs) to one
+// Workspace per OS window. These tests lock the model's per-workspace isolation and teardown contract BEFORE
+// the TerminalSessionManager/WindowController start depending on it for N workspaces. All assertions read the
+// model directly (each Workspace's own tabCount/activeTab), so they do not depend on the shared event log.
 
-TEST_CASE("SessionModel: windows are created with distinct ids and are independent containers",
-          "[vtworkspace][model][window]")
+TEST_CASE("SessionModel: workspaces are created with distinct ids and are independent containers",
+          "[vtworkspace][model][workspace]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
     REQUIRE(a != nullptr);
     REQUIRE(b != nullptr);
 
@@ -1034,19 +1034,19 @@ TEST_CASE("SessionModel: windows are created with distinct ids and are independe
     CHECK(a != b);
     CHECK(a->empty());
     CHECK(b->empty());
-    // window(id) resolves each back to its own object.
-    CHECK(f.model.window(a->id()) == a);
-    CHECK(f.model.window(b->id()) == b);
+    // workspace(id) resolves each back to its own object.
+    CHECK(f.model.workspace(a->id()) == a);
+    CHECK(f.model.workspace(b->id()) == b);
     // An unknown id resolves to nullptr.
-    CHECK(f.model.window(WindowId { 999999 }) == nullptr);
+    CHECK(f.model.workspace(WorkspaceId { 999999 }) == nullptr);
 }
 
-TEST_CASE("SessionModel: tabs and panes added to one window do not appear in another",
-          "[vtworkspace][model][window]")
+TEST_CASE("SessionModel: tabs and panes added to one workspace do not appear in another",
+          "[vtworkspace][model][workspace]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
 
     // Two tabs into A, one into B.
     auto* a1 = f.model.createTab(a->id());
@@ -1057,16 +1057,16 @@ TEST_CASE("SessionModel: tabs and panes added to one window do not appear in ano
 
     CHECK(a->tabCount() == 2);
     CHECK(b->tabCount() == 1);
-    // Each window's tabs are its own; A's tab is not reachable as one of B's.
+    // Each workspace's tabs are its own; A's tab is not reachable as one of B's.
     CHECK(b->indexOf(a1->id()) == -1);
     CHECK(a->indexOf(b1->id()) == -1);
-    // findTab is model-global (it locates across windows) — but the tab belongs to exactly one window.
+    // findTab is model-global (it locates across workspaces) — but the tab belongs to exactly one workspace.
     CHECK(f.model.findTab(a1->id()) == a1);
     CHECK(f.model.findTab(b1->id()) == b1);
-    // windowOfTab resolves each tab to its owning window; an unknown tab maps to the empty WindowId.
-    CHECK(f.model.windowOfTab(a1->id()) == a->id());
-    CHECK(f.model.windowOfTab(b1->id()) == b->id());
-    CHECK(f.model.windowOfTab(TabId { 999999 }) == WindowId {});
+    // workspaceOfTab resolves each tab to its owning workspace; an unknown tab maps to the empty WorkspaceId.
+    CHECK(f.model.workspaceOfTab(a1->id()) == a->id());
+    CHECK(f.model.workspaceOfTab(b1->id()) == b->id());
+    CHECK(f.model.workspaceOfTab(TabId { 999999 }) == WorkspaceId {});
 
     // Splitting A's active pane must not change B's pane/tab counts.
     auto const bTabsBefore = b->tabCount();
@@ -1076,17 +1076,17 @@ TEST_CASE("SessionModel: tabs and panes added to one window do not appear in ano
     CHECK(b1->paneCount() == 1);
 }
 
-TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtworkspace][model][window]")
+TEST_CASE("SessionModel: active-tab state is tracked per workspace", "[vtworkspace][model][workspace]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
 
     auto* a1 = f.model.createTab(a->id());
     (void) f.model.createTab(a->id()); // a2 becomes A's active
     auto* b1 = f.model.createTab(b->id());
 
-    // Newest tab is active in each window, independently.
+    // Newest tab is active in each workspace, independently.
     CHECK(a->activeTabIndex() == 1);
     CHECK(b->activeTabIndex() == 0);
 
@@ -1098,12 +1098,12 @@ TEST_CASE("SessionModel: active-tab state is tracked per window", "[vtworkspace]
     CHECK(b->activeTabIndex() == 0);
 }
 
-TEST_CASE("SessionModel: removeWindow tears down only that window and leaves others intact",
-          "[vtworkspace][model][window]")
+TEST_CASE("SessionModel: removeWorkspace tears down only that workspace and leaves others intact",
+          "[vtworkspace][model][workspace]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
 
     (void) f.model.createTab(a->id());
     (void) f.model.createTab(a->id());
@@ -1111,37 +1111,38 @@ TEST_CASE("SessionModel: removeWindow tears down only that window and leaves oth
     auto const bId = b->id();
     auto const aId = a->id();
 
-    // Every tabClosed reported during removeWindow(A) names window A only, never B.
+    // Every tabClosed reported during removeWorkspace(A) names workspace A only, never B.
     f.events.log.clear();
-    f.model.removeWindow(aId);
+    f.model.removeWorkspace(aId);
 
     // A is gone; B and its tab survive with the same identity.
-    CHECK(f.model.window(aId) == nullptr);
-    REQUIRE(f.model.window(bId) == b);
+    CHECK(f.model.workspace(aId) == nullptr);
+    REQUIRE(f.model.workspace(bId) == b);
     CHECK(b->tabCount() == 1);
     CHECK(f.model.findTab(b1->id()) == b1);
     // A's tabs were reported closed; B fired no close.
     CHECK(f.events.sawPrefix("tabClosed"));
     CHECK(f.events.countPrefix("tabClosed") == 2); // exactly A's two tabs
 
-    // Removing an unknown window is a silent no-op (does not disturb B).
+    // Removing an unknown workspace is a silent no-op (does not disturb B).
     f.events.log.clear();
-    f.model.removeWindow(WindowId { 999999 });
+    f.model.removeWorkspace(WorkspaceId { 999999 });
     CHECK(f.events.log.empty());
-    CHECK(f.model.window(bId) == b);
+    CHECK(f.model.workspace(bId) == b);
 }
 // }}}
 
 // {{{ Previous-active-tab (model-level "switch to previous tab" memory)
 //
-// Replaces DisplayState::previousSession as the source for switchToPreviousTab. Lives on vtworkspace::Window
-// so it is per-window, Qt-free, and unit-testable. Must never dangle at a wrong slot after a close/move.
+// Replaces DisplayState::previousSession as the source for switchToPreviousTab. Lives on
+// vtworkspace::Workspace so it is per-workspace, Qt-free, and unit-testable. Must never dangle at a wrong
+// slot after a close/move.
 
 TEST_CASE("SessionModel: previousActiveTab follows the last activation and toggles",
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* t0 = f.model.createTab(win->id()); // active=0, prev=-1
     CHECK(win->previousActiveTabIndex() == -1);
 
@@ -1166,7 +1167,7 @@ TEST_CASE("SessionModel: closing the previous tab invalidates the previous-tab m
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* t0 = f.model.createTab(win->id());
     auto* t1 = f.model.createTab(win->id());  // active=1, prev=0(t0)
     f.model.activateTab(win->id(), t1->id()); // no-op (already active), prev stays 0
@@ -1183,7 +1184,7 @@ TEST_CASE("SessionModel: closing a lower-indexed tab shifts the previous-tab slo
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* t0 = f.model.createTab(win->id());
     auto* t1 = f.model.createTab(win->id());
     auto* t2 = f.model.createTab(win->id());  // active=2(t2), prev=1(t1)
@@ -1202,7 +1203,7 @@ TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* t0 = f.model.createTab(win->id());
     auto* t1 = f.model.createTab(win->id());
     auto* t2 = f.model.createTab(win->id()); // active=2(t2), prev=1(t1)
@@ -1218,21 +1219,21 @@ TEST_CASE("SessionModel: moving a tab keeps the previous-tab pointer on the same
 
 // {{{ Guard no-ops (unknown ids / no-op requests never fire events or mutate state)
 
-TEST_CASE("SessionModel: tab operations on an unknown window are safe no-ops", "[vtworkspace][model][tab]")
+TEST_CASE("SessionModel: tab operations on an unknown workspace are safe no-ops", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
-    auto const unknownWindow = WindowId { 999999 };
+    auto const unknownWorkspace = WorkspaceId { 999999 };
     f.events.log.clear();
 
-    f.model.closeTab(unknownWindow, tab->id());
-    f.model.closeOtherTabs(unknownWindow, tab->id());
-    f.model.closeTabsToRight(unknownWindow, tab->id());
-    f.model.activateTab(unknownWindow, tab->id());
-    f.model.moveTab(unknownWindow, tab->id(), 0);
+    f.model.closeTab(unknownWorkspace, tab->id());
+    f.model.closeOtherTabs(unknownWorkspace, tab->id());
+    f.model.closeTabsToRight(unknownWorkspace, tab->id());
+    f.model.activateTab(unknownWorkspace, tab->id());
+    f.model.moveTab(unknownWorkspace, tab->id(), 0);
 
-    // Nothing fired and the real window's state is untouched.
+    // Nothing fired and the real workspace's state is untouched.
     CHECK(f.events.log.empty());
     CHECK(win->tabCount() == 1);
     CHECK(win->activeTab() == tab);
@@ -1242,12 +1243,12 @@ TEST_CASE("SessionModel: closeTab and closeTabsToRight with an unknown tab id ar
           "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     f.events.log.clear();
 
-    f.model.closeTab(win->id(), TabId { 999999 });         // unknown tab in a known window
+    f.model.closeTab(win->id(), TabId { 999999 });         // unknown tab in a known workspace
     f.model.closeTabsToRight(win->id(), TabId { 999999 }); // unknown anchor: nothing to the right of it
 
     CHECK(f.events.log.empty());
@@ -1259,7 +1260,7 @@ TEST_CASE("SessionModel: closeTab and closeTabsToRight with an unknown tab id ar
 TEST_CASE("SessionModel: moveTab to the tab's current index is a silent no-op", "[vtworkspace][model][tab]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* a = f.model.createTab(win->id());
     auto* b = f.model.createTab(win->id());
     f.events.log.clear();
@@ -1280,7 +1281,7 @@ TEST_CASE("SessionModel: title and color mutations on an unknown tab are safe no
           "[vtworkspace][model][title][color]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     f.model.setTabTitle(tab->id(), "kept");
     f.model.setTabColor(tab->id(), TabColorSource::User, vtbackend::RGBColor { 0x11, 0x22, 0x33 });
@@ -1314,10 +1315,10 @@ struct CompletedChangesOnlyEvents: ModelEvents
     int closed = 0;
     int moved = 0;
 
-    void tabAdded(WindowId, TabId, int) override { ++added; }
-    void tabClosed(WindowId, TabId, int) override { ++closed; }
-    void tabMoved(WindowId, TabId, int, int) override { ++moved; }
-    void activeTabChanged(WindowId, TabId, int) override {}
+    void tabAdded(WorkspaceId, TabId, int) override { ++added; }
+    void tabClosed(WorkspaceId, TabId, int) override { ++closed; }
+    void tabMoved(WorkspaceId, TabId, int, int) override { ++moved; }
+    void activeTabChanged(WorkspaceId, TabId, int) override {}
     void paneSplit(TabId, PaneId, PaneId) override {}
     void paneClosed(TabId, PaneId, PaneId) override {}
     void activePaneChanged(TabId, PaneId) override {}
@@ -1334,7 +1335,7 @@ TEST_CASE("SessionModel: hosts observing only completed changes may inherit the 
     uint64_t nextSession = 1;
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
 
-    auto* win = model.createWindow();
+    auto* win = model.createWorkspace();
     auto* a = model.createTab(win->id()); // runs the default tabAboutToBeAdded() no-op
     auto* b = model.createTab(win->id());
     CHECK(events.added == 2);
@@ -1585,12 +1586,12 @@ TEST_CASE("SessionModel: moveActivePane re-parents and fires paneTreeRestructure
     }
 }
 
-TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sessions intact",
-          "[vtworkspace][model][window][move]")
+TEST_CASE("SessionModel: moveTabToWorkspace transplants a tab between workspaces, sessions intact",
+          "[vtworkspace][model][workspace][move]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
     auto* t0 = f.model.createTab(a->id());
     auto* t1 = f.model.createTab(a->id()); // a has [t0, t1], t1 active
     auto* b0 = f.model.createTab(b->id()); // b has [b0], b0 active
@@ -1600,7 +1601,7 @@ TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sess
     SECTION("the tab leaves the source and appears in the destination at the requested index")
     {
         f.events.log.clear();
-        f.model.moveTabToWindow(a->id(), t1->id(), b->id(), 0);
+        f.model.moveTabToWorkspace(a->id(), t1->id(), b->id(), 0);
 
         CHECK(a->tabCount() == 1);
         CHECK(a->indexOf(t1->id()) < 0); // gone from source
@@ -1608,35 +1609,35 @@ TEST_CASE("SessionModel: moveTabToWindow transplants a tab between windows, sess
         CHECK(b->tabAt(0) == t1);    // inserted at index 0 in dest
         CHECK(b->activeTab() == t1); // dest adopts the moved tab as active
 
-        // The bracketing + completion events fired with both window ids.
+        // The bracketing + completion events fired with both workspace ids.
         CHECK(f.events.sawPrefix(std::format("tabAboutToMoveWin:{}", a->id().value)));
         CHECK(f.events.sawPrefix(std::format("tabMovedWin:{}:{}", a->id().value, t1->id().value)));
     }
 
-    SECTION("moving a window's LAST tab empties the source (indices reset), dest gains it")
+    SECTION("moving a workspace's LAST tab empties the source (indices reset), dest gains it")
     {
         // Give A a single tab by closing t1 first.
         f.model.closeTab(a->id(), t1->id());
         REQUIRE(a->tabCount() == 1);
-        f.model.moveTabToWindow(a->id(), t0->id(), b->id(), 1);
+        f.model.moveTabToWorkspace(a->id(), t0->id(), b->id(), 1);
         CHECK(a->tabCount() == 0);
         CHECK(a->activeTabIndex() == -1);
         CHECK(b->tabCount() == 2);
         CHECK(b->indexOf(t0->id()) == 1);
     }
 
-    SECTION("same-window move degenerates to a reorder")
+    SECTION("same-workspace move degenerates to a reorder")
     {
-        f.model.moveTabToWindow(a->id(), t0->id(), a->id(), 1);
+        f.model.moveTabToWorkspace(a->id(), t0->id(), a->id(), 1);
         CHECK(a->tabAt(1) == t0);
         CHECK(a->tabCount() == 2);
     }
 
-    SECTION("unknown source/destination window or unknown tab is a safe no-op")
+    SECTION("unknown source/destination workspace or unknown tab is a safe no-op")
     {
-        f.model.moveTabToWindow(WindowId { 9999 }, t1->id(), b->id(), 0);
-        f.model.moveTabToWindow(a->id(), TabId { 9999 }, b->id(), 0);
-        f.model.moveTabToWindow(a->id(), t1->id(), WindowId { 9999 }, 0);
+        f.model.moveTabToWorkspace(WorkspaceId { 9999 }, t1->id(), b->id(), 0);
+        f.model.moveTabToWorkspace(a->id(), TabId { 9999 }, b->id(), 0);
+        f.model.moveTabToWorkspace(a->id(), t1->id(), WorkspaceId { 9999 }, 0);
         CHECK(a->tabCount() == 2);
         CHECK(b->tabCount() == 1);
     }
@@ -1652,7 +1653,7 @@ TEST_CASE("SessionModel: toggling pane zoom announces the zoomed leaf, then its 
           "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     auto* newLeaf = f.model.splitActivePane(tab->id(), SplitState::Vertical);
     REQUIRE(newLeaf != nullptr);
@@ -1675,7 +1676,7 @@ TEST_CASE("SessionModel: toggling pane zoom announces the zoomed leaf, then its 
 TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     f.events.log.clear();
 
@@ -1690,7 +1691,7 @@ TEST_CASE("SessionModel: zooming a single-pane tab announces nothing", "[vtworks
 TEST_CASE("SessionModel: a focus move while zoomed re-announces the new leaf", "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     auto* right = f.model.splitActivePane(tab->id(), SplitState::Vertical);
     REQUIRE(right != nullptr);
@@ -1715,7 +1716,7 @@ TEST_CASE("SessionModel: a focus move on an unzoomed tab announces no zoom chang
           "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
     f.events.log.clear();
@@ -1732,7 +1733,7 @@ TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing 
           "[vtworkspace][model][zoom]")
 {
     auto const zoomedTab = [](Fixture& f) {
-        auto* win = f.model.createWindow();
+        auto* win = f.model.createWorkspace();
         auto* tab = f.model.createTab(win->id());
         REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
         REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
@@ -1756,7 +1757,7 @@ TEST_CASE("SessionModel: restructuring a zoomed tab announces the zoom clearing 
     {
         Fixture f;
         auto* tab = zoomedTab(f);
-        auto const win = f.model.windowOfTab(tab->id());
+        auto const win = f.model.workspaceOfTab(tab->id());
         f.model.closePane(win, tab->id(), tab->activePane()->id());
         CHECK_FALSE(tab->isZoomed());
         CHECK(f.events.countPrefix("zoom:") == 1);
@@ -1805,7 +1806,7 @@ TEST_CASE("SessionModel: an unzoomed restructure does not retitle a multi-pane t
     // title ("Multiple panes") untouched, so they must stay silent. This keeps announceZoomChange()'s
     // retitle honest — tied to the zoom actually changing, not a blanket emit on every mutation.
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
@@ -1823,7 +1824,7 @@ TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at al
           "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
@@ -1844,7 +1845,7 @@ TEST_CASE("SessionModel: mutating an unzoomed tab announces no zoom change at al
 TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     auto const tabId = tab->id();
     REQUIRE(f.model.splitActivePane(tabId, SplitState::Vertical) != nullptr);
@@ -1867,7 +1868,7 @@ TEST_CASE("SessionModel: closing the last pane of a zoomed tab closes the tab", 
 TEST_CASE("SessionModel: resizing a zoomed pane announces the zoom clearing", "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* tab = f.model.createTab(win->id());
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
     f.model.toggleActivePaneZoom(tab->id());
@@ -1887,11 +1888,11 @@ TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly o
 {
     // Both mutators retitle for their OWN reason (the pane count crossing 1<->many) and would retitle
     // again for the zoom they cleared. The host's tabTitleChanged fan-out rebuilds and republishes the
-    // status line to every session in the window, so a double emit runs that whole sweep twice per key.
+    // status line to every session in the workspace, so a double emit runs that whole sweep twice per key.
     SECTION("splitting")
     {
         Fixture f;
-        auto* win = f.model.createWindow();
+        auto* win = f.model.createWorkspace();
         auto* tab = f.model.createTab(win->id());
         REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
         f.model.toggleActivePaneZoom(tab->id());
@@ -1906,7 +1907,7 @@ TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly o
     SECTION("closing a pane")
     {
         Fixture f;
-        auto* win = f.model.createWindow();
+        auto* win = f.model.createWorkspace();
         auto* tab = f.model.createTab(win->id());
         REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
         REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Horizontal) != nullptr);
@@ -1922,7 +1923,7 @@ TEST_CASE("SessionModel: splitting or closing a zoomed tab retitles it exactly o
     SECTION("an unzoomed split still retitles once")
     {
         Fixture f;
-        auto* win = f.model.createWindow();
+        auto* win = f.model.createWorkspace();
         auto* tab = f.model.createTab(win->id());
         f.events.log.clear();
 
@@ -1937,7 +1938,7 @@ TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and 
           "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* win = f.model.createWindow();
+    auto* win = f.model.createWorkspace();
     auto* zoomed = f.model.createTab(win->id());
     REQUIRE(f.model.splitActivePane(zoomed->id(), SplitState::Vertical) != nullptr);
     f.model.toggleActivePaneZoom(zoomed->id());
@@ -1956,44 +1957,44 @@ TEST_CASE("SessionModel: zoom is per-tab state that survives switching away and 
     CHECK(zoomed->layoutRoot() == zoomed->activePane());
 }
 
-TEST_CASE("SessionModel: zoom travels with a tab moved to another window", "[vtworkspace][model][zoom]")
+TEST_CASE("SessionModel: zoom travels with a tab moved to another workspace", "[vtworkspace][model][zoom]")
 {
     Fixture f;
-    auto* a = f.model.createWindow();
-    auto* b = f.model.createWindow();
+    auto* a = f.model.createWorkspace();
+    auto* b = f.model.createWorkspace();
     auto* tab = f.model.createTab(a->id());
     REQUIRE(f.model.splitActivePane(tab->id(), SplitState::Vertical) != nullptr);
     f.model.toggleActivePaneZoom(tab->id());
     auto const zoomedLeaf = tab->zoomedLeafId();
     REQUIRE(zoomedLeaf.has_value());
 
-    // moveTabToWindow transplants the Tab object intact, and the zoom is Tab state — so it rides along
-    // rather than being silently dropped on the destination window's first rebuild.
-    f.model.moveTabToWindow(a->id(), tab->id(), b->id(), 0);
+    // moveTabToWorkspace transplants the Tab object intact, and the zoom is Tab state — so it rides along
+    // rather than being silently dropped on the destination workspace's first rebuild.
+    f.model.moveTabToWorkspace(a->id(), tab->id(), b->id(), 0);
 
-    REQUIRE(f.model.windowOfTab(tab->id()) == b->id());
+    REQUIRE(f.model.workspaceOfTab(tab->id()) == b->id());
     CHECK(tab->isZoomed());
     CHECK(tab->zoomedLeafId() == zoomedLeaf);
     CHECK(tab->layoutRoot() == tab->activePane());
 }
 
-TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtworkspace][model][pane]")
+TEST_CASE("SessionModel: findSessionLeaf locates a session in any workspace", "[vtworkspace][model][pane]")
 {
     Fixture f;
-    auto* win1 = f.model.createWindow();
-    auto* win2 = f.model.createWindow();
+    auto* win1 = f.model.createWorkspace();
+    auto* win2 = f.model.createWorkspace();
     auto* tab1 = f.model.createTab(win1->id());                                  // session 1000
     auto* tab2 = f.model.createTab(win2->id());                                  // session 1001
     auto* splitLeaf = f.model.splitActivePane(tab2->id(), SplitState::Vertical); // session 1002
     REQUIRE(splitLeaf != nullptr);
 
-    // A session in the primary window resolves to its only leaf.
+    // A session in the primary workspace resolves to its only leaf.
     auto const [w1, t1, l1] = f.model.findSessionLeaf(SessionId { 1000 });
     CHECK(w1 == win1);
     CHECK(t1 == tab1);
     CHECK(l1 == tab1->rootPane());
 
-    // A session in a SECONDARY window, behind a split, resolves just the same
+    // A session in a SECONDARY workspace, behind a split, resolves just the same
     // (the daemon's session-exit pruning and output mapping depend on it).
     auto const [w2, t2, l2] = f.model.findSessionLeaf(SessionId { 1002 });
     CHECK(w2 == win2);
@@ -2011,14 +2012,14 @@ TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtw
 
 namespace
 {
-/// Two windows. `a` holds [target, source], `b` holds [other]. The target is one pane (session 1000), the
+/// Two workspaces. `a` holds [target, source], `b` holds [other]. The target is one pane (session 1000), the
 /// source two panes (sessions 1001 and 1002, the second active), the other's single pane is 1003.
 ///
 /// The ids are captured up front: merging destroys the source tab, so its pointer must not be used after.
 struct MergeFixture: Fixture
 {
-    Window* a = model.createWindow();
-    Window* b = model.createWindow();
+    Workspace* a = model.createWorkspace();
+    Workspace* b = model.createWorkspace();
     Tab* target = model.createTab(a->id());
     Tab* source = model.createTab(a->id());
     Pane* sourceActive = model.splitActivePane(source->id(), SplitState::Horizontal);
@@ -2040,7 +2041,7 @@ struct MergeFixture: Fixture
         return sessions;
     }
 
-    /// Merges the source into the target's only leaf on @p side, within window `a`.
+    /// Merges the source into the target's only leaf on @p side, within workspace `a`.
     Pane* merge(SplitSide side)
     {
         return model.mergeTabIntoSplit(a->id(), sourceId, a->id(), targetId, targetLeafId, side);
@@ -2165,16 +2166,16 @@ TEST_CASE("SessionModel: mergeTabIntoSplit refuses what it cannot graft, changin
               == nullptr);
     }
 
-    SECTION("unknown windows, tabs and panes")
+    SECTION("unknown workspaces, tabs and panes")
     {
-        auto const unknownWindow = WindowId { 9999 };
+        auto const unknownWorkspace = WorkspaceId { 9999 };
         auto const unknownTab = TabId { 9999 };
         auto const unknownPane = PaneId { 9999 };
         CHECK(f.model.mergeTabIntoSplit(
-                  unknownWindow, f.sourceId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
+                  unknownWorkspace, f.sourceId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
               == nullptr);
         CHECK(f.model.mergeTabIntoSplit(
-                  f.a->id(), f.sourceId, unknownWindow, f.targetId, f.targetLeafId, SplitSide::Right)
+                  f.a->id(), f.sourceId, unknownWorkspace, f.targetId, f.targetLeafId, SplitSide::Right)
               == nullptr);
         CHECK(f.model.mergeTabIntoSplit(
                   f.a->id(), unknownTab, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
@@ -2185,7 +2186,7 @@ TEST_CASE("SessionModel: mergeTabIntoSplit refuses what it cannot graft, changin
         CHECK(f.model.mergeTabIntoSplit(
                   f.a->id(), f.sourceId, f.a->id(), f.targetId, unknownPane, SplitSide::Right)
               == nullptr);
-        // A source that is not in the window it is said to be in.
+        // A source that is not in the workspace it is said to be in.
         CHECK(f.model.mergeTabIntoSplit(
                   f.b->id(), f.sourceId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
               == nullptr);
@@ -2228,13 +2229,13 @@ TEST_CASE("SessionModel: mergeTabIntoSplit clears zoom on both sides", "[vtworks
     }
 }
 
-TEST_CASE("SessionModel: mergeTabIntoSplit across windows", "[vtworkspace][model][merge][window]")
+TEST_CASE("SessionModel: mergeTabIntoSplit across workspaces", "[vtworkspace][model][merge][workspace]")
 {
     MergeFixture f;
     auto const otherId = f.other->id();
     auto const otherLeaf = f.other->rootPane()->id();
 
-    SECTION("a window's only tab merged into another window's pane empties the source window")
+    SECTION("a workspace's only tab merged into another workspace's pane empties the source workspace")
     {
         f.events.log.clear();
         auto* const grafted = f.model.mergeTabIntoSplit(
@@ -2249,7 +2250,7 @@ TEST_CASE("SessionModel: mergeTabIntoSplit across windows", "[vtworkspace][model
         CHECK(f.events.countPrefix("paneClosed:") == 0);
     }
 
-    SECTION("the source window keeps the rest of its tabs and an active one")
+    SECTION("the source workspace keeps the rest of its tabs and an active one")
     {
         auto* const extra = f.model.createTab(f.b->id()); // b: [other, extra], extra active
         (void) f.model.mergeTabIntoSplit(
@@ -2268,11 +2269,11 @@ TEST_CASE("SessionModel: mergeTabIntoSplit across windows", "[vtworkspace][model
     }
 }
 
-TEST_CASE("SessionModel: mergeTabIntoSplit within a window keeps the active bookkeeping straight",
-          "[vtworkspace][model][merge][window]")
+TEST_CASE("SessionModel: mergeTabIntoSplit within a workspace keeps the active bookkeeping straight",
+          "[vtworkspace][model][merge][workspace]")
 {
     Fixture f;
-    auto* const win = f.model.createWindow();
+    auto* const win = f.model.createWorkspace();
     auto* const first = f.model.createTab(win->id());
     auto* const middle = f.model.createTab(win->id());
     auto* const last = f.model.createTab(win->id()); // [first, middle, last], last active
@@ -2297,20 +2298,21 @@ TEST_CASE("SessionModel: mergeTabIntoSplit within a window keeps the active book
 
 namespace
 {
-/// A model with two windows: one of two tabs (the first split twice, zoomed, coloured and titled), one empty.
+/// A model with two workspaces: one of two tabs (the first split twice, zoomed, coloured and titled), one
+/// empty.
 void populate(Fixture& fixture)
 {
-    auto* const window = fixture.model.createWindow();
-    auto* const first = fixture.model.createTab(window->id());
-    auto* const second = fixture.model.createTab(window->id());
+    auto* const workspace = fixture.model.createWorkspace();
+    auto* const first = fixture.model.createTab(workspace->id());
+    auto* const second = fixture.model.createTab(workspace->id());
     (void) second;
     (void) fixture.model.splitActivePane(first->id(), SplitState::Vertical, 0.3);
     (void) fixture.model.splitActivePane(first->id(), SplitState::Horizontal, 0.7);
     fixture.model.toggleActivePaneZoom(first->id());
     fixture.model.setTabTitle(first->id(), "build");
     fixture.model.setTabColor(first->id(), TabColorSource::User, vtbackend::RGBColor { 1, 2, 3 });
-    fixture.model.activateTab(window->id(), first->id());
-    (void) fixture.model.createWindow();
+    fixture.model.activateTab(workspace->id(), first->id());
+    (void) fixture.model.createWorkspace();
 }
 } // namespace
 
@@ -2325,28 +2327,28 @@ TEST_CASE("SessionModel: restored model has the same ids and tree", "[vtworkspac
     REQUIRE(restored.model.restore(tree, ids).has_value());
 
     auto const again = restored.model.captureTree();
-    REQUIRE(again.windows.size() == tree.windows.size());
-    CHECK(restored.model.idState().nextWindow == ids.nextWindow);
+    REQUIRE(again.workspaces.size() == tree.workspaces.size());
+    CHECK(restored.model.idState().nextWorkspace == ids.nextWorkspace);
     CHECK(restored.model.idState().nextTab == ids.nextTab);
     CHECK(restored.model.idState().nextPane == ids.nextPane);
     CHECK(restored.events.log.empty());
 
-    auto const* const window = restored.model.windowAt(0);
-    REQUIRE(window != nullptr);
-    CHECK(window->id() == tree.windows[0].id);
-    CHECK(window->activeTabIndex() == tree.windows[0].activeTabIndex);
-    CHECK(window->tabCount() == 2);
-    auto const* const tab = window->tabAt(0);
+    auto const* const workspace = restored.model.workspaceAt(0);
+    REQUIRE(workspace != nullptr);
+    CHECK(workspace->id() == tree.workspaces[0].id);
+    CHECK(workspace->activeTabIndex() == tree.workspaces[0].activeTabIndex);
+    CHECK(workspace->tabCount() == 2);
+    auto const* const tab = workspace->tabAt(0);
     REQUIRE(tab != nullptr);
-    CHECK(tab->id() == tree.windows[0].tabs[0].id);
+    CHECK(tab->id() == tree.workspaces[0].tabs[0].id);
     CHECK(tab->paneCount() == 3);
     CHECK(tab->isZoomed());
     CHECK(tab->runtimeTitle() == std::optional<std::string> { "build" });
     CHECK(tab->color(TabColorSource::User) == std::optional { vtbackend::RGBColor { 1, 2, 3 } });
-    CHECK(tab->activePane()->id() == tree.windows[0].tabs[0].view.activePane);
-    CHECK(tab->leafSessions() == original.model.windowAt(0)->tabAt(0)->leafSessions());
+    CHECK(tab->activePane()->id() == tree.workspaces[0].tabs[0].view.activePane);
+    CHECK(tab->leafSessions() == original.model.workspaceAt(0)->tabAt(0)->leafSessions());
     CHECK(tab->rootPane()->ratio()
-          == Catch::Approx(original.model.windowAt(0)->tabAt(0)->rootPane()->ratio()));
+          == Catch::Approx(original.model.workspaceAt(0)->tabAt(0)->rootPane()->ratio()));
 
     // Captured again, the restored model is the original, id for id.
     auto const equalPane = [](this auto const& self, PaneTreeState const& a, PaneTreeState const& b) -> bool {
@@ -2355,7 +2357,8 @@ TEST_CASE("SessionModel: restored model has the same ids and tree", "[vtworkspac
                && std::ranges::equal(
                    a.children, b.children, [&](auto const& x, auto const& y) { return self(x, y); });
     };
-    for (auto const& [expectedTab, actualTab]: std::views::zip(tree.windows[0].tabs, again.windows[0].tabs))
+    for (auto const& [expectedTab, actualTab]:
+         std::views::zip(tree.workspaces[0].tabs, again.workspaces[0].tabs))
     {
         CHECK(expectedTab.id == actualTab.id);
         CHECK(equalPane(expectedTab.root, actualTab.root));
@@ -2377,19 +2380,19 @@ TEST_CASE("SessionModel: a pane split after restore gets an id above every resto
 
     auto const highest = [&] {
         auto highestId = uint64_t { 0 };
-        restored.model.forEachTab([&](Window&, Tab& tab) {
+        restored.model.forEachTab([&](Workspace&, Tab& tab) {
             tab.rootPane()->walkTree(
                 [&](Pane const& pane) { highestId = std::max(highestId, pane.id().value); });
         });
         return highestId;
     }();
-    auto* const tab = restored.model.windowAt(0)->tabAt(1);
+    auto* const tab = restored.model.workspaceAt(0)->tabAt(1);
     auto* const leaf = restored.model.splitActivePane(tab->id(), SplitState::Vertical);
     REQUIRE(leaf != nullptr);
     CHECK(leaf->id().value > highest);
     CHECK(leaf->parent()->id().value > highest);
-    CHECK(restored.model.createTab(restored.model.windowAt(0)->id())->id().value >= ids.nextTab.value);
-    CHECK(restored.model.createWindow()->id().value == ids.nextWindow.value);
+    CHECK(restored.model.createTab(restored.model.workspaceAt(0)->id())->id().value >= ids.nextTab.value);
+    CHECK(restored.model.createWorkspace()->id().value == ids.nextWorkspace.value);
 }
 
 TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][model][restore]")
@@ -2402,12 +2405,12 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     SECTION("duplicate pane id is refused")
     {
         auto broken = tree;
-        broken.windows[0].tabs[1].root.id = broken.windows[0].tabs[0].root.children[0].id;
+        broken.workspaces[0].tabs[1].root.id = broken.workspaces[0].tabs[0].root.children[0].id;
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error() == ModelRestoreError::DuplicateId);
-        CHECK(restored.model.windowCount() == 0);
+        CHECK(restored.model.workspaceCount() == 0);
     }
 
     SECTION("an id at the counter is refused")
@@ -2423,7 +2426,7 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     SECTION("a split without two children is refused")
     {
         auto broken = tree;
-        broken.windows[0].tabs[0].root.children.pop_back();
+        broken.workspaces[0].tabs[0].root.children.pop_back();
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
@@ -2433,7 +2436,7 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     SECTION("a split whose ratio is not a number is refused")
     {
         auto broken = tree;
-        broken.windows[0].tabs[0].root.ratio = std::numeric_limits<double>::quiet_NaN();
+        broken.workspaces[0].tabs[0].root.ratio = std::numeric_limits<double>::quiet_NaN();
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
@@ -2443,7 +2446,7 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     SECTION("a split whose ratio is infinite is refused")
     {
         auto broken = tree;
-        broken.windows[0].tabs[0].root.ratio = std::numeric_limits<double>::infinity();
+        broken.workspaces[0].tabs[0].root.ratio = std::numeric_limits<double>::infinity();
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
@@ -2454,7 +2457,7 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     {
         // SessionId{} is the sentinel for none: a leaf naming it would map to no hosted session.
         auto broken = tree;
-        broken.windows[0].tabs[1].root.session = SessionId {};
+        broken.workspaces[0].tabs[1].root.session = SessionId {};
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
@@ -2464,17 +2467,17 @@ TEST_CASE("SessionModel: restore refuses an inconsistent state", "[vtworkspace][
     SECTION("an active pane that is no leaf is refused")
     {
         auto broken = tree;
-        broken.windows[0].tabs[0].view.activePane = PaneId { 9999 };
+        broken.workspaces[0].tabs[0].view.activePane = PaneId { 9999 };
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error() == ModelRestoreError::UnknownActivePane);
     }
 
-    SECTION("a window's tab index out of range is refused")
+    SECTION("a workspace's tab index out of range is refused")
     {
         auto broken = tree;
-        broken.windows[0].activeTabIndex = 7;
+        broken.workspaces[0].activeTabIndex = 7;
         auto restored = Fixture {};
         auto const result = restored.model.restore(broken, ids);
         REQUIRE_FALSE(result.has_value());
@@ -2491,7 +2494,7 @@ TEST_CASE("SessionModel: the first unused session id is above every restored lea
     auto const tree = original.model.captureTree();
 
     auto highest = uint64_t { 0 };
-    original.model.forEachTab([&](Window&, Tab& tab) {
+    original.model.forEachTab([&](Workspace&, Tab& tab) {
         for (auto const session: tab.leafSessions())
             highest = std::max(highest, session.value);
     });

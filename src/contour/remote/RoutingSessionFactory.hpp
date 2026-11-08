@@ -132,9 +132,9 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         active().reportTabPresentation(presentation);
     }
 
-    [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const& spawn) override
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
     {
-        return active().requestRemoteWindow(spawn);
+        return active().requestRemoteWorkspace(spawn);
     }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { active().requestRemoteClose(pty); }

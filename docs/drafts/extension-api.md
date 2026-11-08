@@ -70,7 +70,7 @@ It is to let a sandboxed guest **contribute rows to registries that already acce
 | `actions::Action` | `src/contour/Actions.hpp` | one variant that the keymap, the command palette **and** every context menu read |
 | `vtpty::Pty` | `src/vtpty/Pty.hpp:52` | already a pure-virtual transport interface |
 | `vtbackend::ShellIntegration` | `src/vtbackend/shell/ShellIntegration.hpp:10` | already a pure-virtual observer interface |
-| `vtworkspace::SessionModel` | `src/vtworkspace/SessionModel.hpp` | a complete tab/pane/window verb set, Qt-free |
+| `vtworkspace::SessionModel` | `src/vtworkspace/SessionModel.hpp` | a complete tab/pane/workspace verb set, Qt-free |
 
 The consequence for scope: **milestone 1 is small**, because for several interfaces the work is a
 binding and a permission check, not a new mechanism. And the consequence for design: an extension
@@ -356,23 +356,23 @@ costs when nobody uses it, and which existing type it is built on. Signatures ar
 #### `contour:terminal/workspace`
 
 > **Shipped in part** as `terminal-extensions:control/control@0.1.0` (`wit/control/`): listing,
-> opening, splitting, closing and labelling windows, tabs and panes, under the `control read` and
+> opening, splitting, closing and labelling workspaces, tabs and panes, under the `control read` and
 > `control write` manifest lines. Focus, move, resize, zoom, swap and layouts are not in it yet.
 
 **Permissions:** `workspace:read`, `workspace:write` · **Placement:** session · **Cost unused:** nil
 (pull API plus a coalesced change event)
 
-Enumerate and manipulate the window/tab/pane tree: create, split, close, focus, move, resize, zoom,
+Enumerate and manipulate the workspace/tab/pane tree: create, split, close, focus, move, resize, zoom,
 swap; read and set tab titles and tab colours; load and save layouts.
 
 This maps almost one-to-one onto `vtworkspace::SessionModel` (`src/vtworkspace/SessionModel.hpp`),
 which is already Qt-free and already has the whole verb set — `createTab`, `closeTab`, `activateTab`,
-`moveTab`, `moveTabToWindow`, `closePane`, `setActivePane`, `focusDirection`, `setPaneRatio`,
+`moveTab`, `moveTabToWorkspace`, `closePane`, `setActivePane`, `focusDirection`, `setPaneRatio`,
 `resizeActivePane`, `toggleActivePaneOrientation`, `swapActivePane`, `moveActivePane`,
 `toggleActivePaneZoom`, `setTabTitle`, `setTabColor`. The extension interface adds nothing but a
 permission check and identity mapping.
 
-**Identity is by opaque id, not index.** `WindowId`/`TabId`/`PaneId` are already stable; indices are
+**Identity is by opaque id, not index.** `WorkspaceId`/`TabId`/`PaneId` are already stable; indices are
 not, and an extension that stored index 3 across a tab close would act on the wrong pane. The API
 never exposes an index as an addressing token, only as an ordering fact.
 

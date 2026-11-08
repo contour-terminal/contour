@@ -24,7 +24,7 @@ namespace vthost
 /// @return The reason it names, or nullopt for a value no enumerator has.
 [[nodiscard]] constexpr std::optional<proto::StopReason> stopReasonFrom(uint8_t value) noexcept
 {
-    return enumUpTo(value, proto::StopReason::UserKeepingWorkspace);
+    return enumUpTo(value, proto::StopReason::UserKeepingWorkspaces);
 }
 
 /// @return The reply to an UpgradeDaemon that started the upgrade.

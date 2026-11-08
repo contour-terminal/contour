@@ -9,7 +9,7 @@ TEST_CASE("a StopDaemon reason reads as an enumerator or as nothing", "[vthost][
 {
     CHECK(vthost::stopReasonFrom(0) == vthost::proto::StopReason::User);
     CHECK(vthost::stopReasonFrom(1) == vthost::proto::StopReason::UpgradeRestart);
-    CHECK(vthost::stopReasonFrom(2) == vthost::proto::StopReason::UserKeepingWorkspace);
+    CHECK(vthost::stopReasonFrom(2) == vthost::proto::StopReason::UserKeepingWorkspaces);
     // An unknown reason is refused, never read as a plain stop: a daemon that discarded the workspace on
     // a newer client's "keep it" would lose what the user asked to keep.
     CHECK_FALSE(vthost::stopReasonFrom(3).has_value());

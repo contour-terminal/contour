@@ -219,12 +219,12 @@ TEST_CASE("consent lists control permissions", "[vtextension][consent][control]"
               "Module: git@/usr/share/contour/extensions/git.wasm",
               "It may run only these, exactly as written ({name} is filled in by the extension):",
               "status: git -C {dir} status --porcelain=v2 --branch",
-              "May see the windows, tabs and panes.",
+              "May see the workspaces, tabs and panes.",
               "May type into panes (can run commands).",
           });
     CHECK(lineOf(question, "May type into panes (can run commands).").weight
           == ConsentWeight::CanRunCommands);
-    CHECK(lineOf(question, "May see the windows, tabs and panes.").weight == ConsentWeight::Observes);
+    CHECK(lineOf(question, "May see the workspaces, tabs and panes.").weight == ConsentWeight::Observes);
 
     SECTION("without commands")
     {

@@ -115,8 +115,8 @@ namespace
         return uuid.empty() ? std::string {} : "pane:" + std::string(uuid);
     }
 
-    /// @return The tabs or windows of @p workspace as target candidates; with @p onlyTab, just that tab.
-    std::vector<vtcontrol::TargetCandidate> candidatesOf(vtcontrol::ListReply const& workspace,
+    /// @return The tabs or workspaces of @p reply as target candidates; with @p onlyTab, just that tab.
+    std::vector<vtcontrol::TargetCandidate> candidatesOf(vtcontrol::ListReply const& reply,
                                                          ObjectKind kind,
                                                          std::string_view onlyTab)
     {
@@ -125,27 +125,27 @@ namespace
             if (auto const ref = vtcontrol::parseObjectRef(id))
                 out.push_back({ .ref = *ref, .label = label, .position = position });
         };
-        for (auto const& window: workspace.windows)
+        for (auto const& workspace: reply.workspaces)
         {
-            if (kind == ObjectKind::Window)
-                add(window.id, window.label, window.position);
+            if (kind == ObjectKind::Workspace)
+                add(workspace.id, workspace.label, workspace.position);
             else
-                for (auto const& tab: window.tabs)
+                for (auto const& tab: workspace.tabs)
                     if (onlyTab.empty() || tab.id == onlyTab)
                         add(tab.id, tab.label, tab.position);
         }
         return out;
     }
 
-    /// Resolves a tab or window spec to a full id, under the same scoping rules as resolvePane.
+    /// Resolves a tab or workspace spec to a full id, under the same scoping rules as resolvePane.
     /// @param spec What the agent wrote; empty names the caller's own tab.
-    std::expected<std::string, std::string> resolveContainer(vtcontrol::ListReply const& workspace,
+    std::expected<std::string, std::string> resolveContainer(vtcontrol::ListReply const& reply,
                                                              std::string_view callerPane,
                                                              ObjectKind kind,
                                                              std::string_view spec,
                                                              TabScope scope)
     {
-        auto ownTab = ownTabOf(workspace, callerPane).value_or(std::string {});
+        auto ownTab = ownTabOf(reply, callerPane).value_or(std::string {});
         if (kind == ObjectKind::Tab && spec.empty())
         {
             if (ownTab.empty())
@@ -153,12 +153,12 @@ namespace
                                                      "so there is no default tab; name one" });
             return ownTab;
         }
-        if (kind == ObjectKind::Window && scope == TabScope::OwnTab)
-            return std::unexpected(std::format("windows are out of reach{}", OutsideHint));
+        if (kind == ObjectKind::Workspace && scope == TabScope::OwnTab)
+            return std::unexpected(std::format("workspaces are out of reach{}", OutsideHint));
 
-        auto const all = candidatesOf(workspace, kind, {});
+        auto const all = candidatesOf(reply, kind, {});
         auto const inScope =
-            scope == TabScope::AllTabs ? all : candidatesOf(workspace, kind, ownTab.empty() ? "-" : ownTab);
+            scope == TabScope::AllTabs ? all : candidatesOf(reply, kind, ownTab.empty() ? "-" : ownTab);
         auto const found = vtcontrol::resolveTarget(kind, spec, inScope);
         if (found)
             return vtcontrol::toString(*found);
@@ -635,7 +635,8 @@ McpServer::ToolResult McpServer::toolSetLabel(ToolRow const& row, std::string_vi
             ? std::nullopt
             : vtcontrol::enumFromName<ObjectKind>(std::string_view { request->object }.substr(0, colon));
     if (!kind)
-        return fail(std::format("'{}' names no window, tab or pane; write <kind>:<target>", request->object));
+        return fail(
+            std::format("'{}' names no workspace, tab or pane; write <kind>:<target>", request->object));
     auto const spec = vtcontrol::parseObjectRef(request->object)
                           ? std::string_view { request->object }
                           : std::string_view { request->object }.substr(colon + 1);

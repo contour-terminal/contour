@@ -46,7 +46,7 @@ it feels native on Windows 11, macOS and Linux.
 **Windows, tabs and sessions**
 
 - ✅ Available on all major platforms: Linux, macOS, FreeBSD, OpenBSD and Windows.
-- ✅ [Persistent sessions](https://contour-terminal.org/persistent-sessions/) (daemon mode) — reattach locally or over the network, restore your workspace after a reboot, and interoperate with tmux in both directions
+- ✅ [Persistent sessions](https://contour-terminal.org/persistent-sessions/) (daemon mode) — reattach locally or over the network, restore your workspaces after a reboot, and interoperate with tmux in both directions
 - ✅ Terminal tabs and split panes, with colored tabs, tab badges and drag-and-drop rearranging of panes and tabs
 - ✅ [Layouts](https://contour-terminal.org/configuration/layouts/): named sets of tabs and panes, opened with one action
 - ✅ Saved remote hosts and a Connect picker that asks where a window's sessions should live
@@ -262,7 +262,7 @@ cmake --build build/ --target install
     contour daemon [socket PATH] [label NAME] [listen-tcp HOST:PORT] [tls-cert FILE] [tls-key FILE]
                    status | logs | stop
     contour daemon-service install|uninstall|start|stop|restart|status [label NAME]
-    contour ls | new | split | send | pane capture | close | label    Script the daemon's windows, tabs and panes
+    contour ls | new | split | send | pane capture | close | label    Script the daemon's workspaces, tabs and panes
     contour block list | read   and   contour wait | events          Read command blocks and follow what happens
     contour api list | describe | call                               The typed control API
     contour agent setup                                              Teach coding agents to operate Contour panes

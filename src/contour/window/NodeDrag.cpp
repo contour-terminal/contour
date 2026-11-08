@@ -160,7 +160,7 @@ std::optional<NodeDrag> parseNodeDrag(QString const& json)
 
     return NodeDrag { .payload = kind->payload,
                       .host = *host,
-                      .window = vtworkspace::WindowId { static_cast<uint64_t>(*window) },
+                      .window = vtworkspace::WorkspaceId { static_cast<uint64_t>(*window) },
                       .tabIndex = static_cast<int>(*tabIndex),
                       .sessions = std::move(sessions) };
 }

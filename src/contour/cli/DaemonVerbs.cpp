@@ -326,7 +326,7 @@ namespace
             {
                 case Confirmation::Confirmed: break;
                 case Confirmation::Declined:
-                    err << "no daemon is running; its saved workspace is kept\n";
+                    err << "no daemon is running; its saved workspaces are kept\n";
                     return ExitStatus::Unreachable;
                 case Confirmation::Unavailable:
                     err << "no daemon is running; pass --yes to clear its saved workspace\n";
@@ -393,20 +393,20 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
         }
     }
 
-    // A daemon that keeps no workspace refuses a reason it does not know: it is stopped plainly instead.
+    // A daemon that keeps no workspaces refuses a reason it does not know: it is stopped plainly instead.
     auto reason = vthost::proto::StopReason::User;
     if (options.disposition == StopDisposition::KeepSnapshot)
     {
         if (status->capabilities.contains(vthost::proto::Capability::WorkspaceRestore))
-            reason = vthost::proto::StopReason::UserKeepingWorkspace;
+            reason = vthost::proto::StopReason::UserKeepingWorkspaces;
         else
-            err << "contour daemon: this daemon keeps no workspace\n";
+            err << "contour daemon: this daemon keeps no workspaces\n";
     }
 
     if (auto const stopped = control.stop(reason); !stopped)
         return fail(stopped.error());
-    out << (reason == vthost::proto::StopReason::UserKeepingWorkspace
-                ? "daemon stopped; its workspace is kept\n"
+    out << (reason == vthost::proto::StopReason::UserKeepingWorkspaces
+                ? "daemon stopped; its workspaces are kept\n"
                 : "daemon stopped\n");
     return ExitStatus::Ok;
 }

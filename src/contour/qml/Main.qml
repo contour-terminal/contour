@@ -183,7 +183,7 @@ ThemedWindow
     // `session: terminalSessions.createSession()`; with the pane tree as the sole renderer, Main.qml mints
     // the initial session so activeTabRootPane becomes a non-null single-leaf proxy the PaneNode Loader
     // renders. createNewTab() creates the session in THIS window (the controller tags it with its
-    // WindowId).
+    // WorkspaceId).
     Component.onCompleted: {
         // Mint this OS window's controller BEFORE creating its first tab, so the tab's model events are
         // driven on this window's list-model.

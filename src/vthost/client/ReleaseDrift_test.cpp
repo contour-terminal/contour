@@ -40,10 +40,10 @@ TEST_CASE("the drift notice uses the spec's wording", "[vthost][drift]")
     CHECK(vthost::client::assessDrift("0.8.1", "", LayoutAfterRestart::Lost).text
           == "daemon of an earlier release than this client (0.8.1)");
     auto const restored = vthost::client::assessDrift("0.8.2", "0.8.1", LayoutAfterRestart::Restored);
-    CHECK(
-        restored.confirmation
-        == "Restarting the daemon on 0.8.2 ends the programs running in it. Your windows, tabs, directories "
-           "and scrollback come back.");
+    CHECK(restored.confirmation
+          == "Restarting the daemon on 0.8.2 ends the programs running in it. Your workspaces, tabs, "
+             "directories "
+             "and scrollback come back.");
 }
 
 TEST_CASE("before phase 6 a restart does not keep the layout", "[vthost][drift]")

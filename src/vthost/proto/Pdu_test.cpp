@@ -412,7 +412,7 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
         SessionNotify { .session = 4, .title = "Build finished", .body = "3 warnings, 0 errors" },
         SessionClipboard { .session = 4, .selection = "c", .data = "copied text" },
             LayoutState {
-                .window = 1,
+                .workspace = 1,
                 .activeTab = 0,
                 .tabs = { WireTab { .tabId = 5,
                                     .activePane = 12,
@@ -430,8 +430,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                                                           WirePane { .paneId = 12, .session = 101 } },
                                         } } },
             },
-            CreateTab {},                  // no preference: the daemon's own first window
-            CreateTab { .session = 4711 }, // named window, via a session it hosts
+            CreateTab {},                  // no preference: the daemon's own first workspace
+            CreateTab { .session = 4711 }, // named workspace, via a session it hosts
             SplitPane { .session = 5, .orientation = 2, .ratio = 6000 },
             ClosePane { .session = 100 },
             ResizeSplit { .firstSession = 5, .secondSession = 9, .ratio = 7250 },
@@ -444,7 +444,7 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
             PerformOperation { .session = 7,
                                .operation = EngineOperation::SetUserMark,
                                .row = RowAddress { .stableId = -12, .generation = 0x1'0000'0003 } },
-            NewWindow {},
+            NewWorkspace {},
             PermissionRequest { .session = 4,
                                 .hostId = "git@/usr/share/contour/extensions/git.wasm",
                                 .name = "git",
@@ -486,7 +486,7 @@ TEST_CASE("a layout split pane must carry exactly two children", "[vthost][proto
     // children[0]/[1] out of bounds on the reconstructed tree.
     auto layoutWith = [](uint8_t split, std::vector<WirePane> children) {
         return DecodedPdu { LayoutState {
-            .window = 1,
+            .workspace = 1,
             .activeTab = 0,
             .tabs = { WireTab {
                 .tabId = 1,
@@ -920,8 +920,8 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    // The release string (length byte and five characters), and the followed-window count, the instance and
-    // the two restored counts behind it.
+    // The release string (length byte and five characters), and the followed-workspace count, the instance
+    // and the two restored counts behind it.
     auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/10);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
@@ -1035,7 +1035,8 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        // "r", "zeta" and their lengths, the followed-window count, the instance and the two restored counts
+        // "r", "zeta" and their lengths, the followed-workspace count, the instance and the two restored
+        // counts
         auto const frame = encodeWithoutTrailingField(hello, 11);
         CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 11);
         auto expected = hello;
@@ -1947,20 +1948,21 @@ TEST_CASE("a command-block record's size estimate never under-counts", "[vthost]
 TEST_CASE("ClientHello carries an attach intent and a profile name", "[vthost][pdu]")
 {
     auto const hello =
-        ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .windows = { 1, 7 } },
+        ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 1, 7 } },
                       .profileName = "work" };
     CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
 }
 
-TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWindows and no profile",
+TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWorkspaces and no profile",
           "[vthost][pdu]")
 {
-    auto const hello = ClientHello { .token = "tok",
-                                     .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
-                                     .role = ConnectionRole::Control,
-                                     .clientArea = WireClientArea { .columns = 132, .lines = 43 },
-                                     .attachIntent = { .kind = AttachIntentKind::Launch, .windows = { 3 } },
-                                     .profileName = "work" };
+    auto const hello =
+        ClientHello { .token = "tok",
+                      .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+                      .role = ConnectionRole::Control,
+                      .clientArea = WireClientArea { .columns = 132, .lines = 43 },
+                      .attachIntent = { .kind = AttachIntentKind::Launch, .workspaces = { 3 } },
+                      .profileName = "work" };
     auto expected = hello;
     expected.attachIntent = {};
     expected.profileName.clear();
@@ -1995,10 +1997,10 @@ TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWind
     }
 }
 
-TEST_CASE("an attach intent kind no enumerator names decodes as AllWindows", "[vthost][pdu]")
+TEST_CASE("an attach intent kind no enumerator names decodes as AllWorkspaces", "[vthost][pdu]")
 {
     auto const hello =
-        ClientHello { .attachIntent = { .kind = AttachIntentKind::Windows, .windows = { 4 } } };
+        ClientHello { .attachIntent = { .kind = AttachIntentKind::Workspaces, .workspaces = { 4 } } };
     auto const future = encodeWithFieldsEdited(DecodedPdu { hello }, [](std::span<std::byte const> fields) {
         auto edited = std::vector<std::byte>(fields.begin(), fields.end());
         // The kind precedes the count, the one id, the empty profile's length byte and the color preference.
@@ -2006,29 +2008,29 @@ TEST_CASE("an attach intent kind no enumerator names decodes as AllWindows", "[v
         return edited;
     });
     auto const decoded = decodeAs<ClientHello>(future);
-    CHECK(decoded.attachIntent.kind == AttachIntentKind::AllWindows);
-    CHECK(decoded.attachIntent.windows == std::vector<uint64_t> { 4 });
+    CHECK(decoded.attachIntent.kind == AttachIntentKind::AllWorkspaces);
+    CHECK(decoded.attachIntent.workspaces == std::vector<uint64_t> { 4 });
 }
 
-TEST_CASE("ServerHello carries the followed windows; a refusal carries none", "[vthost][pdu]")
+TEST_CASE("ServerHello carries the followed workspaces; a refusal carries none", "[vthost][pdu]")
 {
-    auto const hello = ServerHello { .agreedVersion = 4, .followedWindows = { 1, 3 } };
-    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).followedWindows
+    auto const hello = ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1, 3 } };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).followedWorkspaces
           == std::vector<uint64_t> { 1, 3 });
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } }))
-              .followedWindows.empty());
+              .followedWorkspaces.empty());
     // A daemon from before the field: the count, its ids, the instance and the restored counts after them are
     // missing.
     auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 6);
-    CHECK(decodeAs<ServerHello>(legacy).followedWindows.empty());
+    CHECK(decodeAs<ServerHello>(legacy).followedWorkspaces.empty());
 }
 
 TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as unknown", "[vthost][pdu]")
 {
     auto const hello =
-        ServerHello { .agreedVersion = 4, .followedWindows = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
+        ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
-    // A daemon from before the field: the followed windows end the blob.
+    // A daemon from before the field: the followed workspaces end the blob.
     auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
@@ -2039,14 +2041,14 @@ TEST_CASE("ServerHello carries what a restore brought back; an older daemon's re
           "[vthost][pdu]")
 {
     auto const hello =
-        ServerHello { .agreedVersion = 4, .daemonInstance = 7, .restoredWindows = 2, .restoredTabs = 7 };
+        ServerHello { .agreedVersion = 4, .daemonInstance = 7, .restoredWorkspaces = 2, .restoredTabs = 7 };
     auto const decoded = std::get<ServerHello>(roundTrip(DecodedPdu { hello }));
-    CHECK(decoded.restoredWindows == 2);
+    CHECK(decoded.restoredWorkspaces == 2);
     CHECK(decoded.restoredTabs == 7);
     CHECK(decoded.daemonInstance == 7);
     // A daemon from before the fields: the two varints at the blob's end are missing.
     auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 2));
-    CHECK(legacy.restoredWindows == 0);
+    CHECK(legacy.restoredWorkspaces == 0);
     CHECK(legacy.restoredTabs == 0);
     CHECK(legacy.daemonInstance == 7);
 }
@@ -2101,8 +2103,8 @@ TEST_CASE("MoveNode round-trips for every target kind and carries bytes no enume
     auto const well = MoveNode {
         .sourceKind = 1, .sourceSessions = { 4, 5, 6 }, .targetKind = 2, .targetSession = 9, .index = 300
     };
-    auto const newWindow = MoveNode { .sourceKind = 1, .sourceSessions = { 4, 5 }, .targetKind = 3 };
-    for (auto const& move: { edge, swap, well, newWindow })
+    auto const newWorkspace = MoveNode { .sourceKind = 1, .sourceSessions = { 4, 5 }, .targetKind = 3 };
+    for (auto const& move: { edge, swap, well, newWorkspace })
         CHECK(roundTrip(DecodedPdu { move }) == DecodedPdu { move });
     auto const unknown = MoveNode { .sourceKind = 0xEE,
                                     .sourceSessions = {},
@@ -2182,10 +2184,11 @@ TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[v
                                   .session = 3, .orientation = 2, .ratio = 5000, .profileName = "x" } }))
               .profileName
           == "x");
-    CHECK(std::get<NewWindow>(roundTrip(DecodedPdu { NewWindow { .profileName = "y" } })).profileName == "y");
+    CHECK(std::get<NewWorkspace>(roundTrip(DecodedPdu { NewWorkspace { .profileName = "y" } })).profileName
+          == "y");
 
     // Bodies as a peer from before the field sends them.
-    CHECK(decodeAs<NewWindow>(frameOf(PduType::NewWindow, {})).profileName.empty());
+    CHECK(decodeAs<NewWorkspace>(frameOf(PduType::NewWorkspace, {})).profileName.empty());
     auto createTab = Writer {};
     createTab.varint(3);
     CHECK(decodeAs<CreateTab>(frameOf(PduType::CreateTab, createTab.view())).profileName.empty());
@@ -2319,10 +2322,10 @@ TEST_CASE("LayoutState carries the served edit, and a body from before it reads 
           "[vthost][proto][tab-edit-acks]")
 {
     auto const tab = WireTab { .tabId = 3, .activePane = 1, .root = WirePane { .paneId = 1, .session = 9 } };
-    auto const stamped = LayoutState { .window = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 7 };
+    auto const stamped = LayoutState { .workspace = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 7 };
     CHECK(roundTrip(DecodedPdu { stamped }) == DecodedPdu { stamped });
     // Stamped with no edit served yet: 0, still told apart from a daemon that says nothing.
-    auto const none = LayoutState { .window = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 0 };
+    auto const none = LayoutState { .workspace = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 0 };
     CHECK(std::get<LayoutState>(roundTrip(DecodedPdu { none })).servedEdit == std::optional<uint64_t> { 0 });
 
     // A daemon from before the field ends the body where the field starts (7 is one varint byte).

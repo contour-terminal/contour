@@ -75,19 +75,20 @@ TEST_CASE("workspace.list mirrors the model with registry ids", "[vthost][contro
 {
     auto h = ControlHarness {};
     auto const first = h.openTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const second = tab->activePane()->session();
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows[0].id
-          == vtcontrol::toString(vtcontrol::ObjectRef {
-              .kind = vtcontrol::ObjectKind::Window, .uuid = *h.host.objects().uuidOf(h.host.windowId()) }));
-    CHECK(list->windows[0].position == 1);
-    REQUIRE(list->windows[0].tabs.size() == 1);
-    auto const& tabInfo = list->windows[0].tabs[0];
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].id
+          == vtcontrol::toString(
+              vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                     .uuid = *h.host.objects().uuidOf(h.host.workspaceId()) }));
+    CHECK(list->workspaces[0].position == 1);
+    REQUIRE(list->workspaces[0].tabs.size() == 1);
+    auto const& tabInfo = list->workspaces[0].tabs[0];
     CHECK(tabInfo.isActive);
     CHECK(tabInfo.position == 1);
     REQUIRE(tabInfo.panes.size() == 2);
@@ -207,7 +208,7 @@ TEST_CASE("a stale caller pane is NotFound, never another pane", "[vthost][contr
 {
     auto h = ControlHarness {};
     auto const kept = h.openTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const gone = tab->activePane()->session();
     auto const goneId = h.paneId(gone);
@@ -356,18 +357,18 @@ TEST_CASE("object.setLabel makes a pane addressable by label", "[vthost][control
                 .has_value());
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    CHECK(list->windows[0].tabs[1].label == "build");
+    CHECK(list->workspaces[0].tabs[1].label == "build");
 }
 
-TEST_CASE("a control call from a pane moved into a new window resolves its tab", "[vthost][control][move]")
+TEST_CASE("a control call from a pane moved into a new workspace resolves its tab", "[vthost][control][move]")
 {
     auto h = ControlHarness {};
     auto const first = h.openTab();
     auto const dragged = h.openTab();
-    auto const& window = h.host.createEmptyWindow();
+    auto const& workspace = h.host.createEmptyWorkspace();
     REQUIRE(h.host.model()
                 .moveNode(vtworkspace::PaneSource { dragged },
-                          vtworkspace::TabWellTarget { .window = window.id(), .index = 0 })
+                          vtworkspace::TabWellTarget { .workspace = workspace.id(), .index = 0 })
                 .has_value());
     h.context.callerPane = h.paneId(dragged);
 
@@ -375,7 +376,7 @@ TEST_CASE("a control call from a pane moved into a new window resolves its tab",
                 h.service, h.context, vtcontrol::SetLabelRequest { .object = "tab:", .label = "moved" })
                 .has_value());
     REQUIRE(callSync<vtcontrol::EmptyReply>(
-                h.service, h.context, vtcontrol::SetLabelRequest { .object = "window:", .label = "away" })
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = "workspace:", .label = "away" })
                 .has_value());
     CHECK(h.host.terminal(first) != nullptr);
 }
@@ -393,23 +394,23 @@ TEST_CASE("tab.create returns ids that workspace.list then shows", "[vthost][con
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows[0].id == created->window);
-    REQUIRE(list->windows[0].tabs.size() == 2);
-    auto const& tab = list->windows[0].tabs[1];
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].id == created->workspace);
+    REQUIRE(list->workspaces[0].tabs.size() == 2);
+    auto const& tab = list->workspaces[0].tabs[1];
     CHECK(tab.id == created->tab);
     CHECK(tab.label == "build");
     REQUIRE(tab.panes.size() == 1);
     CHECK(tab.panes[0].id == created->pane);
     // Keep left the first tab the active one.
-    CHECK(list->windows[0].tabs[0].isActive);
-    CHECK(list->windows[0].tabs[0].panes[0].id == h.paneId(first));
+    CHECK(list->workspaces[0].tabs[0].isActive);
+    CHECK(list->workspaces[0].tabs[0].panes[0].id == h.paneId(first));
 
     // Take, the default, activates it.
     auto const taken =
         callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
     REQUIRE(taken.has_value());
-    CHECK(h.host.model().window(h.host.windowId())->activeTabIndex() == 2);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->activeTabIndex() == 2);
 }
 
 namespace
@@ -419,7 +420,7 @@ struct StubViewer final: vthost::SessionStreamEvents
 };
 } // namespace
 
-TEST_CASE("tab.create with placement new opens a second window", "[vthost][control][write]")
+TEST_CASE("tab.create with placement new opens a second workspace", "[vthost][control][write]")
 {
     auto h = ControlHarness {};
     std::ignore = h.openTab();
@@ -427,30 +428,31 @@ TEST_CASE("tab.create with placement new opens a second window", "[vthost][contr
     auto const created = callSync<vtcontrol::CreateTabReply>(
         h.service,
         h.context,
-        vtcontrol::CreateTabRequest { .placement = vtcontrol::WindowPlacement::New, .command = { "htop" } });
+        vtcontrol::CreateTabRequest { .placement = vtcontrol::WorkspacePlacement::New,
+                                      .command = { "htop" } });
     REQUIRE(created.has_value());
-    REQUIRE(h.host.model().windowCount() == 2);
-    auto const* window = h.host.model().windowAt(1);
-    CHECK(created->window
-          == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Window,
-                                                        .uuid = *h.host.objects().uuidOf(window->id()) }));
+    REQUIRE(h.host.model().workspaceCount() == 2);
+    auto const* workspace = h.host.model().workspaceAt(1);
+    CHECK(created->workspace
+          == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                        .uuid = *h.host.objects().uuidOf(workspace->id()) }));
     CHECK(h.seen.back().program == "htop");
     // No client claims it, so the primary viewer follows it (settled conflict #6).
     auto const viewer = StubViewer {};
-    CHECK(h.host.windowClaim(window->id(), &viewer) == vthost::WindowClaim::Unclaimed);
+    CHECK(h.host.workspaceClaim(workspace->id(), &viewer) == vthost::WorkspaceClaim::Unclaimed);
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 2);
-    CHECK(list->windows[1].position == 2);
-    CHECK(list->windows[1].tabs.at(0).panes.at(0).id == created->pane);
+    REQUIRE(list->workspaces.size() == 2);
+    CHECK(list->workspaces[1].position == 2);
+    CHECK(list->workspaces[1].tabs.at(0).panes.at(0).id == created->pane);
 
-    // A tab in that window, named by its position.
+    // A tab in that workspace, named by its position.
     auto const second = callSync<vtcontrol::CreateTabReply>(
-        h.service, h.context, vtcontrol::CreateTabRequest { .window = "2" });
+        h.service, h.context, vtcontrol::CreateTabRequest { .workspace = "2" });
     REQUIRE(second.has_value());
-    CHECK(second->window == created->window);
-    CHECK(h.host.model().windowAt(1)->tabCount() == 2);
+    CHECK(second->workspace == created->workspace);
+    CHECK(h.host.model().workspaceAt(1)->tabCount() == 2);
 }
 
 TEST_CASE("pane.split below 30 gives the new pane 30 percent and focus", "[vthost][control][write]")
@@ -466,7 +468,7 @@ TEST_CASE("pane.split below 30 gives the new pane 30 percent and focus", "[vthos
                                   .ratioPercent = 30,
                                   .label = "tail" });
     REQUIRE(split.has_value());
-    auto const* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     REQUIRE(tab->paneCount() == 2);
     auto const* root = tab->rootPane();
     CHECK(root->splitState() == vtworkspace::SplitState::Horizontal);
@@ -489,7 +491,7 @@ TEST_CASE("pane.split with focus keep leaves the anchor active", "[vthost][contr
         h.context,
         vtcontrol::SplitRequest { .pane = h.paneId(anchor), .focus = vtcontrol::FocusPolicy::Keep });
     REQUIRE(split.has_value());
-    auto const* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
     CHECK(tab->paneCount() == 2);
     CHECK(tab->activePane()->session() == anchor);
     CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
@@ -592,7 +594,7 @@ TEST_CASE("pane.close and tab.close remove what they name", "[vthost][control][w
                 h.service, h.context, vtcontrol::CloseTabRequest { .tab = second->tab })
                 .has_value());
     CHECK(h.host.sessionCount() == 1);
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 1);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == 1);
     // A close the API asked for is a requested one, which a reboot restore does not bring back.
     CHECK(ends.causes == std::vector<vthost::SessionEnd>(3, vthost::SessionEnd::Requested));
     h.host.unsubscribeStream(&ends);
@@ -659,7 +661,7 @@ TEST_CASE("a subscriber receives block.finished with the exit code", "[vthost][c
     CHECK(delivery.subscription == subscription);
     CHECK(delivery.event.origin.pane == h.paneId(session));
     CHECK(delivery.event.origin.tab.starts_with("tab:"));
-    CHECK(delivery.event.origin.window.starts_with("window:"));
+    CHECK(delivery.event.origin.workspace.starts_with("workspace:"));
 }
 
 TEST_CASE("events filter by kind and by pane", "[vthost][control][events]")
@@ -759,12 +761,12 @@ TEST_CASE("the layout and the working directory are events", "[vthost][control][
     REQUIRE(callSync<vtcontrol::EmptyReply>(h.service, h.context, vtcontrol::CloseTabRequest {}).has_value());
     CHECK(delivered<vtcontrol::PaneClosedEvent>(h.context.sink).size() == 2);
     CHECK(delivered<vtcontrol::TabClosedEvent>(h.context.sink).size() == 1);
-    // A closed pane still names the tab and window it was in.
+    // A closed pane still names the tab and workspace it was in.
     for (auto const& delivery: h.context.sink.deliveries)
         if (std::holds_alternative<vtcontrol::PaneClosedEvent>(delivery.event.payload))
         {
             CHECK(delivery.event.origin.tab == tabId);
-            CHECK(delivery.event.origin.window.starts_with("window:"));
+            CHECK(delivery.event.origin.workspace.starts_with("workspace:"));
         }
 }
 
@@ -793,7 +795,7 @@ TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    auto const& pane = list->windows.at(0).tabs.at(0).panes.at(0);
+    auto const& pane = list->workspaces.at(0).tabs.at(0).panes.at(0);
     REQUIRE(pane.programStatus.size() == 2);
     CHECK(pane.programStatus.front().state == vtcontrol::ProgramState::Working);
     CHECK(pane.programStatus.front().progress == uint8_t { 10 });
@@ -821,7 +823,7 @@ TEST_CASE("program status needs screen, in its event as in ls", "[vthost][contro
     auto const listedRecords = [&] {
         auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
         REQUIRE(list.has_value());
-        return list->windows.at(0).tabs.at(0).panes.at(0).programStatus;
+        return list->workspaces.at(0).tabs.at(0).panes.at(0).programStatus;
     };
 
     SECTION("read alone: refused by name, left out of every kind and of ls")

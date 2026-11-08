@@ -96,19 +96,19 @@ struct RecordingEvents final: vtworkspace::ModelEvents
 {
     std::vector<std::string> log;
 
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabAdded:{}", index));
     }
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabClosed:{}", index));
     }
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int from, int to) override
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int from, int to) override
     {
         log.push_back(std::format("tabMoved:{}->{}", from, to));
     }
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("activeTabChanged:{}", index));
     }
@@ -128,13 +128,14 @@ struct RecordingEvents final: vtworkspace::ModelEvents
     {
         log.emplace_back("paneRatioChanged");
     }
-    void tabAboutToBeMovedToWindow(vtworkspace::WindowId, int, vtworkspace::WindowId, int) override
+    void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId, int, vtworkspace::WorkspaceId, int) override
     {
-        log.emplace_back("tabAboutToBeMovedToWindow");
+        log.emplace_back("tabAboutToBeMovedToWorkspace");
     }
-    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+    void tabMovedToWorkspace(
+        vtworkspace::WorkspaceId, vtworkspace::TabId, int, vtworkspace::WorkspaceId, int) override
     {
-        log.emplace_back("tabMovedToWindow");
+        log.emplace_back("tabMovedToWorkspace");
     }
     void tabTitleChanged(vtworkspace::TabId) override { log.emplace_back("tabTitleChanged"); }
     void tabColorChanged(vtworkspace::TabId) override { log.emplace_back("tabColorChanged"); }
@@ -498,7 +499,7 @@ TEST_CASE("the last pane's session exit closes the whole tab", "[vthost][host]")
     h.host.handleSessionExit(session);
 
     CHECK(h.host.sessionCount() == 0);
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 0);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == 0);
     CHECK(h.recorder.saw("tabClosed"));
 }
 
@@ -1270,7 +1271,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
     host.subscribeStream(&second);
 
     REQUIRE(host.createTab() != nullptr);
-    auto const session = host.model().window(host.windowId())->activeTab()->rootPane()->session();
+    auto const session = host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
     auto* terminal = host.terminal(session);
     REQUIRE(terminal != nullptr);
 
@@ -1808,35 +1809,35 @@ TEST_CASE("a spawn request never dictates the session's page size", "[vthost][ho
     CHECK(terminal->pageSize() == h.host.pageSize());
 }
 
-TEST_CASE("createTab honours the window the request names", "[vthost][host]")
+TEST_CASE("createTab honours the workspace the request names", "[vthost][host]")
 {
-    // The daemon really does host several windows, and every client→server layout verb names its
-    // target by a SESSION (window ids are minted per model, so a client's are not the host's).
-    // createTab used its own `_window` unconditionally, so a "+" clicked in a second attach-mode
-    // window opened its tab in the FIRST one — and the window clicked in gained nothing.
+    // The daemon really does host several workspaces, and every client→server layout verb names its
+    // target by a SESSION (workspace ids are minted per model, so a client's are not the host's).
+    // createTab used its own `_workspace` unconditionally, so a "+" clicked in a second attach-mode
+    // workspace opened its tab in the FIRST one — and the workspace clicked in gained nothing.
     auto h = HostHarness {};
-    auto* second = h.host.createWindow();
+    auto* second = h.host.createWorkspace();
     REQUIRE(second != nullptr);
-    REQUIRE(second->id() != h.host.windowId());
+    REQUIRE(second->id() != h.host.workspaceId());
     auto const inSecond = second->activeTab()->rootPane()->session();
 
-    // Unnamed: the host's own window, as before.
+    // Unnamed: the host's own workspace, as before.
     auto* defaulted = h.host.createTab();
     REQUIRE(defaulted != nullptr);
-    CHECK(h.host.model().windowOfTab(defaulted->id()) == h.host.windowId());
+    CHECK(h.host.model().workspaceOfTab(defaulted->id()) == h.host.workspaceId());
 
-    // Named by a session of the SECOND window: the tab lands there.
+    // Named by a session of the SECOND workspace: the tab lands there.
     auto* targeted = h.host.createTab({}, inSecond);
     REQUIRE(targeted != nullptr);
-    CHECK(h.host.model().windowOfTab(targeted->id()) == second->id());
+    CHECK(h.host.model().workspaceOfTab(targeted->id()) == second->id());
 
-    // A session this host does not hold falls back to its own window rather than failing.
+    // A session this host does not hold falls back to its own workspace rather than failing.
     auto* unknown = h.host.createTab({}, vtworkspace::SessionId { 99999 });
     REQUIRE(unknown != nullptr);
-    CHECK(h.host.model().windowOfTab(unknown->id()) == h.host.windowId());
+    CHECK(h.host.model().workspaceOfTab(unknown->id()) == h.host.workspaceId());
 }
 
-TEST_CASE("SessionHost realizes a single-tab startup layout into its one window", "[vthost][host][layout]")
+TEST_CASE("SessionHost realizes a single-tab startup layout into its one workspace", "[vthost][host][layout]")
 {
     auto source = core::net::testing::ScriptedBackend {};
     auto loop = core::net::EventLoop { source };
@@ -1853,11 +1854,11 @@ TEST_CASE("SessionHost realizes a single-tab startup layout into its one window"
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 1);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 1);
 
-    auto* tab = window->tabAt(0);
+    auto* tab = workspace->tabAt(0);
     REQUIRE(tab != nullptr);
     CHECK(tab->rootPane()->isLeaf());
     REQUIRE(host.terminal(tab->rootPane()->session()) != nullptr);
@@ -1892,15 +1893,15 @@ TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthos
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 3); // one leaf tab + two-pane split tab
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 2);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 2);
 
-    auto* editorTab = window->tabAt(0);
+    auto* editorTab = workspace->tabAt(0);
     REQUIRE(editorTab != nullptr);
     CHECK(editorTab->rootPane()->isLeaf());
 
-    auto* serversTab = window->tabAt(1);
+    auto* serversTab = workspace->tabAt(1);
     REQUIRE(serversTab != nullptr);
     REQUIRE_FALSE(serversTab->rootPane()->isLeaf());
     REQUIRE(serversTab->rootPane()->first() != nullptr);
@@ -1927,9 +1928,9 @@ TEST_CASE("SessionHost with an empty startup layout keeps today's single-default
                                                           .sizePolicy = vthost::ClientSizePolicy::Latest } };
 
     CHECK(host.sessionCount() == 0);
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    CHECK(window->tabCount() == 0);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    CHECK(workspace->tabCount() == 0);
 }
 
 TEST_CASE("SessionHost honors a startup layout pane's command/arguments override, "
@@ -1962,10 +1963,10 @@ TEST_CASE("SessionHost honors a startup layout pane's command/arguments override
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 1);
-    REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 1);
+    REQUIRE(host.terminal(workspace->tabAt(0)->rootPane()->session()) != nullptr);
 
     REQUIRE(seen.has_value());
     CHECK(seen->program == "nvim");
@@ -2002,10 +2003,10 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 1);
-    REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 1);
+    REQUIRE(host.terminal(workspace->tabAt(0)->rootPane()->session()) != nullptr);
 
     REQUIRE(seen.has_value());
     CHECK(seen->program.empty()); // no command named: program/arguments stay untouched
@@ -2088,11 +2089,11 @@ TEST_CASE("SessionHost still passes through an engaged-but-empty command with it
     CHECK(seen->arguments == std::vector<std::string> { "--flag", "value" });
 }
 
-TEST_CASE("SessionHost falls back to an empty window when every startup-layout seed is refused",
+TEST_CASE("SessionHost falls back to an empty workspace when every startup-layout seed is refused",
           "[vthost][host][layout]")
 {
     // A PTY factory that always fails (e.g. resource exhaustion at daemon startup) must not
-    // leave a half-built or crashed host: realization produces zero tabs, and the window stays
+    // leave a half-built or crashed host: realization produces zero tabs, and the workspace stays
     // empty -- NativeSession::completeHandshake's existing first-attach fallback is unaffected by
     // this test (it lives above SessionHost) but this confirms SessionHost itself degrades
     // gracefully.
@@ -2110,9 +2111,9 @@ TEST_CASE("SessionHost falls back to an empty window when every startup-layout s
                                                           .startupLayout = layout } };
 
     CHECK(host.sessionCount() == 0);
-    auto* window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    CHECK(window->tabCount() == 0);
+    auto* workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    CHECK(workspace->tabCount() == 0);
 }
 
 TEST_CASE("a hosted session decides a command directory's locality against the host's identity",
@@ -2821,7 +2822,7 @@ TEST_CASE("SessionHost.extension.controlVerb", "[vthost][host][extensions][contr
     };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->workspaceId())->activeTab()->rootPane()->session();
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
 
@@ -2861,7 +2862,7 @@ TEST_CASE("SessionHost.extension.controlClosesItsOwnPane", "[vthost][host][exten
     };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->workspaceId())->activeTab()->rootPane()->session();
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
 
@@ -2894,7 +2895,7 @@ TEST_CASE("SessionHost.extension.noFont", "[vthost][host][extensions][guest]")
         DaemonExtensionsHarness { module, vtextension::CommandPermission::Deny, { { "state", "describe" } } };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->workspaceId())->activeTab()->rootPane()->session();
     // A client is attached: the daemon repaints the row only for one to be sent.
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
@@ -2935,7 +2936,7 @@ TEST_CASE("SessionHost.extension.askNoClient", "[vthost][host][extensions][guest
     auto timeline = ExtensionTimeline {};
     h.host->subscribeStream(&timeline);
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->workspaceId())->activeTab()->rootPane()->session();
     timeline.rowShowsPending = [&] {
         return h.indicatorText(session) == "[err:pending]";
     };
@@ -3187,7 +3188,7 @@ TEST_CASE("a profile's shell still learns the pane's own ids", "[vthost][profile
     CHECK(h.shells.back().env.at("A") == "1");
     CHECK(h.shells.back().env.at("CONTOUR_PANE").starts_with("pane:"));
     CHECK(h.shells.back().env.at("CONTOUR_TAB").starts_with("tab:"));
-    CHECK(h.shells.back().env.at("CONTOUR_WINDOW").starts_with("window:"));
+    CHECK(h.shells.back().env.at("CONTOUR_WORKSPACE").starts_with("workspace:"));
 }
 
 TEST_CASE("an unknown profile name runs the host's default profile", "[vthost][profiles]")
@@ -3543,10 +3544,10 @@ namespace
 /// Model events that do nothing, for a probe that overrides the one it watches.
 struct NullModelEvents: vtworkspace::ModelEvents
 {
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
@@ -3557,21 +3558,21 @@ struct NullModelEvents: vtworkspace::ModelEvents
 
 } // namespace
 
-TEST_CASE("createTab mints window, pane and tab ids and exports them to the shell", "[vthost][host][ids]")
+TEST_CASE("createTab mints workspace, pane and tab ids and exports them to the shell", "[vthost][host][ids]")
 {
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
     auto const session = tab->rootPane()->session();
 
-    // The window is minted at construction, then the tab's pane, then the tab.
-    CHECK(h.host.objects().uuidOf(h.host.windowId()) == seq(1));
+    // The workspace is minted at construction, then the tab's pane, then the tab.
+    CHECK(h.host.objects().uuidOf(h.host.workspaceId()) == seq(1));
     CHECK(h.host.objects().uuidOf(session) == seq(2));
     CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
     REQUIRE(h.seen.size() == 1);
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.seen.back().env.at("CONTOUR_WORKSPACE") == ref(vtcontrol::ObjectKind::Workspace, 1));
     // The override engaged for the ids names no program: the configured shell runs.
     CHECK(h.seen.back().program.empty());
 }
@@ -3580,7 +3581,7 @@ TEST_CASE("the tab's id is bound before observers hear of the tab", "[vthost][ho
 {
     struct Probe final: NullModelEvents
     {
-        void tabAdded(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        void tabAdded(vtworkspace::WorkspaceId /*workspace*/, vtworkspace::TabId tab, int /*index*/) override
         {
             uuid = host->objects().uuidOf(tab);
         }
@@ -3607,29 +3608,29 @@ TEST_CASE("a split pane gets a new id and its tab's id in CONTOUR_TAB", "[vthost
     REQUIRE(h.seen.size() == 2);
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.seen.back().env.at("CONTOUR_WORKSPACE") == ref(vtcontrol::ObjectKind::Workspace, 1));
     CHECK(h.host.objects().uuidOf(tab->rootPane()->second()->session()) == seq(4));
     // The first pane keeps its own.
     CHECK(h.host.objects().uuidOf(tab->rootPane()->first()->session()) == seq(2));
 }
 
-TEST_CASE("a new window gets its own id, and its first pane lives in it", "[vthost][host][ids]")
+TEST_CASE("a new workspace gets its own id, and its first pane lives in it", "[vthost][host][ids]")
 {
     auto h = HostHarness {};
-    auto* window = h.host.createWindow();
-    REQUIRE(window != nullptr);
+    auto* workspace = h.host.createWorkspace();
+    REQUIRE(workspace != nullptr);
 
-    // pane, tab, window.
-    CHECK(h.host.objects().uuidOf(window->id()) == seq(4));
+    // pane, tab, workspace.
+    CHECK(h.host.objects().uuidOf(workspace->id()) == seq(4));
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 4));
-    auto const* tab = window->activeTab();
+    CHECK(h.seen.back().env.at("CONTOUR_WORKSPACE") == ref(vtcontrol::ObjectKind::Workspace, 4));
+    auto const* tab = workspace->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
 }
 
-TEST_CASE("startup layout panes share their tab's and window's ids", "[vthost][host][ids]")
+TEST_CASE("startup layout panes share their tab's and workspace's ids", "[vthost][host][ids]")
 {
     auto tab = vtworkspace::LayoutTab {};
     tab.root.orientation = vtworkspace::SplitState::Horizontal;
@@ -3651,8 +3652,8 @@ TEST_CASE("startup layout panes share their tab's and window's ids", "[vthost][h
                                     .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
     };
     REQUIRE(seen.size() == 2);
-    CHECK(seen[0].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
-    CHECK(seen[1].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[0].env.at("CONTOUR_WORKSPACE") == ref(vtcontrol::ObjectKind::Workspace, 1));
+    CHECK(seen[1].env.at("CONTOUR_WORKSPACE") == ref(vtcontrol::ObjectKind::Workspace, 1));
     CHECK(seen[0].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(seen[0].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
     CHECK(seen[1].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
@@ -3676,7 +3677,7 @@ TEST_CASE("preset ids and labels are honoured", "[vthost][host][ids]")
     CHECK(h.seen.back().env.at("CONTOUR_PANE")
           == vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }));
 
-    // The source minted nothing for them: the next ids continue from the window's.
+    // The source minted nothing for them: the next ids continue from the workspace's.
     auto* next = h.host.createTab();
     REQUIRE(next != nullptr);
     CHECK(h.host.objects().uuidOf(next->rootPane()->session()) == seq(2));
@@ -3711,7 +3712,7 @@ TEST_CASE("observers can still name what closed while they are told", "[vthost][
 {
     struct Probe final: NullModelEvents
     {
-        void tabClosed(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        void tabClosed(vtworkspace::WorkspaceId /*workspace*/, vtworkspace::TabId tab, int /*index*/) override
         {
             uuid = host->objects().uuidOf(tab);
         }
@@ -3811,27 +3812,28 @@ TEST_CASE("hosted sessions fan out block, title and cwd signals", "[vthost][host
     CHECK(recorder.all<vthost::WorkingDirectoryChangedSignal>().size() == 1);
 }
 
-TEST_CASE("a whole tab moved to another window reaches the subscribers, before and after", "[vthost][move]")
+TEST_CASE("a whole tab moved to another workspace reaches the subscribers, before and after",
+          "[vthost][move]")
 {
     auto h = HostHarness {};
     auto* const tab = h.host.createTab();
-    auto* const other = h.host.createWindow();
+    auto* const other = h.host.createWorkspace();
     REQUIRE((tab != nullptr && other != nullptr));
     h.recorder.log.clear();
 
     auto const moved =
-        h.host.model().moveNode(vtworkspace::TabSource { h.host.windowId(), tab->id() },
-                                vtworkspace::TabWellTarget { .window = other->id(), .index = 0 });
+        h.host.model().moveNode(vtworkspace::TabSource { h.host.workspaceId(), tab->id() },
+                                vtworkspace::TabWellTarget { .workspace = other->id(), .index = 0 });
     REQUIRE(moved.has_value());
 
-    auto const before = std::ranges::find(h.recorder.log, "tabAboutToBeMovedToWindow");
-    auto const after = std::ranges::find(h.recorder.log, "tabMovedToWindow");
+    auto const before = std::ranges::find(h.recorder.log, "tabAboutToBeMovedToWorkspace");
+    auto const after = std::ranges::find(h.recorder.log, "tabMovedToWorkspace");
     REQUIRE(before != h.recorder.log.end());
     REQUIRE(after != h.recorder.log.end());
     CHECK(before < after);
 }
 
-TEST_CASE("a window and tab a move creates are named, and the moved pane is re-fitted", "[vthost][move]")
+TEST_CASE("a workspace and tab a move creates are named, and the moved pane is re-fitted", "[vthost][move]")
 {
     auto h = HostHarness {};
     auto* const tab = h.host.createTab();
@@ -3842,33 +3844,33 @@ TEST_CASE("a window and tab a move creates are named, and the moved pane is re-f
     auto const dragged = tab->activePane()->session();
     auto const halved = h.host.terminal(dragged)->totalPageSize();
 
-    auto const& window = h.host.createEmptyWindow();
+    auto const& workspace = h.host.createEmptyWorkspace();
     auto const moved =
         h.host.model().moveNode(vtworkspace::PaneSource { dragged },
-                                vtworkspace::TabWellTarget { .window = window.id(), .index = 0 });
+                                vtworkspace::TabWellTarget { .workspace = workspace.id(), .index = 0 });
     REQUIRE(moved.has_value());
 
-    CHECK(h.host.objects().uuidOf(window.id()).has_value());
+    CHECK(h.host.objects().uuidOf(workspace.id()).has_value());
     CHECK(h.host.objects().uuidOf(moved->tab).has_value());
     // The pane is no longer half of a split: its shell is told the page it now fills.
     CHECK(h.host.terminal(dragged)->totalPageSize() != halved);
     CHECK(h.host.terminal(dragged)->totalPageSize() == h.host.terminal(stays)->totalPageSize());
 }
 
-TEST_CASE("a window made empty for a move is claimed by its creator and given back when unused",
+TEST_CASE("a workspace made empty for a move is claimed by its creator and given back when unused",
           "[vthost][move]")
 {
     auto h = HostHarness {};
-    auto const& window = h.host.createEmptyWindow(&h.client);
-    auto const id = window.id();
-    CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Yours);
-    CHECK(h.host.windowClaim(id, &h.otherClient) == vthost::WindowClaim::Others);
+    auto const& workspace = h.host.createEmptyWorkspace(&h.client);
+    auto const id = workspace.id();
+    CHECK(h.host.workspaceClaim(id, &h.client) == vthost::WorkspaceClaim::Yours);
+    CHECK(h.host.workspaceClaim(id, &h.otherClient) == vthost::WorkspaceClaim::Others);
     CHECK(h.host.objects().uuidOf(id).has_value());
 
-    h.host.discardWindow(id);
-    CHECK(h.host.model().window(id) == nullptr);
+    h.host.discardWorkspace(id);
+    CHECK(h.host.model().workspace(id) == nullptr);
     CHECK_FALSE(h.host.objects().uuidOf(id).has_value());
-    CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Unclaimed);
+    CHECK(h.host.workspaceClaim(id, &h.client) == vthost::WorkspaceClaim::Unclaimed);
 }
 
 // ---------------------------------------------------------------------------

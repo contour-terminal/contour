@@ -43,12 +43,12 @@ enum class Capability : uint8_t
     /// gate on it. A daemon applies a present client area regardless; a client sends it regardless. Do not
     /// make either end require it -- that breaks every peer from before it.
     InitialClientArea = 3,
-    AttachIntent = 4,  ///< The peer honours the ClientHello's attach intent (which windows to follow).
+    AttachIntent = 4,  ///< The peer honours the ClientHello's attach intent (which workspaces to follow).
     ProfileByName = 5, ///< The peer resolves the profile name a hello or spawning verb carries.
     TabEdits = 6,      ///< The peer serves EditTab.
     Heartbeat = 7,     ///< The peer echoes Heartbeat.
-    /// The peer keeps its workspace across a restart: it snapshots its windows, tabs and panes, restores
-    /// them at its next start, and honours StopReason::UserKeepingWorkspace. A daemon offers it while its
+    /// The peer keeps its workspace across a restart: it snapshots its workspaces, tabs and panes, restores
+    /// them at its next start, and honours StopReason::UserKeepingWorkspaces. A daemon offers it while its
     /// persistence is on.
     WorkspaceRestore = 8,
     ControlApi = 9,     ///< The peer serves ControlRequest, ControlReply and ControlEvent.
@@ -74,13 +74,13 @@ enum class Capability : uint8_t
     /// ignores it.
     ColorPreference = 15,
     /// The peer serves MoveNode: it moves a pane or a whole tab to an edge of a pane, onto a pane, into a
-    /// window's tab well or into a new window. A daemon without it cannot, so a client does not offer the
-    /// drop and tells its user instead.
+    /// workspace's tab well or into a new workspace. A daemon without it cannot, so a client does not offer
+    /// the drop and tells its user instead.
     MoveNode = 16,
     /// The peer marks the end of each layout push: a daemon follows the LayoutStates it pushes for one change
-    /// -- however many model events it fired, across every window the connection follows -- with one
+    /// -- however many model events it fired, across every workspace the connection follows -- with one
     /// LayoutBatchEnd, and a client decides what the push dropped only then. Without it a client cannot tell
-    /// the last window's layout of a push from one still in flight, and decides at the end of each read.
+    /// the last workspace's layout of a push from one still in flight, and decides at the end of each read.
     LayoutBatch = 17,
     /// The peer serves UpgradeDaemon and announces DaemonUpgrading: a daemon replaces itself in place, and a
     /// client that negotiated this waits for the same daemon to come back instead of starting a new one.

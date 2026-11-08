@@ -558,7 +558,7 @@ namespace
     {
         if (config.snapshotPath.empty())
             return std::nullopt;
-        daemonLog()("the workspace is kept in {}", core::pathToUtf8(config.snapshotPath));
+        daemonLog()("the workspaces are kept in {}", core::pathToUtf8(config.snapshotPath));
         return SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
                                       NativeFilePrivacy::instance(),
                                       config.snapshotPath };

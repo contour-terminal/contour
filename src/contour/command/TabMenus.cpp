@@ -70,8 +70,8 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::command(SetTabTitle {}, "Rename…"),
             Table::submenu("Tab Color", tabColorRows),
+            Table::command(SetTabTitle {}, "Rename…"),
             Table::command(MoveTabToNewWindow {}, "Move Tab to New Window").enabledWhen(hasMultipleTabs),
 
             Table::separator(),

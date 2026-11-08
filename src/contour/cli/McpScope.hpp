@@ -45,27 +45,26 @@ struct ScopeError
 /// Under `OwnTab` the target is matched against the caller's tab only: a label or suffix that would
 /// match a pane of another tab does not resolve, so it can neither be ambiguous with nor stand in
 /// for one of the caller's own panes.
-/// @param workspace The `list` reply.
+/// @param reply The `list` reply.
 /// @param callerPane The full id of the pane the agent runs in; empty when unknown.
 /// @param target What the agent wrote; empty names the caller's own pane.
 /// @param scope Which panes may be named.
 /// @return The pane's full id, or why it cannot be named.
-[[nodiscard]] std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& workspace,
+[[nodiscard]] std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& reply,
                                                                  std::string_view callerPane,
                                                                  std::string_view target,
                                                                  TabScope scope);
 
-/// @param workspace The `list` reply.
+/// @param reply The `list` reply.
 /// @param callerPane The full id of the pane the agent runs in.
 /// @return The id of the tab holding @p callerPane, or nothing when no tab does.
-[[nodiscard]] std::optional<std::string> ownTabOf(vtcontrol::ListReply const& workspace,
+[[nodiscard]] std::optional<std::string> ownTabOf(vtcontrol::ListReply const& reply,
                                                   std::string_view callerPane);
 
-/// @param workspace The `list` reply.
+/// @param reply The `list` reply.
 /// @param callerPane The full id of the pane the agent runs in.
-/// @return The reply as JSON, plus a top-level `self` (`pane`, `tab`, `window`), `isOwnTab` on the
-///         caller's tab, `isSelf` on the caller's pane, and the caller's tab first within its window.
-[[nodiscard]] std::string annotateWorkspace(vtcontrol::ListReply const& workspace,
-                                            std::string_view callerPane);
+/// @return The reply as JSON, plus a top-level `self` (`pane`, `tab`, `workspace`), `isOwnTab` on the
+///         caller's tab, `isSelf` on the caller's pane, and the caller's tab first within its workspace.
+[[nodiscard]] std::string annotateWorkspace(vtcontrol::ListReply const& reply, std::string_view callerPane);
 
 } // namespace contour::cli

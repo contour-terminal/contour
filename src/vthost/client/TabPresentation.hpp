@@ -12,7 +12,7 @@
 namespace vthost::client
 {
 
-/// Whether a tab is its window's active one.
+/// Whether a tab is its workspace's active one.
 enum class TabActivity : uint8_t
 {
     Inactive = 0,
@@ -20,7 +20,7 @@ enum class TabActivity : uint8_t
 };
 
 /// How one tab is presented: which pane is active, which one is zoomed, its title and colour, and whether it
-/// is the window's active tab. Sessions are named by the daemon's ids, the only names both ends share.
+/// is the workspace's active tab. Sessions are named by the daemon's ids, the only names both ends share.
 struct TabPresentation
 {
     uint64_t activeSession = 0;          ///< The session of the active pane; 0 for none.

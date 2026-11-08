@@ -22,8 +22,8 @@ struct PaneSource
 /// makes a difference (a swap), and as a whole tab where that is the cheaper, identity-preserving move.
 struct TabSource
 {
-    WindowId window; //!< The window holding the tab.
-    TabId tab;       //!< The tab being moved.
+    WorkspaceId workspace; //!< The workspace holding the tab.
+    TabId tab;             //!< The tab being moved.
 };
 
 /// What is being dragged.
@@ -42,20 +42,20 @@ struct SwapTarget
     SessionId pane; //!< The session of the leaf to trade with.
 };
 
-/// Drop onto a window's tab strip: the source becomes a tab at @c index.
+/// Drop onto a workspace's tab strip: the source becomes a tab at @c index.
 struct TabWellTarget
 {
-    WindowId window; //!< The window whose tab strip receives it.
-    int index;       //!< The tab position; clamped into the window's tab range.
+    WorkspaceId workspace; //!< The workspace whose tab strip receives it.
+    int index;             //!< The tab position; clamped into the workspace's tab range.
 };
 
-/// Drop onto nothing: the source becomes the only tab of a new window.
-struct NewWindowTarget
+/// Drop onto nothing: the source becomes the only tab of a new workspace.
+struct NewWorkspaceTarget
 {
 };
 
 /// Where the source is dropped.
-using MoveTarget = std::variant<EdgeTarget, SwapTarget, TabWellTarget, NewWindowTarget>;
+using MoveTarget = std::variant<EdgeTarget, SwapTarget, TabWellTarget, NewWorkspaceTarget>;
 
 /// Wire/host-facing names of the MoveSource alternatives, shared by vthost and contour.
 enum class MoveSourceKind : uint8_t
@@ -70,14 +70,14 @@ enum class MoveTargetKind : uint8_t
     Edge = 0,
     Swap,
     TabWell,
-    NewWindow,
+    NewWorkspace,
 };
 
 /// Why SessionModel::moveNode refused. On any of these the model is untouched and no event fired.
 enum class MoveError : uint8_t
 {
-    UnknownSource = 0, //!< The dragged session, window or tab does not exist.
-    UnknownTarget,     //!< The drop pane or window does not exist.
+    UnknownSource = 0, //!< The dragged session, workspace or tab does not exist.
+    UnknownTarget,     //!< The drop pane or workspace does not exist.
     SelfTarget,        //!< The source is dropped onto itself (or onto a pane inside the dragged tab).
     TabIntoSwap,       //!< A multi-pane tab cannot trade places with a single pane.
     NoOp,              //!< The drop would leave everything where it is.
@@ -100,9 +100,9 @@ enum class MoveError : uint8_t
 /// Where focus lands after a successful move.
 struct MoveResult
 {
-    WindowId window;   //!< The window now showing the moved node.
-    TabId tab;         //!< The tab now holding it (the active tab of @c window).
-    SessionId focused; //!< The moved session, which is the tab's active pane.
+    WorkspaceId workspace; //!< The workspace now showing the moved node.
+    TabId tab;             //!< The tab now holding it (the active tab of @c workspace).
+    SessionId focused;     //!< The moved session, which is the tab's active pane.
 };
 
 } // namespace vtworkspace

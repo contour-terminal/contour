@@ -4,7 +4,7 @@
 /// @file
 /// `ClientSupervisor` — keeps a native client attached across a lost connection: it connects through a
 /// transport factory, runs one `NativeClient` per connection, and after a loss reconnects with backoff,
-/// resuming the windows the lost connection followed.
+/// resuming the workspaces the lost connection followed.
 
 #include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
@@ -73,8 +73,8 @@ using ClientFactory = std::function<std::unique_ptr<NativeClient>(std::unique_pt
 using StateHandler = std::function<void(ConnectionState state, std::string const& reason)>;
 
 /// Runs one native connection after another: the first with the caller's intent, every later one resuming
-/// the windows the connection before it followed -- or, for a client that attached with AllWindows, following
-/// every window again.
+/// the workspaces the connection before it followed -- or, for a client that attached with AllWorkspaces,
+/// following every workspace again.
 class ClientSupervisor
 {
   public:
@@ -157,8 +157,9 @@ class ClientSupervisor
     ///         supervisor.
     [[nodiscard]] core::async::Task<Outcome> reconnect();
 
-    /// @return What a reconnect asks to follow: every window again for a client that followed every window,
-    ///         else Resume of the windows the lost connection followed.
+    /// @return What a reconnect asks to follow: every workspace again for a client that followed every
+    /// workspace,
+    ///         else Resume of the workspaces the lost connection followed.
     [[nodiscard]] proto::AttachIntent resumeIntent() const;
 
     /// Tells the handler of a state change.
@@ -198,7 +199,7 @@ class ClientSupervisor
     core::async::StopSource _retry;
     /// When the UpgradeHold under way ends, on the loop's clock; nullopt while none is.
     std::optional<core::platform::SteadyTimePoint> _upgradeHoldUntil;
-    /// The windows the last accepted connection followed: what the next one resumes.
+    /// The workspaces the last accepted connection followed: what the next one resumes.
     std::vector<uint64_t> _followed;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client
     /// holding the socket it carries.

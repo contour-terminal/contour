@@ -3,7 +3,7 @@
 
 /// @file
 /// The in-memory model of a workspace snapshot: what the daemon writes so that a reboot, a crash or the
-/// drift restart can bring the windows, tabs and panes back. @see SessionSnapshotCodec.hpp for the file.
+/// drift restart can bring the workspaces, tabs and panes back. @see SessionSnapshotCodec.hpp for the file.
 
 #include <vtbackend/core/Color.hpp>
 
@@ -26,7 +26,7 @@ namespace vthost
 /// An opaque 128-bit object id. The snapshot keeps raw bytes, so it names no id type of a later phase.
 using ObjectUuid = std::array<std::uint8_t, 16>;
 
-/// The identity of a window, tab or pane: its id and its label.
+/// The identity of a workspace, tab or pane: its id and its label.
 struct ObjectIdentityRecord
 {
     ObjectUuid uuid {};
@@ -79,27 +79,27 @@ struct TabSnapshot
     bool operator==(TabSnapshot const&) const = default;
 };
 
-/// One window as it was captured.
-struct WindowSnapshot
+/// One workspace as it was captured.
+struct WorkspaceLayoutSnapshot
 {
     std::optional<ObjectIdentityRecord> identity {};
     std::vector<TabSnapshot> tabs {};
     std::uint32_t activeTab = 0;
 
-    bool operator==(WindowSnapshot const&) const = default;
+    bool operator==(WorkspaceLayoutSnapshot const&) const = default;
 };
 
 /// Everything the daemon hosted at one instant.
 struct WorkspaceSnapshot
 {
     std::chrono::sys_seconds takenAt {};
-    std::vector<WindowSnapshot> windows {};
+    std::vector<WorkspaceLayoutSnapshot> workspaces {};
     /// The cell size in pixels a client last stated (SessionHost::learnedCellPixelSize()); none when no
     /// client ever did. Never the configured default. Unchecked: whoever applies it bounds it first.
     std::optional<vtpty::ImageSize> cellPixelSize {};
 
-    /// @return Whether the snapshot holds no window, i.e. there is nothing to restore.
-    [[nodiscard]] bool empty() const noexcept { return windows.empty(); }
+    /// @return Whether the snapshot holds no workspace, i.e. there is nothing to restore.
+    [[nodiscard]] bool empty() const noexcept { return workspaces.empty(); }
 
     bool operator==(WorkspaceSnapshot const&) const = default;
 };

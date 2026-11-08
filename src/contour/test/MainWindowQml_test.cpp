@@ -124,7 +124,7 @@ TEST_CASE("Main.qml startup: sized-before-shown ordering and declared chrome (of
     auto root = loadMainWindow(engine, controller, warnings);
 
     // 1. Startup order: mint the controller, bind THIS window, check for a torn-off tab to adopt
-    //    (none here -> false), then a daemon window to adopt (not attached -> false), then a startup
+    //    (none here -> false), then a daemon workspace to adopt (not attached -> false), then a startup
     //    layout (none -> false), create the first tab (so the window can be sized from real metrics),
     //    and only then map it.
     CHECK(controller.calls

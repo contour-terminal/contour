@@ -145,7 +145,8 @@ class TmuxController final:
     /// multi-pane layout (all its panes pending) is realized as its WHOLE tree via
     /// applyLayoutToWindow — faithful split ratios and shape. A window's first (or only) pane, or a
     /// pane arriving after the window is already shown, is realized as a tab / an incremental split.
-    void adoptPendingPanes(contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window);
+    void adoptPendingPanes(contour::session::TerminalSessionManager& manager,
+                           vtworkspace::WorkspaceId window);
 
     /// Binds the NEXT createPty() to tmux pane @p pane rather than popping the FIFO pending queue. The
     /// whole-tree realizer calls this — via applyLayoutToWindow's beforeLeafSeed — right before each
@@ -287,7 +288,7 @@ class TmuxController final:
     /// Realizes tmux window @p tmuxWindow's whole layout @p tree as a tab in @p guiWindow, binding each
     /// leaf to its tmux pane and seeding the window's split anchor. Runs on the GUI thread.
     void realizeWindowLayout(contour::session::TerminalSessionManager& manager,
-                             vtworkspace::WindowId guiWindow,
+                             vtworkspace::WorkspaceId guiWindow,
                              uint64_t tmuxWindow,
                              vthost::tmux::BinaryLayout const& tree);
 
@@ -295,7 +296,7 @@ class TmuxController final:
     /// later pane as a split of the window's anchor (at the pane's remote ratio). Runs on the GUI
     /// thread. @return true if a pane was consumed (progress made); false if creation stalled.
     [[nodiscard]] bool realizeOnePane(contour::session::TerminalSessionManager& manager,
-                                      vtworkspace::WindowId guiWindow);
+                                      vtworkspace::WorkspaceId guiWindow);
 
   protected:
     [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override;

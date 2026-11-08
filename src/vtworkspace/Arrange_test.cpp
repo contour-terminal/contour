@@ -35,11 +35,11 @@ namespace
                              .children = { std::move(first), std::move(second) } };
 }
 
-/// Tab `tab` of window `window` shows sessions 1000 | (1001 / 1002), with 1002 the active pane.
+/// Tab `tab` of workspace `workspace` shows sessions 1000 | (1001 / 1002), with 1002 the active pane.
 struct ArrangeFixture: Fixture
 {
-    Window* window = model.createWindow();
-    Tab* tab = model.createTab(window->id());
+    Workspace* workspace = model.createWorkspace();
+    Tab* tab = model.createTab(workspace->id());
     Pane* p1001 = model.splitActivePane(tab->id(), SplitState::Vertical, 0.4);
     Pane* p1002 = model.splitActivePane(tab->id(), SplitState::Horizontal, 0.7);
     TabId tabId = tab->id();
@@ -184,8 +184,8 @@ TEST_CASE("arrangeTab clears a zoom, as every reshaping does", "[vtworkspace][mo
 TEST_CASE("arrangeTab of a one-pane tab into that pane changes nothing", "[vtworkspace][model][arrange]")
 {
     Fixture f;
-    auto* const window = f.model.createWindow();
-    auto* const tab = f.model.createTab(window->id());
+    auto* const workspace = f.model.createWorkspace();
+    auto* const tab = f.model.createTab(workspace->id());
     f.events.log.clear();
 
     REQUIRE(f.model.arrangeTab(tab->id(), leaf(1000)).has_value());
@@ -245,8 +245,8 @@ TEST_CASE("arrangeTab changes only the axis of a split", "[vtworkspace][model][a
 {
     // [1000 | 1001] to 1000 / 1001: the same sessions, in the same order, along the other axis.
     Fixture f;
-    auto* const window = f.model.createWindow();
-    auto* const tab = f.model.createTab(window->id());
+    auto* const workspace = f.model.createWorkspace();
+    auto* const tab = f.model.createTab(workspace->id());
     (void) f.model.splitActivePane(tab->id(), SplitState::Vertical);
     f.events.log.clear();
 

@@ -86,10 +86,10 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
         CHECK(text.contains("bytes=3"));
     }
 
-    SECTION("LayoutState reports its window and tab count")
+    SECTION("LayoutState reports its workspace and tab count")
     {
         auto const text = summaryOf(PduType::LayoutState);
-        CHECK(text.contains("window=1"));
+        CHECK(text.contains("workspace=1"));
         CHECK(text.contains("tabs=2"));
     }
 
@@ -128,7 +128,7 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
 
     SECTION("payloadless PDUs summarize to nothing")
     {
-        CHECK(summaryOf(PduType::NewWindow).empty());
+        CHECK(summaryOf(PduType::NewWorkspace).empty());
     }
 
     SECTION("PerformOperation names its session and operation and sizes its text")
@@ -136,10 +136,10 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
         CHECK(summaryOf(PduType::PerformOperation) == "session=4 operation=3 text=18B row=0@0");
     }
 
-    SECTION("CreateTab names the window it targets")
+    SECTION("CreateTab names the workspace it targets")
     {
-        // Not payloadless any more: it carries the session whose window the tab belongs in, and a
-        // trace that omitted it could not tell two windows' tab requests apart.
+        // Not payloadless any more: it carries the session whose workspace the tab belongs in, and a
+        // trace that omitted it could not tell two workspaces' tab requests apart.
         CHECK(summaryOf(PduType::CreateTab) == "session=4 profile=\"work\"");
     }
 }
@@ -184,28 +184,28 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
     CHECK(summarize(DecodedPdu {
               ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" } })
           == "versions=4-6 caps=1,4711 token=yes settings=no role=attach area=none "
-             "intent=all-windows windows=[] profile=\"\"");
+             "intent=all-workspaces workspaces=[] profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello {} })
-          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=all-windows "
-             "windows=[] profile=\"\"");
+          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=all-workspaces "
+             "workspaces=[] profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello { .attachIntent = { .kind = AttachIntentKind::Launch },
                                                .profileName = "main" } })
-              .ends_with("intent=launch windows=[] profile=\"main\""));
+              .ends_with("intent=launch workspaces=[] profile=\"main\""));
     CHECK(summarize(DecodedPdu { ClientHello {
-                        .attachIntent = { .kind = AttachIntentKind::Resume, .windows = { 1, 7 } } } })
-              .contains("intent=resume windows=[1,7]"));
+                        .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 1, 7 } } } })
+              .contains("intent=resume workspaces=[1,7]"));
     CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
           == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown followed=[] "
              "instance=0000000000000000 restored=0/0");
-    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .followedWindows = { 1, 3 } } })
+    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1, 3 } } })
               .contains("followed=[1,3]"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .daemonInstance = 0xC0FFEE } })
               .contains("instance=0000000000c0ffee"));
-    CHECK(
-        summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .restoredWindows = 2, .restoredTabs = 7 } })
-            .ends_with("restored=2/7"));
+    CHECK(summarize(
+              DecodedPdu { ServerHello { .agreedVersion = 4, .restoredWorkspaces = 2, .restoredTabs = 7 } })
+              .ends_with("restored=2/7"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .releaseVersion = "0.8.1" } })
               .contains("release=0.8.1"));
     CHECK(summarize(DecodedPdu { ServerHello { .layout = HelloLayout::VersionAlone, .codecVersion = 3 } })
@@ -264,7 +264,8 @@ TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")
     CHECK_FALSE(summarize(DecodedPdu { ClientHello {} }).contains("cell="));
 
     // A payloadless PDU must not leave a dangling separator before the byte count.
-    CHECK(traceLine(Direction::Send, 0, DecodedPdu { NewWindow {} }, 4) == "send #0 NewWindow (4 bytes)");
+    CHECK(traceLine(Direction::Send, 0, DecodedPdu { NewWorkspace {} }, 4)
+          == "send #0 NewWorkspace (4 bytes)");
 }
 
 TEST_CASE("the catalog's tags are contiguous from zero", "[vthost][proto]")
@@ -316,7 +317,7 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(summarize(DecodedPdu { PanesReprojected {} }).empty());
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
-    CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");
+    CHECK(summarize(DecodedPdu { NewWorkspace { .profileName = "y" } }) == "profile=\"y\"");
 }
 
 TEST_CASE("a ControlRequest's trace names the method but not the params", "[vthost][proto][control]")

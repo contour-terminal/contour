@@ -252,7 +252,7 @@ constexpr auto NodeMime = contour::window::NodeDragMime;
     return contour::window::writeNodeDrag(
         contour::window::NodeDrag { .payload = payload,
                                     .host = { .kind = contour::window::HostKind::Process, .id = "test" },
-                                    .window = vtworkspace::WindowId { 1 },
+                                    .window = vtworkspace::WorkspaceId { 1 },
                                     .tabIndex = 0,
                                     .sessions = std::move(sessions) });
 }

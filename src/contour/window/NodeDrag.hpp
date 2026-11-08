@@ -54,7 +54,7 @@ struct NodeDrag
 {
     DropPayload payload = DropPayload::None; ///< Pane or Tab; nothing else is a node.
     HostIdentity host;                       ///< Whose ids @c sessions are.
-    vtworkspace::WindowId window;            ///< The window the drag started in, in the dragging process.
+    vtworkspace::WorkspaceId window;         ///< The window the drag started in, in the dragging process.
     int tabIndex = 0;                        ///< The row of the tab the drag started in.
     /// The host's ids of what is dragged: a pane's one session; a tab's every session, the first naming the
     /// tab. Local SessionId values in-process, daemon session ids when daemon-hosted.

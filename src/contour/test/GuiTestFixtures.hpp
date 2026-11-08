@@ -584,9 +584,9 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         _factory->reportTabPresentation(presentation);
     }
 
-    [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const& spawn) override
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
     {
-        return _factory->requestRemoteWindow(spawn);
+        return _factory->requestRemoteWorkspace(spawn);
     }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { _factory->requestRemoteClose(pty); }
@@ -886,7 +886,7 @@ struct ScopedController
 {
     contour::session::TerminalSessionManager& manager;
     contour::window::WindowController* controller;
-    vtworkspace::WindowId id;
+    vtworkspace::WorkspaceId id;
 
     explicit ScopedController(contour::session::TerminalSessionManager& m):
         manager(m), controller(m.createWindowController()), id(controller->windowId())
@@ -962,7 +962,7 @@ struct SessionTabs
     for ([[maybe_unused]] auto const _: std::views::iota(0, n))
     {
         controller.createNewTab();
-        auto const* tab = manager.model().window(controller.windowId())->activeTab();
+        auto const* tab = manager.model().workspace(controller.windowId())->activeTab();
         REQUIRE(tab != nullptr);
         REQUIRE(controller.activeSession() != nullptr);
         result.tabs.push_back(tab->id());

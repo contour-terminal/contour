@@ -1,6 +1,6 @@
 # Control API
 
-Every window, tab and pane a Contour daemon hosts can be listed, driven and watched from the shell, from
+Every workspace, tab and pane a Contour daemon hosts can be listed, driven and watched from the shell, from
 scripts and from coding agents, with the same `contour` binary that runs the terminal. The verbs below talk to
 the daemon's control API; `contour api list` shows everything the API offers, including what has no verb yet.
 
@@ -12,17 +12,17 @@ A shell hosted by the daemon finds its surroundings in four environment variable
 | --- | --- |
 | `$CONTOUR_PANE` | The shell's own pane, `pane:<uuid>`. The default target of every verb. |
 | `$CONTOUR_TAB` | Its tab, `tab:<uuid>`. |
-| `$CONTOUR_WINDOW` | Its window, `window:<uuid>`. |
+| `$CONTOUR_WORKSPACE` | Its workspace, `workspace:<uuid>`. |
 | `$CONTOUR_DAEMON` | The daemon's socket path. |
 
 ## Targets
 
-Wherever a verb takes a pane, tab or window (`--pane P`), `P` is resolved in this order, and the first kind of
+Wherever a verb takes a pane, tab or workspace (`--pane P`), `P` is resolved in this order, and the first kind of
 match wins:
 
 1. a full id (`pane:018f3c4e-...`);
 2. a label, compared case-insensitively (see `contour label`);
-3. a 1-based position, for tabs and windows;
+3. a 1-based position, for tabs and workspaces;
 4. an id suffix of at least four hex digits.
 
 More than one match is an error that lists the candidates, one per line. Without `--pane`, a verb acts on
@@ -33,13 +33,13 @@ pane.
 
 | Verb | What it does |
 | --- | --- |
-| `contour ls [--window W]` | Lists windows, tabs and panes as a tree; ids are shortened to their last 8 hex digits and `*` marks the active ones. |
-| `contour new [--window W \| --new-window] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Opens a tab and prints its pane id. |
+| `contour ls [--workspace W]` | Lists workspaces, tabs and panes as a tree; ids are shortened to their last 8 hex digits and `*` marks the active ones. |
+| `contour new [--workspace W \| --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Opens a tab and prints its pane id. |
 | `contour split [--pane P] [--right \| --below] [--ratio PCT] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Splits a pane and prints the new pane's id. |
 | `contour send [--pane P] [--enter] [--wait] TEXT...\|-` | Types text into a pane. `--enter` appends a carriage return, `-` reads standard input, `--wait` waits for the command the text starts and exits with that command's own status. |
 | `contour pane capture [--pane P] [--scrollback N \| --all]` | Prints a pane's text. |
 | `contour close [--pane P \| --tab T]` | Closes a pane, or a tab with all its panes. |
-| `contour label OBJECT LABEL` | Labels a window, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
+| `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
 | `contour block list [--pane P] [--limit N]` | Lists a pane's recent command blocks, newest first: `id  exit  duration  command`. |
 | `contour block read [BLOCK] [--pane P] [--prompt \| --output]` | Prints a block's text; without `BLOCK`, the pane's last finished block. With neither flag, the prompt and then the output. |
 | `contour wait [BLOCK] [--pane P] [--timeout SECONDS]` | Waits for a block to finish and exits with the command's own status. |
@@ -75,10 +75,10 @@ A bare word (`--daemon homepc`) names a saved host of the configuration's `hosts
 `--tls-ca` do not. A saved `tls://` host without `tls_ca` is refused like a `HOST:PORT` daemon without
 `--tls-ca`. A name no saved host has exits 4 with the names that are saved.
 
-### Windows opened by `contour new --new-window`
+### Workspaces opened by `contour new --new-workspace`
 
-A window created by a control connection is followed by the primary viewer, the GUI whose launch took every
-window, and so appears in the open GUI. With no GUI attached it appears at the next launch.
+A workspace created by a control connection is followed by the primary viewer, the GUI whose launch took every
+workspace, and so appears in the open GUI. With no GUI attached it appears at the next launch.
 
 ## Waiting
 
@@ -124,7 +124,7 @@ separated list of:
 | 0 | Done. |
 | 1 | The call failed; the reason is on standard error as `Error: <message>`. |
 | 2 | The command line was malformed, or a setting it names cannot be used (a `--tls-ca` that does not parse). |
-| 3 | The pane, tab, window or block named does not exist, or the name matches several. |
+| 3 | The pane, tab, workspace or block named does not exist, or the name matches several. |
 | 4 | No daemon could be reached. |
 | 5 | The daemon declined; the reason is on standard error. |
 | 130 | Interrupted by Ctrl+C. |
@@ -218,7 +218,7 @@ tools (an agent sees only those the daemon's grants permit, see `daemon.info`):
 
 | Tool | Does | Needs |
 | --- | --- | --- |
-| `workspace_list` | Lists windows, tabs and panes, marking your own | `read` |
+| `workspace_list` | Lists workspaces, tabs and panes, marking your own | `read` |
 | `daemon_info` | Reports the daemon and the connection's grants | `read` |
 | `pane_capture` | Reads a pane's screen | `screen` |
 | `block_list`, `block_read` | Lists and reads command blocks | `screen` |

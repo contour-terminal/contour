@@ -31,7 +31,7 @@ TEST_CASE("events without a payload body decode", "[vtcontrol][events]")
 {
     auto const json = vtcontrol::encodeEvent(
         vtcontrol::Event { .origin = { .pane = "pane:p" }, .payload = vtcontrol::BellEvent {} });
-    CHECK(json == R"({"type":"pane.bell","window":"","tab":"","pane":"pane:p","payload":{}})");
+    CHECK(json == R"({"type":"pane.bell","workspace":"","tab":"","pane":"pane:p","payload":{}})");
     auto const back = vtcontrol::decodeEvent(json);
     REQUIRE(back);
     CHECK(std::holds_alternative<vtcontrol::BellEvent>(back->payload));

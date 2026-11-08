@@ -62,17 +62,17 @@ constexpr auto Interval = 30s;
 {
     auto count = std::size_t { 0 };
     if (snapshot)
-        for (auto const& window: snapshot->windows)
-            for (auto const& tab: window.tabs)
+        for (auto const& workspace: snapshot->workspaces)
+            for (auto const& tab: workspace.tabs)
                 count += leafCount(tab.root);
     return count;
 }
 
 [[nodiscard]] WorkspaceSnapshot onePane(std::chrono::sys_seconds takenAt = {})
 {
-    auto window = WindowSnapshot {};
-    window.tabs.push_back(TabSnapshot {});
-    return WorkspaceSnapshot { .takenAt = takenAt, .windows = { std::move(window) } };
+    auto workspace = WorkspaceLayoutSnapshot {};
+    workspace.tabs.push_back(TabSnapshot {});
+    return WorkspaceSnapshot { .takenAt = takenAt, .workspaces = { std::move(workspace) } };
 }
 
 /// A host on a manual clock, persisted to an in-memory file whose replacing renames are counted, and fail
@@ -453,43 +453,45 @@ TEST_CASE("prepareRestore turns each verdict into a restore or nothing", "[vthos
     }
 }
 
-TEST_CASE("a cross-window MoveNode schedules a workspace snapshot", "[vthost][snapshot][persistence][move]")
+TEST_CASE("a cross-workspace MoveNode schedules a workspace snapshot",
+          "[vthost][snapshot][persistence][move]")
 {
     auto h = PersistenceHarness {};
     auto* const dragged = h.host->createTab();
-    auto* const other = h.host->createWindow();
+    auto* const other = h.host->createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
     h.persist();
     h.pass(Interval);
     auto const before = h.writes;
 
-    // The whole tab leaves its window: the one event that names the change is tabMovedToWindow.
+    // The whole tab leaves its workspace: the one event that names the change is tabMovedToWorkspace.
     auto const moved = applyMoveNode(
         h.host->model(),
         proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Tab),
                           .sourceSessions = { dragged->rootPane()->session().value },
                           .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::TabWell),
                           .targetSession = other->tabAt(0)->rootPane()->session().value },
-        MoveWindowHooks { .create = [&] { return h.host->createEmptyWindow().id(); },
-                          .discard = [&](vtworkspace::WindowId window) { h.host->discardWindow(window); } });
+        MoveWorkspaceHooks {
+            .create = [&] { return h.host->createEmptyWorkspace().id(); },
+            .discard = [&](vtworkspace::WorkspaceId workspace) { h.host->discardWorkspace(workspace); } });
     REQUIRE(moved.has_value());
     h.pass(Interval);
     CHECK(h.writes > before);
 }
 
-TEST_CASE("a tab moved to another window is a layout change on its own",
+TEST_CASE("a tab moved to another workspace is a layout change on its own",
           "[vthost][snapshot][persistence][move]")
 {
     // The event alone, as a move whose other events were all skipped would raise it.
     auto h = PersistenceHarness {};
     auto* const tab = h.host->createTab();
-    auto* const other = h.host->createWindow();
+    auto* const other = h.host->createWorkspace();
     REQUIRE((tab != nullptr && other != nullptr));
     h.persist();
     h.pass(Interval);
     auto const before = h.writes;
 
-    h.persistence->tabMovedToWindow(h.host->windowId(), tab->id(), 0, other->id(), 0);
+    h.persistence->tabMovedToWorkspace(h.host->workspaceId(), tab->id(), 0, other->id(), 0);
     h.pass(Interval);
     CHECK(h.writes > before);
 }

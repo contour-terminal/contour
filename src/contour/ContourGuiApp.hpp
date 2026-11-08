@@ -198,16 +198,16 @@ struct ShellIntegrationServices
     std::optional<config::HostPlatform> host {};
 };
 
-/// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
-/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
+/// The daemon workspace the boot (first) OS window should adopt when attaching, rather than authoring
+/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) workspace; a
 /// later OS window is not a boot window (@p anyWindowMapped is then true). Pure so the boot-adoption
 /// rule is unit-testable without the QML boot flow.
-/// @param anyWindowMapped True if at least one OS window is already bound to a daemon window.
-/// @param daemonWindowIds The daemon's known window ids, ascending (windowIds() ordering).
-/// @return The daemon window to adopt, or nullopt if this is not the boot window, or the daemon has
-///         not reported a window yet.
-[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWindowToAdopt(
-    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWindowIds);
+/// @param anyWindowMapped True if at least one OS window is already bound to a daemon workspace.
+/// @param daemonWorkspaceIds The daemon's known workspace ids, ascending (workspaceIds() ordering).
+/// @return The daemon workspace to adopt, or nullopt if this is not the boot window, or the daemon has
+///         not reported a workspace yet.
+[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
+    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds);
 
 /// Whether @p configHome holds QML overrides in the pre-module layout, which nothing loads.
 ///
@@ -407,13 +407,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The staged screen, or nullptr (already consumed / never staged / screen unplugged).
     [[nodiscard]] QScreen* takePendingSpawnScreen() noexcept;
 
-    /// Attach mode: authors a new window on the daemon (routed through the session factory's
-    /// requestRemoteWindow) instead of opening a purely local one. The daemon's new-window layout push
-    /// then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
-    /// @param spawn What the new window's first session runs, as the daemon is asked for it.
+    /// Attach mode: authors a new workspace on the daemon (routed through the session factory's
+    /// requestRemoteWorkspace) instead of opening a purely local window. The daemon's new-workspace layout
+    /// push then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
+    /// @param spawn What the new workspace's first session runs, as the daemon is asked for it.
     /// @return true if the request was routed to the daemon (do NOT open a local window); false for a
     ///         local factory.
-    [[nodiscard]] bool requestRemoteWindow(session::RemoteSpawn const& spawn);
+    [[nodiscard]] bool requestRemoteWorkspace(session::RemoteSpawn const& spawn);
 
     /// The app-wide forced-font-DPI provider (single instance; see display/ContentScale.h), created
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
@@ -995,18 +995,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     struct ClientRequest
     {
         ClientEngine engine = ClientEngine::Native;
-        std::string tmuxSocket;         ///< `--tmux-socket`.
-        std::string socket;             ///< `--socket`; empty for `daemon.socket`.
-        std::string label;              ///< `--label`; empty when not given.
-        std::string profile;            ///< `--profile`.
-        std::string config;             ///< `--config`.
-        std::string connectTcp;         ///< `--connect-tcp`; empty for the local socket.
-        std::string tlsCaPath;          ///< `--tls-ca`.
-        std::string token;              ///< `--token` or `--token-file`, resolved.
-        std::string sizePolicy;         ///< `--size-policy`; empty for `daemon.size_policy`.
-        std::string logFilter;          ///< `--log`, forwarded to a daemon it starts.
-        std::string logFile;            ///< `--log-file`, likewise.
-        std::optional<uint64_t> window; ///< `--window`: the one daemon window to show.
+        std::string tmuxSocket;            ///< `--tmux-socket`.
+        std::string socket;                ///< `--socket`; empty for `daemon.socket`.
+        std::string label;                 ///< `--label`; empty when not given.
+        std::string profile;               ///< `--profile`.
+        std::string config;                ///< `--config`.
+        std::string connectTcp;            ///< `--connect-tcp`; empty for the local socket.
+        std::string tlsCaPath;             ///< `--tls-ca`.
+        std::string token;                 ///< `--token` or `--token-file`, resolved.
+        std::string sizePolicy;            ///< `--size-policy`; empty for `daemon.size_policy`.
+        std::string logFilter;             ///< `--log`, forwarded to a daemon it starts.
+        std::string logFile;               ///< `--log-file`, likewise.
+        std::optional<uint64_t> workspace; ///< `--workspace`: the one daemon workspace to show.
         std::optional<cli::HostTransport>
             host; ///< `--host`, resolved: a remote daemon instead of the local one.
     };
@@ -1114,18 +1114,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] std::expected<void, std::string> settleHosting(
         std::expected<void, std::string> const& attached);
 
-    /// Native attach: brings the local OS windows in line with the daemon's windows (B4). Maps the
-    /// primary daemon window onto the boot window and, for each additional daemon window, spawns an OS
+    /// Native attach: brings the local OS windows in line with the daemon's workspaces (B4). Maps the
+    /// primary daemon workspace onto the boot window and, for each additional daemon workspace, spawns an OS
     /// window (which binds itself via bindPendingAttachWindow) then reconciles each window's tab/pane
     /// tree. Idempotent — re-run on every layoutChanged. No-op when not attached.
     void reconcileAttachWindows();
 
     /// Attach-window binder installed on the manager: called from a freshly-spawned window's Main.qml
-    /// (via consumeAttachWindow). If a daemon window is staged for it, records the daemon→OS-window
+    /// (via consumeAttachWindow). If a daemon workspace is staged for it, records the daemon→OS-window
     /// mapping, reconciles that window's layout into it, and returns true so the window does NOT create
     /// its own first tab.
     /// @param controller The freshly-created controller of the just-spawned OS window.
-    /// @return true if @p controller's window was bound to a pending daemon window.
+    /// @return true if @p controller's window was bound to a pending daemon workspace.
     bool bindPendingAttachWindow(window::WindowController* controller);
 
     /// Waits for the native attach started before the GUI booted, with what remains of its budget, then
@@ -1137,10 +1137,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(std::chrono::milliseconds budget,
                                                                      std::string hostLabel);
 
-    /// After a reconnect: closes the OS windows of the daemon windows the daemon no longer has for this
+    /// After a reconnect: closes the OS windows of the daemon workspaces the daemon no longer has for this
     /// client, once the windows that came instead are shown, so that closing them never closes the last one.
-    /// @param daemonWindows The lost daemon windows.
-    void closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWindows);
+    /// @param daemonWorkspaces The lost daemon workspaces.
+    void closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWorkspaces);
 
     /// Connects what the native controller says about a lost connection: every pane's reconnecting state,
     /// and the windows a reconnect did not bring back.
@@ -1177,12 +1177,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::filesystem::path const& controlPath,
         vthost::DaemonSpawnOptions const& options);
 
-    /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
-    /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
+    /// Records the daemon-workspace → OS-window mapping and immediately reconciles that daemon workspace's
+    /// tab/pane tree into @p localWorkspace — the one place the "a mapping always implies a reconcile"
     /// invariant lives (shared by the primary-window and spawned-window paths).
-    /// @param daemonWindow The daemon window id.
+    /// @param daemonWorkspace The daemon workspace id.
     /// @param osWindow The OS window that mirrors it.
-    void bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow);
+    void bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId localWorkspace);
 
     /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
     /// still to be bound: a toast about a restore must not surface in a window opened later.
@@ -1223,17 +1223,17 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return Nothing once attached; the message to report, the controller given up, otherwise.
     std::function<std::expected<void, std::string>()> _awaitAttach;
 
-    /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
-    /// daemon window maps to the boot window; additional ones map to spawned windows.
-    std::unordered_map<uint64_t, vtworkspace::WindowId> _attachWindowMap;
-    /// The daemon window whose OS window is being spawned right now: reconcileAttachWindows stages it
+    /// Native attach (B4): each daemon workspace id mapped to the OS window that mirrors it. The primary
+    /// daemon workspace maps to the boot window; additional ones map to spawned windows.
+    std::unordered_map<uint64_t, vtworkspace::WorkspaceId> _attachWindowMap;
+    /// The daemon workspace whose OS window is being spawned right now: reconcileAttachWindows stages it
     /// just before newWindow(), and that window's Main.qml claims it via bindPendingAttachWindow.
     /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
     /// stage is always consumed before the next is made.
-    std::optional<uint64_t> _pendingAttachWindow;
+    std::optional<uint64_t> _pendingAttachWorkspace;
     /// The layouts of the reconcile under way, one snapshot for every window of it -- one whose OS window
-    /// opens meanwhile (bindDaemonWindow) included -- so that all of them are brought to the same push. Null
-    /// between reconciles. Points at reconcileAttachWindows()' own.
+    /// opens meanwhile (bindDaemonWorkspace) included -- so that all of them are brought to the same push.
+    /// Null between reconciles. Points at reconcileAttachWindows()' own.
     remote::LayoutSnapshot const* _reconcilingLayouts = nullptr;
 
     /// Whether the boot window has adopted the daemon's primary window yet.

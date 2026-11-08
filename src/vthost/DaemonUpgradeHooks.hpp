@@ -28,7 +28,7 @@ class DaemonUpgradeHooks final: public handover::UpgradeHooks
   public:
     /// @param connections The daemon's non-native connections (not owned; outlives this).
     /// @param writeSnapshot Writes the workspace snapshot now and blocks until it is on disk, without sealing
-    ///        the writer (WorkspacePersistence::writeNow); empty while the daemon keeps no workspace.
+    ///        the writer (WorkspacePersistence::writeNow); empty while the daemon keeps no workspaces.
     DaemonUpgradeHooks(ConnectionRegistry const& connections, std::function<void()> writeSnapshot):
         _connections(connections), _writeSnapshot(std::move(writeSnapshot))
     {
