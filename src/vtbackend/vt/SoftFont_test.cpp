@@ -186,7 +186,6 @@ TEST_CASE("buildSoftFont: a VT320 full-cell glyph is stored at 15x12 and at posi
     auto const topRow = std::vector<uint8_t>(15, 1);
     auto const leftOnly = std::vector<uint8_t> { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     auto const blank = std::vector<uint8_t>(15, 0);
-    CHECK(row(glyph, 0) == std::vector<uint8_t>(15, 1));
     CHECK(row(glyph, 0) == topRow);
     for (auto const y: { 1, 2, 3, 4, 5 })
         CHECK(row(glyph, y) == leftOnly);

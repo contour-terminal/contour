@@ -837,8 +837,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] bool mirrorsSoftFonts() const noexcept;
 
     /// Sends @p session's soft fonts when they differ from what this connection was last told, read under
-    /// the terminal lock. Called ahead of every delta and snapshot, so a Delta never names a glyph its
-    /// receiver has not been given.
+    /// the terminal lock. Called ahead of every delta and snapshot, so a font reaches the receiver before
+    /// the cells that use it. A Delta can still name a font the client has not received -- a font loaded
+    /// after the push, whose next push is still to come -- and such a cell renders as its text until then.
     /// @param session The session.
     void pushSoftFonts(vtworkspace::SessionId session);
 

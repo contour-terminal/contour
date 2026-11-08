@@ -2295,6 +2295,10 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
                     // the width alone.
                     (void) targetCell.appendCharacter(sourceCell.codepoint(ci),
                                                       ClusterWidthPolicy::FirstCodepoint);
+                // The write dropped any glyph the target wore; the copy wears the source's, or soft text
+                // would turn into the plain characters it stands for.
+                if (auto const softGlyph = sourceCell.softGlyph())
+                    targetCell.setSoftGlyph(*softGlyph);
             }
             else
             {
@@ -3027,13 +3031,13 @@ namespace
 
 bool Screen::tryDesignateSoftFont(Sequence const& seq)
 {
+    // Every ESC sequence asks first, and a terminal with no soft font (nearly all) has nothing to name.
+    if (!_terminal->softFonts().hasFonts())
+        return false;
     auto const request = decodeSCS(seq);
     if (!request)
         return false;
     auto const fontNumber = _terminal->softFonts().fontForDesignator(request->designator);
-    // Every ESC sequence asks first, and a terminal with no soft font (nearly all) has nothing to name.
-    if (!_terminal->softFonts().hasFonts())
-        return false;
     if (!fontNumber)
         return false;
     _cursor.charsets.selectDRCS(request->table, *fontNumber);

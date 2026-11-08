@@ -111,9 +111,13 @@ class SoftGlyphMapPtr
     ~SoftGlyphMapPtr() = default;
 
     [[nodiscard]] explicit operator bool() const noexcept { return _map != nullptr; }
-    [[nodiscard]] SoftGlyphMap* operator->() const noexcept { return _map.get(); }
-    [[nodiscard]] SoftGlyphMap& operator*() const noexcept { return *_map; }
-    [[nodiscard]] SoftGlyphMap* get() const noexcept { return _map.get(); }
+    // Deep const: a const line hands out a const table, as a line owning the map by value would.
+    [[nodiscard]] SoftGlyphMap* operator->() noexcept { return _map.get(); }
+    [[nodiscard]] SoftGlyphMap const* operator->() const noexcept { return _map.get(); }
+    [[nodiscard]] SoftGlyphMap& operator*() noexcept { return *_map; }
+    [[nodiscard]] SoftGlyphMap const& operator*() const noexcept { return *_map; }
+    [[nodiscard]] SoftGlyphMap* get() noexcept { return _map.get(); }
+    [[nodiscard]] SoftGlyphMap const* get() const noexcept { return _map.get(); }
 
     /// Drops the table.
     void reset() noexcept { _map.reset(); }
@@ -301,7 +305,8 @@ void copyColumnRange(Map const& src, Map& dst, size_t srcCol, size_t dstCol, siz
 
 /// Re-indexes a column-keyed map for moving [srcCol, srcCol+count) to [dstCol, dstCol+count): the
 /// destination's own entries are dropped (their cells are overwritten) and the source's follow their
-/// cells. Entries outside both ranges stay; the vacated source columns are left to the caller's clear.
+/// cells. Entries outside both ranges stay. The source range is vacated here too, erased before the
+/// moved entries land, so a caller has no clearing of its own to do.
 /// @param map    The map to re-index.
 /// @param srcCol First source column.
 /// @param dstCol First destination column.

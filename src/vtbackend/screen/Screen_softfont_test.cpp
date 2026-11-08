@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 using namespace vtbackend;
 using namespace vtbackend::test;
@@ -196,6 +197,10 @@ TEST_CASE("copy yields the underlying characters", "[screen][softfont]")
     (void) mock.terminal.selector()->extend(
         CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
     CHECK(mock.terminal.extractSelectionText() == "A!B");
+    // The middle cell is a soft one: the text above came from its underlying character.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
+    CHECK(!mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK(!mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(2)).softGlyph().has_value());
 }
 
 TEST_CASE("space, DEL and non-ASCII stay plain while a soft set is active", "[screen][softfont]")
@@ -455,4 +460,20 @@ TEST_CASE("an input method preedit over soft cells carries none of their glyphs"
                                          return entry.position.column;
                                      }));
     CHECK(columns == std::vector { ColumnOffset(2) });
+}
+
+TEST_CASE("DECCRA copies soft glyphs with their cells", "[screen][softfont]")
+{
+    auto mock = MockTerm { TestPage };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\"");
+    // Copy the two cells of line 1 to line 2, one column to the right.
+    mock.writeToScreen("\033[1;1;1;2;1;2;2;1$v");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(!screen.at(LineOffset(1), ColumnOffset(0)).softGlyph());
+    CHECK(screen.at(LineOffset(1), ColumnOffset(1)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x21 });
+    CHECK(screen.at(LineOffset(1), ColumnOffset(2)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x22 });
+    CHECK(screen.at(LineOffset(1), ColumnOffset(1)).codepoint(0) == U'!');
 }
