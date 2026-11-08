@@ -30,6 +30,25 @@ namespace vtrasterizer
 [[nodiscard]] std::vector<uint8_t> scaleSoftGlyph(vtbackend::SoftGlyph const& glyph,
                                                   vtbackend::ImageSize target);
 
+/// The top-left pixel of a window cut out of a scaled soft glyph.
+struct SoftGlyphWindowOrigin
+{
+    size_t x = 0;
+    size_t y = 0;
+};
+
+/// Scales a soft glyph to @p target as above, but computes only the @p window-sized rectangle of the result
+/// that starts at @p origin, so a tile cut from a stretched glyph never scales the rest of it.
+/// @param glyph The glyph to scale.
+/// @param target The size the whole glyph is scaled to.
+/// @param window The size of the rectangle wanted; it must lie within @p target.
+/// @param origin Where the rectangle starts.
+/// @return Row-major pixels of the rectangle, top row first, each 0 (clear) or 0xFF (ink).
+[[nodiscard]] std::vector<uint8_t> scaleSoftGlyph(vtbackend::SoftGlyph const& glyph,
+                                                  vtbackend::ImageSize target,
+                                                  vtbackend::ImageSize window,
+                                                  SoftGlyphWindowOrigin origin);
+
 /// What SoftFontRenderer::render did.
 enum class SoftGlyphDraw : uint8_t
 {

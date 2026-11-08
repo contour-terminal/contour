@@ -23,20 +23,31 @@ namespace
 
 std::vector<uint8_t> scaleSoftGlyph(SoftGlyph const& glyph, ImageSize target)
 {
+    return scaleSoftGlyph(glyph, target, target, SoftGlyphWindowOrigin {});
+}
+
+std::vector<uint8_t> scaleSoftGlyph(SoftGlyph const& glyph,
+                                    ImageSize target,
+                                    ImageSize window,
+                                    SoftGlyphWindowOrigin origin)
+{
     auto const targetWidth = unbox<size_t>(target.width);
     auto const targetHeight = unbox<size_t>(target.height);
-    auto pixels = std::vector<uint8_t>(targetWidth * targetHeight, uint8_t { 0 });
-    if (glyph.width == 0 || glyph.height == 0
+    auto const windowWidth = unbox<size_t>(window.width);
+    auto const windowHeight = unbox<size_t>(window.height);
+    auto pixels = std::vector<uint8_t>(windowWidth * windowHeight, uint8_t { 0 });
+    if (glyph.width == 0 || glyph.height == 0 || targetWidth == 0 || targetHeight == 0
         || glyph.coverage.size() < size_t { glyph.width } * glyph.height)
         return pixels;
 
-    for (auto const y: std::views::iota(size_t { 0 }, targetHeight))
+    for (auto const y: std::views::iota(size_t { 0 }, windowHeight))
     {
-        auto const sourceRow = (y * glyph.height / targetHeight) * glyph.width;
-        for (auto const x: std::views::iota(size_t { 0 }, targetWidth))
-            pixels[(y * targetWidth) + x] = glyph.coverage[sourceRow + (x * glyph.width / targetWidth)] != 0
-                                                ? uint8_t { 0xFF }
-                                                : uint8_t { 0 };
+        auto const sourceRow = ((origin.y + y) * glyph.height / targetHeight) * glyph.width;
+        for (auto const x: std::views::iota(size_t { 0 }, windowWidth))
+            pixels[(y * windowWidth) + x] =
+                glyph.coverage[sourceRow + ((origin.x + x) * glyph.width / targetWidth)] != 0
+                    ? uint8_t { 0xFF }
+                    : uint8_t { 0 };
     }
     return pixels;
 }
@@ -61,14 +72,10 @@ SoftGlyphDraw SoftFontRenderer::render(CellLocation position,
     for (auto const i: std::views::iota(0, tileCount))
     {
         auto const& data = *tiles.at(static_cast<size_t>(i));
-        auto renderTile = atlas::RenderTile {};
-        renderTile.x = atlas::RenderTile::X { origin.x + (i * unbox<int>(_gridMetrics.cellSize.width)) };
-        renderTile.y = atlas::RenderTile::Y { origin.y };
-        renderTile.bitmapSize = data.bitmapSize;
-        renderTile.color = atlas::normalize(color);
-        renderTile.normalizedLocation = data.metadata.normalizedLocation;
-        renderTile.tileLocation = data.location;
-        textureScheduler().renderTile(renderTile);
+        renderTile(atlas::RenderTile::X { origin.x + (i * unbox<int>(_gridMetrics.cellSize.width)) },
+                   atlas::RenderTile::Y { origin.y },
+                   color,
+                   data);
     }
     return SoftGlyphDraw::Drawn;
 }
@@ -101,22 +108,17 @@ std::optional<Renderable::TextureAtlas::TileCreateData> SoftFontRenderer::create
     auto const logicalSize =
         ImageSize { doubleWidth ? Width::cast_from(unbox(cellSize.width) * 2) : cellSize.width,
                     doubleHeight ? Height::cast_from(unbox(cellSize.height) * 2) : cellSize.height };
-    auto const scaled = scaleSoftGlyph(glyph, logicalSize);
 
-    // Slice the cell's tile out of the scaled glyph: the subIndex-th cell across, and the top or bottom half
+    // Cut the cell's tile out of the scaled glyph: the subIndex-th cell across, and the top or bottom half
     // down. The rows are kept top first, which is how the atlas takes an alpha bitmap (a FreeType glyph is
     // uploaded the same way).
-    auto const rowSize = unbox<size_t>(logicalSize.width);
-    auto const tileWidth = unbox<size_t>(cellSize.width);
     auto const tileHeight = unbox<size_t>(cellSize.height);
-    auto const sourceX = static_cast<size_t>(subIndex) * tileWidth;
-    auto const sourceY = flags.test(LineFlag::DoubleHeightBottom) ? tileHeight : size_t { 0 };
-
-    auto tile = std::vector<uint8_t>(tileWidth * tileHeight);
-    for (auto const y: std::views::iota(size_t { 0 }, tileHeight))
-        std::copy_n(scaled.begin() + static_cast<std::ptrdiff_t>(((sourceY + y) * rowSize) + sourceX),
-                    tileWidth,
-                    tile.begin() + static_cast<std::ptrdiff_t>(y * tileWidth));
+    auto tile = scaleSoftGlyph(
+        glyph,
+        logicalSize,
+        cellSize,
+        SoftGlyphWindowOrigin { .x = static_cast<size_t>(subIndex) * unbox<size_t>(cellSize.width),
+                                .y = flags.test(LineFlag::DoubleHeightBottom) ? tileHeight : size_t { 0 } });
 
     return createTileData(tileLocation,
                           std::move(tile),
