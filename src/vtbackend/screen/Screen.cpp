@@ -9164,6 +9164,8 @@ unique_ptr<ParserExtension> Screen::hookDECDLD(Sequence const& seq)
 {
     // DECDLD — Down-Line-Load Character Set (DRCS)
     // DCS Pfn;Pcn;Pe;Pcmw;Pw;Pt;Pcmh;Pcss { Dscs Sxbp1;Sxbp2;...ST
+    // Only the first eight parameters mean anything; the rest are ignored, as real fonts send a trailing `;`
+    // (the vt100.net .fnt files do) and the function table admits up to sixteen.
     auto const parameters = DecdldParameters { .pfn = seq.paramOr(0, 0),
                                                .pcn = seq.paramOr(1, 0),
                                                .pe = seq.paramOr(2, 0),

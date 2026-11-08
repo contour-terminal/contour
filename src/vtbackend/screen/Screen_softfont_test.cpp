@@ -411,3 +411,29 @@ TEST_CASE("soft glyphs are listed by position, sorted by line and then column", 
     CHECK(std::ranges::all_of(buffer.get().softGlyphs,
                               [](auto const& entry) { return entry.glyph != nullptr; }));
 }
+
+TEST_CASE("a DECDLD with a trailing empty 9th parameter loads (vt100.net .fnt header)", "[screen][softfont]")
+{
+    // The files on vt100.net/dec/vt320 are framed exactly so: 8-bit DCS, a `;` after Pcss, the final, Dscs B,
+    // glyphs separated by CR LF, 8-bit ST.
+    auto mock = MockTerm { OneLine };
+    auto const font = std::format("\x90"
+                                  "0;1;1;0;0;2;0;0;{{B{}\r\n;{}\x9c",
+                                  Glyph,
+                                  Glyph);
+    mock.writeToScreen(font);
+    REQUIRE(mock.terminal.softFonts().font(0) != nullptr);
+    mock.writeToScreen("\033(B!");
+    auto const cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    CHECK(cell.softGlyph() == SoftGlyphRef { .font = 0, .position = 0x21 });
+}
+
+TEST_CASE("a DECDLD with ten or more parameters still loads", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(std::format("\033P0;1;1;0;0;2;0;0;;;;;{{B{};{}\033\\", Glyph, Glyph));
+    REQUIRE(mock.terminal.softFonts().font(0) != nullptr);
+    mock.writeToScreen("\033(B!");
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x21 });
+}
