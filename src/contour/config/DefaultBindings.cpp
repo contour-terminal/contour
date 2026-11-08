@@ -305,6 +305,10 @@ namespace
             written(All, Primary, U'T', Any, { actions::CreateNewTab {} }),
             written(DesktopOnly, Primary, U'S', Any, { actions::SpeakSelection {} }),
             written(DesktopOnly, Primary, U'X', Any, { actions::ClosePane {} }),
+            // macOS: Command+P opens the palette, as the Primary translation of Ctrl+Shift+P gives it
+            // (Contour has no Print to lose). Shift+Command+P stays bound below for VS Code, Zed and Ghostty
+            // muscle memory. This row comes first, so the menus and the palette show Command+P.
+            both(PlatformScope::MacOnly, Primary, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, PrimaryShift, U'P', Any, { actions::OpenCommandPalette {} }),
             written(All, CtrlShift, U'\\', Any, { actions::ToggleSplitOrientation {} }),
             written(DesktopOnly, Primary, U'Z', Any, { actions::TogglePaneZoom {} }),
@@ -334,6 +338,7 @@ namespace
             written(DesktopOnly, CtrlAlt, U'O', Any, { actions::OpenFileManager {} }),
             written(DesktopOnly, CtrlAlt, U'.', Any, { actions::ToggleStatusLine {} }),
             written(All, Primary, U'F', Any, { actions::SearchReverse {} }),
+            // Shift on macOS because Command+H hides the application.
             written(All, PrimaryShift, U'H', Any, { actions::NoSearchHighlight {} }),
             written(All,
                     Primary,
@@ -409,6 +414,7 @@ namespace
             both(DesktopOnly, Primary, U'K', Any, { actions::NewWindowTo {} }),
             both(PlatformScope::MacOnly, Primary, U'D', Any, { actions::SplitVertical {} }),
             both(PlatformScope::MacOnly, PrimaryShift, U'D', Any, { actions::SplitHorizontal {} }),
+            // Shift on macOS because Command+K clears to the prompt.
             both(PlatformScope::MacOnly, PrimaryShift, U'K', Any, { actions::NewWindowTo {} }),
         };
         return rows;

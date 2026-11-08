@@ -17,8 +17,10 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 using namespace contour;
 using namespace contour::config;
@@ -61,6 +63,60 @@ std::string describe(InputMappings const& mappings)
                             collision.chord);
     return text;
 }
+
+/// The rows of @p written (both editions' defaults on @p kind) and @p fallbacks that sit on one chord, as
+/// action names in table order, without repeats.
+template <typename Input, typename Written, typename Fallbacks>
+[[nodiscard]] std::vector<std::string_view> actionsOn(
+    Written written, Fallbacks const& fallbacks, Modifiers modifiers, Input input, MatchModes modes)
+{
+    auto result = std::vector<std::string_view> {};
+    auto const take = [&](auto const& row) {
+        if (row.modifiers != modifiers || row.input != input || row.binding.empty())
+            return;
+        if (modes != MatchModes {} && row.modes != modes)
+            return;
+        auto const name = actions::name(row.binding.front());
+        if (std::ranges::find(result, name) == result.end())
+            result.push_back(name);
+    };
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const& row: written(edition))
+            take(row);
+    for (auto const& row: fallbacks)
+        take(row.mapping);
+    return result;
+}
+
+/// The actions bound to a character chord on @p kind, in either edition's defaults or the fallbacks.
+/// @param modes When not empty, only rows requiring exactly these modes.
+[[nodiscard]] std::vector<std::string_view> charActions(KeyboardPlatformKind kind,
+                                                        Modifiers modifiers,
+                                                        char32_t input,
+                                                        MatchModes modes = {})
+{
+    return actionsOn(
+        [kind](DefaultsEdition edition) { return makeDefaultInputMappings(edition, kind).charMappings; },
+        builtinFallbackCharMappings(kind),
+        modifiers,
+        input,
+        modes);
+}
+
+/// The actions bound to a character chord on @p kind in the fallback table only.
+[[nodiscard]] std::vector<std::string_view> fallbackCharActions(KeyboardPlatformKind kind,
+                                                                Modifiers modifiers,
+                                                                char32_t input)
+{
+    return actionsOn([](DefaultsEdition) { return std::vector<CharInputMapping> {}; },
+                     builtinFallbackCharMappings(kind),
+                     modifiers,
+                     input,
+                     MatchModes {});
+}
+
+/// Shorthand for an expected list of action names.
+using Names = std::vector<std::string_view>;
 } // namespace
 
 TEST_CASE("modesOverlap", "[bindings]")
@@ -342,4 +398,15 @@ TEST_CASE("every platform opens the Connect picker with its New Window to… cho
             CHECK(claimed == 1);
         }
     }
+}
+
+TEST_CASE("macOS opens the command palette with Command+P and Shift+Command+P", "[bindings][palette]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    CHECK(charActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
+    CHECK(charActions(mac, Modifiers { Modifier::Super, Modifier::Shift }, U'P')
+          == Names { "OpenCommandPalette" });
+    // A configuration written before Command+P existed lists Shift+Command+P only; Command+P reaches it as a
+    // fallback.
+    CHECK(fallbackCharActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
 }

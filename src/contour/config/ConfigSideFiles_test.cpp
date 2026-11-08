@@ -167,9 +167,19 @@ TEST_CASE("Config: the command palette is bound to Ctrl+Shift+P by default", "[c
     REQUIRE(bound != mappings.charMappings.end());
     CHECK(bound->input == U'P');
     // Primary+Shift: Ctrl+Shift on the desktop, Command+Shift on a Mac.
-    CHECK(bound->modifiers
-          == contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
-                 .with(vtbackend::Modifier::Shift));
+    auto const primaryShift = contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind)
+                                  .with(vtbackend::Modifier::Shift);
+    if constexpr (contour::config::BuildKeyboardPlatformKind == contour::config::KeyboardPlatformKind::Mac)
+    {
+        // A Mac lists Command+P first, the chord the menus show, and keeps Shift+Command+P beside it.
+        CHECK(bound->modifiers == vtbackend::Modifiers { vtbackend::Modifier::Super });
+        CHECK(std::ranges::any_of(mappings.charMappings, [&](auto const& mapping) {
+            return mapping.input == U'P' && mapping.modifiers == primaryShift && !mapping.binding.empty()
+                   && std::holds_alternative<contour::actions::OpenCommandPalette>(mapping.binding.at(0));
+        }));
+    }
+    else
+        CHECK(bound->modifiers == primaryShift);
 }
 
 TEST_CASE("Config: command_palette_recent_count", "[config][palette]")
