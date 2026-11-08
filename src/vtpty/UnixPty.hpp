@@ -45,7 +45,6 @@ class UnixPty final: public Pty
         void close() override;
         [[nodiscard]] bool isClosed() const noexcept override;
         bool configure() noexcept override;
-        bool login() override;
         int write(std::string_view) noexcept override;
     };
 

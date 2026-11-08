@@ -1382,8 +1382,6 @@ namespace
 
 void ContourGuiApp::releaseHosting()
 {
-    // A spawn still held back is let go, so that stopping the attach below finds nothing waiting.
-    openDaemonSpawnGate();
     _awaitAttach = nullptr;
     _onGuiBooted = nullptr;
     // Each stops serving its windows as it stops.
@@ -1395,12 +1393,6 @@ void ContourGuiApp::releaseHosting()
         _sessionManager.releaseBinding(_tmuxController->windowBinding());
         _tmuxController->stop();
     }
-}
-
-void ContourGuiApp::openDaemonSpawnGate() noexcept
-{
-    _daemonSpawnGate->store(DaemonSpawnGate::Open);
-    _daemonSpawnGate->notify_all();
 }
 
 std::expected<void, std::string> ContourGuiApp::startNativeAttach()
@@ -1469,7 +1461,6 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         // stop() does not wait -- while a spawned daemon comes up; nothing else uses what it captures.
         auto ensureDaemon =
             [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
-             spawnGate = _daemonSpawnGate,
              placement = _processPlacement,
              repairOnce = std::make_shared<std::once_flag>(),
              label,
@@ -1483,7 +1474,6 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
                 std::call_once(*repairOnce, [&] { start->repairRegistration(label); });
                 return {};
             }
-            spawnGate->wait(DaemonSpawnGate::Closed);
             // A registered service is started before a daemon is spawned on demand.
             auto const starter = start->starter(
                 label, vthost::UnixEndpoint { .socketPath = controlPath }, *placement, daemonOptions);
@@ -2756,7 +2746,6 @@ int ContourGuiApp::terminalGuiAction()
     // The platform Qt runs on is known now; a test injected its own probe at construction.
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());
-    openDaemonSpawnGate();
     // So that Windows Installer, replacing a running Contour, can close it and open it again as it was
     // started. Failing to register only costs that reopening, so it is logged and nothing more.
     registerForRestart();

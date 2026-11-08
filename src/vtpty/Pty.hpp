@@ -51,7 +51,6 @@ class PtySlave
     virtual void close() = 0;
     [[nodiscard]] virtual bool isClosed() const noexcept = 0;
     [[nodiscard]] virtual bool configure() noexcept = 0;
-    [[nodiscard]] virtual bool login() = 0;
     [[nodiscard]] virtual int write(std::string_view text) noexcept = 0;
 };
 
@@ -61,7 +60,6 @@ class PtySlaveDummy: public PtySlave
     void close() override {}
     [[nodiscard]] bool isClosed() const noexcept override { return false; }
     bool configure() noexcept override { return true; }
-    bool login() override { return true; }
     int write(std::string_view) noexcept override { return 0; }
 };
 

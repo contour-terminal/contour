@@ -317,6 +317,12 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_input_platform_neutral check-input-platform-neutral.py)
         contour_add_lint_gate(check_input_platform_neutral_selftest check-input-platform-neutral.py --self-test)
 
+        # No fork() or forkpty() in a threaded process: every first-party spawn is a posix_spawn of this
+        # executable in trampoline mode, and only the single-threaded trampoline forks (an allowlist in the
+        # script names it and the crash-path addr2line). Test code is exempt; the self-test keeps the scanner honest.
+        contour_add_lint_gate(check_no_threaded_fork check-no-threaded-fork.py)
+        contour_add_lint_gate(check_no_threaded_fork_selftest check-no-threaded-fork.py --self-test)
+
         # The chrome QML takes every colour from the palette or from chromeStyle. This gate fails on a hex
         # literal or an all-numeric Qt.rgba( in src/contour/qml and src/contour/styles, so a hardcoded
         # colour cannot return; the self-test keeps the scanner itself honest.

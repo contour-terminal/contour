@@ -20,17 +20,18 @@
 #ifndef _WIN32
 TEST_CASE("ControlModeSpawn.arguments", "[vthost][tmux]")
 {
-    // Built before the fork, as everything the child uses is: it may not allocate.
+    // Built before the spawn: the argument vector travels to the trampoline in the spawn spec.
     CHECK(vthost::tmux::controlModeArguments("")
           == std::vector<std::string> { "tmux", "-C", "attach-session" });
     CHECK(vthost::tmux::controlModeArguments("/tmp/tmux-1000/default")
           == std::vector<std::string> { "tmux", "-C", "-S", "/tmp/tmux-1000/default", "attach-session" });
 }
 
-TEST_CASE("ControlModeSpawn.a tmux that is not on PATH is reported without a fork", "[vthost][tmux]")
+TEST_CASE("ControlModeSpawn.a tmux that is not on PATH is reported without a spawn", "[vthost][tmux]")
 {
-    // The program is looked up here, before forkpty(): a PATH walk in the child would allocate. Not finding
-    // it is then a reason to give, rather than a child that exits 127 behind a transport that just ends.
+    // The program is looked up here, before the spawn: the trampoline is given an image to exec, not a name
+    // to search for. Not finding it is then a reason to give, rather than a child that exits 127 behind a
+    // transport that just ends.
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
     auto placement = vtpty::NoPlacement {};
@@ -48,7 +49,7 @@ TEST_CASE("ControlModeSpawn.a tmux that is not on PATH is reported without a for
 TEST_CASE("ControlModeSpawn.tmux is looked for among the files it is handed", "[vthost][tmux]")
 {
     // A tmux only this in-memory filesystem has: the lookup finds it there, without asking the disk. The
-    // child's exec of it then fails, and the child exits; that it was forked at all says it was found.
+    // child's exec of it then fails, and the child exits; that it was spawned at all says it was found.
     auto files = core::platform::testing::InMemoryFileSystem {};
     files.addExecutable("/contour-test-only/bin/tmux");
     auto const source = core::net::makeDefaultBackend();

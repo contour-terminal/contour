@@ -16,8 +16,8 @@ act on the unit as a whole:
 
 ## What happens now
 
-`vtpty::Process::start()` forks the child and **parks** it on a gate — a socket pair — before
-`exec`. The parent hands the child, as a `ParkedChild`, to the injected `ProcessPlacement`:
+`vtpty::Process::start()` spawns the child through the [spawn trampoline](#the-spawn-trampoline) and
+**parks** it on a gate — a socket pair — before `exec`. The parent hands the child, as a `ParkedChild`, to the injected `ProcessPlacement`:
 
 - `SystemdScopePlacement` (Linux, `CONTOUR_WITH_SYSTEMD=ON`) asks the user's systemd, over
   sd-bus, for a transient `contour-session-<contour pid>-<child pid>-<n>.scope` in `app.slice` with
@@ -47,7 +47,8 @@ The programs a session starts outside its terminal go through the **same placeme
 local file a link names (`xdg-open`), the viewer `OpenCommandOutput` hands a command's output to, the
 second Contour that follows a link to an executable file or opens one in `$EDITOR`, and the one
 `spawn_new_process` starts. `ExternalLauncher` starts each through `vtpty::startDetached()`, which
-double-forks -- the program is not Contour's child, and outlives it -- and parks the program's
+spawns the trampoline, and the trampoline forks the program once -- the program is not Contour's child,
+and outlives it -- and parks the program's
 process on a gate exactly as `Process::start()` parks a shell. `ContourGuiApp` hands the sessions'
 factory and the launcher one placement. Windows starts them through `QProcess`, having no placement.
 The daemon `contour client` spawns, and the one `contour daemon --background` starts, go through
@@ -75,6 +76,97 @@ Contour into a scope there leaves it unprotected. An install to a prefix systemd
 `~/.local`, whose `lib/systemd/user` is not on the user search path -- installs drop-ins that have
 no effect.
 
+## The spawn trampoline
+
+Contour is multithreaded, and `fork()` from a multithreaded process is only safe if no other thread
+holds a lock that the child, or an at-fork handler, then needs. That is a property of every library
+loaded, not of Contour's code. #2181 was the instance that bit: on macOS the attach worker forked the
+on-demand daemon while the main thread was inside `QApplication`'s constructor, in `setlocale()`; Apple's
+libc takes the locale and malloc locks in opposite orders in its at-fork handler and in `setlocale()`,
+and the two threads deadlocked. Holding the spawn back until `QApplication` existed removed that race,
+not the class. So no first-party code forks from a threaded process any more: every child is started by
+`posix_spawn` of **Contour's own executable in a hidden trampoline mode** (`vtpty/SpawnTrampoline.hpp`).
+The trampoline is a fresh, single-threaded process, so everything between "spawned" and `exec` -- the
+placement gate, `setsid`, the controlling terminal, the working directory, the environment, the
+login-shell fallback -- runs without any lock it could trip over. It is the same work that used to run
+between `fork()` and `exec()`, moved after an `exec` instead of before one.
+
+### How it works
+
+- **The marker.** The parent runs the executable with `argv[1]` equal to
+  `--vtpty-spawn-trampoline=<version>` (`SpawnTrampolineMarker`; the version is
+  `SpawnTrampolineProtocolVersion`, 1 today). Every `main()` that can reach a spawn site -- Contour's,
+  the test mains and the tools -- calls `vtpty::runSpawnTrampolineIfRequested()` as its first statement; on a
+  marker it performs the trampoline and never returns, otherwise it returns and the program starts as
+  usual. A binary that reaches a spawn site without the call would run its own `main` with the marker as
+  an argument, so the call is the first line of every `main()`.
+- **The spec.** What the child is to become -- program, arguments, environment, working directory,
+  lookup rule (exact path or `PATH` search), whether to take the PTY as controlling terminal, whether to
+  configure the terminal settings, where an exec failure is reported (`SpawnSpec`) -- is serialized by the
+  parent and read by the trampoline from **file descriptor 3**. A descriptor, not `argv`: an environment
+  block can exceed Linux's 128 KiB limit for one argument. The trampoline itself runs under the parent's
+  environment, so the dynamic loader finds Contour's libraries exactly as it did for the parent
+  (`LD_LIBRARY_PATH`, `DYLD_*`); the child's environment travels in the spec and is installed right before
+  `exec`.
+- **The slots.** Descriptors the trampoline inherits sit at fixed numbers, set up with
+  `posix_spawn_file_actions_adddup2`, from 4 up: 4 Gate (the placement gate), 5 Settle (the byte that
+  says the terminal is taken on), 6 Terminal (the PTY slave), 7 FastPipe (the stdout fast pipe), 8 Input
+  and 9 Output (the stdin and stdout of a detached program). A spec lists the slots it was given
+  (`TrampolineSlots`).
+- **The modes.** `Terminal` is a session shell or the tmux client: place, take the PTY on, `chdir`,
+  install the environment, `exec`, and on failure the diagnostics and fallback ladder the child always
+  had, written to the terminal. `Detached` is a program started outside any terminal: the trampoline
+  forks once -- safe, being single-threaded -- the intermediate process reports the program's pid (or
+  `-errno`) over the gate and exits, the parent reaps it and places the program, which parks, sets its
+  stdio, and `exec`s. The program stays reparented to init, as before. Opening the PTY master stays
+  in the parent, in the `vtpty` PTY code.
+- **Placement is unchanged.** `posix_spawn` returns the pid that `exec` keeps, so
+  `ProcessPlacement::placeThenRelease` places the trampoline process and, with it, the program it
+  becomes; the program still starts only after the release byte.
+
+### Finding the executable
+
+The parent spawns the *running* image, resolved by a stateless function:
+
+- **Linux:** the literal path `/proc/self/exe`. `posix_spawn` resolves it in the child, which still
+  shares the parent's image, so it names the running file even after a package upgrade replaced or
+  deleted it on disk.
+- **macOS:** `_NSGetExecutablePath()`, made absolute. The file at that path can be a newer version after
+  an app update; the version marker is what keeps that safe.
+- **FreeBSD:** `sysctl` `KERN_PROC_PATHNAME`.
+
+### The version marker
+
+Parent and trampoline are the same binary except across an in-place update, when a still-running old
+Contour spawns the new file. The trampoline reads the version first; one it does not understand ends
+with a distinct status and a diagnostic on its stderr, which is the parent's. What the parent then
+surfaces depends on the mode: `startDetached()` reaps the trampoline and returns a spawn error
+(`protocol_not_supported`, or `bad_message` for an unreadable spec). `Process::start()` does not look at
+the exit status of a session's trampoline: the diagnostic appears on the parent's stderr and the session
+sees its child exit with that status. Either way an old GUI fails to open new shells until it is
+restarted, rather than misreading a newer spec.
+Changing the spec's layout means bumping `SpawnTrampolineProtocolVersion`.
+
+### Cost
+
+One extra `exec` of the Qt-linked executable per spawn: **about 25-29 ms** on a release build,
+measured, and accepted for a design with one binary and no helper to install.
+
+### Audit: what still forks
+
+`scripts/check-no-threaded-fork.py` (CTest label `lint`) fails on a `fork(`, `vfork(` or `forkpty(`
+call anywhere in `src/` outside the files below. Test code (`*_test.cpp`, `src/*/test/`) is exempt.
+
+| Where | Why it is outside the rule |
+|---|---|
+| `src/vtpty/SpawnTrampoline_unix.cpp` | The single-threaded trampoline: the `Detached` mode's one fork. |
+| `src/crispy/StackTrace.cpp` | Forks `addr2line` on the crash and debug path, where the process is already going down. |
+
+Not covered by the gate, because they are not first-party calls: `QProcess::startDetached` in
+`contour/platform/QtExternalLauncher.cpp` and `contour/ContourGuiApp.cpp` is Qt's own spawning, and Qt
+owns its safety. `CommandCapture` already used `posix_spawn`. Everything else that starts a process --
+`vtpty::Process`, `vtpty::startDetached()`, `spawnControlMode()` -- goes through the trampoline.
+
 ## Invariants worth not breaking
 
 - **Every path releases the child.** Release is `ParkedChild`'s destructor: an exception, a
@@ -82,7 +174,9 @@ no effect.
 - **Release is a byte sent with `MSG_NOSIGNAL`.** Contour does not ignore `SIGPIPE`, and a child
   killed while parked must not take Contour with it. A byte, not end-of-file, because a sibling
   forked meanwhile inherits the gate's parent end.
-- **The child waits on the gate before anything else**, using async-signal-safe calls only.
+- **The child waits on the gate before anything else.** In the trampoline -- a fresh, single-threaded,
+  exec'd process -- that is its first act after reading the spec, so nothing of the program runs
+  before the placement; no async-signal-safe restriction applies to it any more.
 - **`placeThenRelease` never blocks and never throws**: `Process::start()` runs on the GUI thread
   and reports failures as values. One worker thread owns the sd-bus connection, and starts with the
   first session, with every signal blocked: the daemon waits for `SIGTERM` with `sigwait()`.

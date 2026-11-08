@@ -2,7 +2,6 @@
 #include <vtpty/UnixPty.hpp>
 
 #include <vtpty/InheritedPty.hpp>
-#include <vtpty/Process.hpp>
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -159,28 +158,6 @@ bool UnixPty::Slave::configure() noexcept
     auto const tio = util::constructTerminalSettings(_slaveFd);
     if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
         tcflush(_slaveFd, TCIOFLUSH);
-    return true;
-}
-
-bool UnixPty::Slave::login()
-{
-    if (_slaveFd < 0)
-        return false;
-
-    if (!configure())
-        return false;
-
-    // Set the controlling terminal, unless we are running inside a flatpak.
-    // Because flatpak does not allow setting the controlling terminal.
-    // - https://github.com/flatpak/flatpak/issues/3697
-    // - https://github.com/flatpak/flatpak/issues/3285
-    auto const ctty = Process::isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire;
-    if (!util::loginTerminal(_slaveFd, ctty))
-        return false;
-
-    if (_slaveFd > 2)
-        _slaveFd.close();
-
     return true;
 }
 

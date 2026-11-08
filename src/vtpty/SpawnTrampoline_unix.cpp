@@ -381,8 +381,7 @@ namespace
         {
             if (spec.terminalSettings == TerminalSettings::Configure)
                 util::applyTerminalSettings(*terminal, util::constructTerminalSettings(*terminal));
-            // As UnixPty::Slave::login() is used: a terminal it cannot make the controlling one is still the
-            // program's best chance at one.
+            // A terminal it cannot make the controlling one is still the program's best chance at one.
             std::ignore = util::loginTerminal(*terminal, spec.controllingTerminal);
             ::close(*terminal);
         }
