@@ -2563,12 +2563,33 @@ void Terminal::sendPaste(string_view text)
     // No branch for "is the user typing a search term": the find bar owns a real text field, which
     // handles its own clipboard. Appending here is what used to corrupt the pattern, since it wrote
     // past the edit buffer the prompt was actually rendering from.
-    core::locked(_inputMutex, [&] { _inputGenerator.generatePaste(text); });
+    core::locked(_inputMutex, [&] {
+        // ConPTY delivers bare LF differently from Enter. PSReadLine can insert the next line
+        // above the previous one even inside bracketed paste markers, so normalize before wrapping.
+        if (device().pasteLineEndings() == vtpty::PasteLineEndings::CarriageReturn && text.contains('\n'))
+        {
+            auto normalized = std::string {};
+            normalized.reserve(text.size());
+            auto previous = '\0';
+            for (auto const ch: text)
+            {
+                if (ch != '\n' || previous != '\r')
+                    normalized.push_back(ch == '\n' ? '\r' : ch);
+                previous = ch;
+            }
+            _inputGenerator.generatePaste(normalized);
+        }
+        else
+            _inputGenerator.generatePaste(text);
+    });
     flushInput();
 }
 
 bool Terminal::pastesUnchanged(string_view text) const
 {
+    if (device().pasteLineEndings() == vtpty::PasteLineEndings::CarriageReturn && text.contains('\n'))
+        return false;
+
     auto const purpose =
         isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
     return isUnchangedBySanitizing(text, purpose);

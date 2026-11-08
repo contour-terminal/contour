@@ -253,6 +253,7 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage, std::optional<std::chrono::milliseconds> timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
+    [[nodiscard]] PasteLineEndings pasteLineEndings() const noexcept override { return pty().pasteLineEndings(); }
     void interruptWrites() override { pty().interruptWrites(); }
     void allowWrites() override { pty().allowWrites(); }
     [[nodiscard]] std::expected<InheritedPty, AdoptError> handover() const override { return pty().handover(); }
