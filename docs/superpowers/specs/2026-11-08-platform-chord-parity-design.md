@@ -189,7 +189,7 @@ Ctrl+Shift+X? — **builder's call, my suggestion: Ctrl+Shift+W**, the more fami
 
 - `⌘W` closes the focused pane (then the tab), `⇧⌘W` closes the tab. Played back to the user without
   objection, but not explicitly confirmed.
-- The concrete new Mac chords: `⇧⌘O`, `⌃⌘.`, `⌃⌘O`, `⌃⌘S`, `⌃⌘,`, `⌥⇧⌘V`.
+- The concrete new Mac chords: `⇧⌘O`, `⌃⌘.`, `⌃⌘O`, `⌃⌘S`, `⌃⌘,`, `⌃⌘V`.
 - Desktop: `Ctrl+Shift+W` as an *additional* ClosePane chord; CloseTab stays unbound there.
 - Ctrl+Shift+C is a plain `both` row (no consume; it does not decline).
 - PasteClipboard(strip) on macOS is ⌃⌘V.
