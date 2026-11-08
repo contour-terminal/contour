@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -17,6 +18,50 @@ using std::string;
 using std::string_view;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
+
+TEST_CASE("utils.split keeps every field, an empty last one included")
+{
+    struct Case
+    {
+        string_view text {};
+        std::vector<string_view> fields {};
+    };
+    auto const cases = std::array {
+        Case { .text = ""sv, .fields = {} },
+        Case { .text = "a"sv, .fields = { "a"sv } },
+        Case { .text = "a;b"sv, .fields = { "a"sv, "b"sv } },
+        Case { .text = "a;;b"sv, .fields = { "a"sv, ""sv, "b"sv } },
+        Case { .text = ";a"sv, .fields = { ""sv, "a"sv } },
+        Case { .text = "a;"sv, .fields = { "a"sv, ""sv } },
+        Case { .text = ";"sv, .fields = { ""sv, ""sv } },
+        Case { .text = "c;"sv, .fields = { "c"sv, ""sv } }, // OSC 52 ; c ; -- an empty last parameter
+    };
+
+    for (auto const& testCase: cases)
+    {
+        INFO("text: \"" << testCase.text << '"');
+        CHECK(core::split(testCase.text, ';') == testCase.fields);
+    }
+}
+
+TEST_CASE("utils.split's callback form stops where the callback says")
+{
+    auto seen = std::vector<string_view> {};
+    auto const ranToEnd = core::split("a;b;"sv, ';', [&](string_view field) {
+        seen.push_back(field);
+        return true;
+    });
+    CHECK(ranToEnd);
+    CHECK(seen == std::vector { "a"sv, "b"sv, ""sv });
+
+    seen.clear();
+    auto const stopped = core::split("a;b;c"sv, ';', [&](string_view field) {
+        seen.push_back(field);
+        return field != "b";
+    });
+    CHECK_FALSE(stopped);
+    CHECK(seen == std::vector { "a"sv, "b"sv });
+}
 
 TEST_CASE("utils.split.0")
 {

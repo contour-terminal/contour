@@ -415,6 +415,22 @@ TEST_CASE("the standard formatter lays a line out as configured", "[log][logsink
         CHECK(lines[0] == "[test.formatter] first");
         CHECK(lines[1] == "        second");
     }
+
+    SECTION("a trailing line break ends the last line rather than starting an empty one")
+    {
+        category.value.setFormatter(
+            core::log::makeStandardFormatter({ .colorize = false, .showTimestamp = false }));
+        category.value()("first\nsecond\n");
+        CHECK(capture.text() == "[test.formatter] first\n        second\n");
+    }
+
+    SECTION("a message of nothing but a line break is one empty line, not none")
+    {
+        category.value.setFormatter(
+            core::log::makeStandardFormatter({ .colorize = false, .showTimestamp = false }));
+        category.value()("\n");
+        CHECK(capture.text() == "[test.formatter] \n");
+    }
 }
 
 TEST_CASE("the error formatter tags its lines so they stand out", "[log][logsink]")

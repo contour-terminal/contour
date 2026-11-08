@@ -7,6 +7,45 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.17.0] - 2026-11-08
+
+### Breaking
+
+- **`core::split` keeps an empty last field.** `split("a;", ';')` is now `a`, `` rather than `a` alone, as
+  `"a;;b"` and `";a"` already kept theirs -- the last field was the only one dropped when empty. A protocol
+  whose last parameter may be empty (`OSC 52 ; c ;`, which clears the clipboard; `OSC 777 ; notify ; title ;`)
+  could not be read with it. An empty text still has no fields. Migration: a caller to which an empty field
+  means nothing skips it (`if (field.empty()) continue;`); one splitting text into lines by `'\n'` drops a
+  trailing line break first, as the log formatter now does -- and, if that leaves the text empty, still has
+  the one empty line it was.
+
+## [0.16.0] - 2026-11-06
+
+### Added
+
+- **`core::tui::EndProbe`, `InputSource::probeEnd()`, `TerminalInput::probeEnd()` and
+  `TuiRuntimeOptions::endProbe`**: a way to ask an input, without reading it, whether it has ended where no
+  readiness reports it. `probeEnd()` is virtual with a default of `EndProbe::NotNeeded`, so an existing source
+  compiles and behaves as before -- and a source that wraps another must forward it, or it turns the question off;
+  `endProbe` defaults to one second, and zero turns the asking off.
+
+### Fixed
+
+- **On Windows, a TUI no longer outlives a console whose host process died.** Closing a Windows Terminal tab or
+  window, or the terminal dying, can end the console host without a close event reaching the client. The
+  client's console input handle is then never signalled again -- every console call on it fails with
+  `ERROR_PIPE_NOT_CONNECTED` instead -- so the runtime's input flow stayed parked for ever, the read that
+  reports an ended input (core-cpp#49) never ran, and the process lived on with no console, waking only for
+  its own timers. A shell built on the runtime kept starting `cmd.exe` children that could not attach to the
+  dead console and failed with `0xC0000142`, each raising an error dialog. `TuiRuntime` now asks such an
+  input every `TuiRuntimeOptions::endProbe`, and ends its input stream as an ended read does once the console
+  can no longer answer -- only an answer that says the console is gone ends it, so a passing failure does not
+  end a live session. An input whose end arrives as readiness, which is every POSIX one, answers
+  `EndProbe::NotNeeded` to the first question, in the runtime's first turn, and costs no timer.
+  `TerminalInput::poll()`, the wait under no runtime, does the same on Windows: it waits in slices of at most a
+  second and asks between them, so a `poll(-1)` returns once the console is gone, with `inputClosed()` true,
+  instead of never.
+
 ## [0.15.0] - 2026-11-06
 
 ### Added

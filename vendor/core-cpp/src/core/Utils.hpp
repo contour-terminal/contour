@@ -244,11 +244,24 @@ template <std::ranges::input_range Range>
     return result;
 }
 
+/// Hands each field of @p text, as separated by @p delimiter, to @p callback in order.
+///
+/// Every field is a field, empty or not and wherever it stands: `"a;;b"` is `a`, ``, `b`; `";a"` is ``, `a`;
+/// and `"a;"` is `a`, `` -- an empty last field is not dropped, so a protocol whose last parameter may be
+/// empty (`OSC 52 ; c ;`) reads it as given. Only an empty @p text has no fields at all. A caller to which an
+/// empty field means nothing skips it itself.
+/// @param text The text to split.
+/// @param delimiter What separates two fields.
+/// @param callback Called with each field; returning false ends the walk.
+/// @return false if @p callback ended the walk, true if every field was handed over.
 template <typename T, typename Callback>
 constexpr bool split(std::basic_string_view<T> text,
                      T delimiter,
                      Callback const& callback) noexcept(noexcept(callback(std::basic_string_view<T> {})))
 {
+    if (text.empty())
+        return true;
+
     size_t a = 0;
     size_t b = 0;
     while ((b = text.find(delimiter, a)) != std::basic_string_view<T>::npos)
@@ -259,12 +272,14 @@ constexpr bool split(std::basic_string_view<T> text,
         a = b + 1;
     }
 
-    if (a < text.size())
-        return callback(text.substr(a));
-
-    return true;
+    return callback(text.substr(a));
 }
 
+/// Splits @p text into its fields, as the callback form of split() hands them over: an empty last field
+/// included, and none for an empty @p text.
+/// @param text The text to split.
+/// @param delimiter What separates two fields.
+/// @return The fields, in order, as views into @p text.
 template <typename T>
 constexpr auto split(std::basic_string_view<T> text, T delimiter) -> std::vector<std::basic_string_view<T>>
 {

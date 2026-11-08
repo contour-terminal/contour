@@ -577,7 +577,8 @@ namespace
         if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS", configEnvironment());
             !terminfoDirs.empty())
             for (auto const dir: core::split(string_view(terminfoDirs), ':'))
-                locations.emplace_back(string(dir));
+                if (!dir.empty()) // ncurses reads an empty entry as its default directory, added below
+                    locations.emplace_back(string(dir));
 
         locations.emplace_back("/usr/share/terminfo");
 

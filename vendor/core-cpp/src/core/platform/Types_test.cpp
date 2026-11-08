@@ -16,6 +16,20 @@
 #include <cstdint>
 #include <string_view>
 
+#ifdef __EMSCRIPTEN__
+    #include <emscripten/version.h>
+// 7.0 renamed the version macros and deprecates the old spelling, which -Werror then refuses; the
+// releases before it have only the old one. defined() does not expand a macro, so asking is safe.
+namespace
+{
+    #if defined(__EMSCRIPTEN_MAJOR__)
+constexpr auto EmscriptenMajor = __EMSCRIPTEN_MAJOR__;
+    #else
+constexpr auto EmscriptenMajor = __EMSCRIPTEN_major__;
+    #endif
+} // namespace
+#endif
+
 #ifdef _WIN32
     #include <windows.h>
 #else
@@ -90,11 +104,20 @@ TEST_CASE("platformRead.drained_pipe_whose_writer_closed", "[platform]")
     errno = 0;
     auto const second = platformRead(readH, buf.data(), buf.size());
 #ifdef __EMSCRIPTEN__
-    // ...except under Emscripten, whose pipes have no end of file: a read of an empty pipe
-    // fails with EAGAIN whether or not the writer has closed (see platformRead()).
+    // ...except under Emscripten before 7.0, whose pipes have no end of file: a read of an empty pipe
+    // fails with EAGAIN whether or not the writer has closed (see platformRead()). 7.0 reports the end of
+    // file as POSIX does.
     auto const readError = errno;
-    CHECK(second == -1);
-    CHECK(readError == EAGAIN);
+    if constexpr (EmscriptenMajor < 7)
+    {
+        CHECK(second == -1);
+        CHECK(readError == EAGAIN);
+    }
+    else
+    {
+        CHECK(second == 0);
+        CHECK(readError == 0);
+    }
 #else
     CHECK(second == 0);
 #endif

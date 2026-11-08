@@ -15,9 +15,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <set>
 #include <string_view>
@@ -381,6 +383,45 @@ TEST_CASE("XTGETTCAP")
         mock.writeToScreen(std::format("\033P+q{:02X}{:02X}\033\\", 'x', 'x'));
         // Note how 'xx' is not in the return reply, meaning "not found"
         CHECK(mock.terminal.peekInput() == "\033P0+r\033\\");
+    }
+}
+
+TEST_CASE("a trailing ';' is an empty last parameter", "[screen][osc]")
+{
+    // core::split keeps an empty last field, so a handler sees a trailing `;` as the empty parameter it is:
+    // read as given where the protocol allows an empty value, skipped where it names nothing.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+
+    SECTION("OSC 777 notify with an empty body still notifies")
+    {
+        mock.writeToScreen("\033]777;notify;Build done;\033\\");
+        REQUIRE(mock.notifications.size() == 1);
+        CHECK(mock.notifications[0].first == "Build done");
+        CHECK(mock.notifications[0].second.empty());
+    }
+
+    SECTION("OSC 4 sets the color before it")
+    {
+        mock.writeToScreen("\033]4;7;#abcdef;\033\\");
+        mock.writeToScreen("\033]4;7;?\033\\");
+        CHECK(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+    }
+
+    SECTION("OSC 104 resets the index before it")
+    {
+        mock.writeToScreen("\033]4;7;#abcdef\033\\");
+        mock.writeToScreen("\033]104;7;\033\\");
+        mock.writeToScreen("\033]4;7;?\033\\");
+        CHECK(e(mock.terminal.peekInput()) == e("\033]4;7;rgb:c0c0/c0c0/c0c0\033\\"));
+    }
+
+    SECTION("XTGETTCAP answers the capability before it, and nothing for the empty name")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen(std::format("\033P+q{};\033\\", core::toHexString(std::string_view { "am" })));
+        auto const reply = mock.terminal.peekInput();
+        INFO(e(reply));
+        CHECK(std::ranges::count(std::string_view { reply }, '\033') == 2); // one DCS ... ST, not two
     }
 }
 

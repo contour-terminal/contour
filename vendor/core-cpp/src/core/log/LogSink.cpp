@@ -104,7 +104,15 @@ namespace
             return result;
         }
 
-        for (auto const [index, line]: core::views::enumerate(core::split(message.text(), '\n')))
+        // A message ending in a line break ends its last line there; it does not begin an empty one. A
+        // message that is nothing but the line break is still one (empty) line, not none.
+        auto text = std::string_view { message.text() };
+        if (text.ends_with('\n'))
+            text.remove_suffix(1);
+        auto lines = core::split(text, '\n');
+        if (lines.empty())
+            lines.emplace_back();
+        for (auto const [index, line]: core::views::enumerate(lines))
         {
             if (index == 0)
                 appendPrefix();
