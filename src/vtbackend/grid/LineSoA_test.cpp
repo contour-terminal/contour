@@ -987,6 +987,29 @@ TEST_CASE("LineSoA.softGlyph writing a cell drops its soft glyph", "[LineSoA][So
     CHECK(!line.useCellAt(ColumnOffset(7)).softGlyph());
 }
 
+TEST_CASE("LineSoA.softGlyph a wide character drops the soft glyph under its continuation",
+          "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(3)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    line.useCellAt(ColumnOffset(4)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x22 });
+
+    static_cast<void>(writeTextToSoA(line.storage(), 3, "\xE4\xB8\x96", GraphicsAttributes {})); // U+4E16
+    CHECK(!line.useCellAt(ColumnOffset(3)).softGlyph());
+    CHECK(!line.useCellAt(ColumnOffset(4)).softGlyph());
+}
+
+TEST_CASE("LineSoA.softGlyph writeTextOnly drops the soft glyph", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(3)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    line.useCellAt(ColumnOffset(4)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x22 });
+
+    line.useCellAt(ColumnOffset(3)).writeTextOnly(U' ', 1);
+    CHECK(!line.useCellAt(ColumnOffset(3)).softGlyph());
+    CHECK(line.useCellAt(ColumnOffset(4)).softGlyph());
+}
+
 TEST_CASE("LineSoA.softGlyph reset drops all soft glyphs", "[LineSoA][SoftGlyph]")
 {
     auto line = Line(ColumnCount(10));

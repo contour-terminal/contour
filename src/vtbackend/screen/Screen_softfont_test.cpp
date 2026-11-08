@@ -478,3 +478,29 @@ TEST_CASE("DECCRA copies soft glyphs with their cells", "[screen][softfont]")
           == SoftGlyphRef { .font = 0, .position = 0x22 });
     CHECK(screen.at(LineOffset(1), ColumnOffset(1)).codepoint(0) == U'!');
 }
+
+TEST_CASE("DECSERA erases the soft glyph of a cell", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\"");
+    auto& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+
+    mock.writeToScreen("\033[1;1;1;1${"); // DECSERA over the first cell only
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoint(0) == U' ');
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
+}
+
+TEST_CASE("a wide character written over soft cells leaves no soft glyph behind", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\"");
+    mock.writeToScreen("\033(B\033[1;1H世"); // plain US-ASCII again, so the wide character is plain text
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoint(0) == U'世');
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
+}

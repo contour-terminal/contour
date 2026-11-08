@@ -183,6 +183,8 @@ class BasicCellProxy
         _line->clusterSize[_col] = (ch != 0) ? uint8_t { 1 } : uint8_t { 0 };
         if (oldClusterSize > 1)
             clearClusterExtras(*_line, _col);
+        // New text replaces whatever the cell showed instead of it, a soft glyph included.
+        clearReplacedSideTables(*_line, static_cast<uint16_t>(_col));
     }
 
     void reset() noexcept
