@@ -56,6 +56,9 @@ namespace
         ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt } };
     constexpr auto SuperShift = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Shift } };
     constexpr auto SuperAlt = ChordSpec { .extra = Modifiers { Modifier::Super, Modifier::Alt } };
+    /// Control+Command: the macOS counterpart of a desktop Ctrl+Alt row. Option composes characters, so an
+    /// Option chord on a character cannot fire; Control+Command is the Mac's own second tier.
+    constexpr auto CtrlSuper = ChordSpec { .extra = Modifiers { Modifier::Control, Modifier::Super } };
     /// The host's Primary set: Command on macOS, Ctrl+Shift elsewhere.
     constexpr auto Primary = ChordSpec { .primary = PrimaryUse::Present };
     /// Primary plus Shift: Shift+Command on macOS, which is where macOS spells these chords, and still
@@ -295,6 +298,7 @@ namespace
     {
         static auto const rows = std::vector<DefaultBindingRow<char32_t>> {
             written(DesktopOnly, CtrlAlt, U',', Any, { actions::ToggleInputMethodHandling {} }),
+            both(MacOnly, CtrlSuper, U',', Any, { actions::ToggleInputMethodHandling {} }),
             written(DesktopOnly, CtrlShift, U'-', Any, { actions::DecreaseFontSize {} }),
             written(DesktopOnly, CtrlShift, U'_', Any, { actions::DecreaseFontSize {} }),
             // Ctrl+Shift+= (Ctrl+Shift+plus on a US layout) enlarges the font, as in kitty and GNOME
@@ -307,8 +311,10 @@ namespace
             both(DesktopOnly, Primary, U'C', Any, { actions::CopySelection {}, actions::CancelSelection {} }),
             written(All, Primary, U'N', Any, { actions::NewTerminal {} }),
             written(DesktopOnly, CtrlAlt, U'V', Any, { actions::PasteClipboard { .strip = true } }),
+            both(MacOnly, CtrlSuper, U'V', Any, { actions::PasteClipboard { .strip = true } }),
             written(All, Primary, U'V', Any, { actions::PasteClipboard { .strip = false } }),
             written(DesktopOnly, CtrlAlt, U'S', Any, { actions::ScreenshotVT {} }),
+            both(MacOnly, CtrlSuper, U'S', Any, { actions::ScreenshotVT {} }),
             written(DesktopOnly, Ctrl, U'0', Any, { actions::ResetFontSize {} }),
             written(All, Primary, U'T', Any, { actions::CreateNewTab {} }),
             written(DesktopOnly, Primary, U'S', Any, { actions::SpeakSelection {} }),
@@ -348,7 +354,9 @@ namespace
             written(DesktopOnly, CtrlAlt, U'K', PrimaryScreenOnly, { actions::ScrollMarkUp {} }),
             written(DesktopOnly, CtrlAlt, U'J', PrimaryScreenOnly, { actions::ScrollMarkDown {} }),
             written(DesktopOnly, CtrlAlt, U'O', Any, { actions::OpenFileManager {} }),
+            both(MacOnly, CtrlSuper, U'O', Any, { actions::OpenFileManager {} }),
             written(DesktopOnly, CtrlAlt, U'.', Any, { actions::ToggleStatusLine {} }),
+            both(MacOnly, CtrlSuper, U'.', Any, { actions::ToggleStatusLine {} }),
             written(All, Primary, U'F', Any, { actions::SearchReverse {} }),
             // Shift on macOS because Command+H hides the application.
             written(All, PrimaryShift, U'H', Any, { actions::NoSearchHighlight {} }),
@@ -365,6 +373,14 @@ namespace
             fallback(DesktopOnly,
                      Primary,
                      U'G',
+                     PrimaryScreenOnly,
+                     { actions::OpenCommandOutput {} },
+                     DeclinedInput::Consume),
+            // macOS: Shift+Command+O ("open output"), since Command+G steps to the next search match. As the
+            // desktop row: at the prompt only, and consumed when it declines.
+            fallback(MacOnly,
+                     PrimaryShift,
+                     U'O',
                      PrimaryScreenOnly,
                      { actions::OpenCommandOutput {} },
                      DeclinedInput::Consume),

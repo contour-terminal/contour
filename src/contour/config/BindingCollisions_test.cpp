@@ -460,3 +460,28 @@ TEST_CASE("the desktop copies with Ctrl+Shift+C and enlarges the font with Ctrl+
         CHECK(std::holds_alternative<actions::CancelSelection>(copy->mapping.binding.at(1)));
     }
 }
+
+TEST_CASE("macOS answers the desktop's Ctrl+Alt chords with Control+Command", "[bindings]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    auto const ctrlCmd = Modifiers { Modifier::Control, Modifier::Super };
+    CHECK(charActions(mac, ctrlCmd, U'.') == Names { "ToggleStatusLine" });
+    CHECK(charActions(mac, ctrlCmd, U'O') == Names { "OpenFileManager" });
+    CHECK(charActions(mac, ctrlCmd, U'S') == Names { "ScreenshotVT" });
+    CHECK(charActions(mac, ctrlCmd, U',') == Names { "ToggleInputMethodHandling" });
+    CHECK(charActions(mac, ctrlCmd, U'V') == Names { "PasteClipboard" });
+    auto const* paste = fallbackCharRow(mac, ctrlCmd, U'V');
+    REQUIRE(paste != nullptr);
+    CHECK(std::get<actions::PasteClipboard>(paste->mapping.binding.front()).strip);
+}
+
+TEST_CASE("macOS opens the last command's output with Shift+Command+O at the prompt only", "[bindings]")
+{
+    auto const mac = KeyboardPlatformKind::Mac;
+    auto const chord = Modifiers { Modifier::Super, Modifier::Shift };
+    CHECK(fallbackCharActions(mac, chord, U'O') == Names { "OpenCommandOutput" });
+    auto const* row = fallbackCharRow(mac, chord, U'O');
+    REQUIRE(row != nullptr);
+    CHECK(row->mapping.modes == MatchModes { 0, MatchModes::AlternateScreen });
+    CHECK(row->declined == DeclinedInput::Consume);
+}
