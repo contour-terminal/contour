@@ -1227,10 +1227,12 @@ TEST_CASE("TerminalSession: CopySelection may fall back to the last command's ou
         CHECK(clipboard.text() == "$ make\n");
     }
 
-    SECTION("without the fallback an empty selection is copied, as it always was")
+    SECTION("without the fallback, nothing selected leaves the clipboard alone")
     {
+        // The copy chord still claims the press, so it never reaches the application; but pressing it twice
+        // must not wipe what the first press copied.
         CHECK((*session)(contour::actions::CopySelection {}));
-        CHECK(clipboard.text().empty());
+        CHECK(clipboard.text() == "untouched");
     }
 }
 

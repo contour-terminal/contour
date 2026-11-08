@@ -5982,7 +5982,10 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
                                         vtbackend::CommandBlockId {})
                     .has_value();
 
-            copyExplicitly(text);
+            // Nothing selected and no fallback: the press is claimed, but the clipboard keeps what it held,
+            // so pressing the copy chord twice does not wipe what the first press copied.
+            if (!text.empty())
+                copyExplicitly(text);
             break;
         }
         case actions::CopyFormat::HTML:
