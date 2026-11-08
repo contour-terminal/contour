@@ -297,6 +297,14 @@ namespace
             written(DesktopOnly, CtrlAlt, U',', Any, { actions::ToggleInputMethodHandling {} }),
             written(DesktopOnly, CtrlShift, U'-', Any, { actions::DecreaseFontSize {} }),
             written(DesktopOnly, CtrlShift, U'_', Any, { actions::DecreaseFontSize {} }),
+            // Ctrl+Shift+= (Ctrl+Shift+plus on a US layout) enlarges the font, as in kitty and GNOME
+            // Terminal.
+            both(DesktopOnly, Primary, U'=', Any, { actions::IncreaseFontSize {} }),
+            both(DesktopOnly, Primary, U'+', Any, { actions::IncreaseFontSize {} }),
+            // Ctrl+Shift+C copies, as every Linux and Windows terminal does (macOS: Command+C, below). A
+            // written row cannot consume a declined press, and needs none: CopySelection does not decline on
+            // an empty selection.
+            both(DesktopOnly, Primary, U'C', Any, { actions::CopySelection {}, actions::CancelSelection {} }),
             written(All, Primary, U'N', Any, { actions::NewTerminal {} }),
             written(DesktopOnly, CtrlAlt, U'V', Any, { actions::PasteClipboard { .strip = true } }),
             written(All, Primary, U'V', Any, { actions::PasteClipboard { .strip = false } }),

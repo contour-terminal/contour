@@ -36,6 +36,9 @@ key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight d
 char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
 char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
@@ -123,6 +126,9 @@ key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight d
 char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
 char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
@@ -187,6 +193,9 @@ key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=
 key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no

@@ -115,6 +115,26 @@ template <typename Input, typename Written, typename Fallbacks>
                      MatchModes {});
 }
 
+/// The first fallback row on a chord, or nullptr.
+template <typename Input>
+[[nodiscard]] FallbackMapping<Input> const* fallbackRow(std::vector<FallbackMapping<Input>> const& rows,
+                                                        Modifiers modifiers,
+                                                        Input input)
+{
+    auto const found = std::ranges::find_if(rows, [&](auto const& row) {
+        return row.mapping.modifiers == modifiers && row.mapping.input == input;
+    });
+    return found != rows.end() ? &*found : nullptr;
+}
+
+/// The first character fallback row on a chord on @p kind, or nullptr.
+[[nodiscard]] FallbackCharMapping const* fallbackCharRow(KeyboardPlatformKind kind,
+                                                         Modifiers modifiers,
+                                                         char32_t input)
+{
+    return fallbackRow(builtinFallbackCharMappings(kind), modifiers, input);
+}
+
 /// Shorthand for an expected list of action names.
 using Names = std::vector<std::string_view>;
 } // namespace
@@ -422,4 +442,21 @@ TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][pa
           == Names { "CloseTab" });
     // The desktop keeps Ctrl+Shift+X.
     CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'X') == Names { "ClosePane" });
+}
+
+TEST_CASE("the desktop copies with Ctrl+Shift+C and enlarges the font with Ctrl+Shift+=", "[bindings]")
+{
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
+    {
+        INFO("platform " << static_cast<int>(kind));
+        CHECK(charActions(kind, ctrlShift, U'C') == Names { "CopySelection" });
+        CHECK(charActions(kind, ctrlShift, U'=') == Names { "IncreaseFontSize" });
+        CHECK(charActions(kind, ctrlShift, U'+') == Names { "IncreaseFontSize" });
+        // Copying clears the selection, as Ctrl+C in select mode does.
+        auto const* copy = fallbackCharRow(kind, ctrlShift, U'C');
+        REQUIRE(copy != nullptr);
+        REQUIRE(copy->mapping.binding.size() == 2);
+        CHECK(std::holds_alternative<actions::CancelSelection>(copy->mapping.binding.at(1)));
+    }
 }
