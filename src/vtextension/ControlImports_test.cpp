@@ -280,8 +280,8 @@ TEST_CASE("running a command needs the manifest line 'control input' beside 'con
     SECTION("a new tab naming a command, without input")
     {
         auto call =
-            GuestCall { vtcontrol::CreateTabRequest { .window = "",
-                                                      .placement = vtcontrol::WindowPlacement::Existing,
+            GuestCall { vtcontrol::CreateTabRequest { .workspace = "",
+                                                      .placement = vtcontrol::WorkspacePlacement::Existing,
                                                       .cwd = "",
                                                       .command = { "make" },
                                                       .label = "",

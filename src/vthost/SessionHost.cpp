@@ -957,9 +957,10 @@ SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRest
         auto const id = realized.panes == 0 ? _window : _model.createWindow()->id();
         // The host's own window takes the identity of each one that tries to fill it, the last such one
         // keeping it.
-        auto const uuid = restoredUuid(ObjectKind::Window, window.identity);
+        auto const uuid = restoredUuid(ObjectKind::Workspace, window.identity);
         _objects.bind(id, uuid);
-        _objects.setLabel(ObjectRef { .kind = ObjectKind::Window, .uuid = uuid }, labelOf(window.identity));
+        _objects.setLabel(ObjectRef { .kind = ObjectKind::Workspace, .uuid = uuid },
+                          labelOf(window.identity));
         auto const inWindow = realizeRestoredWindow(id, window, restore);
         // A window none of whose panes came back is not left behind empty.
         if (inWindow.panes == 0 && id != _window)
@@ -1220,7 +1221,7 @@ vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& reques
 
     auto* window = &createEmptyWindow(creator, newWindow);
     if (request.presetIds)
-        _objects.setLabel(ObjectRef { ObjectKind::Window, newWindow }, request.presetIds->windowLabel);
+        _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWindow }, request.presetIds->windowLabel);
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
     auto* tab = _model.createTab(window->id());

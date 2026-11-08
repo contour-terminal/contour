@@ -21,7 +21,7 @@ constexpr auto B1 = "pane:018f3c4e-0000-7000-8000-00000000b001";
 constexpr auto TabA = "tab:018f3c4e-0000-7000-8000-0000000000aa";
 constexpr auto TabB = "tab:018f3c4e-0000-7000-8000-0000000000bb";
 
-// One window: tab B listed first, then tab A {a1 "build", a2 "tests"}; tab B {b1 "build"}.
+// One workspace: tab B listed first, then tab A {a1 "build", a2 "tests"}; tab B {b1 "build"}.
 vtcontrol::ListReply workspace()
 {
     auto tabB = vtcontrol::TabInfo { .id = TabB, .position = 1 };
@@ -29,11 +29,11 @@ vtcontrol::ListReply workspace()
     auto tabA = vtcontrol::TabInfo { .id = TabA, .position = 2 };
     tabA.panes.push_back(vtcontrol::PaneInfo { .id = A1, .label = "build" });
     tabA.panes.push_back(vtcontrol::PaneInfo { .id = A2, .label = "tests" });
-    auto window =
-        vtcontrol::WindowInfo { .id = "window:018f3c4e-0000-7000-8000-0000000000ff", .position = 1 };
-    window.tabs.push_back(tabB);
-    window.tabs.push_back(tabA);
-    return { .windows = { window } };
+    auto workspace =
+        vtcontrol::WorkspaceInfo { .id = "workspace:018f3c4e-0000-7000-8000-0000000000ff", .position = 1 };
+    workspace.tabs.push_back(tabB);
+    workspace.tabs.push_back(tabA);
+    return { .workspaces = { workspace } };
 }
 } // namespace
 
@@ -106,7 +106,7 @@ TEST_CASE("ownTabOf names the caller's tab", "[mcp-scope]")
 TEST_CASE("annotateWorkspace marks self and sorts the own tab first", "[mcp-scope]")
 {
     auto const json = contour::cli::annotateWorkspace(workspace(), A1);
-    auto const self = std::string(R"("self":{"pane":")") + A1 + R"(","tab":")" + TabA + R"(","window":)";
+    auto const self = std::string(R"("self":{"pane":")") + A1 + R"(","tab":")" + TabA + R"(","workspace":)";
     CHECK(json.contains(self));
     CHECK(json.find(TabA) < json.find(std::string(R"("id":")") + TabB));
     CHECK(json.contains(R"("isOwnTab":true)"));

@@ -44,18 +44,18 @@ struct EnumTable<FocusPolicy>
 };
 
 /// Where a new tab goes.
-enum class WindowPlacement : uint8_t
+enum class WorkspacePlacement : uint8_t
 {
     Existing = 0,
     New,
 };
 
 template <>
-struct EnumTable<WindowPlacement>
+struct EnumTable<WorkspacePlacement>
 {
     static constexpr std::array Rows {
-        EnumName { WindowPlacement::Existing, "existing" },
-        EnumName { WindowPlacement::New, "new" },
+        EnumName { WorkspacePlacement::Existing, "existing" },
+        EnumName { WorkspacePlacement::New, "new" },
     };
 };
 
@@ -265,19 +265,19 @@ struct TabInfo
     std::string id {};              ///< `tab:<uuid>`.
     std::string label {};           ///< The label, or empty.
     std::string title {};           ///< The tab's title.
-    uint32_t position = 0;          ///< 1-based position within the window.
-    bool isActive = false;          ///< Whether it is its window's active tab.
+    uint32_t position = 0;          ///< 1-based position within the workspace.
+    bool isActive = false;          ///< Whether it is its workspace's active tab.
     std::vector<PaneInfo> panes {}; ///< Its panes.
 };
 
-/// A window.
-struct WindowInfo
+/// A workspace.
+struct WorkspaceInfo
 {
     using ApiRecordTag = void;
 
-    std::string id {};            ///< `window:<uuid>`.
+    std::string id {};            ///< `workspace:<uuid>`.
     std::string label {};         ///< The label, or empty.
-    uint32_t position = 0;        ///< 1-based position among the daemon's windows.
+    uint32_t position = 0;        ///< 1-based position among the daemon's workspaces.
     std::vector<TabInfo> tabs {}; ///< Its tabs.
 };
 
@@ -351,7 +351,7 @@ struct ListRequest
 {
     using ApiRecordTag = void;
 
-    std::string window {}; ///< Restrict to this window; empty for all.
+    std::string workspace {}; ///< Restrict to this workspace; empty for all.
 };
 
 /// `list` reply.
@@ -359,7 +359,7 @@ struct ListReply
 {
     using ApiRecordTag = void;
 
-    std::vector<WindowInfo> windows {}; ///< The windows.
+    std::vector<WorkspaceInfo> workspaces {}; ///< The workspaces.
 };
 
 /// `tab.create` request.
@@ -367,12 +367,12 @@ struct CreateTabRequest
 {
     using ApiRecordTag = void;
 
-    std::string window {};                                 ///< The window; empty for the primary viewer's.
-    WindowPlacement placement = WindowPlacement::Existing; ///< Existing window or a new one.
-    std::string cwd {};                                    ///< Working directory; empty for the default.
-    std::vector<std::string> command {};                   ///< Program and arguments; empty for the shell.
-    std::string label {};                                  ///< Label for the new tab.
-    FocusPolicy focus = FocusPolicy::Take;                 ///< Whether the new tab takes the focus.
+    std::string workspace {}; ///< The workspace; empty for the primary viewer's.
+    WorkspacePlacement placement = WorkspacePlacement::Existing; ///< Existing workspace or a new one.
+    std::string cwd {};                    ///< Working directory; empty for the default.
+    std::vector<std::string> command {};   ///< Program and arguments; empty for the shell.
+    std::string label {};                  ///< Label for the new tab.
+    FocusPolicy focus = FocusPolicy::Take; ///< Whether the new tab takes the focus.
 };
 
 /// `tab.create` reply.
@@ -380,9 +380,9 @@ struct CreateTabReply
 {
     using ApiRecordTag = void;
 
-    std::string window {}; ///< The window id.
-    std::string tab {};    ///< The new tab's id.
-    std::string pane {};   ///< The new tab's pane.
+    std::string workspace {}; ///< The workspace id.
+    std::string tab {};       ///< The new tab's id.
+    std::string pane {};      ///< The new tab's pane.
 };
 
 /// `pane.split` request.

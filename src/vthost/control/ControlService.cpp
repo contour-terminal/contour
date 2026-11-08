@@ -213,7 +213,7 @@ std::vector<TargetCandidate> ControlService::windowCandidates() const
         auto const uuid = _host.objects().uuidOf(window->id());
         if (!uuid)
             continue;
-        auto const ref = ObjectRef { .kind = ObjectKind::Window, .uuid = *uuid };
+        auto const ref = ObjectRef { .kind = ObjectKind::Workspace, .uuid = *uuid };
         candidates.push_back(TargetCandidate { .ref = ref,
                                                .label = std::string { _host.objects().labelOf(ref) },
                                                .position = static_cast<uint32_t>(index + 1) });
@@ -303,7 +303,7 @@ std::expected<WindowId, ControlError> ControlService::resolveWindow(vtcontrol::C
     }
 
     auto const candidates = windowCandidates();
-    return vtcontrol::resolveTarget(ObjectKind::Window, spec, candidates)
+    return vtcontrol::resolveTarget(ObjectKind::Workspace, spec, candidates)
         .and_then([&](ObjectRef const& ref) -> std::expected<WindowId, ControlError> {
             auto const handle = _host.objects().find(ref);
             auto const* window = handle ? std::get_if<WindowId>(&*handle) : nullptr;
@@ -341,14 +341,14 @@ vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session,
     return info;
 }
 
-vtcontrol::WindowInfo ControlService::windowInfoOf(vtworkspace::Window const& window,
-                                                   uint32_t position,
-                                                   vtcontrol::ControlGrants grants) const
+vtcontrol::WorkspaceInfo ControlService::windowInfoOf(vtworkspace::Window const& window,
+                                                      uint32_t position,
+                                                      vtcontrol::ControlGrants grants) const
 {
     auto const windowRef =
-        ObjectRef { .kind = ObjectKind::Window,
+        ObjectRef { .kind = ObjectKind::Workspace,
                     .uuid = _host.objects().uuidOf(window.id()).value_or(vtcontrol::Uuid {}) };
-    auto info = vtcontrol::WindowInfo {};
+    auto info = vtcontrol::WorkspaceInfo {};
     info.id = vtcontrol::toString(windowRef);
     info.label = std::string { _host.objects().labelOf(windowRef) };
     info.position = position;
@@ -527,12 +527,12 @@ std::expected<vtcontrol::ListReply, ControlError> ControlService::list(
     vtcontrol::CallContext const& context, vtcontrol::ListRequest const& request) const
 {
     auto only = std::optional<WindowId> {};
-    if (!request.window.empty())
+    if (!request.workspace.empty())
     {
-        auto const window = resolveWindow(context, request.window);
-        if (!window)
-            return std::unexpected(window.error());
-        only = *window;
+        auto const workspace = resolveWindow(context, request.workspace);
+        if (!workspace)
+            return std::unexpected(workspace.error());
+        only = *workspace;
     }
     auto reply = vtcontrol::ListReply {};
     auto const& model = _host.model();
@@ -540,7 +540,7 @@ std::expected<vtcontrol::ListReply, ControlError> ControlService::list(
     {
         auto const* window = model.windowAt(index);
         if (!only || window->id() == *only)
-            reply.windows.push_back(
+            reply.workspaces.push_back(
                 windowInfoOf(*window, static_cast<uint32_t>(index + 1), context.grants()));
     }
     return reply;
@@ -658,9 +658,9 @@ std::expected<ObjectRef, ControlError> ControlService::resolveObject(vtcontrol::
             return resolveTab(context, spec).transform([&](TabId tab) {
                 return ObjectRef { .kind = ObjectKind::Tab, .uuid = *_host.objects().uuidOf(tab) };
             });
-        case ObjectKind::Window:
+        case ObjectKind::Workspace:
             return resolveWindow(context, spec).transform([&](WindowId window) {
-                return ObjectRef { .kind = ObjectKind::Window, .uuid = *_host.objects().uuidOf(window) };
+                return ObjectRef { .kind = ObjectKind::Workspace, .uuid = *_host.objects().uuidOf(window) };
             });
     }
     return std::unexpected(notFound(std::format("'{}' names no object", object)));
@@ -736,7 +736,7 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
 {
     auto const spawn = spawnRequestOf(request.command, request.cwd);
     auto* tab = static_cast<vtworkspace::Tab*>(nullptr);
-    if (request.placement == vtcontrol::WindowPlacement::New)
+    if (request.placement == vtcontrol::WorkspacePlacement::New)
     {
         // No client claims it, so the primary viewer -- the GUI whose launch took every window -- shows it.
         auto* window = _host.createWindow(spawn, nullptr);
@@ -746,7 +746,7 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
     }
     else
     {
-        auto const windowId = resolveWindow(context, request.window);
+        auto const windowId = resolveWindow(context, request.workspace);
         if (!windowId)
             return std::unexpected(windowId.error());
         auto* window = _host.model().window(*windowId);
@@ -768,7 +768,8 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
     if (!request.label.empty())
         _host.objects().setLabel(tabRef, request.label);
     return vtcontrol::CreateTabReply {
-        .window = idOf(ObjectKind::Window, _host.objects().uuidOf(windowId).value_or(vtcontrol::Uuid {})),
+        .workspace =
+            idOf(ObjectKind::Workspace, _host.objects().uuidOf(windowId).value_or(vtcontrol::Uuid {})),
         .tab = vtcontrol::toString(tabRef),
         .pane = idOf(ObjectKind::Pane, *_host.objects().uuidOf(session)),
     };
@@ -1008,7 +1009,7 @@ vtcontrol::EventOrigin ControlService::originOf(SessionId session) const
     if (auto const [window, tab, leaf] = _host.model().findSessionLeaf(session); tab != nullptr)
     {
         auto const owner = originOf(window->id(), tab->id());
-        origin.window = owner.window;
+        origin.workspace = owner.workspace;
         origin.tab = owner.tab;
     }
     return origin;
@@ -1018,7 +1019,7 @@ vtcontrol::EventOrigin ControlService::originOf(WindowId window, TabId tab) cons
 {
     auto origin = vtcontrol::EventOrigin {};
     if (auto const uuid = _host.objects().uuidOf(window))
-        origin.window = idOf(ObjectKind::Window, *uuid);
+        origin.workspace = idOf(ObjectKind::Workspace, *uuid);
     if (auto const uuid = _host.objects().uuidOf(tab))
         origin.tab = idOf(ObjectKind::Tab, *uuid);
     return origin;

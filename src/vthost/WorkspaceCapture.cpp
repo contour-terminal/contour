@@ -197,7 +197,7 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
             continue;
         auto captured =
             WindowSnapshot { .identity = identityOf(host.objects(),
-                                                    vtcontrol::ObjectKind::Window,
+                                                    vtcontrol::ObjectKind::Workspace,
                                                     host.objects().uuidOf(window->id())),
                              .activeTab = static_cast<std::uint32_t>(std::max(window->activeTabIndex(), 0)) };
         for (auto const tabIndex: std::views::iota(0, window->tabCount()))

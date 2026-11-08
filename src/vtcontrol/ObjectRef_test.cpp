@@ -20,3 +20,17 @@ TEST_CASE("object and block references", "[vtcontrol][ids]")
     CHECK_FALSE(vtcontrol::parseBlockRef("block:018f3c4e-9a1b-7c2d-8e3f-0123456789ab/12x"));
     CHECK_FALSE(vtcontrol::parseBlockRef("pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ab/1"));
 }
+
+TEST_CASE("ObjectRef: workspace kind round-trips", "[vtcontrol][ids]")
+{
+    auto const text = std::string { "workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab" };
+    auto const ref = vtcontrol::parseObjectRef(text);
+    REQUIRE(ref.has_value());
+    CHECK(ref->kind == vtcontrol::ObjectKind::Workspace);
+    CHECK(toString(*ref) == text);
+}
+
+TEST_CASE("ObjectRef: the old window prefix is rejected", "[vtcontrol][ids]")
+{
+    CHECK_FALSE(vtcontrol::parseObjectRef("window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab"));
+}

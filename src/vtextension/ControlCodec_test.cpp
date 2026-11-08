@@ -100,12 +100,12 @@ template <typename T>
                                     .panes = { pane(id + "/p1", true), pane(id + "/p2", false) } };
     };
     return vtcontrol::ListReply {
-        .windows = { vtcontrol::WindowInfo {
-                         .id = "window:1", .label = "", .position = 1, .tabs = { tab("tab:a", 1) } },
-                     vtcontrol::WindowInfo { .id = "window:2",
-                                             .label = "w",
-                                             .position = 2,
-                                             .tabs = { tab("tab:b", 1), tab("tab:c", 2) } } },
+        .workspaces = { vtcontrol::WorkspaceInfo {
+                            .id = "workspace:1", .label = "", .position = 1, .tabs = { tab("tab:a", 1) } },
+                        vtcontrol::WorkspaceInfo { .id = "workspace:2",
+                                                   .label = "w",
+                                                   .position = 2,
+                                                   .tabs = { tab("tab:b", 1), tab("tab:c", 2) } } },
     };
 }
 

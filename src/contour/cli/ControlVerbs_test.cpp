@@ -301,19 +301,20 @@ TEST_CASE("exitStatusForBlock", "[contour][cli][control]")
 TEST_CASE("ls prints a readable tree", "[contour][cli][control]")
 {
     auto run = Run {};
-    auto channel =
-        ScriptedChannel { R"({"windows":[{"id":"window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"",)"
-                          R"("position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac",)"
-                          R"("label":"build","title":"zsh","position":1,"isActive":true,"panes":[)"
-                          R"({"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh",)"
-                          R"("cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},)"
-                          R"("programStatus":[],"futureKey":1}]}]}]})"s };
+    auto channel = ScriptedChannel {
+        R"({"workspaces":[{"id":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"",)"
+        R"("position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac",)"
+        R"("label":"build","title":"zsh","position":1,"isActive":true,"panes":[)"
+        R"({"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh",)"
+        R"("cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},)"
+        R"("programStatus":[],"futureKey":1}]}]}]})"s
+    };
     auto const flags = parseFlags({ "ls" });
 
     CHECK(contour::cli::runControlVerb(verbNamed("ls"), flags, channel, run.io()) == 0);
 
     CHECK(run.out.str()
-          == "window 1  456789ab\n"
+          == "workspace 1  456789ab\n"
              "  * tab 1  456789ac  build\n"
              "    * pane  456789ad  zsh  80x24  /home/me\n");
     REQUIRE(channel.calls.size() == 1);
@@ -735,8 +736,10 @@ TEST_CASE("events without --follow stops after the first event", "[contour][cli]
 {
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
-    channel.events = { R"({"type":"pane.bell","window":"","tab":"","pane":"pane:1234abcd","payload":{}})",
-                       R"({"type":"pane.bell","window":"","tab":"","pane":"pane:1234abcd","payload":{}})" };
+    channel.events = {
+        R"({"type":"pane.bell","workspace":"","tab":"","pane":"pane:1234abcd","payload":{}})",
+        R"({"type":"pane.bell","workspace":"","tab":"","pane":"pane:1234abcd","payload":{}})"
+    };
 
     CHECK(contour::cli::runControlVerb(verbNamed("events"), parseFlags({ "events" }), channel, run.io())
           == 0);
@@ -755,10 +758,10 @@ TEST_CASE("human event lines", "[contour][cli][control]")
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
     channel.events = {
-        R"({"type":"block.finished","window":"","tab":"","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-01231234abcd",)"
+        R"({"type":"block.finished","workspace":"","tab":"","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-01231234abcd",)"
         R"("payload":{"block":{"id":"block:x/1","pane":"pane:x","state":"finished","command":"make","exitCode":3}}})",
-        R"({"type":"pane.titleChanged","window":"","tab":"","pane":"","payload":{"title":"vim"}})",
-        R"({"type":"future.thing","window":"","tab":"","pane":"","payload":{}})",
+        R"({"type":"pane.titleChanged","workspace":"","tab":"","pane":"","payload":{"title":"vim"}})",
+        R"({"type":"future.thing","workspace":"","tab":"","pane":"","payload":{}})",
     };
 
     CHECK(contour::cli::runControlVerb(
@@ -768,14 +771,14 @@ TEST_CASE("human event lines", "[contour][cli][control]")
           == "12:00:00 block.finished \u20261234abcd exit 3 make\n"
              "12:00:00 pane.titleChanged - vim\n"
              "12:00:00 "
-             "{\"type\":\"future.thing\",\"window\":\"\",\"tab\":\"\",\"pane\":\"\",\"payload\":{}}\n");
+             "{\"type\":\"future.thing\",\"workspace\":\"\",\"tab\":\"\",\"pane\":\"\",\"payload\":{}}\n");
 }
 
 TEST_CASE("events --json prints each event as received; Ctrl+C is 130", "[contour][cli][control]")
 {
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
-    channel.events = { R"({"type":"pane.bell","window":"","tab":"","pane":"","payload":{}})" };
+    channel.events = { R"({"type":"pane.bell","workspace":"","tab":"","pane":"","payload":{}})" };
 
     CHECK(contour::cli::runControlVerb(
               verbNamed("events"), parseFlags({ "events", "--follow", "--json" }), channel, run.io())

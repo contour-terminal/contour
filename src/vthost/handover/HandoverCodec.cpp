@@ -89,7 +89,7 @@ template <>
 struct StateEnumWire<vtcontrol::ObjectKind>
 {
     static constexpr auto Values = std::array {
-        vtcontrol::ObjectKind::Window,
+        vtcontrol::ObjectKind::Workspace,
         vtcontrol::ObjectKind::Tab,
         vtcontrol::ObjectKind::Pane,
     };

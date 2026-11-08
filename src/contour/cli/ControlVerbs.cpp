@@ -166,13 +166,13 @@ namespace
 
     void printWorkspace(vtcontrol::ListReply const& reply, std::ostream& out)
     {
-        for (auto const& window: reply.windows)
+        for (auto const& workspace: reply.workspaces)
         {
-            out << std::format("window {}  {}{}\n",
-                               window.position,
-                               shortId(window.id),
-                               window.label.empty() ? ""s : "  " + window.label);
-            for (auto const& tab: window.tabs)
+            out << std::format("workspace {}  {}{}\n",
+                               workspace.position,
+                               shortId(workspace.id),
+                               workspace.label.empty() ? ""s : "  " + workspace.label);
+            for (auto const& tab: workspace.tabs)
             {
                 out << std::format("  {} tab {}  {}  {}\n",
                                    tab.isActive ? '*' : ' ',
@@ -370,7 +370,7 @@ namespace
     [[nodiscard]] Params buildList(CLI::FlagStore const& flags)
     {
         return vtcontrol::encodeJson(
-            vtcontrol::ListRequest { .window = VerbFlags { flags, "ls" }.text("window") });
+            vtcontrol::ListRequest { .workspace = VerbFlags { flags, "ls" }.text("window") });
     }
 
     [[nodiscard]] Params buildNew(CLI::FlagStore const& flags)
@@ -379,9 +379,9 @@ namespace
         if (!f.text("window").empty() && f.isSet("new-window"))
             return std::unexpected("--window and --new-window exclude each other"s);
         return vtcontrol::encodeJson(vtcontrol::CreateTabRequest {
-            .window = f.text("window"),
-            .placement = f.isSet("new-window") ? vtcontrol::WindowPlacement::New
-                                               : vtcontrol::WindowPlacement::Existing,
+            .workspace = f.text("window"),
+            .placement = f.isSet("new-window") ? vtcontrol::WorkspacePlacement::New
+                                               : vtcontrol::WorkspacePlacement::Existing,
             .cwd = f.text("cwd"),
             .command = toStrings(f.words()),
             .label = f.text("label"),

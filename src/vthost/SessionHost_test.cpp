@@ -3187,7 +3187,7 @@ TEST_CASE("a profile's shell still learns the pane's own ids", "[vthost][profile
     CHECK(h.shells.back().env.at("A") == "1");
     CHECK(h.shells.back().env.at("CONTOUR_PANE").starts_with("pane:"));
     CHECK(h.shells.back().env.at("CONTOUR_TAB").starts_with("tab:"));
-    CHECK(h.shells.back().env.at("CONTOUR_WINDOW").starts_with("window:"));
+    CHECK(h.shells.back().env.at("CONTOUR_WINDOW").starts_with("workspace:"));
 }
 
 TEST_CASE("an unknown profile name runs the host's default profile", "[vthost][profiles]")
@@ -3571,7 +3571,7 @@ TEST_CASE("createTab mints window, pane and tab ids and exports them to the shel
     REQUIRE(h.seen.size() == 1);
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Workspace, 1));
     // The override engaged for the ids names no program: the configured shell runs.
     CHECK(h.seen.back().program.empty());
 }
@@ -3607,7 +3607,7 @@ TEST_CASE("a split pane gets a new id and its tab's id in CONTOUR_TAB", "[vthost
     REQUIRE(h.seen.size() == 2);
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Workspace, 1));
     CHECK(h.host.objects().uuidOf(tab->rootPane()->second()->session()) == seq(4));
     // The first pane keeps its own.
     CHECK(h.host.objects().uuidOf(tab->rootPane()->first()->session()) == seq(2));
@@ -3623,7 +3623,7 @@ TEST_CASE("a new window gets its own id, and its first pane lives in it", "[vtho
     CHECK(h.host.objects().uuidOf(window->id()) == seq(4));
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
-    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 4));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Workspace, 4));
     auto const* tab = window->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
@@ -3651,8 +3651,8 @@ TEST_CASE("startup layout panes share their tab's and window's ids", "[vthost][h
                                     .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
     };
     REQUIRE(seen.size() == 2);
-    CHECK(seen[0].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
-    CHECK(seen[1].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[0].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Workspace, 1));
+    CHECK(seen[1].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Workspace, 1));
     CHECK(seen[0].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
     CHECK(seen[0].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
     CHECK(seen[1].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));

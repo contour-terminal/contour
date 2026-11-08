@@ -245,9 +245,9 @@ class ControlService final:
 
     /// @param grants What the asking connection holds, which says what its panes' records may carry.
     /// @return The API record of one window, as the model has it now.
-    [[nodiscard]] vtcontrol::WindowInfo windowInfoOf(vtworkspace::Window const& window,
-                                                     uint32_t position,
-                                                     vtcontrol::ControlGrants grants) const;
+    [[nodiscard]] vtcontrol::WorkspaceInfo windowInfoOf(vtworkspace::Window const& window,
+                                                        uint32_t position,
+                                                        vtcontrol::ControlGrants grants) const;
 
     /// @param session The pane's session.
     /// @param tab The tab it is a leaf of, which says whether it is the active one.

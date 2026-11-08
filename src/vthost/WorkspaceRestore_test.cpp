@@ -393,7 +393,7 @@ namespace
         vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, *objects.uuidOf(session) }),
         vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }),
         vtcontrol::toString(
-            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, *objects.uuidOf(window->id()) }),
+            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, *objects.uuidOf(window->id()) }),
     };
 }
 
@@ -431,7 +431,7 @@ TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were 
     auto const firstPane = tab->rootPane()->first()->session();
     objects.setLabel({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }, "logs");
     objects.setLabel({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }, "ops");
-    objects.setLabel({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }, "main");
+    objects.setLabel({ vtcontrol::ObjectKind::Workspace, *objects.uuidOf(source->windowId()) }, "main");
 
     auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
     auto decoded = decodeSnapshot(encodeSnapshot(captured));
@@ -464,7 +464,7 @@ TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were 
     CHECK(now.uuidOf(restored->windowId()) == objects.uuidOf(source->windowId()));
     CHECK(now.labelOf({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }) == "logs");
     CHECK(now.labelOf({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }) == "ops");
-    CHECK(now.labelOf({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }) == "main");
+    CHECK(now.labelOf({ vtcontrol::ObjectKind::Workspace, *objects.uuidOf(source->windowId()) }) == "main");
     // The first restored spawn is the first pane, and its shell is told the ids it came back with.
     REQUIRE(h.recorded.overrides.size() == source->sessionCount());
     CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*restored, restoredFirst));

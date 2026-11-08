@@ -126,8 +126,8 @@ TEST_CASE("a record is declared before its first use", "[vtcontrol][wit]")
     };
     CHECK(positionOf("record size {") < positionOf("record pane-info {"));
     CHECK(positionOf("record pane-info {") < positionOf("record tab-info {"));
-    CHECK(positionOf("record tab-info {") < positionOf("record window-info {"));
-    CHECK(positionOf("record window-info {") < positionOf("record list-reply {"));
+    CHECK(positionOf("record tab-info {") < positionOf("record workspace-info {"));
+    CHECK(positionOf("record workspace-info {") < positionOf("record list-reply {"));
     CHECK(positionOf("enum control-error-code {") < positionOf("record control-error {"));
 }
 

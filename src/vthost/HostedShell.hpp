@@ -65,7 +65,7 @@ namespace vthost
         { "CONTOUR_PANE", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }) },
         { "CONTOUR_TAB", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, tab }) },
         { "CONTOUR_WINDOW",
-          vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, window }) },
+          vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, window }) },
     };
 }
 

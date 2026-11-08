@@ -81,13 +81,14 @@ TEST_CASE("workspace.list mirrors the model with registry ids", "[vthost][contro
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows[0].id
-          == vtcontrol::toString(vtcontrol::ObjectRef {
-              .kind = vtcontrol::ObjectKind::Window, .uuid = *h.host.objects().uuidOf(h.host.windowId()) }));
-    CHECK(list->windows[0].position == 1);
-    REQUIRE(list->windows[0].tabs.size() == 1);
-    auto const& tabInfo = list->windows[0].tabs[0];
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(
+        list->workspaces[0].id
+        == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                      .uuid = *h.host.objects().uuidOf(h.host.windowId()) }));
+    CHECK(list->workspaces[0].position == 1);
+    REQUIRE(list->workspaces[0].tabs.size() == 1);
+    auto const& tabInfo = list->workspaces[0].tabs[0];
     CHECK(tabInfo.isActive);
     CHECK(tabInfo.position == 1);
     REQUIRE(tabInfo.panes.size() == 2);
@@ -356,7 +357,7 @@ TEST_CASE("object.setLabel makes a pane addressable by label", "[vthost][control
                 .has_value());
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    CHECK(list->windows[0].tabs[1].label == "build");
+    CHECK(list->workspaces[0].tabs[1].label == "build");
 }
 
 TEST_CASE("a control call from a pane moved into a new window resolves its tab", "[vthost][control][move]")
@@ -375,7 +376,7 @@ TEST_CASE("a control call from a pane moved into a new window resolves its tab",
                 h.service, h.context, vtcontrol::SetLabelRequest { .object = "tab:", .label = "moved" })
                 .has_value());
     REQUIRE(callSync<vtcontrol::EmptyReply>(
-                h.service, h.context, vtcontrol::SetLabelRequest { .object = "window:", .label = "away" })
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = "workspace:", .label = "away" })
                 .has_value());
     CHECK(h.host.terminal(first) != nullptr);
 }
@@ -393,17 +394,17 @@ TEST_CASE("tab.create returns ids that workspace.list then shows", "[vthost][con
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows[0].id == created->window);
-    REQUIRE(list->windows[0].tabs.size() == 2);
-    auto const& tab = list->windows[0].tabs[1];
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].id == created->workspace);
+    REQUIRE(list->workspaces[0].tabs.size() == 2);
+    auto const& tab = list->workspaces[0].tabs[1];
     CHECK(tab.id == created->tab);
     CHECK(tab.label == "build");
     REQUIRE(tab.panes.size() == 1);
     CHECK(tab.panes[0].id == created->pane);
     // Keep left the first tab the active one.
-    CHECK(list->windows[0].tabs[0].isActive);
-    CHECK(list->windows[0].tabs[0].panes[0].id == h.paneId(first));
+    CHECK(list->workspaces[0].tabs[0].isActive);
+    CHECK(list->workspaces[0].tabs[0].panes[0].id == h.paneId(first));
 
     // Take, the default, activates it.
     auto const taken =
@@ -427,12 +428,13 @@ TEST_CASE("tab.create with placement new opens a second window", "[vthost][contr
     auto const created = callSync<vtcontrol::CreateTabReply>(
         h.service,
         h.context,
-        vtcontrol::CreateTabRequest { .placement = vtcontrol::WindowPlacement::New, .command = { "htop" } });
+        vtcontrol::CreateTabRequest { .placement = vtcontrol::WorkspacePlacement::New,
+                                      .command = { "htop" } });
     REQUIRE(created.has_value());
     REQUIRE(h.host.model().windowCount() == 2);
     auto const* window = h.host.model().windowAt(1);
-    CHECK(created->window
-          == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Window,
+    CHECK(created->workspace
+          == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
                                                         .uuid = *h.host.objects().uuidOf(window->id()) }));
     CHECK(h.seen.back().program == "htop");
     // No client claims it, so the primary viewer follows it (settled conflict #6).
@@ -441,15 +443,15 @@ TEST_CASE("tab.create with placement new opens a second window", "[vthost][contr
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 2);
-    CHECK(list->windows[1].position == 2);
-    CHECK(list->windows[1].tabs.at(0).panes.at(0).id == created->pane);
+    REQUIRE(list->workspaces.size() == 2);
+    CHECK(list->workspaces[1].position == 2);
+    CHECK(list->workspaces[1].tabs.at(0).panes.at(0).id == created->pane);
 
     // A tab in that window, named by its position.
     auto const second = callSync<vtcontrol::CreateTabReply>(
-        h.service, h.context, vtcontrol::CreateTabRequest { .window = "2" });
+        h.service, h.context, vtcontrol::CreateTabRequest { .workspace = "2" });
     REQUIRE(second.has_value());
-    CHECK(second->window == created->window);
+    CHECK(second->workspace == created->workspace);
     CHECK(h.host.model().windowAt(1)->tabCount() == 2);
 }
 
@@ -659,7 +661,7 @@ TEST_CASE("a subscriber receives block.finished with the exit code", "[vthost][c
     CHECK(delivery.subscription == subscription);
     CHECK(delivery.event.origin.pane == h.paneId(session));
     CHECK(delivery.event.origin.tab.starts_with("tab:"));
-    CHECK(delivery.event.origin.window.starts_with("window:"));
+    CHECK(delivery.event.origin.workspace.starts_with("workspace:"));
 }
 
 TEST_CASE("events filter by kind and by pane", "[vthost][control][events]")
@@ -764,7 +766,7 @@ TEST_CASE("the layout and the working directory are events", "[vthost][control][
         if (std::holds_alternative<vtcontrol::PaneClosedEvent>(delivery.event.payload))
         {
             CHECK(delivery.event.origin.tab == tabId);
-            CHECK(delivery.event.origin.window.starts_with("window:"));
+            CHECK(delivery.event.origin.workspace.starts_with("workspace:"));
         }
 }
 
@@ -793,7 +795,7 @@ TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
 
     auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
     REQUIRE(list.has_value());
-    auto const& pane = list->windows.at(0).tabs.at(0).panes.at(0);
+    auto const& pane = list->workspaces.at(0).tabs.at(0).panes.at(0);
     REQUIRE(pane.programStatus.size() == 2);
     CHECK(pane.programStatus.front().state == vtcontrol::ProgramState::Working);
     CHECK(pane.programStatus.front().progress == uint8_t { 10 });
@@ -821,7 +823,7 @@ TEST_CASE("program status needs screen, in its event as in ls", "[vthost][contro
     auto const listedRecords = [&] {
         auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
         REQUIRE(list.has_value());
-        return list->windows.at(0).tabs.at(0).panes.at(0).programStatus;
+        return list->workspaces.at(0).tabs.at(0).panes.at(0).programStatus;
     };
 
     SECTION("read alone: refused by name, left out of every kind and of ls")

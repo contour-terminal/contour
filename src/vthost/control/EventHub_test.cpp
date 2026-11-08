@@ -27,7 +27,7 @@ namespace
 
 [[nodiscard]] vtcontrol::Event bellIn(vtcontrol::Uuid pane)
 {
-    return vtcontrol::Event { .origin = { .window = {},
+    return vtcontrol::Event { .origin = { .workspace = {},
                                           .tab = {},
                                           .pane = vtcontrol::toString(vtcontrol::ObjectRef {
                                               .kind = vtcontrol::ObjectKind::Pane, .uuid = pane }) },

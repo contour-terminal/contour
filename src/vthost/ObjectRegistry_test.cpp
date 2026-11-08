@@ -48,7 +48,7 @@ TEST_CASE("ObjectRegistry maps ids to uuids and back, per kind", "[vthost][ids]"
     REQUIRE(found);
     CHECK(std::get<SessionId>(*found) == SessionId { 1 });
     CHECK(std::get<TabId>(*registry.find(ObjectRef { ObjectKind::Tab, tab })) == TabId { 1 });
-    CHECK(std::get<WindowId>(*registry.find(ObjectRef { ObjectKind::Window, window })) == WindowId { 1 });
+    CHECK(std::get<WindowId>(*registry.find(ObjectRef { ObjectKind::Workspace, window })) == WindowId { 1 });
 
     // A uuid of one kind is not found under another.
     CHECK_FALSE(registry.find(ObjectRef { ObjectKind::Tab, pane }));

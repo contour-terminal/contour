@@ -5986,8 +5986,8 @@ TEST_CASE("a ControlRequest is answered with its reply", "[vthost][native][contr
     CHECK(list.outcome == proto::ControlOutcome::Ok);
     auto const decoded = vtcontrol::decodeJson<vtcontrol::ListReply>(list.body);
     REQUIRE(decoded.has_value());
-    REQUIRE(decoded->windows.size() == 1);
-    CHECK(decoded->windows[0].tabs.size() == 1);
+    REQUIRE(decoded->workspaces.size() == 1);
+    CHECK(decoded->workspaces[0].tabs.size() == 1);
 
     REQUIRE(isControlReply(got[2]));
     auto const& unknown = std::get<proto::ControlReply>(got[2].pdu);

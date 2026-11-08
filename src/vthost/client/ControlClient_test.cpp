@@ -191,8 +191,8 @@ TEST_CASE("ControlClient calls a method", "[vthost][client][control]")
     REQUIRE(reply);
     auto const list = vtcontrol::decodeJson<vtcontrol::ListReply>(*reply);
     REQUIRE(list);
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows[0].tabs.size() == 1);
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].tabs.size() == 1);
 }
 
 TEST_CASE("a remote error surfaces as ControlFailure::Remote", "[vthost][client][control]")

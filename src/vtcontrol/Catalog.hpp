@@ -57,7 +57,7 @@ struct PermissionPhrase
 /// One row per `Permission`, in enumerator order, as `EnumTable<Permission>` has.
 inline constexpr std::array PermissionPhrases {
     PermissionPhrase { .permission = Permission::Read,
-                       .phrase = "see the windows, tabs and panes",
+                       .phrase = "see the workspaces, tabs and panes",
                        .weight = ConsentWeight::Observes },
     PermissionPhrase { .permission = Permission::Screen,
                        .phrase = "read what panes show, and their command history",
@@ -247,19 +247,19 @@ inline constexpr auto Methods = std::tuple {
     },
     Method<ListRequest, ListReply> {
         "workspace.list",
-        "List the windows, tabs and panes.",
+        "List the workspaces, tabs and panes.",
         Permission::Read,
         Exposure::Everywhere,
-        R"({"window":""})",
-        R"({"windows":[{"id":"window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"","position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","label":"build","title":"zsh","position":1,"isActive":true,"panes":[{"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh","cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},"programStatus":[]}]}]}]})",
+        R"({"workspace":""})",
+        R"({"workspaces":[{"id":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"","position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","label":"build","title":"zsh","position":1,"isActive":true,"panes":[{"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh","cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},"programStatus":[]}]}]}]})",
     },
     Method<CreateTabRequest, CreateTabReply> {
         "tab.create",
-        "Open a tab, optionally in a new window and running a command.",
+        "Open a tab, optionally in a new workspace and running a command.",
         Permission::Write,
         Exposure::Everywhere,
-        R"({"window":"","placement":"existing","cwd":"/tmp","command":["make","-j8"],"label":"build","focus":"keep"})",
-        R"({"window":"window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad"})",
+        R"({"workspace":"","placement":"existing","cwd":"/tmp","command":["make","-j8"],"label":"build","focus":"keep"})",
+        R"({"workspace":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad"})",
         CommandNeedsInput<CreateTabRequest>,
     },
     Method<SplitRequest, SplitReply> {
@@ -305,7 +305,7 @@ inline constexpr auto Methods = std::tuple {
     },
     Method<SetLabelRequest, EmptyReply> {
         "object.setLabel",
-        "Give a window, tab or pane a label to address it by; an empty label clears it.",
+        "Give a workspace, tab or pane a label to address it by; an empty label clears it.",
         Permission::Write,
         Exposure::Everywhere,
         R"({"object":"pane:logs","label":"tail"})",

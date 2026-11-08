@@ -25,7 +25,7 @@ ObjectRegistry::Table const& ObjectRegistry::tableOf(ObjectKind kind) const noex
 {
     switch (kind)
     {
-        case ObjectKind::Window: return _windows;
+        case ObjectKind::Workspace: return _windows;
         case ObjectKind::Tab: return _tabs;
         case ObjectKind::Pane: break;
     }
@@ -61,7 +61,7 @@ std::optional<Uuid> ObjectRegistry::uuidIn(Table const& table, uint64_t id)
 
 void ObjectRegistry::bind(vtworkspace::WindowId id, Uuid uuid)
 {
-    bindIn(_windows, ObjectKind::Window, id.value, uuid);
+    bindIn(_windows, ObjectKind::Workspace, id.value, uuid);
 }
 
 void ObjectRegistry::bind(vtworkspace::TabId id, Uuid uuid)
@@ -76,7 +76,7 @@ void ObjectRegistry::bind(vtworkspace::SessionId id, Uuid uuid)
 
 void ObjectRegistry::forget(vtworkspace::WindowId id)
 {
-    forgetIn(_windows, ObjectKind::Window, id.value);
+    forgetIn(_windows, ObjectKind::Workspace, id.value);
 }
 
 void ObjectRegistry::forget(vtworkspace::TabId id)
@@ -112,7 +112,7 @@ std::optional<ObjectRegistry::Handle> ObjectRegistry::find(ObjectRef const& ref)
         return std::nullopt;
     switch (ref.kind)
     {
-        case ObjectKind::Window: return Handle { vtworkspace::WindowId { known->second } };
+        case ObjectKind::Workspace: return Handle { vtworkspace::WindowId { known->second } };
         case ObjectKind::Tab: return Handle { vtworkspace::TabId { known->second } };
         case ObjectKind::Pane: break;
     }
