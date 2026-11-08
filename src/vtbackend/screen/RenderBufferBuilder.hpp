@@ -8,6 +8,7 @@
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/PreeditPlacement.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/vt/SoftFontStore.hpp>
 
 #include <gsl/pointers>
 
@@ -193,6 +194,7 @@ class RenderBufferBuilder
 
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
+                                                   SoftFontStore const& softFonts,
                                                    ConstCellProxy cell,
                                                    LineFlags lineFlags,
                                                    RGBColor fg,

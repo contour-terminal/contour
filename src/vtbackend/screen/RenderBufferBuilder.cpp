@@ -256,8 +256,14 @@ void RenderBufferBuilder::renderDetachedLine(std::vector<RenderCell>& output,
                                          std::nullopt);
 
         // The row's own line flags stay behind: the copy is drawn single width and single height.
-        output.emplace_back(
-            makeRenderCell(palette, cell, LineFlags {}, fg, bg, screenRow, ColumnOffset::cast_from(column)));
+        output.emplace_back(makeRenderCell(palette,
+                                           terminal.softFonts(),
+                                           cell,
+                                           LineFlags {},
+                                           fg,
+                                           bg,
+                                           screenRow,
+                                           ColumnOffset::cast_from(column)));
 
         if (auto const hyperlink = cell.hyperlink();
             hyperlink != HyperlinkId {} && isHyperlinkLive(terminal.hyperlinks(), hyperlink))
@@ -420,6 +426,7 @@ RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& color
 }
 
 RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
+                                               SoftFontStore const& softFonts,
                                                ConstCellProxy screenCell,
                                                LineFlags lineFlags,
                                                RGBColor fg,
@@ -447,6 +454,11 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     }
 
     renderCell.image = screenCell.imageFragment();
+
+    // A line without soft glyphs costs one null test here. A font that is gone resolves to no glyph, so
+    // the cell falls back to drawing its codepoints.
+    if (auto const ref = screenCell.softGlyph())
+        renderCell.softGlyph = softFonts.resolve(*ref).glyph;
 
     return renderCell;
 }
@@ -1097,6 +1109,7 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
+                                               _terminal->softFonts(),
                                                screenCell,
                                                _currentLineFlags,
                                                fg,

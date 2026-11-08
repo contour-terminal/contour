@@ -14,6 +14,7 @@
 #include <vtbackend/core/TextScale.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
+#include <vtbackend/vt/SoftFont.hpp>
 
 #include <core/Flags.hpp>
 
@@ -74,6 +75,12 @@ struct RenderCell
 {
     std::u32string codepoints;
     std::shared_ptr<ImageFragment> image;
+
+    /// The soft-font glyph this cell draws instead of its codepoints (DECDLD), or null for ordinary text.
+    /// Non-null exactly when the cell's font exists: the defined glyph, or that font's error glyph for an
+    /// undefined position. It shares ownership of the bitmap, so the renderer may read it after the state
+    /// lock is released even if the font is redefined meanwhile.
+    std::shared_ptr<SoftGlyph const> softGlyph;
     CellLocation position;
     RenderAttributes attributes;
     uint8_t width = 1;

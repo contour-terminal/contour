@@ -2,18 +2,22 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/SoftGlyphRef.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <format>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 
 using namespace vtbackend;
 using namespace vtbackend::test;
@@ -253,4 +257,121 @@ TEST_CASE("a designated but erased font falls back to the plain character", "[sc
     auto const cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
     CHECK(cell.codepoint(0) == U'!');
     CHECK_FALSE(cell.softGlyph().has_value());
+}
+
+namespace
+{
+
+/// Refreshes the render buffer and returns the soft glyph the cell at column 0 of line 0 carries, plus
+/// whether that cell was found at all.
+struct RenderedCell
+{
+    bool found = false;
+    std::shared_ptr<SoftGlyph const> glyph;
+    std::u32string codepoints;
+};
+
+[[nodiscard]] RenderedCell renderedCellAt(MockTerm<>& mock, int column)
+{
+    mock.terminal.markScreenDirty();
+    (void) mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+    for (auto const& cell: buffer.get().cells)
+        if (cell.position.line == LineOffset(0) && cell.position.column == ColumnOffset(column))
+            return { .found = true, .glyph = cell.softGlyph, .codepoints = cell.codepoints };
+    return {};
+}
+
+} // namespace
+
+TEST_CASE("render cell carries the defined glyph", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    auto const rendered = renderedCellAt(mock, 0);
+    REQUIRE(rendered.found);
+    REQUIRE(rendered.glyph != nullptr);
+    auto const expected = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x21 });
+    CHECK(expected.lookup == SoftGlyphLookup::Defined);
+    CHECK(rendered.glyph->id == expected.glyph->id);
+}
+
+TEST_CASE("render cell carries the error glyph for an undefined position", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B0"); // 0x30: the font defines only 0x21 and 0x22
+    auto const undefined = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x30 });
+    REQUIRE(undefined.lookup == SoftGlyphLookup::Undefined);
+    auto const rendered = renderedCellAt(mock, 0);
+    REQUIRE(rendered.glyph != nullptr);
+    CHECK(rendered.glyph->id == undefined.glyph->id);
+}
+
+TEST_CASE("render cell has no soft glyph after RIS, and shows its codepoint", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    REQUIRE(renderedCellAt(mock, 0).glyph != nullptr);
+
+    // The cell outlives its font only when the font goes while the reference stays: erase the font alone.
+    mock.writeToScreen("\033P1;1;2;0;0;2;0;0{C\033\\");
+    auto const rendered = renderedCellAt(mock, 0);
+    REQUIRE(rendered.found);
+    CHECK(rendered.glyph == nullptr);
+    CHECK(rendered.codepoints == U"!");
+}
+
+TEST_CASE("redefinition shows on the next render buffer", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!");
+    auto const before = renderedCellAt(mock, 0);
+    REQUIRE(before.glyph != nullptr);
+
+    // Same position, different bitmap.
+    mock.writeToScreen("\033P0;1;0;0;0;2;0;0{B?~~~~~~~~~~~~~~/~~~~~~~~~~~~~~~\033\\");
+    auto const after = renderedCellAt(mock, 0);
+    REQUIRE(after.glyph != nullptr);
+    CHECK(after.glyph->id != before.glyph->id);
+}
+
+TEST_CASE("soft font redefinition races rendering", "[softfont][threading]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033(B!\"");
+    constexpr auto Iterations = 1000;
+    auto checked = std::atomic<size_t> { 0 };
+
+    auto writer = std::thread { [&] {
+        for (auto const index: std::views::iota(0, Iterations))
+        {
+            // Alternate two bitmaps for position 0x21 (Pcn=1); the sixel data differs per parity.
+            auto const bitmap =
+                (index % 2) == 0 ? "~~~~~~~~~~~~~~~/~~~~~~~~~~~~~~~" : "N~~~~~~~~~~~~~~/~~~~~~~~~~~~~~~";
+            mock.writeToScreen(std::format("\033P0;1;0;0;0;2;0;0{{B{}\033\\", bitmap));
+        }
+    } };
+
+    for (auto const index: std::views::iota(0, Iterations))
+    {
+        (void) index;
+        (void) mock.terminal.refreshRenderBuffer();
+        auto const buffer = mock.terminal.renderBuffer();
+        for (auto const& cell: buffer.get().cells)
+            if (cell.softGlyph)
+            {
+                // Every byte must be readable: the glyph is owned by the buffer, not the live font.
+                auto sum = size_t { 0 };
+                for (auto const value: cell.softGlyph->coverage)
+                    sum += value;
+                checked.fetch_add(1 + (sum & 0), std::memory_order_relaxed);
+            }
+    }
+    writer.join();
+    CHECK(checked.load() > 0);
 }
