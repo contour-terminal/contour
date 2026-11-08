@@ -1280,9 +1280,12 @@ if(CONTOUR_FRONTEND_GUI)
         # libssh2 initialisation in SshSession -- must have its races tested in an unsilenced module suite
         # (text_shaper_test, vtpty_test), not through contour_gui_test.
         set(CONTOUR_QML_TEST_TSAN_OPTIONS "TSAN_OPTIONS=string_append: ignore_noninstrumented_modules=1")
+        # The style runs above are the same suite over the same uninstrumented Qt: under the Fluent style
+        # alone, QPainter's parallel span fills (the popup shadow's mask) read as thousands of races.
         if(CONTOUR_SANITIZE STREQUAL "thread")
-            set_property(TEST contour_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION
-                         "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            set_property(TEST contour_gui_test contour_gui_test_fluent contour_gui_test_contourlinux
+                              contour_gui_test_contourtui
+                         APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
         endif()
 
         # The notification suite again, but against a session bus whose org.freedesktop.Notifications
