@@ -2979,13 +2979,37 @@ void Screen::applicationKeypadMode(bool enable)
 
 namespace
 {
-    /// An SCS sequence's target: the G-set, whether it is the 96-character kind, and the Dscs.
+    /// An SCS sequence's target: the G-set, the size of the sets it holds, and the Dscs.
     struct ScsRequest
     {
         CharsetTable table;
-        bool is96;
+        SoftCharsetSize size;
         std::string designator;
     };
+
+    /// The G-set an SCS first intermediate selects, and its size:
+    ///   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
+    ///   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
+    struct ScsGSet
+    {
+        CharsetTable table;
+        SoftCharsetSize size;
+    };
+
+    constexpr std::optional<ScsGSet> scsGSetOf(char intermediate) noexcept
+    {
+        switch (intermediate)
+        {
+            case '(': return ScsGSet { CharsetTable::G0, SoftCharsetSize::Size94 };
+            case ')': return ScsGSet { CharsetTable::G1, SoftCharsetSize::Size94 };
+            case '*': return ScsGSet { CharsetTable::G2, SoftCharsetSize::Size94 };
+            case '+': return ScsGSet { CharsetTable::G3, SoftCharsetSize::Size94 };
+            case '-': return ScsGSet { CharsetTable::G1, SoftCharsetSize::Size96 };
+            case '.': return ScsGSet { CharsetTable::G2, SoftCharsetSize::Size96 };
+            case '/': return ScsGSet { CharsetTable::G3, SoftCharsetSize::Size96 };
+            default: return std::nullopt;
+        }
+    }
 
     /// Decodes an ESC sequence as SCS.
     /// @return The request, or nullopt when the sequence names no G-set.
@@ -2994,38 +3018,15 @@ namespace
         auto const& intermediates = seq.intermediateCharacters();
         if (intermediates.empty())
             return std::nullopt;
-
-        // First intermediate selects the G-set and its size:
-        //   94-charset designators:  ( = G0, ) = G1, * = G2, + = G3
-        //   96-charset designators:        - = G1, . = G2, / = G3   (G0 cannot hold a 96-charset)
-        auto request = ScsRequest { .table = CharsetTable::G0, .is96 = false, .designator = {} };
-        switch (intermediates[0])
-        {
-            case '(': request.table = CharsetTable::G0; break;
-            case ')': request.table = CharsetTable::G1; break;
-            case '*': request.table = CharsetTable::G2; break;
-            case '+': request.table = CharsetTable::G3; break;
-            case '-':
-                request.table = CharsetTable::G1;
-                request.is96 = true;
-                break;
-            case '.':
-                request.table = CharsetTable::G2;
-                request.is96 = true;
-                break;
-            case '/':
-                request.table = CharsetTable::G3;
-                request.is96 = true;
-                break;
-            default: return std::nullopt;
-        }
+        auto const gSet = scsGSetOf(intermediates[0]);
+        if (!gSet)
+            return std::nullopt;
 
         // The designator is the remaining intermediates plus the final character: one byte for a standard
         // set, an intermediate and a final for a DRCS one.
-        for (auto const intermediate: intermediates | std::views::drop(1))
-            request.designator += intermediate;
-        request.designator += seq.finalChar();
-        return request;
+        auto designator = std::ranges::to<std::string>(intermediates | std::views::drop(1));
+        designator += seq.finalChar();
+        return ScsRequest { .table = gSet->table, .size = gSet->size, .designator = std::move(designator) };
     }
 } // namespace
 
@@ -3072,7 +3073,7 @@ bool Screen::tryHandleSCS(Sequence const& seq)
     auto const standardCharset = [&]() -> std::optional<CharsetId> {
         if (designator.size() != 1)
             return std::nullopt;
-        if (request->is96)
+        if (request->size == SoftCharsetSize::Size96)
         {
             // 96-character sets (invoked into GR). Only ISO Latin-1 supplemental ('A') is defined here.
             switch (designator[0])
@@ -3102,7 +3103,7 @@ bool Screen::tryHandleSCS(Sequence const& seq)
 
     if (standardCharset)
     {
-        if (request->is96)
+        if (request->size == SoftCharsetSize::Size96)
             _cursor.charsets.select96(request->table, *standardCharset);
         else
             designateCharset(request->table, *standardCharset);
