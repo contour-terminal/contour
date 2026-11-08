@@ -537,6 +537,26 @@ TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
     (void) hangUp(process);
 }
 
+    #ifdef __linux__
+TEST_CASE("Process.theShellStartsWithNoSignalBlocked", "[process]")
+{
+    // A thread that blocks a signal must not hand that mask to the sessions it starts: the child is spawned
+    // with an empty one.
+    auto blocked = sigset_t {};
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGINT);
+    auto previous = sigset_t {};
+    REQUIRE(pthread_sigmask(SIG_BLOCK, &blocked, &previous) == 0);
+
+    auto process = running("/bin/sh", { "-c", "grep SigBlk /proc/$$/status" });
+    auto const started = process.start();
+    REQUIRE(pthread_sigmask(SIG_SETMASK, &previous, nullptr) == 0);
+    REQUIRE(started.has_value());
+    CHECK(printed(process, "SigBlk:\t0000000000000000"));
+    (void) hangUp(process);
+}
+    #endif
+
 namespace
 {
 

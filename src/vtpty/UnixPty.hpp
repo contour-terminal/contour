@@ -56,6 +56,9 @@ class UnixPty final: public Pty
     PtySlave& slave() noexcept override;
 
     [[nodiscard]] PtyMasterHandle handle() const noexcept;
+
+    /// @return The slave's descriptor, for a spawn to hand to the child; -1 once closed. Only after start().
+    [[nodiscard]] PtySlaveHandle slaveHandle() const noexcept;
     [[nodiscard]] StartResult start() override;
     void close() override;
     void waitForClosed() override;

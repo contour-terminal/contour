@@ -51,13 +51,14 @@ struct DetachedCommand
 /// therefore not reported here: it exits with status 127 once released, which nothing here sees, unlike
 /// QProcess::startDetached(), which waits for the exec. A caller checks that the program is there first.
 ///
-/// Implemented in Process_unix.cpp, beside Process::start(), whose async-signal-safe child helpers it
-/// shares.
+/// Implemented in Process_unix.cpp, beside Process::start(). Like it, spawned through the spawn
+/// trampoline (spawnTrampoline()) rather than forked.
 ///
 /// @param command   What to run.
 /// @param placement Places the process before it runs, and releases it.
 /// @return The process's id; or why it could not be handed to @p placement -- the input file could not
-///         be opened, a fork failed, or the program's pid never arrived. In that last case a program
+///         be opened, the trampoline could not be spawned (protocol_not_supported or bad_message where it
+///         refused its spec), or the program's pid never arrived. In that last case a program
 ///         already forked may run regardless, unplaced, once its gate closes.
 [[nodiscard]] std::expected<int, std::error_code> startDetached(DetachedCommand const& command,
                                                                 ProcessPlacement& placement);

@@ -243,6 +243,12 @@ UnixPty::~UnixPty()
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
 }
 
+PtySlaveHandle UnixPty::slaveHandle() const noexcept
+{
+    assert(started());
+    return _slave->handle();
+}
+
 PtySlave& UnixPty::slave() noexcept
 {
     assert(started());
