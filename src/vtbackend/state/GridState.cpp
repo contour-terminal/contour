@@ -301,6 +301,25 @@ namespace
         out.varint(value);
     }
 
+    /// Writes a column-keyed side table as one framed field: its entries ascending by column, each as the
+    /// column and then whatever @p putValue writes for the value. An empty table writes nothing.
+    template <typename Table, typename PutValue>
+    void putColumnTable(StateWriter& out, LineField field, Table const& table, PutValue const& putValue)
+    {
+        if (table.empty())
+            return;
+        auto columns = std::ranges::to<std::vector>(table | std::views::keys);
+        std::ranges::sort(columns);
+        out.varint(keyOf(field, WireKind::Framed));
+        auto const frame = out.beginFrame();
+        for (auto const column: columns)
+        {
+            out.varint(column);
+            putValue(out, table.at(column));
+        }
+        out.endFrame(frame);
+    }
+
     [[nodiscard]] constexpr uint64_t zigzag(int64_t value) noexcept
     {
         return (static_cast<uint64_t>(value) << 1U)
@@ -461,41 +480,20 @@ void Line::encodeState(StateWriter& out, LineEncodeContext& context) const
         }
     }
 
-    if (_storage.imageFragments && !_storage.imageFragments->empty())
-    {
-        auto columns = std::vector<uint16_t> {};
-        columns.reserve(_storage.imageFragments->size());
-        for (auto const column: *_storage.imageFragments | std::views::keys)
-            columns.push_back(column);
-        std::ranges::sort(columns);
-        out.varint(keyOf(LineField::ImageFragments, WireKind::Framed));
-        auto const fragments = out.beginFrame();
-        for (auto const column: columns)
-        {
-            out.varint(column);
-            out.varint(context.images.fragmentId(_storage.imageFragments->at(column)));
-        }
-        out.endFrame(fragments);
-    }
+    if (_storage.imageFragments)
+        putColumnTable(out,
+                       LineField::ImageFragments,
+                       *_storage.imageFragments,
+                       [&](StateWriter& writer, auto const& fragment) {
+                           writer.varint(context.images.fragmentId(fragment));
+                       });
 
-    if (_storage.softGlyphs && !_storage.softGlyphs->empty())
-    {
-        auto columns = std::vector<uint16_t> {};
-        columns.reserve(_storage.softGlyphs->size());
-        for (auto const column: *_storage.softGlyphs | std::views::keys)
-            columns.push_back(column);
-        std::ranges::sort(columns);
-        out.varint(keyOf(LineField::SoftGlyphs, WireKind::Framed));
-        auto const glyphs = out.beginFrame();
-        for (auto const column: columns)
-        {
-            auto const ref = _storage.softGlyphs->at(column);
-            out.varint(column);
-            out.varint(ref.font);
-            out.varint(ref.position);
-        }
-        out.endFrame(glyphs);
-    }
+    if (_storage.softGlyphs)
+        putColumnTable(
+            out, LineField::SoftGlyphs, *_storage.softGlyphs, [](StateWriter& writer, SoftGlyphRef ref) {
+                writer.varint(ref.font);
+                writer.varint(ref.position);
+            });
     out.endFrame(frame);
 }
 
@@ -555,13 +553,14 @@ namespace
         return validateClusters(storage);
     }
 
-    /// Reads the image fragments of a line of @p columns into @p storage.
-    [[nodiscard]] std::expected<void, StateDecodeError> getFragments(std::span<uint8_t const> payload,
-                                                                     uint32_t columns,
-                                                                     LineSoA& storage,
-                                                                     LineDecodeContext const& context)
+    /// Reads a column-keyed side table of a line of @p columns into @p table: the columns strictly ascending
+    /// and inside the line, each followed by the value @p getValue reads and judges.
+    template <typename Table, typename GetValue>
+    [[nodiscard]] std::expected<void, StateDecodeError> getColumnTable(std::span<uint8_t const> payload,
+                                                                       uint32_t columns,
+                                                                       Table& table,
+                                                                       GetValue const& getValue)
     {
-        auto& map = storage.imageFragments.emplace();
         auto in = StateReader::ofPayload(payload);
         auto previous = std::optional<uint64_t> {};
         while (!in.atEnd())
@@ -569,18 +568,36 @@ namespace
             auto const column = in.varint();
             if (!column)
                 return StateFailure { column.error() };
-            auto const id = in.varint();
-            if (!id)
-                return StateFailure { id.error() };
+            auto value = getValue(in);
+            if (!value)
+                return StateFailure { value.error() };
             if (*column >= uint64_t { columns } || (previous && *previous >= *column))
                 return StateFailure { StateDecodeError::InvalidValue };
             previous = *column;
-            auto fragment = context.images.fragment(*id);
-            if (!fragment)
-                return StateFailure { StateDecodeError::InvalidValue };
-            map.emplace(static_cast<uint16_t>(*column), std::move(fragment));
+            table.emplace(static_cast<uint16_t>(*column), std::move(*value));
         }
         return {};
+    }
+
+    /// Reads the image fragments of a line of @p columns into @p storage.
+    [[nodiscard]] std::expected<void, StateDecodeError> getFragments(std::span<uint8_t const> payload,
+                                                                     uint32_t columns,
+                                                                     LineSoA& storage,
+                                                                     LineDecodeContext const& context)
+    {
+        using Fragment = std::shared_ptr<ImageFragment>;
+        return getColumnTable(payload,
+                              columns,
+                              storage.imageFragments.emplace(),
+                              [&](StateReader& in) -> std::expected<Fragment, StateDecodeError> {
+                                  auto const id = in.varint();
+                                  if (!id)
+                                      return StateFailure { id.error() };
+                                  auto fragment = context.images.fragment(*id);
+                                  if (!fragment)
+                                      return StateFailure { StateDecodeError::InvalidValue };
+                                  return fragment;
+                              });
     }
 
     /// Reads the soft-glyph references of a line of @p columns into @p storage.
@@ -588,30 +605,22 @@ namespace
                                                                       uint32_t columns,
                                                                       LineSoA& storage)
     {
-        auto& map = storage.softGlyphs.ensure();
-        auto in = StateReader::ofPayload(payload);
-        auto previous = std::optional<uint64_t> {};
-        while (!in.atEnd())
-        {
-            auto const column = in.varint();
-            if (!column)
-                return StateFailure { column.error() };
-            auto const font = in.varint();
-            if (!font)
-                return StateFailure { font.error() };
-            auto const position = in.varint();
-            if (!position)
-                return StateFailure { position.error() };
-            if (*column >= uint64_t { columns } || (previous && *previous >= *column)
-                || *font >= SoftFontCount || *position < FirstSoftCellPosition
-                || *position > LastSoftCellPosition)
-                return StateFailure { StateDecodeError::InvalidValue };
-            previous = *column;
-            map.emplace(static_cast<uint16_t>(*column),
-                        SoftGlyphRef { .font = static_cast<uint8_t>(*font),
-                                       .position = static_cast<uint8_t>(*position) });
-        }
-        return {};
+        return getColumnTable(payload,
+                              columns,
+                              storage.softGlyphs.ensure(),
+                              [](StateReader& in) -> std::expected<SoftGlyphRef, StateDecodeError> {
+                                  auto const font = in.varint();
+                                  if (!font)
+                                      return StateFailure { font.error() };
+                                  auto const position = in.varint();
+                                  if (!position)
+                                      return StateFailure { position.error() };
+                                  if (*font >= SoftFontCount || *position < FirstSoftCellPosition
+                                      || *position > LastSoftCellPosition)
+                                      return StateFailure { StateDecodeError::InvalidValue };
+                                  return SoftGlyphRef { .font = static_cast<uint8_t>(*font),
+                                                        .position = static_cast<uint8_t>(*position) };
+                              });
     }
 
     /// The scalar fields of a line, as the wire holds them.
