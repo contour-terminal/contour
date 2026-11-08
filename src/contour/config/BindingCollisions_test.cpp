@@ -410,3 +410,16 @@ TEST_CASE("macOS opens the command palette with Command+P and Shift+Command+P", 
     // fallback.
     CHECK(fallbackCharActions(mac, Modifiers { Modifier::Super }, U'P') == Names { "OpenCommandPalette" });
 }
+
+TEST_CASE("every platform closes the active pane with Primary+W", "[bindings][panes]")
+{
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'W') == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Win32, ctrlShift, U'W') == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Mac, Modifiers { Modifier::Super }, U'W')
+          == Names { "ClosePane" });
+    CHECK(charActions(KeyboardPlatformKind::Mac, Modifiers { Modifier::Super, Modifier::Shift }, U'W')
+          == Names { "CloseTab" });
+    // The desktop keeps Ctrl+Shift+X.
+    CHECK(charActions(KeyboardPlatformKind::Xkb, ctrlShift, U'X') == Names { "ClosePane" });
+}

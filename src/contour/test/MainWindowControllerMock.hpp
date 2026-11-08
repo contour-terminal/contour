@@ -172,8 +172,9 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::applicationVersion() with a fixed test value.
     [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
 
-    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, Ctrl+Shift+X, CreateNewTab's,
-    /// Ctrl+Shift+T, and nothing for any other command (an ended pane's footer names Close's).
+    /// Mirrors WindowController::shortcutText(): a ClosePane chord (the desktop's Ctrl+Shift+X),
+    /// CreateNewTab's, Ctrl+Shift+T, and nothing for any other command (an ended pane's footer names
+    /// Close's).
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
         if (commandName == QStringLiteral("CreateNewTab"))

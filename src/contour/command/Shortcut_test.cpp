@@ -265,6 +265,8 @@ TEST_CASE("a Primary row renders per platform", "[command][shortcut]")
     {
         CHECK(spelled(KeyboardPlatformKind::Mac, "CreateNewTab") == "⌘T");
         CHECK(spelled(KeyboardPlatformKind::Mac, "OpenCommandPalette") == "⌘P");
+        CHECK(spelled(KeyboardPlatformKind::Mac, "ClosePane") == "⌘W");
+        CHECK(spelled(KeyboardPlatformKind::Mac, "CloseTab") == "⇧⌘W");
     }
 
     SECTION("the desktop spells Primary as Ctrl+Shift, in words")
@@ -272,6 +274,7 @@ TEST_CASE("a Primary row renders per platform", "[command][shortcut]")
         CHECK(spelled(KeyboardPlatformKind::Xkb, "CreateNewTab") == "Ctrl+Shift+T");
         CHECK(spelled(KeyboardPlatformKind::Win32, "CreateNewTab") == "Ctrl+Shift+T");
         CHECK(spelled(KeyboardPlatformKind::Xkb, "OpenCommandPalette") == "Ctrl+Shift+P");
+        CHECK(spelled(KeyboardPlatformKind::Xkb, "ClosePane") == "Ctrl+Shift+W");
     }
 
     SECTION("the keyboard's style is the platform's, the window controls' the host's")

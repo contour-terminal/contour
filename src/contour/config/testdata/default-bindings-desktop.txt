@@ -43,6 +43,7 @@ char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declin
 char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
@@ -129,6 +130,7 @@ char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declin
 char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
@@ -185,6 +187,7 @@ key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=
 key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
 key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
 char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+004F clicks=- -> SplitHorizontal declined=pass gated=no

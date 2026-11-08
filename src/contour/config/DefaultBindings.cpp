@@ -304,6 +304,10 @@ namespace
             written(DesktopOnly, Ctrl, U'0', Any, { actions::ResetFontSize {} }),
             written(All, Primary, U'T', Any, { actions::CreateNewTab {} }),
             written(DesktopOnly, Primary, U'S', Any, { actions::SpeakSelection {} }),
+            // Primary+W closes the active pane, and the tab with its last pane: Ctrl+Shift+W as GNOME
+            // Terminal, kitty and Windows Terminal close, Command+W as iTerm2 and Ghostty close a split.
+            // First, so it is the chord the menus show; the desktop keeps Ctrl+Shift+X beside it.
+            both(All, Primary, U'W', Any, { actions::ClosePane {} }),
             written(DesktopOnly, Primary, U'X', Any, { actions::ClosePane {} }),
             // macOS: Command+P opens the palette, as the Primary translation of Ctrl+Shift+P gives it
             // (Contour has no Print to lose). Shift+Command+P stays bound below for VS Code, Zed and Ghostty
@@ -363,11 +367,14 @@ namespace
             fallback(PlatformScope::MacOnly, Super, U'G', Any, { actions::FocusNextSearchMatch {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U'G', Any, { actions::FocusPreviousSearchMatch {} }),
             fallback(PlatformScope::MacOnly, Super, U'E', Any, { actions::SearchSelection {} }),
-            // The macOS tab chords: Command+T opens a tab, Command+W closes it, Shift+Command+[ and ] step to
+            // The macOS tab chords: Command+T opens a tab, Shift+Command+[ and ] step to
             // the previous and next tab, and Command+1 ... 9 select the tab at that position. Shift+[ arrives
             // as '{': TerminalSession retries a Shift chord under its unshifted base.
             fallback(PlatformScope::MacOnly, Super, U'T', Any, { actions::CreateNewTab {} }),
-            fallback(PlatformScope::MacOnly, Super, U'W', Any, { actions::CloseTab {} }),
+            // Shift+Command+W closes the whole tab, splits and all (Command+W is ClosePane, above). The
+            // desktop has no CloseTab chord: its Primary already holds Shift, so Primary+Shift+W is
+            // Ctrl+Shift+W.
+            both(PlatformScope::MacOnly, PrimaryShift, U'W', Any, { actions::CloseTab {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U'[', Any, { actions::SwitchToTabLeft {} }),
             fallback(PlatformScope::MacOnly, SuperShift, U']', Any, { actions::SwitchToTabRight {} }),
             fallback(PlatformScope::MacOnly, Super, U'1', Any, { actions::SwitchToTab { .position = 1 } }),
