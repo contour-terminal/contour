@@ -27,7 +27,7 @@ struct LayoutPane
     /// every other resolved config path: a std::string narrowed from it with path::string() would be
     /// spelled in the ANSI code page on Windows, which spells most of Unicode not at all.
     std::optional<std::filesystem::path> directory;
-    /// Per-pane profile override (terminal-level settings only — not window ones).
+    /// Per-pane profile override (terminal-level settings only — not workspace ones).
     std::optional<std::string> profile;
     /// Fraction (0, 1] of the parent split this pane occupies. Unset means "share whatever the
     /// explicitly-sized siblings leave over, equally" (see vtworkspace::ratioForFirst).
@@ -83,13 +83,13 @@ struct Layout
 ///         no backing session.
 using PaneSeeder = std::function<bool(LayoutPane const& leaf)>;
 
-/// Creates a tab in @p window from @p tab: seeds+creates the first pane, applies title/color, then
+/// Creates a tab in @p workspace from @p tab: seeds+creates the first pane, applies title/color, then
 /// builds the pane tree. @p seed is invoked immediately before each model allocation to stage that
 /// pane's backing session (it must make the model's allocator return the id it created). If a seed
 /// fails, realization stops: the first pane's failure yields no tab (nullptr); a later pane's failure
 /// leaves the tab with the panes realized so far — every one backed, none blank.
 [[nodiscard]] Tab* realizeLayoutTab(SessionModel& model,
-                                    WindowId window,
+                                    WorkspaceId workspace,
                                     LayoutTab const& tab,
                                     PaneSeeder const& seed);
 

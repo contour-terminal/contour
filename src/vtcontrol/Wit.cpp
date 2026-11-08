@@ -250,7 +250,7 @@ std::string renderControlWit()
 //
 // Generated from the host's method catalog; regenerate it rather than edit it (see README.md).
 
-/// The control verbs: what an extension may ask its terminal to do with windows, tabs and panes.
+/// The control verbs: what an extension may ask its terminal to do with workspaces, tabs and panes.
 ///
 /// The package is terminal-neutral: any terminal can implement the host side. README.md says how an
 /// extension imports it, and which permissions each verb needs.

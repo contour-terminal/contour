@@ -30,22 +30,22 @@ std::expected<void, TabMergeError> applyTabMerge(vtworkspace::SessionModel& mode
     auto const side = splitSideFrom(merge.side);
     if (!side)
         return std::unexpected { TabMergeError::UnknownSide };
-    auto const [fromWindow, source, sourceLeaf] = model.findSessionLeaf(
+    auto const [fromWorkspace, source, sourceLeaf] = model.findSessionLeaf(
         vtworkspace::SessionId { merge.tabSessions.empty() ? 0 : merge.tabSessions.front() });
-    auto const [toWindow, target, targetLeaf] =
+    auto const [toWorkspace, target, targetLeaf] =
         model.findSessionLeaf(vtworkspace::SessionId { merge.targetSession });
-    if (fromWindow == nullptr || source == nullptr || toWindow == nullptr || target == nullptr
+    if (fromWorkspace == nullptr || source == nullptr || toWorkspace == nullptr || target == nullptr
         || targetLeaf == nullptr)
         return std::unexpected { TabMergeError::UnknownSession };
-    // The merge stays within one window until the clients' reconcilers graft across two.
-    if (fromWindow != toWindow)
-        return std::unexpected { TabMergeError::CrossWindow };
+    // The merge stays within one workspace until the clients' reconcilers graft across two.
+    if (fromWorkspace != toWorkspace)
+        return std::unexpected { TabMergeError::CrossWorkspace };
     // The request names the whole tab it saw. Another client (or this one, dragging twice before a push
     // arrived) may have merged more into it since: moving that would drag panes nobody dragged.
     if (!namesWholeTab(*source, merge.tabSessions))
         return std::unexpected { TabMergeError::StaleTab };
     if (model.mergeTabIntoSplit(
-            fromWindow->id(), source->id(), toWindow->id(), target->id(), targetLeaf->id(), *side)
+            fromWorkspace->id(), source->id(), toWorkspace->id(), target->id(), targetLeaf->id(), *side)
         == nullptr)
         return std::unexpected { TabMergeError::Refused };
     return {};

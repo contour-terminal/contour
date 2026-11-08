@@ -72,9 +72,9 @@ std::string_view eventName(EventPayload const& payload)
 std::string encodeEvent(Event const& event)
 {
     auto const payload = std::visit([](auto const& value) { return encodeJson(value); }, event.payload);
-    return std::format(R"({{"type":{},"window":{},"tab":{},"pane":{},"payload":{}}})",
+    return std::format(R"({{"type":{},"workspace":{},"tab":{},"pane":{},"payload":{}}})",
                        quoteJsonString(eventName(event.payload)),
-                       quoteJsonString(event.origin.window),
+                       quoteJsonString(event.origin.workspace),
                        quoteJsonString(event.origin.tab),
                        quoteJsonString(event.origin.pane),
                        payload);
@@ -88,7 +88,7 @@ std::expected<Event, ControlError> decodeEvent(std::string_view text)
     auto payload = decodePayload(envelope->type, envelope->payload.text, PayloadIndices);
     if (!payload)
         return std::unexpected(std::move(payload.error()));
-    return Event { .origin = { .window = std::move(envelope->window),
+    return Event { .origin = { .workspace = std::move(envelope->workspace),
                                .tab = std::move(envelope->tab),
                                .pane = std::move(envelope->pane) },
                    .payload = std::move(*payload) };

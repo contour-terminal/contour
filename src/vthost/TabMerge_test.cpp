@@ -26,10 +26,10 @@ struct MergeEvents final: vtworkspace::ModelEvents
     int restructured = 0;
     int panesClosed = 0;
 
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override { ++tabsClosed; }
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override { ++tabsClosed; }
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { ++panesClosed; }
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
@@ -40,16 +40,16 @@ struct MergeEvents final: vtworkspace::ModelEvents
     void paneTreeRestructured(vtworkspace::TabId) override { ++restructured; }
 };
 
-/// One window of two tabs: the first holds sessions 1 and 2, the second session 3.
+/// One workspace of two tabs: the first holds sessions 1 and 2, the second session 3.
 struct TwoTabs
 {
     MergeEvents events;
     uint64_t nextSession = 1;
     vtworkspace::SessionModel model { events, [this] { return vtworkspace::SessionId { nextSession++ }; } };
-    vtworkspace::WindowId window = model.createWindow()->id();
-    vtworkspace::Tab* first = model.createTab(window);
+    vtworkspace::WorkspaceId workspace = model.createWorkspace()->id();
+    vtworkspace::Tab* first = model.createTab(workspace);
     vtworkspace::Pane* second = model.splitActivePane(first->id(), vtworkspace::SplitState::Horizontal);
-    vtworkspace::Tab* dragged = model.createTab(window);
+    vtworkspace::Tab* dragged = model.createTab(workspace);
 };
 
 } // namespace
@@ -69,13 +69,13 @@ TEST_CASE("merging a tab grafts its session beside the target and keeps every se
         applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 1, .side = 1 });
     REQUIRE(merged.has_value());
 
-    CHECK(m.model.window(m.window)->tabCount() == 1);
+    CHECK(m.model.workspace(m.workspace)->tabCount() == 1);
     CHECK(m.first->paneCount() == 3);
     CHECK(m.events.tabsClosed == 1);
     CHECK(m.events.restructured == 1);
     // The dragged tab's session was moved, not closed: no pane was reported closed.
     CHECK(m.events.panesClosed == 0);
-    auto const [window, tab, leaf] = m.model.findSessionLeaf(vtworkspace::SessionId { 3 });
+    auto const [workspace, tab, leaf] = m.model.findSessionLeaf(vtworkspace::SessionId { 3 });
     CHECK(tab == m.first);
     CHECK(leaf != nullptr);
 }
@@ -112,24 +112,24 @@ TEST_CASE("a merge that names nothing changes nothing", "[vthost][tab-merge]")
         CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = {}, .targetSession = 1, .side = 1 })
               == std::unexpected { TabMergeError::UnknownSession });
     }
-    CHECK(m.model.window(m.window)->tabCount() == 2);
+    CHECK(m.model.workspace(m.workspace)->tabCount() == 2);
     CHECK(m.events.tabsClosed == 0);
     CHECK(m.events.restructured == 0);
 }
 
-TEST_CASE("a merge across two windows is refused", "[vthost][tab-merge]")
+TEST_CASE("a merge across two workspaces is refused", "[vthost][tab-merge]")
 {
     auto m = TwoTabs {};
-    auto const other = m.model.createWindow()->id();
-    auto const* const elsewhere = m.model.createTab(other); // session 4, in another window
+    auto const other = m.model.createWorkspace()->id();
+    auto const* const elsewhere = m.model.createTab(other); // session 4, in another workspace
     REQUIRE(elsewhere != nullptr);
 
     CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 4 }, .targetSession = 1, .side = 1 })
-          == std::unexpected { TabMergeError::CrossWindow });
+          == std::unexpected { TabMergeError::CrossWorkspace });
     CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 4, .side = 1 })
-          == std::unexpected { TabMergeError::CrossWindow });
-    CHECK(m.model.window(m.window)->tabCount() == 2);
-    CHECK(m.model.window(other)->tabCount() == 1);
+          == std::unexpected { TabMergeError::CrossWorkspace });
+    CHECK(m.model.workspace(m.workspace)->tabCount() == 2);
+    CHECK(m.model.workspace(other)->tabCount() == 1);
     CHECK(m.events.tabsClosed == 0);
 }
 
@@ -138,16 +138,16 @@ TEST_CASE("a request made of a stale view of the tab moves nothing", "[vthost][t
     // Another client merged session 2 into the tab holding 3 before this request arrived: the request still
     // names the tab as {3}, so it would drag session 2 along with it.
     auto m = TwoTabs {};
-    REQUIRE(m.model.mergeTabIntoSplit(m.window,
+    REQUIRE(m.model.mergeTabIntoSplit(m.workspace,
                                       m.first->id(),
-                                      m.window,
+                                      m.workspace,
                                       m.dragged->id(),
                                       m.dragged->rootPane()->id(),
                                       vtworkspace::SplitSide::Right)
             != nullptr);
-    REQUIRE(m.model.window(m.window)->tabCount() == 1);
+    REQUIRE(m.model.workspace(m.workspace)->tabCount() == 1);
     // Now the only tab holds {1, 2, 3}; a second tab to merge it into does not exist, so build one.
-    auto const* const another = m.model.createTab(m.window); // session 4
+    auto const* const another = m.model.createTab(m.workspace); // session 4
     REQUIRE(another != nullptr);
     auto const eventsBefore = m.events.restructured;
 
@@ -171,6 +171,6 @@ TEST_CASE("a request made of a stale view of the tab moves nothing", "[vthost][t
                   .has_value());
         return;
     }
-    CHECK(m.model.window(m.window)->tabCount() == 2);
+    CHECK(m.model.workspace(m.workspace)->tabCount() == 2);
     CHECK(m.events.restructured == eventsBefore);
 }

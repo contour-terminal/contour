@@ -558,7 +558,7 @@ class MockMainController: public MainWindowControllerMock
         calls << QStringLiteral("consumePendingTransplant");
         return false;
     }
-    // Not attached in these tests, so no daemon window is adopted (the window falls through).
+    // Not attached in these tests, so no daemon workspace is adopted (the window falls through).
     Q_INVOKABLE bool consumeAttachWindow(QObject*)
     {
         calls << QStringLiteral("consumeAttachWindow");

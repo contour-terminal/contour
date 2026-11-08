@@ -68,7 +68,7 @@ struct ControlHarness
     control::ControlService service;
     vtcontrol::testing::FakeCallContext context;
 
-    /// Opens a tab in the host's window.
+    /// Opens a tab in the host's workspace.
     /// @return The session of its pane.
     vtworkspace::SessionId openTab()
     {

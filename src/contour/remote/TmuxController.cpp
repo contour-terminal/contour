@@ -690,7 +690,7 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
 }
 
 void TmuxController::adoptPendingPanes(contour::session::TerminalSessionManager& manager,
-                                       vtworkspace::WindowId guiWindow)
+                                       vtworkspace::WorkspaceId guiWindow)
 {
     // Splits performed here (whole-tree realize, or an incremental split of an existing tmux pane)
     // must build the mirror pane locally, not author a new split back to tmux. (Mirrors
@@ -749,7 +749,7 @@ void TmuxController::adoptPendingPanes(contour::session::TerminalSessionManager&
 }
 
 void TmuxController::realizeWindowLayout(contour::session::TerminalSessionManager& manager,
-                                         vtworkspace::WindowId guiWindow,
+                                         vtworkspace::WorkspaceId guiWindow,
                                          uint64_t tmuxWindow,
                                          vthost::tmux::BinaryLayout const& tree)
 {
@@ -763,7 +763,7 @@ void TmuxController::realizeWindowLayout(contour::session::TerminalSessionManage
     // Seed the split anchor so a later incremental split of this window has a session to split beside.
     // The ID is stored (not the pointer): the anchor is resolved back to a live session at use time,
     // so a pane dying in between can never leave a dangling pointer behind.
-    if (auto* win = manager.model().window(guiWindow); win != nullptr && win->tabCount() > 0)
+    if (auto* win = manager.model().workspace(guiWindow); win != nullptr && win->tabCount() > 0)
         if (auto* tab = win->tabAt(win->tabCount() - 1); tab != nullptr)
         {
             auto const lock = std::lock_guard { _mutex };
@@ -772,7 +772,7 @@ void TmuxController::realizeWindowLayout(contour::session::TerminalSessionManage
 }
 
 bool TmuxController::realizeOnePane(contour::session::TerminalSessionManager& manager,
-                                    vtworkspace::WindowId guiWindow)
+                                    vtworkspace::WorkspaceId guiWindow)
 {
     auto record = PendingPane {};
     {

@@ -222,7 +222,7 @@ class MainWindowControllerMock: public QAbstractListModel
         return contour::window::writeNodeDrag(
             contour::window::NodeDrag { .payload = contour::window::DropPayload::Tab,
                                         .host = { .kind = contour::window::HostKind::Process, .id = "test" },
-                                        .window = vtworkspace::WindowId { 1 },
+                                        .window = vtworkspace::WorkspaceId { 1 },
                                         .tabIndex = tabIndex,
                                         .sessions = { 100 + (static_cast<uint64_t>(tabIndex) * 2),
                                                       101 + (static_cast<uint64_t>(tabIndex) * 2) } });

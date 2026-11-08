@@ -90,6 +90,24 @@ TEST_CASE("every verb reaching loadConfig declares the options it reads", "[cont
     }
 }
 
+TEST_CASE("contour client takes --workspace and refuses --window", "[contour][app][cli]")
+{
+    TestApp app;
+    auto const syntax = app.app().parameterDefinition();
+
+    auto const parse = [&](std::string_view option) {
+        auto const line = core::cli::StringViewList { "contour", "client", option, "7" };
+        return core::cli::parse(syntax, line);
+    };
+
+    auto const accepted = parse("--workspace");
+    REQUIRE(accepted.has_value());
+    CHECK(accepted->get<std::string>("contour.client.workspace") == "7");
+
+    // An unknown option is a parse error, which the application ends with EXIT_FAILURE.
+    CHECK_FALSE(parse("--window").has_value());
+}
+
 TEST_CASE("ContourGuiApp early-exit threshold falls back to the documented default", "[contour][app]")
 {
     TestApp app;
@@ -164,21 +182,21 @@ TEST_CASE("hasStrandedQmlOverrides only fires on a customization that has actual
     }
 }
 
-TEST_CASE("the attach boot window adopts the primary daemon window", "[contour][app][attach]")
+TEST_CASE("the attach boot window adopts the primary daemon workspace", "[contour][app][attach]")
 {
-    using contour::primaryDaemonWindowToAdopt;
+    using contour::primaryDaemonWorkspaceToAdopt;
 
-    // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon window,
+    // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon workspace,
     // so Main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
-    CHECK(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
+    CHECK(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
 
     // A later OS window (one already mapped) is NOT the boot window — it adopts nothing here (it is
-    // handled by the staged _pendingAttachWindow path instead).
-    CHECK_FALSE(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/true, { 7, 12 }).has_value());
+    // handled by the staged _pendingAttachWorkspace path instead).
+    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/true, { 7, 12 }).has_value());
 
-    // No daemon window reported yet: nothing to bind now — the caller still claims the boot window
+    // No daemon workspace reported yet: nothing to bind now — the caller still claims the boot window
     // and reconcileAttachWindows binds it once the first layout arrives.
-    CHECK_FALSE(primaryDaemonWindowToAdopt(/*anyWindowMapped=*/false, {}).has_value());
+    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, {}).has_value());
 }
 
 TEST_CASE("onExit records no exit status for a non-process session", "[contour][app]")

@@ -78,7 +78,7 @@ QString const& processToken()
 }
 
 WindowController::WindowController(session::TerminalSessionManager& manager,
-                                   vtworkspace::WindowId windowId,
+                                   vtworkspace::WorkspaceId windowId,
                                    config::MenuPresentation menuPresentation,
                                    std::optional<WindowPosition> initialPosition,
                                    core::platform::IClock const& clock,
@@ -555,12 +555,12 @@ std::string WindowController::titleAtRow(int row) const
     return data(index(row, 0), static_cast<int>(Roles::TitleRole)).toString().toStdString();
 }
 
-vtworkspace::Window* WindowController::window() const noexcept
+vtworkspace::Workspace* WindowController::window() const noexcept
 {
-    // Resolve the backing vtworkspace::Window strictly by this controller's own WindowId, so each controller
-    // adapts exactly its window (correct for N windows). For the first controller this is the same object
-    // the manager's ctor minted as _modelWindow.
-    return _manager.model().window(_windowId);
+    // Resolve the backing vtworkspace::Workspace strictly by this controller's own WorkspaceId, so each
+    // controller adapts exactly its window (correct for N windows). For the first controller this is the same
+    // object the manager's ctor minted as _modelWindow.
+    return _manager.model().workspace(_windowId);
 }
 
 vtworkspace::Tab* WindowController::activeModelTab() const noexcept
@@ -992,7 +992,7 @@ void WindowController::dropNodeOnPane(session::TerminalSession const* pane,
 
 void WindowController::dropNodeOnTab(int tabIndex, QString const& nodePayload)
 {
-    auto const* const window = _manager.model().window(_windowId);
+    auto const* const window = _manager.model().workspace(_windowId);
     auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
     // Beside the tab's active pane, but a place of its own: one an older daemon serves no route to.
@@ -1010,10 +1010,10 @@ void WindowController::dropNodeInGap(int index, QString const& nodePayload)
         return;
     // A gap is between two tabs as they are now; a tab of this window taken out of the strip first lands
     // one row left of a gap to its right.
-    if (drag->tab && drag->window == _windowId && drag->movesWholeTab())
-        if (auto const row = _manager.model().window(_windowId)->indexOf(*drag->tab); index > row)
+    if (drag->tab && drag->workspace == _windowId && drag->movesWholeTab())
+        if (auto const row = _manager.model().workspace(_windowId)->indexOf(*drag->tab); index > row)
             --index;
-    placeNode(*drag, vtworkspace::TabWellTarget { .window = _windowId, .index = index });
+    placeNode(*drag, vtworkspace::TabWellTarget { .workspace = _windowId, .index = index });
 }
 
 void WindowController::setTabSpans(QList<QRectF> const& tabs)
@@ -1032,7 +1032,7 @@ TabBarHitValue WindowController::tabBarHit(qreal x) const
 
 bool WindowController::springOpens(int tabIndex, QString const& nodePayload) const
 {
-    auto const* const window = _manager.model().window(_windowId);
+    auto const* const window = _manager.model().workspace(_windowId);
     auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
     if (tab == nullptr || drag == nullptr)
@@ -1094,7 +1094,7 @@ void WindowController::finishNodeDrag(int dropAction)
         return;
     auto const spot = probe.dropSpot();
     std::ignore = _manager.moveNode(ended->drag(),
-                                    vtworkspace::NewWindowTarget {},
+                                    vtworkspace::NewWorkspaceTarget {},
                                     spot.screen != nullptr ? spot.screen : screen(),
                                     spot.at);
 }
@@ -1190,7 +1190,7 @@ namespace
 {
     /// Saves @p window under @p name through @p manager, and has @p notices say how it went.
     void saveWindowLayoutAndTell(session::TerminalSessionManager& manager,
-                                 vtworkspace::WindowId window,
+                                 vtworkspace::WorkspaceId window,
                                  QString const& name,
                                  LayoutReplace replace,
                                  NoticeModel& notices)
@@ -1241,7 +1241,7 @@ QVariantMap WindowController::checkLayoutName(QString const& name, bool replace)
 
 QString WindowController::layoutSummary() const
 {
-    auto const* const window = _manager.model().window(_windowId);
+    auto const* const window = _manager.model().workspace(_windowId);
     auto tabs = 0;
     auto panes = 0;
     if (window != nullptr)
@@ -1679,7 +1679,7 @@ void WindowController::closeWindow()
                 for (auto* session: _manager.sessionsOfTab(tab))
                     doomed.push_back(session);
 
-    _manager.model().removeWindow(_windowId);
+    _manager.model().removeWorkspace(_windowId);
 
     // Prune our PaneProxy tree explicitly (see above): clear each cached Pane* first so any getter that
     // runs before deleteLater() takes effect sees no stale pointer, then drop the root.

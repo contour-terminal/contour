@@ -639,9 +639,9 @@ void NativeClient::restateSessionSettings(std::optional<proto::WireSessionSettin
         proto::SessionSettingsChanged { .sessionSettings = _handshake.sessionSettings } });
 }
 
-void NativeClient::createWindow(std::string profileName)
+void NativeClient::createWorkspace(std::string profileName)
 {
-    send(proto::DecodedPdu { proto::NewWindow { .profileName = profileForWire(std::move(profileName)) } });
+    send(proto::DecodedPdu { proto::NewWorkspace { .profileName = profileForWire(std::move(profileName)) } });
 }
 
 void NativeClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName)
@@ -802,12 +802,12 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* layout = std::get_if<proto::LayoutState>(&pdu))
     {
-        // A daemon sends the layouts of the windows a connection follows, so one it pushes later -- a window
-        // this connection created -- is followed too, and a reconnect resumes it with the rest.
+        // A daemon sends the layouts of the workspaces a connection follows, so one it pushes later -- a
+        // workspace this connection created -- is followed too, and a reconnect resumes it with the rest.
         if (shares(proto::Capability::AttachIntent))
-            if (auto const at = std::ranges::lower_bound(_followedWindows, layout->window);
-                at == _followedWindows.end() || *at != layout->window)
-                _followedWindows.insert(at, layout->window);
+            if (auto const at = std::ranges::lower_bound(_followedWorkspaces, layout->workspace);
+                at == _followedWorkspaces.end() || *at != layout->workspace)
+                _followedWorkspaces.insert(at, layout->workspace);
         if (!_onLayout)
             return;
         if (_pendingEdits.empty())
@@ -932,11 +932,11 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
     _daemonRelease = hello.releaseVersion;
     _daemonInstance = hello.daemonInstance;
-    _restoredCounts = hello.restoredWindows == 0 && hello.restoredTabs == 0
+    _restoredCounts = hello.restoredWorkspaces == 0 && hello.restoredTabs == 0
                           ? std::nullopt
-                          : std::optional { RestoredCounts { .windows = hello.restoredWindows,
+                          : std::optional { RestoredCounts { .workspaces = hello.restoredWorkspaces,
                                                              .tabs = hello.restoredTabs } };
-    _followedWindows = hello.followedWindows;
+    _followedWorkspaces = hello.followedWorkspaces;
     _negotiated = std::move(*outcome);
     _handshakeTimer.reset();
     clientLog()("attach: connected (protocol v{})", _negotiated->version);

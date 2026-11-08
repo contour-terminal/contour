@@ -22,20 +22,20 @@ namespace
     /// Where the caller's pane sits.
     struct CallerLocation
     {
-        vtcontrol::WindowInfo const* window = nullptr;
+        vtcontrol::WorkspaceInfo const* workspace = nullptr;
         vtcontrol::TabInfo const* tab = nullptr;
     };
 
-    [[nodiscard]] std::optional<CallerLocation> locate(vtcontrol::ListReply const& workspace,
+    [[nodiscard]] std::optional<CallerLocation> locate(vtcontrol::ListReply const& reply,
                                                        std::string_view callerPane)
     {
         if (callerPane.empty())
             return std::nullopt;
-        for (auto const& window: workspace.windows)
-            for (auto const& tab: window.tabs)
+        for (auto const& workspace: reply.workspaces)
+            for (auto const& tab: workspace.tabs)
                 for (auto const& pane: tab.panes)
                     if (pane.id == callerPane)
-                        return CallerLocation { .window = &window, .tab = &tab };
+                        return CallerLocation { .workspace = &workspace, .tab = &tab };
         return std::nullopt;
     }
 
@@ -55,7 +55,7 @@ namespace
     }
 } // namespace
 
-std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& workspace,
+std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& reply,
                                                    std::string_view callerPane,
                                                    std::string_view target,
                                                    TabScope scope)
@@ -65,7 +65,7 @@ std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& w
         return std::unexpected(ScopeError { .kind = Kind::NoCaller,
                                             .message = "no caller pane is known (CONTOUR_PANE is not set), "
                                                        "so there is no default pane; name one" });
-    auto const caller = locate(workspace, callerPane);
+    auto const caller = locate(reply, callerPane);
     if (!callerPane.empty() && !caller)
         return std::unexpected(
             ScopeError { .kind = Kind::CallerGone,
@@ -75,8 +75,8 @@ std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& w
 
     auto own = std::vector<vtcontrol::TargetCandidate> {};
     auto all = std::vector<vtcontrol::TargetCandidate> {};
-    for (auto const& window: workspace.windows)
-        for (auto const& tab: window.tabs)
+    for (auto const& workspace: reply.workspaces)
+        for (auto const& tab: workspace.tabs)
         {
             collect(all, tab);
             if (caller && &tab == caller->tab)
@@ -108,23 +108,23 @@ std::expected<std::string, ScopeError> resolvePane(vtcontrol::ListReply const& w
     return std::unexpected(fromControl(inTab.error()));
 }
 
-std::optional<std::string> ownTabOf(vtcontrol::ListReply const& workspace, std::string_view callerPane)
+std::optional<std::string> ownTabOf(vtcontrol::ListReply const& reply, std::string_view callerPane)
 {
-    if (auto const where = locate(workspace, callerPane))
+    if (auto const where = locate(reply, callerPane))
         return where->tab->id;
     return std::nullopt;
 }
 
-std::string annotateWorkspace(vtcontrol::ListReply const& workspace, std::string_view callerPane)
+std::string annotateWorkspace(vtcontrol::ListReply const& reply, std::string_view callerPane)
 {
     auto document = glz::generic {};
-    if (glz::read_json(document, vtcontrol::encodeJson(workspace)))
-        return vtcontrol::encodeJson(workspace);
+    if (glz::read_json(document, vtcontrol::encodeJson(reply)))
+        return vtcontrol::encodeJson(reply);
 
-    auto const caller = locate(workspace, callerPane);
+    auto const caller = locate(reply, callerPane);
     auto* rootPtr = document.get_if<glz::generic::object_t>();
     if (rootPtr == nullptr)
-        return vtcontrol::encodeJson(workspace);
+        return vtcontrol::encodeJson(reply);
     auto& rootObject = *rootPtr;
     auto const ownTabId = caller ? std::string_view { caller->tab->id } : std::string_view {};
 
@@ -136,14 +136,14 @@ std::string annotateWorkspace(vtcontrol::ListReply const& workspace, std::string
         return id ? std::string_view { *id } : std::string_view {};
     };
 
-    if (auto const windows = rootObject.find("windows"); windows != rootObject.end())
-        if (auto* windowList = windows->second.get_if<glz::generic::array_t>())
-            for (auto& window: *windowList)
+    if (auto const workspaces = rootObject.find("workspaces"); workspaces != rootObject.end())
+        if (auto* workspaceList = workspaces->second.get_if<glz::generic::array_t>())
+            for (auto& workspace: *workspaceList)
             {
-                auto* windowObject = window.get_if<glz::generic::object_t>();
-                if (windowObject == nullptr || !windowObject->contains("tabs"))
+                auto* workspaceObject = workspace.get_if<glz::generic::object_t>();
+                if (workspaceObject == nullptr || !workspaceObject->contains("tabs"))
                     continue;
-                auto* tabList = windowObject->at("tabs").get_if<glz::generic::array_t>();
+                auto* tabList = workspaceObject->at("tabs").get_if<glz::generic::array_t>();
                 if (tabList == nullptr)
                     continue;
                 for (auto& tab: *tabList)
@@ -169,13 +169,13 @@ std::string annotateWorkspace(vtcontrol::ListReply const& workspace, std::string
         auto self = glz::generic::object_t {};
         self["pane"] = std::string(callerPane);
         self["tab"] = caller->tab->id;
-        self["window"] = caller->window->id;
+        self["workspace"] = caller->workspace->id;
         rootObject["self"] = self;
     }
 
     auto text = std::string {};
     if (glz::write_json(document, text))
-        return vtcontrol::encodeJson(workspace);
+        return vtcontrol::encodeJson(reply);
     return text;
 }
 

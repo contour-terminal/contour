@@ -105,13 +105,13 @@ namespace
         });
     }
 
-    void writeWindow(proto::Writer& sink, WindowSnapshot const& window)
+    void writeWorkspace(proto::Writer& sink, WorkspaceLayoutSnapshot const& workspace)
     {
         writeBlob(sink, [&](proto::Writer& out) {
-            writeIdentity(out, window.identity);
-            out.varint(window.activeTab);
-            out.varint(window.tabs.size());
-            for (auto const& tab: window.tabs)
+            writeIdentity(out, workspace.identity);
+            out.varint(workspace.activeTab);
+            out.varint(workspace.tabs.size());
+            for (auto const& tab: workspace.tabs)
                 writeTab(out, tab);
         });
     }
@@ -319,31 +319,31 @@ namespace
         });
     }
 
-    [[nodiscard]] Parsed<WindowSnapshot> readWindow(proto::Reader& source, DecodeContext& context)
+    [[nodiscard]] Parsed<WorkspaceLayoutSnapshot> readWorkspace(proto::Reader& source, DecodeContext& context)
     {
-        return readBlobWith(source, [&](proto::Reader& in) -> Parsed<WindowSnapshot> {
-            auto window = WindowSnapshot {};
+        return readBlobWith(source, [&](proto::Reader& in) -> Parsed<WorkspaceLayoutSnapshot> {
+            auto workspace = WorkspaceLayoutSnapshot {};
             if (in.remaining() == 0)
-                return window;
+                return workspace;
             auto identity = readIdentity(in);
             if (!identity)
                 return std::unexpected(identity.error());
-            window.identity = *std::move(identity);
+            workspace.identity = *std::move(identity);
             if (in.remaining() == 0)
-                return window;
+                return workspace;
             auto const activeTab = in.varint();
             auto const tabCount = in.varint();
-            if (!activeTab || !tabCount || *tabCount > MaxTabsPerWindow)
+            if (!activeTab || !tabCount || *tabCount > MaxTabsPerWorkspace)
                 return std::unexpected(SnapshotError::Malformed);
-            window.activeTab = static_cast<std::uint32_t>(std::min<std::uint64_t>(*activeTab, UINT32_MAX));
+            workspace.activeTab = static_cast<std::uint32_t>(std::min<std::uint64_t>(*activeTab, UINT32_MAX));
             for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, *tabCount))
             {
                 auto tab = readTab(in, context);
                 if (!tab)
                     return std::unexpected(tab.error());
-                window.tabs.push_back(*std::move(tab));
+                workspace.tabs.push_back(*std::move(tab));
             }
-            return window;
+            return workspace;
         });
     }
 
@@ -353,16 +353,16 @@ namespace
         auto context = DecodeContext {};
         auto decoded = DecodedSnapshot {};
         auto const takenAt = in.svarint();
-        auto const windowCount = in.varint();
-        if (!takenAt || !windowCount || *windowCount > MaxSnapshotWindows)
+        auto const workspaceCount = in.varint();
+        if (!takenAt || !workspaceCount || *workspaceCount > MaxSnapshotWorkspaces)
             return std::unexpected(SnapshotError::Malformed);
         decoded.snapshot.takenAt = std::chrono::sys_seconds { std::chrono::seconds { *takenAt } };
-        for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, *windowCount))
+        for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, *workspaceCount))
         {
-            auto window = readWindow(in, context);
-            if (!window)
-                return std::unexpected(window.error());
-            decoded.snapshot.windows.push_back(*std::move(window));
+            auto workspace = readWorkspace(in, context);
+            if (!workspace)
+                return std::unexpected(workspace.error());
+            decoded.snapshot.workspaces.push_back(*std::move(workspace));
         }
         if (in.remaining() > 0)
         {
@@ -387,10 +387,10 @@ std::vector<std::byte> encodeSnapshot(WorkspaceSnapshot const& snapshot)
 {
     auto body = proto::Writer {};
     body.svarint(snapshot.takenAt.time_since_epoch().count());
-    body.varint(snapshot.windows.size());
-    for (auto const& window: snapshot.windows)
-        writeWindow(body, window);
-    // Appended after the windows, so a file from before the field reads as none.
+    body.varint(snapshot.workspaces.size());
+    for (auto const& workspace: snapshot.workspaces)
+        writeWorkspace(body, workspace);
+    // Appended after the workspaces, so a file from before the field reads as none.
     if (snapshot.cellPixelSize)
     {
         body.varint(unbox<std::uint64_t>(snapshot.cellPixelSize->width));

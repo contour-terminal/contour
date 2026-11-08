@@ -230,11 +230,11 @@ namespace
     /// just-created pane is available to seed the next.
     [[nodiscard]] std::unordered_map<uint64_t, contour::session::TerminalSession*> remoteToLocal(
         contour::session::TerminalSessionManager& manager,
-        vtworkspace::WindowId window,
+        vtworkspace::WorkspaceId window,
         NativeController const& controller)
     {
         auto out = std::unordered_map<uint64_t, contour::session::TerminalSession*> {};
-        auto* win = manager.model().window(window);
+        auto* win = manager.model().workspace(window);
         if (win == nullptr)
             return out;
         for (auto const i: std::views::iota(0, win->tabCount()))
@@ -251,7 +251,7 @@ namespace
       public:
         BoundSessions(contour::session::TerminalSessionManager& manager, NativeController const& controller)
         {
-            manager.model().forEachTab([&](vtworkspace::Window const&, vtworkspace::Tab& tab) {
+            manager.model().forEachTab([&](vtworkspace::Workspace const&, vtworkspace::Tab& tab) {
                 for (auto const* session: manager.sessionsOfTab(&tab))
                     if (auto const remote = controller.sessionForPty(&session->terminal().device()))
                     {
@@ -398,7 +398,7 @@ namespace
     void gatherMovedPanes(contour::session::TerminalSessionManager& manager,
                           NativeController& controller,
                           BoundSessions& bound,
-                          vtworkspace::WindowId window,
+                          vtworkspace::WorkspaceId window,
                           vthost::proto::LayoutState const& layout)
     {
         auto& model = manager.model();
@@ -412,7 +412,7 @@ namespace
             auto const shown = std::ranges::to<std::vector>(
                 sessionsOf(wireTab->root)
                 | std::views::filter([&](uint64_t remote) { return bound.localOf(remote).has_value(); }));
-            auto const* const here = model.window(window);
+            auto const* const here = model.workspace(window);
             if (shown.empty() || here == nullptr)
                 continue;
             auto const* tab = static_cast<vtworkspace::Tab const*>(nullptr);
@@ -423,16 +423,16 @@ namespace
                 // A tab the daemon made for a move: its first pane, taken out into a tab of its own.
                 auto const moved = manager.applyNodeMove(
                     vtworkspace::PaneSource { .session = *bound.localOf(shown.front()) },
-                    vtworkspace::TabWellTarget { .window = window, .index = here->tabCount() });
+                    vtworkspace::TabWellTarget { .workspace = window, .index = here->tabCount() });
                 if (!moved)
                     continue;
                 bound.moved(moved->focused, moved->tab);
                 tab = model.findTab(moved->tab);
             }
-            else if (auto const from = model.windowOfTab(tab->id()); from != window)
+            else if (auto const from = model.workspaceOfTab(tab->id()); from != window)
                 std::ignore = manager.applyNodeMove(
-                    vtworkspace::TabSource { .window = from, .tab = tab->id() },
-                    vtworkspace::TabWellTarget { .window = window, .index = here->tabCount() });
+                    vtworkspace::TabSource { .workspace = from, .tab = tab->id() },
+                    vtworkspace::TabWellTarget { .workspace = window, .index = here->tabCount() });
             controller.pairTab(tab->id(), wireTab->tabId);
             gatherInto(manager, bound, *tab, shown);
         }
@@ -467,14 +467,14 @@ namespace
     /// still unpaired.
     void placeTabs(vtworkspace::SessionModel& model,
                    NativeController const& controller,
-                   vtworkspace::WindowId window,
+                   vtworkspace::WorkspaceId window,
                    vthost::proto::LayoutState const& layout)
     {
         auto row = 0;
         for (auto const& wireTab: layout.tabs)
         {
             auto const paired = controller.tabPairedWith(wireTab.tabId);
-            auto const* const win = model.window(window);
+            auto const* const win = model.workspace(window);
             if (!paired || win == nullptr || win->indexOf(*paired) < 0)
                 continue;
             model.moveTab(window, *paired, row); // a no-op where it is already
@@ -522,7 +522,7 @@ namespace
         auto const remoteOf = [&](vtworkspace::Pane const* leaf) -> uint64_t {
             return leaf != nullptr ? bound.remoteOf(leaf->session()).value_or(0) : 0;
         };
-        auto const* window = model.window(model.windowOfTab(local.id()));
+        auto const* window = model.workspace(model.workspaceOfTab(local.id()));
         auto const here = vthost::client::TabPresentation {
             .activeSession = remoteOf(local.activePane()),
             .zoomedSession = local.isZoomed() ? remoteOf(local.activePane()) : 0,
@@ -550,7 +550,7 @@ namespace
     /// each target pane is activated and closed (closeActivePane removes the tab's ACTIVE pane).
     void closeEndedPanes(contour::session::TerminalSessionManager& manager,
                          NativeController const& controller,
-                         vtworkspace::WindowId window,
+                         vtworkspace::WorkspaceId window,
                          LayoutSnapshot const& alive)
     {
         auto named = std::unordered_set<uint64_t> {};
@@ -577,7 +577,7 @@ namespace
 
     /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
     void realizeWholeTab(contour::session::TerminalSessionManager& manager,
-                         vtworkspace::WindowId window,
+                         vtworkspace::WorkspaceId window,
                          NativeController& controller,
                          vthost::proto::WireTab const& wireTab,
                          std::optional<vtbackend::PageSize> pageSize)
@@ -594,64 +594,64 @@ namespace
     }
 } // namespace
 
-std::vector<ReconciledWindow> windowsToReconcile(LayoutSnapshot const& layouts)
+std::vector<ReconciledWorkspace> workspacesToReconcile(LayoutSnapshot const& layouts)
 {
-    return std::ranges::to<std::vector>(layouts | std::views::transform([](auto const& entry) {
-                                            auto sessions = std::vector<uint64_t> {};
-                                            for (auto const& tab: entry.second->tabs)
-                                                collectSessions(tab.root, sessions);
-                                            return ReconciledWindow {
-                                                .daemonWindow = entry.first,
-                                                .tabs = entry.second->tabs.empty() ? DaemonWindowTabs::None
-                                                                                   : DaemonWindowTabs::Some,
-                                                .sessions = std::move(sessions),
-                                            };
-                                        }));
+    return std::ranges::to<std::vector>(
+        layouts | std::views::transform([](auto const& entry) {
+            auto sessions = std::vector<uint64_t> {};
+            for (auto const& tab: entry.second->tabs)
+                collectSessions(tab.root, sessions);
+            return ReconciledWorkspace {
+                .daemonWorkspace = entry.first,
+                .tabs = entry.second->tabs.empty() ? DaemonWorkspaceTabs::None : DaemonWorkspaceTabs::Some,
+                .sessions = std::move(sessions),
+            };
+        }));
 }
 
-std::vector<ReconciledWindow> windowsToReconcile(NativeController const& controller)
+std::vector<ReconciledWorkspace> workspacesToReconcile(NativeController const& controller)
 {
-    return windowsToReconcile(controller.settledLayouts());
+    return workspacesToReconcile(controller.settledLayouts());
 }
 
 void reconcileAttachWindows(contour::session::TerminalSessionManager& manager,
                             NativeController& controller,
                             LayoutSnapshot const& layouts,
                             AttachWindowMap& windows,
-                            std::function<void(ReconciledWindow const&)> const& openWindow)
+                            std::function<void(ReconciledWorkspace const&)> const& openWindow)
 {
-    auto const isOpen = [&](vtworkspace::WindowId window) {
-        return manager.model().window(window) != nullptr;
+    auto const isOpen = [&](vtworkspace::WorkspaceId window) {
+        return manager.model().workspace(window) != nullptr;
     };
     auto const wereOpen = std::ranges::to<std::vector>(
         windows | std::views::filter([&](auto const& entry) { return isOpen(entry.second); })
         | std::views::keys);
     {
         auto const hold = manager.holdEmptiedWindows();
-        auto const reconciled = windowsToReconcile(layouts);
+        auto const reconciled = workspacesToReconcile(layouts);
         for (auto const& window: reconciled)
         {
-            if (auto const mapped = windows.find(window.daemonWindow); mapped != windows.end())
+            if (auto const mapped = windows.find(window.daemonWorkspace); mapped != windows.end())
             {
-                applyRemoteLayout(manager, mapped->second, controller, layouts, window.daemonWindow);
+                applyRemoteLayout(manager, mapped->second, controller, layouts, window.daemonWorkspace);
                 manager.deliverRestoreSummaryTo(mapped->second);
                 continue;
             }
             openWindow(window);
         }
-        // A window a pass emptied that shows a daemon window holding tabs is the next reconcile's to fill.
+        // A window a pass emptied that shows a daemon workspace holding tabs is the next reconcile's to fill.
         for (auto const& window: reconciled)
-            if (auto const mapped = windows.find(window.daemonWindow);
-                window.tabs == DaemonWindowTabs::Some && mapped != windows.end())
+            if (auto const mapped = windows.find(window.daemonWorkspace);
+                window.tabs == DaemonWorkspaceTabs::Some && mapped != windows.end())
                 hold.keep(mapped->second);
     }
     // A window this pass closed goes with its mapping, and so does one closed before -- by its user -- once
-    // its daemon window is pushed empty: the daemon window filled again then gets an OS window of its own,
-    // where a mapping to the closed one would show it nowhere. One whose daemon window still holds tabs, or
-    // is merely absent from this snapshot (a reconnect settles windows frame by frame, a partial snapshot
-    // lacks some), keeps its mapping, so that the window its user closed does not open again.
-    auto const isPushedEmpty = [&](uint64_t daemonWindow) {
-        auto const found = layouts.find(daemonWindow);
+    // its daemon workspace is pushed empty: the daemon workspace filled again then gets an OS window of its
+    // own, where a mapping to the closed one would show it nowhere. One whose daemon workspace still holds
+    // tabs, or is merely absent from this snapshot (a reconnect settles windows frame by frame, a partial
+    // snapshot lacks some), keeps its mapping, so that the window its user closed does not open again.
+    auto const isPushedEmpty = [&](uint64_t daemonWorkspace) {
+        auto const found = layouts.find(daemonWorkspace);
         return found != layouts.end() && found->second->tabs.empty();
     };
     std::erase_if(windows, [&](auto const& entry) {
@@ -670,30 +670,30 @@ void forgetClosedTabPairings(contour::session::TerminalSessionManager const& man
 }
 
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
-                       vtworkspace::WindowId window,
+                       vtworkspace::WorkspaceId window,
                        NativeController& controller,
-                       std::optional<uint64_t> daemonWindow,
+                       std::optional<uint64_t> daemonWorkspace,
                        std::optional<vtbackend::PageSize> pageSize)
 {
-    applyRemoteLayout(manager, window, controller, controller.settledLayouts(), daemonWindow, pageSize);
+    applyRemoteLayout(manager, window, controller, controller.settledLayouts(), daemonWorkspace, pageSize);
 }
 
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
-                       vtworkspace::WindowId window,
+                       vtworkspace::WorkspaceId window,
                        NativeController& controller,
                        LayoutSnapshot const& layouts,
-                       std::optional<uint64_t> daemonWindow,
+                       std::optional<uint64_t> daemonWorkspace,
                        std::optional<vtbackend::PageSize> pageSize)
 {
-    // Select the daemon window to reconcile: the caller's, or the primary (lowest-id)
+    // Select the daemon workspace to reconcile: the caller's, or the primary (lowest-id)
     // window for the single-window path.
-    auto const found = daemonWindow ? layouts.find(*daemonWindow) : layouts.begin();
+    auto const found = daemonWorkspace ? layouts.find(*daemonWorkspace) : layouts.begin();
     if (found == layouts.end())
         return;
     auto const& layout = *found->second;
-    // A window a move emptied is closed here while its daemon window may still be pushed (empty): there is
+    // A window a move emptied is closed here while its daemon workspace may still be pushed (empty): there is
     // nothing to reconcile, and realizing into it would pull back what the move took out.
-    if (manager.model().window(window) == nullptr)
+    if (manager.model().workspace(window) == nullptr)
         return;
     // A window a move below empties stays open until the pass is done -- until every window's is, under
     // reconcileAttachWindows(): a later step, or another window's pass, may fill it again.
@@ -714,7 +714,7 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
         while (auto const op =
                    findNewMerge(remoteToLocal(manager, window, controller), manager.model(), wireTab.root))
         {
-            auto const* const win = manager.model().window(window);
+            auto const* const win = manager.model().workspace(window);
             if (win == nullptr)
                 break;
             auto const tabs = std::views::iota(0, win->tabCount());
@@ -784,7 +784,7 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
 
     // Each wire tab is paired with the local tab that sameTree() accepts — the identity check IS the
     // pairing for a tab the realizer made.
-    auto* win = manager.model().window(window);
+    auto* win = manager.model().workspace(window);
     auto shownAs = std::vector<std::pair<std::size_t, vtworkspace::Tab*>> {};
     for (auto const [index, wireTab]: core::views::enumerate(layout.tabs))
         for (auto const i: std::views::iota(0, win != nullptr ? win->tabCount() : 0))

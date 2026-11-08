@@ -34,7 +34,7 @@ enum class DriftKind : uint8_t
 /// @return How the daemon's release stands against the client's.
 [[nodiscard]] DriftKind compareReleases(std::string_view client, std::string_view daemon);
 
-/// Whether the user's windows and tabs come back after the daemon restarts.
+/// Whether the user's workspaces and tabs come back after the daemon restarts.
 enum class LayoutAfterRestart : uint8_t
 {
     Lost = 0, ///< Every shell ends and a fresh one opens.

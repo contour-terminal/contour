@@ -2,7 +2,7 @@
 //
 // Generated from the host's method catalog; regenerate it rather than edit it (see README.md).
 
-/// The control verbs: what an extension may ask its terminal to do with windows, tabs and panes.
+/// The control verbs: what an extension may ask its terminal to do with workspaces, tabs and panes.
 ///
 /// The package is terminal-neutral: any terminal can implement the host side. README.md says how an
 /// extension imports it, and which permissions each verb needs.
@@ -20,7 +20,7 @@ interface types {
     }
 
     record list-request {
-        window: string,
+        workspace: string,
     }
 
     record size {
@@ -72,7 +72,7 @@ interface types {
         panes: list<pane-info>,
     }
 
-    record window-info {
+    record workspace-info {
         id: string,
         label: string,
         position: u32,
@@ -80,10 +80,10 @@ interface types {
     }
 
     record list-reply {
-        windows: list<window-info>,
+        workspaces: list<workspace-info>,
     }
 
-    enum window-placement {
+    enum workspace-placement {
         existing,
         new,
     }
@@ -94,8 +94,8 @@ interface types {
     }
 
     record create-tab-request {
-        window: string,
-        placement: window-placement,
+        workspace: string,
+        placement: workspace-placement,
         cwd: string,
         command: list<string>,
         label: string,
@@ -103,7 +103,7 @@ interface types {
     }
 
     record create-tab-reply {
-        window: string,
+        workspace: string,
         tab: string,
         pane: string,
     }
@@ -299,11 +299,11 @@ interface control {
     /// Needs `read`.
     daemon-info: func() -> result<daemon-info-reply, control-error>;
 
-    /// List the windows, tabs and panes.
+    /// List the workspaces, tabs and panes.
     /// Needs `read`.
     workspace-list: func(request: list-request) -> result<list-reply, control-error>;
 
-    /// Open a tab, optionally in a new window and running a command.
+    /// Open a tab, optionally in a new workspace and running a command.
     /// Needs `write`, and `input` as well for running a command.
     tab-create: func(request: create-tab-request) -> result<create-tab-reply, control-error>;
 
@@ -327,7 +327,7 @@ interface control {
     /// Needs `write`.
     tab-close: func(request: close-tab-request) -> result<_, control-error>;
 
-    /// Give a window, tab or pane a label to address it by; an empty label clears it.
+    /// Give a workspace, tab or pane a label to address it by; an empty label clears it.
     /// Needs `write`.
     object-set-label: func(request: set-label-request) -> result<_, control-error>;
 

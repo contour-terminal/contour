@@ -88,12 +88,12 @@ struct RestoreHarness
     }
 };
 
-/// @return The terminal of @p host's active pane of its @p tabIndex-th tab in its own window.
+/// @return The terminal of @p host's active pane of its @p tabIndex-th tab in its own workspace.
 [[nodiscard]] vtbackend::Terminal& terminalOf(SessionHost& host, int tabIndex)
 {
-    auto const* const window = host.model().window(host.windowId());
-    REQUIRE(window != nullptr);
-    auto const* const tab = window->tabAt(tabIndex);
+    auto const* const workspace = host.model().workspace(host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    auto const* const tab = workspace->tabAt(tabIndex);
     REQUIRE(tab != nullptr);
     auto* const terminal = host.terminal(tab->activePane()->session());
     REQUIRE(terminal != nullptr);
@@ -117,13 +117,13 @@ void pump(vtbackend::Terminal& terminal, std::string_view output)
     return PaneNode { .pane = std::move(pane) };
 }
 
-/// @return A snapshot of one window holding one tab per pane given.
+/// @return A snapshot of one workspace holding one tab per pane given.
 [[nodiscard]] WorkspaceSnapshot workspaceOf(std::vector<PaneSnapshot> panes)
 {
-    auto window = WindowSnapshot {};
+    auto workspace = WorkspaceLayoutSnapshot {};
     for (auto& pane: panes)
-        window.tabs.push_back(TabSnapshot { .root = leaf(std::move(pane)) });
-    return WorkspaceSnapshot { .takenAt = Now, .windows = { std::move(window) } };
+        workspace.tabs.push_back(TabSnapshot { .root = leaf(std::move(pane)) });
+    return WorkspaceSnapshot { .takenAt = Now, .workspaces = { std::move(workspace) } };
 }
 
 void checkSameShape(PaneNode const& restored, PaneNode const& saved)
@@ -152,8 +152,8 @@ TEST_CASE("a captured workspace comes back with the same shape", "[vthost][snaps
     source->model().setTabTitle(second->id(), "build");
     source->model().setTabColor(
         second->id(), vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0x336699U });
-    REQUIRE(source->createWindow() != nullptr);
-    source->model().activateTab(source->windowId(), second->id());
+    REQUIRE(source->createWorkspace() != nullptr);
+    source->model().activateTab(source->workspaceId(), second->id());
 
     auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
     auto const bytes = encodeSnapshot(captured);
@@ -165,11 +165,11 @@ TEST_CASE("a captured workspace comes back with the same shape", "[vthost][snaps
     CHECK(restored->restoreOutcome() == RestoreOutcome::Realized);
     CHECK(restored->sessionCount() == source->sessionCount());
     auto const again = captureWorkspace(*restored, { .scrollback = ScrollbackPersistence::Off }, Now);
-    REQUIRE(again.windows.size() == snap.windows.size());
-    for (auto const windowIndex: std::views::iota(std::size_t { 0 }, snap.windows.size()))
+    REQUIRE(again.workspaces.size() == snap.workspaces.size());
+    for (auto const workspaceIndex: std::views::iota(std::size_t { 0 }, snap.workspaces.size()))
     {
-        auto const& want = snap.windows[windowIndex];
-        auto const& got = again.windows[windowIndex];
+        auto const& want = snap.workspaces[workspaceIndex];
+        auto const& got = again.workspaces[workspaceIndex];
         CHECK(got.activeTab == want.activeTab);
         REQUIRE(got.tabs.size() == want.tabs.size());
         for (auto const tabIndex: std::views::iota(std::size_t { 0 }, want.tabs.size()))
@@ -203,7 +203,7 @@ TEST_CASE("each restored pane starts in its directory with its profile", "[vthos
     REQUIRE(h.recorded.overrides[0].has_value());
     CHECK(h.recorded.overrides[0]->workingDirectory == "/work/a");
     CHECK(h.recorded.overrides[0]->program == "/bin/zsh");
-    auto const session = host->model().window(host->windowId())->tabAt(0)->activePane()->session();
+    auto const session = host->model().workspace(host->workspaceId())->tabAt(0)->activePane()->session();
     CHECK(host->paneRuntime(session).profile == "work");
 }
 
@@ -228,7 +228,7 @@ TEST_CASE("restored history sits above the divider and the new prompt", "[vthost
     REQUIRE(source->createTab() != nullptr);
     terminalOf(*source, 0).writeToScreen("old 1\r\nold 2\r\nold 3\r\n");
     auto const captured = captureWorkspace(*source, {}, Now);
-    REQUIRE(captured.windows.at(0).tabs.at(0).root.pane.history.has_value());
+    REQUIRE(captured.workspaces.at(0).tabs.at(0).root.pane.history.has_value());
 
     auto const host = h.restore(WorkspaceRestore { .snapshot = captured, .divider = DividerOf });
 
@@ -289,7 +289,7 @@ TEST_CASE("a pane whose command was not re-run remembers it until its next comma
     auto& first = terminalOf(*host, 0);
     auto& second = terminalOf(*host, 1);
     auto const sessionOf = [&](int tab) {
-        return host->model().window(host->windowId())->tabAt(tab)->activePane()->session();
+        return host->model().workspace(host->workspaceId())->tabAt(tab)->activePane()->session();
     };
     std::ignore = h.loop.runUntilIdle();
 
@@ -345,7 +345,7 @@ TEST_CASE("an empty or unrealizable restore falls back to the startup layout", "
     {
         auto const host =
             h.makeHost(SessionHostConfig { .startupLayout = startup, .restore = WorkspaceRestore {} });
-        CHECK(host->model().window(host->windowId())->tabCount() == 2);
+        CHECK(host->model().workspace(host->workspaceId())->tabCount() == 2);
         CHECK(host->restoreOutcome() == RestoreOutcome::NothingRealized);
     }
     SECTION("a restore whose every spawn fails")
@@ -356,7 +356,7 @@ TEST_CASE("an empty or unrealizable restore falls back to the startup layout", "
         CHECK(host->restoreOutcome() == RestoreOutcome::NothingRealized);
         // Both restored tabs were tried, then the startup layout's.
         CHECK(h.recorded.overrides.size() == 4);
-        CHECK(host->model().windowCount() == 1);
+        CHECK(host->model().workspaceCount() == 1);
     }
     SECTION("no restore at all")
     {
@@ -366,42 +366,44 @@ TEST_CASE("an empty or unrealizable restore falls back to the startup layout", "
     }
 }
 
-TEST_CASE("a restore whose first window comes back empty fills the host's own window with the next",
+TEST_CASE("a restore whose first workspace comes back empty fills the host's own workspace with the next",
           "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
     h.recorded.failFirst = 1;
     auto workspace = workspaceOf({ {} });
-    workspace.windows.push_back(WindowSnapshot { .tabs = { TabSnapshot { .root = leaf() } } });
+    workspace.workspaces.push_back(WorkspaceLayoutSnapshot { .tabs = { TabSnapshot { .root = leaf() } } });
 
     auto const host = h.restore(WorkspaceRestore { .snapshot = std::move(workspace) });
     CHECK(host->restoreOutcome() == RestoreOutcome::Realized);
-    CHECK(host->model().windowCount() == 1);
-    CHECK(host->model().window(host->windowId())->tabCount() == 1);
+    CHECK(host->model().workspaceCount() == 1);
+    CHECK(host->model().workspace(host->workspaceId())->tabCount() == 1);
 }
 
 namespace
 {
 
-/// @return What @p host's registry names @p session's pane, tab and window by, as their references.
+/// @return What @p host's registry names @p session's pane, tab and workspace by, as their references.
 [[nodiscard]] std::vector<std::string> refsOf(SessionHost& host, vtworkspace::SessionId session)
 {
-    auto const [window, tab, leaf] = host.model().findSessionLeaf(session);
+    auto const [workspace, tab, leaf] = host.model().findSessionLeaf(session);
     REQUIRE(leaf != nullptr);
     auto const& objects = host.objects();
     return {
         vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, *objects.uuidOf(session) }),
         vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }),
         vtcontrol::toString(
-            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, *objects.uuidOf(window->id()) }),
+            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, *objects.uuidOf(workspace->id()) }),
     };
 }
 
-/// @return The CONTOUR_PANE, CONTOUR_TAB and CONTOUR_WINDOW a spawn was given.
+/// @return The CONTOUR_PANE, CONTOUR_TAB and CONTOUR_WORKSPACE a spawn was given.
 [[nodiscard]] std::vector<std::string> exportedRefsOf(std::optional<vtpty::Process::ExecInfo> const& spawn)
 {
     REQUIRE(spawn.has_value());
-    return { spawn->env.at("CONTOUR_PANE"), spawn->env.at("CONTOUR_TAB"), spawn->env.at("CONTOUR_WINDOW") };
+    return { spawn->env.at("CONTOUR_PANE"),
+             spawn->env.at("CONTOUR_TAB"),
+             spawn->env.at("CONTOUR_WORKSPACE") };
 }
 
 } // namespace
@@ -413,12 +415,12 @@ TEST_CASE("a restored pane gets a UUID and exports it to its shell", "[vthost][s
     REQUIRE(host->restoreOutcome() == RestoreOutcome::Realized);
     REQUIRE(h.recorded.overrides.size() == 1);
 
-    auto const session = host->model().window(host->windowId())->tabAt(0)->activePane()->session();
+    auto const session = host->model().workspace(host->workspaceId())->tabAt(0)->activePane()->session();
     CHECK(host->objects().uuidOf(session).has_value());
     CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*host, session));
 }
 
-TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were captured with",
+TEST_CASE("restored workspaces, tabs and panes keep the UUIDs and labels they were captured with",
           "[vthost][snapshot][restore][ids]")
 {
     auto h = RestoreHarness {};
@@ -426,45 +428,46 @@ TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were 
     auto* tab = source->createTab();
     REQUIRE(tab != nullptr);
     source->splitActivePane(tab->id(), SplitState::Vertical, 0.5);
-    REQUIRE(source->createWindow() != nullptr);
+    REQUIRE(source->createWorkspace() != nullptr);
     auto& objects = source->objects();
     auto const firstPane = tab->rootPane()->first()->session();
     objects.setLabel({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }, "logs");
     objects.setLabel({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }, "ops");
-    objects.setLabel({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }, "main");
+    objects.setLabel({ vtcontrol::ObjectKind::Workspace, *objects.uuidOf(source->workspaceId()) }, "main");
 
     auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
     auto decoded = decodeSnapshot(encodeSnapshot(captured));
     REQUIRE(decoded.has_value());
     auto const& snap = decoded->snapshot;
-    REQUIRE(snap.windows.size() == 2);
-    REQUIRE(snap.windows[0].identity.has_value());
-    CHECK(snap.windows[0].identity->uuid == objects.uuidOf(source->windowId())->bytes);
-    CHECK(snap.windows[0].identity->label == "main");
-    REQUIRE(snap.windows[0].tabs.front().identity.has_value());
-    CHECK(snap.windows[0].tabs.front().identity->label == "ops");
-    REQUIRE(snap.windows[0].tabs.front().root.children.size() == 2);
-    auto const& firstLeaf = snap.windows[0].tabs.front().root.children[0].pane;
+    REQUIRE(snap.workspaces.size() == 2);
+    REQUIRE(snap.workspaces[0].identity.has_value());
+    CHECK(snap.workspaces[0].identity->uuid == objects.uuidOf(source->workspaceId())->bytes);
+    CHECK(snap.workspaces[0].identity->label == "main");
+    REQUIRE(snap.workspaces[0].tabs.front().identity.has_value());
+    CHECK(snap.workspaces[0].tabs.front().identity->label == "ops");
+    REQUIRE(snap.workspaces[0].tabs.front().root.children.size() == 2);
+    auto const& firstLeaf = snap.workspaces[0].tabs.front().root.children[0].pane;
     REQUIRE(firstLeaf.identity.has_value());
     CHECK(firstLeaf.identity->uuid == objects.uuidOf(firstPane)->bytes);
     CHECK(firstLeaf.identity->label == "logs");
-    CHECK_FALSE(snap.windows[0].tabs.front().root.children[1].pane.identity->label.has_value());
+    CHECK_FALSE(snap.workspaces[0].tabs.front().root.children[1].pane.identity->label.has_value());
 
     h.recorded.overrides.clear();
     auto const restored = h.restore(WorkspaceRestore { .snapshot = snap });
     REQUIRE(restored->restoreOutcome() == RestoreOutcome::Realized);
-    auto const* const window = restored->model().window(restored->windowId());
-    REQUIRE(window != nullptr);
-    auto const* const restoredTab = window->tabAt(0);
+    auto const* const workspace = restored->model().workspace(restored->workspaceId());
+    REQUIRE(workspace != nullptr);
+    auto const* const restoredTab = workspace->tabAt(0);
     REQUIRE(restoredTab != nullptr);
     auto const restoredFirst = restoredTab->rootPane()->first()->session();
     auto const& now = restored->objects();
     CHECK(now.uuidOf(restoredFirst) == objects.uuidOf(firstPane));
     CHECK(now.uuidOf(restoredTab->id()) == objects.uuidOf(tab->id()));
-    CHECK(now.uuidOf(restored->windowId()) == objects.uuidOf(source->windowId()));
+    CHECK(now.uuidOf(restored->workspaceId()) == objects.uuidOf(source->workspaceId()));
     CHECK(now.labelOf({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }) == "logs");
     CHECK(now.labelOf({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }) == "ops");
-    CHECK(now.labelOf({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }) == "main");
+    CHECK(now.labelOf({ vtcontrol::ObjectKind::Workspace, *objects.uuidOf(source->workspaceId()) })
+          == "main");
     // The first restored spawn is the first pane, and its shell is told the ids it came back with.
     REQUIRE(h.recorded.overrides.size() == source->sessionCount());
     CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*restored, restoredFirst));
@@ -478,11 +481,11 @@ TEST_CASE("a snapshot that repeats a UUID restores the second object under a fre
     auto const host =
         h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot { .identity = repeated },
                                                                PaneSnapshot { .identity = repeated } }) });
-    auto const* const window = host->model().window(host->windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 2);
-    auto const first = host->objects().uuidOf(window->tabAt(0)->activePane()->session());
-    auto const second = host->objects().uuidOf(window->tabAt(1)->activePane()->session());
+    auto const* const workspace = host->model().workspace(host->workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 2);
+    auto const first = host->objects().uuidOf(workspace->tabAt(0)->activePane()->session());
+    auto const second = host->objects().uuidOf(workspace->tabAt(1)->activePane()->session());
     REQUIRE((first.has_value() && second.has_value()));
     CHECK(first->bytes == repeated.uuid);
     CHECK(*second != *first);
@@ -491,52 +494,55 @@ TEST_CASE("a snapshot that repeats a UUID restores the second object under a fre
 namespace
 {
 
-/// @return A snapshot of one window per count given, each holding that many single-pane tabs.
-[[nodiscard]] WorkspaceSnapshot windowsOf(std::vector<int> const& tabCounts)
+/// @return A snapshot of one workspace per count given, each holding that many single-pane tabs.
+[[nodiscard]] WorkspaceSnapshot workspacesOf(std::vector<int> const& tabCounts)
 {
     auto snapshot = WorkspaceSnapshot { .takenAt = Now };
     for (auto const tabs: tabCounts)
     {
-        auto window = WindowSnapshot {};
+        auto workspace = WorkspaceLayoutSnapshot {};
         std::ranges::generate_n(
-            std::back_inserter(window.tabs), tabs, [] { return TabSnapshot { .root = leaf() }; });
-        snapshot.windows.push_back(std::move(window));
+            std::back_inserter(workspace.tabs), tabs, [] { return TabSnapshot { .root = leaf() }; });
+        snapshot.workspaces.push_back(std::move(workspace));
     }
     return snapshot;
 }
 
 } // namespace
 
-TEST_CASE("a restore announces the windows and tabs it brought back, once", "[vthost][snapshot][restore]")
+TEST_CASE("a restore announces the workspaces and tabs it brought back, once", "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
-    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspacesOf({ 3, 4 }), .divider = DividerOf });
     auto const everything = [](uint64_t) {
         return true;
     };
 
-    CHECK(host->takeRestoreAnnouncement(everything) == RestoredCounts { .windows = 2, .tabs = 7 });
+    CHECK(host->takeRestoreAnnouncement(everything) == RestoredCounts { .workspaces = 2, .tabs = 7 });
     CHECK_FALSE(host->takeRestoreAnnouncement(everything).has_value());
 }
 
-TEST_CASE("a window none of whose panes spawned is not announced", "[vthost][snapshot][restore]")
+TEST_CASE("a workspace none of whose panes spawned is not announced", "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
-    h.recorded.failFirst = 3; // every pane of the first window
-    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    h.recorded.failFirst = 3; // every pane of the first workspace
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspacesOf({ 3, 4 }), .divider = DividerOf });
 
     CHECK(host->takeRestoreAnnouncement([](uint64_t) { return true; })
-          == RestoredCounts { .windows = 1, .tabs = 4 });
+          == RestoredCounts { .workspaces = 1, .tabs = 4 });
 }
 
-TEST_CASE("a client is told only of the windows it follows", "[vthost][snapshot][restore]")
+TEST_CASE("a client is told only of the workspaces it follows", "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
-    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
-    auto const first = host->model().windowAt(0)->id().value;
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspacesOf({ 3, 4 }), .divider = DividerOf });
+    auto const first = host->model().workspaceAt(0)->id().value;
 
-    CHECK(host->takeRestoreAnnouncement([first](uint64_t window) { return window == first; })
-          == RestoredCounts { .windows = 1, .tabs = 3 });
+    CHECK(host->takeRestoreAnnouncement([first](uint64_t workspace) { return workspace == first; })
+          == RestoredCounts { .workspaces = 1, .tabs = 3 });
     // The question is asked of the first client only: nothing is left for another.
     CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
 }
@@ -545,7 +551,7 @@ TEST_CASE("a host that restored nothing has nothing to announce", "[vthost][snap
 {
     auto h = RestoreHarness {};
     h.recorded.failing = true;
-    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 2 }), .divider = DividerOf });
+    auto const host = h.restore(WorkspaceRestore { .snapshot = workspacesOf({ 2 }), .divider = DividerOf });
     CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
     CHECK_FALSE(h.makeHost({})->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
 }

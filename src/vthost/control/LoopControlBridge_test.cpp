@@ -75,8 +75,8 @@ TEST_CASE("LoopControlBridge serves a call from another thread", "[vthost][contr
     REQUIRE(reply.has_value());
     auto const list = vtcontrol::decodeJson<vtcontrol::ListReply>(*reply);
     REQUIRE(list.has_value());
-    REQUIRE(list->windows.size() == 1);
-    CHECK(list->windows.front().tabs.size() == 1);
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces.front().tabs.size() == 1);
 }
 
 TEST_CASE("LoopControlBridge calls as the extension's pane", "[vthost][control][extension][threading]")
@@ -156,8 +156,8 @@ TEST_CASE("LoopControlBridge applies a request's grant rule as dispatch does",
         REQUIRE(reply.has_value());
         auto const list = vtcontrol::decodeJson<vtcontrol::ListReply>(*reply);
         REQUIRE(list.has_value());
-        REQUIRE(list->windows.size() == 1);
-        return list->windows.front().tabs.size();
+        REQUIRE(list->workspaces.size() == 1);
+        return list->workspaces.front().tabs.size();
     };
 
     auto const refused = callFromWorker(bridge, h.loop, "tab.create", R"({"command":["make"]})", write);

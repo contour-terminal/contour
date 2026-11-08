@@ -23,9 +23,10 @@ namespace
 
     /// The cost of a restart per LayoutAfterRestart, indexed by it.
     constexpr auto ConfirmationTexts = std::array<std::string_view, 2> {
-        "Restarting the daemon on {c} ends every shell it runs. Your windows, tabs and scrollback are not "
+        "Restarting the daemon on {c} ends every shell it runs. Your workspaces, tabs and scrollback are not "
         "kept; a fresh shell opens.",
-        "Restarting the daemon on {c} ends the programs running in it. Your windows, tabs, directories and "
+        "Restarting the daemon on {c} ends the programs running in it. Your workspaces, tabs, directories "
+        "and "
         "scrollback come back.",
     };
 
@@ -101,7 +102,7 @@ DriftKind compareReleases(std::string_view client, std::string_view daemon)
 LayoutAfterRestart layoutSurvivesRestart(proto::Negotiated const& negotiated) noexcept
 {
     // What the daemon offered, not what both share: the restore is the daemon's alone, and a client needs
-    // no capability of its own to get its windows back.
+    // no capability of its own to get its workspaces back.
     return negotiated.peerCapabilities.contains(proto::Capability::WorkspaceRestore)
                ? LayoutAfterRestart::Restored
                : LayoutAfterRestart::Lost;

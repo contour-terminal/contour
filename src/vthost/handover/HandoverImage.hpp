@@ -150,7 +150,7 @@ struct HandoverImage
 {
     uint64_t daemonInstance = 0;                ///< Which daemon instance wrote it.
     std::string fromRelease;                    ///< The release that wrote it.
-    vtworkspace::WorkspaceTreeState tree {};    ///< The windows, tabs and panes.
+    vtworkspace::WorkspaceTreeState tree {};    ///< The workspaces, tabs and panes.
     vtworkspace::ModelIdState modelIds {};      ///< The model's id counters.
     vtworkspace::SessionId nextSessionId { 1 }; ///< The id the next session is minted with.
     ObjectRegistrySnapshot objects {};          ///< The object registry.

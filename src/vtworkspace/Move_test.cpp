@@ -23,19 +23,19 @@ using namespace vtworkspace::test;
 
 namespace
 {
-/// Window `w1` holds tab `a` (sessions 1000 | 1001, 1001 active) and tab `b` (session 1002).
-/// Window `w2` holds tab `c` (sessions 1003 / 1004, 1004 active).
+/// Workspace `w1` holds tab `a` (sessions 1000 | 1001, 1001 active) and tab `b` (session 1002).
+/// Workspace `w2` holds tab `c` (sessions 1003 / 1004, 1004 active).
 struct MoveFixture: Fixture
 {
-    Window* w1 = model.createWindow();
-    Window* w2 = model.createWindow();
+    Workspace* w1 = model.createWorkspace();
+    Workspace* w2 = model.createWorkspace();
     Tab* a = model.createTab(w1->id());
     Pane* a1 = model.splitActivePane(a->id(), SplitState::Vertical);
     Tab* b = model.createTab(w1->id());
     Tab* c = model.createTab(w2->id());
     Pane* c1 = model.splitActivePane(c->id(), SplitState::Horizontal);
-    WindowId w1Id = w1->id();
-    WindowId w2Id = w2->id();
+    WorkspaceId w1Id = w1->id();
+    WorkspaceId w2Id = w2->id();
     TabId aId = a->id();
     TabId bId = b->id();
     TabId cId = c->id();
@@ -67,11 +67,11 @@ struct MoveFixture: Fixture
     void requireFocus(MoveResult const& result, SessionId moved)
     {
         REQUIRE(result.focused == moved);
-        auto const [window, tab, leaf] = model.findSessionLeaf(moved);
+        auto const [workspace, tab, leaf] = model.findSessionLeaf(moved);
         REQUIRE(leaf != nullptr);
-        CHECK(window->id() == result.window);
+        CHECK(workspace->id() == result.workspace);
         CHECK(tab->id() == result.tab);
-        CHECK(window->activeTab() == tab);
+        CHECK(workspace->activeTab() == tab);
         CHECK(tab->activePane() == leaf);
         CHECK_FALSE(tab->isZoomed());
 
@@ -204,13 +204,13 @@ TEST_CASE("moveNode: pane to edge of a pane in another tab", "[vtworkspace][mode
     f.requireFocus(*result, SessionId { 1000 });
 }
 
-TEST_CASE("moveNode: pane to edge of a pane in another window", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: pane to edge of a pane in another workspace", "[vtworkspace][model][move]")
 {
     MoveFixture f;
     auto const result = f.model.moveNode(PaneSource { SessionId { 1001 } },
                                          EdgeTarget { SessionId { 1003 }, SplitSide::Right });
     REQUIRE(result.has_value());
-    CHECK(result->window == f.w2Id);
+    CHECK(result->workspace == f.w2Id);
     CHECK(MoveFixture::sessionsOf(*f.c) == std::vector<uint64_t> { 1003, 1001, 1004 });
     CHECK(MoveFixture::sessionsOf(*f.a) == std::vector<uint64_t> { 1000 });
     CHECK(f.allSessionsPresent());
@@ -238,13 +238,13 @@ TEST_CASE("moveNode: pane swap in one tab keeps both ratios", "[vtworkspace][mod
     f.requireFocus(*result, SessionId { 1000 });
 }
 
-TEST_CASE("moveNode: pane swap across windows", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: pane swap across workspaces", "[vtworkspace][model][move]")
 {
     MoveFixture f;
     auto const result =
         f.model.moveNode(PaneSource { SessionId { 1001 } }, SwapTarget { SessionId { 1003 } });
     REQUIRE(result.has_value());
-    CHECK(result->window == f.w2Id);
+    CHECK(result->workspace == f.w2Id);
     CHECK(MoveFixture::sessionsOf(*f.a) == std::vector<uint64_t> { 1000, 1003 });
     CHECK(MoveFixture::sessionsOf(*f.c) == std::vector<uint64_t> { 1001, 1004 });
     CHECK(f.events.countPrefix("replaced:") == 0);
@@ -281,16 +281,16 @@ TEST_CASE("moveNode: pane to a tab well clamps the index", "[vtworkspace][model]
     f.requireFocus(*result, SessionId { 1000 });
 }
 
-TEST_CASE("moveNode: pane to a new window", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: pane to a new workspace", "[vtworkspace][model][move]")
 {
     MoveFixture f;
-    auto const windowsBefore = f.model.windowCount();
-    auto const result = f.model.moveNode(PaneSource { SessionId { 1000 } }, NewWindowTarget {});
+    auto const workspacesBefore = f.model.workspaceCount();
+    auto const result = f.model.moveNode(PaneSource { SessionId { 1000 } }, NewWorkspaceTarget {});
     REQUIRE(result.has_value());
-    CHECK(f.model.windowCount() == windowsBefore + 1);
-    CHECK(result->window != f.w1Id);
-    CHECK(result->window != f.w2Id);
-    auto* const created = f.model.window(result->window);
+    CHECK(f.model.workspaceCount() == workspacesBefore + 1);
+    CHECK(result->workspace != f.w1Id);
+    CHECK(result->workspace != f.w2Id);
+    auto* const created = f.model.workspace(result->workspace);
     REQUIRE(created != nullptr);
     CHECK(created->tabCount() == 1);
     CHECK(MoveFixture::sessionsOf(*created->tabAt(0)) == std::vector<uint64_t> { 1000 });
@@ -298,7 +298,7 @@ TEST_CASE("moveNode: pane to a new window", "[vtworkspace][model][move]")
     f.requireFocus(*result, SessionId { 1000 });
 }
 
-TEST_CASE("moveNode: multi-pane tab to an edge in another window", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: multi-pane tab to an edge in another workspace", "[vtworkspace][model][move]")
 {
     MoveFixture f;
     auto const result =
@@ -311,10 +311,10 @@ TEST_CASE("moveNode: multi-pane tab to an edge in another window", "[vtworkspace
     f.requireFocus(*result, SessionId { 1001 }); // the dragged tab's active pane
 }
 
-TEST_CASE("moveNode: multi-pane tab to a tab well and a new window", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: multi-pane tab to a tab well and a new workspace", "[vtworkspace][model][move]")
 {
     MoveFixture f;
-    SECTION("tab well of another window")
+    SECTION("tab well of another workspace")
     {
         auto const result = f.model.moveNode(TabSource { f.w1Id, f.aId }, TabWellTarget { f.w2Id, 0 });
         REQUIRE(result.has_value());
@@ -323,18 +323,18 @@ TEST_CASE("moveNode: multi-pane tab to a tab well and a new window", "[vtworkspa
         CHECK(f.allSessionsPresent());
         f.requireFocus(*result, SessionId { 1001 });
     }
-    SECTION("reorder within the window")
+    SECTION("reorder within the workspace")
     {
         auto const result = f.model.moveNode(TabSource { f.w1Id, f.aId }, TabWellTarget { f.w1Id, 1 });
         REQUIRE(result.has_value());
         CHECK(f.w1->tabAt(1)->id() == f.aId);
         f.requireFocus(*result, SessionId { 1001 });
     }
-    SECTION("new window")
+    SECTION("new workspace")
     {
-        auto const result = f.model.moveNode(TabSource { f.w1Id, f.aId }, NewWindowTarget {});
+        auto const result = f.model.moveNode(TabSource { f.w1Id, f.aId }, NewWorkspaceTarget {});
         REQUIRE(result.has_value());
-        CHECK(f.model.window(result->window)->tabAt(0)->id() == f.aId);
+        CHECK(f.model.workspace(result->workspace)->tabAt(0)->id() == f.aId);
         f.requireFocus(*result, SessionId { 1001 });
     }
 }
@@ -363,7 +363,7 @@ TEST_CASE("moveNode: one-pane tab to an edge merges the tab", "[vtworkspace][mod
     f.requireFocus(*result, SessionId { 1002 });
 }
 
-TEST_CASE("moveNode: last pane of the last tab leaves its window empty", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: last pane of the last tab leaves its workspace empty", "[vtworkspace][model][move]")
 {
     MoveFixture f;
     f.model.closeTab(f.w1Id, f.aId);
@@ -376,7 +376,7 @@ TEST_CASE("moveNode: last pane of the last tab leaves its window empty", "[vtwor
         f.model.moveNode(PaneSource { loneSession }, EdgeTarget { SessionId { 1003 }, SplitSide::Left });
     REQUIRE(result.has_value());
     CHECK(f.w1->empty());
-    REQUIRE(f.model.window(f.w1Id) != nullptr); // the host closes it, not the model
+    REQUIRE(f.model.workspace(f.w1Id) != nullptr); // the host closes it, not the model
     CHECK(f.events.countPrefix("paneClosed:") == 0);
     CHECK(std::get<2>(f.model.findSessionLeaf(loneSession)) != nullptr);
     f.requireFocus(*result, loneSession);
@@ -422,19 +422,19 @@ TEST_CASE("moveNode: refuses an unknown source", "[vtworkspace][model][move]")
     SECTION("a closed session")
     {
         f.events.log.clear();
-        f.requireRefused(f.model.moveNode(PaneSource { SessionId { 4242 } }, NewWindowTarget {}),
+        f.requireRefused(f.model.moveNode(PaneSource { SessionId { 4242 } }, NewWorkspaceTarget {}),
                          MoveError::UnknownSource);
     }
     SECTION("an unknown tab")
     {
         f.events.log.clear();
-        f.requireRefused(f.model.moveNode(TabSource { f.w1Id, TabId { 999 } }, NewWindowTarget {}),
+        f.requireRefused(f.model.moveNode(TabSource { f.w1Id, TabId { 999 } }, NewWorkspaceTarget {}),
                          MoveError::UnknownSource);
     }
-    SECTION("an unknown window")
+    SECTION("an unknown workspace")
     {
         f.events.log.clear();
-        f.requireRefused(f.model.moveNode(TabSource { WindowId { 999 }, f.aId }, NewWindowTarget {}),
+        f.requireRefused(f.model.moveNode(TabSource { WorkspaceId { 999 }, f.aId }, NewWorkspaceTarget {}),
                          MoveError::UnknownSource);
     }
 }
@@ -442,7 +442,7 @@ TEST_CASE("moveNode: refuses an unknown source", "[vtworkspace][model][move]")
 TEST_CASE("moveNode: refuses an unknown target", "[vtworkspace][model][move]")
 {
     MoveFixture f;
-    auto const windowsBefore = f.model.windowCount();
+    auto const workspacesBefore = f.model.workspaceCount();
 
     SECTION("a closed session as edge")
     {
@@ -456,13 +456,13 @@ TEST_CASE("moveNode: refuses an unknown target", "[vtworkspace][model][move]")
             f.model.moveNode(PaneSource { SessionId { 1000 } }, SwapTarget { SessionId { 4242 } }),
             MoveError::UnknownTarget);
     }
-    SECTION("an unknown window")
+    SECTION("an unknown workspace")
     {
         f.requireRefused(
-            f.model.moveNode(PaneSource { SessionId { 1000 } }, TabWellTarget { WindowId { 999 }, 0 }),
+            f.model.moveNode(PaneSource { SessionId { 1000 } }, TabWellTarget { WorkspaceId { 999 }, 0 }),
             MoveError::UnknownTarget);
     }
-    CHECK(f.model.windowCount() == windowsBefore);
+    CHECK(f.model.workspaceCount() == workspacesBefore);
 }
 
 TEST_CASE("moveNode: refuses to move a node onto itself", "[vtworkspace][model][move]")
@@ -533,7 +533,8 @@ TEST_CASE("describe(MoveError) names every error", "[vtworkspace][model][move]")
         CHECK_FALSE(describe(error).empty());
 }
 
-TEST_CASE("moveNode: a swap across tabs of one window restructures both tabs", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: a swap across tabs of one workspace restructures both tabs",
+          "[vtworkspace][model][move]")
 {
     MoveFixture f;
     auto const result =
@@ -552,34 +553,36 @@ TEST_CASE("moveNode: a plain tab reorder fires no retitle", "[vtworkspace][model
     CHECK(f.events.countPrefix("title:") == 0);
 }
 
-TEST_CASE("moveNode: refuses a new window for what already fills its window", "[vtworkspace][model][move]")
+TEST_CASE("moveNode: refuses a new workspace for what already fills its workspace",
+          "[vtworkspace][model][move]")
 {
     MoveFixture f;
-    // Window w2 holds tab c alone, with two panes.
-    auto const windowsBefore = f.model.windowCount();
+    // Workspace w2 holds tab c alone, with two panes.
+    auto const workspacesBefore = f.model.workspaceCount();
 
-    SECTION("the only tab of a window")
+    SECTION("the only tab of a workspace")
     {
-        CHECK(f.model.fillsItsWindow(TabSource { f.w2Id, f.cId }));
-        f.requireRefused(f.model.moveNode(TabSource { f.w2Id, f.cId }, NewWindowTarget {}), MoveError::NoOp);
+        CHECK(f.model.fillsItsWorkspace(TabSource { f.w2Id, f.cId }));
+        f.requireRefused(f.model.moveNode(TabSource { f.w2Id, f.cId }, NewWorkspaceTarget {}),
+                         MoveError::NoOp);
     }
-    SECTION("the only pane of a window's only tab")
+    SECTION("the only pane of a workspace's only tab")
     {
         f.model.closeTab(f.w2Id, f.cId);
         auto* const lone = f.model.createTab(f.w2Id);
         auto const loneSession = lone->rootPane()->session();
         f.events.log.clear();
-        CHECK(f.model.fillsItsWindow(PaneSource { loneSession }));
-        auto const result = f.model.moveNode(PaneSource { loneSession }, NewWindowTarget {});
+        CHECK(f.model.fillsItsWorkspace(PaneSource { loneSession }));
+        auto const result = f.model.moveNode(PaneSource { loneSession }, NewWorkspaceTarget {});
         REQUIRE_FALSE(result.has_value());
         CHECK(result.error() == MoveError::NoOp);
         CHECK(f.events.log.empty());
-        CHECK(f.model.windowCount() == windowsBefore);
+        CHECK(f.model.workspaceCount() == workspacesBefore);
     }
-    CHECK(f.model.windowCount() == windowsBefore);
-    // Not all of its window: a tab beside others, and a pane beside others.
-    CHECK_FALSE(f.model.fillsItsWindow(PaneSource { SessionId { 1000 } }));
-    CHECK_FALSE(f.model.fillsItsWindow(PaneSource { SessionId { 4242 } }));
+    CHECK(f.model.workspaceCount() == workspacesBefore);
+    // Not all of its workspace: a tab beside others, and a pane beside others.
+    CHECK_FALSE(f.model.fillsItsWorkspace(PaneSource { SessionId { 1000 } }));
+    CHECK_FALSE(f.model.fillsItsWorkspace(PaneSource { SessionId { 4242 } }));
 }
 
 namespace
@@ -599,17 +602,17 @@ struct ProbingEvents: RecordingEvents
             lostAt.push_back(log.back());
     }
 
-    void tabAdded(WindowId w, TabId t, int index) override
+    void tabAdded(WorkspaceId w, TabId t, int index) override
     {
         RecordingEvents::tabAdded(w, t, index);
         probe();
     }
-    void tabClosed(WindowId w, TabId t, int index) override
+    void tabClosed(WorkspaceId w, TabId t, int index) override
     {
         RecordingEvents::tabClosed(w, t, index);
         probe();
     }
-    void activeTabChanged(WindowId w, TabId t, int index) override
+    void activeTabChanged(WorkspaceId w, TabId t, int index) override
     {
         RecordingEvents::activeTabChanged(w, t, index);
         probe();
@@ -634,9 +637,9 @@ struct ProbingEvents: RecordingEvents
         RecordingEvents::paneZoomChanged(t, zoomedLeaf);
         probe();
     }
-    void tabMovedToWindow(WindowId from, TabId t, int fromIdx, WindowId to, int toIdx) override
+    void tabMovedToWorkspace(WorkspaceId from, TabId t, int fromIdx, WorkspaceId to, int toIdx) override
     {
-        RecordingEvents::tabMovedToWindow(from, t, fromIdx, to, toIdx);
+        RecordingEvents::tabMovedToWorkspace(from, t, fromIdx, to, toIdx);
         probe();
     }
 };
@@ -648,26 +651,26 @@ TEST_CASE("moveNode: a pane taken into a tab of its own is in a tab at every eve
     auto events = ProbingEvents {};
     auto nextSession = uint64_t { 1000 };
     auto model = SessionModel { events, [&nextSession] { return SessionId { nextSession++ }; } };
-    auto* const window = model.createWindow();
-    auto* const other = model.createWindow();
-    auto* const tab = model.createTab(window->id());
+    auto* const workspace = model.createWorkspace();
+    auto* const other = model.createWorkspace();
+    auto* const tab = model.createTab(workspace->id());
     auto const moved = model.splitActivePane(tab->id(), SplitState::Vertical)->session();
     std::ignore = model.createTab(other->id());
     events.model = &model;
     events.watched = moved;
     events.log.clear();
 
-    SECTION("into its own window's tab well")
+    SECTION("into its own workspace's tab well")
     {
-        REQUIRE(model.moveNode(PaneSource { moved }, TabWellTarget { window->id(), 1 }).has_value());
+        REQUIRE(model.moveNode(PaneSource { moved }, TabWellTarget { workspace->id(), 1 }).has_value());
     }
-    SECTION("into another window's tab well")
+    SECTION("into another workspace's tab well")
     {
         REQUIRE(model.moveNode(PaneSource { moved }, TabWellTarget { other->id(), 0 }).has_value());
     }
-    SECTION("into a new window")
+    SECTION("into a new workspace")
     {
-        REQUIRE(model.moveNode(PaneSource { moved }, NewWindowTarget {}).has_value());
+        REQUIRE(model.moveNode(PaneSource { moved }, NewWorkspaceTarget {}).has_value());
     }
     CHECK(events.lostAt.empty());
     // The tab holding it is announced before the tab it left is.

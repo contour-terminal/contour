@@ -135,13 +135,19 @@ struct Run
     }
 };
 
-/// Parses @p args (after `contour`) against the application's own syntax.
-core::cli::FlagStore parseFlags(std::vector<std::string_view> const& args)
+/// Parses @p args (after `contour`) against the application's own syntax, keeping a refusal.
+auto tryParse(std::vector<std::string_view> const& args)
 {
     static auto const app = contour::cli::ContourApp { core::defaultEnvironment() };
     auto line = core::cli::StringViewList { "contour" };
     line.insert(line.end(), args.begin(), args.end());
-    auto parsed = core::cli::parse(app.parameterDefinition(), line);
+    return core::cli::parse(app.parameterDefinition(), line);
+}
+
+/// Parses @p args (after `contour`), which must be accepted.
+core::cli::FlagStore parseFlags(std::vector<std::string_view> const& args)
+{
+    auto parsed = tryParse(args);
     REQUIRE(parsed.has_value());
     return *std::move(parsed);
 }
@@ -169,6 +175,68 @@ TEST_CASE("split builds its request from flags", "[contour][cli][control]")
                                                              .focus = vtcontrol::FocusPolicy::Keep }));
 }
 
+TEST_CASE("ControlVerbs: ls and new take --workspace W and --new-workspace", "[contour][cli][control]")
+{
+    auto const list = verbNamed("ls").buildParams(parseFlags({ "ls", "--workspace", "w1" }));
+    REQUIRE(list.has_value());
+    CHECK(*list == vtcontrol::encodeJson(vtcontrol::ListRequest { .workspace = "w1" }));
+
+    struct Row
+    {
+        std::vector<std::string_view> args;
+        std::string_view workspace;
+        vtcontrol::WorkspacePlacement placement;
+    };
+    auto const rows = std::array {
+        Row { { "new", "--new-workspace" }, "", vtcontrol::WorkspacePlacement::New },
+        Row { { "new", "--workspace", "w2" }, "w2", vtcontrol::WorkspacePlacement::Existing },
+    };
+    for (auto const& row: rows)
+    {
+        auto const params = verbNamed("new").buildParams(parseFlags(row.args));
+        REQUIRE(params.has_value());
+        auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*params);
+        REQUIRE(request.has_value());
+        CHECK(request->workspace == row.workspace);
+        CHECK(request->placement == row.placement);
+    }
+}
+
+TEST_CASE("ControlVerbs: the old --window flag is an unknown option", "[contour][cli][control]")
+{
+    // The parser refuses it, and ContourApp::run turns a refusal into EXIT_FAILURE (see App::run).
+    for (auto const option: std::array<std::string_view, 2> { "--window", "--new-window" })
+    {
+        auto const parsed = tryParse({ "ls", option });
+        REQUIRE_FALSE(parsed.has_value());
+        CHECK(parsed.error().message.contains(option));
+    }
+}
+
+TEST_CASE("ControlVerbs: new refuses the removed window flags, naming the new ones",
+          "[contour][cli][control]")
+{
+    // `new` keeps unknown options as its command, so the parser cannot refuse these.
+    auto run = Run {};
+    auto channel = ScriptedChannel { "{}"s };
+    auto const status = [&](std::vector<std::string_view> const& args) {
+        return contour::cli::runControlVerb(verbNamed("new"), parseFlags(args), channel, run.io());
+    };
+
+    CHECK(status({ "new", "--window", "1" }) == 2);
+    CHECK(run.err.str().contains("--window is now --workspace"));
+    CHECK(status({ "new", "--new-window" }) == 2);
+    CHECK(run.err.str().contains("--new-window is now --new-workspace"));
+    // Every other spelling the parser accepts for an option name.
+    for (auto const word: std::array<std::string_view, 4> { "--window=W", "-window", "window", "new-window" })
+    {
+        run.err.str({});
+        CHECK(status({ "new", word, "daemon", "sh" }) == 2);
+        CHECK(run.err.str().contains(" is now --"));
+    }
+    CHECK(channel.calls.empty());
+}
+
 TEST_CASE("contradictory or malformed flags are bad usage", "[contour][cli][control]")
 {
     auto run = Run {};
@@ -182,7 +250,7 @@ TEST_CASE("contradictory or malformed flags are bad usage", "[contour][cli][cont
     CHECK(status({ "split", "--ratio", "0" }) == 2);
     CHECK(status({ "split", "--ratio", "x" }) == 2);
     CHECK(status({ "split", "--ratio", "100" }) == 2);
-    CHECK(status({ "new", "--window", "w", "--new-window" }) == 2);
+    CHECK(status({ "new", "--workspace", "w", "--new-workspace" }) == 2);
     CHECK(status({ "close", "--pane", "p", "--tab", "t" }) == 2);
     CHECK(status({ "label", "only-one" }) == 2);
     CHECK(channel.calls.empty());
@@ -301,19 +369,20 @@ TEST_CASE("exitStatusForBlock", "[contour][cli][control]")
 TEST_CASE("ls prints a readable tree", "[contour][cli][control]")
 {
     auto run = Run {};
-    auto channel =
-        ScriptedChannel { R"({"windows":[{"id":"window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"",)"
-                          R"("position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac",)"
-                          R"("label":"build","title":"zsh","position":1,"isActive":true,"panes":[)"
-                          R"({"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh",)"
-                          R"("cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},)"
-                          R"("programStatus":[],"futureKey":1}]}]}]})"s };
+    auto channel = ScriptedChannel {
+        R"({"workspaces":[{"id":"workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","label":"",)"
+        R"("position":1,"tabs":[{"id":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac",)"
+        R"("label":"build","title":"zsh","position":1,"isActive":true,"panes":[)"
+        R"({"id":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad","label":"","title":"zsh",)"
+        R"("cwd":"/home/me","isActive":true,"size":{"columns":80,"lines":24},)"
+        R"("programStatus":[],"futureKey":1}]}]}]})"s
+    };
     auto const flags = parseFlags({ "ls" });
 
     CHECK(contour::cli::runControlVerb(verbNamed("ls"), flags, channel, run.io()) == 0);
 
     CHECK(run.out.str()
-          == "window 1  456789ab\n"
+          == "workspace 1  456789ab\n"
              "  * tab 1  456789ac  build\n"
              "    * pane  456789ad  zsh  80x24  /home/me\n");
     REQUIRE(channel.calls.size() == 1);
@@ -735,8 +804,10 @@ TEST_CASE("events without --follow stops after the first event", "[contour][cli]
 {
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
-    channel.events = { R"({"type":"pane.bell","window":"","tab":"","pane":"pane:1234abcd","payload":{}})",
-                       R"({"type":"pane.bell","window":"","tab":"","pane":"pane:1234abcd","payload":{}})" };
+    channel.events = {
+        R"({"type":"pane.bell","workspace":"","tab":"","pane":"pane:1234abcd","payload":{}})",
+        R"({"type":"pane.bell","workspace":"","tab":"","pane":"pane:1234abcd","payload":{}})"
+    };
 
     CHECK(contour::cli::runControlVerb(verbNamed("events"), parseFlags({ "events" }), channel, run.io())
           == 0);
@@ -755,10 +826,10 @@ TEST_CASE("human event lines", "[contour][cli][control]")
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
     channel.events = {
-        R"({"type":"block.finished","window":"","tab":"","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-01231234abcd",)"
+        R"({"type":"block.finished","workspace":"","tab":"","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-01231234abcd",)"
         R"("payload":{"block":{"id":"block:x/1","pane":"pane:x","state":"finished","command":"make","exitCode":3}}})",
-        R"({"type":"pane.titleChanged","window":"","tab":"","pane":"","payload":{"title":"vim"}})",
-        R"({"type":"future.thing","window":"","tab":"","pane":"","payload":{}})",
+        R"({"type":"pane.titleChanged","workspace":"","tab":"","pane":"","payload":{"title":"vim"}})",
+        R"({"type":"future.thing","workspace":"","tab":"","pane":"","payload":{}})",
     };
 
     CHECK(contour::cli::runControlVerb(
@@ -768,14 +839,14 @@ TEST_CASE("human event lines", "[contour][cli][control]")
           == "12:00:00 block.finished \u20261234abcd exit 3 make\n"
              "12:00:00 pane.titleChanged - vim\n"
              "12:00:00 "
-             "{\"type\":\"future.thing\",\"window\":\"\",\"tab\":\"\",\"pane\":\"\",\"payload\":{}}\n");
+             "{\"type\":\"future.thing\",\"workspace\":\"\",\"tab\":\"\",\"pane\":\"\",\"payload\":{}}\n");
 }
 
 TEST_CASE("events --json prints each event as received; Ctrl+C is 130", "[contour][cli][control]")
 {
     auto run = Run {};
     auto channel = ScriptedChannel { "{}"s };
-    channel.events = { R"({"type":"pane.bell","window":"","tab":"","pane":"","payload":{}})" };
+    channel.events = { R"({"type":"pane.bell","workspace":"","tab":"","pane":"","payload":{}})" };
 
     CHECK(contour::cli::runControlVerb(
               verbNamed("events"), parseFlags({ "events", "--follow", "--json" }), channel, run.io())

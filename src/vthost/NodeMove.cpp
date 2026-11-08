@@ -32,9 +32,9 @@ namespace
             return refuse(NodeMoveError::UnknownKind);
         if (move.sourceSessions.empty())
             return refuse(NodeMoveError::UnknownSession);
-        auto const [window, tab, leaf] =
+        auto const [workspace, tab, leaf] =
             model.findSessionLeaf(vtworkspace::SessionId { move.sourceSessions.front() });
-        if (window == nullptr || tab == nullptr || leaf == nullptr)
+        if (workspace == nullptr || tab == nullptr || leaf == nullptr)
             return refuse(NodeMoveError::UnknownSession);
         if (kind == std::to_underlying(vtworkspace::MoveSourceKind::Pane))
         {
@@ -46,7 +46,7 @@ namespace
         // panes nobody dragged.
         if (!namesWholeTab(*tab, move.sourceSessions))
             return refuse(NodeMoveError::StaleTab);
-        return vtworkspace::MoveSource { vtworkspace::TabSource { window->id(), tab->id() } };
+        return vtworkspace::MoveSource { vtworkspace::TabSource { workspace->id(), tab->id() } };
     }
 
     /// @return The target the request names, or why it names none.
@@ -55,7 +55,7 @@ namespace
     {
         using vtworkspace::MoveTargetKind;
         auto const session = vtworkspace::SessionId { move.targetSession };
-        auto const [window, tab, leaf] = model.findSessionLeaf(session);
+        auto const [workspace, tab, leaf] = model.findSessionLeaf(session);
         switch (move.targetKind)
         {
             case std::to_underlying(MoveTargetKind::Edge): {
@@ -71,14 +71,15 @@ namespace
                     return refuse(NodeMoveError::UnknownSession);
                 return vtworkspace::MoveTarget { vtworkspace::SwapTarget { .pane = session } };
             case std::to_underlying(MoveTargetKind::TabWell): {
-                if (window == nullptr)
+                if (workspace == nullptr)
                     return refuse(NodeMoveError::UnknownSession);
                 constexpr auto Largest = static_cast<uint64_t>(std::numeric_limits<int>::max());
                 return vtworkspace::MoveTarget { vtworkspace::TabWellTarget {
-                    .window = window->id(), .index = static_cast<int>(std::min(move.index, Largest)) } };
+                    .workspace = workspace->id(),
+                    .index = static_cast<int>(std::min(move.index, Largest)) } };
             }
-            case std::to_underlying(MoveTargetKind::NewWindow):
-                return vtworkspace::MoveTarget { vtworkspace::NewWindowTarget {} };
+            case std::to_underlying(MoveTargetKind::NewWorkspace):
+                return vtworkspace::MoveTarget { vtworkspace::NewWorkspaceTarget {} };
             default: return refuse(NodeMoveError::UnknownKind);
         }
     }
@@ -86,7 +87,7 @@ namespace
 
 std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspace::SessionModel& model,
                                                                       proto::MoveNode const& move,
-                                                                      MoveWindowHooks const& windows)
+                                                                      MoveWorkspaceHooks const& workspaces)
 {
     // Both ends are read before the model is touched, so a refusal changes nothing.
     auto const source = sourceOf(model, move);
@@ -95,21 +96,21 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspac
     auto target = targetOf(model, move);
     if (!target)
         return std::unexpected { target.error() };
-    // sourceOf() found the session's pane, so it has a window.
-    auto const sourceWindow =
+    // sourceOf() found the session's pane, so it has a workspace.
+    auto const sourceWorkspace =
         std::get<0>(model.findSessionLeaf(vtworkspace::SessionId { move.sourceSessions.front() }))->id();
-    // The model would refuse a new window for what fills its window, but only once the window was made:
-    // refused before, nothing is made, and no client sees a window come and go.
-    if (std::holds_alternative<vtworkspace::NewWindowTarget>(*target) && model.fillsItsWindow(*source))
+    // The model would refuse a new workspace for what fills its workspace, but only once the workspace was
+    // made: refused before, nothing is made, and no client sees a workspace come and go.
+    if (std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target) && model.fillsItsWorkspace(*source))
         return std::unexpected { NodeMoveFailure { .error = NodeMoveError::Model,
                                                    .model = vtworkspace::MoveError::NoOp } };
-    // A new window is made by the host's own path, which names it and records who asked, and is then the
-    // well of a move; a refused move takes the still-empty window away again.
-    auto const made = std::holds_alternative<vtworkspace::NewWindowTarget>(*target)
-                          ? std::optional { windows.create() }
+    // A new workspace is made by the host's own path, which names it and records who asked, and is then the
+    // well of a move; a refused move takes the still-empty workspace away again.
+    auto const made = std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target)
+                          ? std::optional { workspaces.create() }
                           : std::nullopt;
     auto const landing =
-        made ? vtworkspace::MoveTarget { vtworkspace::TabWellTarget { .window = *made, .index = 0 } }
+        made ? vtworkspace::MoveTarget { vtworkspace::TabWellTarget { .workspace = *made, .index = 0 } }
              : *target;
     auto moved = model.moveNode(*source, landing).transform_error([](vtworkspace::MoveError error) {
         return NodeMoveFailure { .error = NodeMoveError::Model, .model = error };
@@ -117,14 +118,14 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspac
     if (!moved)
     {
         if (made)
-            windows.discard(*made);
+            workspaces.discard(*made);
         return moved;
     }
-    // A window the move took its last tab out of is not left behind: its observers were told it holds none,
-    // so a client closes its own window for it, and it goes.
-    if (auto const* const emptied = model.window(sourceWindow);
-        emptied != nullptr && emptied->empty() && sourceWindow != moved->window)
-        windows.discard(sourceWindow);
+    // A workspace the move took its last tab out of is not left behind: its observers were told it holds
+    // none, so a client closes its own workspace for it, and it goes.
+    if (auto const* const emptied = model.workspace(sourceWorkspace);
+        emptied != nullptr && emptied->empty() && sourceWorkspace != moved->workspace)
+        workspaces.discard(sourceWorkspace);
     return moved;
 }
 

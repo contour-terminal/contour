@@ -166,13 +166,13 @@ namespace
 
     void printWorkspace(vtcontrol::ListReply const& reply, std::ostream& out)
     {
-        for (auto const& window: reply.windows)
+        for (auto const& workspace: reply.workspaces)
         {
-            out << std::format("window {}  {}{}\n",
-                               window.position,
-                               shortId(window.id),
-                               window.label.empty() ? ""s : "  " + window.label);
-            for (auto const& tab: window.tabs)
+            out << std::format("workspace {}  {}{}\n",
+                               workspace.position,
+                               shortId(workspace.id),
+                               workspace.label.empty() ? ""s : "  " + workspace.label);
+            for (auto const& tab: workspace.tabs)
             {
                 out << std::format("  {} tab {}  {}  {}\n",
                                    tab.isActive ? '*' : ' ',
@@ -370,18 +370,51 @@ namespace
     [[nodiscard]] Params buildList(CLI::FlagStore const& flags)
     {
         return vtcontrol::encodeJson(
-            vtcontrol::ListRequest { .window = VerbFlags { flags, "ls" }.text("window") });
+            vtcontrol::ListRequest { .workspace = VerbFlags { flags, "ls" }.text("workspace") });
+    }
+
+    /// A spelling this daemon vocabulary dropped, and the one that replaces it.
+    struct RemovedFlag
+    {
+        std::string_view removed;
+        std::string_view replacement;
+    };
+
+    /// `new` takes its trailing words as the command, so an unknown option lands there instead of being
+    /// refused; these are the flags that used to name a daemon workspace, caught before they are run as one.
+    /// `removed` is the bare option name, matched however the parser would accept it (see removedNewFlag).
+    constexpr auto RemovedNewFlags = std::array {
+        RemovedFlag { .removed = "window", .replacement = "--workspace" },
+        RemovedFlag { .removed = "new-window", .replacement = "--new-workspace" },
+    };
+
+    /// Finds the removed flag a leading word spells, in any form the CLI parser accepts for an option:
+    /// `--NAME`, `--NAME=VALUE`, `-NAME` and the dashless `NAME`.
+    /// @param word The first trailing word of `new`.
+    /// @return The removed flag, or nullptr when the word is no such spelling.
+    [[nodiscard]] RemovedFlag const* removedNewFlag(std::string_view word) noexcept
+    {
+        word = word.substr(0, word.find('='));
+        if (word.starts_with("--"sv))
+            word.remove_prefix(2);
+        else if (word.starts_with('-'))
+            word.remove_prefix(1);
+        auto const found = std::ranges::find(RemovedNewFlags, word, &RemovedFlag::removed);
+        return found != RemovedNewFlags.end() ? &*found : nullptr;
     }
 
     [[nodiscard]] Params buildNew(CLI::FlagStore const& flags)
     {
         auto const f = VerbFlags { flags, "new" };
-        if (!f.text("window").empty() && f.isSet("new-window"))
-            return std::unexpected("--window and --new-window exclude each other"s);
+        if (auto const& words = f.words(); !words.empty())
+            if (auto const* const found = removedNewFlag(words.front()); found != nullptr)
+                return std::unexpected(std::format("--{} is now {}"sv, found->removed, found->replacement));
+        if (!f.text("workspace").empty() && f.isSet("new-workspace"))
+            return std::unexpected("--workspace and --new-workspace exclude each other"s);
         return vtcontrol::encodeJson(vtcontrol::CreateTabRequest {
-            .window = f.text("window"),
-            .placement = f.isSet("new-window") ? vtcontrol::WindowPlacement::New
-                                               : vtcontrol::WindowPlacement::Existing,
+            .workspace = f.text("workspace"),
+            .placement = f.isSet("new-workspace") ? vtcontrol::WorkspacePlacement::New
+                                                  : vtcontrol::WorkspacePlacement::Existing,
             .cwd = f.text("cwd"),
             .command = toStrings(f.words()),
             .label = f.text("label"),
@@ -556,12 +589,12 @@ namespace
             ControlVerb {
                 .path = "ls",
                 .method = "workspace.list",
-                .usage = "ls [--window W]",
-                .summary = "Lists the windows, tabs and panes; * marks the active ones.",
+                .usage = "ls [--workspace W]",
+                .summary = "Lists the workspaces, tabs and panes; * marks the active ones.",
                 .options =
                     [] {
-                        return withConnectionOptions(
-                            { CLI::Option { "window", CLI::Value { ""s }, "Lists this window only.", "W" } });
+                        return withConnectionOptions({ CLI::Option {
+                            "workspace", CLI::Value { ""s }, "Lists this workspace only.", "W" } });
                     },
                 .verbatim = std::nullopt,
                 .buildParams = buildList,
@@ -570,15 +603,16 @@ namespace
             ControlVerb {
                 .path = "new",
                 .method = "tab.create",
-                .usage = "new [--window W | --new-window] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]",
+                .usage =
+                    "new [--workspace W | --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]",
                 .summary = "Opens a tab and prints its pane id.",
                 .options =
                     [] {
                         return withConnectionOptions({
                             CLI::Option {
-                                "window", CLI::Value { ""s }, "Opens the tab in this window.", "W" },
+                                "workspace", CLI::Value { ""s }, "Opens the tab in this workspace.", "W" },
                             CLI::Option {
-                                "new-window", CLI::Value { false }, "Opens the tab in a new window." },
+                                "new-workspace", CLI::Value { false }, "Opens the tab in a new workspace." },
                             CLI::Option { "cwd", CLI::Value { ""s }, "The working directory.", "DIR" },
                             CLI::Option { "label", CLI::Value { ""s }, "Labels the new tab.", "L" },
                             noFocusOption(),
@@ -679,7 +713,7 @@ namespace
                 .path = "label",
                 .method = "object.setLabel",
                 .usage = "label OBJECT LABEL",
-                .summary = "Labels a window, tab or pane to address it by; an empty label clears it.",
+                .summary = "Labels a workspace, tab or pane to address it by; an empty label clears it.",
                 .options = [] { return withConnectionOptions({}); },
                 .verbatim =
                     CLI::Verbatim { "OBJECT LABEL", "The object, e.g. pane:logs, and its new label." },

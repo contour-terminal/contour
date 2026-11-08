@@ -315,7 +315,7 @@ using DaemonControlFor = std::function<std::unique_ptr<vthost::client::DaemonCon
                                             std::ostream& err);
 
 /// @param restore The `daemon.restore` section.
-/// @param snapshotPath The daemon's snapshot file; empty keeps no workspace.
+/// @param snapshotPath The daemon's snapshot file; empty keeps no workspaces.
 /// @return How the daemon keeps its workspace: its scrollback Off when `scrollback` is false or
 ///         `scrollback_lines` is 0, else the Tail of that many rows.
 [[nodiscard]] vthost::WorkspacePersistenceConfig workspacePersistenceOf(

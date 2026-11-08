@@ -1367,7 +1367,7 @@ if(CONTOUR_FRONTEND_GUI)
             add_test(NAME contour_e2e_client_unreachable
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/client-unreachable.sh $<TARGET_FILE:contour>)
             # Where a launch hosts its sessions (`daemon.mode`): `required` ends it before any window, `auto`
-            # falls back to in-process saying why, and `contour client --window` names a window the daemon
+            # falls back to in-process saying why, and `contour client --workspace` names a workspace the daemon
             # lacks. The default `in_process` is what every other app run here already covers.
             add_test(NAME contour_e2e_hosting
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/hosting.sh $<TARGET_FILE:contour>)

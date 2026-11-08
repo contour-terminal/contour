@@ -85,18 +85,18 @@ TEST_CASE("captureWorkspace records the layout as the model holds it", "[vthost]
     h.host.model().setTabTitle(second->id(), "build");
     h.host.model().setTabColor(
         second->id(), vtworkspace::TabColorSource::User, vtbackend::RGBColor { 0x336699U });
-    auto const* const other = h.host.createWindow();
+    auto const* const other = h.host.createWorkspace();
     REQUIRE(other != nullptr);
-    h.host.model().activateTab(h.host.windowId(), second->id());
+    h.host.model().activateTab(h.host.workspaceId(), second->id());
 
     auto const snapshot = captureWorkspace(h.host, {}, Now);
 
     CHECK(snapshot.takenAt == Now);
-    REQUIRE(snapshot.windows.size() == 2);
-    CHECK(snapshot.windows[0].activeTab == 1);
-    REQUIRE(snapshot.windows[0].tabs.size() == 2);
-    CHECK(snapshot.windows[0].tabs[0].root.split == SplitState::None);
-    auto const& tab = snapshot.windows[0].tabs[1];
+    REQUIRE(snapshot.workspaces.size() == 2);
+    CHECK(snapshot.workspaces[0].activeTab == 1);
+    REQUIRE(snapshot.workspaces[0].tabs.size() == 2);
+    CHECK(snapshot.workspaces[0].tabs[0].root.split == SplitState::None);
+    auto const& tab = snapshot.workspaces[0].tabs[1];
     CHECK(tab.root.split == SplitState::Vertical);
     CHECK(tab.root.ratio == Catch::Approx(0.3));
     REQUIRE(tab.root.children.size() == 2);
@@ -107,7 +107,7 @@ TEST_CASE("captureWorkspace records the layout as the model holds it", "[vthost]
     CHECK(tab.zoom == TabZoom::Zoomed);
     CHECK(tab.title == "build");
     CHECK(tab.color == vtbackend::RGBColor { 0x33, 0x66, 0x99 });
-    CHECK(snapshot.windows[1].tabs.size() == 1);
+    CHECK(snapshot.workspaces[1].tabs.size() == 1);
 }
 
 TEST_CASE("captureWorkspace of an empty host is empty", "[vthost][snapshot][capture]")
@@ -217,8 +217,8 @@ TEST_CASE("captureWorkspace with scrollback off stores no history but keeps the 
     auto const withTail = captureWorkspace(h.host, {}, Now);
     auto const without = captureWorkspace(h.host, { .scrollback = ScrollbackPersistence::Off }, Now);
 
-    auto const& tailed = withTail.windows.at(0).tabs.at(0).root.pane;
-    auto const& bare = without.windows.at(0).tabs.at(0).root.pane;
+    auto const& tailed = withTail.workspaces.at(0).tabs.at(0).root.pane;
+    auto const& bare = without.workspaces.at(0).tabs.at(0).root.pane;
     CHECK(tailed.history.has_value());
     CHECK_FALSE(bare.history.has_value());
     CHECK(bare.workingDirectory == tailed.workingDirectory);
@@ -232,12 +232,12 @@ TEST_CASE("captureWorkspace records what the pane runs", "[vthost][snapshot][cap
     REQUIRE(tab != nullptr);
     auto& terminal = h.activeTerminal(*tab);
 
-    CHECK_FALSE(captureWorkspace(h.host, {}, Now).windows.at(0).tabs.at(0).root.pane.runningCommandLine);
+    CHECK_FALSE(captureWorkspace(h.host, {}, Now).workspaces.at(0).tabs.at(0).root.pane.runningCommandLine);
 
     terminal.writeToScreen(test::commandStarted("vim notes.md"));
-    CHECK(captureWorkspace(h.host, {}, Now).windows.at(0).tabs.at(0).root.pane.runningCommandLine
+    CHECK(captureWorkspace(h.host, {}, Now).workspaces.at(0).tabs.at(0).root.pane.runningCommandLine
           == "vim notes.md");
 
     terminal.writeToScreen(test::commandEnd(0));
-    CHECK_FALSE(captureWorkspace(h.host, {}, Now).windows.at(0).tabs.at(0).root.pane.runningCommandLine);
+    CHECK_FALSE(captureWorkspace(h.host, {}, Now).workspaces.at(0).tabs.at(0).root.pane.runningCommandLine);
 }

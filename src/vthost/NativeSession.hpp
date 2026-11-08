@@ -146,7 +146,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     enum class ConnectionPhase : uint8_t
     {
         AwaitingHello = 0, ///< No ClientHello accepted yet: nothing but a hello is read.
-        Viewing,           ///< An accepted Attach hello: a client that shows the host's windows.
+        Viewing,           ///< An accepted Attach hello: a client that shows the host's workspaces.
         Controlling, ///< An accepted Control hello: calls the daemon and its control API, views nothing.
     };
 
@@ -257,35 +257,36 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void sessionPermissionRequested(vtworkspace::SessionId session,
                                     proto::PermissionRequest const& request) override;
 
-    /// Adapts the host's model-change fan-out into a "layout changed" callback naming the window or the tab
-    /// the change is in: every structural change re-pushes the whole LayoutState of a window. It is a
+    /// Adapts the host's model-change fan-out into a "layout changed" callback naming the workspace or the
+    /// tab the change is in: every structural change re-pushes the whole LayoutState of a workspace. It is a
     /// `vtworkspace::ModelEvents` an Attach connection subscribes to the host as its hello is accepted, so
     /// the model stays transport-agnostic.
     struct LayoutObserver final: vtworkspace::ModelEvents
     {
-        std::function<void(vtworkspace::WindowId)> onWindowChange; ///< A change in one window's tab strip.
-        std::function<void(vtworkspace::TabId)> onTabChange;       ///< A change within one tab.
-        void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        std::function<void(vtworkspace::WorkspaceId)>
+            onWorkspaceChange;                               ///< A change in one workspace's tab strip.
+        std::function<void(vtworkspace::TabId)> onTabChange; ///< A change within one tab.
+        void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int) override
         {
-            onWindowChange(window);
+            onWorkspaceChange(workspace);
         }
-        void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        void tabClosed(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int) override
         {
-            onWindowChange(window);
+            onWorkspaceChange(workspace);
         }
-        void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId, int, int) override
+        void tabMoved(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int, int) override
         {
-            onWindowChange(window);
+            onWorkspaceChange(workspace);
         }
-        void tabMovedToWindow(
-            vtworkspace::WindowId from, vtworkspace::TabId, int, vtworkspace::WindowId to, int) override
+        void tabMovedToWorkspace(
+            vtworkspace::WorkspaceId from, vtworkspace::TabId, int, vtworkspace::WorkspaceId to, int) override
         {
-            onWindowChange(from);
-            onWindowChange(to);
+            onWorkspaceChange(from);
+            onWorkspaceChange(to);
         }
-        void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        void activeTabChanged(vtworkspace::WorkspaceId workspace, vtworkspace::TabId, int) override
         {
-            onWindowChange(window);
+            onWorkspaceChange(workspace);
         }
         void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId) override
         {
@@ -336,13 +337,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     ///         the matched token otherwise; none before a hello is accepted.
     [[nodiscard]] vtcontrol::ControlGrants grants() const noexcept { return _grants; }
 
-    /// @param window A daemon window.
-    /// @return Whether this connection is shown @p window: its layout, its sessions' screens and events.
-    ///         Every window under FollowScope::Every; under Listed, the attach plan's and those it gained
-    ///         since (its own NewWindow, and — for the primary viewer — the windows no client claims).
-    [[nodiscard]] bool follows(vtworkspace::WindowId window) const noexcept
+    /// @param workspace A daemon workspace.
+    /// @return Whether this connection is shown @p workspace: its layout, its sessions' screens and events.
+    ///         Every workspace under FollowScope::Every; under Listed, the attach plan's and those it gained
+    ///         since (its own NewWorkspace, and — for the primary viewer — the workspaces no client claims).
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept
     {
-        return _scope == FollowScope::Every || _followedWindows.contains(window.value);
+        return _scope == FollowScope::Every || _followedWorkspaces.contains(workspace.value);
     }
 
   private:
@@ -623,7 +624,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param event A SessionBell, SessionNotify or SessionClipboard.
     void emitSessionEvent(proto::SessionEventPdu const& event);
 
-    /// Serializes each followed window's tab/pane tree into a LayoutState and pushes it
+    /// Serializes each followed workspace's tab/pane tree into a LayoutState and pushes it
     /// (serial 0), once the handshake completed — on attach, and on every change to a client not sharing
     /// Capability::LayoutBatch. To a client sharing it the push is ended by a LayoutBatchEnd (@see
     /// endLayoutBatch).
@@ -636,28 +637,28 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @return Whether this client shares Capability::LayoutBatch: its pushes are ended, and coalesced.
     [[nodiscard]] bool batchesLayouts() const noexcept;
 
-    /// The model changed in @p window. A client sharing Capability::LayoutBatch has the window marked, and
-    /// pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every followed
-    /// window's layout now, as a client of the release before it always was.
-    /// @param window The window the change is in.
-    void layoutChanged(vtworkspace::WindowId window);
+    /// The model changed in @p workspace. A client sharing Capability::LayoutBatch has the workspace marked,
+    /// and pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every followed
+    /// workspace's layout now, as a client of the release before it always was.
+    /// @param workspace The workspace the change is in.
+    void layoutChanged(vtworkspace::WorkspaceId workspace);
 
-    /// Pushes the layout of each window changed since the batch opened (@see layoutChanged) that this client
-    /// follows, each once, as it is now; a window the batch removed is pushed with no tab to a client that
-    /// followed it, which closes its own window for it.
+    /// Pushes the layout of each workspace changed since the batch opened (@see layoutChanged) that this
+    /// client follows, each once, as it is now; a workspace the batch removed is pushed with no tab to a
+    /// client that followed it, which closes its own workspace for it.
     /// @return Whether any LayoutState went out.
     bool flushChangedLayouts();
 
     /// Opens a layout batch if none is: spawns the endLayoutBatch() that ends it.
     void openLayoutBatch();
 
-    /// Brings the followed windows in line with the model before a layout push: closed windows leave the
-    /// set; this connection's own new windows, and — for the primary viewer — unclaimed ones, join it, and
-    /// each joining window's sessions are queued a snapshot.
-    void refreshFollowedWindows();
+    /// Brings the followed workspaces in line with the model before a layout push: closed workspaces leave
+    /// the set; this connection's own new workspaces, and — for the primary viewer — unclaimed ones, join it,
+    /// and each joining workspace's sessions are queued a snapshot.
+    void refreshFollowedWorkspaces();
 
     /// @param session A hosted session.
-    /// @return Whether @p session sits in a window this connection follows; false for one in no window.
+    /// @return Whether @p session sits in a workspace this connection follows; false for one in no workspace.
     [[nodiscard]] bool followsSession(vtworkspace::SessionId session) const;
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
@@ -668,23 +669,23 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// What an accepted Attach hello starts: the census ticket and the host's subscriptions, the client's
     /// settings and client area, the attach plan and what it creates, then the ServerHello naming the
-    /// followed windows, their layout, their sessions' snapshots and the open permission questions.
+    /// followed workspaces, their layout, their sessions' snapshots and the open permission questions.
     ///
     /// The ServerHello waits for the plan because it states what the plan follows; nothing reaches the
     /// peer before it, as @ref _negotiated is engaged only once it is sent.
     /// @param serial The hello's serial, which the ServerHello answers.
     /// @param hello The accepted hello.
-    /// @param reply The ServerHello, without its followed windows.
+    /// @param reply The ServerHello, without its followed workspaces.
     /// @param negotiated What the handshake agreed on.
     void attachClient(uint64_t serial,
                       proto::ClientHello const& hello,
                       proto::ServerHello reply,
                       proto::Negotiated negotiated);
 
-    /// Decides which windows this connection follows and creates what that asks for: a first tab in the
-    /// primary window, or a window of its own. Counts the connection as the host's client after deciding,
-    /// so that it is not among the clients it is decided against.
-    /// @param intent What the hello asked for; AllWindows when Capability::AttachIntent is not shared.
+    /// Decides which workspaces this connection follows and creates what that asks for: a first tab in the
+    /// primary workspace, or a workspace of its own. Counts the connection as the host's client after
+    /// deciding, so that it is not among the clients it is decided against.
+    /// @param intent What the hello asked for; AllWorkspaces when Capability::AttachIntent is not shared.
     void executeAttachPlan(proto::AttachIntent const& intent);
 
     /// Bounds the cell size a client states alongside a grid (vthost::sanePixelSize); an out-of-range one is
@@ -882,8 +883,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] bool hasSendRoom() const noexcept;
 
     /// Sees the command-block records a push left owed to @p session sent later: by the next debounce
-    /// window while the send queue has room, else once it has room again — parked on its watermark by
-    /// @ref requeueOnSendRoom, rather than rebuilding the session every window to find none.
+    /// workspace while the send queue has room, else once it has room again — parked on its watermark by
+    /// @ref requeueOnSendRoom, rather than rebuilding the session every workspace to find none.
     /// @param session The session whose records are owed.
     void followUpRecords(vtworkspace::SessionId session);
 
@@ -987,7 +988,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// What every session THIS connection creates is spawned with.
     ///
-    /// One spelling for all four creation paths (the attach-time first session, CreateTab, NewWindow,
+    /// One spelling for all four creation paths (the attach-time first session, CreateTab, NewWorkspace,
     /// SplitPane), so a fifth cannot quietly forget the client's preference.
     /// @param verbProfile The profile the spawning verb names; empty for the connection's. Honoured only
     ///        with Capability::ProfileByName shared.
@@ -1027,11 +1028,11 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] core::async::Task<void> flushAt(SpawnedFlowClaim claim,
                                                   core::platform::SteadyTimePoint deadline);
 
-    /// Pushes the windows the batch changed (@see flushChangedLayouts) and sends the LayoutBatchEnd of the
+    /// Pushes the workspaces the batch changed (@see flushChangedLayouts) and sends the LayoutBatchEnd of the
     /// pushes made since it was spawned: a flow, so that it runs once the change that pushed has run to its
     /// end. One change fires several model events -- a pane moved out of its tab is announced shrunk before
-    /// the window it entered shows it -- and each window is pushed once for all of them, as the change left
-    /// it. The end is sent when anything was pushed, and for a move of this client's even when it pushed
+    /// the workspace it entered shows it -- and each workspace is pushed once for all of them, as the change
+    /// left it. The end is sent when anything was pushed, and for a move of this client's even when it pushed
     /// nothing this client follows, so the move is known to have landed.
     /// @param claim The batch's claim on `this` (@see claimLayoutBatch).
     [[nodiscard]] core::async::Task<void> endLayoutBatch(SpawnedFlowClaim claim);
@@ -1085,10 +1086,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// The host profile this client's sessions run under, as its hello named it with
     /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
     std::string _profileName;
-    /// Whether this connection follows every window or a listed set; Every until the attach plan says.
+    /// Whether this connection follows every workspace or a listed set; Every until the attach plan says.
     FollowScope _scope = FollowScope::Every;
-    /// The windows followed under FollowScope::Listed, by id. @see follows
-    std::set<uint64_t> _followedWindows;
+    /// The workspaces followed under FollowScope::Listed, by id. @see follows
+    std::set<uint64_t> _followedWorkspaces;
     LayoutObserver _layoutObserver;
     /// Answers the client's unknown PDUs, and holds back the ones it said it does not know.
     proto::UnsupportedTracker _unsupported;
@@ -1128,8 +1129,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     uint64_t _layoutBatchCause = 0;
     /// The serial of the MoveNode being applied while its model events push; 0 outside that call.
     uint64_t _servingMove = 0;
-    /// The windows the open layout batch changed, pushed once as it ends (@see flushChangedLayouts).
-    std::unordered_set<uint64_t> _changedWindows;
+    /// The workspaces the open layout batch changed, pushed once as it ends (@see flushChangedLayouts).
+    std::unordered_set<uint64_t> _changedWorkspaces;
     /// The earliest flush deadline armed; nullopt while no flush is due.
     std::optional<core::platform::SteadyTimePoint> _flushDeadline;
     /// The flushAt() coroutines live, superseded ones included: what @ref run waits out before it lets

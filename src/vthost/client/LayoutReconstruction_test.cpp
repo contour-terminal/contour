@@ -30,13 +30,14 @@ namespace
 /// callbacks (the bracket hooks keep their no-op defaults).
 struct NoopEvents: vtworkspace::ModelEvents
 {
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override {}
+    void tabMovedToWorkspace(
+        vtworkspace::WorkspaceId, vtworkspace::TabId, int, vtworkspace::WorkspaceId, int) override
     {
     }
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
@@ -94,7 +95,7 @@ std::unique_ptr<Rebuilt> realize(WireLayout const& wl)
     auto pending = vtworkspace::SessionId {};
     rebuilt->model =
         std::make_unique<vtworkspace::SessionModel>(rebuilt->events, [&pending] { return pending; });
-    auto const window = rebuilt->model->createWindow()->id();
+    auto const workspace = rebuilt->model->createWorkspace()->id();
 
     // The seeder stages each leaf's remote session so the model allocator hands it
     // back for that pane — exactly what a GUI seeder would do before binding.
@@ -104,7 +105,7 @@ std::unique_ptr<Rebuilt> realize(WireLayout const& wl)
     };
     for (auto const& tab: wl.layout.tabs)
     {
-        auto* modelTab = vtworkspace::realizeLayoutTab(*rebuilt->model, window, tab, seed);
+        auto* modelTab = vtworkspace::realizeLayoutTab(*rebuilt->model, workspace, tab, seed);
         REQUIRE(modelTab != nullptr);
         rebuilt->tabs.push_back(modelTab);
     }
@@ -265,7 +266,7 @@ TEST_CASE("composeClientArea sums a split's axis and spans the other", "[vthost]
 
 TEST_CASE("composeAnchoredClientArea reports the anchoring tab's area", "[vthost][layout]")
 {
-    // Two mirrored windows, each one tab: window A is 80x24, window B is 100x30. The wire carries
+    // Two mirrored workspaces, each one tab: workspace A is 80x24, workspace B is 100x30. The wire carries
     // ONE client area per client, so exactly one of them has to speak for both.
     auto const roots = std::vector { leaf(100), leaf(200) };
     auto const sizes = sizesOf({ { 100, cells(80, 24) }, { 200, cells(100, 30) } });
@@ -442,7 +443,7 @@ namespace
     split.children = { proto::WirePane { .paneId = 11, .session = 1 },
                        proto::WirePane { .paneId = 12, .session = 2 } };
     return proto::LayoutState {
-        .window = 1,
+        .workspace = 1,
         .activeTab = 0,
         .tabs = { proto::WireTab { .tabId = 1, .activePane = 11, .root = split },
                   proto::WireTab { .tabId = 2,

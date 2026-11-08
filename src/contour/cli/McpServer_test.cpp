@@ -40,11 +40,11 @@ vtcontrol::ListReply workspace()
     tabA.panes.push_back(vtcontrol::PaneInfo { .id = A2, .label = "tests" });
     auto tabB = vtcontrol::TabInfo { .id = TabB, .position = 2 };
     tabB.panes.push_back(vtcontrol::PaneInfo { .id = B1, .label = "other" });
-    auto window =
-        vtcontrol::WindowInfo { .id = "window:018f3c4e-0000-7000-8000-0000000000ff", .position = 1 };
-    window.tabs.push_back(tabA);
-    window.tabs.push_back(tabB);
-    return { .windows = { window } };
+    auto workspace =
+        vtcontrol::WorkspaceInfo { .id = "workspace:018f3c4e-0000-7000-8000-0000000000ff", .position = 1 };
+    workspace.tabs.push_back(tabA);
+    workspace.tabs.push_back(tabB);
+    return { .workspaces = { workspace } };
 }
 
 /// Answers each method with its scripted reply (`{}` when none) and records every call.
@@ -265,7 +265,7 @@ TEST_CASE("object_setLabel is confined to the own tab", "[mcp-server]")
               .contains(R"("isError":true)"));
     CHECK(f.call("object_setLabel", std::format(R"({{"object":"{}","label":"t"}})", TabB))
               .contains(R"("isError":true)"));
-    CHECK(f.call("object_setLabel", R"({"object":"window:1","label":"t"})").contains(R"("isError":true)"));
+    CHECK(f.call("object_setLabel", R"({"object":"workspace:1","label":"t"})").contains(R"("isError":true)"));
     CHECK(f.call("object_setLabel", R"({"object":"bogus","label":"t"})").contains(R"("isError":true)"));
     CHECK(f.channel.count("object.setLabel") == 0);
 }

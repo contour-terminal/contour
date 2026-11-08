@@ -89,7 +89,7 @@ template <>
 struct StateEnumWire<vtcontrol::ObjectKind>
 {
     static constexpr auto Values = std::array {
-        vtcontrol::ObjectKind::Window,
+        vtcontrol::ObjectKind::Workspace,
         vtcontrol::ObjectKind::Tab,
         vtcontrol::ObjectKind::Pane,
     };
@@ -259,7 +259,7 @@ template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::ModelIdState>
 static void visitStateFields(Visitor& visitor, T& ids)
 {
-    visitor(1, ids.nextWindow);
+    visitor(1, ids.nextWorkspace);
     visitor(2, ids.nextTab);
     visitor(3, ids.nextPane);
 }
@@ -312,20 +312,20 @@ static void visitStateFields(Visitor& visitor, T& tab)
 }
 
 template <typename Visitor, typename T>
-    requires std::same_as<std::remove_const_t<T>, vtworkspace::WindowState>
-static void visitStateFields(Visitor& visitor, T& window)
+    requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceState>
+static void visitStateFields(Visitor& visitor, T& workspace)
 {
-    visitor(1, window.id);
-    visitor(2, window.tabs);
-    visitor(3, window.activeTabIndex);
-    visitor(4, window.previousActiveTabIndex);
+    visitor(1, workspace.id);
+    visitor(2, workspace.tabs);
+    visitor(3, workspace.activeTabIndex);
+    visitor(4, workspace.previousActiveTabIndex);
 }
 
 template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceTreeState>
 static void visitStateFields(Visitor& visitor, T& tree)
 {
-    visitor(1, tree.windows);
+    visitor(1, tree.workspaces);
 }
 
 // }}}

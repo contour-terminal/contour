@@ -51,7 +51,7 @@ The prompt names each permission by what it lets the extension do:
 
 | Permission | The prompt says                                      |
 | ---------- | ---------------------------------------------------- |
-| `read`     | May see the windows, tabs and panes.                 |
+| `read`     | May see the workspaces, tabs and panes.              |
 | `screen`   | May read what panes show, and their command history. |
 | `input`    | May type into panes.                                 |
 | `write`    | May open, split, close and label tabs and panes.     |

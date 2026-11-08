@@ -117,8 +117,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param transport How to reach the daemon: the local unix control socket, or a TLS-encrypted,
     ///        token-authenticated TCP endpoint. Opened afresh for every reconnect; its describe() names the
     ///        daemon in every log line and failure message.
-    /// @param intent Which of the daemon's windows the first connection follows; every reconnect resumes the
-    ///        windows the lost connection followed.
+    /// @param intent Which of the daemon's workspaces the first connection follows; every reconnect resumes
+    /// the
+    ///        workspaces the lost connection followed.
     /// @param profileName The host profile this client's sessions run, stated in every ClientHello; empty for
     ///        the daemon's default.
     /// @param attachSettings The emulation settings to state in the ClientHello — this client's own
@@ -202,17 +203,17 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Asks the daemon to create a new tab (B3-Qt). The daemon honors it and
     /// re-pushes its layout, which the GUI reconciles into a new local tab. A no-op
     /// once detached.
-    /// @param actingPty A pty of the WINDOW the tab belongs in — the daemon hosts more than one
-    ///        and resolves the window from the session this pty is bound to. Null or unbound
-    ///        falls back to the daemon's first window.
+    /// @param actingPty A pty of the WORKSPACE the tab belongs in — the daemon hosts more than one
+    ///        and resolves the workspace from the session this pty is bound to. Null or unbound
+    ///        falls back to the daemon's first workspace.
     /// @param spawn What the tab's session runs: its profile, by the name the daemon resolves.
     void requestCreateTab(vtpty::Pty const* actingPty, contour::session::RemoteSpawn const& spawn);
 
-    /// Asks the daemon to create a new window (B4). The daemon honors it and pushes
-    /// that window's LayoutState; the GUI opens a matching OS window and reconciles
-    /// the window's tabs into it. A no-op once detached.
-    /// @param spawn What the window's first session runs: its profile, by the name the daemon resolves.
-    void requestCreateWindow(contour::session::RemoteSpawn const& spawn);
+    /// Asks the daemon to create a new workspace (B4). The daemon honors it and pushes
+    /// that workspace's LayoutState; the GUI opens a matching OS window and reconciles
+    /// the workspace's tabs into it. A no-op once detached.
+    /// @param spawn What the workspace's first session runs: its profile, by the name the daemon resolves.
+    void requestCreateWorkspace(contour::session::RemoteSpawn const& spawn);
 
     /// Asks the daemon to split the pane hosting the remote session bound to local
     /// pty @p actingPty (@p vertical orientation). The daemon honors it and
@@ -248,38 +249,38 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param answer The user's answer.
     void answerPermission(std::string hostId, std::string digest, vthost::GrantState answer);
 
-    /// @return The daemon window ids currently known, ascending. The daemon starts
-    ///         with one window and grows via NewWindow; the GUI maps one OS window to
+    /// @return The daemon workspace ids currently known, ascending. The daemon starts
+    ///         with one workspace and grows via NewWorkspace; the GUI maps one OS window to
     ///         each (B4). A thread-safe snapshot.
-    [[nodiscard]] std::vector<uint64_t> windowIds() const;
+    [[nodiscard]] std::vector<uint64_t> workspaceIds() const;
 
-    /// @return The daemon's most recent tab/pane layout for @p daemonWindow, or
-    ///         nullopt if that window is unknown. A thread-safe copy — the reactor
+    /// @return The daemon's most recent tab/pane layout for @p daemonWorkspace, or
+    ///         nullopt if that workspace is unknown. A thread-safe copy — the reactor
     ///         thread updates it. The GUI reconstructs one OS window's tree from it.
-    [[nodiscard]] std::optional<vthost::proto::LayoutState> layout(uint64_t daemonWindow) const;
+    [[nodiscard]] std::optional<vthost::proto::LayoutState> layout(uint64_t daemonWorkspace) const;
 
-    /// @return The primary (lowest-id) daemon window's layout, or nullopt if none has
-    ///         arrived yet. Convenience for the single-window path.
+    /// @return The primary (lowest-id) daemon workspace's layout, or nullopt if none has
+    ///         arrived yet. Convenience for the single-workspace path.
     [[nodiscard]] std::optional<vthost::proto::LayoutState> layout() const;
 
-    /// @return The primary (lowest-id) daemon window's layout converted for
+    /// @return The primary (lowest-id) daemon workspace's layout converted for
     ///         `vtworkspace::realizeLayoutTab` (an empty layout if none has arrived), plus
     ///         its leaf→remote-session map. The layout executor realizes this to
     ///         reproduce the daemon tree.
     [[nodiscard]] vthost::client::WireLayout wireLayout() const;
 
-    /// @return The layouts the GUI reconciles against, as one snapshot of every window: those of the last
+    /// @return The layouts the GUI reconciles against, as one snapshot of every workspace: those of the last
     ///         push the daemon ended (proto::LayoutBatchEnd) when Capability::LayoutBatch is shared, so the
     ///         frames of a push still arriving never mix with the last one's; the latest otherwise. A copy
-    ///         of pointers, cheap to take once per reconcile and share between its windows. Any thread.
+    ///         of pointers, cheap to take once per reconcile and share between its OS windows. Any thread.
     [[nodiscard]] LayoutSnapshot settledLayouts() const;
 
-    /// @return The settled layout (@see settledLayouts) of @p daemonWindow; null if it has none.
-    /// @param daemonWindow The daemon's window id.
+    /// @return The settled layout (@see settledLayouts) of @p daemonWorkspace; null if it has none.
+    /// @param daemonWorkspace The daemon's workspace id.
     [[nodiscard]] std::shared_ptr<vthost::proto::LayoutState const> settledLayout(
-        uint64_t daemonWindow) const;
+        uint64_t daemonWorkspace) const;
 
-    /// @return The settled layout (@see settledLayouts) of the primary (lowest-id) window; null if none.
+    /// @return The settled layout (@see settledLayouts) of the primary (lowest-id) workspace; null if none.
     [[nodiscard]] std::shared_ptr<vthost::proto::LayoutState const> settledLayout() const;
 
     /// Binds the NEXT createPty() to remote session @p session (instead of popping
@@ -444,15 +445,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// whose changes came from the daemon, and for a tab the daemon has not pushed.
     void reportTabPresentation(contour::session::LocalTabPresentation const& presentation) override;
 
-    /// SessionFactory: a GUI "new window" is authored on the daemon
-    /// (requestCreateWindow); the daemon's new-window layout push maps it onto a
+    /// SessionFactory: a GUI "new window" is authored on the daemon as a new workspace
+    /// (requestCreateWorkspace); the daemon's new-workspace layout push maps it onto a
     /// fresh OS window. A window spawned BY the reconciler itself (while realizing) is
-    /// not re-authored — it is the local half of a daemon window that already exists.
-    [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const& spawn) override
+    /// not re-authored — it is the local half of a daemon workspace that already exists.
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
     {
         if (isRealizingLayout())
             return false;
-        requestCreateWindow(spawn);
+        requestCreateWorkspace(spawn);
         return true;
     }
 
@@ -490,8 +491,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     }
 
     /// SessionFactory: starts a new supervised run once the last one ended (refused, failed, or stopped),
-    /// resuming the windows followed. The outcome arrives as connectionStateChanged() and, when it ends for
-    /// good again, connectionClosed(). GUI thread.
+    /// resuming the workspaces followed. The outcome arrives as connectionStateChanged() and, when it ends
+    /// for good again, connectionClosed(). GUI thread.
     /// @return Nothing once started; AlreadyConnected while a run is up or being sought, NotAttached when
     ///         this controller never connected.
     [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override;
@@ -516,19 +517,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connectionState() changed (fires on the reactor thread; connect queued).
     void connectionStateChanged();
 
-    /// After a reconnect: daemon windows this client showed that the daemon no longer has for it -- it
+    /// After a reconnect: daemon workspaces this client showed that the daemon no longer has for it -- it
     /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread, ahead
-    /// of the layoutChanged() of the windows that came instead; connect queued).
-    /// @param daemonWindows The lost windows' ids, as the lost connection named them.
-    void windowsLost(std::vector<uint64_t> daemonWindows);
+    /// of the layoutChanged() of the workspaces that came instead; connect queued).
+    /// @param daemonWorkspaces The lost workspaces' ids, as the lost connection named them.
+    void workspacesLost(std::vector<uint64_t> daemonWorkspaces);
 
-    /// The daemon says it restored its saved workspace before this client attached, and how much came back
+    /// The daemon says it restored its saved workspaces before this client attached, and how much came back
     /// (fires on the reactor thread, once per connection whose hello carries it; connect queued). Only the
     /// first Attach connection after a restore is told, so a second client never raises it, nor does a
     /// reconnect to the same daemon run; a reconnect to a restarted daemon that itself restored does.
-    /// @param windows How many windows came back.
+    /// @param workspaces How many workspaces came back.
     /// @param tabs How many tabs.
-    void workspaceRestored(quint32 windows, quint32 tabs);
+    void workspaceRestored(quint32 workspaces, quint32 tabs);
 
     /// The daemon's tab/pane layout changed (fires on the reactor thread; connect
     /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
@@ -634,7 +635,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param session The session to state it for.
     void stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const;
 
-    /// Reactor-side, under _mutex: a reconnect was accepted. Judges which windows were lost, and makes the
+    /// Reactor-side, under _mutex: a reconnect was accepted. Judges which workspaces were lost, and makes the
     /// bindings ready for the new connection's snapshots: restarted mirrors when the same daemon answered,
     /// detached bindings when it restarted. The panes closed while the connection was down are closed on
     /// the daemon now when it is the same one, and forgotten when it restarted.
@@ -649,7 +650,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// Reactor-side: sends again the closes the client wrote nowhere because its connection was ending, for
     /// the panes @p layout still lists -- the daemon never saw them. Each goes out once.
-    /// @param layout A window's layout the daemon just pushed.
+    /// @param layout A workspace's layout the daemon just pushed.
     void replayUnsentCloses(vthost::proto::LayoutState const& layout);
 
     /// Reactor-side: hands a system sleep or wake to the connection that is up. While none is, a wake cuts
@@ -731,7 +732,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The client area composed from the pane tree the daemon last pushed and the grids its leaves
     /// are rendered at (@see vthost::client::composeClientArea). Prefers the tab holding the pane
     /// that reported last — it is the one on screen — and otherwise takes the first tab that fully
-    /// resolves, in daemon-window then tab order, so the choice never depends on hash order.
+    /// resolves, in daemon-workspace then tab order, so the choice never depends on hash order.
     /// Must be called under BOTH _mutex (for the layouts) and _geometryMutex (for the pane grids).
     /// @return The composed area, or nullopt while no tab fully resolves.
     [[nodiscard]] std::optional<vtpty::PageSize> composedClientArea() const;
@@ -785,8 +786,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// What the daemon last said each session's terminal does with typed text (SessionInputEcho), kept so a
     /// pane bound after it arrived starts from it. Guarded by _mutex.
     std::unordered_map<uint64_t, vtpty::InputEcho> _inputEchoes;
-    /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
-    /// yields a stable ascending order (the primary window is the lowest id).
+    /// The daemon's latest tab/pane tree per workspace id (B2/B4). Ordered so workspaceIds()
+    /// yields a stable ascending order (the primary workspace is the lowest id).
     LayoutSnapshot _layouts;
     /// The layouts the GUI reconciles against (@see settledLayouts): _layouts as the last LayoutBatchEnd left
     /// them, or as each LayoutState left them from a daemon that does not end its pushes. Written by the
@@ -909,8 +910,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connection was up is dropped, never replayed into whatever shell answers after a reconnect.
     std::atomic<uint64_t> _inputConnection = 0;
     std::atomic<std::size_t> _droppedInputBytes = 0; ///< Since the connection was lost; for the log.
-    /// The windows the last reconnect lost, announced with the first layout that came instead. Under _mutex.
-    std::vector<uint64_t> _lostWindows;
+    /// The workspaces the last reconnect lost, announced with the first layout that came instead. Under
+    /// _mutex.
+    std::vector<uint64_t> _lostWorkspaces;
     uint64_t _nextBindingSerial = 1; ///< @see Binding::serial. Under _mutex.
     /// Keeps the power monitor's handler, which posts each event to notePowerEvent() on the reactor; empty
     /// without a monitor. ~NativeController() stops and joins the reactor before members die, so a handler

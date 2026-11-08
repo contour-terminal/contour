@@ -52,7 +52,7 @@ namespace
     workspace.takenAt = std::chrono::sys_seconds { std::chrono::seconds { seconds } };
     auto tab = TabSnapshot {};
     tab.title = "t";
-    workspace.windows.push_back(WindowSnapshot { .tabs = { tab } });
+    workspace.workspaces.push_back(WorkspaceLayoutSnapshot { .tabs = { tab } });
     return workspace;
 }
 

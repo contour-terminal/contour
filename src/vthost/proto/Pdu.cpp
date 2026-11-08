@@ -188,9 +188,9 @@ namespace
     {
         return std::to_underlying(PduType::ClosePane);
     }
-    [[nodiscard]] constexpr uint64_t tagOf(NewWindow const&) noexcept
+    [[nodiscard]] constexpr uint64_t tagOf(NewWorkspace const&) noexcept
     {
-        return std::to_underlying(PduType::NewWindow);
+        return std::to_underlying(PduType::NewWorkspace);
     }
     [[nodiscard]] constexpr uint64_t tagOf(ResizeSplit const&) noexcept
     {
@@ -414,9 +414,9 @@ namespace
             fields.varint(pdu.clientArea->lines);
         }
         fields.u8(std::to_underlying(pdu.attachIntent.kind));
-        fields.varint(pdu.attachIntent.windows.size());
-        for (auto const window: pdu.attachIntent.windows)
-            fields.varint(window);
+        fields.varint(pdu.attachIntent.workspaces.size());
+        for (auto const workspace: pdu.attachIntent.workspaces)
+            fields.varint(workspace);
         fields.string(pdu.profileName);
         fields.u8(std::to_underlying(pdu.colorPreference));
         encodeCellPixelSize(fields, pdu.cellPixelSize);
@@ -446,11 +446,11 @@ namespace
         fields.string(pdu.machineId);
         fields.string(pdu.hostname);
         fields.string(pdu.releaseVersion);
-        fields.varint(pdu.followedWindows.size());
-        for (auto const window: pdu.followedWindows)
-            fields.varint(window);
+        fields.varint(pdu.followedWorkspaces.size());
+        for (auto const workspace: pdu.followedWorkspaces)
+            fields.varint(workspace);
         fields.varint(pdu.daemonInstance);
-        fields.varint(pdu.restoredWindows);
+        fields.varint(pdu.restoredWorkspaces);
         fields.varint(pdu.restoredTabs);
         out.blob(fields.view());
     }
@@ -775,7 +775,7 @@ namespace
         out.string(pdu.profileName);
     }
 
-    void encodeBody(Writer& out, NewWindow const& pdu)
+    void encodeBody(Writer& out, NewWorkspace const& pdu)
     {
         out.string(pdu.profileName);
     }
@@ -1007,7 +1007,7 @@ namespace
 
     void encodeBody(Writer& out, LayoutState const& pdu)
     {
-        out.varint(pdu.window);
+        out.varint(pdu.workspace);
         out.u32(pdu.activeTab);
         out.varint(pdu.tabs.size());
         for (auto const& tab: pdu.tabs)
@@ -1153,17 +1153,17 @@ namespace
         auto kind = uint8_t {};
         if (!assign(in.u8(), kind, error))
             return false;
-        auto windows =
-            decodeVector(in, pdu.attachIntent.windows, [](Reader& reader) { return reader.varint(); });
-        if (!windows)
+        auto workspaces =
+            decodeVector(in, pdu.attachIntent.workspaces, [](Reader& reader) { return reader.varint(); });
+        if (!workspaces)
         {
-            error = windows.error();
+            error = workspaces.error();
             return false;
         }
         // A kind no enumerator names is what a daemon without the capability does anyway.
         pdu.attachIntent.kind = kind <= std::to_underlying(AttachIntentKind::Resume)
                                     ? static_cast<AttachIntentKind>(kind)
-                                    : AttachIntentKind::AllWindows;
+                                    : AttachIntentKind::AllWorkspaces;
         return true;
     }
 
@@ -1276,14 +1276,14 @@ namespace
             return std::unexpected(error);
         if (inner.remaining() != 0)
         {
-            if (auto const followed =
-                    decodeVector(inner, pdu.followedWindows, [](Reader& reader) { return reader.varint(); });
+            if (auto const followed = decodeVector(
+                    inner, pdu.followedWorkspaces, [](Reader& reader) { return reader.varint(); });
                 !followed)
                 return std::unexpected(followed.error());
         }
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.daemonInstance, error))
             return std::unexpected(error);
-        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredWindows, error))
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredWorkspaces, error))
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredTabs, error))
             return std::unexpected(error);
@@ -1652,9 +1652,9 @@ namespace
         return pdu;
     }
 
-    DecodeResult decodeNewWindow(Reader& in)
+    DecodeResult decodeNewWorkspace(Reader& in)
     {
-        auto pdu = NewWindow {};
+        auto pdu = NewWorkspace {};
         auto error = DecodeError {};
         if (in.remaining() != 0 && !assign(in.string(), pdu.profileName, error))
             return std::unexpected(error);
@@ -2046,7 +2046,7 @@ namespace
         auto pdu = LayoutState {};
         auto error = DecodeError {};
         auto tabCount = uint64_t { 0 };
-        if (!assign(in.varint(), pdu.window, error) || !assign(in.u32(), pdu.activeTab, error)
+        if (!assign(in.varint(), pdu.workspace, error) || !assign(in.u32(), pdu.activeTab, error)
             || !assign(in.varint(), tabCount, error))
             return std::unexpected(error);
         // tmux's WINDOW_MAXIMUM is 10000; a count far beyond that is a lie (the
@@ -2102,7 +2102,7 @@ namespace
         DecodeRow { PduType::CreateTab, decodeCreateTab },
         DecodeRow { PduType::SplitPane, decodeSplitPane },
         DecodeRow { PduType::ClosePane, decodeClosePane },
-        DecodeRow { PduType::NewWindow, decodeNewWindow },
+        DecodeRow { PduType::NewWorkspace, decodeNewWorkspace },
         DecodeRow { PduType::ResizeSplit, decodeResizeSplit },
         DecodeRow { PduType::SessionSettingsChanged, decodeSessionSettingsChanged },
         DecodeRow { PduType::PerformOperation, decodePerformOperation },

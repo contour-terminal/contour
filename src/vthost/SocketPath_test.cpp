@@ -214,7 +214,7 @@ TEST_CASE("a hosted shell's pane variables are full references", "[vthost][socke
     auto const environment = vthost::paneEnvironment(uuid, uuid, uuid);
     CHECK(environment.at("CONTOUR_PANE") == "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
     CHECK(environment.at("CONTOUR_TAB") == "tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
-    CHECK(environment.at("CONTOUR_WINDOW") == "window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK(environment.at("CONTOUR_WORKSPACE") == "workspace:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
     CHECK(environment.size() == 3);
 
     // The daemon's own variables win over a profile's, the pane's ids among a profile's variables.

@@ -1199,7 +1199,7 @@ std::vector<uint32_t> drainIncrements(NativeHarness& h,
                                       vthost::client::RemoteScreen& client)
 {
     auto carried = std::vector<uint32_t> {};
-    for ([[maybe_unused]] auto const window: std::views::iota(0, 1000))
+    for ([[maybe_unused]] auto const workspace: std::views::iota(0, 1000))
     {
         auto const delta = vthost::NativeSessionFollowTester::increment(*h.session, id);
         if (!delta)
@@ -3289,7 +3289,7 @@ TEST_CASE("a ClientHello's settings reach the sessions that client creates", "[v
     // ServerHello, LayoutState, SessionState, Delta.
     std::ignore = h.exchange({ proto::DecodedPdu { hello } }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(terminal->terminalId() == vtbackend::VTType::VT420);
@@ -3322,11 +3322,11 @@ TEST_CASE("restated settings reach the sessions the client creates afterwards", 
                                proto::DecodedPdu { proto::CreateTab {} } },
                              4);
 
-    auto const* window = h.host.model().window(h.host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 2);
-    auto* first = h.host.terminal(window->tabAt(0)->rootPane()->session());
-    auto* second = h.host.terminal(window->tabAt(1)->rootPane()->session());
+    auto const* workspace = h.host.model().workspace(h.host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 2);
+    auto* first = h.host.terminal(workspace->tabAt(0)->rootPane()->session());
+    auto* second = h.host.terminal(workspace->tabAt(1)->rootPane()->session());
     REQUIRE(first != nullptr);
     REQUIRE(second != nullptr);
     CHECK(first->terminalId() == vtbackend::VTType::VT420);
@@ -3346,10 +3346,10 @@ TEST_CASE("restating no settings returns later sessions to the host's own", "[vt
                                proto::DecodedPdu { proto::CreateTab {} } },
                              4);
 
-    auto const* window = h.host.model().window(h.host.windowId());
-    REQUIRE(window != nullptr);
-    REQUIRE(window->tabCount() == 2);
-    auto* second = h.host.terminal(window->tabAt(1)->rootPane()->session());
+    auto const* workspace = h.host.model().workspace(h.host.workspaceId());
+    REQUIRE(workspace != nullptr);
+    REQUIRE(workspace->tabCount() == 2);
+    auto* second = h.host.terminal(workspace->tabAt(1)->rootPane()->session());
     REQUIRE(second != nullptr);
     CHECK(second->terminalId() == h.host.settings().terminalId);
 }
@@ -3360,7 +3360,7 @@ TEST_CASE("a ClientHello without settings leaves the host's own in force", "[vth
 
     std::ignore = h.exchange({ proto::ClientHello {} }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount()) == 500);
@@ -3379,7 +3379,7 @@ TEST_CASE("a client cannot ask a session out of the host invariants", "[vthost][
 
     std::ignore = h.exchange({ proto::DecodedPdu { hello } }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount())
@@ -3742,7 +3742,7 @@ TEST_CASE("a budgeted record walk resumes where the last increment stopped", "[v
     // Forty 4 KB records are several increments' worth. Each increment converts records from where the
     // last one stopped, never from the oldest again, so the remainder drains in work proportional to
     // itself: every record converted once, plus the one per increment that did not fit — not the
-    // quadratic walk a restart from the oldest each window would cost.
+    // quadratic walk a restart from the oldest each workspace would cost.
     using Tester = vthost::NativeSessionFollowTester;
     auto harness = ManualHarness {};
     auto& h = harness.h;
@@ -3752,7 +3752,7 @@ TEST_CASE("a budgeted record walk resumes where the last increment stopped", "[v
 
     auto delivered = std::vector<uint32_t> {};
     auto increments = 0;
-    for ([[maybe_unused]] auto const window: std::views::iota(0, 40))
+    for ([[maybe_unused]] auto const workspace: std::views::iota(0, 40))
     {
         auto const from = Tester::walkFrom(*h.session, sessionId);
         auto const delta = Tester::increment(*h.session, sessionId);
@@ -4315,7 +4315,7 @@ TEST_CASE("a PDU the client refused is not sent to it again", "[vthost][negotiat
         imageGoneArrived);
 
     REQUIRE(imageGoneArrived(received));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 2);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == 2);
     CHECK(std::ranges::count_if(received, isLayout) == 1);
     CHECK(h.session->peerRefused(proto::PduType::LayoutState));
     CHECK_FALSE(h.session->peerRefused(proto::PduType::Delta));
@@ -5169,12 +5169,13 @@ namespace
 {
 
 /// @param kind What the client asks to follow.
-/// @param windows The windows named, for AttachIntentKind::Windows and Resume.
+/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
 /// @return A hello stating that intent, offering Capability::AttachIntent so that it is honoured.
-[[nodiscard]] proto::ClientHello intentHello(proto::AttachIntentKind kind, std::vector<uint64_t> windows = {})
+[[nodiscard]] proto::ClientHello intentHello(proto::AttachIntentKind kind,
+                                             std::vector<uint64_t> workspaces = {})
 {
     return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
-                                .attachIntent = { .kind = kind, .windows = std::move(windows) } };
+                                .attachIntent = { .kind = kind, .workspaces = std::move(workspaces) } };
 }
 
 /// @return The ServerHello among @p frames, or nullptr when none arrived.
@@ -5186,24 +5187,24 @@ namespace
     return nullptr;
 }
 
-/// @return The windows the LayoutStates among @p frames describe.
-[[nodiscard]] std::set<uint64_t> layoutWindows(std::vector<proto::DecodedFrame> const& frames)
+/// @return The workspaces the LayoutStates among @p frames describe.
+[[nodiscard]] std::set<uint64_t> layoutWorkspaces(std::vector<proto::DecodedFrame> const& frames)
 {
-    auto windows = std::set<uint64_t> {};
+    auto workspaces = std::set<uint64_t> {};
     for (auto const& frame: frames)
         if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu))
-            windows.insert(layout->window);
-    return windows;
+            workspaces.insert(layout->workspace);
+    return workspaces;
 }
 
-/// @return The last LayoutState among @p frames for @p window, or nullptr when none arrived.
+/// @return The last LayoutState among @p frames for @p workspace, or nullptr when none arrived.
 [[nodiscard]] proto::LayoutState const* lastLayoutOf(std::vector<proto::DecodedFrame> const& frames,
-                                                     uint64_t window)
+                                                     uint64_t workspace)
 {
     proto::LayoutState const* found = nullptr;
     for (auto const& frame: frames)
         if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
-            layout && layout->window == window)
+            layout && layout->workspace == workspace)
             found = layout;
     return found;
 }
@@ -5228,12 +5229,12 @@ namespace
     return sessions;
 }
 
-/// @return The sessions @p host hosts in @p window.
-[[nodiscard]] std::set<uint64_t> sessionsOf(SessionHost& host, uint64_t window)
+/// @return The sessions @p host hosts in @p workspace.
+[[nodiscard]] std::set<uint64_t> sessionsOf(SessionHost& host, uint64_t workspace)
 {
     auto sessions = std::set<uint64_t> {};
-    host.model().forEachTab([&](vtworkspace::Window& owner, vtworkspace::Tab& tab) {
-        if (owner.id().value != window)
+    host.model().forEachTab([&](vtworkspace::Workspace& owner, vtworkspace::Tab& tab) {
+        if (owner.id().value != workspace)
             return;
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
@@ -5263,21 +5264,21 @@ Task<void> probeOnce(core::net::EventLoop* loop, core::net::ISocket* client, Ste
     std::ignore = co_await client->write(std::span<std::byte const> { bytes.data(), bytes.size() });
 }
 
-/// Once the second client holds its attach snapshot: gives the window it follows a second tab, beside the
-/// session it already hosts, and has both connections told that every session of that window changed.
-/// @param ownWindow Receives the window the second client follows.
-Task<void> growSecondWindow(TwoClientHarness* h,
-                            std::vector<proto::DecodedFrame> const* fromTwo,
-                            uint64_t* ownWindow)
+/// Once the second client holds its attach snapshot: gives the workspace it follows a second tab, beside the
+/// session it already hosts, and has both connections told that every session of that workspace changed.
+/// @param ownWorkspace Receives the workspace the second client follows.
+Task<void> growSecondWorkspace(TwoClientHarness* h,
+                               std::vector<proto::DecodedFrame> const* fromTwo,
+                               uint64_t* ownWorkspace)
 {
     co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
     auto const* hello = serverHelloOf(*fromTwo);
     REQUIRE(hello != nullptr);
-    REQUIRE(hello->followedWindows.size() == 1);
-    *ownWindow = hello->followedWindows.front();
-    auto const beside = *sessionsOf(h->host, *ownWindow).begin();
+    REQUIRE(hello->followedWorkspaces.size() == 1);
+    *ownWorkspace = hello->followedWorkspaces.front();
+    auto const beside = *sessionsOf(h->host, *ownWorkspace).begin();
     REQUIRE(h->host.createTab({}, vtworkspace::SessionId { beside }) != nullptr);
-    for (auto const session: sessionsOf(h->host, *ownWindow))
+    for (auto const session: sessionsOf(h->host, *ownWorkspace))
     {
         h->host.terminal(vtworkspace::SessionId { session })->writeToScreen("x");
         h->serverOne->sessionScreenUpdated(vtworkspace::SessionId { session });
@@ -5287,39 +5288,39 @@ Task<void> growSecondWindow(TwoClientHarness* h,
 
 } // namespace
 
-TEST_CASE("a lone Launch client follows every window", "[vthost][native][attach-intent]")
+TEST_CASE("a lone Launch client follows every workspace", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const* second = h.host.createWindow();
+    auto const* second = h.host.createWorkspace();
     REQUIRE(second != nullptr);
-    auto const windows = std::vector<uint64_t> { h.host.windowId().value, second->id().value };
+    auto const workspaces = std::vector<uint64_t> { h.host.workspaceId().value, second->id().value };
 
     auto const received = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Launch) },
                                           [](auto const& got) { return snapshotRunCount(got) >= 2; });
 
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->followedWindows == windows);
-    CHECK(layoutWindows(received) == std::set<uint64_t>(windows.begin(), windows.end()));
-    auto expected = sessionsOf(h.host, windows[0]);
-    expected.merge(sessionsOf(h.host, windows[1]));
+    CHECK(hello->followedWorkspaces == workspaces);
+    CHECK(layoutWorkspaces(received) == std::set<uint64_t>(workspaces.begin(), workspaces.end()));
+    auto expected = sessionsOf(h.host, workspaces[0]);
+    expected.merge(sessionsOf(h.host, workspaces[1]));
     CHECK(snapshotSessions(received) == expected);
 }
 
-TEST_CASE("two Launch clients split the windows between them", "[vthost][native][attach-intent]")
+TEST_CASE("two Launch clients split the workspaces between them", "[vthost][native][attach-intent]")
 {
-    // Review focus 1: the second launch gets a window of its own, and neither mirrors the other's.
+    // Review focus 1: the second launch gets a workspace of its own, and neither mirrors the other's.
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.windowId().value;
+    auto const first = h.host.workspaceId().value;
     auto const hello = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto ownWindow = uint64_t { 0 };
-    auto const twoGrown = [&ownWindow](std::vector<proto::DecodedFrame> const& got) {
-        auto const* layout = lastLayoutOf(got, ownWindow);
+    auto ownWorkspace = uint64_t { 0 };
+    auto const twoGrown = [&ownWorkspace](std::vector<proto::DecodedFrame> const& got) {
+        auto const* layout = lastLayoutOf(got, ownWorkspace);
         return layout != nullptr && layout->tabs.size() == 2 && snapshotRunCount(got) >= 2;
     };
     h.loop.blockOn(core::net::testing::allOf(
@@ -5331,31 +5332,32 @@ TEST_CASE("two Launch clients split the windows between them", "[vthost][native]
                  &hello,
                  &fromOne,
                  [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        growSecondWindow(&h, &fromTwo, &ownWindow),
+        growSecondWorkspace(&h, &fromTwo, &ownWorkspace),
         probeOnce(&h.loop, h.firstPair.second.get(), [&] { return twoGrown(fromTwo); }),
         collectUntil(&h.loop, h.firstPair.second.get(), imageGoneArrived, &fromOne),
         collectUntil(&h.loop, h.secondPair.second.get(), twoGrown, &fromTwo)));
 
     auto const* oneHello = serverHelloOf(fromOne);
     REQUIRE(oneHello != nullptr);
-    CHECK(oneHello->followedWindows == std::vector<uint64_t> { first });
+    CHECK(oneHello->followedWorkspaces == std::vector<uint64_t> { first });
     REQUIRE(twoGrown(fromTwo));
-    CHECK(ownWindow != first);
-    CHECK_FALSE(layoutWindows(fromTwo).contains(first));
-    CHECK_FALSE(layoutWindows(fromOne).contains(ownWindow));
-    auto const ownSessions = sessionsOf(h.host, ownWindow);
+    CHECK(ownWorkspace != first);
+    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
+    CHECK_FALSE(layoutWorkspaces(fromOne).contains(ownWorkspace));
+    auto const ownSessions = sessionsOf(h.host, ownWorkspace);
     CHECK(ownSessions.size() == 2);
     for (auto const session: describedSessions(fromOne))
         CHECK_FALSE(ownSessions.contains(session));
 }
 
-TEST_CASE("a Windows intent naming an unknown window follows nothing", "[vthost][native][attach-intent]")
+TEST_CASE("a Workspaces intent naming an unknown workspace follows nothing",
+          "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
 
     auto const received = h.exchangeUntil(
-        { intentHello(proto::AttachIntentKind::Windows, { 999 }), proto::FetchImage { .imageId = 4242 } },
+        { intentHello(proto::AttachIntentKind::Workspaces, { 999 }), proto::FetchImage { .imageId = 4242 } },
         imageGoneArrived,
         // Long enough for an attach snapshot that should not come to have come.
         [](core::net::EventLoop* loop) -> Task<void> {
@@ -5364,29 +5366,30 @@ TEST_CASE("a Windows intent naming an unknown window follows nothing", "[vthost]
 
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->followedWindows.empty());
-    CHECK(layoutWindows(received).empty());
+    CHECK(hello->followedWorkspaces.empty());
+    CHECK(layoutWorkspaces(received).empty());
     CHECK(snapshotSessions(received).empty());
     CHECK(imageGoneArrived(received)); // the connection stayed open and answered
 }
 
-TEST_CASE("a client without the AttachIntent capability sees every window, including later ones",
+TEST_CASE("a client without the AttachIntent capability sees every workspace, including later ones",
           "[vthost][native][attach-intent]")
 {
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.windowId().value;
+    auto const first = h.host.workspaceId().value;
     // The intent is stated but not offered, so it is not honoured: this is how a client predating
     // intents attaches.
     auto const legacy = encodeRequest({ proto::ClientHello {
-        .attachIntent = { .kind = proto::AttachIntentKind::Windows, .windows = {} } } });
+        .attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} } } });
     auto const creating = encodeRequest(
-        { intentHello(proto::AttachIntentKind::Windows), proto::DecodedPdu { proto::NewWindow {} } });
+        { intentHello(proto::AttachIntentKind::Workspaces), proto::DecodedPdu { proto::NewWorkspace {} } });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto const laterWindowSeen = [first](std::vector<proto::DecodedFrame> const& got) {
-        return std::ranges::any_of(layoutWindows(got), [first](uint64_t window) { return window != first; });
+    auto const laterWorkspaceSeen = [first](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(layoutWorkspaces(got),
+                                   [first](uint64_t workspace) { return workspace != first; });
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
@@ -5397,24 +5400,24 @@ TEST_CASE("a client without the AttachIntent capability sees every window, inclu
                  &creating,
                  &fromOne,
                  [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        collectUntil(&h.loop, h.firstPair.second.get(), laterWindowSeen, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), laterWindowSeen, &fromTwo)));
+        collectUntil(&h.loop, h.firstPair.second.get(), laterWorkspaceSeen, &fromOne),
+        collectUntil(&h.loop, h.secondPair.second.get(), laterWorkspaceSeen, &fromTwo)));
 
     auto const* oneHello = serverHelloOf(fromOne);
     REQUIRE(oneHello != nullptr);
-    CHECK(oneHello->followedWindows == std::vector<uint64_t> { first });
-    CHECK(laterWindowSeen(fromOne));
-    CHECK(layoutWindows(fromOne).contains(first));
+    CHECK(oneHello->followedWorkspaces == std::vector<uint64_t> { first });
+    CHECK(laterWorkspaceSeen(fromOne));
+    CHECK(layoutWorkspaces(fromOne).contains(first));
 }
 
 TEST_CASE("a permission question is not asked of a client that does not show its pane",
           "[vthost][native][attach-intent][extensions]")
 {
-    // Asked in its pane, so a client following only another window has nowhere to ask it.
+    // Asked in its pane, so a client following only another workspace has nowhere to ask it.
     auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
     auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
     std::ignore = newSession(h.host);
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE(other != nullptr);
     auto const shown = other->id().value;
     REQUIRE(hosting->sessions.size() == 2);
@@ -5431,60 +5434,62 @@ TEST_CASE("a permission question is not asked of a client that does not show its
     }));
     REQUIRE(h.host.pendingPermissionRequests().size() == 1);
 
-    auto hello = intentHello(proto::AttachIntentKind::Windows, { shown });
+    auto hello = intentHello(proto::AttachIntentKind::Workspaces, { shown });
     hello.capabilities = proto::CapabilitySet::of(
         { proto::Capability::AttachIntent, proto::Capability::ExtensionPermissions });
     auto const received =
         h.exchangeUntil({ hello }, [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     REQUIRE(snapshotRunCount(received) >= 1);
-    CHECK(layoutWindows(received) == std::set<uint64_t> { shown });
+    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { shown });
     CHECK_FALSE(std::ranges::any_of(received, isPermissionRequest));
     CHECK(h.host.pendingPermissionRequests().size() == 1); // still waiting for a client that shows it
 }
 
-TEST_CASE("a window this connection creates joins its follow set", "[vthost][native][attach-intent]")
+TEST_CASE("a workspace this connection creates joins its follow set", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.windowId().value;
+    auto const first = h.host.workspaceId().value;
 
     auto const received = h.exchangeUntil(
-        { intentHello(proto::AttachIntentKind::Windows, { first }),
-          proto::DecodedPdu { proto::NewWindow {} } },
-        [](auto const& got) { return layoutWindows(got).size() == 2 && snapshotRunCount(got) >= 2; });
+        { intentHello(proto::AttachIntentKind::Workspaces, { first }),
+          proto::DecodedPdu { proto::NewWorkspace {} } },
+        [](auto const& got) { return layoutWorkspaces(got).size() == 2 && snapshotRunCount(got) >= 2; });
 
-    auto const windows = layoutWindows(received);
-    REQUIRE(windows.size() == 2);
-    auto const created = *std::ranges::find_if(windows, [first](uint64_t window) { return window != first; });
+    auto const workspaces = layoutWorkspaces(received);
+    REQUIRE(workspaces.size() == 2);
+    auto const created =
+        *std::ranges::find_if(workspaces, [first](uint64_t workspace) { return workspace != first; });
     auto const createdSessions = sessionsOf(h.host, created);
     REQUIRE(createdSessions.size() == 1);
     CHECK(snapshotSessions(received).contains(*createdSessions.begin()));
 }
 
-TEST_CASE("a window created by a control connection appears in the primary viewer only",
+TEST_CASE("a workspace created by a control connection appears in the primary viewer only",
           "[vthost][native][attach-intent]")
 {
     // Index override 6. The control API is not served yet; the host-side creation it will call, with no
-    // client claiming the window, stands in for it.
+    // client claiming the workspace, stands in for it.
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.windowId().value;
+    auto const first = h.host.workspaceId().value;
     auto const hello = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto controlWindow = uint64_t { 0 };
+    auto controlWorkspace = uint64_t { 0 };
     auto const createUnclaimed = [](TwoClientHarness* h,
                                     std::vector<proto::DecodedFrame> const* fromTwo,
-                                    uint64_t* controlWindow) -> Task<void> {
+                                    uint64_t* controlWorkspace) -> Task<void> {
         co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
-        auto const* window = h->host.createWindow();
-        REQUIRE(window != nullptr);
-        *controlWindow = window->id().value;
+        auto const* workspace = h->host.createWorkspace();
+        REQUIRE(workspace != nullptr);
+        *controlWorkspace = workspace->id().value;
     };
-    auto const oneSeesIt = [&controlWindow](std::vector<proto::DecodedFrame> const& got) {
-        return controlWindow != 0 && layoutWindows(got).contains(controlWindow) && snapshotRunCount(got) >= 2;
+    auto const oneSeesIt = [&controlWorkspace](std::vector<proto::DecodedFrame> const& got) {
+        return controlWorkspace != 0 && layoutWorkspaces(got).contains(controlWorkspace)
+               && snapshotRunCount(got) >= 2;
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
@@ -5495,16 +5500,16 @@ TEST_CASE("a window created by a control connection appears in the primary viewe
                  &hello,
                  &fromOne,
                  [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        createUnclaimed(&h, &fromTwo, &controlWindow),
+        createUnclaimed(&h, &fromTwo, &controlWorkspace),
         probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
         collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
         collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
 
     REQUIRE(oneSeesIt(fromOne));
-    CHECK(layoutWindows(fromOne).contains(first));
-    CHECK(snapshotSessions(fromOne).contains(*sessionsOf(h.host, controlWindow).begin()));
-    CHECK_FALSE(layoutWindows(fromTwo).contains(controlWindow));
-    CHECK_FALSE(layoutWindows(fromTwo).contains(first));
+    CHECK(layoutWorkspaces(fromOne).contains(first));
+    CHECK(snapshotSessions(fromOne).contains(*sessionsOf(h.host, controlWorkspace).begin()));
+    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(controlWorkspace));
+    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
 }
 
 TEST_CASE("the host counts an Attach connection as a client beside the census",
@@ -5568,7 +5573,7 @@ proto::ClientHello profileHello(std::string profile, proto::CapabilitySet capabi
 std::vector<std::string> profilesOf(SessionHost& host)
 {
     auto sessions = std::set<uint64_t> {};
-    host.model().forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
+    host.model().forEachTab([&](vtworkspace::Workspace&, vtworkspace::Tab& tab) {
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
                 sessions.insert(pane.session().value);
@@ -5590,7 +5595,7 @@ TEST_CASE("a client naming a profile gets it; its session settings are ignored",
                    AttachSnapshotFrames);
 
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build" });
-    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(session);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount()) == 5000);
@@ -5604,8 +5609,8 @@ TEST_CASE("a CreateTab's profile overrides the connection's", "[vthost][native][
         { profileHello("build", proto::CapabilitySet::of({ proto::Capability::ProfileByName })),
           proto::CreateTab { .session = 0, .profileName = "ops" },
           proto::CreateTab { .session = 0, .profileName = {} } },
-        [window = h.host.windowId().value](auto const& got) {
-            auto const* layout = lastLayoutOf(got, window);
+        [workspace = h.host.workspaceId().value](auto const& got) {
+            auto const* layout = lastLayoutOf(got, workspace);
             return layout != nullptr && layout->tabs.size() == 3;
         });
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build", "ops", "build" });
@@ -5616,13 +5621,13 @@ TEST_CASE("a client without ProfileByName keeps the session-settings path", "[vt
     auto h = NativeHarness { profileOptions() };
     std::ignore = h.exchangeUntil(
         { profileHello("build", {}), proto::CreateTab { .session = 0, .profileName = "ops" } },
-        [window = h.host.windowId().value](auto const& got) {
-            auto const* layout = lastLayoutOf(got, window);
+        [workspace = h.host.workspaceId().value](auto const& got) {
+            auto const* layout = lastLayoutOf(got, workspace);
             return layout != nullptr && layout->tabs.size() == 2;
         });
 
     CHECK(profilesOf(h.host) == std::vector<std::string> { std::string {}, std::string {} });
-    auto const session = h.host.model().window(h.host.windowId())->tabAt(0)->rootPane()->session();
+    auto const session = h.host.model().workspace(h.host.workspaceId())->tabAt(0)->rootPane()->session();
     auto* terminal = h.host.terminal(session);
     REQUIRE(terminal != nullptr);
     CHECK(terminal->terminalId() == vtbackend::VTType::VT420);
@@ -5644,8 +5649,9 @@ TEST_CASE("a title one client sets reaches the other client's layout", "[vthost]
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto const titled = [window = h.host.windowId().value](std::vector<proto::DecodedFrame> const& got) {
-        auto const* layout = lastLayoutOf(got, window);
+    auto const titled = [workspace =
+                             h.host.workspaceId().value](std::vector<proto::DecodedFrame> const& got) {
+        auto const* layout = lastLayoutOf(got, workspace);
         return layout != nullptr && !layout->tabs.empty() && layout->tabs.front().title == "build";
     };
     h.loop.blockOn(
@@ -5695,9 +5701,9 @@ TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pu
     REQUIRE((target != nullptr && dragged != nullptr));
     auto const targetSession = target->rootPane()->session();
     auto const draggedSession = dragged->rootPane()->session();
-    auto const window = h.host.windowId().value;
+    auto const workspace = h.host.workspaceId().value;
     auto const tabCount = [&] {
-        return h.host.model().window(h.host.windowId())->tabCount();
+        return h.host.model().workspace(h.host.workspaceId())->tabCount();
     };
     auto const tabsBefore = tabCount();
     REQUIRE(tabsBefore >= 2);
@@ -5718,18 +5724,18 @@ TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pu
         });
     auto const pushesOfMergedLayout = std::ranges::count_if(received, [&](auto const& frame) {
         auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
-        return layout != nullptr && layout->window == window
+        return layout != nullptr && layout->workspace == workspace
                && std::cmp_equal(layout->tabs.size(), tabsBefore - 1);
     });
     INFO("pushes of the merged layout: " << pushesOfMergedLayout);
-    // Not one: every model event the merge fires pushes the window's layout (the tab closed, the active tab
-    // and pane changed, the tree restructured, ...), each of them already the merged one. A change to the
+    // Not one: every model event the merge fires pushes the workspace's layout (the tab closed, the active
+    // tab and pane changed, the tree restructured, ...), each of them already the merged one. A change to the
     // number is a decision about the clients' reconciliation, not an accident.
     constexpr auto MergePushCount = 5;
     CHECK(pushesOfMergedLayout == MergePushCount);
 
     CHECK(std::cmp_equal(tabCount(), tabsBefore - 1));
-    auto const [mergedWindow, mergedTab, mergedLeaf] = h.host.model().findSessionLeaf(draggedSession);
+    auto const [mergedWorkspace, mergedTab, mergedLeaf] = h.host.model().findSessionLeaf(draggedSession);
     CHECK(mergedTab == target);
     CHECK(mergedLeaf != nullptr);
     CHECK(target->paneCount() == 2);
@@ -5747,7 +5753,7 @@ TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, u
     auto const* target = h.host.createTab();
     auto const* dragged = h.host.createTab();
     REQUIRE((target != nullptr && dragged != nullptr));
-    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+    auto const tabsBefore = h.host.model().workspace(h.host.workspaceId())->tabCount();
 
     // The request names a tab as holding a session it does not: a stale view of it.
     auto const isRefusal = [](proto::DecodedFrame const& frame) {
@@ -5764,7 +5770,7 @@ TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, u
     CHECK(refusal->serial == 2); // the merge's: the second frame the client sent
     CHECK(std::get<proto::TabMergeRefused>(refusal->pdu).reason
           == std::to_underlying(vthost::TabMergeError::StaleTab));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == tabsBefore);
     CHECK(target->paneCount() == 1);
 }
 
@@ -5775,7 +5781,7 @@ TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupp
     auto const* target = h.host.createTab();
     auto const* dragged = h.host.createTab();
     REQUIRE((target != nullptr && dragged != nullptr));
-    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+    auto const tabsBefore = h.host.model().workspace(h.host.workspaceId())->tabCount();
 
     // An older client's hello offers nothing, and a daemon of today still refuses what it did not negotiate.
     auto const received = h.exchangeUntil(
@@ -5792,7 +5798,7 @@ TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupp
     REQUIRE(refused != received.end());
     CHECK(std::get<proto::Unsupported>(refused->pdu).ident
           == std::to_underlying(proto::PduType::MergeTabIntoSplit));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(h.host.model().workspace(h.host.workspaceId())->tabCount() == tabsBefore);
     CHECK(target->paneCount() == 1);
 }
 
@@ -5986,8 +5992,8 @@ TEST_CASE("a ControlRequest is answered with its reply", "[vthost][native][contr
     CHECK(list.outcome == proto::ControlOutcome::Ok);
     auto const decoded = vtcontrol::decodeJson<vtcontrol::ListReply>(list.body);
     REQUIRE(decoded.has_value());
-    REQUIRE(decoded->windows.size() == 1);
-    CHECK(decoded->windows[0].tabs.size() == 1);
+    REQUIRE(decoded->workspaces.size() == 1);
+    CHECK(decoded->workspaces[0].tabs.size() == 1);
 
     REQUIRE(isControlReply(got[2]));
     auto const& unknown = std::get<proto::ControlReply>(got[2].pdu);
@@ -6385,7 +6391,7 @@ TEST_CASE("the idle check of the echo state runs only within the activity window
     CHECK(inputEchoFrames(client.received).empty());
     CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
 
-    // ... until output opens the window: the echo rides the output's flush, and the check is armed again.
+    // ... until output opens the workspace: the echo rides the output's flush, and the check is armed again.
     f.update(client, id, "Password:");
     REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
     CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
@@ -6422,13 +6428,13 @@ TEST_CASE("a viewer that does not mirror the echo state arms no idle check",
 namespace
 {
 
-/// A hello offering MoveNode, as a client that can drag panes between windows does.
+/// A hello offering MoveNode, as a client that can drag panes between workspaces does.
 [[nodiscard]] proto::ClientHello movingHello()
 {
     return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::MoveNode }) };
 }
 
-/// @return A MoveNode taking the one-pane tab of @p dragged to the tab well of the window hosting @p onto.
+/// @return A MoveNode taking the one-pane tab of @p dragged to the tab well of the workspace hosting @p onto.
 [[nodiscard]] proto::MoveNode intoTabWell(vtworkspace::SessionId dragged, vtworkspace::SessionId onto)
 {
     return proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Pane),
@@ -6438,12 +6444,12 @@ namespace
                              .index = 9 };
 }
 
-/// @return Whether @p frames holds a LayoutState of @p window naming @p session.
+/// @return Whether @p frames holds a LayoutState of @p workspace naming @p session.
 [[nodiscard]] bool layoutShows(std::vector<proto::DecodedFrame> const& frames,
-                               uint64_t window,
+                               uint64_t workspace,
                                vtworkspace::SessionId session)
 {
-    auto const* layout = lastLayoutOf(frames, window);
+    auto const* layout = lastLayoutOf(frames, workspace);
     if (layout == nullptr)
         return false;
     auto const names = [&](this auto const& self, proto::WirePane const& node) -> bool {
@@ -6454,36 +6460,37 @@ namespace
 
 } // namespace
 
-TEST_CASE("a MoveNode moves a pane into another window, its session keeps running and its output keeps "
+TEST_CASE("a MoveNode moves a pane into another workspace, its session keeps running and its output keeps "
           "arriving",
           "[vthost][native][move][daemon]")
 {
     auto h = NativeHarness {};
     auto const* dragged = h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
     auto const draggedSession = dragged->rootPane()->session();
-    auto const otherWindow = other->id();
+    auto const otherWorkspace = other->id();
     auto const otherSession = other->tabAt(0)->rootPane()->session();
 
     auto const arrived = [&](auto const& got) {
-        return layoutShows(got, otherWindow.value, draggedSession)
+        return layoutShows(got, otherWorkspace.value, draggedSession)
                && std::ranges::any_of(increments(got), [&](auto const* delta) {
                       return delta->session == draggedSession.value;
                   });
     };
-    // Written once the move's layout has reached the client: the session is the same one, in its new window.
+    // Written once the move's layout has reached the client: the session is the same one, in its new
+    // workspace.
     auto const received =
         h.exchangeUntil({ movingHello(), intoTabWell(draggedSession, otherSession) },
                         arrived,
                         writeOnce(&h, draggedSession, "after the move", [&] {
-                            return layoutShows(h.received, otherWindow.value, draggedSession);
+                            return layoutShows(h.received, otherWorkspace.value, draggedSession);
                         }));
 
     CHECK(arrived(received));
-    auto const [window, tab, leaf] = h.host.model().findSessionLeaf(draggedSession);
-    REQUIRE(window != nullptr);
-    CHECK(window->id() == otherWindow);
+    auto const [workspace, tab, leaf] = h.host.model().findSessionLeaf(draggedSession);
+    REQUIRE(workspace != nullptr);
+    CHECK(workspace->id() == otherWorkspace);
     // Moved, not re-created.
     CHECK(h.host.terminal(draggedSession) != nullptr);
     CHECK_FALSE(std::ranges::any_of(
@@ -6494,10 +6501,10 @@ TEST_CASE("two clients: a MoveNode from one pushes the new layout to both", "[vt
 {
     auto h = TwoClientHarness {};
     auto const* dragged = h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
     auto const draggedSession = dragged->rootPane()->session();
-    auto const otherWindow = other->id().value;
+    auto const otherWorkspace = other->id().value;
     auto const otherSession = other->tabAt(0)->rootPane()->session();
 
     auto const hello = encodeRequest({ proto::ClientHello {} });
@@ -6505,7 +6512,7 @@ TEST_CASE("two clients: a MoveNode from one pushes the new layout to both", "[vt
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
     auto const moved = [&](std::vector<proto::DecodedFrame> const& got) {
-        return layoutShows(got, otherWindow, draggedSession);
+        return layoutShows(got, otherWorkspace, draggedSession);
     };
     // The mover speaks once the watcher holds its attach snapshot, so the watcher sees the change as a push.
     h.loop.blockOn(
@@ -6526,14 +6533,14 @@ TEST_CASE("two clients: a MoveNode from one pushes the new layout to both", "[vt
 
 namespace
 {
-/// @return Whether a layout among @p frames for @p window shows a tab whose root split lies along @p axis.
+/// @return Whether a layout among @p frames for @p workspace shows a tab whose root split lies along @p axis.
 [[nodiscard]] bool layoutSplitsAlong(std::vector<proto::DecodedFrame> const& frames,
-                                     uint64_t window,
+                                     uint64_t workspace,
                                      vtworkspace::SplitState axis)
 {
     return std::ranges::any_of(frames, [&](proto::DecodedFrame const& frame) {
         auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
-        return layout != nullptr && layout->window == window
+        return layout != nullptr && layout->workspace == workspace
                && std::ranges::any_of(layout->tabs, [&](proto::WireTab const& tab) {
                       return tab.root.split == std::to_underlying(axis);
                   });
@@ -6550,7 +6557,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tab->id())->rootPane();
     auto const anchor = root->first()->session();
-    auto const window = h.host.model().windowOfTab(tab->id()).value;
+    auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
 
     auto const hello = encodeRequest({ proto::ClientHello {} });
     auto const setting = encodeRequest(
@@ -6560,7 +6567,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
     auto const flipped = [&](std::vector<proto::DecodedFrame> const& got) {
-        return layoutSplitsAlong(got, window, vtworkspace::SplitState::Horizontal);
+        return layoutSplitsAlong(got, workspace, vtworkspace::SplitState::Horizontal);
     };
     h.loop.blockOn(
         core::net::testing::allOf(h.serverOne->run(),
@@ -6588,7 +6595,7 @@ TEST_CASE("a SetSplitOrientation ends a layout batch, and a stale session or a s
     REQUIRE(tab != nullptr);
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
-    auto const window = h.host.model().windowOfTab(tab->id()).value;
+    auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
     auto const hello =
         proto::ClientHello { .capabilities = proto::CapabilitySet::of(
                                  { proto::Capability::MoveNode, proto::Capability::LayoutBatch }) };
@@ -6602,13 +6609,13 @@ TEST_CASE("a SetSplitOrientation ends a layout batch, and a stale session or a s
           proto::SetSplitOrientation { .anchorSession = anchor.value,
                                        .state = std::to_underlying(vtworkspace::SplitState::Horizontal) } },
         [&](auto const& got) {
-            return layoutSplitsAlong(got, window, vtworkspace::SplitState::Horizontal)
+            return layoutSplitsAlong(got, workspace, vtworkspace::SplitState::Horizontal)
                    && std::ranges::any_of(got, [](auto const& frame) {
                           return std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu);
                       });
         });
 
-    CHECK(layoutSplitsAlong(received, window, vtworkspace::SplitState::Horizontal));
+    CHECK(layoutSplitsAlong(received, workspace, vtworkspace::SplitState::Horizontal));
     CHECK(std::ranges::any_of(received, [](auto const& frame) {
         return std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu);
     }));
@@ -6653,10 +6660,10 @@ TEST_CASE("a MoveNode onto the only sibling's edge pushes the tab re-split along
     auto const* root = h.host.model().findTab(tabId)->rootPane();
     auto const left = root->first()->session();
     auto const right = root->second()->session();
-    auto const window = h.host.model().windowOfTab(tabId).value;
+    auto const workspace = h.host.model().workspaceOfTab(tabId).value;
 
     auto const stacked = [&](auto const& got) {
-        auto const* layout = lastLayoutOf(got, window);
+        auto const* layout = lastLayoutOf(got, workspace);
         return layout != nullptr && std::ranges::any_of(layout->tabs, [&](proto::WireTab const& wireTab) {
                    auto const& node = wireTab.root;
                    return node.split == std::to_underlying(vtworkspace::SplitState::Horizontal)
@@ -6684,7 +6691,7 @@ TEST_CASE("a MoveNode without the move-node capability is refused", "[vthost][na
 {
     auto h = NativeHarness {};
     auto const* dragged = h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
     auto const draggedSession = dragged->rootPane()->session();
     auto const before = h.host.model().findSessionLeaf(draggedSession);
@@ -6709,7 +6716,7 @@ TEST_CASE("a refused MoveNode answers MoveNodeRefused under its serial and chang
 {
     auto h = NativeHarness {};
     auto const* dragged = h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
     auto const draggedSession = dragged->rootPane()->session();
     auto const before = h.host.model().findSessionLeaf(draggedSession);
@@ -6748,32 +6755,33 @@ TEST_CASE("an old daemon: the client sees no move-node capability", "[vthost][na
     CHECK_FALSE(hello->capabilities.contains(proto::Capability::MoveNode));
 }
 
-TEST_CASE("a pane moved to a new window opens it for the client that asked, not for the primary viewer",
+TEST_CASE("a pane moved to a new workspace opens it for the client that asked, not for the primary viewer",
           "[vthost][native][move][daemon]")
 {
     auto h = TwoClientHarness {};
     auto const* dragged = h.host.createTab();
-    // Beside another tab: a window of its own for a window's whole content is refused.
+    // Beside another tab: a workspace of its own for a workspace's whole content is refused.
     auto const* staying = h.host.createTab();
     REQUIRE((dragged != nullptr && staying != nullptr));
-    auto const first = h.host.windowId().value;
+    auto const first = h.host.workspaceId().value;
     auto const draggedSession = dragged->rootPane()->session();
 
-    // Neither client lists a window; the one that moves also offers MoveNode.
-    auto const watcherHello = encodeRequest({ intentHello(proto::AttachIntentKind::Windows) });
-    auto moverHello = intentHello(proto::AttachIntentKind::Windows);
+    // Neither client lists a workspace; the one that moves also offers MoveNode.
+    auto const watcherHello = encodeRequest({ intentHello(proto::AttachIntentKind::Workspaces) });
+    auto moverHello = intentHello(proto::AttachIntentKind::Workspaces);
     moverHello.capabilities =
         proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::MoveNode });
     auto const moving = encodeRequest(
         { moverHello,
           proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Pane),
                             .sourceSessions = { draggedSession.value },
-                            .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::NewWindow) } });
+                            .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::NewWorkspace) } });
 
     auto fromWatcher = std::vector<proto::DecodedFrame> {};
     auto fromMover = std::vector<proto::DecodedFrame> {};
-    auto const opensNewWindow = [first](std::vector<proto::DecodedFrame> const& got) {
-        return std::ranges::any_of(layoutWindows(got), [first](uint64_t window) { return window != first; });
+    auto const opensNewWorkspace = [first](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(layoutWorkspaces(got),
+                                   [first](uint64_t workspace) { return workspace != first; });
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
@@ -6784,91 +6792,91 @@ TEST_CASE("a pane moved to a new window opens it for the client that asked, not 
                  &moving,
                  &fromWatcher,
                  [](auto const& got) { return serverHelloOf(got) != nullptr; }),
-        probeOnce(&h.loop, h.firstPair.second.get(), [&] { return opensNewWindow(fromMover); }),
+        probeOnce(&h.loop, h.firstPair.second.get(), [&] { return opensNewWorkspace(fromMover); }),
         collectUntil(&h.loop, h.firstPair.second.get(), imageGoneArrived, &fromWatcher),
-        collectUntil(&h.loop, h.secondPair.second.get(), opensNewWindow, &fromMover)));
+        collectUntil(&h.loop, h.secondPair.second.get(), opensNewWorkspace, &fromMover)));
 
-    CHECK(opensNewWindow(fromMover));
-    CHECK_FALSE(opensNewWindow(fromWatcher));
+    CHECK(opensNewWorkspace(fromMover));
+    CHECK_FALSE(opensNewWorkspace(fromWatcher));
 }
 
 namespace
 {
-/// @return Whether @p frames last told of @p window as holding no tab.
-[[nodiscard]] bool pushedEmpty(std::vector<proto::DecodedFrame> const& frames, uint64_t window)
+/// @return Whether @p frames last told of @p workspace as holding no tab.
+[[nodiscard]] bool pushedEmpty(std::vector<proto::DecodedFrame> const& frames, uint64_t workspace)
 {
-    auto const* layout = lastLayoutOf(frames, window);
+    auto const* layout = lastLayoutOf(frames, workspace);
     return layout != nullptr && layout->tabs.empty();
 }
 } // namespace
 
-// A window a move takes the last tab out of is not left behind: every client is pushed it empty, which is
-// what closes the client's own window for it, and then it is gone -- from the model, and with its name and
+// A workspace a move takes the last tab out of is not left behind: every client is pushed it empty, which is
+// what closes the client's own workspace for it, and then it is gone -- from the model, and with its name and
 // claim from what the control API lists.
-TEST_CASE("a window a MoveNode empties is pushed empty, then removed", "[vthost][native][move][daemon]")
+TEST_CASE("a workspace a MoveNode empties is pushed empty, then removed", "[vthost][native][move][daemon]")
 {
     auto h = NativeHarness {};
     auto const* staying = h.host.createTab();
-    auto const* emptied = h.host.createWindow();
+    auto const* emptied = h.host.createWorkspace();
     REQUIRE((staying != nullptr && emptied != nullptr));
-    auto const primary = h.host.windowId();
-    auto const emptiedWindow = emptied->id();
+    auto const primary = h.host.workspaceId();
+    auto const emptiedWorkspace = emptied->id();
     auto const draggedSession = emptied->tabAt(0)->rootPane()->session();
     auto const stayingSession = staying->rootPane()->session();
-    REQUIRE(h.host.objects().uuidOf(emptiedWindow).has_value());
+    REQUIRE(h.host.objects().uuidOf(emptiedWorkspace).has_value());
 
     auto const moved = [&](auto const& got) {
-        return layoutShows(got, primary.value, draggedSession) && pushedEmpty(got, emptiedWindow.value);
+        return layoutShows(got, primary.value, draggedSession) && pushedEmpty(got, emptiedWorkspace.value);
     };
     auto const received =
         h.exchangeUntil({ movingHello(), intoTabWell(draggedSession, stayingSession) }, moved);
 
     CHECK(moved(received));
-    CHECK(h.host.model().window(emptiedWindow) == nullptr);
-    CHECK(h.host.model().windowCount() == 1);
-    CHECK_FALSE(h.host.objects().uuidOf(emptiedWindow).has_value());
+    CHECK(h.host.model().workspace(emptiedWorkspace) == nullptr);
+    CHECK(h.host.model().workspaceCount() == 1);
+    CHECK_FALSE(h.host.objects().uuidOf(emptiedWorkspace).has_value());
     CHECK(h.host.terminal(draggedSession) != nullptr);
-    CHECK(h.host.windowId() == primary);
+    CHECK(h.host.workspaceId() == primary);
 }
 
-// The host's own window is where a creation naming none lands: emptied by a move and removed, another takes
-// that role, so the next tab still has a window to open in.
-TEST_CASE("the host's own window a MoveNode empties is removed, and another window takes its role",
+// The host's own workspace is where a creation naming none lands: emptied by a move and removed, another
+// takes that role, so the next tab still has a workspace to open in.
+TEST_CASE("the host's own workspace a MoveNode empties is removed, and another workspace takes its role",
           "[vthost][native][move][daemon]")
 {
     auto h = NativeHarness {};
     auto const* dragged = h.host.createTab();
-    auto const* other = h.host.createWindow();
+    auto const* other = h.host.createWorkspace();
     REQUIRE((dragged != nullptr && other != nullptr));
-    auto const primary = h.host.windowId();
-    auto const otherWindow = other->id();
+    auto const primary = h.host.workspaceId();
+    auto const otherWorkspace = other->id();
     auto const draggedSession = dragged->rootPane()->session();
 
     auto const moved = [&](auto const& got) {
-        return layoutShows(got, otherWindow.value, draggedSession) && pushedEmpty(got, primary.value);
+        return layoutShows(got, otherWorkspace.value, draggedSession) && pushedEmpty(got, primary.value);
     };
     auto const received = h.exchangeUntil(
         { movingHello(), intoTabWell(draggedSession, other->tabAt(0)->rootPane()->session()) }, moved);
 
     CHECK(moved(received));
-    CHECK(h.host.model().window(primary) == nullptr);
-    CHECK(h.host.windowId() == otherWindow);
+    CHECK(h.host.model().workspace(primary) == nullptr);
+    CHECK(h.host.workspaceId() == otherWorkspace);
     auto const* const created = h.host.createTab();
     REQUIRE(created != nullptr);
-    CHECK(h.host.model().windowOfTab(created->id()) == otherWindow);
+    CHECK(h.host.model().workspaceOfTab(created->id()) == otherWorkspace);
 }
 
 // A client of the release before MoveNode never moves anything, but sees the moves another client makes: it
-// is pushed the emptied window empty, as it was pushed any window a closed pane emptied, and closes it.
-TEST_CASE("a client that cannot move is pushed the window another client's move empties as empty",
+// is pushed the emptied workspace empty, as it was pushed any workspace a closed pane emptied, and closes it.
+TEST_CASE("a client that cannot move is pushed the workspace another client's move empties as empty",
           "[vthost][native][move][daemon][compat]")
 {
     auto h = TwoClientHarness {};
     auto const* staying = h.host.createTab();
-    auto const* emptied = h.host.createWindow();
+    auto const* emptied = h.host.createWorkspace();
     REQUIRE((staying != nullptr && emptied != nullptr));
-    auto const primary = h.host.windowId().value;
-    auto const emptiedWindow = emptied->id();
+    auto const primary = h.host.workspaceId().value;
+    auto const emptiedWorkspace = emptied->id();
     auto const draggedSession = emptied->tabAt(0)->rootPane()->session();
 
     auto const hello = encodeRequest({ proto::ClientHello {} });
@@ -6877,7 +6885,7 @@ TEST_CASE("a client that cannot move is pushed the window another client's move 
     auto fromMover = std::vector<proto::DecodedFrame> {};
     auto fromWatcher = std::vector<proto::DecodedFrame> {};
     auto const moved = [&](std::vector<proto::DecodedFrame> const& got) {
-        return layoutShows(got, primary, draggedSession) && pushedEmpty(got, emptiedWindow.value);
+        return layoutShows(got, primary, draggedSession) && pushedEmpty(got, emptiedWorkspace.value);
     };
     h.loop.blockOn(
         core::net::testing::allOf(h.serverOne->run(),
@@ -6893,13 +6901,14 @@ TEST_CASE("a client that cannot move is pushed the window another client's move 
 
     CHECK(moved(fromMover));
     CHECK(moved(fromWatcher));
-    CHECK(h.host.model().window(emptiedWindow) == nullptr);
+    CHECK(h.host.model().workspace(emptiedWorkspace) == nullptr);
 }
 
 namespace
 {
 
-/// The layouts a client holds as each LayoutBatchEnd among @p frames arrives, by window, one entry per batch.
+/// The layouts a client holds as each LayoutBatchEnd among @p frames arrives, by workspace, one entry per
+/// batch.
 [[nodiscard]] std::vector<std::map<uint64_t, proto::LayoutState>> layoutsAtBatchEnds(
     std::vector<proto::DecodedFrame> const& frames)
 {
@@ -6908,16 +6917,16 @@ namespace
     for (auto const& frame: frames)
     {
         if (auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu))
-            held.insert_or_assign(layout->window, *layout);
+            held.insert_or_assign(layout->workspace, *layout);
         else if (std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu))
             batches.push_back(held);
     }
     return batches;
 }
 
-/// @return How many of the windows in @p layouts name @p session.
-[[nodiscard]] std::size_t windowsNaming(std::map<uint64_t, proto::LayoutState> const& layouts,
-                                        vtworkspace::SessionId session)
+/// @return How many of the workspaces in @p layouts name @p session.
+[[nodiscard]] std::size_t workspacesNaming(std::map<uint64_t, proto::LayoutState> const& layouts,
+                                           vtworkspace::SessionId session)
 {
     auto const names = [&](this auto const& self, proto::WirePane const& node) -> bool {
         return node.session == session.value || std::ranges::any_of(node.children, self);
@@ -6928,24 +6937,24 @@ namespace
         }));
 }
 
-/// The move a layout batch exists for: one pane of a two-pane tab into another window's tab well, which the
-/// model announces half done -- the pane detached, in no window -- before it announces it inserted.
-struct PaneIntoOtherWindow
+/// The move a layout batch exists for: one pane of a two-pane tab into another workspace's tab well, which
+/// the model announces half done -- the pane detached, in no workspace -- before it announces it inserted.
+struct PaneIntoOtherWorkspace
 {
     NativeHarness h;
     vtworkspace::SessionId dragged;
-    uint64_t otherWindow = 0;
+    uint64_t otherWorkspace = 0;
     vtworkspace::SessionId otherSession;
 
-    explicit PaneIntoOtherWindow(HarnessOptions options = {}): h(std::move(options))
+    explicit PaneIntoOtherWorkspace(HarnessOptions options = {}): h(std::move(options))
     {
         auto const* tab = h.host.createTab();
         REQUIRE(tab != nullptr);
         h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         dragged = h.host.model().findTab(tab->id())->activePane()->session();
-        auto const* other = h.host.createWindow();
+        auto const* other = h.host.createWorkspace();
         REQUIRE(other != nullptr);
-        otherWindow = other->id().value;
+        otherWorkspace = other->id().value;
         otherSession = other->tabAt(0)->rootPane()->session();
     }
 
@@ -6953,7 +6962,7 @@ struct PaneIntoOtherWindow
     [[nodiscard]] std::vector<proto::DecodedFrame> run(proto::ClientHello const& hello)
     {
         auto const arrived = [&](auto const& got) {
-            return layoutShows(got, otherWindow, dragged)
+            return layoutShows(got, otherWorkspace, dragged)
                    && std::ranges::any_of(increments(got),
                                           [&](auto const* delta) { return delta->session == dragged.value; });
         };
@@ -6961,18 +6970,18 @@ struct PaneIntoOtherWindow
         return h.exchangeUntil({ hello, intoTabWell(dragged, otherSession) },
                                arrived,
                                writeOnce(&h, dragged, "after the move", [&] {
-                                   return layoutShows(h.received, otherWindow, dragged);
+                                   return layoutShows(h.received, otherWorkspace, dragged);
                                }));
     }
 };
 
 } // namespace
 
-TEST_CASE(
-    "a client sharing layout-batch is told each push's end, and a moved pane is in one window at every end",
-    "[vthost][native][move][daemon]")
+TEST_CASE("a client sharing layout-batch is told each push's end, and a moved pane is in one workspace at "
+          "every end",
+          "[vthost][native][move][daemon]")
 {
-    auto f = PaneIntoOtherWindow {};
+    auto f = PaneIntoOtherWorkspace {};
     auto const received =
         f.run(proto::ClientHello { .capabilities = proto::CapabilitySet::of(
                                        { proto::Capability::MoveNode, proto::Capability::LayoutBatch }) });
@@ -6985,10 +6994,10 @@ TEST_CASE(
     // them: the attach's and the move's may share one, read in one turn.
     REQUIRE(!batches.empty());
     for (auto const& layouts: batches)
-        CHECK(windowsNaming(layouts, f.dragged) == 1);
+        CHECK(workspacesNaming(layouts, f.dragged) == 1);
     auto const& last = batches.back();
-    REQUIRE(last.contains(f.otherWindow));
-    CHECK(windowsNaming({ { f.otherWindow, last.at(f.otherWindow) } }, f.dragged) == 1);
+    REQUIRE(last.contains(f.otherWorkspace));
+    CHECK(workspacesNaming({ { f.otherWorkspace, last.at(f.otherWorkspace) } }, f.dragged) == 1);
     // Nothing of a push trails its end.
     auto const lastLayout = std::ranges::find_last_if(
         received, [](auto const& frame) { return std::holds_alternative<proto::LayoutState>(frame.pdu); });
@@ -7001,7 +7010,7 @@ TEST_CASE(
 
 TEST_CASE("the batch a MoveNode's change ends names that request's serial", "[vthost][native][move][daemon]")
 {
-    auto f = PaneIntoOtherWindow {};
+    auto f = PaneIntoOtherWorkspace {};
     auto const received =
         f.run(proto::ClientHello { .capabilities = proto::CapabilitySet::of(
                                        { proto::Capability::MoveNode, proto::Capability::LayoutBatch }) });
@@ -7033,11 +7042,11 @@ TEST_CASE("a push no request caused ends with cause 0", "[vthost][native][move][
 
 TEST_CASE("a client without layout-batch is sent no LayoutBatchEnd", "[vthost][native][move][daemon][compat]")
 {
-    auto f = PaneIntoOtherWindow {};
+    auto f = PaneIntoOtherWorkspace {};
     auto const received = f.run(
         proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::MoveNode }) });
 
-    CHECK(layoutShows(received, f.otherWindow, f.dragged));
+    CHECK(layoutShows(received, f.otherWorkspace, f.dragged));
     CHECK_FALSE(std::ranges::any_of(received, [](auto const& frame) {
         return std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu);
     }));
@@ -7047,7 +7056,7 @@ namespace
 {
 
 /// @param more A capability offered beside them, if any.
-/// @return A hello offering MoveNode and LayoutBatch, as a client that drags panes between windows does.
+/// @return A hello offering MoveNode and LayoutBatch, as a client that drags panes between workspaces does.
 [[nodiscard]] proto::ClientHello batchingHello(std::optional<proto::Capability> more = std::nullopt)
 {
     auto capabilities =
@@ -7077,13 +7086,14 @@ namespace
 } // namespace
 
 // One move fires several model events, and a client that ends its pushes reads only the state at the end:
-// each window the move changed is pushed once, as the move left it, and the batch is ended once.
-TEST_CASE("a move pushes each window it changed once, then ends its batch, to a client sharing layout-batch",
-          "[vthost][native][move][daemon]")
+// each workspace the move changed is pushed once, as the move left it, and the batch is ended once.
+TEST_CASE(
+    "a move pushes each workspace it changed once, then ends its batch, to a client sharing layout-batch",
+    "[vthost][native][move][daemon]")
 {
-    auto f = PaneIntoOtherWindow {};
-    auto const sourceWindow =
-        f.h.host.model().windowOfTab(std::get<1>(f.h.host.model().findSessionLeaf(f.dragged))->id()).value;
+    auto f = PaneIntoOtherWorkspace {};
+    auto const sourceWorkspace =
+        f.h.host.model().workspaceOfTab(std::get<1>(f.h.host.model().findSessionLeaf(f.dragged))->id()).value;
     auto const hello = encodeRequest({ batchingHello() });
     auto const move = encodedAt(2, intoTabWell(f.dragged, f.otherSession));
     auto const attachEnded = [](std::vector<proto::DecodedFrame> const& got) {
@@ -7107,47 +7117,47 @@ TEST_CASE("a move pushes each window it changed once, then ends its batch, to a 
         received, [](auto const& frame) { return std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu); });
     REQUIRE(attachEnd != received.end());
     auto const afterAttach = std::ranges::subrange(std::next(attachEnd), received.end());
-    auto const layoutsOf = [&](uint64_t window) {
-        return std::ranges::count_if(afterAttach, [window](auto const& frame) {
+    auto const layoutsOf = [&](uint64_t workspace) {
+        return std::ranges::count_if(afterAttach, [workspace](auto const& frame) {
             auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
-            return layout != nullptr && layout->window == window;
+            return layout != nullptr && layout->workspace == workspace;
         });
     };
     auto const ends = std::ranges::count_if(afterAttach, [](auto const& frame) {
         return std::holds_alternative<proto::LayoutBatchEnd>(frame.pdu);
     });
-    CHECK(layoutsOf(sourceWindow) == 1);
-    CHECK(layoutsOf(f.otherWindow) == 1);
+    CHECK(layoutsOf(sourceWorkspace) == 1);
+    CHECK(layoutsOf(f.otherWorkspace) == 1);
     CHECK(ends == 1);
-    CHECK(layoutShows(received, f.otherWindow, f.dragged));
+    CHECK(layoutShows(received, f.otherWorkspace, f.dragged));
 }
 
-// The client that asked for a move is told it landed even when it follows none of the windows the move
+// The client that asked for a move is told it landed even when it follows none of the workspaces the move
 // changed -- here, none at all: a batch naming the request ends, with nothing pushed in it.
-TEST_CASE("a move ends its batch for the client that asked, though it follows no window the move changed",
+TEST_CASE("a move ends its batch for the client that asked, though it follows no workspace the move changed",
           "[vthost][native][move][daemon]")
 {
     auto h = NativeHarness {};
     std::ignore = h.host.createTab();
-    auto const* from = h.host.createWindow();
-    auto const* into = h.host.createWindow();
+    auto const* from = h.host.createWorkspace();
+    auto const* into = h.host.createWorkspace();
     REQUIRE((from != nullptr && into != nullptr));
-    auto const fromWindow = from->id().value;
-    auto const intoWindow = into->id().value;
+    auto const fromWorkspace = from->id().value;
+    auto const intoWorkspace = into->id().value;
     auto const dragged = from->tabAt(0)->rootPane()->session();
     auto const onto = into->tabAt(0)->rootPane()->session();
 
     auto hello = batchingHello(proto::Capability::AttachIntent);
-    // A window no longer there: the client follows none, as one whose window closed meanwhile does.
-    hello.attachIntent = { .kind = proto::AttachIntentKind::Windows, .windows = { 999 } };
+    // A workspace no longer there: the client follows none, as one whose workspace closed meanwhile does.
+    hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = { 999 } };
     auto const received = h.exchangeUntil({ hello, intoTabWell(dragged, onto) },
                                           [](auto const& got) { return batchEndedBy(got, 2); });
 
     CHECK(batchEndedBy(received, 2));
-    CHECK(lastLayoutOf(received, fromWindow) == nullptr);
-    CHECK(lastLayoutOf(received, intoWindow) == nullptr);
-    CHECK(h.host.model().windowOfTab(std::get<1>(h.host.model().findSessionLeaf(dragged))->id()).value
-          == intoWindow);
+    CHECK(lastLayoutOf(received, fromWorkspace) == nullptr);
+    CHECK(lastLayoutOf(received, intoWorkspace) == nullptr);
+    CHECK(h.host.model().workspaceOfTab(std::get<1>(h.host.model().findSessionLeaf(dragged))->id()).value
+          == intoWorkspace);
 }
 
 TEST_CASE("a MoveNode the model refuses answers with the model's reason too",

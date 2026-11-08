@@ -44,7 +44,7 @@ struct ResolvedDrag
     /// The local tab the drag is, or came from: the one tab that shows every session it names and, for a
     /// tab, no other. None for a drag of another host's, or of what is gone since.
     std::optional<vtworkspace::TabId> tab;
-    vtworkspace::WindowId window {}; ///< The window of @c tab; meaningless without it.
+    vtworkspace::WorkspaceId workspace {}; ///< The workspace of @c tab; meaningless without it.
     /// What it moves: a whole tab for a tab, or for the only pane of one.
     window::MoveSubject subject = window::MoveSubject::Pane;
     /// How it is dropped at each place, by MovePlace.
@@ -63,10 +63,10 @@ struct ResolvedDrag
         return at(place).refusal;
     }
 
-    /// @return The place beside a pane of window @p target is: its own window's, or another's.
-    [[nodiscard]] window::MovePlace edgePlaceIn(vtworkspace::WindowId target) const noexcept
+    /// @return The place beside a pane of workspace @p target is: its own workspace's, or another's.
+    [[nodiscard]] window::MovePlace edgePlaceIn(vtworkspace::WorkspaceId target) const noexcept
     {
-        return tab && window == target ? window::MovePlace::Edge : window::MovePlace::EdgeOtherWindow;
+        return tab && workspace == target ? window::MovePlace::Edge : window::MovePlace::EdgeOtherWindow;
     }
 
     /// @return Whether it moves a whole tab.

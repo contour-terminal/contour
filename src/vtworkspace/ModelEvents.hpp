@@ -28,71 +28,71 @@ class ModelEvents
     ModelEvents& operator=(ModelEvents&&) = default;
     virtual ~ModelEvents() = default;
 
-    /// A new tab is about to be appended to @p window at position @p index, before it is inserted.
+    /// A new tab is about to be appended to @p workspace at position @p index, before it is inserted.
     ///
     /// Paired with tabAdded(): this "before" half fires while the model still holds the OLD tab set, the
     /// "after" half once the tab exists. A Qt QAbstractItemModel host maps this pair to
     /// beginInsertRows()/endInsertRows(), whose contract requires the begin call while rowCount() still
     /// reports the old count. The default is a no-op so non-Qt hosts (e.g. a daemon that only reacts to
     /// completed changes) can ignore it.
-    /// @param window The window receiving the tab.
+    /// @param workspace The workspace receiving the tab.
     /// @param index  The position the new tab will occupy.
-    virtual void tabAboutToBeAdded(WindowId window, int index) { (void) window, (void) index; }
+    virtual void tabAboutToBeAdded(WorkspaceId workspace, int index) { (void) workspace, (void) index; }
 
-    /// A new tab was appended to @p window at position @p index. Paired with tabAboutToBeAdded().
-    virtual void tabAdded(WindowId window, TabId tab, int index) = 0;
+    /// A new tab was appended to @p workspace at position @p index. Paired with tabAboutToBeAdded().
+    virtual void tabAdded(WorkspaceId workspace, TabId tab, int index) = 0;
 
-    /// The tab @p tab at @p index is about to be removed from @p window, before it is erased.
+    /// The tab @p tab at @p index is about to be removed from @p workspace, before it is erased.
     ///
     /// Paired with tabClosed(); maps to beginRemoveRows()/endRemoveRows() on a Qt host. Default no-op.
-    /// @param window The window losing the tab.
+    /// @param workspace The workspace losing the tab.
     /// @param index  The position of the tab about to be removed.
-    virtual void tabAboutToBeRemoved(WindowId window, int index) { (void) window, (void) index; }
+    virtual void tabAboutToBeRemoved(WorkspaceId workspace, int index) { (void) workspace, (void) index; }
 
-    /// The tab @p tab was removed from @p window (it was at @p index before removal). Paired with
+    /// The tab @p tab was removed from @p workspace (it was at @p index before removal). Paired with
     /// tabAboutToBeRemoved().
-    virtual void tabClosed(WindowId window, TabId tab, int index) = 0;
+    virtual void tabClosed(WorkspaceId workspace, TabId tab, int index) = 0;
 
-    /// A tab is about to move within @p window from @p fromIndex to @p toIndex, before the reorder.
+    /// A tab is about to move within @p workspace from @p fromIndex to @p toIndex, before the reorder.
     ///
     /// Paired with tabMoved(); maps to beginMoveRows()/endMoveRows() on a Qt host. Default no-op.
-    /// @param window    The window whose tab moves.
+    /// @param workspace    The workspace whose tab moves.
     /// @param fromIndex The tab's current position.
     /// @param toIndex   The tab's destination position.
-    virtual void tabAboutToBeMoved(WindowId window, int fromIndex, int toIndex)
+    virtual void tabAboutToBeMoved(WorkspaceId workspace, int fromIndex, int toIndex)
     {
-        (void) window, (void) fromIndex, (void) toIndex;
+        (void) workspace, (void) fromIndex, (void) toIndex;
     }
 
-    /// A tab moved within its window from @p fromIndex to @p toIndex. Paired with tabAboutToBeMoved().
-    virtual void tabMoved(WindowId window, TabId tab, int fromIndex, int toIndex) = 0;
+    /// A tab moved within its workspace from @p fromIndex to @p toIndex. Paired with tabAboutToBeMoved().
+    virtual void tabMoved(WorkspaceId workspace, TabId tab, int fromIndex, int toIndex) = 0;
 
-    /// The tab @p tab is about to move from window @p from (at @p fromIndex) into window @p to (at
-    /// @p toIndex), before the transplant. Paired with tabMovedToWindow().
+    /// The tab @p tab is about to move from workspace @p from (at @p fromIndex) into workspace @p to (at
+    /// @p toIndex), before the transplant. Paired with tabMovedToWorkspace().
     ///
-    /// A cross-window move is modeled by a Qt host as a remove on @p from and an insert on @p to (Qt's
+    /// A cross-workspace move is modeled by a Qt host as a remove on @p from and an insert on @p to (Qt's
     /// beginMoveRows is single-model), so this "before" half lets the host bracket a beginRemoveRows on
-    /// the source and a beginInsertRows on the destination. Defaulted to a no-op so single-window and
+    /// the source and a beginInsertRows on the destination. Defaulted to a no-op so single-workspace and
     /// completed-only hosts can ignore it.
-    /// @param from      The window losing the tab.
+    /// @param from      The workspace losing the tab.
     /// @param fromIndex The tab's current position in @p from.
-    /// @param to        The window gaining the tab.
+    /// @param to        The workspace gaining the tab.
     /// @param toIndex   The position the tab will occupy in @p to.
-    virtual void tabAboutToBeMovedToWindow(WindowId from, int fromIndex, WindowId to, int toIndex)
+    virtual void tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIndex, WorkspaceId to, int toIndex)
     {
         (void) from, (void) fromIndex, (void) to, (void) toIndex;
     }
 
-    /// The tab @p tab moved from window @p from (it was at @p fromIndex) into window @p to at
-    /// @p toIndex. Paired with tabAboutToBeMovedToWindow(). Its sessions travel with it — none are
+    /// The tab @p tab moved from workspace @p from (it was at @p fromIndex) into workspace @p to at
+    /// @p toIndex. Paired with tabAboutToBeMovedToWorkspace(). Its sessions travel with it — none are
     /// closed. Defaulted to a no-op.
-    virtual void tabMovedToWindow(WindowId from, TabId tab, int fromIndex, WindowId to, int toIndex)
+    virtual void tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex, WorkspaceId to, int toIndex)
     {
         (void) from, (void) tab, (void) fromIndex, (void) to, (void) toIndex;
     }
 
-    /// The active tab of @p window changed to @p tab (at @p index).
-    virtual void activeTabChanged(WindowId window, TabId tab, int index) = 0;
+    /// The active tab of @p workspace changed to @p tab (at @p index).
+    virtual void activeTabChanged(WorkspaceId workspace, TabId tab, int index) = 0;
 
     /// A leaf @p leaf was split, producing the new leaf @p newLeaf. After this call @p leaf is an
     /// internal split node whose first child holds the original session and whose second child is

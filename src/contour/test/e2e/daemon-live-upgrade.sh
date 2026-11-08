@@ -21,7 +21,7 @@
 # Scenario 2 breaks the configuration file the daemon started with and asks again: the new release cannot
 # load it, so the upgrade is refused (exit 5, configUnreadable) and the old daemon serves on, untouched.
 #
-# Scenario 3 edits the configuration and upgrades again: a window opened after the upgrade has the edited
+# Scenario 3 edits the configuration and upgrades again: a workspace opened after the upgrade has the edited
 # profile's terminal size, and a further edit after it is reloaded by the upgraded image's own watcher.
 #
 # The handover pause is measured and printed, never asserted: how long the screen shows no new line.
@@ -39,7 +39,7 @@ SOCKET="$OUT/sock"
 XDG_CONFIG_HOME="$OUT/config"
 XDG_STATE_HOME="$OUT/state"
 export XDG_CONFIG_HOME XDG_STATE_HOME
-unset CONTOUR_WINDOW CONTOUR_TAB CONTOUR_PANE CONTOUR_MUX CONTOUR_DAEMON CONTOUR_PROFILE
+unset CONTOUR_WORKSPACE CONTOUR_TAB CONTOUR_PANE CONTOUR_MUX CONTOUR_DAEMON CONTOUR_PROFILE
 CONFIG="$XDG_CONFIG_HOME/contour/contour.yml"
 DAEMON_PID=""
 PROGRAM_PID=""
@@ -293,7 +293,7 @@ kill -0 "$PROGRAM_PID" 2>/dev/null || fail "the hosted program $PROGRAM_PID died
 [ "$(cat "$OUT/program.pid")" = "$PROGRAM_PID" ] || fail "the program pid file changed"
 contour ls daemon "$SOCKET" json
 PANES_AFTER="$(cat "$OUT/last.txt")"
-[ "$PANES_BEFORE" = "$PANES_AFTER" ] || fail "the windows, tabs and panes differ after the upgrade: $PANES_BEFORE / $PANES_AFTER"
+[ "$PANES_BEFORE" = "$PANES_AFTER" ] || fail "the workspaces, tabs and panes differ after the upgrade: $PANES_BEFORE / $PANES_AFTER"
 
 # Still counting, and no hole where the handover was: the run on screen reaches from before the upgrade to
 # after it, in single steps.
@@ -341,8 +341,8 @@ gap="$(ticks_gapless 20)"
 
 # --- Scenario 3: an edited configuration, carried over and reloaded ------------------------------------------
 #
-# A window a control connection opens with no client attached is spawned at the profile's terminal size as
-# the daemon read it at its start: the size of a new window shows which configuration the upgraded image
+# A workspace a control connection opens with no client attached is spawned at the profile's terminal size as
+# the daemon read it at its start: the size of a new workspace shows which configuration the upgraded image
 # started on. Its reload, a poll of the file every 2 s, shows in its log.
 cat > "$OUT/size.sh" <<'SIZE'
 stty size > "$1.tmp"
@@ -368,11 +368,11 @@ daemon_pid_alive || fail "the daemon died in the second upgrade"
 kill -0 "$PROGRAM_PID" 2>/dev/null || fail "the hosted program died in the second upgrade"
 contour daemon status --socket "$SOCKET"
 grep -qE '^upgrades: +2$' "$OUT/last.txt" || fail "the second upgrade did not count"
-contour new new-window daemon "$SOCKET" json sh "$OUT/size.sh" "$OUT/size-carried"
-[ "$status" -eq 0 ] || fail "contour new new-window exited $status"
-wait_for 200 size_written carried || fail "the new window did not report its size within 20s"
+contour new new-workspace daemon "$SOCKET" json sh "$OUT/size.sh" "$OUT/size-carried"
+[ "$status" -eq 0 ] || fail "contour new new-workspace exited $status"
+wait_for 200 size_written carried || fail "the new workspace did not report its size within 20s"
 [ "$(tr -d ' \n' < "$OUT/size-carried")" = "3383" ] \
-    || fail "a window after the upgrade is '$(cat "$OUT/size-carried")', not the edited profile's 33 83"
+    || fail "a workspace after the upgrade is '$(cat "$OUT/size-carried")', not the edited profile's 33 83"
 
 # After the upgrade: only the upgraded image's own watcher can reload this edit.
 RELOADS="$(reloads)"

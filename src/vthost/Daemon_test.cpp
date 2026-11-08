@@ -768,7 +768,7 @@ TEST_CASE("workspaceFor discards only on a plain stop", "[vthost][daemon][snapsh
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::Idle) == ShutdownWorkspace::Keep);
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequested) == ShutdownWorkspace::Discard);
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::UpgradeRestart) == ShutdownWorkspace::Keep);
-    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequestedKeepingWorkspace)
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequestedKeepingWorkspaces)
                  == ShutdownWorkspace::Keep);
 }
 
@@ -869,13 +869,13 @@ TEST_CASE("what one host keeps at shutdown, the next one restores", "[vthost][da
     h.runFirstDaemon(vthost::ShutdownCause::UpgradeRestart);
 
     auto const restored = h.runSecondDaemon();
-    REQUIRE(restored.windows.size() == 1);
+    REQUIRE(restored.workspaces.size() == 1);
     // The startup tab, then the split one: what the first daemon held, not a startup layout beside it.
-    REQUIRE(restored.windows[0].tabs.size() == 2);
-    CHECK(paneCount(restored.windows[0].tabs[0].root) == 1);
-    CHECK(paneCount(restored.windows[0].tabs[1].root) == 2);
+    REQUIRE(restored.workspaces[0].tabs.size() == 2);
+    CHECK(paneCount(restored.workspaces[0].tabs[0].root) == 1);
+    CHECK(paneCount(restored.workspaces[0].tabs[1].root) == 2);
     CHECK(std::ranges::any_of(h.lines, [](std::string const& line) {
-        return line.contains("restoring 1 window(s) from") && line.contains(RestartSnapshot);
+        return line.contains("restoring 1 workspace(s) from") && line.contains(RestartSnapshot);
     }));
 }
 
@@ -886,9 +886,9 @@ TEST_CASE("what one host discards at shutdown, the next one does not restore", "
 
     REQUIRE_FALSE(vthost::prepareRestore(h.store, h.config, h.sink(), h.wallClock).has_value());
     auto const started = h.runSecondDaemon();
-    REQUIRE(started.windows.size() == 1);
-    REQUIRE(started.windows[0].tabs.size() == 1); // the startup layout
-    CHECK(paneCount(started.windows[0].tabs[0].root) == 1);
+    REQUIRE(started.workspaces.size() == 1);
+    REQUIRE(started.workspaces[0].tabs.size() == 1); // the startup layout
+    CHECK(paneCount(started.workspaces[0].tabs[0].root) == 1);
 }
 
 #ifndef _WIN32

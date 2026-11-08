@@ -295,8 +295,8 @@ class NativeClient final
     /// serial the refusal came under, which is the one moveNode() returned for the request it refuses.
     using MoveNodeRefusedHandler = std::function<void(proto::MoveNodeRefused const&, uint64_t serial)>;
     /// Handler invoked when the daemon ends a layout push (proto::LayoutBatchEnd, Capability::LayoutBatch):
-    /// every window's layout of the change was handed to the LayoutHandler before it, and the PDU names the
-    /// MoveNode request whose effects the push completes, if one did.
+    /// every workspace's layout of the change was handed to the LayoutHandler before it, and the PDU names
+    /// the MoveNode request whose effects the push completes, if one did.
     using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
     /// Handler invoked when the daemon asks this client to re-assert its pane sizes (proto::PanesReprojected,
     /// Capability::PanesReprojected), which only a daemon built while that was sent on departures does.
@@ -324,8 +324,8 @@ class NativeClient final
         /// The client area, in cells, the first session should spawn at; absent means "the daemon's
         /// default". The ResizeRequest the client sends once its window is realized still corrects it.
         std::optional<proto::WireClientArea> clientArea = std::nullopt;
-        /// Which of the daemon's windows to follow; honoured by a daemon sharing Capability::AttachIntent,
-        /// which every other daemon reads as AllWindows.
+        /// Which of the daemon's workspaces to follow; honoured by a daemon sharing Capability::AttachIntent,
+        /// which every other daemon reads as AllWorkspaces.
         proto::AttachIntent attachIntent = {};
         /// The host profile this client's sessions run under; empty for the daemon's default. Honoured by a
         /// daemon sharing Capability::ProfileByName; @ref sessionSettings is still sent, for one that does
@@ -334,7 +334,8 @@ class NativeClient final
         /// The light/dark preference this client shows: the daemon builds the sessions it follows under it,
         /// before their first snapshot. @see proto::ClientHello::colorPreference.
         proto::WireColorPreference colorPreference = proto::WireColorPreference::Unstated;
-        /// The pixel size of one cell of the client's window, when known (a reconnect repeats the last one).
+        /// The pixel size of one cell of the client's window, when known (a reconnect repeats the last
+        /// one).
         /// @see proto::ClientHello::cellPixelSize.
         std::optional<proto::WireCellPixelSize> cellPixelSize = std::nullopt;
     };
@@ -429,12 +430,12 @@ class NativeClient final
     ///
     /// A @p profileName travels only to a daemon sharing Capability::ProfileByName (@see namesProfiles);
     /// any other is sent the verb's older body, and spawns with this client's session settings.
-    /// @param beside A session of the window the new tab belongs in; 0 = the daemon's own first
-    ///        window. Named by session because window ids are per model (@see proto::CreateTab).
+    /// @param beside A session of the workspace the new tab belongs in; 0 = the daemon's own first
+    ///        workspace. Named by session because workspace ids are per model (@see proto::CreateTab).
     /// @param profileName The host profile the new session runs; empty for this client's.
     void createTab(uint64_t beside, std::string profileName);
-    /// @param profileName The host profile the new window's session runs; empty for this client's.
-    void createWindow(std::string profileName);
+    /// @param profileName The host profile the new workspace's session runs; empty for this client's.
+    void createWorkspace(std::string profileName);
     /// @param profileName The host profile the new pane's session runs; empty for this client's.
     void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName);
     /// Asks the daemon to close @p session's pane.
@@ -462,9 +463,9 @@ class NativeClient final
                                uint64_t targetSession,
                                vtworkspace::SplitSide side);
 
-    /// Asks the daemon to move a pane or a whole tab: beside a pane, onto one (a swap), into a window's tab
-    /// well or into a new window. Nothing is spawned or closed; the daemon answers with the layout pushes
-    /// alone, or with a MoveNodeRefused that reaches the MoveNodeRefusedHandler.
+    /// Asks the daemon to move a pane or a whole tab: beside a pane, onto one (a swap), into a workspace's
+    /// tab well or into a new workspace. Nothing is spawned or closed; the daemon answers with the layout
+    /// pushes alone, or with a MoveNodeRefused that reaches the MoveNodeRefusedHandler.
     /// @param move The source and target, named by daemon session (@see proto::MoveNode).
     /// @return The serial it went out under, which the daemon's answer names -- the refusal's, or the
     ///         LayoutBatchEnd::causeSerial of the push it made; std::nullopt when nothing was written,
@@ -482,10 +483,14 @@ class NativeClient final
     ///         what the sessions run and how they emulate, and this client names profiles instead.
     [[nodiscard]] bool namesProfiles() const noexcept { return shares(proto::Capability::ProfileByName); }
 
-    /// @return The daemon windows this connection follows, ascending: those its ServerHello named, plus every
-    ///         window whose layout the daemon pushed since (one this connection created). Empty until
+    /// @return The daemon workspaces this connection follows, ascending: those its ServerHello named, plus
+    /// every
+    ///         workspace whose layout the daemon pushed since (one this connection created). Empty until
     ///         connected(), and from a daemon that predates attach intents.
-    [[nodiscard]] std::vector<uint64_t> const& followedWindows() const noexcept { return _followedWindows; }
+    [[nodiscard]] std::vector<uint64_t> const& followedWorkspaces() const noexcept
+    {
+        return _followedWorkspaces;
+    }
 
     /// Reports a divider the user moved, so the ratio lives in the daemon's model and a re-attaching
     /// client rebuilds the tree at it. The split is named by the leftmost leaf session of each of its
@@ -574,7 +579,7 @@ class NativeClient final
 
     /// @return What the daemon's restore brought back, when this connection's hello said so: only the first
     ///         accepted Attach connection after a restore is told. Empty for zero counts, from a daemon that
-    ///         predates the fields, and before the handshake. @see proto::ServerHello::restoredWindows
+    ///         predates the fields, and before the handshake. @see proto::ServerHello::restoredWorkspaces
     [[nodiscard]] std::optional<RestoredCounts> restoredCounts() const noexcept { return _restoredCounts; }
 
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
@@ -690,7 +695,7 @@ class NativeClient final
     std::string _daemonRelease;                       ///< @see daemonRelease()
     uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
     std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
-    std::vector<uint64_t> _followedWindows;           ///< @see followedWindows()
+    std::vector<uint64_t> _followedWorkspaces;        ///< @see followedWorkspaces()
     std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
     std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.

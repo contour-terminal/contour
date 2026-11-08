@@ -85,7 +85,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
                   == static_cast<int>(contour::window::WindowController::Roles::BadgeTextRole));
 
     TabListModel():
-        _model { *this, [this] { return SessionId { _nextSession++ }; } }, _window { _model.createWindow() }
+        _model { *this, [this] { return SessionId { _nextSession++ }; } },
+        _window { _model.createWorkspace() }
     {
         // Mirror TerminalSessionManager's resolver: map a SessionId to the session's own title. Here
         // titles are seeded per session via setSessionTitle() so a test can control {WindowTitle}.
@@ -96,7 +97,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     }
 
     [[nodiscard]] SessionModel& model() noexcept { return _model; }
-    [[nodiscard]] Window& window() noexcept { return *_window; }
+    [[nodiscard]] Workspace& window() noexcept { return *_window; }
 
     /// Sets the program-driven title used for {WindowTitle} expansion of @p session.
     void setSessionTitle(SessionId session, std::string title)
@@ -181,25 +182,28 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     // }}}
 
     // {{{ vtworkspace::ModelEvents — identical begin/end* bracketing to WindowController's on* hooks
-    void tabAboutToBeAdded(WindowId, int index) override { beginInsertRows(QModelIndex(), index, index); }
-    void tabAdded(WindowId, TabId, int) override
+    void tabAboutToBeAdded(WorkspaceId, int index) override { beginInsertRows(QModelIndex(), index, index); }
+    void tabAdded(WorkspaceId, TabId, int) override
     {
         endInsertRows();
         refreshAllTabTitles();
     }
-    void tabAboutToBeRemoved(WindowId, int index) override { beginRemoveRows(QModelIndex(), index, index); }
-    void tabClosed(WindowId, TabId, int) override
+    void tabAboutToBeRemoved(WorkspaceId, int index) override
+    {
+        beginRemoveRows(QModelIndex(), index, index);
+    }
+    void tabClosed(WorkspaceId, TabId, int) override
     {
         endRemoveRows();
         refreshAllTabTitles();
     }
-    void tabAboutToBeMoved(WindowId, int fromIndex, int toIndex) override
+    void tabAboutToBeMoved(WorkspaceId, int fromIndex, int toIndex) override
     {
         // Qt's moveRows: when moving DOWN, the destination row is one past the target.
         auto const dest = toIndex > fromIndex ? toIndex + 1 : toIndex;
         _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), dest);
     }
-    void tabMoved(WindowId, TabId, int, int) override
+    void tabMoved(WorkspaceId, TabId, int, int) override
     {
         if (_tabMoveInProgress)
         {
@@ -208,7 +212,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         }
         refreshAllTabTitles();
     }
-    void activeTabChanged(WindowId, TabId, int index) override
+    void activeTabChanged(WorkspaceId, TabId, int index) override
     {
         ++activeTabChangedCount;
         lastActiveTabRow = index;
@@ -337,7 +341,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     uint64_t _nextSession = 1;
     std::map<uint64_t, vtbackend::ProgramStatusSet> _programStatus; ///< Each session's records, by id.
     SessionModel _model;
-    Window* _window;
+    Workspace* _window;
     std::string _tabLabelTemplate = "{TabName}"; // the shipped default
     std::map<uint64_t, std::string> _sessionTitles;
     bool _tabMoveInProgress = false; // carries beginMoveRows()'s result to tabMoved(), as in the manager

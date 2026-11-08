@@ -14,7 +14,7 @@ namespace
 struct FateCase
 {
     std::string_view name;
-    LayoutWindows layout;
+    LayoutWorkspaces layout;
     AttachSpawn spawn;
     AttachBoot boot;
     RestoreSummaryFate expected;
@@ -22,32 +22,32 @@ struct FateCase
 
 constexpr auto FateCases = std::array {
     FateCase { "no layout yet",
-               LayoutWindows::None,
+               LayoutWorkspaces::None,
                AttachSpawn::Idle,
                AttachBoot::Adopted,
                RestoreSummaryFate::Keep },
     FateCase { "boot window not up",
-               LayoutWindows::Some,
+               LayoutWorkspaces::Some,
                AttachSpawn::Idle,
                AttachBoot::Pending,
                RestoreSummaryFate::Keep },
     FateCase { "a window is spawning",
-               LayoutWindows::Some,
+               LayoutWorkspaces::Some,
                AttachSpawn::Spawning,
                AttachBoot::Adopted,
                RestoreSummaryFate::Keep },
     FateCase { "nothing left to bind",
-               LayoutWindows::Some,
+               LayoutWorkspaces::Some,
                AttachSpawn::Idle,
                AttachBoot::Adopted,
                RestoreSummaryFate::Expire },
     FateCase { "empty layout, all else settled",
-               LayoutWindows::None,
+               LayoutWorkspaces::None,
                AttachSpawn::Idle,
                AttachBoot::Pending,
                RestoreSummaryFate::Keep },
     FateCase { "spawning and pending",
-               LayoutWindows::Some,
+               LayoutWorkspaces::Some,
                AttachSpawn::Spawning,
                AttachBoot::Pending,
                RestoreSummaryFate::Keep },

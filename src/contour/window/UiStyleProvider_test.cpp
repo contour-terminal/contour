@@ -921,10 +921,10 @@ namespace
 class SilentModelEvents final: public vtworkspace::ModelEvents
 {
   public:
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}

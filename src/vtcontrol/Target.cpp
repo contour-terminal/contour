@@ -83,7 +83,7 @@ std::expected<ObjectRef, ControlError> resolveTarget(ObjectKind kind,
         !byLabel.empty())
         return settle(byLabel, spec, kind);
 
-    // 3. A 1-based position, for tabs and windows.
+    // 3. A 1-based position, for tabs and workspaces.
     if (kind != ObjectKind::Pane)
     {
         auto position = uint32_t { 0 };

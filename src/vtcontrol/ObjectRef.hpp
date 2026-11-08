@@ -17,7 +17,7 @@ namespace vtcontrol
 /// The kinds of object an id can name. A block has its own reference type (`BlockRef`).
 enum class ObjectKind : uint8_t
 {
-    Window = 0,
+    Workspace = 0,
     Tab,
     Pane,
 };
@@ -26,13 +26,13 @@ template <>
 struct EnumTable<ObjectKind>
 {
     static constexpr std::array Rows {
-        EnumName { ObjectKind::Window, "window" },
+        EnumName { ObjectKind::Workspace, "workspace" },
         EnumName { ObjectKind::Tab, "tab" },
         EnumName { ObjectKind::Pane, "pane" },
     };
 };
 
-/// A window, tab or pane, spelled `window:<uuid>`, `tab:<uuid>` or `pane:<uuid>`.
+/// A workspace, tab or pane, spelled `workspace:<uuid>`, `tab:<uuid>` or `pane:<uuid>`.
 struct ObjectRef
 {
     ObjectKind kind = ObjectKind::Pane; ///< What the id names.
@@ -55,7 +55,7 @@ struct BlockRef
 [[nodiscard]] std::string toString(ObjectRef const& ref);
 
 /// @param text The text of a reference.
-/// @return The reference, or nothing when `text` is not a `window:`, `tab:` or `pane:` id.
+/// @return The reference, or nothing when `text` is not a `workspace:`, `tab:` or `pane:` id.
 [[nodiscard]] std::optional<ObjectRef> parseObjectRef(std::string_view text);
 
 /// @param ref The reference.
