@@ -4,8 +4,7 @@ To customize key mappings, you need to configure `input_mapping` yaml entry
 !!! warning "Defining `input_mapping` replaces the built-in bindings — it does not add to them"
 
     As soon as an `input_mapping` section is present in your `contour.yml`, Contour's built-in
-    defaults (`Ctrl+Shift+C`/`Ctrl+Shift+V`, the `Ctrl+Shift+P` command palette, the tab and pane
-    shortcuts, …) are discarded, and only the entries you list are active. Writing an
+    defaults (`Ctrl+Shift+V`, the `Ctrl+Shift+P` command palette, the tab shortcuts, …) are discarded, and only the entries you list are active. Writing an
     `input_mapping` section is a declaration that you are defining the full set of bindings.
 
     The `contour.yml` that Contour generates on first run already contains every default binding
@@ -31,6 +30,10 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 | `Right` mouse button | Open the terminal's context menu |
 | `Ctrl` + triple-click with the `Left` mouse button | Select the output of the command under the pointer (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md); on the alternate screen, which has no commands, the click selects as usual) |
 | Horizontal wheel / two-finger sideways swipe | Switch tabs |
+
+The default chords added since your configuration was generated (see [Default chords](#default-chords)) reach
+it the same way, among them `Ctrl+Shift+C`, `Ctrl+Shift+W`, the pane chords and the macOS `⌘P`, `⌘W` and `⌃⌘`
+chords.
 
 These are consulted only when your `input_mapping` does not claim the same key or button (for the
 triple-click, the same button and click count), so binding one of them yourself replaces it.
