@@ -1095,10 +1095,25 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
 
 void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
 {
+    // The input method's preedit takes over the cursor line's cells from its first column on; the
+    // cells there are its text, not what the grid holds, so the grid's soft glyphs do not apply.
+    auto const preeditColumns = [&] {
+        auto const preeditLine =
+            _cursorPosition && !_inputMethodData.preeditString.empty()
+            && gridPositionOf(CellLocation { .line = _lineNr, .column = ColumnOffset(0) }).line
+                   == _cursorPosition->line;
+        return preeditLine ? std::pair { unbox<size_t>(preeditPlacement().start),
+                                         unbox<size_t>(preeditPlacement().start)
+                                             + unbox<size_t>(preeditPlacement().columns) }
+                           : std::pair<size_t, size_t> { 0, 0 };
+    }();
+
     auto pending = std::vector<RenderSoftGlyph> {};
     pending.reserve(glyphs.size());
     for (auto const& [column, ref]: glyphs)
     {
+        if (column >= preeditColumns.first && column < preeditColumns.second)
+            continue;
         // A font that is gone resolves to no glyph, so the cell falls back to drawing its codepoints.
         auto glyph = _terminal->softFonts().resolve(ref).glyph;
         if (!glyph)
@@ -1112,8 +1127,8 @@ void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
     // cell order.
     std::ranges::sort(pending, {}, &RenderSoftGlyph::position);
 
-    // A cell the line did not render (under the input method editor, say) has nothing to attach to. The
-    // line's cells are in column order, so one merge pass keeps the glyphs that have a cell.
+    // A cell the line did not render has nothing to attach to. The line's cells are in column order, so
+    // one merge pass keeps the glyphs that have a cell.
     auto cell = _output->cells.begin() + static_cast<std::ptrdiff_t>(_lineFirstCell);
     auto const cellsEnd = _output->cells.end();
     for (auto& entry: pending)

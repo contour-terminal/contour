@@ -437,3 +437,22 @@ TEST_CASE("a DECDLD with ten or more parameters still loads", "[screen][softfont
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph()
           == SoftGlyphRef { .font = 0, .position = 0x21 });
 }
+
+TEST_CASE("an input method preedit over soft cells carries none of their glyphs", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    // Soft glyphs at columns 0..2, the cursor back on column 0, and "xy" composed there: the preedit
+    // takes over columns 0 and 1, and column 2 stays the grid's.
+    mock.writeToScreen("\033(B!\"!\033[1;1H");
+    mock.terminal.updateInputMethodPreeditString("xy");
+    mock.terminal.markScreenDirty();
+    (void) mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+
+    auto const columns =
+        std::ranges::to<std::vector>(buffer.get().softGlyphs | std::views::transform([](auto const& entry) {
+                                         return entry.position.column;
+                                     }));
+    CHECK(columns == std::vector { ColumnOffset(2) });
+}
