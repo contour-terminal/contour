@@ -8,6 +8,7 @@
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <ranges>
@@ -35,35 +36,35 @@ enum class PrimarySpelling : uint8_t
                                                                      KeyboardPlatformKind kind,
                                                                      PrimarySpelling spelling)
 {
-    if (spelling == PrimarySpelling::Canonical)
-        return canonicalModifierSpellings(modifiers, kind);
-    auto result = std::vector<std::string_view> {};
-    for (auto const& row: vtbackend::ChordModifierTable)
-        if (modifiers.contains(row.modifier))
-            result.push_back(row.name);
-    return result;
+    return spelling == PrimarySpelling::Canonical ? canonicalModifierSpellings(modifiers, kind)
+                                                  : literalModifierSpellings(modifiers);
 }
 
-/// The modifiers @p spellings mean when a configuration is read on @p kind.
-/// @param spellings The written spellings, each one the writer emits (so each parses).
-/// @param kind The keyboard platform reading them.
-/// @return The union of what each spelling denotes there.
-[[nodiscard]] inline vtbackend::Modifiers readBack(std::span<std::string_view const> spellings,
-                                                   KeyboardPlatformKind kind)
+/// The modifiers a row means on @p reader when a configuration written on @p writer spells it @p spelling.
+/// @param modifiers The row's modifiers on @p writer.
+/// @param writer The keyboard platform the configuration is written for.
+/// @param spelling How the row is spelled.
+/// @param reader The keyboard platform reading the configuration.
+/// @return The union of what each written spelling denotes on @p reader.
+[[nodiscard]] inline vtbackend::Modifiers modifiersReadOn(vtbackend::Modifiers modifiers,
+                                                          KeyboardPlatformKind writer,
+                                                          PrimarySpelling spelling,
+                                                          KeyboardPlatformKind reader)
 {
     auto result = vtbackend::Modifiers {};
-    for (auto const spelling: spellings)
-        result |= parseModifierSpelling(spelling, kind).value_or(vtbackend::Modifiers {});
+    for (auto const name: modifierSpellings(modifiers, writer, spelling))
+        result |= parseModifierSpelling(name, reader).value_or(vtbackend::Modifiers {});
     return result;
 }
 
 /// How the writer spells each row of @p rows, written on @p kind.
 ///
-/// `Primary` is what lets one contour.yml work on every machine, but it is a per-row translation: two rows
-/// that differ on the host can land on one chord elsewhere -- Command+W and Shift+Command+W both read back
-/// as Ctrl+Shift+W on the desktop, where the loader would merge them and run both. So a row that would land,
-/// on some other platform, on the chord an earlier row already holds there is written literally instead,
-/// and the earlier row keeps its portable spelling.
+/// `Primary` is what lets one contour.yml work on every machine, but it translates each row on its own: two
+/// rows that differ on the host can land on one chord elsewhere -- a Mac's Command+W and Shift+Command+W both
+/// read back as Ctrl+Shift+W on the desktop, where the loader folds them into one binding that runs both. So
+/// of two rows that would fold on some other platform, one that is spelled with `Primary` is written
+/// literally instead -- the later one where both are, so that the earlier keeps its portable spelling --
+/// until no two rows fold.
 /// @param rows The table, in the order it is written.
 /// @param kind The keyboard platform the configuration is written for.
 /// @return One spelling per row, in the same order.
@@ -72,27 +73,37 @@ template <typename Input>
     std::span<vtbackend::InputBinding<Input, ActionList> const> rows, KeyboardPlatformKind kind)
 {
     auto result = std::vector<PrimarySpelling>(rows.size(), PrimarySpelling::Canonical);
-    auto const chordOn = [&](std::size_t index, KeyboardPlatformKind reader) {
-        auto const spellings = modifierSpellings(rows[index].modifiers, kind, result[index]);
-        return readBack(spellings, reader);
+    auto const folds = [&](std::size_t a, std::size_t b) {
+        return canFireTogether(rows[a], rows[b])
+               && std::ranges::any_of(AllKeyboardPlatformKinds, [&](KeyboardPlatformKind reader) {
+                      return reader != kind
+                             && modifiersReadOn(rows[a].modifiers, kind, result[a], reader)
+                                    == modifiersReadOn(rows[b].modifiers, kind, result[b], reader);
+                  });
     };
-    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
-        for (auto const readerIndex: std::views::iota(std::size_t { 0 }, KeyboardPlatformKindCount))
-        {
-            auto const reader = static_cast<KeyboardPlatformKind>(readerIndex);
-            if (reader == kind || result[index] == PrimarySpelling::Literal)
-                continue;
-            auto const& row = rows[index];
-            auto const folds =
-                std::ranges::any_of(std::views::iota(std::size_t { 0 }, index), [&](auto earlier) {
-                    auto const& other = rows[earlier];
-                    return other.input == row.input && other.clickCount == row.clickCount
-                           && modesOverlap(other.modes, row.modes)
-                           && chordOn(earlier, reader) == chordOn(index, reader);
-                });
-            if (folds)
-                result[index] = PrimarySpelling::Literal;
-        }
+    auto const respellable = [&](std::size_t index) {
+        return result[index] == PrimarySpelling::Canonical
+               && modifierSpellings(rows[index].modifiers, kind, PrimarySpelling::Canonical)
+                      != literalModifierSpellings(rows[index].modifiers);
+    };
+    // Each pass only turns Canonical into Literal, so this ends after at most one pass per row.
+    auto changed = true;
+    while (changed)
+    {
+        changed = false;
+        for (auto const later: std::views::iota(std::size_t { 0 }, rows.size()))
+            for (auto const earlier: std::views::iota(std::size_t { 0 }, later))
+            {
+                if (!folds(earlier, later))
+                    continue;
+                auto const victim = respellable(later) ? later : earlier;
+                if (respellable(victim))
+                {
+                    result[victim] = PrimarySpelling::Literal;
+                    changed = true;
+                }
+            }
+    }
     return result;
 }
 

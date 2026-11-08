@@ -29,6 +29,18 @@ namespace contour::config
     return (a.enabled() & b.disabled()) == 0 && (a.disabled() & b.enabled()) == 0;
 }
 
+/// Whether one key press can fire both bindings, whatever their modifiers: the same input and click count,
+/// and mode filters that overlap.
+/// @param a The first binding.
+/// @param b The second binding.
+/// @return True when only the modifiers can tell the two apart.
+template <typename Input>
+[[nodiscard]] constexpr bool canFireTogether(vtbackend::InputBinding<Input, ActionList> const& a,
+                                             vtbackend::InputBinding<Input, ActionList> const& b) noexcept
+{
+    return a.input == b.input && a.clickCount == b.clickCount && modesOverlap(a.modes, b.modes);
+}
+
 /// Which table of InputMappings a collision was found in.
 enum class BindingKind : uint8_t
 {
@@ -69,8 +81,7 @@ namespace detail
     {
         for (auto const [i, a]: core::views::enumerate(bindings))
             for (auto const [j, b]: core::views::enumerate(bindings | std::views::drop(i + 1)))
-                if (a.input == b.input && a.modifiers == b.modifiers && a.clickCount == b.clickCount
-                    && modesOverlap(a.modes, b.modes))
+                if (a.modifiers == b.modifiers && canFireTogether(a, b))
                     out.push_back(
                         BindingCollision { .kind = kind,
                                            .first = static_cast<std::size_t>(i),

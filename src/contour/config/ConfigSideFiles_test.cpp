@@ -2524,8 +2524,7 @@ using contour::config::KeyboardPlatformKind;
 using vtbackend::Modifier;
 using vtbackend::Modifiers;
 
-constexpr auto PlatformKinds =
-    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+constexpr auto const& PlatformKinds = contour::config::AllKeyboardPlatformKinds;
 
 /// The `input_mapping:` section a document with one row stating @p mods and nothing else.
 [[nodiscard]] std::string oneRowConfig(std::string_view mods)

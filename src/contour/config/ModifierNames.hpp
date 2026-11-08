@@ -9,9 +9,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
+#include <iterator>
 #include <optional>
-#include <ranges>
 #include <string_view>
 #include <vector>
 
@@ -118,9 +117,21 @@ inline constexpr std::string_view PrimaryModifierName = "Primary";
 [[nodiscard]] constexpr vtbackend::Modifiers modifiersAmbiguousBesidePrimary() noexcept
 {
     auto result = vtbackend::Modifiers {};
-    for (auto const index: std::views::iota(std::size_t { 0 }, KeyboardPlatformKindCount))
-        result |= primaryModifiers(static_cast<KeyboardPlatformKind>(index));
+    for (auto const kind: AllKeyboardPlatformKinds)
+        result |= primaryModifiers(kind);
     return result.without(vtbackend::Modifiers { vtbackend::Modifier::Shift });
+}
+
+/// Every modifier of @p modifiers by its own canonical name, in ChordModifierTable order.
+/// @param modifiers The chord's modifiers.
+/// @return The spellings, in the order they are written.
+[[nodiscard]] inline std::vector<std::string_view> literalModifierSpellings(vtbackend::Modifiers modifiers)
+{
+    auto result = std::vector<std::string_view> {};
+    for (auto const& row: vtbackend::ChordModifierTable)
+        if (modifiers.contains(row.modifier))
+            result.push_back(row.name);
+    return result;
 }
 
 /// The spellings a writer emits for @p modifiers on @p kind: "Primary" first when they contain the Primary
@@ -133,16 +144,11 @@ inline constexpr std::string_view PrimaryModifierName = "Primary";
 [[nodiscard]] inline std::vector<std::string_view> canonicalModifierSpellings(vtbackend::Modifiers modifiers,
                                                                               KeyboardPlatformKind kind)
 {
-    auto result = std::vector<std::string_view> {};
     auto const primary = primaryModifiers(kind);
-    auto const hasPrimary =
-        modifiers.contains(primary) && !modifiers.without(primary).any(modifiersAmbiguousBesidePrimary());
-    if (hasPrimary)
-        result.push_back(PrimaryModifierName);
-    auto const rest = hasPrimary ? modifiers.without(primary) : modifiers;
-    for (auto const& row: vtbackend::ChordModifierTable)
-        if (rest.contains(row.modifier))
-            result.push_back(row.name);
+    if (!modifiers.contains(primary) || modifiers.without(primary).any(modifiersAmbiguousBesidePrimary()))
+        return literalModifierSpellings(modifiers);
+    auto result = std::vector<std::string_view> { PrimaryModifierName };
+    std::ranges::copy(literalModifierSpellings(modifiers.without(primary)), std::back_inserter(result));
     return result;
 }
 

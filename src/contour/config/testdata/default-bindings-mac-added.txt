@@ -1,4 +1,7 @@
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Super] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Control|Super] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
@@ -14,6 +17,9 @@
 [defaults classic] char modes=[Any] mods=[Super] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
 [defaults classic] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Super] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Control|Super] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
 [defaults native2026] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
@@ -34,6 +40,9 @@
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=RightArrow clicks=- -> SendChars("\u{5}") declined=pass gated=no
 [fallbacks] key modes=[~AltScreen] mods=[Super] input=Backspace clicks=- -> SendChars("\u{15}") declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
+[fallbacks] char modes=[Any] mods=[Super] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0057 clicks=- -> ClosePane declined=pass gated=no
@@ -42,12 +51,9 @@
 [fallbacks] char modes=[Any] mods=[Control|Super] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Shift|Super] input=U+004F clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Shift|Super] input=U+0057 clicks=- -> CloseTab declined=pass gated=no
-[fallbacks] char modes=[Any] mods=[Super] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
 [fallbacks] char modes=[~AltScreen] mods=[Super] input=U+004B clicks=- -> ClearToPrompt declined=consume gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
-[fallbacks] char modes=[Any] mods=[Super] input=U+002B clicks=- -> IncreaseFontSize declined=pass gated=no
-[fallbacks] char modes=[Any] mods=[Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Shift|Super] input=U+003D clicks=- -> IncreaseFontSize declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
 [fallbacks] char modes=[Any] mods=[Super] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no

@@ -318,14 +318,14 @@ namespace
             both(MacOnly, CtrlSuper, U',', Any, { actions::ToggleInputMethodHandling {} }),
             written(DesktopOnly, CtrlShift, U'-', Any, { actions::DecreaseFontSize {} }),
             written(DesktopOnly, CtrlShift, U'_', Any, { actions::DecreaseFontSize {} }),
-            // Ctrl+Shift+= (Ctrl+Shift+plus on a US layout) enlarges the font, as in kitty and GNOME
-            // Terminal.
-            both(DesktopOnly, Primary, U'=', Any, { actions::IncreaseFontSize {} }),
-            both(DesktopOnly, Primary, U'+', Any, { actions::IncreaseFontSize {} }),
-            // Ctrl+Shift+C copies, as every Linux and Windows terminal does (macOS: Command+C, below). A
-            // written row cannot consume a declined press, and needs none: CopySelection does not decline on
-            // an empty selection.
-            both(DesktopOnly, Primary, U'C', Any, { actions::CopySelection {}, actions::CancelSelection {} }),
+            // Primary+= enlarges the font: Ctrl+Shift+= as in kitty and GNOME Terminal, Command+= on a Mac.
+            // Plus is Shift+equals on a US layout, so it arrives as '+' (with Shift, retried under its
+            // unshifted base).
+            both(All, Primary, U'=', Any, { actions::IncreaseFontSize {} }),
+            both(All, Primary, U'+', Any, { actions::IncreaseFontSize {} }),
+            // Primary+C copies: Ctrl+Shift+C as every Linux and Windows terminal, Command+C on a Mac. Copying
+            // with nothing selected claims the press without touching the clipboard, so it never declines.
+            both(All, Primary, U'C', Any, { actions::CopySelection {}, actions::CancelSelection {} }),
             written(All, Primary, U'N', Any, { actions::NewTerminal {} }),
             written(DesktopOnly, CtrlAlt, U'V', Any, { actions::PasteClipboard { .strip = true } }),
             both(MacOnly, CtrlSuper, U'V', Any, { actions::PasteClipboard { .strip = true } }),
@@ -428,16 +428,7 @@ namespace
             fallback(PlatformScope::MacOnly, Super, U'8', Any, { actions::SwitchToTab { .position = 8 } }),
             fallback(PlatformScope::MacOnly, Super, U'9', Any, { actions::SwitchToTab { .position = 9 } }),
             // The Command chords macOS users expect, none of them one the menu bar owns (Command+Q, H and M).
-            // Copy is consumed when nothing is selected, so the chord never reaches the application as a bare
-            // letter. Command+plus is Shift+Command+equals on a US layout, which arrives as '+' with Shift
-            // and is retried under its unshifted base. Fallbacks, so an explicit binding of the chord still
-            // wins.
-            fallback(MacOnly,
-                     Super,
-                     U'C',
-                     Any,
-                     { actions::CopySelection {}, actions::CancelSelection {} },
-                     DeclinedInput::Consume),
+            // Fallbacks, so an explicit binding of the chord still wins.
             fallback(MacOnly, Super, U'V', Any, { actions::PasteClipboard { .strip = false } }),
             // Command+K clears to the prompt (a hard reset would destroy a running vim or tmux), on the
             // primary screen only; consumed when it declines, so it never types a 'k'.
@@ -457,8 +448,6 @@ namespace
                      { actions::ClearToPrompt {} },
                      DeclinedInput::Consume),
             fallback(MacOnly, Super, U'N', Any, { actions::NewTerminal {} }),
-            fallback(MacOnly, Super, U'+', Any, { actions::IncreaseFontSize {} }),
-            fallback(MacOnly, Super, U'=', Any, { actions::IncreaseFontSize {} }),
             fallback(MacOnly, SuperShift, U'=', Any, { actions::IncreaseFontSize {} }),
             fallback(MacOnly, Super, U'-', Any, { actions::DecreaseFontSize {} }),
             fallback(MacOnly, Super, U'0', Any, { actions::ResetFontSize {} }),

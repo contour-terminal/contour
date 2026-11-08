@@ -34,8 +34,7 @@ using vtbackend::Modifiers;
 namespace
 {
 /// Every keyboard platform kind.
-constexpr auto AllKinds =
-    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+constexpr auto const& AllKinds = AllKeyboardPlatformKinds;
 
 MatchModes modesOf(std::initializer_list<MatchModes::Flag> on,
                    std::initializer_list<MatchModes::Flag> off = {})
@@ -67,82 +66,67 @@ std::string describe(InputMappings const& mappings)
     return text;
 }
 
-/// The rows of @p written (both editions' defaults on @p kind) and @p fallbacks that sit on one chord, as
-/// action names in table order, without repeats.
-template <typename Input, typename Written, typename Fallbacks>
-[[nodiscard]] std::vector<std::string_view> actionsOn(
-    Written written, Fallbacks const& fallbacks, Modifiers modifiers, Input input, MatchModes modes)
+/// Action names, in table order.
+using Names = std::vector<std::string_view>;
+
+/// Appends to @p out the action of every row of @p rows on one chord, skipping repeats.
+/// @param modes When not empty, only rows requiring exactly these modes.
+template <typename Rows, typename Input>
+void appendActions(Rows const& rows, Modifiers modifiers, Input input, MatchModes modes, Names& out)
 {
-    auto result = std::vector<std::string_view> {};
-    auto const take = [&](auto const& row) {
+    for (auto const& row: rows)
+    {
         if (row.modifiers != modifiers || row.input != input || row.binding.empty())
-            return;
+            continue;
         if (modes != MatchModes {} && row.modes != modes)
-            return;
+            continue;
         auto const name = actions::name(row.binding.front());
-        if (std::ranges::find(result, name) == result.end())
-            result.push_back(name);
-    };
-    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
-        for (auto const& row: written(edition))
-            take(row);
-    for (auto const& row: fallbacks)
-        take(row.mapping);
-    return result;
+        if (std::ranges::find(out, name) == out.end())
+            out.push_back(name);
+    }
+}
+
+/// The fallback rows of @p fallbacks as plain bindings.
+template <typename Input>
+[[nodiscard]] auto mappingsOf(std::vector<FallbackMapping<Input>> const& fallbacks)
+{
+    return fallbacks | std::views::transform(&FallbackMapping<Input>::mapping);
 }
 
 /// The actions bound to a character chord on @p kind, in either edition's defaults or the fallbacks.
 /// @param modes When not empty, only rows requiring exactly these modes.
-[[nodiscard]] std::vector<std::string_view> charActions(KeyboardPlatformKind kind,
-                                                        Modifiers modifiers,
-                                                        char32_t input,
-                                                        MatchModes modes = {})
+[[nodiscard]] Names charActions(KeyboardPlatformKind kind,
+                                Modifiers modifiers,
+                                char32_t input,
+                                MatchModes modes = {})
 {
-    return actionsOn(
-        [kind](DefaultsEdition edition) { return makeDefaultInputMappings(edition, kind).charMappings; },
-        builtinFallbackCharMappings(kind),
-        modifiers,
-        input,
-        modes);
+    auto result = Names {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        appendActions(defaultInputMappings(edition, kind).charMappings, modifiers, input, modes, result);
+    appendActions(mappingsOf(builtinFallbackCharMappings(kind)), modifiers, input, modes, result);
+    return result;
 }
 
 /// The actions bound to a key chord on @p kind, in either edition's defaults or the fallbacks.
 /// @param modes When not empty, only rows requiring exactly these modes.
-[[nodiscard]] std::vector<std::string_view> keyActions(KeyboardPlatformKind kind,
-                                                       Modifiers modifiers,
-                                                       vtbackend::Key input,
-                                                       MatchModes modes = {})
+[[nodiscard]] Names keyActions(KeyboardPlatformKind kind,
+                               Modifiers modifiers,
+                               vtbackend::Key input,
+                               MatchModes modes = {})
 {
-    return actionsOn(
-        [kind](DefaultsEdition edition) { return makeDefaultInputMappings(edition, kind).keyMappings; },
-        builtinFallbackKeyMappings(kind),
-        modifiers,
-        input,
-        modes);
+    auto result = Names {};
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        appendActions(defaultInputMappings(edition, kind).keyMappings, modifiers, input, modes, result);
+    appendActions(mappingsOf(builtinFallbackKeyMappings(kind)), modifiers, input, modes, result);
+    return result;
 }
 
 /// The actions bound to a character chord on @p kind in the fallback table only.
-[[nodiscard]] std::vector<std::string_view> fallbackCharActions(KeyboardPlatformKind kind,
-                                                                Modifiers modifiers,
-                                                                char32_t input)
+[[nodiscard]] Names fallbackCharActions(KeyboardPlatformKind kind, Modifiers modifiers, char32_t input)
 {
-    return actionsOn([](DefaultsEdition) { return std::vector<CharInputMapping> {}; },
-                     builtinFallbackCharMappings(kind),
-                     modifiers,
-                     input,
-                     MatchModes {});
-}
-
-/// The first fallback row on a chord, or nullptr.
-template <typename Input>
-[[nodiscard]] FallbackMapping<Input> const* fallbackRow(std::vector<FallbackMapping<Input>> const& rows,
-                                                        Modifiers modifiers,
-                                                        Input input)
-{
-    auto const found = std::ranges::find_if(rows, [&](auto const& row) {
-        return row.mapping.modifiers == modifiers && row.mapping.input == input;
-    });
-    return found != rows.end() ? &*found : nullptr;
+    auto result = Names {};
+    appendActions(mappingsOf(builtinFallbackCharMappings(kind)), modifiers, input, MatchModes {}, result);
+    return result;
 }
 
 /// The first character fallback row on a chord on @p kind, or nullptr.
@@ -150,12 +134,14 @@ template <typename Input>
                                                          Modifiers modifiers,
                                                          char32_t input)
 {
-    return fallbackRow(builtinFallbackCharMappings(kind), modifiers, input);
+    auto const& rows = builtinFallbackCharMappings(kind);
+    auto const found = std::ranges::find_if(rows, [&](auto const& row) {
+        return row.mapping.modifiers == modifiers && row.mapping.input == input;
+    });
+    return found != rows.end() ? &*found : nullptr;
 }
 
-/// @p rows as a configuration written on @p from reads them back on @p to: each row's modifiers go through
-/// the writer's spellings for @p from (@see portablePrimarySpellings) and the reader's meaning of them on @p
-/// to.
+/// @p rows as a configuration written on @p from reads them back on @p to (@see portablePrimarySpellings).
 template <typename Input>
 [[nodiscard]] std::vector<vtbackend::InputBinding<Input, ActionList>> carried(
     std::vector<vtbackend::InputBinding<Input, ActionList>> rows,
@@ -164,11 +150,8 @@ template <typename Input>
 {
     auto const spellings =
         portablePrimarySpellings(std::span<vtbackend::InputBinding<Input, ActionList> const> { rows }, from);
-    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
-    {
-        auto const written = modifierSpellings(rows[index].modifiers, from, spellings[index]);
-        rows[index].modifiers = readBack(written, to);
-    }
+    for (auto&& [row, spelling]: std::views::zip(rows, spellings))
+        row.modifiers = modifiersReadOn(row.modifiers, from, spelling, to);
     return rows;
 }
 
@@ -181,9 +164,6 @@ template <typename Input>
                            .charMappings = carried(mappings.charMappings, from, to),
                            .mouseMappings = carried(mappings.mouseMappings, from, to) };
 }
-
-/// Shorthand for an expected list of action names.
-using Names = std::vector<std::string_view>;
 } // namespace
 
 TEST_CASE("modesOverlap", "[bindings]")
@@ -575,7 +555,24 @@ TEST_CASE("a configuration generated on one platform binds no chord twice on ano
             {
                 INFO("edition " << token << ", written on " << static_cast<int>(from) << ", read on "
                                 << static_cast<int>(to));
-                auto const mappings = carriedMappings(makeDefaultInputMappings(edition, from), from, to);
+                auto const mappings = carriedMappings(defaultInputMappings(edition, from), from, to);
                 CHECK(describe(mappings) == std::string {});
             }
+}
+
+TEST_CASE("portablePrimarySpellings respells whichever row of a folding pair holds Primary",
+          "[bindings][primary]")
+{
+    // Written on a Mac, Command+C (Primary) and a literal Ctrl+Shift+C both read back as Ctrl+Shift+C on the
+    // desktop. The later row has no Primary to give up, so the earlier one is written literally.
+    auto const rows = std::vector<CharInputMapping> {
+        CharInputMapping { .modifiers = Modifiers { Modifier::Super },
+                           .input = U'C',
+                           .binding = { actions::CopySelection {} } },
+        CharInputMapping { .modifiers = Modifiers { Modifier::Control, Modifier::Shift },
+                           .input = U'C',
+                           .binding = { actions::ToggleFullscreen {} } },
+    };
+    CHECK(portablePrimarySpellings(std::span<CharInputMapping const> { rows }, KeyboardPlatformKind::Mac)
+          == std::vector { PrimarySpelling::Literal, PrimarySpelling::Canonical });
 }

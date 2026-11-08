@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -21,6 +22,11 @@ enum class KeyboardPlatformKind : uint8_t
 
 /// The number of KeyboardPlatformKind enumerators.
 inline constexpr std::size_t KeyboardPlatformKindCount = 3;
+
+/// Every KeyboardPlatformKind, in enumerator order.
+inline constexpr auto AllKeyboardPlatformKinds =
+    std::array { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac };
+static_assert(AllKeyboardPlatformKinds.size() == KeyboardPlatformKindCount);
 
 /// The kind this build targets.
 inline constexpr KeyboardPlatformKind BuildKeyboardPlatformKind =
