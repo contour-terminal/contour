@@ -1034,12 +1034,16 @@ void ScreenMirror::applySoftGlyphCells(RemoteScreen const& screen,
     // An update touches the history rows it names and nothing else there: restamping every soft glyph row of
     // a deep scrollback on each echoed keystroke would mark them all changed again. The page is a handful of
     // rows and is restated whole, as the images are.
-    for (auto it = screen.softGlyphCells.lower_bound(base); it != screen.softGlyphCells.end(); ++it)
-        applyRow(it->first, it->second);
+    for (auto const& [stableId, columns]:
+         std::ranges::subrange(screen.softGlyphCells.lower_bound(base), screen.softGlyphCells.end()))
+        applyRow(stableId, columns);
     for (auto const& row: *rewritten)
         if (row.stableId < base)
             if (auto const it = screen.softGlyphCells.find(row.stableId); it != screen.softGlyphCells.end())
-                applyRow(it->first, it->second);
+            {
+                auto const& [stableId, columns] = *it;
+                applyRow(stableId, columns);
+            }
 }
 
 void ScreenMirror::syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uint64_t generation)
