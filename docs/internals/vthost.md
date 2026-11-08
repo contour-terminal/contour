@@ -132,7 +132,7 @@ with any other value is a pre-negotiation peer's, decoded no further than that v
 | PDU | Layout |
 |-----|--------|
 | `ClientHello` | `u32 4`, one blob of `varint min, varint max, varint count + varint idents, string token, optional session settings` and whatever a later version appends, then one zero byte |
-| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint count + varint followedWindows, varint daemonInstance` and whatever a later version appends |
+| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint count + varint followedWorkspaces, varint daemonInstance` and whatever a later version appends |
 | `ServerHello` (version alone) | the `u32` alone: the refusal a pre-negotiation client (0.7.0 on codec 1, 0.8.0 on codec 2, or codec 3) reads |
 
 Each stays readable to contour 0.7.0, whose daemon decodes a hello whole before it checks the version
@@ -160,8 +160,8 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `InputEcho` | 12 | `input-echo` | `SessionInputEcho`: the daemon tells a client sharing it what each session's terminal does with typed text, so the client locks a pane at a password prompt and turns its OS's Secure Keyboard Entry on. A client of an older daemon stays at `Unknown`: no lock, no secure input |
 | `TabMerge` | 13 | `tab-merge` | `MergeTabIntoSplit`: the daemon grafts a whole tab, sessions and all, beside a pane of another tab. A client offers a drop-to-split only to a daemon sharing it; against an older one the tab is left to tear off into its own window, as before |
 | `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
-| `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a window's tab well, or into a new window, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
-| `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every window the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one window may be in flight to another |
+| `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a workspace's tab well, or into a new workspace, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
+| `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every workspace the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one workspace may be in flight to another |
 | `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: a client re-sends every pane's size when asked. The daemon no longer offers it (it restores the survivors' pane sizes itself, see "One grid, several clients"); the client keeps offering and answering it for daemons built while it was sent |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
@@ -238,7 +238,7 @@ absence looks like an oversight:
   close was ever sent).
 - **Daemon → client** is the re-pushed `LayoutState`: every model change fans out through each
   connection's layout observer, and the client reconciles structurally rather than per session id
-  (`applyRemoteLayout`'s subtractive pass). A window whose last tab closed still reports, as an
+  (`applyRemoteLayout`'s subtractive pass). A workspace whose last tab closed still reports, as an
   empty tab list, so removal is never signalled by silence.
 - **Per-session server state** is dropped on `SessionStreamEvents::sessionClosed`, which erases the
   session's follow state and pending-delta entry — a dead session cannot accumulate work.
@@ -250,10 +250,10 @@ an existing PDU's meaning.
 
 ### What a client syncs back
 
-A client rebuilds its windows from `LayoutState`, so anything it changes about a tab and does not
+A client rebuilds its workspaces from `LayoutState`, so anything it changes about a tab and does not
 tell the daemon is lost on the next attach, and never reaches another client. Two verbs carry it
 back: `ResizeSplit` for a divider (below), and `EditTab` for how a tab is presented — its active
-pane, its zoom, its title, its colour, and which tab of the window is active.
+pane, its zoom, its title, its colour, and which tab of the workspace is active.
 
 **`EditTab`** (tag 28, gated on `Capability::TabEdits`; without it the daemon answers
 `Unsupported`) names a session and a `TabEditKind`, and `vthost::applyTabEdit` applies it through
@@ -282,7 +282,7 @@ tab's sessions move into the target tab, and **none is spawned or closed**, whic
 `SplitPane` (it spawns a fresh session) nor `ClosePane` (it would kill the dragged ones) could carry it.
 The model's events fan out as a `LayoutState` push per event the merge fires (five today), each already
 showing the merged tree. A request is refused, and logged with `describe(TabMergeError)`, for an unknown
-session or side, both sessions in one tab, two windows (`CrossWindow`), or a tab that no longer holds
+session or side, both sessions in one tab, two workspaces (`CrossWorkspace`), or a tab that no longer holds
 exactly the sessions named (`StaleTab`: another client merged into it meanwhile, so the request would
 drag along panes nobody dragged).
 
@@ -293,8 +293,8 @@ A merge that succeeds is answered by the layout push alone.
 
 A client does not merge locally, since the next push would undo it: `NativeController::requestRemoteTabMerge`
 sends the verb and `applyRemoteLayout` grafts the tab when the push arrives (`findNewMerge` recognises a
-leaf beside a subtree that is exactly one other local tab's sessions). The merge stays within one window,
-because a layout is pushed and reconciled per window. `NativeClient::mergeTabIntoSplit` writes nothing
+leaf beside a subtree that is exactly one other local tab's sessions). The merge stays within one workspace,
+because a layout is pushed and reconciled per workspace. `NativeClient::mergeTabIntoSplit` writes nothing
 unless the daemon shares `TabMerge`, and `SessionFactory::tabMergeSupport()` tells the window, so a tab
 dropped on a pane of such a daemon is not offered a split.
 
@@ -308,30 +308,30 @@ both ends by session, never by pane or tab id, because ids are minted per model.
 |-------|---------|
 | `sourceKind` | a `vtworkspace::MoveSourceKind` byte: `Pane` (0) or `Tab` (1) |
 | `sourceSessions` | a pane source: its one session. A tab source: **every** session of the tab as the client sees it, the first naming the tab |
-| `targetKind` | a `vtworkspace::MoveTargetKind` byte: `Edge` (0), `Swap` (1), `TabWell` (2), `NewWindow` (3) |
-| `targetSession` | `Edge` and `Swap`: the pane, by its session. `TabWell`: any session of the window whose tab strip receives it. `NewWindow`: 0 |
+| `targetKind` | a `vtworkspace::MoveTargetKind` byte: `Edge` (0), `Swap` (1), `TabWell` (2), `NewWorkspace` (3) |
+| `targetSession` | `Edge` and `Swap`: the pane, by its session. `TabWell`: any session of the workspace whose tab strip receives it. `NewWorkspace`: 0 |
 | `side` | `Edge` only: a `vtworkspace::SplitSide` byte |
-| `index` | `TabWell` only: the position among the window's tabs (clamped into range) |
+| `index` | `TabWell` only: the position among the workspace's tabs (clamped into range) |
 
 `vthost::applyMoveNode` (`vthost/NodeMove.*`, pure over the model, so every refusal is table-tested without
 a socket) reads both ends, and only then runs the `vtworkspace::SessionModel::moveNode` an in-process window
 runs. Kinds and sides are read through `std::to_underlying` tables, never cast. **No session is spawned or
 closed**, and a move is applied completely or not at all: it is validated before the model is touched, and a
 refusal fires no event. On success the model fires its events, and every attached client is pushed the new
-layouts; there is no reply PDU. An emptied tab closes, an emptied window is removed, the moved pane's
+layouts; there is no reply PDU. An emptied tab closes, an emptied workspace is removed, the moved pane's
 session takes focus in its new tab, and zoom is cleared on both tabs; a new split divides the target pane
 in half, a swap trades two places and each keeps its ratio.
 
-A `NewWindow` move is not made by the model alone. The daemon makes the window itself, through
-`MoveWindowHooks` (`SessionHost::createEmptyWindow`): the window gets its UUID binding like any
+A `NewWorkspace` move is not made by the model alone. The daemon makes the workspace itself, through
+`MoveWorkspaceHooks` (`SessionHost::createEmptyWorkspace`): the workspace gets its UUID binding like any
 other, and **the requesting connection is recorded as its creator**, so that the requester's follow scope
-adopts it (`WindowClaim::Yours`) and another attached GUI does not claim a window that is this client's own.
-The window then is the well of an ordinary tab-well move, and a refused move takes it away again
-(`discardWindow`) so a refusal leaves no empty window behind. A source that is already all of its window -- its
-only tab, or that tab's only pane -- is refused as the model's `NoOp` before any window is made
-(`SessionModel::fillsItsWindow`): moved, it would only tear its window down and build it again for every client. The same hook removes the window a move took
+adopts it (`WorkspaceClaim::Yours`) and another attached GUI does not claim a workspace that is this client's own.
+The workspace then is the well of an ordinary tab-well move, and a refused move takes it away again
+(`discardWorkspace`) so a refusal leaves no empty workspace behind. A source that is already all of its workspace -- its
+only tab, or that tab's only pane -- is refused as the model's `NoOp` before any workspace is made
+(`SessionModel::fillsItsWorkspace`): moved, it would only tear its workspace down and build it again for every client. The same hook removes the workspace a move took
 its last tab out of, once every client was pushed it empty — its UUID and creator go with it, and when it was
-the host's primary window, the lowest-id window left takes that role.
+the host's primary workspace, the lowest-id workspace left takes that role.
 
 A refusal is answered with **`MoveNodeRefused`** (tag 38, under the request's serial, only to a client that
 negotiated `MoveNode`), carrying the reason as a byte, `reason`, and after it `modelReason`: the
@@ -352,25 +352,25 @@ one that changes nothing says nothing at all, and anything else -- a move the cl
 it -- says the daemon could not move the pane. A success is answered by the layout pushes alone.
 
 **`LayoutBatchEnd`** (tag 39, gated on `Capability::LayoutBatch`) closes a push. One move fires several model
-events, and to a client without the capability the daemon pushes each followed window's layout once per event,
-some of them between the move's halves (the window the pane left shows it gone before the window it entered
-shows it arrived). Under the capability each event only marks the window it is in, and the batch it opens is
-pushed once the frame that made the change has handed control back to the loop: each marked window this client
-follows, once, as the change left it -- a marked window the change removed goes out with no tab, so the client
+events, and to a client without the capability the daemon pushes each followed workspace's layout once per event,
+some of them between the move's halves (the workspace the pane left shows it gone before the workspace it entered
+shows it arrived). Under the capability each event only marks the workspace it is in, and the batch it opens is
+pushed once the frame that made the change has handed control back to the loop: each marked workspace this client
+follows, once, as the change left it -- a marked workspace the change removed goes out with no tab, so the client
 closes its own window for it -- and then one `LayoutBatchEnd`. The PTYs are resized as each event is fanned
 out, before that, for every client alike, so they have their sizes before the client sees the layout. Its field `causeSerial` is the serial of the
 `MoveNode` whose effects the batch completes, 0 when no request of this client caused it. A client therefore
 reconciles one **settled snapshot** per batch (`NativeController::layoutsSettled`): the layouts it holds when
-the end arrives are the state the change left, across every window, and a session that none of them names is
+the end arrives are the state the change left, across every workspace, and a session that none of them names is
 gone, not in flight. The client that asked completes its move on the batch: the serials only grow per
 connection, so a batch ended by serial S completes every move it has in flight up to S
 (`NativeController::takeCompletedMoves`), including one that pushed nothing: the batch of a move is ended
-to the client that asked for it even when it follows none of the windows the move changed. A move whose window is never
+to the client that asked for it even when it follows none of the workspaces the move changed. A move whose workspace is never
 placed expires after five seconds instead of waiting for ever.
 
 Against a daemon without `LayoutBatch`, the client keeps the older **park and settle** path: a session a push
-dropped from every window is *parked* (`NativeController::parkSession`) rather than ended, and decided at the
-end of the read that brought the frame: if a later layout names it, its window takes over the same
+dropped from every workspace is *parked* (`NativeController::parkSession`) rather than ended, and decided at the
+end of the read that brought the frame: if a later layout names it, its workspace takes over the same
 `TerminalSession`; if not, it is closed. That is correct, but it can only guess at the end of a push, which is
 why the batch marker exists.
 
@@ -401,10 +401,10 @@ note, so a drop is never half done. `MergeTabIntoSplit` stays for as long as suc
 
 **tmux control mode.** A `contour client --tmux` window is a gateway, not a model the GUI can move into, so a
 drop there is refused on the client (`MoveRefusal::Tmux`). On the serving side, `tmux::ControlSession`, which
-mirrors the model to a tmux client, treats a move as the layout change it is: `tabMovedToWindow` raises
+mirrors the model to a tmux client, treats a move as the layout change it is: `tabMovedToWorkspace` raises
 `%sessions-changed` and a `%layout-change` for the tab, and `paneSwapped` the layout change alone.
 
-**Persistence.** `WorkspacePersistence` observes the model, and `tabMovedToWindow` is one of the events it
+**Persistence.** `WorkspacePersistence` observes the model, and `tabMovedToWorkspace` is one of the events it
 takes as a `SnapshotTrigger::LayoutChanged`, so a move is saved with the next layout snapshot and a restored
 workspace has the arrangement the user left (see [Workspace snapshots](#workspace-snapshots)).
 
@@ -441,12 +441,12 @@ skipped rather than written onto.
 
 The same pairing carries a tab's presentation both ways, compared as one
 `vthost::client::TabPresentation` (active and zoomed pane by session, title, colour, and whether the
-tab is its window's active one). **Outbound**, the five model events that can change it
+tab is its workspace's active one). **Outbound**, the five model events that can change it
 (`activePaneChanged`, `paneZoomChanged`, `tabTitleChanged`, `tabColorChanged`, `activeTabChanged`)
 call `SessionFactory::reportTabPresentation`, which names the panes by their ptys, since only the
 factory knows what a pty is bound to; `NativeController` translates them to sessions and sends one
 `EditTab` per field `tabEditsToReport` finds different. It compares with the last `LayoutState` for
-the tab, or with what it reported since, until the next push of that window: a zoom also retitles a
+the tab, or with what it reported since, until the next push of that workspace: a zoom also retitles a
 tab, and the second report must not send the zoom again. **Inbound**, `applyRemoteLayout`'s last pass
 runs `tabEditsToReport` the other way round — what the daemon has that the local tab has not — and
 applies the edits to the local model through the daemon's own `applyTabEdit`, with the sessions
@@ -775,7 +775,7 @@ break to remove.
 profile (history depth, reported terminal identity, reflow, grapheme clustering, frozen modes, image
 registers, sixel scrolling; never the page size, which `ResizeRequest` negotiates). The daemon applies it over its own
 settings, validating every field, and hands the result to the sessions *that connection* creates:
-`CreateTab`, `SplitPane`, `NewWindow`, and the first session an attach to an empty daemon spawns.
+`CreateTab`, `SplitPane`, `NewWorkspace`, and the first session an attach to an empty daemon spawns.
 Sessions that already exist are never re-emulated, which is what makes two clients on different
 profiles conflict-free rather than a race — an application that already read DA1 cannot be told its
 terminal changed identity. A client whose configuration changed restates its preference with
@@ -1028,56 +1028,56 @@ history. The mirror terminal adds the origin to every cell it reports in a mouse
 release (`vtbackend::Terminal::setReportedCellOrigin`), so a click lands on the cell the application
 drew there, not on the client's own cell.
 
-### Which windows a client sees
+### Which workspaces a client sees
 
-A grid is shared; a *window* need not be. A client states an attach intent in its `ClientHello`
+A grid is shared; a *workspace* need not be. A client states an attach intent in its `ClientHello`
 (`proto::AttachIntent`, honoured only when both ends share `Capability::AttachIntent`), and the
 daemon decides with the pure `vthost::planAttach` what that connection follows and what attaching
 creates:
 
 | Intent | Follows | Creates |
 | --- | --- | --- |
-| `AllWindows` (no capability: every client before intents) | every window, later ones included (`FollowScope::Every`) | the first tab, on an empty daemon |
-| `Launch`, no other client attached | every window with a tab | the first tab, on an empty daemon |
-| `Launch`, another client attached | a new window of its own | that window |
-| `NewWindow` | a new window of its own | that window |
-| `Windows` | the listed windows that exist (possibly none) | nothing |
-| `Resume` | the listed windows that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
+| `AllWorkspaces` (no capability: every client before intents) | every workspace, later ones included (`FollowScope::Every`) | the first tab, on an empty daemon |
+| `Launch`, no other client attached | every workspace with a tab | the first tab, on an empty daemon |
+| `Launch`, another client attached | a new workspace of its own | that workspace |
+| `NewWorkspace` | a new workspace of its own | that workspace |
+| `Workspaces` | the listed workspaces that exist (possibly none) | nothing |
+| `Resume` | the listed workspaces that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
 
 "Another client" is `SessionHost::connectedClients()`: handshaken native `Attach` connections,
 counted after the plan (so a connection never counts against itself) and uncounted as the
 connection is destroyed. It is deliberately not the daemon's `ClientCensus`, which counts tmux and
 imsg clients too, for idle exit: a tmux gateway attached must not turn the first GUI's launch into
-a second window.
+a second workspace.
 
-The handshake runs negotiate → plan → create → `ServerHello` (whose `followedWindows` names the
-windows followed) → `LayoutState` per followed window → snapshots of their sessions. The plan runs
+The handshake runs negotiate → plan → create → `ServerHello` (whose `followedWorkspaces` names the
+workspaces followed) → `LayoutState` per followed workspace → snapshots of their sessions. The plan runs
 after the hello's client area is applied, so whatever it spawns spawns at the client's size. Nothing
 reaches the peer before its `ServerHello`. From then on a connection is sent the layout, screens,
-resizes, bells, notifications and clipboard writes of followed windows only; a window that closes
+resizes, bells, notifications and clipboard writes of followed workspaces only; a workspace that closes
 leaves the set.
 
-A window gains followers in two ways. One a connection creates (its `NewWindow`, or the window a
+A workspace gains followers in two ways. One a connection creates (its `NewWorkspace`, or the workspace a
 launch made for it) is *claimed* for it in `SessionHost` before its first tab is announced, and that
-connection follows it. A window nobody claims — one the control API creates — is followed by the
+connection follows it. A workspace nobody claims — one the control API creates — is followed by the
 **primary viewer**, the connection whose `Launch`/`Resume` found no other client attached: `contour
-new` then appears in the GUI the user launched first, not in none. A claimed window stays claimed
-after its creator leaves, so a second GUI never inherits the first one's window; it waits for the
-next launch that takes every window. Each window joining a connection's set is sent its sessions'
+new` then appears in the GUI the user launched first, not in none. A claimed workspace stays claimed
+after its creator leaves, so a second GUI never inherits the first one's workspace; it waits for the
+next launch that takes every workspace. Each workspace joining a connection's set is sent its sessions'
 snapshots, since a quiet session would otherwise produce nothing to send.
 
-A client that loses its connection keeps its windows. `vthost::client::ClientSupervisor` opens every
+A client that loses its connection keeps its workspaces. `vthost::client::ClientSupervisor` opens every
 connection through an `ITransportFactory` (`Transport.hpp`), and after a loss reconnects with backoff
-(250 ms doubling to 5 s), each new connection stating `Resume` of the windows the lost one followed —
-or `AllWindows` again for a client that attached with it, so a reconnect never narrows its view.
-Window and session ids count from 1 in every run of a daemon, so the ids alone cannot tell a restarted
-daemon's window 1 from the one the client showed: the `ServerHello` states `daemonInstance`, drawn at
-random as the daemon starts, and a client that meets another instance takes every window it showed for
-lost. That is also why `Resume` does not take an empty window for a survivor — a restarted daemon's own
-primary window holds no tab yet. The GUI (`contour::remote::NativeController`) keeps every pane and pty
+(250 ms doubling to 5 s), each new connection stating `Resume` of the workspaces the lost one followed —
+or `AllWorkspaces` again for a client that attached with it, so a reconnect never narrows its view.
+Workspace and session ids count from 1 in every run of a daemon, so the ids alone cannot tell a restarted
+daemon's workspace 1 from the one the client showed: the `ServerHello` states `daemonInstance`, drawn at
+random as the daemon starts, and a client that meets another instance takes every workspace it showed for
+lost. That is also why `Resume` does not take an empty workspace for a survivor — a restarted daemon's own
+primary workspace holds no tab yet. The GUI (`contour::remote::NativeController`) keeps every pane and pty
 while reconnecting, drops what is typed meanwhile rather than replaying it into whatever shell answers
-next, restarts each pane's mirror for the new connection's snapshots, and reports the lost windows
-(`windowsLost`) with the first window that came instead, so it can close them without closing the last
+next, restarts each pane's mirror for the new connection's snapshots, and reports the lost workspaces
+(`workspacesLost`) with the first workspace that came instead, so it can close them without closing the last
 one.
 
 A connection gone half-open (a laptop that changed networks, a host that vanished) produces no EOF, so
@@ -1102,7 +1102,7 @@ suspended, so there is nothing to detect and no false loss either. A late tick o
 
 ### Control channel
 
-The daemon's control API (`src/vtcontrol`: windows, tabs, panes and command blocks, named by UUID,
+The daemon's control API (`src/vtcontrol`: workspaces, tabs, panes and command blocks, named by UUID,
 spoken in strict JSON) travels on the native connection, not on a listener of its own, so it inherits
 that endpoint's whole access rule and phase 5's `--stdio` relay. A caller connects with the
 **Control** role, which never views: no first session is spawned for it, it is sent no layout, no
@@ -1226,7 +1226,7 @@ echo there, so the lock appears without waiting for output. A value the client d
 
 The host's configuration owns what runs; the client's owns how it looks. A client names a
 **profile** — in its `ClientHello` (`profileName`), or on a spawning verb (`CreateTab`, `SplitPane`,
-`NewWindow`, whose name overrides the connection's for that one spawn) — and the daemon resolves the
+`NewWorkspace`, whose name overrides the connection's for that one spawn) — and the daemon resolves the
 name in its own configuration through `vthost::ProfileCatalog` (`contour::cli::ConfigProfileCatalog`
 for `contour daemon`). The resolved profile supplies the session's settings and its whole shell:
 program, arguments, working directory and environment — the shell the in-process GUI spawns for that
@@ -1292,7 +1292,7 @@ single shutdown log line names it:
 | `Idle`              | an `ExitWhenIdle` daemon with nothing to serve for its grace period           | `idle`                           |
 | `StopRequested`     | a Control connection's `StopDaemon` with reason `User`                        | `stop requested`                 |
 | `UpgradeRestart`    | a Control connection's `StopDaemon` with reason `UpgradeRestart`              | `restart for upgrade`            |
-| `StopRequestedKeepingWorkspace` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspace` | `stop requested, keeping the workspace` |
+| `StopRequestedKeepingWorkspace` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspaces` | `stop requested, keeping the workspace` |
 
 All of them funnel into one `ShutdownFunnel`, which runs on the loop thread and runs once: a second
 request — a `SIGTERM` racing a `StopDaemon` — logs nothing and does nothing. The shutdown first calls
@@ -1393,7 +1393,7 @@ The last-session path is unaffected (its sessions are already gone by then).
 
 ### Workspace snapshots
 
-A daemon whose `DaemonConfig::persistence` names a file keeps its workspace there
+A daemon whose `DaemonConfig::persistence` names a file keeps its workspaces there
 (`SessionSnapshotStore`), and offers `Capability::WorkspaceRestore` (8) while it does; that
 capability is what turns `client::layoutSurvivesRestart` to `Restored`, and with it the drift
 confirmation's text. `runDaemon` wires it in this order:
@@ -1409,7 +1409,7 @@ confirmation's text. `runDaemon` wires it in this order:
 4. the funnel's hook runs `finalize(workspaceFor(cause))` and only then the caller's
    `beforeShutdown`. `workspaceFor` discards for `StopRequested` alone: a signal is how a reboot ends
    the daemon, a last session may have been killed by it, and `--keep-snapshot` is
-   `StopReason::UserKeepingWorkspace` (2), which a daemon that predates it refuses rather than reads
+   `StopReason::UserKeepingWorkspaces` (2), which a daemon that predates it refuses rather than reads
    as a plain stop. The CLI therefore sends it only to a daemon whose hello offered
    `WorkspaceRestore`.
 
@@ -1423,8 +1423,8 @@ not know are skipped; absent trailing fields keep their defaults — phase 1's P
 ```
 File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
 Magic    := the 8 bytes "CTRSNAP\n"
-Body     := TakenAt:svarint(unix seconds) WindowCount:varint Window{WindowCount}
-Window   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+Body     := TakenAt:svarint(unix seconds) WorkspaceCount:varint Workspace{WorkspaceCount}
+Workspace := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
 Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
 Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
 Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?

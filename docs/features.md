@@ -17,7 +17,7 @@
 :material-check-bold:{.check-mark}  [Drag and drop](demo/drag-and-drop.md): drop a tab on a pane edge to split it, or files to type their escaped paths <br/>
 :material-check-bold:{.check-mark}  [Clickable links](configuration/links.md): URLs, file paths and your own patterns in whatever a program prints, opened with <kbd>Ctrl</kbd>+click <br/>
 :material-check-bold:{.check-mark}  A find bar with a live match count, floating over the pane being searched <br/>
-:material-check-bold:{.check-mark}  [Control API](control-api.md) and the `contour ls`, `new`, `split`, `send`, `pane capture` and `block` commands to script the daemon's windows, tabs, panes and command blocks <br/>
+:material-check-bold:{.check-mark}  [Control API](control-api.md) and the `contour ls`, `new`, `split`, `send`, `pane capture` and `block` commands to script the daemon's workspaces, tabs, panes and command blocks <br/>
 :material-check-bold:{.check-mark}  [MCP server](control-api.md) (`contour mcp`): coding agents such as Claude Code and Codex split panes, run commands and read their output in their own tab <br/>
 :material-check-bold:{.check-mark}  Sandboxed WebAssembly [status-line extensions](extensions.md) <br/>
 :material-check-bold:{.check-mark}  [Quick terminal](quick-terminal.md): a global hotkey slides a terminal down from the top of the screen <br/>

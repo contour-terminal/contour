@@ -9,6 +9,10 @@ moves your sessions into a **background process**, so they survive the window th
 Close the window, reattach later, or attach from another machine — the shells keep running
 either way.
 
+**Terms.** The *daemon* is the background process. A *workspace* is what it holds: a set of tabs, each a
+arrangement of panes. A *window* is an operating-system window of the Contour GUI, which shows one
+workspace; closing the window leaves the workspace and its shells with the daemon.
+
 That buys you three things:
 
 - A long build, a database migration or a training run keeps going after you close the window —
@@ -182,7 +186,7 @@ contour --daemon-mode required     # this launch only: fail rather than fall bac
 ### What a launch opens
 
 An attaching launch opens one new window beside whatever the daemon already shows. When no other
-window is attached to the daemon, it instead brings every window the daemon holds back, so reopening
+window is attached to the daemon, it instead brings every workspace the daemon holds back, so reopening
 Contour after closing its last window finds your sessions where you left them.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
@@ -191,7 +195,7 @@ under `auto`; under `required` it ends before any window, since a daemon session
 ### When the connection is lost
 
 A window attached to a daemon keeps its panes when the connection drops. They show "Reconnecting…"
-while the window reconnects with backoff (250 ms doubling to 5 s) and picks its windows up again. A
+while the window reconnects with backoff (250 ms doubling to 5 s) and picks its workspaces up again. A
 connection gone half-open — a laptop that changed networks — is noticed by a heartbeat within about
 15 s instead of whenever TCP gives up. Input typed while disconnected is dropped rather than replayed
 into whatever shell answers next. A launch that falls back to `in_process` has no connection to lose.
@@ -201,7 +205,7 @@ into whatever shell answers next. A launch that falls back to `in_process` has n
 | Option | What it does |
 | --- | --- |
 | `--socket PATH`, `--label NAME` | Which daemon to attach to; same resolution as above, `daemon.socket` of the client's configuration included. |
-| `--window ID` | Show only the daemon window `ID` instead of opening a new one; fails, naming it, when the daemon has no such window. |
+| `--workspace ID` | Show only the daemon workspace `ID` instead of opening a new one; fails, naming it, when the daemon has no such workspace. |
 | `--size-policy POLICY` | The policy a daemon this client auto-starts runs with; defaults to `daemon.size_policy`. |
 | `--tmux` | Attach to a **real tmux server** instead of a Contour daemon. See [tmux interoperability](#tmux-interoperability). |
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |
@@ -304,9 +308,9 @@ read,screen ci-reader s3cret
 all admin-token
 ```
 
-A line is a grant list — `all`, or a comma list of `read` (look at the workspace), `screen` (read
+A line is a grant list — `all`, or a comma list of `read` (look at the workspaces), `screen` (read
 what is on screen and in command blocks), `input` (type into a pane) and `write` (change the
-workspace, stop the daemon) — one space, then the token, which may contain spaces. Carriage returns
+workspaces, stop the daemon) — one space, then the token, which may contain spaces. Carriage returns
 and trailing whitespace are dropped, as for `--token-file`; blank lines and lines starting with `#`
 are ignored. An unknown grant, an empty token or a token that appears twice stops the daemon from
 starting, naming the line. The file adds tokens beside `--token`/`--token-file`, never instead of
@@ -315,7 +319,7 @@ the access file means removing `--token` as well. A line that repeats the `--tok
 from starting too, since its narrower grants would silently read as everything.
 
 Running a program is typing it: `tab.create` and `pane.split` with a `command` need `input` as well
-as `write`, so a token granted `read,screen,write` can open shells and rearrange the workspace but
+as `write`, so a token granted `read,screen,write` can open shells and rearrange the workspaces but
 cannot run a program of its choosing in it.
 Events follow the same grants: `block.finished` carries the command line and needs `screen`, so a
 subscription of a `read` token is handed every other kind but that one, and a subscribe naming only
@@ -408,36 +412,36 @@ know it was stopped on purpose rather than restarting it.
     Persistence is against the *client*, not against the daemon process. Stopping the daemon ends
     every shell it hosts. Shutdown is abrupt by design — attached clients see the connection close
     with no goodbye, exactly as a real `tmux kill-server` looks to them. What comes back after a
-    reboot, a crash or an upgrade is the *workspace* — see [Surviving reboots](#surviving-reboots).
+    reboot, a crash or an upgrade are the *workspaces* — see [Surviving reboots](#surviving-reboots).
 
 ## Surviving reboots
 
-A daemon keeps a snapshot of its workspace, so that after a reboot, a crash or an upgrade the next
+A daemon keeps a snapshot of its workspaces, so that after a reboot, a crash or an upgrade the next
 daemon brings it back. The shells themselves cannot survive their daemon; what returns is:
 
-- every window, tab and split, with its ratios, the active tab and pane, and a zoomed pane;
+- every workspace, tab and split, with its ratios, the active tab and pane, and a zoomed pane;
 - tab titles and the tab colours you set;
 - each pane's working directory and profile;
 - the newest lines of each pane's scrollback, under a dim marker row such as
   `── restored · snapshot of 2026-10-24 09:15 ──`, followed by a fresh shell.
 
-The snapshot is written every `interval` seconds while the workspace changes, at once when you close
+The snapshot is written every `interval` seconds while the workspaces change, at once when you close
 a pane or a tab, and once more as the daemon ends. It is **restored** when a daemon starts and finds
 one: after a reboot, a crash, a `SIGTERM`, an idle exit, or the restart the drift chip offers after
 an upgrade (see [After upgrading Contour](#after-upgrading-contour)). It is **not restored** after a
 plain `contour daemon stop`, which empties it, and panes and tabs you closed are not brought back.
 
 ```sh
-contour daemon stop                   # ends the shells and discards the workspace
-contour daemon stop --keep-snapshot   # ends the shells; the next daemon restores the workspace
+contour daemon stop                   # ends the shells and discards the workspaces
+contour daemon stop --keep-snapshot   # ends the shells; the next daemon restores the workspaces
 ```
 
-With no daemon running, `contour daemon stop` still offers to empty the saved workspace, so a daemon
-started later does not bring back what you meant to end. Since a crash may have left that workspace as
+With no daemon running, `contour daemon stop` still offers to empty the saved workspaces, so a daemon
+started later does not bring back what you meant to end. Since a crash may have left those workspaces as
 all you have, it asks first, unless `--yes` is given, and without a terminal to ask on it clears
 nothing and tells you to pass `--yes`. It exits with status 4 as before, whether it cleared the
-workspace or you kept it; with nothing saved it says so and creates no file. A
-daemon from a release before this feature keeps no workspace: `--keep-snapshot` then says so and
+workspaces or you kept them; with nothing saved it says so and creates no file. A
+daemon from a release before this feature keeps no workspaces: `--keep-snapshot` then says so and
 stops it plainly.
 
 A program is never started again by itself. Only one you list in `rerun_programs` is run once more
@@ -451,7 +455,7 @@ daemon:
     scrollback: true          # bring the scrollback back
     scrollback_lines: 1000    # the most lines kept per pane, 0 to 100000
     rerun_programs: []        # e.g. [vim, htop]; nothing is re-run unless listed
-    interval: 30              # seconds between writes of a changed workspace, at least 5
+    interval: 30              # seconds between writes of changed workspaces, at least 5
 ```
 
 `scrollback_lines` bounds the snapshot only; how much scrollback a session holds while it runs stays
@@ -460,7 +464,7 @@ daemon:
 The snapshot is `<state-dir>/sessions/<label>.snapshot` (the state directory is listed under
 [Platform notes](#platform-notes)); a daemon started with `--label work` keeps `work.snapshot`. A
 daemon given a socket of its own, by `--socket` or `$CONTOUR_MUX`, keeps `<label>@<hash>.snapshot`
-instead, the hash naming its socket, so it never restores or overwrites the workspace of the daemon
+instead, the hash naming its socket, so it never restores or overwrites the workspaces of the daemon
 its label runs; `contour daemon stop --socket` finds the same file. The
 file is your user's alone: mode `0600` in a `0700` directory on Linux, macOS and BSD, and a protected
 ACL granting only your account on Windows. It is replaced atomically and durably: each write is
@@ -596,7 +600,7 @@ When the daemon's release differs from the client's, the window shows a quiet ch
 `daemon 0.8.1 is older than this client`. For a local daemon that supports it, clicking it offers
 **Upgrade daemon (keeps your programs running)**; see [Live upgrade](#live-upgrade) below. Otherwise
 it offers **Restart daemon on the new version**. The confirmation says what that costs: it **ends
-every shell the daemon hosts**, and a fresh one opens on the new daemon. A daemon that keeps its workspace brings your windows, tabs,
+every shell the daemon hosts**, and a fresh one opens on the new daemon. A daemon that keeps its workspaces brings your workspaces, tabs,
 directories and scrollback back, and the confirmation says so (see
 [Surviving reboots](#surviving-reboots)). After the restart a new Contour window attaches to the new
 daemon, and this one closes. The chip is shown
@@ -614,7 +618,7 @@ a running process's binary: there the daemon starts the new release beside itsel
 session, and ends once the new release has taken over. The daemon's process ID changes; every shell's and
 program's does not, nor does its console. Each session's screens, scrollback, images,
 cursor and modes, and an escape sequence cut in half by the switch (up to a bound, below), come across
-as they were; so do your windows, tabs and splits. The windows show `Upgrading daemon…` for a moment and reconnect by
+as they were; so do your workspaces, tabs and splits. The windows show `Upgrading daemon…` for a moment and reconnect by
 themselves.
 
 Start it from the chip, or from a shell or script:
@@ -701,7 +705,7 @@ since it exits 10 seconds after its last session and client are gone.
   `daemon.default_cell_pixel_size` until one reports. With a per-pane font zoom, or windows on
   monitors of different DPI, every pane other than the last-reporting one lays its images out for
   *that* pane's cell, so they come out larger or smaller than its own cells would make them.
-- Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspace comes back
+- Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspaces come back
   without them (see [Surviving reboots](#surviving-reboots)).
 - **ssh attach needs key or agent authentication.** Contour never answers an ssh prompt — a
   password, a key passphrase, a second factor or an unknown host key — so run `ssh USER@HOST` once
