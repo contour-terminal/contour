@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/InputEcho.hpp>
+#include <vtpty/SpawnSpec.hpp>
 
 #include <gsl/pointers>
 
@@ -58,6 +59,16 @@ bool applyTerminalSettings(int fd, termios const& tio);
 /// @return Nothing; or why a flag could not be set -- invalid_argument for any other flag, as pipe2()
 ///         refuses one.
 [[nodiscard]] std::expected<void, std::error_code> applyCreationFlags(int fd, unsigned flags) noexcept;
+
+/// Makes @p slaveFd the calling process's controlling terminal and standard streams: what login_tty() does,
+/// with the signal mask emptied and the dispositions a shell expects reset to default first.
+/// @param slaveFd The terminal's slave descriptor; left open, also where it is above 2.
+/// @param ctty Whether the terminal becomes the controlling terminal (TIOCSCTTY); a sandbox such as
+///        flatpak forbids it.
+/// @return Nothing; or why the terminal could not be made the controlling one -- the standard streams are
+///         then left as they were.
+[[nodiscard]] std::expected<void, std::error_code> loginTerminal(int slaveFd,
+                                                                 ControllingTerminal ctty) noexcept;
 
 void saveClose(gsl::not_null<int*> fd) noexcept;
 void saveDup2(int a, int b) noexcept;

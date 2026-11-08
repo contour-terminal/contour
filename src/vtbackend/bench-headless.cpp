@@ -13,6 +13,7 @@
 #include <vtpty/MockViewPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
 
 #include <crispy/BufferObject.hpp>
 
@@ -3187,6 +3188,9 @@ class ContourHeadlessBench: public core::cli::App
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     // Before anything starts a thread: on Linux the counters follow the threads started after they open.
     auto const counters = core::platform::makeDefaultCpuCounterSource();
     ContourHeadlessBench app { core::defaultEnvironment(), *counters };

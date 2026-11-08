@@ -170,42 +170,13 @@ bool UnixPty::Slave::login()
     if (!configure())
         return false;
 
-    // This is doing what login_tty() is doing, too.
-    // But doing it ourselves allows for a little more flexibility.
-    // return login_tty(_slaveFd) == 0;
-
-    sigset_t signals;
-    sigemptyset(&signals);
-    pthread_sigmask(SIG_SETMASK, &signals, nullptr);
-
-    // clang-format off
-    struct sigaction act {};
-    act.sa_handler = SIG_DFL;
-    // clang-format on
-
-    for (auto const signo: { SIGCHLD, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGALRM })
-        sigaction(signo, &act, nullptr);
-
-    setsid();
-
-#ifdef TIOCSCTTY
     // Set the controlling terminal, unless we are running inside a flatpak.
     // Because flatpak does not allow setting the controlling terminal.
     // - https://github.com/flatpak/flatpak/issues/3697
     // - https://github.com/flatpak/flatpak/issues/3285
-    if (!Process::isFlatpak())
-    {
-        if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
-            return false;
-    }
-#endif
-
-    for (int const fd: { 0, 1, 2 })
-    {
-        if (_slaveFd != fd)
-            ::close(fd);
-        util::saveDup2(_slaveFd, fd);
-    }
+    auto const ctty = Process::isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire;
+    if (!util::loginTerminal(_slaveFd, ctty))
+        return false;
 
     if (_slaveFd > 2)
         _slaveFd.close();

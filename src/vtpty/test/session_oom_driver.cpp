@@ -20,6 +20,7 @@
 #include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SdBusScopeBus.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
@@ -370,6 +371,9 @@ int reportPlacements(std::string_view unitPrefix)
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     auto const arguments = std::span { argv, static_cast<std::size_t>(argc) };
     if (arguments.size() != 2)
         return ExitUsage;

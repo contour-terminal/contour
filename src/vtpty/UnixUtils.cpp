@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -17,6 +18,8 @@
 #ifdef __linux__
     #include <sys/syscall.h>
 #endif
+
+#include <sys/ioctl.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -176,6 +179,42 @@ void closeDescriptorsAbove(int keepFd, int limit, DescriptorSweep first) noexcep
             [[fallthrough]];
         case DescriptorSweep::Bounded: closeBounded(keepFd, limit); return;
     }
+}
+
+std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTerminal ctty) noexcept
+{
+    // This is doing what login_tty() is doing, too.
+    // But doing it ourselves allows for a little more flexibility.
+
+    sigset_t signals;
+    sigemptyset(&signals);
+    pthread_sigmask(SIG_SETMASK, &signals, nullptr);
+
+    // clang-format off
+    struct sigaction act {};
+    act.sa_handler = SIG_DFL;
+    // clang-format on
+
+    for (auto const signo: { SIGCHLD, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGALRM })
+        sigaction(signo, &act, nullptr);
+
+    setsid();
+
+#ifdef TIOCSCTTY
+    if (ctty == ControllingTerminal::Acquire && ioctl(slaveFd, TIOCSCTTY, nullptr) == -1)
+        return std::unexpected(lastError());
+#else
+    (void) ctty;
+#endif
+
+    for (int const fd: { 0, 1, 2 })
+    {
+        if (slaveFd != fd)
+            ::close(fd);
+        saveDup2(slaveFd, fd);
+    }
+
+    return {};
 }
 
 } // namespace vtpty::util

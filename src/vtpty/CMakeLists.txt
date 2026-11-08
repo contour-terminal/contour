@@ -32,6 +32,8 @@ set(vtpty_SOURCES
     PtyAdoption.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
+    SpawnSpec.cpp
+    SpawnTrampoline${PLATFORM_SUFFIX}.cpp
     SshFailureMessage.cpp
     WindowsCommandLine.cpp
 )
@@ -59,6 +61,8 @@ set(vtpty_HEADERS
     SandboxInfo.hpp
     ScopeBus.hpp
     SpawnLadder.hpp
+    SpawnSpec.hpp
+    SpawnTrampoline.hpp
     SshFailureMessage.hpp
     WindowsCommandLine.hpp
     Win32Handle.hpp
@@ -165,6 +169,8 @@ if(VTPTY_TESTING)
         PtyAdoption_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
+        SpawnSpec_test.cpp
+        SpawnTrampoline_test.cpp
         WindowsCommandLine_test.cpp
         test/PtyReading_test.cpp
     )

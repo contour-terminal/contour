@@ -1768,7 +1768,7 @@ if(CONTOUR_TESTING)
     if(WIN32)
         add_executable(contour_manifest_test
             test/core_test_main.cpp test/ApplicationManifest_test.cpp test/VersionInfo_test.cpp)
-        target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2 contour_test_trace)
+        target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2 contour_test_trace vtpty)
         target_link_libraries(contour_manifest_test PRIVATE version)
         target_compile_definitions(contour_manifest_test PRIVATE
             CONTOUR_BINARY="$<TARGET_FILE:contour>"
@@ -1804,7 +1804,7 @@ if(CONTOUR_TESTING)
             # replace it. Opens a real window briefly, so it needs the desktop and runs alone.
             add_executable(contour_restart_manager_test test/core_test_main.cpp test/RestartManager_test.cpp)
             target_link_libraries(contour_restart_manager_test PRIVATE
-                core::base core::testing Catch2::Catch2 contour_test_trace rstrtmgr)
+                core::base core::testing Catch2::Catch2 contour_test_trace rstrtmgr vtpty)
             target_compile_definitions(contour_restart_manager_test PRIVATE
                 CONTOUR_BINARY="$<TARGET_FILE:contour>")
             add_dependencies(contour_restart_manager_test contour)
