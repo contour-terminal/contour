@@ -2,6 +2,7 @@
 #include <vthost/tmux/ControlModeSpawn.hpp>
 
 #include <vtpty/ProgramLookup.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
 
 #include <core/net/Sockets.hpp>
 
@@ -11,10 +12,13 @@
     #include <sys/wait.h>
 
     #include <algorithm>
+    #include <array>
     #include <cerrno>
     #include <csignal>
     #include <ranges>
     #include <vector>
+
+    #include <fcntl.h>
 
     #ifdef __APPLE__
         #include <util.h>
@@ -48,18 +52,11 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::Event
                                                                 vtpty::ProgramSearch const& search,
                                                                 vtpty::ProcessPlacement& placement)
 {
-    // Everything the child uses is made here. Between forkpty() and exec() a child of this multi-threaded
-    // process may only call async-signal-safe functions: no allocation, and no PATH walk, which execvp()
-    // does.
+    // The program's image and arguments are resolved here; the trampoline, single-threaded, does the rest of
+    // the child-side setup that a forked child of this multi-threaded process could not do safely.
     auto const image = vtpty::findProgram("tmux", search);
     if (!image)
         return std::unexpected(std::format("tmux was not found on PATH ({})", search.path));
-    auto arguments = controlModeArguments(tmuxSocket);
-    auto argv = std::vector<char*> {};
-    argv.reserve(arguments.size() + 1);
-    for (auto& argument: arguments)
-        argv.push_back(argument.data());
-    argv.push_back(nullptr);
 
     // Parked on a gate, as a session's shell is, until the placement has moved it into a scope of its own.
     auto gate = vtpty::makeGate();
@@ -68,17 +65,32 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::Event
             std::format("could not make the tmux client's gate: {}", gate.error().message()));
 
     auto master = -1;
-    auto const pid = ::forkpty(&master, nullptr, nullptr, nullptr);
-    if (pid < 0)
-        return std::unexpected(std::format("forkpty failed: errno {}", errno));
-    if (pid == 0)
+    auto slave = -1;
+    if (::openpty(&master, &slave, nullptr, nullptr, nullptr) < 0)
+        return std::unexpected(std::format("openpty failed: errno {}", errno));
+    for (auto const fd: { master, slave })
+        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+    auto spec = vtpty::SpawnSpec {};
+    spec.mode = vtpty::SpawnMode::Terminal;
+    spec.image = *image;
+    spec.argv = controlModeArguments(tmuxSocket);
+    spec.lookup = vtpty::ExecLookup::ExactPath;
+    spec.controllingTerminal = vtpty::ControllingTerminal::Acquire;
+    spec.terminalSettings = vtpty::TerminalSettings::Keep;
+    spec.failureReport = vtpty::FailureReport::Silent;
+    auto const fds = std::array {
+        vtpty::InheritedFd { vtpty::TrampolineSlot::Gate, gate->childEnd.get() },
+        vtpty::InheritedFd { vtpty::TrampolineSlot::Terminal, slave },
+    };
+    auto const spawned = vtpty::spawnTrampoline(std::move(spec), fds);
+    ::close(slave);
+    if (!spawned)
     {
-        ::close(gate->parentEnd.get());
-        vtpty::awaitGateRelease(gate->childEnd.get());
-        ::close(gate->childEnd.get());
-        ::execv(image->c_str(), argv.data());
-        ::_exit(127);
+        ::close(master);
+        return std::unexpected(std::format("could not spawn the tmux client: {}", spawned.error().message()));
     }
+    auto const pid = *spawned;
     gate->childEnd.reset();
     placement.placeThenRelease(vtpty::ParkedChild {
         pid, vtpty::openPidFd(pid), std::move(gate->parentEnd), vtpty::ProcessRole::TmuxClient });
