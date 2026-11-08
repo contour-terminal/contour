@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/grid/LineSoA.hpp>
+#include <vtbackend/grid/Line.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 
@@ -8,6 +8,7 @@
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
@@ -144,10 +145,11 @@ struct SoftFontHarness
     std::unique_ptr<NativeClient> client;
 };
 
-Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready)
+/// Polls until @p ready holds, failing the scenario when it never does.
+Task<void> requireUntil(core::net::EventLoop* loop, std::function<bool()> ready)
 {
-    for (auto i = 0; i < 2000 && !ready(); ++i)
-        co_await loop->delay(1ms);
+    auto const reached = co_await core::net::testing::waitUntil(loop, std::move(ready), 2000);
+    REQUIRE(reached);
 }
 
 Task<void> drive(SoftFontHarness* h, Task<void> scenario)
@@ -161,22 +163,11 @@ Task<void> drive(SoftFontHarness* h, Task<void> scenario)
 /// @return The soft glyph the cell at (@p line, @p column) of @p terminal's main page shows, if any.
 std::optional<vtbackend::SoftGlyphRef> softGlyphAt(vtbackend::Terminal& terminal, int line, uint16_t column)
 {
-    auto const& storage = terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(line)).storage();
-    if (!storage.softGlyphs)
-        return std::nullopt;
-    auto const it = storage.softGlyphs->find(column);
-    if (it == storage.softGlyphs->end())
-        return std::nullopt;
-    return it->second;
-}
-
-/// @return The glyph of @p terminal's font @p font at @p position, or null.
-std::shared_ptr<vtbackend::SoftGlyph const> glyphOf(vtbackend::Terminal& terminal,
-                                                    uint8_t font,
-                                                    uint8_t position)
-{
-    auto const resolved = terminal.softFonts().font(font);
-    return resolved ? resolved->glyphs[position - 0x20] : nullptr;
+    return terminal.primaryScreen()
+        .grid()
+        .lineAt(vtbackend::LineOffset(line))
+        .useCellAt(vtbackend::ColumnOffset::cast_from(column))
+        .softGlyph();
 }
 
 } // namespace
@@ -189,11 +180,14 @@ TEST_CASE("a font defined before attach reaches the client", "[vthost][softfont]
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] { return glyphOf(*h->mirror, 1, 0x21) != nullptr; });
-        co_await waitUntil(&h->loop, [&] { return softGlyphAt(*h->mirror, 0, 2).has_value(); });
+        co_await requireUntil(&h->loop, [&] {
+            return h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 }) != nullptr;
+        });
+        co_await requireUntil(&h->loop, [&] { return softGlyphAt(*h->mirror, 0, 2).has_value(); });
 
-        auto const serverGlyph = glyphOf(*h->serverTerminal(session), 1, 0x21);
-        auto const mirrorGlyph = glyphOf(*h->mirror, 1, 0x21);
+        auto const serverGlyph =
+            h->serverTerminal(session)->softFonts().resolve({ .font = 1, .position = 0x21 });
+        auto const mirrorGlyph = h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 });
         REQUIRE(serverGlyph != nullptr);
         REQUIRE(mirrorGlyph != nullptr);
         CHECK(mirrorGlyph->id == serverGlyph->id);
@@ -220,18 +214,21 @@ TEST_CASE("redefinition after attach updates the client's glyph", "[vthost][soft
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] { return glyphOf(*h->mirror, 1, 0x21) != nullptr; });
-        auto const before = glyphOf(*h->mirror, 1, 0x21);
+        co_await requireUntil(&h->loop, [&] {
+            return h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 }) != nullptr;
+        });
+        auto const before = h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 });
         REQUIRE(before != nullptr);
 
         // Redefined in place: the cell is not rewritten, only the glyph its reference names.
         h->serverWrites(session, "\033P1;0;0;10;0;0;20;0{ A~\033\\");
-        co_await waitUntil(&h->loop, [&] {
-            auto const now = glyphOf(*h->mirror, 1, 0x21);
+        co_await requireUntil(&h->loop, [&] {
+            auto const now = h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 });
             return now != nullptr && now->id != before->id;
         });
-        auto const serverGlyph = glyphOf(*h->serverTerminal(session), 1, 0x21);
-        auto const mirrorGlyph = glyphOf(*h->mirror, 1, 0x21);
+        auto const serverGlyph =
+            h->serverTerminal(session)->softFonts().resolve({ .font = 1, .position = 0x21 });
+        auto const mirrorGlyph = h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 });
         REQUIRE(serverGlyph != nullptr);
         REQUIRE(mirrorGlyph != nullptr);
         CHECK(mirrorGlyph->id == serverGlyph->id);
@@ -251,7 +248,7 @@ TEST_CASE("a client without the capability sees the underlying characters", "[vt
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(
+        co_await requireUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("!a!"); });
         // The server's cells do carry the glyph; the client was told of neither it nor the font.
         REQUIRE(softGlyphAt(*h->serverTerminal(session), 0, 0).has_value());
@@ -273,13 +270,13 @@ TEST_CASE("RIS on the server makes the client fall back to text", "[vthost][soft
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] { return softGlyphAt(*h->mirror, 0, 0).has_value(); });
+        co_await requireUntil(&h->loop, [&] { return softGlyphAt(*h->mirror, 0, 0).has_value(); });
         REQUIRE(h->mirror->softFonts().font(1) != nullptr);
 
         // RIS drops the fonts and the designation; '!' is then plain text again.
         h->serverWrites(session, "\033c!");
-        co_await waitUntil(&h->loop, [&] { return h->mirror->softFonts().font(1) == nullptr; });
-        co_await waitUntil(&h->loop, [&] {
+        co_await requireUntil(&h->loop, [&] { return h->mirror->softFonts().font(1) == nullptr; });
+        co_await requireUntil(&h->loop, [&] {
             return h->mirror->primaryScreen().grid().renderMainPageText().starts_with("!");
         });
         CHECK(h->mirror->softFonts().font(1) == nullptr);
@@ -303,7 +300,7 @@ TEST_CASE("two fonts sharing a designator: the client selects the most recently 
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] {
+        co_await requireUntil(&h->loop, [&] {
             return h->mirror->softFonts().font(1) != nullptr && h->mirror->softFonts().font(2) != nullptr;
         });
         REQUIRE(h->serverTerminal(session)->softFonts().fontForDesignator(" A") == 1);
@@ -341,10 +338,10 @@ TEST_CASE("soft-glyph cells in a chunked snapshot survive", "[vthost][softfont][
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] {
+        co_await requireUntil(&h->loop, [&] {
             auto const& grid = h->mirror->primaryScreen().grid();
-            return glyphOf(*h->mirror, 1, 0x21) != nullptr && unbox<int>(grid.historyLineCount()) > 300
-                   && softGlyphAt(*h->mirror, 0, 0).has_value();
+            return h->mirror->softFonts().resolve({ .font = 1, .position = 0x21 }) != nullptr
+                   && unbox<int>(grid.historyLineCount()) > 300 && softGlyphAt(*h->mirror, 0, 0).has_value();
         });
         // Every row of the mirror, those of the first and of the last piece alike, shows its glyphs.
         auto const& serverGrid = h->serverTerminal(session)->primaryScreen().grid();
@@ -409,7 +406,7 @@ TEST_CASE("a delta touching one page row leaves the history's soft glyph rows al
     h.connect();
 
     auto scenario = [](SoftFontHarness* h, vtworkspace::SessionId session) -> Task<void> {
-        co_await waitUntil(&h->loop, [&] {
+        co_await requireUntil(&h->loop, [&] {
             return unbox<int>(h->mirror->primaryScreen().grid().historyLineCount()) > 50
                    && softGlyphAt(*h->mirror, -1, 0).has_value();
         });
@@ -423,7 +420,7 @@ TEST_CASE("a delta touching one page row leaves the history's soft glyph rows al
 
         // One character on a page row; the cursor sits on an empty last row, so nothing scrolls.
         h->serverWrites(session, "z");
-        co_await waitUntil(
+        co_await requireUntil(
             &h->loop, [&] { return h->mirror->primaryScreen().grid().renderMainPageText().contains("z"); });
         auto historyRowsChanged = 0;
         std::ignore = grid.forEachLineChangedSince(cursor, [&](vtbackend::LineOffset offset, auto const&) {
