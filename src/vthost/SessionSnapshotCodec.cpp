@@ -353,11 +353,11 @@ namespace
         auto context = DecodeContext {};
         auto decoded = DecodedSnapshot {};
         auto const takenAt = in.svarint();
-        auto const windowCount = in.varint();
-        if (!takenAt || !windowCount || *windowCount > MaxSnapshotWindows)
+        auto const workspaceCount = in.varint();
+        if (!takenAt || !workspaceCount || *workspaceCount > MaxSnapshotWindows)
             return std::unexpected(SnapshotError::Malformed);
         decoded.snapshot.takenAt = std::chrono::sys_seconds { std::chrono::seconds { *takenAt } };
-        for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, *windowCount))
+        for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, *workspaceCount))
         {
             auto window = readWindow(in, context);
             if (!window)

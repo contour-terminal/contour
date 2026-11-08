@@ -56,7 +56,7 @@ namespace
             for (auto const& child: node.children)
                 self(child);
         };
-        for (auto const& window: tree.windows)
+        for (auto const& window: tree.workspaces)
             for (auto const& tab: window.tabs)
                 visit(tab.root);
         return sessions;
@@ -89,11 +89,11 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
         std::max(image.nextSessionId.value, vtworkspace::firstUnusedSessionId(image.tree).value),
         [](uint64_t next, HandoverSession const& session) { return std::max(next, session.id.value + 1); });
 
-    if (_model.windowCount() > 0)
-        _window = _model.windowAt(0)->id();
+    if (_model.workspaceCount() > 0)
+        _window = _model.workspaceAt(0)->id();
     else
     {
-        _window = _model.createWindow()->id();
+        _window = _model.createWorkspace()->id();
         if (!_objects.uuidOf(_window))
             _objects.bind(_window, _objects.mint());
     }

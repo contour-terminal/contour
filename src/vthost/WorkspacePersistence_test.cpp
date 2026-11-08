@@ -463,15 +463,16 @@ TEST_CASE("a cross-window MoveNode schedules a workspace snapshot", "[vthost][sn
     h.pass(Interval);
     auto const before = h.writes;
 
-    // The whole tab leaves its window: the one event that names the change is tabMovedToWindow.
+    // The whole tab leaves its window: the one event that names the change is tabMovedToWorkspace.
     auto const moved = applyMoveNode(
         h.host->model(),
         proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Tab),
                           .sourceSessions = { dragged->rootPane()->session().value },
                           .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::TabWell),
                           .targetSession = other->tabAt(0)->rootPane()->session().value },
-        MoveWindowHooks { .create = [&] { return h.host->createEmptyWindow().id(); },
-                          .discard = [&](vtworkspace::WindowId window) { h.host->discardWindow(window); } });
+        MoveWindowHooks {
+            .create = [&] { return h.host->createEmptyWindow().id(); },
+            .discard = [&](vtworkspace::WorkspaceId window) { h.host->discardWindow(window); } });
     REQUIRE(moved.has_value());
     h.pass(Interval);
     CHECK(h.writes > before);
@@ -489,7 +490,7 @@ TEST_CASE("a tab moved to another window is a layout change on its own",
     h.pass(Interval);
     auto const before = h.writes;
 
-    h.persistence->tabMovedToWindow(h.host->windowId(), tab->id(), 0, other->id(), 0);
+    h.persistence->tabMovedToWorkspace(h.host->windowId(), tab->id(), 0, other->id(), 0);
     h.pass(Interval);
     CHECK(h.writes > before);
 }

@@ -18,32 +18,32 @@
 namespace vtworkspace
 {
 
-// {{{ Window
+// {{{ Workspace
 
-Tab* Window::activeTab() const noexcept
+Tab* Workspace::activeTab() const noexcept
 {
     return tabAt(_activeTabIndex);
 }
 
-Tab* Window::previousActiveTab() const noexcept
+Tab* Workspace::previousActiveTab() const noexcept
 {
     return tabAt(_previousActiveTabIndex);
 }
 
-Tab* Window::tabAt(int index) const noexcept
+Tab* Workspace::tabAt(int index) const noexcept
 {
     if (index < 0 || std::cmp_greater_equal(index, _tabs.size()))
         return nullptr;
     return _tabs[static_cast<size_t>(index)].get();
 }
 
-int Window::indexOf(TabId tab) const noexcept
+int Workspace::indexOf(TabId tab) const noexcept
 {
     auto const it = std::ranges::find_if(_tabs, [tab](auto const& t) { return t->id() == tab; });
     return it != _tabs.end() ? static_cast<int>(std::distance(_tabs.begin(), it)) : -1;
 }
 
-int Window::indexOf(Tab const* tab) const noexcept
+int Workspace::indexOf(Tab const* tab) const noexcept
 {
     auto const it = std::ranges::find_if(_tabs, [tab](auto const& t) { return t.get() == tab; });
     return it != _tabs.end() ? static_cast<int>(std::distance(_tabs.begin(), it)) : -1;
@@ -120,7 +120,7 @@ namespace
     struct RestoreValidator
     {
         ModelIdState ids;
-        std::unordered_set<uint64_t> windows;
+        std::unordered_set<uint64_t> workspaces;
         std::unordered_set<uint64_t> tabs;
         std::unordered_set<uint64_t> panes;
         std::unordered_set<uint64_t> sessions;
@@ -174,18 +174,18 @@ namespace
             return {};
         }
 
-        std::expected<void, ModelRestoreError> checkWindow(WindowState const& window)
+        std::expected<void, ModelRestoreError> checkWorkspace(WorkspaceState const& workspace)
         {
-            if (auto noted = note(windows, window.id.value, ids.nextWindow.value); !noted)
+            if (auto noted = note(workspaces, workspace.id.value, ids.nextWorkspace.value); !noted)
                 return noted;
-            auto const count = static_cast<int>(window.tabs.size());
+            auto const count = static_cast<int>(workspace.tabs.size());
             auto const inRange = [count](int index) {
                 return index >= -1 && index < count;
             };
-            if (!inRange(window.activeTabIndex) || !inRange(window.previousActiveTabIndex)
-                || (count > 0 && window.activeTabIndex < 0))
+            if (!inRange(workspace.activeTabIndex) || !inRange(workspace.previousActiveTabIndex)
+                || (count > 0 && workspace.activeTabIndex < 0))
                 return std::unexpected(ModelRestoreError::BadTabIndex);
-            for (auto const& tab: window.tabs)
+            for (auto const& tab: workspace.tabs)
                 if (auto checked = checkTab(tab); !checked)
                     return checked;
             return {};
@@ -202,8 +202,8 @@ SessionId firstUnusedSessionId(WorkspaceTreeState const& tree)
         return value;
     };
     auto value = uint64_t { 0 };
-    for (auto const& window: tree.windows)
-        for (auto const& tab: window.tabs)
+    for (auto const& workspace: tree.workspaces)
+        for (auto const& tab: workspace.tabs)
             value = std::max(value, highest(tab.root));
     return SessionId { value + 1 };
 }
@@ -211,64 +211,65 @@ SessionId firstUnusedSessionId(WorkspaceTreeState const& tree)
 WorkspaceTreeState SessionModel::captureTree() const
 {
     auto tree = WorkspaceTreeState {};
-    for (auto const& window: _windows)
+    for (auto const& workspace: _workspaces)
     {
-        auto state = WindowState { .id = window->id(),
-                                   .tabs = {},
-                                   .activeTabIndex = window->_activeTabIndex,
-                                   .previousActiveTabIndex = window->_previousActiveTabIndex };
-        for (auto const& tab: window->_tabs)
+        auto state = WorkspaceState { .id = workspace->id(),
+                                      .tabs = {},
+                                      .activeTabIndex = workspace->_activeTabIndex,
+                                      .previousActiveTabIndex = workspace->_previousActiveTabIndex };
+        for (auto const& tab: workspace->_tabs)
             state.tabs.push_back(TabState {
                 .id = tab->id(), .root = captureNode(*tab->rootPane()), .view = tab->viewState() });
-        tree.windows.push_back(std::move(state));
+        tree.workspaces.push_back(std::move(state));
     }
     return tree;
 }
 
 ModelIdState SessionModel::idState() const noexcept
 {
-    return ModelIdState { .nextWindow = _nextWindowId, .nextTab = _nextTabId, .nextPane = _nextPaneId };
+    return ModelIdState { .nextWorkspace = _nextWorkspaceId, .nextTab = _nextTabId, .nextPane = _nextPaneId };
 }
 
 std::expected<void, ModelRestoreError> SessionModel::restore(WorkspaceTreeState const& tree,
                                                              ModelIdState const& ids)
 {
-    Require(_windows.empty());
+    Require(_workspaces.empty());
 
-    auto validator = RestoreValidator { .ids = ids, .windows = {}, .tabs = {}, .panes = {}, .sessions = {} };
-    for (auto const& window: tree.windows)
-        if (auto checked = validator.checkWindow(window); !checked)
+    auto validator =
+        RestoreValidator { .ids = ids, .workspaces = {}, .tabs = {}, .panes = {}, .sessions = {} };
+    for (auto const& workspace: tree.workspaces)
+        if (auto checked = validator.checkWorkspace(workspace); !checked)
             return checked;
 
-    for (auto const& windowState: tree.windows)
+    for (auto const& workspaceState: tree.workspaces)
     {
-        auto window = std::make_unique<Window>(windowState.id);
-        for (auto const& tabState: windowState.tabs)
-            window->_tabs.push_back(
+        auto workspace = std::make_unique<Workspace>(workspaceState.id);
+        for (auto const& tabState: workspaceState.tabs)
+            workspace->_tabs.push_back(
                 std::make_unique<Tab>(tabState.id, buildNode(tabState.root), tabState.view));
-        window->_activeTabIndex = windowState.activeTabIndex;
-        window->_previousActiveTabIndex = windowState.previousActiveTabIndex;
-        _windows.push_back(std::move(window));
+        workspace->_activeTabIndex = workspaceState.activeTabIndex;
+        workspace->_previousActiveTabIndex = workspaceState.previousActiveTabIndex;
+        _workspaces.push_back(std::move(workspace));
     }
-    _nextWindowId = ids.nextWindow;
+    _nextWorkspaceId = ids.nextWorkspace;
     _nextTabId = ids.nextTab;
     _nextPaneId = ids.nextPane;
     return {};
 }
 
 // }}}
-// {{{ Windows
+// {{{ Workspaces
 
-Window* SessionModel::createWindow()
+Workspace* SessionModel::createWorkspace()
 {
-    auto window = std::make_unique<Window>(_nextWindowId++);
-    _windows.push_back(std::move(window));
-    return _windows.back().get();
+    auto workspace = std::make_unique<Workspace>(_nextWorkspaceId++);
+    _workspaces.push_back(std::move(workspace));
+    return _workspaces.back().get();
 }
 
-void SessionModel::removeWindow(WindowId windowId)
+void SessionModel::removeWorkspace(WorkspaceId workspaceId)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
 
@@ -276,21 +277,21 @@ void SessionModel::removeWindow(WindowId windowId)
     while (!win->_tabs.empty())
         closeTabAt(*win, static_cast<int>(win->_tabs.size()) - 1);
 
-    std::erase_if(_windows, [windowId](auto const& w) { return w->id() == windowId; });
+    std::erase_if(_workspaces, [workspaceId](auto const& w) { return w->id() == workspaceId; });
 }
 
-Window* SessionModel::window(WindowId id) const noexcept
+Workspace* SessionModel::workspace(WorkspaceId id) const noexcept
 {
-    auto const it = std::ranges::find_if(_windows, [id](auto const& w) { return w->id() == id; });
-    return it != _windows.end() ? it->get() : nullptr;
+    auto const it = std::ranges::find_if(_workspaces, [id](auto const& w) { return w->id() == id; });
+    return it != _workspaces.end() ? it->get() : nullptr;
 }
 
 // }}}
 // {{{ Tabs
 
-Tab* SessionModel::createTab(WindowId windowId)
+Tab* SessionModel::createTab(WorkspaceId workspaceId)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     assert(win != nullptr);
 
     auto const tabId = _nextTabId++;
@@ -301,32 +302,32 @@ Tab* SessionModel::createTab(WindowId windowId)
         *win, static_cast<int>(win->_tabs.size()), std::make_unique<Tab>(tabId, rootPaneId, session));
 }
 
-Tab* SessionModel::insertTab(Window& win, int requestedIndex, std::unique_ptr<Tab> tab)
+Tab* SessionModel::insertTab(Workspace& win, int requestedIndex, std::unique_ptr<Tab> tab)
 {
-    auto const windowId = win.id();
+    auto const workspaceId = win.id();
     auto const tabId = tab->id();
     auto const index = std::clamp(requestedIndex, 0, static_cast<int>(win._tabs.size()));
 
     // Bracket the insertion so a Qt host's beginInsertRows() runs BEFORE the tab set grows (its contract
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
-    _events.tabAboutToBeAdded(windowId, index);
+    _events.tabAboutToBeAdded(workspaceId, index);
     win._tabs.insert(win._tabs.begin() + index, std::move(tab));
     // Tabs at or after the new slot moved up by one; keep the active/previous slots on the same tabs.
     if (win._activeTabIndex >= index)
         ++win._activeTabIndex;
     if (win._previousActiveTabIndex >= index)
         ++win._previousActiveTabIndex;
-    _events.tabAdded(windowId, tabId, index);
+    _events.tabAdded(workspaceId, tabId, index);
 
     // A new tab is a genuine activation: remember the outgoing active slot as the previous tab.
     win._previousActiveTabIndex = win._activeTabIndex;
     win._activeTabIndex = index;
-    _events.activeTabChanged(windowId, tabId, index);
+    _events.activeTabChanged(workspaceId, tabId, index);
 
     return win._tabs[static_cast<size_t>(index)].get();
 }
 
-void SessionModel::closeTabAt(Window& win, int index, std::function<void()> const& beforeErase)
+void SessionModel::closeTabAt(Workspace& win, int index, std::function<void()> const& beforeErase)
 {
     assert(index >= 0 && std::cmp_less(index, win._tabs.size()));
     auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
@@ -373,9 +374,9 @@ void SessionModel::closeTabAt(Window& win, int index, std::function<void()> cons
         _events.activeTabChanged(win.id(), win._tabs[static_cast<size_t>(newActive)]->id(), newActive);
 }
 
-void SessionModel::closeTab(WindowId windowId, TabId tabId)
+void SessionModel::closeTab(WorkspaceId workspaceId, TabId tabId)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
     auto const index = win->indexOf(tabId);
@@ -384,9 +385,9 @@ void SessionModel::closeTab(WindowId windowId, TabId tabId)
     closeTabAt(*win, index);
 }
 
-void SessionModel::closeOtherTabs(WindowId windowId, TabId keep)
+void SessionModel::closeOtherTabs(WorkspaceId workspaceId, TabId keep)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
     // Iterate back-to-front so each erasure leaves the lower indices valid.
@@ -395,9 +396,9 @@ void SessionModel::closeOtherTabs(WindowId windowId, TabId keep)
             closeTabAt(*win, i);
 }
 
-void SessionModel::closeTabsToRight(WindowId windowId, TabId anchor)
+void SessionModel::closeTabsToRight(WorkspaceId workspaceId, TabId anchor)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
     auto const anchorIndex = win->indexOf(anchor);
@@ -409,9 +410,9 @@ void SessionModel::closeTabsToRight(WindowId windowId, TabId anchor)
         closeTabAt(*win, i);
 }
 
-void SessionModel::activateTab(WindowId windowId, TabId tabId)
+void SessionModel::activateTab(WorkspaceId workspaceId, TabId tabId)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
     auto const index = win->indexOf(tabId);
@@ -421,12 +422,12 @@ void SessionModel::activateTab(WindowId windowId, TabId tabId)
     // subsequent switch-to-previous toggles back to it.
     win->_previousActiveTabIndex = win->_activeTabIndex;
     win->_activeTabIndex = index;
-    _events.activeTabChanged(windowId, tabId, index);
+    _events.activeTabChanged(workspaceId, tabId, index);
 }
 
-void SessionModel::moveTab(WindowId windowId, TabId tabId, int toIndex)
+void SessionModel::moveTab(WorkspaceId workspaceId, TabId tabId, int toIndex)
 {
-    auto* win = window(windowId);
+    auto* win = workspace(workspaceId);
     if (win == nullptr)
         return;
     auto const from = win->indexOf(tabId);
@@ -447,7 +448,7 @@ void SessionModel::moveTab(WindowId windowId, TabId tabId, int toIndex)
 
     // Bracket the reorder: a Qt host's beginMoveRows() must run before the vector is mutated (it reads
     // the pre-move layout to validate the destination), endMoveRows() after.
-    _events.tabAboutToBeMoved(windowId, from, to);
+    _events.tabAboutToBeMoved(workspaceId, from, to);
     auto held = std::move(win->_tabs[static_cast<size_t>(from)]);
     win->_tabs.erase(win->_tabs.begin() + from);
     win->_tabs.insert(win->_tabs.begin() + to, std::move(held));
@@ -457,18 +458,18 @@ void SessionModel::moveTab(WindowId windowId, TabId tabId, int toIndex)
         win->_activeTabIndex = win->indexOf(activeTab);
     win->_previousActiveTabIndex = previousTab != nullptr ? win->indexOf(previousTab) : -1;
 
-    _events.tabMoved(windowId, tabId, from, to);
+    _events.tabMoved(workspaceId, tabId, from, to);
 
     // The active tab object is unchanged, but the reorder can shift its index (e.g. moving a tab
     // across the active one). Observers that track the active tab by index — not by the tabMoved
     // delta — need an explicit activeTabChanged to avoid a stale active-tab index.
     if (activeTab != nullptr && win->_activeTabIndex != previousActiveIndex)
-        _events.activeTabChanged(windowId, activeTab->id(), win->_activeTabIndex);
+        _events.activeTabChanged(workspaceId, activeTab->id(), win->_activeTabIndex);
 }
 
-void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, int toIndex)
+void SessionModel::moveTabToWorkspace(WorkspaceId fromId, TabId tabId, WorkspaceId toId, int toIndex)
 {
-    // Same-window request degenerates to a plain reorder — reuse the tested single-window path so the
+    // Same-workspace request degenerates to a plain reorder — reuse the tested single-workspace path so the
     // active-index translation and beginMoveRows bracketing stay in one place.
     if (fromId == toId)
     {
@@ -476,13 +477,13 @@ void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, 
         return;
     }
 
-    auto* from = window(fromId);
-    auto* to = window(toId);
+    auto* from = workspace(fromId);
+    auto* to = workspace(toId);
     if (from == nullptr || to == nullptr)
         return;
     auto const fromIndex = from->indexOf(tabId);
     if (fromIndex < 0)
-        return; // tab not in the source window
+        return; // tab not in the source workspace
 
     // Snapshot the source's active/previous tab OBJECTS so their indices can be re-derived after the
     // erase (mirrors closeTabAt); the destination gains the tab as its new active.
@@ -490,16 +491,16 @@ void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, 
     auto* srcPreviousTab = from->previousActiveTab();
     auto const dstIndex = std::clamp(toIndex, 0, static_cast<int>(to->_tabs.size()));
 
-    _events.tabAboutToBeMovedToWindow(fromId, fromIndex, toId, dstIndex);
+    _events.tabAboutToBeMovedToWorkspace(fromId, fromIndex, toId, dstIndex);
 
     // Transplant the Tab intact — its pane subtree and the sessions it carries travel with it; nothing
-    // is torn down (unlike closeTab/removeWindow, which report sessions closed).
+    // is torn down (unlike closeTab/removeWorkspace, which report sessions closed).
     auto held = std::move(from->_tabs[static_cast<size_t>(fromIndex)]);
     from->_tabs.erase(from->_tabs.begin() + fromIndex);
     to->_tabs.insert(to->_tabs.begin() + dstIndex, std::move(held));
-    assert(from->indexOf(tabId) < 0 && "the moved tab must have left the source window");
+    assert(from->indexOf(tabId) < 0 && "the moved tab must have left the source workspace");
 
-    // Fix the SOURCE window's active/previous indices exactly as closeTabAt does after an erase.
+    // Fix the SOURCE workspace's active/previous indices exactly as closeTabAt does after an erase.
     if (from->_previousActiveTabIndex == fromIndex)
         from->_previousActiveTabIndex = -1;
     else if (fromIndex < from->_previousActiveTabIndex)
@@ -528,7 +529,7 @@ void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, 
     to->_previousActiveTabIndex = to->_activeTabIndex;
     to->_activeTabIndex = dstIndex;
 
-    _events.tabMovedToWindow(fromId, tabId, fromIndex, toId, dstIndex);
+    _events.tabMovedToWorkspace(fromId, tabId, fromIndex, toId, dstIndex);
     _events.activeTabChanged(toId, tabId, dstIndex);
     if (!from->_tabs.empty() && srcActiveWasMoved)
         _events.activeTabChanged(
@@ -536,15 +537,15 @@ void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, 
 }
 
 Pane* SessionModel::mergeTabIntoSplit(
-    WindowId fromId, TabId sourceId, WindowId toId, TabId targetId, PaneId leafId, SplitSide side)
+    WorkspaceId fromId, TabId sourceId, WorkspaceId toId, TabId targetId, PaneId leafId, SplitSide side)
 {
     // Half and half: the grafted tab and the pane it lands beside share the space equally.
     constexpr double MergeRatio = 0.5;
 
     if (sourceId == targetId)
         return nullptr;
-    auto* from = window(fromId);
-    auto* to = window(toId);
+    auto* from = workspace(fromId);
+    auto* to = workspace(toId);
     if (from == nullptr || to == nullptr)
         return nullptr;
     auto const sourceIndex = from->indexOf(sourceId);
@@ -587,7 +588,7 @@ enum class SessionModel::SourceShape : uint8_t
 /// The dragged node, resolved against the model.
 struct SessionModel::MoveSourceNode
 {
-    Window* window = nullptr;
+    Workspace* workspace = nullptr;
     Tab* tab = nullptr;
     Pane* leaf = nullptr; //!< The dragged leaf; null for a tab with several panes.
     SourceShape shape = SourceShape::LeafOfMany;
@@ -596,9 +597,9 @@ struct SessionModel::MoveSourceNode
 /// The drop place, resolved against the model.
 struct SessionModel::MoveTargetNode
 {
-    Window* window = nullptr;
+    Workspace* workspace = nullptr;
     Tab* tab = nullptr;
-    Pane* leaf = nullptr; //!< The pane dropped beside or onto; null for a tab well or a new window.
+    Pane* leaf = nullptr; //!< The pane dropped beside or onto; null for a tab well or a new workspace.
 };
 
 std::expected<SessionModel::MoveSourceNode, MoveError> SessionModel::resolveMoveSource(
@@ -606,10 +607,10 @@ std::expected<SessionModel::MoveSourceNode, MoveError> SessionModel::resolveMove
 {
     if (auto const* pane = std::get_if<PaneSource>(&source))
     {
-        auto const [window, tab, leaf] = findSessionLeaf(pane->session);
+        auto const [workspace, tab, leaf] = findSessionLeaf(pane->session);
         if (leaf == nullptr)
             return std::unexpected(MoveError::UnknownSource);
-        return MoveSourceNode { .window = window,
+        return MoveSourceNode { .workspace = workspace,
                                 .tab = tab,
                                 .leaf = leaf,
                                 .shape =
@@ -617,11 +618,11 @@ std::expected<SessionModel::MoveSourceNode, MoveError> SessionModel::resolveMove
     }
 
     auto const& tabSource = std::get<TabSource>(source);
-    auto* window = this->window(tabSource.window);
-    auto* tab = window != nullptr ? window->tabAt(window->indexOf(tabSource.tab)) : nullptr;
+    auto* workspace = this->workspace(tabSource.workspace);
+    auto* tab = workspace != nullptr ? workspace->tabAt(workspace->indexOf(tabSource.tab)) : nullptr;
     if (tab == nullptr)
         return std::unexpected(MoveError::UnknownSource);
-    return MoveSourceNode { .window = window,
+    return MoveSourceNode { .workspace = workspace,
                             .tab = tab,
                             .leaf = tab->hasMultiplePanes() ? nullptr : tab->rootPane(),
                             .shape = SourceShape::WholeTab };
@@ -631,10 +632,10 @@ std::expected<SessionModel::MoveTargetNode, MoveError> SessionModel::resolveMove
     MoveTarget const& target) const
 {
     auto const resolveLeaf = [&](SessionId session) -> std::expected<MoveTargetNode, MoveError> {
-        auto const [window, tab, leaf] = findSessionLeaf(session);
+        auto const [workspace, tab, leaf] = findSessionLeaf(session);
         if (leaf == nullptr)
             return std::unexpected(MoveError::UnknownTarget);
-        return MoveTargetNode { .window = window, .tab = tab, .leaf = leaf };
+        return MoveTargetNode { .workspace = workspace, .tab = tab, .leaf = leaf };
     };
 
     if (auto const* edge = std::get_if<EdgeTarget>(&target))
@@ -643,10 +644,10 @@ std::expected<SessionModel::MoveTargetNode, MoveError> SessionModel::resolveMove
         return resolveLeaf(swap->pane);
     if (auto const* well = std::get_if<TabWellTarget>(&target))
     {
-        auto* window = this->window(well->window);
-        if (window == nullptr)
+        auto* workspace = this->workspace(well->workspace);
+        if (workspace == nullptr)
             return std::unexpected(MoveError::UnknownTarget);
-        return MoveTargetNode { .window = window };
+        return MoveTargetNode { .workspace = workspace };
     }
     return MoveTargetNode {};
 }
@@ -687,14 +688,14 @@ std::expected<MoveResult, MoveError> SessionModel::moveNode(MoveSource const& so
             return std::unexpected(MoveError::TabIntoSwap);
     }
     if (auto const* well = std::get_if<TabWellTarget>(&target);
-        well != nullptr && src->shape == SourceShape::WholeTab && dst->window == src->window)
+        well != nullptr && src->shape == SourceShape::WholeTab && dst->workspace == src->workspace)
     {
-        auto const lastIndex = src->window->tabCount() - 1;
-        if (std::clamp(well->index, 0, lastIndex) == src->window->indexOf(src->tab))
+        auto const lastIndex = src->workspace->tabCount() - 1;
+        if (std::clamp(well->index, 0, lastIndex) == src->workspace->indexOf(src->tab))
             return std::unexpected(MoveError::NoOp);
     }
-    // A window of its own for what already is all of one would tear that window down to build it again.
-    if (std::holds_alternative<NewWindowTarget>(target) && fillsItsWindow(*src))
+    // A workspace of its own for what already is all of one would tear that workspace down to build it again.
+    if (std::holds_alternative<NewWorkspaceTarget>(target) && fillsItsWorkspace(*src))
         return std::unexpected(MoveError::NoOp);
     // }}}
 
@@ -706,22 +707,22 @@ std::expected<MoveResult, MoveError> SessionModel::moveNode(MoveSource const& so
             else if constexpr (std::is_same_v<Drop, SwapTarget>)
                 return swapWith(*src, *dst);
             else if constexpr (std::is_same_v<Drop, TabWellTarget>)
-                return moveIntoWell(*src, *dst->window, drop.index);
+                return moveIntoWell(*src, *dst->workspace, drop.index);
             else
-                return moveIntoWell(*src, *createWindow(), 0); // a window of its own, at its first slot
+                return moveIntoWell(*src, *createWorkspace(), 0); // a workspace of its own, at its first slot
         },
         target);
 }
 
-bool SessionModel::fillsItsWindow(MoveSourceNode const& src) noexcept
+bool SessionModel::fillsItsWorkspace(MoveSourceNode const& src) noexcept
 {
-    return src.shape == SourceShape::WholeTab && src.window->tabCount() == 1;
+    return src.shape == SourceShape::WholeTab && src.workspace->tabCount() == 1;
 }
 
-bool SessionModel::fillsItsWindow(MoveSource const& source) const
+bool SessionModel::fillsItsWorkspace(MoveSource const& source) const
 {
     auto const src = resolveMoveSource(source);
-    return src && fillsItsWindow(*src);
+    return src && fillsItsWorkspace(*src);
 }
 
 std::expected<MoveResult, MoveError> SessionModel::moveBeside(MoveSourceNode const& src,
@@ -733,17 +734,17 @@ std::expected<MoveResult, MoveError> SessionModel::moveBeside(MoveSourceNode con
 
     // Captured now: the tabs and panes below are rearranged, and the objects may not survive it.
     auto const srcTabId = src.tab->id();
-    auto const dstWindowId = dst.window->id();
+    auto const dstWorkspaceId = dst.workspace->id();
     auto const dstTabId = dst.tab->id();
     auto const movedSession = src.leaf != nullptr ? src.leaf->session() : src.tab->activePane()->session();
 
     if (src.shape == SourceShape::WholeTab)
     {
         // Refused before it changes anything, as everything moveNode() validated must be.
-        if (mergeTabIntoSplit(src.window->id(), srcTabId, dstWindowId, dstTabId, dst.leaf->id(), side)
+        if (mergeTabIntoSplit(src.workspace->id(), srcTabId, dstWorkspaceId, dstTabId, dst.leaf->id(), side)
             == nullptr)
             return std::unexpected(MoveError::UnknownTarget);
-        return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+        return MoveResult { .workspace = dstWorkspaceId, .tab = dstTabId, .focused = movedSession };
     }
 
     auto const srcZoomBefore = src.tab->zoomedLeafId();
@@ -759,26 +760,27 @@ std::expected<MoveResult, MoveError> SessionModel::moveBeside(MoveSourceNode con
         // leaf's session. Were it reached, the detached pane would be lost with its session; it becomes a
         // tab of its own instead, so every session is still shown, and the move is reported as not landed.
         announceSourceShrunk(*src.tab, srcZoomBefore);
-        (void) insertTab(
-            *dst.window, dst.window->tabCount(), std::make_unique<Tab>(_nextTabId++, leafId, movedSession));
+        (void) insertTab(*dst.workspace,
+                         dst.workspace->tabCount(),
+                         std::make_unique<Tab>(_nextTabId++, leafId, movedSession));
         return std::unexpected(MoveError::UnknownTarget);
     }
     (void) dst.tab->graftLeaf(*dropPane, std::move(detached), side, _nextPaneId++, EdgeRatio);
 
     if (src.tab != dst.tab)
         announceSourceShrunk(*src.tab, srcZoomBefore);
-    activateTab(dstWindowId, dstTabId);
+    activateTab(dstWorkspaceId, dstTabId);
     _events.paneTreeRestructured(dstTabId);
     _events.activePaneChanged(dstTabId, leafId);
     announcePaneMove(*dst.tab, dstZoomBefore);
-    return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+    return MoveResult { .workspace = dstWorkspaceId, .tab = dstTabId, .focused = movedSession };
 }
 
 MoveResult SessionModel::swapWith(MoveSourceNode const& src, MoveTargetNode const& dst)
 {
     auto const srcTabId = src.tab->id();
     auto const srcZoomBefore = src.tab->zoomedLeafId();
-    auto const dstWindowId = dst.window->id();
+    auto const dstWorkspaceId = dst.workspace->id();
     auto const dstTabId = dst.tab->id();
     auto const dstZoomBefore = dst.tab->zoomedLeafId();
     auto const srcLeafId = src.leaf->id();
@@ -801,28 +803,28 @@ MoveResult SessionModel::swapWith(MoveSourceNode const& src, MoveTargetNode cons
         // The source tab's active pane now carries another session, so its title may have changed too.
         announcePaneMove(*src.tab, srcZoomBefore);
     }
-    activateTab(dstWindowId, dstTabId);
+    activateTab(dstWorkspaceId, dstTabId);
     _events.activePaneChanged(dstTabId, dstLeafId);
     announcePaneMove(*dst.tab, dstZoomBefore);
-    return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+    return MoveResult { .workspace = dstWorkspaceId, .tab = dstTabId, .focused = movedSession };
 }
 
-MoveResult SessionModel::moveIntoWell(MoveSourceNode const& src, Window& window, int index)
+MoveResult SessionModel::moveIntoWell(MoveSourceNode const& src, Workspace& workspace, int index)
 {
     auto const srcTabId = src.tab->id();
     auto const srcZoomBefore = src.tab->zoomedLeafId();
-    auto const windowId = window.id();
+    auto const workspaceId = workspace.id();
     auto const movedSession = src.leaf != nullptr ? src.leaf->session() : src.tab->activePane()->session();
 
     if (src.shape == SourceShape::WholeTab)
     {
         src.tab->clearZoom();
-        moveTabToWindow(src.window->id(), srcTabId, windowId, index);
-        activateTab(windowId, srcTabId); // a reorder within one window does not activate by itself
+        moveTabToWorkspace(src.workspace->id(), srcTabId, workspaceId, index);
+        activateTab(workspaceId, srcTabId); // a reorder within one workspace does not activate by itself
         _events.activePaneChanged(srcTabId, src.tab->activePane()->id());
         // A reorder retitles nothing; only a cleared zoom does.
         (void) announceZoomChange(*src.tab, srcZoomBefore);
-        return MoveResult { .window = windowId, .tab = srcTabId, .focused = movedSession };
+        return MoveResult { .workspace = workspaceId, .tab = srcTabId, .focused = movedSession };
     }
 
     // One pane of several becomes a tab of its own, keeping its PaneId and session.
@@ -831,10 +833,10 @@ MoveResult SessionModel::moveIntoWell(MoveSourceNode const& src, Window& window,
     auto detached = src.tab->detachLeaf(*src.leaf);
     // The new tab first, then the shrunk source: an observer told of either finds the moved session in a
     // tab, as with a graft beside a pane of another tab (moveBeside).
-    (void) insertTab(window, index, std::make_unique<Tab>(newTabId, leafId, detached->session()));
+    (void) insertTab(workspace, index, std::make_unique<Tab>(newTabId, leafId, detached->session()));
     announceSourceShrunk(*src.tab, srcZoomBefore);
     _events.activePaneChanged(newTabId, leafId);
-    return MoveResult { .window = windowId, .tab = newTabId, .focused = movedSession };
+    return MoveResult { .workspace = workspaceId, .tab = newTabId, .focused = movedSession };
 }
 
 std::expected<void, ArrangeError> SessionModel::arrangeTab(TabId tabId, PaneArrangement const& shape)
@@ -873,9 +875,9 @@ std::expected<void, ArrangeError> SessionModel::arrangeTab(TabId tabId, PaneArra
 // }}}
 // {{{ Panes
 
-std::pair<Window*, int> SessionModel::locateTab(TabId tabId) const noexcept
+std::pair<Workspace*, int> SessionModel::locateTab(TabId tabId) const noexcept
 {
-    for (auto const& win: _windows)
+    for (auto const& win: _workspaces)
         if (auto const index = win->indexOf(tabId); index >= 0)
             return { win.get(), index };
     return { nullptr, -1 };
@@ -887,15 +889,15 @@ Tab* SessionModel::findTab(TabId tabId) const noexcept
     return win != nullptr ? win->tabAt(index) : nullptr;
 }
 
-WindowId SessionModel::windowOfTab(TabId tabId) const noexcept
+WorkspaceId SessionModel::workspaceOfTab(TabId tabId) const noexcept
 {
     auto const [win, index] = locateTab(tabId);
-    return win != nullptr ? win->id() : WindowId {};
+    return win != nullptr ? win->id() : WorkspaceId {};
 }
 
-std::tuple<Window*, Tab*, Pane*> SessionModel::findSessionLeaf(SessionId session) const
+std::tuple<Workspace*, Tab*, Pane*> SessionModel::findSessionLeaf(SessionId session) const
 {
-    for (auto const& win: _windows)
+    for (auto const& win: _workspaces)
         for (auto const& tab: win->_tabs)
             if (auto* leaf = tab->rootPane()->findLeaf(session); leaf != nullptr)
                 return { win.get(), tab.get(), leaf };
@@ -904,7 +906,7 @@ std::tuple<Window*, Tab*, Pane*> SessionModel::findSessionLeaf(SessionId session
 
 Pane* SessionModel::findLeafPane(PaneId pane) const
 {
-    for (auto const& win: _windows)
+    for (auto const& win: _workspaces)
         for (auto const& tab: win->_tabs)
             if (auto* leaf = tab->rootPane()->walkTree(
                     [pane](Pane& node) { return node.isLeaf() && node.id() == pane; });
@@ -940,7 +942,7 @@ Pane* SessionModel::splitActivePane(TabId tabId, SplitState direction, double ra
     return newLeaf;
 }
 
-void SessionModel::closePane(WindowId windowId, TabId tabId, PaneId leafId)
+void SessionModel::closePane(WorkspaceId workspaceId, TabId tabId, PaneId leafId)
 {
     auto* tab = findTab(tabId);
     if (tab == nullptr)
@@ -952,7 +954,7 @@ void SessionModel::closePane(WindowId windowId, TabId tabId, PaneId leafId)
     if (tab->isLastPane(leaf))
     {
         // Closing the only pane closes the whole tab.
-        closeTab(windowId, tabId);
+        closeTab(workspaceId, tabId);
         return;
     }
 
@@ -1050,7 +1052,7 @@ std::expected<void, SessionModel::SetOrientationError> SessionModel::setSplitOri
 {
     if (axis != SplitState::Horizontal && axis != SplitState::Vertical)
         return std::unexpected(SetOrientationError::NotAnAxis);
-    auto const [window, tab, leaf] = findSessionLeaf(anchor);
+    auto const [workspace, tab, leaf] = findSessionLeaf(anchor);
     if (tab == nullptr || leaf == nullptr)
         return std::unexpected(SetOrientationError::UnknownSession);
     auto* const split = leaf->parent();

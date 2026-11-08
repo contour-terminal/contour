@@ -101,7 +101,7 @@ TEST_CASE("the client model mirrors windows, history and live output", "[vthost]
 {
     auto h = ModelHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     auto const paneId = tab->rootPane()->id().value;
     h.host.terminal(sessionId)->writeToScreen("history-line");
@@ -124,7 +124,7 @@ TEST_CASE("the replay carries scrollback and not just the visible page", "[vthos
     // to PUT it (a PaneView built with zero scrollback would drop it just as silently).
     auto h = ModelHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     auto const paneId = tab->rootPane()->id().value;
 
@@ -376,7 +376,7 @@ TEST_CASE("a pane's capture-pane refill reaches its sink as a replay, and live o
 {
     auto h = SinkModelHarness {};
     h.host.createTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     auto const sessionId = tab->rootPane()->session();
     h.host.terminal(sessionId)->writeToScreen("history-line");
 

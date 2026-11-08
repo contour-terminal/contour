@@ -17,7 +17,7 @@ struct PaneParts;
 
 /// A node in a tab's binary split tree.
 ///
-/// The model is the one used by Windows Terminal: a pane is **either** a leaf **or** an internal
+/// The model is the one used by Workspaces Terminal: a pane is **either** a leaf **or** an internal
 /// split node, never both.
 ///
 /// - A **leaf** has SplitState::None, carries a SessionId, and has no children. It is what the user

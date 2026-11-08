@@ -263,27 +263,27 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// the model stays transport-agnostic.
     struct LayoutObserver final: vtworkspace::ModelEvents
     {
-        std::function<void(vtworkspace::WindowId)> onWindowChange; ///< A change in one window's tab strip.
-        std::function<void(vtworkspace::TabId)> onTabChange;       ///< A change within one tab.
-        void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        std::function<void(vtworkspace::WorkspaceId)> onWindowChange; ///< A change in one window's tab strip.
+        std::function<void(vtworkspace::TabId)> onTabChange;          ///< A change within one tab.
+        void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId, int) override
         {
             onWindowChange(window);
         }
-        void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId, int) override
         {
             onWindowChange(window);
         }
-        void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId, int, int) override
+        void tabMoved(vtworkspace::WorkspaceId window, vtworkspace::TabId, int, int) override
         {
             onWindowChange(window);
         }
-        void tabMovedToWindow(
-            vtworkspace::WindowId from, vtworkspace::TabId, int, vtworkspace::WindowId to, int) override
+        void tabMovedToWorkspace(
+            vtworkspace::WorkspaceId from, vtworkspace::TabId, int, vtworkspace::WorkspaceId to, int) override
         {
             onWindowChange(from);
             onWindowChange(to);
         }
-        void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        void activeTabChanged(vtworkspace::WorkspaceId window, vtworkspace::TabId, int) override
         {
             onWindowChange(window);
         }
@@ -340,7 +340,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @return Whether this connection is shown @p window: its layout, its sessions' screens and events.
     ///         Every window under FollowScope::Every; under Listed, the attach plan's and those it gained
     ///         since (its own NewWindow, and — for the primary viewer — the windows no client claims).
-    [[nodiscard]] bool follows(vtworkspace::WindowId window) const noexcept
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId window) const noexcept
     {
         return _scope == FollowScope::Every || _followedWindows.contains(window.value);
     }
@@ -640,7 +640,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every followed
     /// window's layout now, as a client of the release before it always was.
     /// @param window The window the change is in.
-    void layoutChanged(vtworkspace::WindowId window);
+    void layoutChanged(vtworkspace::WorkspaceId window);
 
     /// Pushes the layout of each window changed since the batch opened (@see layoutChanged) that this client
     /// follows, each once, as it is now; a window the batch removed is pushed with no tab to a client that

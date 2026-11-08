@@ -22,7 +22,7 @@ namespace
     /// The pane an edit names, and the tab and window that hold it.
     struct EditTarget
     {
-        vtworkspace::Window& window;
+        vtworkspace::Workspace& window;
         vtworkspace::Tab& tab;
         vtworkspace::Pane& leaf;
     };

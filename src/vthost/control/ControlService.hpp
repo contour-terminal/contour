@@ -123,18 +123,18 @@ class ControlService final:
     void sessionSignal(vtworkspace::SessionId session, SessionSignal const& signal) override;
 
     // vtworkspace::ModelEvents: what the layout does.
-    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
                    vtworkspace::PaneId newLeaf) override;
-    void tabMoved(vtworkspace::WindowId /*window*/,
+    void tabMoved(vtworkspace::WorkspaceId /*window*/,
                   vtworkspace::TabId /*tab*/,
                   int /*from*/,
                   int /*to*/) override
     {
     }
-    void activeTabChanged(vtworkspace::WindowId /*window*/,
+    void activeTabChanged(vtworkspace::WorkspaceId /*window*/,
                           vtworkspace::TabId /*tab*/,
                           int /*index*/) override
     {
@@ -175,7 +175,7 @@ class ControlService final:
     /// @param positioned The window whose tabs are addressable by position.
     /// @return Every tab, as target candidates.
     [[nodiscard]] std::vector<vtcontrol::TargetCandidate> tabCandidates(
-        vtworkspace::WindowId positioned) const;
+        vtworkspace::WorkspaceId positioned) const;
 
     /// @return Every window, as target candidates.
     [[nodiscard]] std::vector<vtcontrol::TargetCandidate> windowCandidates() const;
@@ -193,7 +193,7 @@ class ControlService final:
         vtcontrol::CallContext const& context, std::string_view spec) const;
 
     /// The window a call is about: @p spec, else the caller pane's window, else the host's.
-    [[nodiscard]] std::expected<vtworkspace::WindowId, vtcontrol::ControlError> resolveWindow(
+    [[nodiscard]] std::expected<vtworkspace::WorkspaceId, vtcontrol::ControlError> resolveWindow(
         vtcontrol::CallContext const& context, std::string_view spec) const;
 
     /// A block a target resolved to: its pane, and its serial; none for the pane's last finished one.
@@ -245,7 +245,7 @@ class ControlService final:
 
     /// @param grants What the asking connection holds, which says what its panes' records may carry.
     /// @return The API record of one window, as the model has it now.
-    [[nodiscard]] vtcontrol::WorkspaceInfo windowInfoOf(vtworkspace::Window const& window,
+    [[nodiscard]] vtcontrol::WorkspaceInfo windowInfoOf(vtworkspace::Workspace const& window,
                                                         uint32_t position,
                                                         vtcontrol::ControlGrants grants) const;
 
@@ -262,7 +262,8 @@ class ControlService final:
     [[nodiscard]] vtcontrol::EventOrigin originOf(vtworkspace::SessionId session) const;
 
     /// @return The ids of @p tab and its window.
-    [[nodiscard]] vtcontrol::EventOrigin originOf(vtworkspace::WindowId window, vtworkspace::TabId tab) const;
+    [[nodiscard]] vtcontrol::EventOrigin originOf(vtworkspace::WorkspaceId window,
+                                                  vtworkspace::TabId tab) const;
 
     /// @param session The pane's session.
     /// @param block A block of it.

@@ -107,11 +107,11 @@ inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSur
 /// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
 [[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
 
-/// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
+/// Per-OS-window Qt/QML adapter over one vtworkspace::Workspace.
 ///
-/// Clean-architecture role: this is the ADAPTER between the pure, Qt-free domain core (vtworkspace::Window /
-/// SessionModel) and the QML window (ApplicationWindow / Main.qml). One instance exists per OS window.
-/// It owns everything window-scoped and Qt-shaped:
+/// Clean-architecture role: this is the ADAPTER between the pure, Qt-free domain core (vtworkspace::Workspace
+/// / SessionModel) and the QML window (ApplicationWindow / Main.qml). One instance exists per OS window. It
+/// owns everything window-scoped and Qt-shaped:
 ///   - the tab-strip QAbstractListModel (rows = this window's tabs) + the tab invokables the strip calls;
 ///   - the PaneProxy tree for the active tab (the recursive PaneNode.qml renders from activeTabRootPane);
 ///   - this window's focused display (_activeDisplay) and the window services derived from it
@@ -122,12 +122,13 @@ inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSur
 ///
 /// It holds NO session lifetime and NO authority over the model tree. Structural mutations
 /// (create/close/move tab, split/close/focus pane, terminate) are delegated to the
-/// TerminalSessionManager SERVICE, tagged with this controller's WindowId, so the model stays the single
+/// TerminalSessionManager SERVICE, tagged with this controller's WorkspaceId, so the model stays the single
 /// source of truth and session ownership stays in one place. The manager also routes each vtworkspace
 /// ModelEvent to the owning window's controller (the on*() hooks below).
 ///
 /// Created only by TerminalSessionManager::createWindowController() (which mints the backing
-/// vtworkspace::Window) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow closes.
+/// vtworkspace::Workspace) and owned via QQmlEngine CppOwnership; destroyed when its ApplicationWindow
+/// closes.
 ///
 /// It is also the window half of the display/window seam: it implements @c display::WindowHost, the
 /// interface the display layer declares for "the OS window I am shown in". Everything a display asks of
@@ -252,7 +253,7 @@ class WindowController:
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
-    /// @param windowId The backing vtworkspace::Window this controller adapts.
+    /// @param windowId The backing vtworkspace::Workspace this controller adapts.
     /// @param menuPresentation Whether this window's menus open natively or in the scene: the app's
     ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
     /// @param initialPosition The first window's remembered location, or where a window opened for a dropped
@@ -262,7 +263,7 @@ class WindowController:
     ///                 while `accessibility_announcements` allows.
     /// @param role     What the window is for; fixed for its life.
     WindowController(session::TerminalSessionManager& manager,
-                     vtworkspace::WindowId windowId,
+                     vtworkspace::WorkspaceId windowId,
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
@@ -275,7 +276,7 @@ class WindowController:
     WindowController(WindowController&&) = delete;
     WindowController& operator=(WindowController&&) = delete;
 
-    [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _windowId; }
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const noexcept { return _windowId; }
     /// @return Where this window is placed as it is first shown -- its remembered place, or where a pane
     ///         dropped outside every window opened it -- until that first expose places it.
     [[nodiscard]] std::optional<WindowPosition> const& initialPosition() const noexcept
@@ -1148,7 +1149,7 @@ class WindowController:
     /// PaneProxy can be constructed against the manager. (Used only by rebuildActiveTabPaneProxies.)
     [[nodiscard]] session::PaneProxy* getProxy(vtworkspace::PaneId id);
 
-    // {{{ Called by the manager's ModelEvents router (dispatched here by WindowId)
+    // {{{ Called by the manager's ModelEvents router (dispatched here by WorkspaceId)
     void onTabAboutToBeAdded(int index);
     void onTabAdded(int index);
     void onTabAboutToBeRemoved(int index);
@@ -1324,9 +1325,9 @@ class WindowController:
     /// The connection followActiveStickyHeader() made to the active session. GUI thread.
     QMetaObject::Connection _activeStickyHeaderConnection;
 
-    /// The backing vtworkspace::Window, or nullptr if it has been removed.
-    [[nodiscard]] vtworkspace::Window* window() const noexcept;
-    /// The active tab of this window's vtworkspace::Window, or nullptr.
+    /// The backing vtworkspace::Workspace, or nullptr if it has been removed.
+    [[nodiscard]] vtworkspace::Workspace* window() const noexcept;
+    /// The active tab of this window's vtworkspace::Workspace, or nullptr.
     [[nodiscard]] vtworkspace::Tab* activeModelTab() const noexcept;
     /// The model tab backing list-model row @p index, or nullptr.
     [[nodiscard]] vtworkspace::Tab* tabAtRow(int index) const noexcept;
@@ -1468,7 +1469,7 @@ class WindowController:
     void abandonNodeDrag();
 
     session::TerminalSessionManager& _manager;
-    vtworkspace::WindowId _windowId;
+    vtworkspace::WorkspaceId _windowId;
     std::vector<TabSpan> _tabSpans; ///< Where the strip's tabs are, as setTabSpans() last reported.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     WindowRole _role; ///< @see role

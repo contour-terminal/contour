@@ -34,10 +34,10 @@ LayoutPane split(SplitState o, std::vector<LayoutPane> kids)
 
 struct NullEvents: ModelEvents
 {
-    void tabAdded(WindowId, TabId, int) override {}
-    void tabClosed(WindowId, TabId, int) override {}
-    void tabMoved(WindowId, TabId, int, int) override {}
-    void activeTabChanged(WindowId, TabId, int) override {}
+    void tabAdded(WorkspaceId, TabId, int) override {}
+    void tabClosed(WorkspaceId, TabId, int) override {}
+    void tabMoved(WorkspaceId, TabId, int, int) override {}
+    void activeTabChanged(WorkspaceId, TabId, int) override {}
     void paneSplit(TabId, PaneId, PaneId) override {}
     void paneClosed(TabId, PaneId, PaneId) override {}
     void activePaneChanged(TabId, PaneId) override {}
@@ -86,7 +86,7 @@ struct RealizeHarness
 TEST_CASE("realizeLayoutTab: a single-pane tab creates one leaf with its command", "[layout][realize]")
 {
     RealizeHarness h;
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
 
     LayoutTab tab;
     tab.title = "editor";
@@ -103,7 +103,7 @@ TEST_CASE("realizeLayoutTab: a single-pane tab creates one leaf with its command
 TEST_CASE("realizeLayoutTab: two side-by-side panes build a Vertical split", "[layout][realize]")
 {
     RealizeHarness h;
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
 
     LayoutTab tab;
     tab.root.orientation = SplitState::Vertical;
@@ -132,7 +132,7 @@ TEST_CASE("realizeLayoutTab: a refused seed mid-tree stops without allocating an
 {
     RealizeHarness h;
     h.seedLimit = 1; // the factory can back the first pane only, then runs dry
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
 
     LayoutTab tab;
     tab.root.orientation = SplitState::Vertical;
@@ -161,7 +161,7 @@ TEST_CASE("realizeLayoutTab: a refused first seed creates no tab at all", "[layo
 {
     RealizeHarness h;
     h.seedLimit = 0; // the factory can back nothing
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
 
     LayoutTab tab;
     tab.root.command = "nvim";
@@ -174,7 +174,7 @@ TEST_CASE("realizeLayoutTab: a refused first seed creates no tab at all", "[layo
 TEST_CASE("realizeLayoutTab: nested split produces the right tree and commands", "[layout][realize]")
 {
     RealizeHarness h;
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
 
     auto mk = [](std::string c) {
         LayoutPane p;
@@ -200,9 +200,10 @@ TEST_CASE("realizeLayoutTab: nested split produces the right tree and commands",
     CHECK(h.commandBySession.at(tail->second()->session().value) == "logs");
 }
 
-TEST_CASE("realizeLayoutTab: an unknown window is refused before any session is seeded", "[layout][realize]")
+TEST_CASE("realizeLayoutTab: an unknown workspace is refused before any session is seeded",
+          "[layout][realize]")
 {
-    // Seeding spawns a REAL backing session, so the window must be validated first: seeding and
+    // Seeding spawns a REAL backing session, so the workspace must be validated first: seeding and
     // then failing to create the tab would orphan that session (it would outlive every reference
     // to it, still holding its PTY).
     RealizeHarness h;
@@ -210,7 +211,7 @@ TEST_CASE("realizeLayoutTab: an unknown window is refused before any session is 
     LayoutTab tab;
     tab.root.command = "nvim";
 
-    auto* modelTab = realizeLayoutTab(h.model, WindowId { 4711 }, tab, h.seeder());
+    auto* modelTab = realizeLayoutTab(h.model, WorkspaceId { 4711 }, tab, h.seeder());
     CHECK(modelTab == nullptr);
     CHECK(h.commandBySession.empty()); // nothing was seeded
 }
@@ -272,7 +273,7 @@ TEST_CASE("LayoutTree: an explicit ratio is a fraction; unspecified siblings sha
 TEST_CASE("serializeTab: reproduces the pane tree with resolved commands", "[layout][save]")
 {
     RealizeHarness h;
-    auto* win = h.model.createWindow();
+    auto* win = h.model.createWorkspace();
     auto mk = [](std::string c) {
         LayoutPane p;
         p.command = std::move(c);

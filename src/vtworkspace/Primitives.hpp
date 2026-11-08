@@ -17,7 +17,7 @@ namespace detail::tags
     struct SessionId {};
     struct PaneId {};
     struct TabId {};
-    struct WindowId {};
+    struct WorkspaceId {};
     // clang-format on
 } // namespace detail::tags
 
@@ -37,8 +37,8 @@ using PaneId = boxed::boxed<uint64_t, detail::tags::PaneId>;
 /// Identifies a tab within the model.
 using TabId = boxed::boxed<uint64_t, detail::tags::TabId>;
 
-/// Identifies a logical window within the model.
-using WindowId = boxed::boxed<uint64_t, detail::tags::WindowId>;
+/// Identifies a logical workspace within the model.
+using WorkspaceId = boxed::boxed<uint64_t, detail::tags::WorkspaceId>;
 
 /// The split orientation of a pane node.
 ///

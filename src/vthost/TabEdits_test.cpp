@@ -25,10 +25,10 @@ struct CountingEvents final: vtworkspace::ModelEvents
 {
     int count = 0;
 
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override { ++count; }
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override { ++count; }
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override { ++count; }
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override { ++count; }
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override { ++count; }
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override { ++count; }
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override { ++count; }
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override { ++count; }
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { ++count; }
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { ++count; }
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { ++count; }
@@ -45,7 +45,7 @@ struct TwoPaneTab
     CountingEvents events;
     uint64_t nextSession = 1;
     vtworkspace::SessionModel model { events, [this] { return vtworkspace::SessionId { nextSession++ }; } };
-    vtworkspace::WindowId window = model.createWindow()->id();
+    vtworkspace::WorkspaceId window = model.createWorkspace()->id();
     vtworkspace::Tab* first = model.createTab(window);
     vtworkspace::Pane* second = model.splitActivePane(first->id(), vtworkspace::SplitState::Horizontal);
     vtworkspace::Tab* other = model.createTab(window);
@@ -115,7 +115,7 @@ TEST_CASE("each tab edit changes the model once and is idempotent", "[vthost][ta
         { .name = "ActivateTab",
           .edit = { .session = 1, .kind = TabEditKind::ActivateTab },
           .prepare = nothing,
-          .holds = [](TwoPaneTab& t) { return t.model.window(t.window)->activeTab() == t.first; } },
+          .holds = [](TwoPaneTab& t) { return t.model.workspace(t.window)->activeTab() == t.first; } },
     };
     CHECK(rows.size() == 8); // every TabEditKind
 

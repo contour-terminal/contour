@@ -50,7 +50,7 @@ TEST_CASE("an object registry snapshot restores every binding and label", "[vtho
     auto const tab = source.mint();
     auto const pane = source.mint();
     auto const other = source.mint();
-    source.bind(vtworkspace::WindowId { 3 }, window);
+    source.bind(vtworkspace::WorkspaceId { 3 }, window);
     source.bind(vtworkspace::TabId { 5 }, tab);
     source.bind(vtworkspace::SessionId { 9 }, pane);
     source.bind(vtworkspace::SessionId { 2 }, other);
@@ -69,7 +69,7 @@ TEST_CASE("an object registry snapshot restores every binding and label", "[vtho
     auto target = ObjectRegistry { std::make_shared<vtcontrol::testing::SequentialUuidSource>() };
     target.bind(vtworkspace::SessionId { 7 }, target.mint());
     target.restore(snapshot);
-    CHECK(target.uuidOf(vtworkspace::WindowId { 3 }) == window);
+    CHECK(target.uuidOf(vtworkspace::WorkspaceId { 3 }) == window);
     CHECK(target.uuidOf(vtworkspace::TabId { 5 }) == tab);
     CHECK(target.uuidOf(vtworkspace::SessionId { 9 }) == pane);
     CHECK(target.uuidOf(vtworkspace::SessionId { 2 }) == other);
@@ -121,7 +121,7 @@ struct CaptureHarness: vthost::testing::LiveHost
         for (auto const& child: node.children)
             self(child);
     };
-    for (auto const& window: tree.windows)
+    for (auto const& window: tree.workspaces)
         for (auto const& tab: window.tabs)
             visit(tab.root);
     return sessions;
@@ -154,7 +154,7 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
 
     // The model as it is, with the ids it mints next.
     auto const live = h.host.model().idState();
-    CHECK(image->modelIds.nextWindow == live.nextWindow);
+    CHECK(image->modelIds.nextWorkspace == live.nextWorkspace);
     CHECK(image->modelIds.nextTab == live.nextTab);
     CHECK(image->modelIds.nextPane == live.nextPane);
     auto treeSessions = leafSessions(image->tree);

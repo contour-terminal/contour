@@ -21,9 +21,9 @@ namespace vtworkspace
 /// holding an id from before never sees it name another object afterwards.
 struct ModelIdState
 {
-    WindowId nextWindow { 1 }; ///< The id the next window gets.
-    TabId nextTab { 1 };       ///< The id the next tab gets.
-    PaneId nextPane { 1 };     ///< The id the next pane (leaf or split node) gets.
+    WorkspaceId nextWorkspace { 1 }; ///< The id the next workspace gets.
+    TabId nextTab { 1 };             ///< The id the next tab gets.
+    PaneId nextPane { 1 };           ///< The id the next pane (leaf or split node) gets.
 };
 
 /// One node of a tab's pane tree, with the ids it has.
@@ -62,31 +62,32 @@ struct TabState
     TabViewState view;
 };
 
-/// A window with its id and tabs.
-struct WindowState
+/// A workspace with its id and tabs.
+struct WorkspaceState
 {
-    WindowId id {};
+    WorkspaceId id {};
     std::vector<TabState> tabs;
-    int activeTabIndex = -1;         ///< -1 where the window holds no tab.
+    int activeTabIndex = -1;         ///< -1 where the workspace holds no tab.
     int previousActiveTabIndex = -1; ///< -1 where there is none.
 };
 
-/// The whole workspace tree: every window, tab and pane, with the ids and session ids they have.
+/// The whole workspace tree: every workspace, tab and pane, with the ids and session ids they have.
 struct WorkspaceTreeState
 {
-    std::vector<WindowState> windows;
+    std::vector<WorkspaceState> workspaces;
 };
 
 /// Why SessionModel::restore() refused a state.
 enum class ModelRestoreError : uint8_t
 {
-    DuplicateId = 0, ///< Two windows, two tabs, two panes (model-wide) or two leaves' sessions share an id.
+    DuplicateId =
+        0, ///< Two workspaces, two tabs, two panes (model-wide) or two leaves' sessions share an id.
     IdBeyondCounter, ///< An id is at or above the counter it is minted from, so a later mint would repeat it.
     /// A tab's tree is malformed: a split without exactly two children or with a ratio that is not finite,
     /// a leaf with any child.
     MalformedTree,
     UnknownActivePane, ///< A tab's active pane is not one of its leaves.
-    BadTabIndex,       ///< A window's active or previous tab index is out of range.
+    BadTabIndex,       ///< A workspace's active or previous tab index is out of range.
     MissingSession,    ///< A leaf carries SessionId{}, the sentinel for none.
 };
 

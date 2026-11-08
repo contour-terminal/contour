@@ -91,7 +91,7 @@ struct RestoreHarness
 /// @return The terminal of @p host's active pane of its @p tabIndex-th tab in its own window.
 [[nodiscard]] vtbackend::Terminal& terminalOf(SessionHost& host, int tabIndex)
 {
-    auto const* const window = host.model().window(host.windowId());
+    auto const* const window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     auto const* const tab = window->tabAt(tabIndex);
     REQUIRE(tab != nullptr);
@@ -203,7 +203,7 @@ TEST_CASE("each restored pane starts in its directory with its profile", "[vthos
     REQUIRE(h.recorded.overrides[0].has_value());
     CHECK(h.recorded.overrides[0]->workingDirectory == "/work/a");
     CHECK(h.recorded.overrides[0]->program == "/bin/zsh");
-    auto const session = host->model().window(host->windowId())->tabAt(0)->activePane()->session();
+    auto const session = host->model().workspace(host->windowId())->tabAt(0)->activePane()->session();
     CHECK(host->paneRuntime(session).profile == "work");
 }
 
@@ -289,7 +289,7 @@ TEST_CASE("a pane whose command was not re-run remembers it until its next comma
     auto& first = terminalOf(*host, 0);
     auto& second = terminalOf(*host, 1);
     auto const sessionOf = [&](int tab) {
-        return host->model().window(host->windowId())->tabAt(tab)->activePane()->session();
+        return host->model().workspace(host->windowId())->tabAt(tab)->activePane()->session();
     };
     std::ignore = h.loop.runUntilIdle();
 
@@ -345,7 +345,7 @@ TEST_CASE("an empty or unrealizable restore falls back to the startup layout", "
     {
         auto const host =
             h.makeHost(SessionHostConfig { .startupLayout = startup, .restore = WorkspaceRestore {} });
-        CHECK(host->model().window(host->windowId())->tabCount() == 2);
+        CHECK(host->model().workspace(host->windowId())->tabCount() == 2);
         CHECK(host->restoreOutcome() == RestoreOutcome::NothingRealized);
     }
     SECTION("a restore whose every spawn fails")
@@ -356,7 +356,7 @@ TEST_CASE("an empty or unrealizable restore falls back to the startup layout", "
         CHECK(host->restoreOutcome() == RestoreOutcome::NothingRealized);
         // Both restored tabs were tried, then the startup layout's.
         CHECK(h.recorded.overrides.size() == 4);
-        CHECK(host->model().windowCount() == 1);
+        CHECK(host->model().workspaceCount() == 1);
     }
     SECTION("no restore at all")
     {
@@ -376,8 +376,8 @@ TEST_CASE("a restore whose first window comes back empty fills the host's own wi
 
     auto const host = h.restore(WorkspaceRestore { .snapshot = std::move(workspace) });
     CHECK(host->restoreOutcome() == RestoreOutcome::Realized);
-    CHECK(host->model().windowCount() == 1);
-    CHECK(host->model().window(host->windowId())->tabCount() == 1);
+    CHECK(host->model().workspaceCount() == 1);
+    CHECK(host->model().workspace(host->windowId())->tabCount() == 1);
 }
 
 namespace
@@ -413,7 +413,7 @@ TEST_CASE("a restored pane gets a UUID and exports it to its shell", "[vthost][s
     REQUIRE(host->restoreOutcome() == RestoreOutcome::Realized);
     REQUIRE(h.recorded.overrides.size() == 1);
 
-    auto const session = host->model().window(host->windowId())->tabAt(0)->activePane()->session();
+    auto const session = host->model().workspace(host->windowId())->tabAt(0)->activePane()->session();
     CHECK(host->objects().uuidOf(session).has_value());
     CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*host, session));
 }
@@ -453,7 +453,7 @@ TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were 
     h.recorded.overrides.clear();
     auto const restored = h.restore(WorkspaceRestore { .snapshot = snap });
     REQUIRE(restored->restoreOutcome() == RestoreOutcome::Realized);
-    auto const* const window = restored->model().window(restored->windowId());
+    auto const* const window = restored->model().workspace(restored->windowId());
     REQUIRE(window != nullptr);
     auto const* const restoredTab = window->tabAt(0);
     REQUIRE(restoredTab != nullptr);
@@ -478,7 +478,7 @@ TEST_CASE("a snapshot that repeats a UUID restores the second object under a fre
     auto const host =
         h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot { .identity = repeated },
                                                                PaneSnapshot { .identity = repeated } }) });
-    auto const* const window = host->model().window(host->windowId());
+    auto const* const window = host->model().workspace(host->windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 2);
     auto const first = host->objects().uuidOf(window->tabAt(0)->activePane()->session());
@@ -533,7 +533,7 @@ TEST_CASE("a client is told only of the windows it follows", "[vthost][snapshot]
 {
     auto h = RestoreHarness {};
     auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
-    auto const first = host->model().windowAt(0)->id().value;
+    auto const first = host->model().workspaceAt(0)->id().value;
 
     CHECK(host->takeRestoreAnnouncement([first](uint64_t window) { return window == first; })
           == RestoredCounts { .windows = 1, .tabs = 3 });

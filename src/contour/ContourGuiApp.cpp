@@ -3549,7 +3549,7 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
             continue;
         // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
         // @see TerminalSession::noteTransportLost
-        if (auto* window = _sessionManager.model().window(mapped->second))
+        if (auto* window = _sessionManager.model().workspace(mapped->second))
             for (auto const index: std::views::iota(0, window->tabCount()))
                 for (auto* session: _sessionManager.sessionsOfTab(window->tabAt(index)))
                     session->noteTransportLost();
@@ -3563,7 +3563,7 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
         controller->closeWindow();
 }
 
-void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
+void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WorkspaceId osWindow)
 {
     _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);

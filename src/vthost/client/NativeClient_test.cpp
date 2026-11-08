@@ -1165,8 +1165,8 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     loop.blockOn(
         core::net::testing::allOf(server.run(), client.run(), driveCreateTab(&loop, &client, &mirroredTabs)));
 
-    CHECK(mirroredTabs == 2);                                     // the mirrored layout grew
-    CHECK(host.model().window(host.windowId())->tabCount() == 2); // the daemon really created the tab
+    CHECK(mirroredTabs == 2);                                        // the mirrored layout grew
+    CHECK(host.model().workspace(host.windowId())->tabCount() == 2); // the daemon really created the tab
 }
 
 namespace
@@ -1364,7 +1364,7 @@ AttachObservation attachDarkClient(bool seeded, proto::WireColorPreference prefe
         server.run(),
         client.run(),
         guardScenario(&loop, [&client] { client.detach(); }, driveAttachThenResize(&loop, &client))));
-    host.model().forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
+    host.model().forEachTab([&](vtworkspace::Workspace&, vtworkspace::Tab& tab) {
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
                 observation.hostEnds.push_back(
@@ -1441,8 +1441,8 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
     loop.blockOn(
         core::net::testing::allOf(server.run(), client.run(), driveCreateWindow(&loop, &client, &windows)));
 
-    CHECK(windows.size() == 2);             // the client saw two distinct windows' layouts
-    CHECK(host.model().windowCount() == 2); // the daemon really created a second window
+    CHECK(windows.size() == 2);                // the client saw two distinct windows' layouts
+    CHECK(host.model().workspaceCount() == 2); // the daemon really created a second window
 }
 
 TEST_CASE("RemoteScreen replaces its block table on a snapshot and stamps only what changed",
@@ -2531,7 +2531,7 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
                                                                   .profileName = "main" },
                                  mainOnly() };
         h.drive(detachOnLayout(&h));
-        auto const session = h.host.model().window(h.host.windowId())->tabAt(0)->rootPane()->session();
+        auto const session = h.host.model().workspace(h.host.windowId())->tabAt(0)->rootPane()->session();
         CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
         CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
     }

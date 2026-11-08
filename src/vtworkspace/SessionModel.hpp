@@ -23,33 +23,33 @@
 namespace vtworkspace
 {
 
-/// A logical window: an ordered list of tabs with one active tab.
+/// A logical workspace: an ordered list of tabs with one active tab.
 ///
-/// In single-process GUI mode there is one Window per OS window; in daemon mode a Window is a
+/// In single-process GUI mode there is one Workspace per OS window; in daemon mode a Workspace is a
 /// server-side layout that one or more clients may attach to.
-class Window
+class Workspace
 {
   public:
-    explicit Window(WindowId id) noexcept: _id { id } {}
+    explicit Workspace(WorkspaceId id) noexcept: _id { id } {}
 
-    Window(Window const&) = delete;
-    Window& operator=(Window const&) = delete;
-    Window(Window&&) = delete;
-    Window& operator=(Window&&) = delete;
-    ~Window() = default;
+    Workspace(Workspace const&) = delete;
+    Workspace& operator=(Workspace const&) = delete;
+    Workspace(Workspace&&) = delete;
+    Workspace& operator=(Workspace&&) = delete;
+    ~Workspace() = default;
 
-    [[nodiscard]] WindowId id() const noexcept { return _id; }
+    [[nodiscard]] WorkspaceId id() const noexcept { return _id; }
     [[nodiscard]] int tabCount() const noexcept { return static_cast<int>(_tabs.size()); }
     [[nodiscard]] bool empty() const noexcept { return _tabs.empty(); }
 
-    /// The active tab, or nullptr if the window has no tabs.
+    /// The active tab, or nullptr if the workspace has no tabs.
     [[nodiscard]] Tab* activeTab() const noexcept;
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
 
     /// The tab that was active before the current one (the target of a "switch to previous tab"
     /// toggle), or nullptr if there is no valid previous tab (never switched, or the previous tab was
     /// closed). Tracked here — the authoritative, Qt-free model — so switch-to-previous-tab is a pure
-    /// model query and lives per window automatically.
+    /// model query and lives per workspace automatically.
     [[nodiscard]] Tab* previousActiveTab() const noexcept;
     [[nodiscard]] int previousActiveTabIndex() const noexcept { return _previousActiveTabIndex; }
 
@@ -63,7 +63,7 @@ class Window
   private:
     friend class SessionModel;
 
-    WindowId _id;
+    WorkspaceId _id;
     std::vector<std::unique_ptr<Tab>> _tabs;
     int _activeTabIndex = -1;
     /// The slot that was active before _activeTabIndex, or -1 if none. Maintained by SessionModel: set on
@@ -78,7 +78,7 @@ class Window
 ///         SessionId{} is the sentinel for none.
 [[nodiscard]] SessionId firstUnusedSessionId(WorkspaceTreeState const& tree);
 
-/// The single source of truth for all windows, tabs and panes.
+/// The single source of truth for all workspaces, tabs and panes.
 ///
 /// SessionModel is deliberately free of Qt and of any transport. Every mutation is performed through
 /// one of its methods, which updates the tree and notifies the host through ModelEvents. The Qt GUI
@@ -108,116 +108,116 @@ class SessionModel
 
     // {{{ Snapshot & restore (daemon live upgrade)
 
-    /// @return Every window, tab and pane, with the ids and session ids they have now.
+    /// @return Every workspace, tab and pane, with the ids and session ids they have now.
     [[nodiscard]] WorkspaceTreeState captureTree() const;
 
-    /// @return The counters the next window, tab and pane are minted from.
+    /// @return The counters the next workspace, tab and pane are minted from.
     [[nodiscard]] ModelIdState idState() const noexcept;
 
     /// Rebuilds the tree of a model that a previous process held, with the very ids it had, so that
     /// reconnecting clients map onto the same objects. Fires no event: nothing observes a model being
     /// rebuilt, and the host that restores it announces what it must itself.
     ///
-    /// A model that holds a window already is a contract violation (Require), not an error: restoring is
+    /// A model that holds a workspace already is a contract violation (Require), not an error: restoring is
     /// done once, into a fresh model. Session ids are taken as given; the SessionAllocator is not called,
     /// so the host must seed its own counter above every restored session id (firstUnusedSessionId()). A
     /// leaf carrying SessionId{} is refused.
-    /// @param tree The windows, tabs and panes to rebuild.
+    /// @param tree The workspaces, tabs and panes to rebuild.
     /// @param ids  The counters to mint from afterwards; every id in @p tree must be below its counter.
     /// @return Nothing; or why @p tree cannot be a model. On error the model is still empty.
     [[nodiscard]] std::expected<void, ModelRestoreError> restore(WorkspaceTreeState const& tree,
                                                                  ModelIdState const& ids);
 
     // }}}
-    // {{{ Windows
+    // {{{ Workspaces
 
-    /// Creates a new, empty window and returns it.
-    [[nodiscard]] Window* createWindow();
+    /// Creates a new, empty workspace and returns it.
+    [[nodiscard]] Workspace* createWorkspace();
 
-    /// Removes a window and everything in it. Each contained session is reported closed.
-    void removeWindow(WindowId window);
+    /// Removes a workspace and everything in it. Each contained session is reported closed.
+    void removeWorkspace(WorkspaceId workspace);
 
-    [[nodiscard]] Window* window(WindowId id) const noexcept;
+    [[nodiscard]] Workspace* workspace(WorkspaceId id) const noexcept;
 
-    /// @return How many windows the model holds.
-    [[nodiscard]] int windowCount() const noexcept { return static_cast<int>(_windows.size()); }
+    /// @return How many workspaces the model holds.
+    [[nodiscard]] int workspaceCount() const noexcept { return static_cast<int>(_workspaces.size()); }
 
-    /// @return The window at @p index (0-based), or nullptr if out of range. For
-    ///         enumerating every window (e.g. the daemon serializing all of them).
-    [[nodiscard]] Window* windowAt(int index) const noexcept
+    /// @return The workspace at @p index (0-based), or nullptr if out of range. For
+    ///         enumerating every workspace (e.g. the daemon serializing all of them).
+    [[nodiscard]] Workspace* workspaceAt(int index) const noexcept
     {
-        return index >= 0 && std::cmp_less(index, _windows.size())
-                   ? _windows[static_cast<std::size_t>(index)].get()
+        return index >= 0 && std::cmp_less(index, _workspaces.size())
+                   ? _workspaces[static_cast<std::size_t>(index)].get()
                    : nullptr;
     }
 
     // }}}
     // {{{ Tabs
 
-    /// Appends a new tab (with a single fresh-session pane) to @p window and makes it active.
-    [[nodiscard]] Tab* createTab(WindowId window);
+    /// Appends a new tab (with a single fresh-session pane) to @p workspace and makes it active.
+    [[nodiscard]] Tab* createTab(WorkspaceId workspace);
 
-    /// Closes the tab @p tab in @p window, reporting each of its sessions closed. If it was the
-    /// last tab, the window becomes empty (the host decides whether to close the OS window).
-    void closeTab(WindowId window, TabId tab);
+    /// Closes the tab @p tab in @p workspace, reporting each of its sessions closed. If it was the
+    /// last tab, the workspace becomes empty (the host decides whether to close the OS window).
+    void closeTab(WorkspaceId workspace, TabId tab);
 
-    /// Closes every tab in @p window except @p keep.
-    void closeOtherTabs(WindowId window, TabId keep);
+    /// Closes every tab in @p workspace except @p keep.
+    void closeOtherTabs(WorkspaceId workspace, TabId keep);
 
-    /// Closes every tab positioned after @p anchor in @p window.
-    void closeTabsToRight(WindowId window, TabId anchor);
+    /// Closes every tab positioned after @p anchor in @p workspace.
+    void closeTabsToRight(WorkspaceId workspace, TabId anchor);
 
-    /// Makes @p tab the active tab of @p window.
-    void activateTab(WindowId window, TabId tab);
+    /// Makes @p tab the active tab of @p workspace.
+    void activateTab(WorkspaceId workspace, TabId tab);
 
-    /// Moves @p tab to @p toIndex within @p window.
-    void moveTab(WindowId window, TabId tab, int toIndex);
+    /// Moves @p tab to @p toIndex within @p workspace.
+    void moveTab(WorkspaceId workspace, TabId tab, int toIndex);
 
-    /// Moves @p tab out of window @p from and into window @p to at @p toIndex, transplanting its whole
+    /// Moves @p tab out of workspace @p from and into workspace @p to at @p toIndex, transplanting its whole
     /// pane subtree (and the sessions it carries — none are closed). Fixes the active/previous-tab
-    /// bookkeeping on both windows. No-op if either window is unknown or @p tab is not in @p from.
+    /// bookkeeping on both workspaces. No-op if either workspace is unknown or @p tab is not in @p from.
     ///
-    /// This is the model half of dragging a tab between windows (or tearing it into a fresh window):
+    /// This is the model half of dragging a tab between workspaces (or tearing it into a fresh workspace):
     /// the Tab object moves intact, so its sessions survive and the host only re-binds them to the
-    /// destination window's displays.
-    /// @param from    The window currently holding @p tab.
+    /// destination workspace's displays.
+    /// @param from    The workspace currently holding @p tab.
     /// @param tab     The tab to move.
-    /// @param to      The destination window (may equal @p from, in which case this reorders).
+    /// @param to      The destination workspace (may equal @p from, in which case this reorders).
     /// @param toIndex The destination position, clamped into the destination's tab range.
-    void moveTabToWindow(WindowId from, TabId tab, WindowId to, int toIndex);
+    void moveTabToWorkspace(WorkspaceId from, TabId tab, WorkspaceId to, int toIndex);
 
-    /// Grafts the whole of tab @p source (in window @p from) beside the leaf @p leaf of tab @p target (in
-    /// window @p to), on @p side, at ratio 0.5. The source's panes and sessions travel with it (none is
+    /// Grafts the whole of tab @p source (in workspace @p from) beside the leaf @p leaf of tab @p target (in
+    /// workspace @p to), on @p side, at ratio 0.5. The source's panes and sessions travel with it (none is
     /// closed); the source tab is removed; the grafted tree's active pane becomes @p target's active
     /// pane, and @p target becomes the active tab of @p to. Zoom state is dropped: a zoomed source shows
     /// all its panes, and so does the target.
     ///
     /// Hosts see the source tab leave (tabAboutToBeRemoved, tabClosed), then the target tab activate, and
     /// the target's tree restructure (paneTreeRestructured, activePaneChanged).
-    /// @param from   The window holding @p source (may equal @p to).
+    /// @param from   The workspace holding @p source (may equal @p to).
     /// @param source The tab to merge.
-    /// @param to     The window holding @p target.
+    /// @param to     The workspace holding @p target.
     /// @param target The tab receiving it.
     /// @param leaf   A leaf of @p target to split.
     /// @param side   The side of @p leaf the merged tab goes on.
     /// @return The root of the grafted tree; nullptr, and nothing changed, when @p source equals
     ///         @p target, an id is unknown, or @p leaf is not a leaf of @p target.
     [[nodiscard]] Pane* mergeTabIntoSplit(
-        WindowId from, TabId source, WindowId to, TabId target, PaneId leaf, SplitSide side);
+        WorkspaceId from, TabId source, WorkspaceId to, TabId target, PaneId leaf, SplitSide side);
 
     // }}}
     // {{{ Moves
 
     /// Moves a pane or a whole tab to a new place: beside another pane, onto another pane (trading
-    /// places), into a window's tab strip, or into a window of its own. No session is closed; the moved
+    /// places), into a workspace's tab strip, or into a workspace of its own. No session is closed; the moved
     /// node keeps its sessions, and the pane keeps its PaneId except when it swaps (only the sessions
     /// trade places then) or becomes a tab of its own.
     ///
     /// Everything is validated before the first mutation, so a refusal changes nothing and fires no
-    /// event. On success the target tab becomes its window's active tab, the moved session becomes its
+    /// event. On success the target tab becomes its workspace's active tab, the moved session becomes its
     /// active pane, and zoom is cleared on every tab involved. A source tab left without panes is
-    /// removed; a source window left without tabs stays in the model, empty, for the host to close (as
-    /// with moveTabToWindow).
+    /// removed; a source workspace left without tabs stays in the model, empty, for the host to close (as
+    /// with moveTabToWorkspace).
     /// @param source What is dragged. A one-pane tab counts as a pane.
     /// @param target Where it is dropped.
     /// @return Where focus lands, or why nothing happened.
@@ -225,10 +225,10 @@ class SessionModel
                                                                 MoveTarget const& target);
 
     /// @param source What a move would drag.
-    /// @return Whether @p source is everything its window holds: its only tab, or that tab's only pane. A
-    ///         NewWindowTarget refuses such a source as MoveError::NoOp; a host that makes the new window
-    ///         itself asks this first.
-    [[nodiscard]] bool fillsItsWindow(MoveSource const& source) const;
+    /// @return Whether @p source is everything its workspace holds: its only tab, or that tab's only pane. A
+    ///         NewWorkspaceTarget refuses such a source as MoveError::NoOp; a host that makes the new
+    ///         workspace itself asks this first.
+    [[nodiscard]] bool fillsItsWorkspace(MoveSource const& source) const;
 
     /// Lays @p tab's panes out as @p shape: the leaves it has are rearranged into the given splits, ratios
     /// and order, each going where its session is named. No session is spawned or closed, and every leaf
@@ -251,9 +251,9 @@ class SessionModel
     Pane* splitActivePane(TabId tab, SplitState direction, double ratio = 0.5);
 
     /// Closes pane @p leaf in @p tab. If it was the tab's last pane, the whole tab is closed
-    /// instead; a window left with no tabs stays in the model (empty), for the host to close or
+    /// instead; a workspace left with no tabs stays in the model (empty), for the host to close or
     /// keep — see closeTab. Reports the closed session(s).
-    void closePane(WindowId window, TabId tab, PaneId leaf);
+    void closePane(WorkspaceId workspace, TabId tab, PaneId leaf);
 
     /// Sets the active pane of @p tab.
     void setActivePane(TabId tab, PaneId leaf);
@@ -354,19 +354,19 @@ class SessionModel
 
     [[nodiscard]] Tab* findTab(TabId tab) const noexcept;
 
-    /// The id of the window owning @p tab, or a default WindowId{} (value 0) if @p tab is unknown. Lets
-    /// the Qt host route a pane event (which carries only a TabId) to the owning window's controller.
-    [[nodiscard]] WindowId windowOfTab(TabId tab) const noexcept;
+    /// The id of the workspace owning @p tab, or a default WorkspaceId{} (value 0) if @p tab is unknown. Lets
+    /// the Qt host route a pane event (which carries only a TabId) to the owning workspace's controller.
+    [[nodiscard]] WorkspaceId workspaceOfTab(TabId tab) const noexcept;
 
-    /// Locates the leaf pane hosting @p session, searching every window. For hosts that resolve a
-    /// session to its pane without knowing which window owns it (the daemon's session-exit pruning,
+    /// Locates the leaf pane hosting @p session, searching every workspace. For hosts that resolve a
+    /// session to its pane without knowing which workspace owns it (the daemon's session-exit pruning,
     /// per-session output mapping, and client-authored split verbs).
     /// @param session The session to locate.
-    /// @return The {window, tab, pane} triple; all nullptr when @p session is unknown.
-    [[nodiscard]] std::tuple<Window*, Tab*, Pane*> findSessionLeaf(SessionId session) const;
+    /// @return The {workspace, tab, pane} triple; all nullptr when @p session is unknown.
+    [[nodiscard]] std::tuple<Workspace*, Tab*, Pane*> findSessionLeaf(SessionId session) const;
 
-    /// Locates the LEAF pane with id @p pane, searching every window (pane ids are minted
-    /// model-globally). For hosts resolving a wire pane reference without knowing which window owns
+    /// Locates the LEAF pane with id @p pane, searching every workspace (pane ids are minted
+    /// model-globally). For hosts resolving a wire pane reference without knowing which workspace owns
     /// it (the tmux control session's %N targets — tmux names leaf panes only, so internal split
     /// nodes deliberately do not match).
     /// @param pane The leaf pane id to locate.
@@ -383,8 +383,8 @@ class SessionModel
     /// @return The pane, or nullptr when either id is unknown.
     [[nodiscard]] Pane* findPane(TabId tab, PaneId pane) const;
 
-    /// Invokes @p f(Window&, Tab&) for every tab of every window, in window order. Single-sources
-    /// the windows×tabs traversal for hosts that project the whole model (the daemon's resize
+    /// Invokes @p f(Workspace&, Tab&) for every tab of every workspace, in workspace order. Single-sources
+    /// the workspaces×tabs traversal for hosts that project the whole model (the daemon's resize
     /// reprojection and attach snapshots).
     /// @param f The per-tab visitor.
     template <typename F>
@@ -393,7 +393,7 @@ class SessionModel
         // @p f is invoked once per tab, so it is forwarded once into a reference binding and
         // called through that (the same idiom Pane::walkTree documents).
         auto&& visit = std::forward<F>(f);
-        for (auto const& win: _windows)
+        for (auto const& win: _workspaces)
             for (auto const& tab: win->_tabs)
                 visit(*win, *tab);
     }
@@ -407,13 +407,13 @@ class SessionModel
     // }}}
 
   private:
-    /// Locates the window owning @p tab. Returns {window, index-of-tab} or {nullptr, -1}.
-    [[nodiscard]] std::pair<Window*, int> locateTab(TabId tab) const noexcept;
+    /// Locates the workspace owning @p tab. Returns {workspace, index-of-tab} or {nullptr, -1}.
+    [[nodiscard]] std::pair<Workspace*, int> locateTab(TabId tab) const noexcept;
 
-    /// Removes the tab at @p index of @p window, announcing it. @p beforeErase, when given, runs after the
+    /// Removes the tab at @p index of @p workspace, announcing it. @p beforeErase, when given, runs after the
     /// "about to be removed" announcement and before the tab is destroyed, for a caller that must take
     /// something out of the tab first.
-    void closeTabAt(Window& window, int index, std::function<void()> const& beforeErase = {});
+    void closeTabAt(Workspace& workspace, int index, std::function<void()> const& beforeErase = {});
 
     /// Announces everything that follows from @p tab's zoom having changed during a mutation, given
     /// the zoomed leaf captured @p zoomedLeafBefore it ran. Every pane mutator ends with this call.
@@ -436,8 +436,8 @@ class SessionModel
     ///         twice, which would run the host's whole status-line fan-out for one keystroke.
     bool announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
 
-    /// Inserts @p tab into @p window at @p index (clamped), announcing it and making it the active tab.
-    Tab* insertTab(Window& window, int index, std::unique_ptr<Tab> tab);
+    /// Inserts @p tab into @p workspace at @p index (clamped), announcing it and making it the active tab.
+    Tab* insertTab(Workspace& workspace, int index, std::unique_ptr<Tab> tab);
 
     /// Announces the zoom change, or else the retitle, of @p tab after a move touched its panes.
     void announcePaneMove(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
@@ -457,8 +457,8 @@ class SessionModel
     /// @return What @p target names, or why it names nothing.
     [[nodiscard]] std::expected<MoveTargetNode, MoveError> resolveMoveTarget(MoveTarget const& target) const;
 
-    /// @return Whether @p src is everything its window holds (@see fillsItsWindow(MoveSource const&)).
-    [[nodiscard]] static bool fillsItsWindow(MoveSourceNode const& src) noexcept;
+    /// @return Whether @p src is everything its workspace holds (@see fillsItsWorkspace(MoveSource const&)).
+    [[nodiscard]] static bool fillsItsWorkspace(MoveSourceNode const& src) noexcept;
 
     /// Moves @p src beside @p dst's pane, on @p side. @pre moveNode() validated the move.
     /// @return Where focus lands; an error only were the validation wrong, never by undefined behaviour.
@@ -469,17 +469,17 @@ class SessionModel
     /// Trades @p src's pane with @p dst's. @pre moveNode() validated the move.
     MoveResult swapWith(MoveSourceNode const& src, MoveTargetNode const& dst);
 
-    /// Moves @p src into @p window's tab strip at @p index. @pre moveNode() validated the move.
-    MoveResult moveIntoWell(MoveSourceNode const& src, Window& window, int index);
+    /// Moves @p src into @p workspace's tab strip at @p index. @pre moveNode() validated the move.
+    MoveResult moveIntoWell(MoveSourceNode const& src, Workspace& workspace, int index);
     // }}}
 
     ModelEvents& _events;
     SessionAllocator _allocateSession;
     Tab::SessionTitleResolver _titleResolver;
 
-    std::vector<std::unique_ptr<Window>> _windows;
+    std::vector<std::unique_ptr<Workspace>> _workspaces;
 
-    WindowId _nextWindowId { 1 };
+    WorkspaceId _nextWorkspaceId { 1 };
     TabId _nextTabId { 1 };
     PaneId _nextPaneId { 1 };
 };

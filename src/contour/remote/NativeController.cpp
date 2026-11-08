@@ -986,7 +986,7 @@ contour::session::RemoteRouting NativeController::requestRemoteMove(contour::ses
         .sourceKind = std::to_underlying(move.source),
         .sourceSessions = move.sourceSessions,
         .targetKind = std::to_underlying(move.target),
-        .targetSession = move.target == vtworkspace::MoveTargetKind::NewWindow ? 0 : move.targetSession,
+        .targetSession = move.target == vtworkspace::MoveTargetKind::NewWorkspace ? 0 : move.targetSession,
         .side = std::to_underlying(move.side),
         .index = static_cast<uint64_t>(std::max(move.index, 0)),
     };

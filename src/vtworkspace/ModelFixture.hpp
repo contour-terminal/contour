@@ -19,31 +19,31 @@ struct RecordingEvents: ModelEvents
 {
     std::vector<std::string> log;
 
-    void tabAboutToBeAdded(WindowId, int index) override
+    void tabAboutToBeAdded(WorkspaceId, int index) override
     {
         log.push_back(std::format("tabAboutToBeAdded:{}", index));
     }
-    void tabAdded(WindowId, TabId t, int index) override
+    void tabAdded(WorkspaceId, TabId t, int index) override
     {
         log.push_back(std::format("tabAdded:{}:{}", t.value, index));
     }
-    void tabAboutToBeRemoved(WindowId, int index) override
+    void tabAboutToBeRemoved(WorkspaceId, int index) override
     {
         log.push_back(std::format("tabAboutToBeRemoved:{}", index));
     }
-    void tabClosed(WindowId, TabId t, int index) override
+    void tabClosed(WorkspaceId, TabId t, int index) override
     {
         log.push_back(std::format("tabClosed:{}:{}", t.value, index));
     }
-    void tabAboutToBeMoved(WindowId, int from, int to) override
+    void tabAboutToBeMoved(WorkspaceId, int from, int to) override
     {
         log.push_back(std::format("tabAboutToBeMoved:{}>{}", from, to));
     }
-    void tabMoved(WindowId, TabId t, int from, int to) override
+    void tabMoved(WorkspaceId, TabId t, int from, int to) override
     {
         log.push_back(std::format("tabMoved:{}:{}>{}", t.value, from, to));
     }
-    void activeTabChanged(WindowId, TabId t, int index) override
+    void activeTabChanged(WorkspaceId, TabId t, int index) override
     {
         log.push_back(std::format("activeTab:{}:{}", t.value, index));
     }
@@ -92,11 +92,11 @@ struct RecordingEvents: ModelEvents
         lastZoomedLeaf = zoomedLeaf;
     }
     void paneTreeRestructured(TabId t) override { log.push_back(std::format("restructured:{}", t.value)); }
-    void tabAboutToBeMovedToWindow(WindowId from, int fromIdx, WindowId to, int toIdx) override
+    void tabAboutToBeMovedToWorkspace(WorkspaceId from, int fromIdx, WorkspaceId to, int toIdx) override
     {
         log.push_back(std::format("tabAboutToMoveWin:{}:{}>{}:{}", from.value, fromIdx, to.value, toIdx));
     }
-    void tabMovedToWindow(WindowId from, TabId t, int fromIdx, WindowId to, int toIdx) override
+    void tabMovedToWorkspace(WorkspaceId from, TabId t, int fromIdx, WorkspaceId to, int toIdx) override
     {
         log.push_back(
             std::format("tabMovedWin:{}:{}:{}>{}:{}", from.value, t.value, fromIdx, to.value, toIdx));

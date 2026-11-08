@@ -75,7 +75,7 @@ TEST_CASE("workspace.list mirrors the model with registry ids", "[vthost][contro
 {
     auto h = ControlHarness {};
     auto const first = h.openTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const second = tab->activePane()->session();
 
@@ -208,7 +208,7 @@ TEST_CASE("a stale caller pane is NotFound, never another pane", "[vthost][contr
 {
     auto h = ControlHarness {};
     auto const kept = h.openTab();
-    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const gone = tab->activePane()->session();
     auto const goneId = h.paneId(gone);
@@ -368,7 +368,7 @@ TEST_CASE("a control call from a pane moved into a new window resolves its tab",
     auto const& window = h.host.createEmptyWindow();
     REQUIRE(h.host.model()
                 .moveNode(vtworkspace::PaneSource { dragged },
-                          vtworkspace::TabWellTarget { .window = window.id(), .index = 0 })
+                          vtworkspace::TabWellTarget { .workspace = window.id(), .index = 0 })
                 .has_value());
     h.context.callerPane = h.paneId(dragged);
 
@@ -410,7 +410,7 @@ TEST_CASE("tab.create returns ids that workspace.list then shows", "[vthost][con
     auto const taken =
         callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
     REQUIRE(taken.has_value());
-    CHECK(h.host.model().window(h.host.windowId())->activeTabIndex() == 2);
+    CHECK(h.host.model().workspace(h.host.windowId())->activeTabIndex() == 2);
 }
 
 namespace
@@ -431,8 +431,8 @@ TEST_CASE("tab.create with placement new opens a second window", "[vthost][contr
         vtcontrol::CreateTabRequest { .placement = vtcontrol::WorkspacePlacement::New,
                                       .command = { "htop" } });
     REQUIRE(created.has_value());
-    REQUIRE(h.host.model().windowCount() == 2);
-    auto const* window = h.host.model().windowAt(1);
+    REQUIRE(h.host.model().workspaceCount() == 2);
+    auto const* window = h.host.model().workspaceAt(1);
     CHECK(created->workspace
           == vtcontrol::toString(vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
                                                         .uuid = *h.host.objects().uuidOf(window->id()) }));
@@ -452,7 +452,7 @@ TEST_CASE("tab.create with placement new opens a second window", "[vthost][contr
         h.service, h.context, vtcontrol::CreateTabRequest { .workspace = "2" });
     REQUIRE(second.has_value());
     CHECK(second->workspace == created->workspace);
-    CHECK(h.host.model().windowAt(1)->tabCount() == 2);
+    CHECK(h.host.model().workspaceAt(1)->tabCount() == 2);
 }
 
 TEST_CASE("pane.split below 30 gives the new pane 30 percent and focus", "[vthost][control][write]")
@@ -468,7 +468,7 @@ TEST_CASE("pane.split below 30 gives the new pane 30 percent and focus", "[vthos
                                   .ratioPercent = 30,
                                   .label = "tail" });
     REQUIRE(split.has_value());
-    auto const* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     REQUIRE(tab->paneCount() == 2);
     auto const* root = tab->rootPane();
     CHECK(root->splitState() == vtworkspace::SplitState::Horizontal);
@@ -491,7 +491,7 @@ TEST_CASE("pane.split with focus keep leaves the anchor active", "[vthost][contr
         h.context,
         vtcontrol::SplitRequest { .pane = h.paneId(anchor), .focus = vtcontrol::FocusPolicy::Keep });
     REQUIRE(split.has_value());
-    auto const* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const* tab = h.host.model().workspace(h.host.windowId())->activeTab();
     CHECK(tab->paneCount() == 2);
     CHECK(tab->activePane()->session() == anchor);
     CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
@@ -594,7 +594,7 @@ TEST_CASE("pane.close and tab.close remove what they name", "[vthost][control][w
                 h.service, h.context, vtcontrol::CloseTabRequest { .tab = second->tab })
                 .has_value());
     CHECK(h.host.sessionCount() == 1);
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 1);
+    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == 1);
     // A close the API asked for is a requested one, which a reboot restore does not bring back.
     CHECK(ends.causes == std::vector<vthost::SessionEnd>(3, vthost::SessionEnd::Requested));
     h.host.unsubscribeStream(&ends);

@@ -96,19 +96,19 @@ struct RecordingEvents final: vtworkspace::ModelEvents
 {
     std::vector<std::string> log;
 
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabAdded:{}", index));
     }
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("tabClosed:{}", index));
     }
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int from, int to) override
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int from, int to) override
     {
         log.push_back(std::format("tabMoved:{}->{}", from, to));
     }
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int index) override
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int index) override
     {
         log.push_back(std::format("activeTabChanged:{}", index));
     }
@@ -128,13 +128,14 @@ struct RecordingEvents final: vtworkspace::ModelEvents
     {
         log.emplace_back("paneRatioChanged");
     }
-    void tabAboutToBeMovedToWindow(vtworkspace::WindowId, int, vtworkspace::WindowId, int) override
+    void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId, int, vtworkspace::WorkspaceId, int) override
     {
-        log.emplace_back("tabAboutToBeMovedToWindow");
+        log.emplace_back("tabAboutToBeMovedToWorkspace");
     }
-    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+    void tabMovedToWorkspace(
+        vtworkspace::WorkspaceId, vtworkspace::TabId, int, vtworkspace::WorkspaceId, int) override
     {
-        log.emplace_back("tabMovedToWindow");
+        log.emplace_back("tabMovedToWorkspace");
     }
     void tabTitleChanged(vtworkspace::TabId) override { log.emplace_back("tabTitleChanged"); }
     void tabColorChanged(vtworkspace::TabId) override { log.emplace_back("tabColorChanged"); }
@@ -498,7 +499,7 @@ TEST_CASE("the last pane's session exit closes the whole tab", "[vthost][host]")
     h.host.handleSessionExit(session);
 
     CHECK(h.host.sessionCount() == 0);
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 0);
+    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == 0);
     CHECK(h.recorder.saw("tabClosed"));
 }
 
@@ -1270,7 +1271,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
     host.subscribeStream(&second);
 
     REQUIRE(host.createTab() != nullptr);
-    auto const session = host.model().window(host.windowId())->activeTab()->rootPane()->session();
+    auto const session = host.model().workspace(host.windowId())->activeTab()->rootPane()->session();
     auto* terminal = host.terminal(session);
     REQUIRE(terminal != nullptr);
 
@@ -1823,17 +1824,17 @@ TEST_CASE("createTab honours the window the request names", "[vthost][host]")
     // Unnamed: the host's own window, as before.
     auto* defaulted = h.host.createTab();
     REQUIRE(defaulted != nullptr);
-    CHECK(h.host.model().windowOfTab(defaulted->id()) == h.host.windowId());
+    CHECK(h.host.model().workspaceOfTab(defaulted->id()) == h.host.windowId());
 
     // Named by a session of the SECOND window: the tab lands there.
     auto* targeted = h.host.createTab({}, inSecond);
     REQUIRE(targeted != nullptr);
-    CHECK(h.host.model().windowOfTab(targeted->id()) == second->id());
+    CHECK(h.host.model().workspaceOfTab(targeted->id()) == second->id());
 
     // A session this host does not hold falls back to its own window rather than failing.
     auto* unknown = h.host.createTab({}, vtworkspace::SessionId { 99999 });
     REQUIRE(unknown != nullptr);
-    CHECK(h.host.model().windowOfTab(unknown->id()) == h.host.windowId());
+    CHECK(h.host.model().workspaceOfTab(unknown->id()) == h.host.windowId());
 }
 
 TEST_CASE("SessionHost realizes a single-tab startup layout into its one window", "[vthost][host][layout]")
@@ -1853,7 +1854,7 @@ TEST_CASE("SessionHost realizes a single-tab startup layout into its one window"
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 1);
 
@@ -1892,7 +1893,7 @@ TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthos
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 3); // one leaf tab + two-pane split tab
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 2);
 
@@ -1927,7 +1928,7 @@ TEST_CASE("SessionHost with an empty startup layout keeps today's single-default
                                                           .sizePolicy = vthost::ClientSizePolicy::Latest } };
 
     CHECK(host.sessionCount() == 0);
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 0);
 }
@@ -1962,7 +1963,7 @@ TEST_CASE("SessionHost honors a startup layout pane's command/arguments override
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 1);
     REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
@@ -2002,7 +2003,7 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
                                                           .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 1);
     REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
@@ -2110,7 +2111,7 @@ TEST_CASE("SessionHost falls back to an empty window when every startup-layout s
                                                           .startupLayout = layout } };
 
     CHECK(host.sessionCount() == 0);
-    auto* window = host.model().window(host.windowId());
+    auto* window = host.model().workspace(host.windowId());
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 0);
 }
@@ -2821,7 +2822,7 @@ TEST_CASE("SessionHost.extension.controlVerb", "[vthost][host][extensions][contr
     };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->windowId())->activeTab()->rootPane()->session();
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
 
@@ -2861,7 +2862,7 @@ TEST_CASE("SessionHost.extension.controlClosesItsOwnPane", "[vthost][host][exten
     };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->windowId())->activeTab()->rootPane()->session();
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
 
@@ -2894,7 +2895,7 @@ TEST_CASE("SessionHost.extension.noFont", "[vthost][host][extensions][guest]")
         DaemonExtensionsHarness { module, vtextension::CommandPermission::Deny, { { "state", "describe" } } };
     h.fileSystem.open();
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->windowId())->activeTab()->rootPane()->session();
     // A client is attached: the daemon repaints the row only for one to be sent.
     auto client = vthost::SessionStreamEvents {};
     h.host->subscribeStream(&client);
@@ -2935,7 +2936,7 @@ TEST_CASE("SessionHost.extension.askNoClient", "[vthost][host][extensions][guest
     auto timeline = ExtensionTimeline {};
     h.host->subscribeStream(&timeline);
     REQUIRE(h.host->createTab() != nullptr);
-    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host->model().workspace(h.host->windowId())->activeTab()->rootPane()->session();
     timeline.rowShowsPending = [&] {
         return h.indicatorText(session) == "[err:pending]";
     };
@@ -3543,10 +3544,10 @@ namespace
 /// Model events that do nothing, for a probe that overrides the one it watches.
 struct NullModelEvents: vtworkspace::ModelEvents
 {
-    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
-    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
-    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int) override {}
     void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
     void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
@@ -3580,7 +3581,7 @@ TEST_CASE("the tab's id is bound before observers hear of the tab", "[vthost][ho
 {
     struct Probe final: NullModelEvents
     {
-        void tabAdded(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        void tabAdded(vtworkspace::WorkspaceId /*window*/, vtworkspace::TabId tab, int /*index*/) override
         {
             uuid = host->objects().uuidOf(tab);
         }
@@ -3711,7 +3712,7 @@ TEST_CASE("observers can still name what closed while they are told", "[vthost][
 {
     struct Probe final: NullModelEvents
     {
-        void tabClosed(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        void tabClosed(vtworkspace::WorkspaceId /*window*/, vtworkspace::TabId tab, int /*index*/) override
         {
             uuid = host->objects().uuidOf(tab);
         }
@@ -3821,11 +3822,11 @@ TEST_CASE("a whole tab moved to another window reaches the subscribers, before a
 
     auto const moved =
         h.host.model().moveNode(vtworkspace::TabSource { h.host.windowId(), tab->id() },
-                                vtworkspace::TabWellTarget { .window = other->id(), .index = 0 });
+                                vtworkspace::TabWellTarget { .workspace = other->id(), .index = 0 });
     REQUIRE(moved.has_value());
 
-    auto const before = std::ranges::find(h.recorder.log, "tabAboutToBeMovedToWindow");
-    auto const after = std::ranges::find(h.recorder.log, "tabMovedToWindow");
+    auto const before = std::ranges::find(h.recorder.log, "tabAboutToBeMovedToWorkspace");
+    auto const after = std::ranges::find(h.recorder.log, "tabMovedToWorkspace");
     REQUIRE(before != h.recorder.log.end());
     REQUIRE(after != h.recorder.log.end());
     CHECK(before < after);
@@ -3845,7 +3846,7 @@ TEST_CASE("a window and tab a move creates are named, and the moved pane is re-f
     auto const& window = h.host.createEmptyWindow();
     auto const moved =
         h.host.model().moveNode(vtworkspace::PaneSource { dragged },
-                                vtworkspace::TabWellTarget { .window = window.id(), .index = 0 });
+                                vtworkspace::TabWellTarget { .workspace = window.id(), .index = 0 });
     REQUIRE(moved.has_value());
 
     CHECK(h.host.objects().uuidOf(window.id()).has_value());
@@ -3866,7 +3867,7 @@ TEST_CASE("a window made empty for a move is claimed by its creator and given ba
     CHECK(h.host.objects().uuidOf(id).has_value());
 
     h.host.discardWindow(id);
-    CHECK(h.host.model().window(id) == nullptr);
+    CHECK(h.host.model().workspace(id) == nullptr);
     CHECK_FALSE(h.host.objects().uuidOf(id).has_value());
     CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Unclaimed);
 }

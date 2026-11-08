@@ -75,10 +75,10 @@ namespace
                     return refuse(NodeMoveError::UnknownSession);
                 constexpr auto Largest = static_cast<uint64_t>(std::numeric_limits<int>::max());
                 return vtworkspace::MoveTarget { vtworkspace::TabWellTarget {
-                    .window = window->id(), .index = static_cast<int>(std::min(move.index, Largest)) } };
+                    .workspace = window->id(), .index = static_cast<int>(std::min(move.index, Largest)) } };
             }
-            case std::to_underlying(MoveTargetKind::NewWindow):
-                return vtworkspace::MoveTarget { vtworkspace::NewWindowTarget {} };
+            case std::to_underlying(MoveTargetKind::NewWorkspace):
+                return vtworkspace::MoveTarget { vtworkspace::NewWorkspaceTarget {} };
             default: return refuse(NodeMoveError::UnknownKind);
         }
     }
@@ -100,16 +100,16 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspac
         std::get<0>(model.findSessionLeaf(vtworkspace::SessionId { move.sourceSessions.front() }))->id();
     // The model would refuse a new window for what fills its window, but only once the window was made:
     // refused before, nothing is made, and no client sees a window come and go.
-    if (std::holds_alternative<vtworkspace::NewWindowTarget>(*target) && model.fillsItsWindow(*source))
+    if (std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target) && model.fillsItsWorkspace(*source))
         return std::unexpected { NodeMoveFailure { .error = NodeMoveError::Model,
                                                    .model = vtworkspace::MoveError::NoOp } };
     // A new window is made by the host's own path, which names it and records who asked, and is then the
     // well of a move; a refused move takes the still-empty window away again.
-    auto const made = std::holds_alternative<vtworkspace::NewWindowTarget>(*target)
+    auto const made = std::holds_alternative<vtworkspace::NewWorkspaceTarget>(*target)
                           ? std::optional { windows.create() }
                           : std::nullopt;
     auto const landing =
-        made ? vtworkspace::MoveTarget { vtworkspace::TabWellTarget { .window = *made, .index = 0 } }
+        made ? vtworkspace::MoveTarget { vtworkspace::TabWellTarget { .workspace = *made, .index = 0 } }
              : *target;
     auto moved = model.moveNode(*source, landing).transform_error([](vtworkspace::MoveError error) {
         return NodeMoveFailure { .error = NodeMoveError::Model, .model = error };
@@ -122,8 +122,8 @@ std::expected<vtworkspace::MoveResult, NodeMoveFailure> applyMoveNode(vtworkspac
     }
     // A window the move took its last tab out of is not left behind: its observers were told it holds none,
     // so a client closes its own window for it, and it goes.
-    if (auto const* const emptied = model.window(sourceWindow);
-        emptied != nullptr && emptied->empty() && sourceWindow != moved->window)
+    if (auto const* const emptied = model.workspace(sourceWindow);
+        emptied != nullptr && emptied->empty() && sourceWindow != moved->workspace)
         windows.discard(sourceWindow);
     return moved;
 }

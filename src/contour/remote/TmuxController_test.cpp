@@ -57,7 +57,7 @@ TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]
     // A pane in tmux window 1 appears and is realized as the first tab.
     ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     REQUIRE_FALSE(tab->runtimeTitle().has_value());
 
@@ -72,7 +72,7 @@ TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]
     ctrl->windowRenamed(2, "logs");
     ctrl->paneAdded(/*window=*/2, /*pane=*/20, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* second = app.manager().model().window(win.id)->tabAt(1);
+    auto* second = app.manager().model().workspace(win.id)->tabAt(1);
     REQUIRE(second != nullptr);
     REQUIRE(second->runtimeTitle().has_value());
     CHECK(*second->runtimeTitle() == "logs");
@@ -166,7 +166,7 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
 
     ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto* session = app.manager().sessionForId(tab->activePane()->session());
     REQUIRE(session != nullptr);
@@ -195,7 +195,7 @@ TEST_CASE("a command pane is refused in tmux mode", "[attach][tmux][semanticbloc
 
     ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto* session = app.manager().sessionForId(tab->activePane()->session());
     REQUIRE(session != nullptr);
@@ -287,7 +287,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
             ctrl->setNextBindPane(it->second);
     });
 
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     CHECK(tab->paneCount() == 2); // both panes realized as one split tab
     REQUIRE_FALSE(tab->rootPane()->isLeaf());
@@ -315,7 +315,7 @@ TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab
     ctrl->adoptPendingPanes(app.manager(), win.id);
     ctrl->paneAdded(/*window=*/2, /*pane=*/20, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    REQUIRE(app.manager().model().window(win.id)->tabCount() == 2);
+    REQUIRE(app.manager().model().workspace(win.id)->tabCount() == 2);
 
     // A third pane is discovered in window 1 but NOT adopted yet, then moved to window 2 — so the
     // record itself must follow, or the pane materializes in the tab tmux no longer places it in.
@@ -323,8 +323,8 @@ TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab
     ctrl->paneMoved(/*fromWindow=*/1, /*toWindow=*/2, /*pane=*/30);
     ctrl->adoptPendingPanes(app.manager(), win.id);
 
-    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1); // window 1 unchanged
-    CHECK(app.manager().model().window(win.id)->tabAt(1)->paneCount() == 2); // window 2 adopted it
+    CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1); // window 1 unchanged
+    CHECK(app.manager().model().workspace(win.id)->tabAt(1)->paneCount() == 2); // window 2 adopted it
 
     ctrl->stop();
 }
@@ -341,10 +341,10 @@ TEST_CASE("a realized tmux pane's move closes the local binding and defers the r
     ctrl->adoptPendingPanes(app.manager(), win.id);
     ctrl->paneAdded(/*window=*/2, /*pane=*/20, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    REQUIRE(app.manager().model().window(win.id)->tabCount() == 2);
+    REQUIRE(app.manager().model().workspace(win.id)->tabCount() == 2);
 
-    auto* moved =
-        app.manager().sessionForId(app.manager().model().window(win.id)->tabAt(0)->activePane()->session());
+    auto* moved = app.manager().sessionForId(
+        app.manager().model().workspace(win.id)->tabAt(0)->activePane()->session());
     REQUIRE(moved != nullptr);
     auto& pty = dynamic_cast<vtpty::ChannelPty&>(moved->terminal().device());
     REQUIRE_FALSE(pty.isClosed());
@@ -376,7 +376,7 @@ TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tm
 
     ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto* session = app.manager().sessionForId(tab->activePane()->session());
     REQUIRE(session != nullptr);
@@ -401,7 +401,7 @@ TEST_CASE("requestRemoteClose resolves a mirrored pane, and ignores a foreign pt
 
     ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     ctrl->adoptPendingPanes(app.manager(), win.id);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(tab != nullptr);
     auto* session = app.manager().sessionForId(tab->activePane()->session());
     REQUIRE(session != nullptr);

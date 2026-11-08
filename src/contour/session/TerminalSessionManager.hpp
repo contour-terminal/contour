@@ -169,8 +169,8 @@ using MoveFailure = std::variant<window::MoveRefusal, RemoteRouting, vtworkspace
  * TerminalSessions. It is NOT the GUI adapter: each OS window has its own WindowController (a
  * QAbstractListModel + PaneProxy tree + window services) that the QML binds to. The manager mints
  * those controllers (createWindowController) and, as the vtworkspace::ModelEvents implementer, ROUTES each
- * model change to the owning window's controller (tab events by WindowId; pane events resolve
- * TabId -> WindowId). Session -> display ownership lives solely on the pane tree (the QML `session:`
+ * model change to the owning window's controller (tab events by WorkspaceId; pane events resolve
+ * TabId -> WorkspaceId). Session -> display ownership lives solely on the pane tree (the QML `session:`
  * binding -> TerminalDisplay::setSession); the manager holds no per-display session map.
  *
  * It is the one thing in session/ that still names the concrete display and window types, and that is
@@ -182,7 +182,7 @@ using MoveFailure = std::variant<window::MoveRefusal, RemoteRouting, vtworkspace
  *
  * It is NOT a list model: the GUI tab strip renders from the per-window WindowController's
  * QAbstractListModel (WindowController::Roles). Every tab/pane operation here is routed by an
- * explicit window identity — either the calling controller's vtworkspace::WindowId or the acting
+ * explicit window identity — either the calling controller's vtworkspace::WorkspaceId or the acting
  * session's hosting tab — never by an implicit "the" window.
  */
 class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
@@ -234,7 +234,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param command     A command to run instead of the profile's shell, or std::nullopt.
     /// @param role        What the session's program is to the user.
     TerminalSession* createSessionInBackground(
-        vtworkspace::WindowId window,
+        vtworkspace::WorkspaceId window,
         std::optional<std::string> const& profileName = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> const& command = std::nullopt,
         SessionRole role = SessionRole::Shell);
@@ -253,13 +253,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    TerminalSession* createSession(vtworkspace::WindowId window,
+    TerminalSession* createSession(vtworkspace::WorkspaceId window,
                                    std::optional<std::string> const& profileName = std::nullopt);
 
     /// Creates and activates a new tab in @p window.
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
-    void createNewTab(vtworkspace::WindowId window,
+    void createNewTab(vtworkspace::WorkspaceId window,
                       std::optional<std::string> const& profileName = std::nullopt)
     {
         // Attach mode: author the tab on the daemon (B3-Qt); its layout re-push
@@ -324,7 +324,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                overwritten.
     /// @return Nothing on success, or the reason the layout could not be saved.
     [[nodiscard]] std::expected<void, config::LayoutSaveError> saveWindowLayout(
-        vtworkspace::WindowId window, std::string const& name, window::LayoutReplace replace);
+        vtworkspace::WorkspaceId window, std::string const& name, window::LayoutReplace replace);
 
     /// Where layouts are persisted: the `layouts.yml` sibling of the loaded config file — which is
     /// exactly where loadConfigFromFile() merges it back from, so saving and loading can never
@@ -401,7 +401,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// "Restored 2 windows, 7 tabs" notice there and forgets it, so a second window shows nothing. Without a
     /// held summary, or a controller for @p window, does nothing. GUI thread.
     /// @param window The window the daemon's restored layout was just realized or reconciled in.
-    void deliverRestoreSummaryTo(vtworkspace::WindowId window);
+    void deliverRestoreSummaryTo(vtworkspace::WorkspaceId window);
 
     /// Forgets the summary held by noteWorkspaceRestored(), undelivered: the layout it belonged to showed no
     /// window it could go to, and a toast about a restore must not surface in a window opened later. GUI
@@ -479,7 +479,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                 session is created — the hook attach mode uses to bind the pane about to be born
     ///                 to a specific remote session (via vthost::client::WireLayout::leafSession).
     /// @return false if @p layout has no tabs (nothing to apply); true otherwise.
-    bool applyLayoutToWindow(vtworkspace::WindowId window,
+    bool applyLayoutToWindow(vtworkspace::WorkspaceId window,
                              config::Layout const& layout,
                              std::optional<vtbackend::PageSize> pageSize = std::nullopt,
                              std::function<void(config::LayoutPane const&)> const& beforeLeafSeed = {});
@@ -538,16 +538,19 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void removeSession(TerminalSession& session);
     void currentSessionIsTerminated();
 
-    // {{{ Tab-strip operations (window-routed; called by WindowController with its own WindowId)
-    void activateTab(vtworkspace::WindowId window, int index);
-    void moveTab(vtworkspace::WindowId window, int fromIndex, int toIndex);
+    // {{{ Tab-strip operations (window-routed; called by WindowController with its own WorkspaceId)
+    void activateTab(vtworkspace::WorkspaceId window, int index);
+    void moveTab(vtworkspace::WorkspaceId window, int fromIndex, int toIndex);
     /// Moves the tab at row @p fromIndex of window @p from into window @p to at row @p toIndex,
     /// transplanting it intact (its sessions survive). Drives the drag of a tab between windows.
     /// @param from      The source window's id.
     /// @param fromIndex The tab's row in @p from.
     /// @param to        The destination window's id.
     /// @param toIndex   The destination row.
-    void moveTabToWindow(vtworkspace::WindowId from, int fromIndex, vtworkspace::WindowId to, int toIndex);
+    void moveTabToWorkspace(vtworkspace::WorkspaceId from,
+                            int fromIndex,
+                            vtworkspace::WorkspaceId to,
+                            int toIndex);
     /// Grafts the whole tab at row @p fromIndex of window @p from beside the pane @p leaf of tab @p target
     /// in window @p to, on @p side, keeping every session (none is closed or re-created). The sessions
     /// are re-pointed at @p target, the grafted active pane gets focus, and a source window this empties
@@ -562,9 +565,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param target    The tab holding @p leaf.
     /// @param leaf      The pane to split.
     /// @param side      The side of @p leaf the tab goes on.
-    void mergeTabIntoSplit(vtworkspace::WindowId from,
+    void mergeTabIntoSplit(vtworkspace::WorkspaceId from,
                            int fromIndex,
-                           vtworkspace::WindowId to,
+                           vtworkspace::WorkspaceId to,
                            vtworkspace::TabId target,
                            vtworkspace::PaneId leaf,
                            vtworkspace::SplitSide side);
@@ -601,7 +604,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// The drag payload of the tab at row @p tabIndex of @p window: a Tab for one of several panes, a Pane
     /// for one of one.
     /// @return The payload; std::nullopt for no such tab, or one with a pane the host has no id for yet.
-    [[nodiscard]] std::optional<window::NodeDrag> tabDragOf(vtworkspace::WindowId window, int tabIndex) const;
+    [[nodiscard]] std::optional<window::NodeDrag> tabDragOf(vtworkspace::WorkspaceId window,
+                                                            int tabIndex) const;
 
     /// Resolves @p drag against the model: the local tab it is or came from, what it moves, and why it cannot
     /// be dropped at each place (window::moveRouteOf(), window::moveRefusalOf()). Every window of this
@@ -747,7 +751,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         /// Keeps @p window open once the last hold goes, though a move emptied it: it shows a daemon window
         /// that still holds tabs, which the next reconcile realizes into it.
         /// @param window The window.
-        void keep(vtworkspace::WindowId window) const;
+        void keep(vtworkspace::WorkspaceId window) const;
 
       private:
         TerminalSessionManager& _manager;
@@ -765,8 +769,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// there stays within one window.
     /// @param from The window holding the dragged tab.
     /// @param to   The window holding the pane to split.
-    [[nodiscard]] TabMergeSupport tabMergeSupport(vtworkspace::WindowId from,
-                                                  vtworkspace::WindowId to) const noexcept
+    [[nodiscard]] TabMergeSupport tabMergeSupport(vtworkspace::WorkspaceId from,
+                                                  vtworkspace::WorkspaceId to) const noexcept
     {
         if (_sessionFactory.hosting() == SessionHosting::Remote && from != to)
             return TabMergeSupport::Unsupported;
@@ -778,10 +782,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param from         The source window's id.
     /// @param fromIndex    The tab's row in @p from.
     /// @param targetScreen The screen the new window should open on (may be nullptr).
-    void tearOffTabToNewWindow(vtworkspace::WindowId from, int fromIndex, QScreen* targetScreen);
-    void closeTabAtIndex(vtworkspace::WindowId window, int index);
-    void closeOtherTabs(vtworkspace::WindowId window, int index);
-    void closeTabsToRight(vtworkspace::WindowId window, int index);
+    void tearOffTabToNewWindow(vtworkspace::WorkspaceId from, int fromIndex, QScreen* targetScreen);
+    void closeTabAtIndex(vtworkspace::WorkspaceId window, int index);
+    void closeOtherTabs(vtworkspace::WorkspaceId window, int index);
+    void closeTabsToRight(vtworkspace::WorkspaceId window, int index);
 
     /// The predefined tab-color palette (a grid of swatches) the user picks from, as QColors.
     [[nodiscard]] QVariantList tabColorPalette() const;
@@ -897,7 +901,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// pty (@see SessionFactory::requestRemoteTab, requestRemoteSplit).
     /// @param window The window to name.
     /// @return A pty of that window, or nullptr.
-    [[nodiscard]] vtpty::Pty const* actingPtyOfWindow(vtworkspace::WindowId window) const;
+    [[nodiscard]] vtpty::Pty const* actingPtyOfWindow(vtworkspace::WorkspaceId window) const;
 
     /// Asks the session factory where an operation on the engine of the session backed by @p pty runs,
     /// sending it to the remote end when that is where (@see SessionFactory::requestHostedOperation).
@@ -984,7 +988,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// VT focus only ever moves within this window, so a model event raised in a background window (a
     /// layout applying its tabs, a tab dropped in by a drag) cannot steal the focused terminal.
     /// @return The focus-owning window, or std::nullopt when no window of this process owns focus.
-    [[nodiscard]] std::optional<vtworkspace::WindowId> focusedWindow() const noexcept
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> focusedWindow() const noexcept
     {
         return _focusedWindow;
     }
@@ -994,13 +998,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// at yet or the caller supplies its own — when a window is spawned (createWindowController) and
     /// when one of its displays takes Qt focus (focusOnDisplay). @see clearFocusedWindow.
     /// @param window The window that just became the active OS window.
-    void setFocusedWindow(vtworkspace::WindowId window);
+    void setFocusedWindow(vtworkspace::WorkspaceId window);
 
     /// Revokes focus ownership iff @p window currently holds it, leaving no window focused and no
     /// terminal focused. A no-op for any other window, so a background window deactivating cannot
     /// clear the focused window's terminal focus.
     /// @param window The window that just stopped being the active OS window (or is being destroyed).
-    void clearFocusedWindow(vtworkspace::WindowId window);
+    void clearFocusedWindow(vtworkspace::WorkspaceId window);
 
     /// The window an application-wide command runs in: the focused one; else, with none focused (every
     /// window minimised, or another application in front), the one that held focus last while it lives;
@@ -1012,24 +1016,24 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window A window of this manager.
     /// @return Whether it is a panel (WindowLevel::Panel, the quick terminal), which is no part of an
     ///         attached host's workspace; false for an ordinary window and for one that is not known.
-    [[nodiscard]] bool isPanelWindow(vtworkspace::WindowId window) const noexcept;
+    [[nodiscard]] bool isPanelWindow(vtworkspace::WorkspaceId window) const noexcept;
 
     /// @param window A window of this manager.
     /// @return Whether it is an ordinary window (WindowLevel::Normal), as opposed to a panel; false for a
     ///         window that is not known.
-    [[nodiscard]] bool isNormalWindow(vtworkspace::WindowId window) const noexcept;
+    [[nodiscard]] bool isNormalWindow(vtworkspace::WorkspaceId window) const noexcept;
 
     /// @p window changed how it is presented -- minimised, restored, maximised. Restoring the
     /// focus-owning window brings its focused pane back in front of the user with no focus change at
     /// all, which is news to that pane all the same. @see TerminalSession::paneSeen
     /// @param window The window whose state changed.
-    void windowStateChanged(vtworkspace::WindowId window);
+    void windowStateChanged(vtworkspace::WorkspaceId window);
 
     /// @p window's surface was exposed. A restore, an un-occlusion or a desktop switch is announced by the
     /// platform BEFORE the surface is exposed, so windowStateChanged() still finds it hidden; this is the
     /// re-decision of what the displays' frames are for, once it is not.
     /// @param window The window whose surface was exposed.
-    void windowExposed(vtworkspace::WindowId window);
+    void windowExposed(vtworkspace::WorkspaceId window);
 
     /// Where @p session sits relative to what the user is looking at, for finish notifications.
     ///
@@ -1152,11 +1156,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Every session of @p window that is on screen now has been seen: its marks clear. Called whenever what
     /// is on screen may have grown -- the active tab changed, the window was restored, a zoom ended.
     /// @param window The window whose sessions to look at.
-    void markVisibleSessionsSeen(vtworkspace::WindowId window);
+    void markVisibleSessionsSeen(vtworkspace::WorkspaceId window);
 
     /// Tells every session of @p window that its display's exposure may have changed (a window-state change).
     /// @param window The window.
-    void notifyDisplaysExposureChanged(vtworkspace::WindowId window);
+    void notifyDisplaysExposureChanged(vtworkspace::WorkspaceId window);
 
     /// @return Every session's unseen output and finished commands, which the tab strips' badges pool.
     [[nodiscard]] window::TabAttention const& tabAttention() const noexcept { return _attention; }
@@ -1176,13 +1180,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window Workspace window identity.
     /// @param now Current monotonic time.
     /// @return Window-scoped aggregate, including background tabs and panes.
-    [[nodiscard]] platform::TaskbarProgress taskbarProgress(vtworkspace::WindowId window,
+    [[nodiscard]] platform::TaskbarProgress taskbarProgress(vtworkspace::WorkspaceId window,
                                                             std::chrono::steady_clock::time_point now) const;
 
     /// Attaches the native taskbar before the OS window is first shown.
     /// @param window Workspace window identity.
     /// @param nativeWindow The Qt window backing it.
-    void bindTaskbarWindow(vtworkspace::WindowId window, QWindow& nativeWindow);
+    void bindTaskbarWindow(vtworkspace::WorkspaceId window, QWindow& nativeWindow);
 
     /// Records @p progress for @p session, for the taskbar aggregate above.
     ///
@@ -1228,10 +1232,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void detachDisplay(display::TerminalDisplay* display) noexcept;
 
     // {{{ Per-OS-window controllers (Stage 2 of the per-window refactor)
-    /// Mints a fresh vtworkspace::Window, creates its per-OS-window WindowController and registers it. The
+    /// Mints a fresh vtworkspace::Workspace, creates its per-OS-window WindowController and registers it. The
     /// controller is the QML-facing adapter for one ApplicationWindow: it owns that window's tab-strip
     /// list-model, PaneProxy tree and window services, and delegates structural / session-lifetime
-    /// operations back to this manager tagged with its WindowId. Owned via QQmlEngine CppOwnership
+    /// operations back to this manager tagged with its WorkspaceId. Owned via QQmlEngine CppOwnership
     /// (like sessions and proxies). Main.qml calls this from Component.onCompleted before creating its
     /// first tab.
     Q_INVOKABLE contour::window::WindowController* createWindowController();
@@ -1295,7 +1299,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
-    [[nodiscard]] window::WindowController* controllerFor(vtworkspace::WindowId window) const noexcept;
+    [[nodiscard]] window::WindowController* controllerFor(vtworkspace::WorkspaceId window) const noexcept;
 
     /// The controller owning @p display's OS window, for routing focus. Matches the controller that has
     /// adopted this display's QQuickWindow (ownsOSWindow); falls back to the sole controller before any
@@ -1319,7 +1323,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// window" is _controllersByWindow.size() == 1; when it is, the manager clears residual session
     /// registries. deleteLater()s the controller.
     /// @param windowId The window whose controller is being removed.
-    void removeWindowController(vtworkspace::WindowId windowId);
+    void removeWindowController(vtworkspace::WorkspaceId windowId);
 
     // Narrow SERVICE interface the WindowController reads through (the manager stays the SessionModel host
     // + SessionId<->TerminalSession registry). These expose the shared model/registry without moving
@@ -1371,22 +1375,25 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     }
 
     // {{{ vtworkspace::ModelEvents — turn model changes into Qt model/signal notifications
-    void tabAboutToBeAdded(vtworkspace::WindowId window, int index) override;
-    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId id, int index) override;
-    void tabAboutToBeRemoved(vtworkspace::WindowId window, int index) override;
-    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void tabAboutToBeMoved(vtworkspace::WindowId window, int fromIndex, int toIndex) override;
-    void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
-    void tabAboutToBeMovedToWindow(vtworkspace::WindowId from,
-                                   int fromIndex,
-                                   vtworkspace::WindowId to,
-                                   int toIndex) override;
-    void tabMovedToWindow(vtworkspace::WindowId from,
-                          vtworkspace::TabId tab,
-                          int fromIndex,
-                          vtworkspace::WindowId to,
-                          int toIndex) override;
-    void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAboutToBeAdded(vtworkspace::WorkspaceId window, int index) override;
+    void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId id, int index) override;
+    void tabAboutToBeRemoved(vtworkspace::WorkspaceId window, int index) override;
+    void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void tabAboutToBeMoved(vtworkspace::WorkspaceId window, int fromIndex, int toIndex) override;
+    void tabMoved(vtworkspace::WorkspaceId window,
+                  vtworkspace::TabId tab,
+                  int fromIndex,
+                  int toIndex) override;
+    void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
+                                      int fromIndex,
+                                      vtworkspace::WorkspaceId to,
+                                      int toIndex) override;
+    void tabMovedToWorkspace(vtworkspace::WorkspaceId from,
+                             vtworkspace::TabId tab,
+                             int fromIndex,
+                             vtworkspace::WorkspaceId to,
+                             int toIndex) override;
+    void activeTabChanged(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
                    vtworkspace::PaneId newLeaf) override;
@@ -1469,7 +1476,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// closeWindow) never tears down the moved tab's now-relocated sessions. While an EmptiedWindowHold
     /// lives, the window is noted instead, and closed once the last hold goes.
     /// @param window The source window a tab was just moved out of.
-    void closeWindowIfEmpty(vtworkspace::WindowId window);
+    void closeWindowIfEmpty(vtworkspace::WorkspaceId window);
 
     /// Tells the user a tab merge was refused (window::TabMergeRefusedText), in the window of @p acting, or
     /// in every window when no session is known.
@@ -1516,7 +1523,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window A window of this manager.
     /// @return The factory that makes its sessions: the app's, or for a panel window the one that spawns
     ///         here whatever host the app is attached to.
-    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WindowId window) const noexcept;
+    [[nodiscard]] SessionFactory& factoryFor(vtworkspace::WorkspaceId window) const noexcept;
 
     /// @param session A session of this manager.
     /// @return Whether it is hosted in a panel window.
@@ -1552,7 +1559,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] config::Layout const* findLayout(std::string const& name, std::string_view context) const;
 
     /// The 0-based row of @p tab within its OWNING window, or -1. Window-agnostic: the owning
-    /// window is resolved through the model (windowOfTab), so this is correct for any tab of any
+    /// window is resolved through the model (workspaceOfTab), so this is correct for any tab of any
     /// window.
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
 
@@ -1560,7 +1567,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] vtworkspace::Tab* findTabHostingSession(vtworkspace::SessionId session) const noexcept;
 
     /// The model tab backing tab-strip row @p index of @p window, or nullptr.
-    [[nodiscard]] vtworkspace::Tab* tabAtRow(vtworkspace::WindowId window, int index) const noexcept;
+    [[nodiscard]] vtworkspace::Tab* tabAtRow(vtworkspace::WorkspaceId window, int index) const noexcept;
 
     /// Collects the backing TerminalSessions of every leaf pane in @p tab (empty if @p tab is null).
     /// @param tab The tab whose pane sessions to gather.
@@ -1576,7 +1583,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                  rowOfTab() lookup, and the tab itself.
     /// @return The matching tabs' backing sessions.
     [[nodiscard]] std::vector<TerminalSession*> gatherSessionsOfTabsWhere(
-        vtworkspace::Window& window, std::function<bool(int row, vtworkspace::Tab*)> const& predicate) const;
+        vtworkspace::Workspace& window,
+        std::function<bool(int row, vtworkspace::Tab*)> const& predicate) const;
 
     /// Terminates each of @p sessions, the single whole-tab close primitive shared by all close
     /// paths (CloseTab, the tab ✕ button, "Close Other Tabs", "Close Tabs to the Right").
@@ -1611,7 +1619,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     struct SessionHost
     {
         vtworkspace::Tab* tab = nullptr;                ///< The tab hosting the session.
-        vtworkspace::Window* window = nullptr;          ///< The window holding @ref tab.
+        vtworkspace::Workspace* window = nullptr;       ///< The window holding @ref tab.
         window::WindowController* controller = nullptr; ///< The controller of @ref window.
     };
 
@@ -1622,7 +1630,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] SessionHost hostOf(TerminalSession const* session) const noexcept
     {
         auto* tab = tabHostingSession(session);
-        auto* win = tab != nullptr ? _model->window(_model->windowOfTab(tab->id())) : nullptr;
+        auto* win = tab != nullptr ? _model->workspace(_model->workspaceOfTab(tab->id())) : nullptr;
         return SessionHost { .tab = tab,
                              .window = win,
                              .controller = win != nullptr ? controllerFor(win->id()) : nullptr };
@@ -1647,7 +1655,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Resolves the model window hosting @p session (through its tab), or nullptr.
     /// @param session The backing session whose hosting window to locate.
     /// @return The hosting window, or nullptr.
-    [[nodiscard]] vtworkspace::Window* windowHostingSession(TerminalSession const* session) const noexcept
+    [[nodiscard]] vtworkspace::Workspace* windowHostingSession(TerminalSession const* session) const noexcept
     {
         return hostOf(session).window;
     }
@@ -1686,7 +1694,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     {
         window::MovePlace place = window::MovePlace::Edge;         ///< Where it is, as the tables read it.
         window::MoveLanding landing = window::MoveLanding::Beside; ///< Where it lands, as announced.
-        std::optional<vtworkspace::WindowId> window; ///< The window it lands in; none for a new one.
+        std::optional<vtworkspace::WorkspaceId> workspace; ///< The workspace it lands in; none for a new one.
         vtworkspace::MoveTargetKind kind = vtworkspace::MoveTargetKind::Edge; ///< What kind of target.
         /// The host's id of the pane the daemon is asked to move beside or onto (a tab well's: its window's
         /// active pane; a new window's: 0); none for one the host has no id for yet.
@@ -1746,7 +1754,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Activates the tab at tab-strip row @p row of @p window: makes it that window's active tab
     /// (so the rendered split tree and subsequent pane operations target it). No-op if @p row is
     /// out of range.
-    void activateModelTabByRow(vtworkspace::WindowId window, int row);
+    void activateModelTabByRow(vtworkspace::WorkspaceId window, int row);
 
     /// Refreshes every window's indicator status line. The per-window tab list + per-pane marker fan-out
     /// lives on each WindowController (WindowController::updateStatusLine), so this simply routes to every
@@ -1809,11 +1817,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // whether a model event may move VT focus. A pointer to the focused display cannot serve, because
     // it is null between a display teardown and the next Qt focus-in -- and a tab switch in that gap
     // notified nobody. @see syncFocusForWindow.
-    std::optional<vtworkspace::WindowId> _focusedWindow;
+    std::optional<vtworkspace::WorkspaceId> _focusedWindow;
 
     // The window that held focus before it was cleared, kept where _focusedWindow is not: what an
     // application-wide command runs in while no window is focused. @see applicationController.
-    std::optional<vtworkspace::WindowId> _lastFocusedWindow;
+    std::optional<vtworkspace::WorkspaceId> _lastFocusedWindow;
 
     bool _multimediaReady = false;
 
@@ -1832,7 +1840,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // authoritative tab title and color; _sessionsById maps each leaf's SessionId to its backing
     // TerminalSession.
     std::unique_ptr<vtworkspace::SessionModel> _model;
-    // Per-OS-window QML adapters, keyed by vtworkspace::WindowId. The ModelEvents router forwards each Qt
+    // Per-OS-window QML adapters, keyed by vtworkspace::WorkspaceId. The ModelEvents router forwards each Qt
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
     std::unordered_map<uint64_t, window::WindowController*> _controllersByWindow;
     /// What the next createWindowController() window is for. @see stageWindowRole
@@ -1869,7 +1877,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     std::optional<window::WindowPosition> _pendingSpawnPosition;
     // How many EmptiedWindowHolds live, and the windows a move emptied meanwhile, in the order it did.
     int _emptiedWindowHolds = 0;
-    std::vector<vtworkspace::WindowId> _emptiedWindows;
+    std::vector<vtworkspace::WorkspaceId> _emptiedWindows;
     // The move asked of the daemon that this manager waits for, until the push that makes it ends, the
     // daemon refuses it, the connection is lost, or RemoteMoveTimeout passes.
     std::optional<PendingRemoteMove> _pendingRemoteMove;

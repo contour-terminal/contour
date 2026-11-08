@@ -32,10 +32,10 @@ struct NodeMoveFailure
 struct MoveWindowHooks
 {
     /// Makes an empty window.
-    std::function<vtworkspace::WindowId()> create;
+    std::function<vtworkspace::WorkspaceId()> create;
     /// Removes a window that holds no tab: one made by @c create that the move did not fill, or the window
     /// the move took its last tab out of.
-    std::function<void(vtworkspace::WindowId)> discard;
+    std::function<void(vtworkspace::WorkspaceId)> discard;
 };
 
 /// Moves the pane or tab @p move names to the target it names. No session is spawned or closed; the

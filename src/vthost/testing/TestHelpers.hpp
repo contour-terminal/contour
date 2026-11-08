@@ -186,7 +186,7 @@ template <typename Condition>
 [[nodiscard]] inline vtworkspace::SessionId newSession(SessionHost& host)
 {
     host.createTab();
-    return host.model().window(host.windowId())->activeTab()->rootPane()->session();
+    return host.model().workspace(host.windowId())->activeTab()->rootPane()->session();
 }
 
 /// When every record promptingWire() and its siblings build was prompted, in nanoseconds since the Unix

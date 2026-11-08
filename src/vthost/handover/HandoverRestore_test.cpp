@@ -266,7 +266,7 @@ TEST_CASE("a handover keeps every program, its input, its output and its screen"
     CHECK(host.windowId() == window);
     CHECK(host.model().idState().nextPane == modelIds.nextPane);
     CHECK(host.model().idState().nextTab == modelIds.nextTab);
-    CHECK(host.model().idState().nextWindow == modelIds.nextWindow);
+    CHECK(host.model().idState().nextWorkspace == modelIds.nextWorkspace);
     for (auto const& [id, uuid]: std::views::zip(ids, uuids))
     {
         INFO("session " << id.value);
@@ -418,7 +418,7 @@ TEST_CASE("a refused workspace tree still adopts every session, each in a tab of
     }));
     auto image = handOver(std::move(old));
     // A tab whose active pane is no leaf of it: the model refuses the whole tree.
-    image.tree.windows.front().tabs.front().view.activePane = vtworkspace::PaneId { 9999 };
+    image.tree.workspaces.front().tabs.front().view.activePane = vtworkspace::PaneId { 9999 };
 
     auto const live = takeOver(std::move(image));
     auto& host = live->host;

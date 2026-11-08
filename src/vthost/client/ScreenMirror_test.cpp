@@ -2783,14 +2783,14 @@ TEST_CASE("ScreenMirror.extension.applied", "[vthost][mirror][extensions]")
 
         // Nothing takes the row over any more: the mirror's own template is back.
         hosting->sessions.front()->fake.takeOver(std::nullopt);
-        auto& server =
-            *h->host.terminal(h->host.model().window(h->host.windowId())->activeTab()->rootPane()->session());
+        auto& server = *h->host.terminal(
+            h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->session());
         {
             auto const guard = std::lock_guard { server };
             server.statusLineExtensionsReplaced();
         }
         h->server->sessionScreenUpdated(
-            h->host.model().window(h->host.windowId())->activeTab()->rootPane()->session());
+            h->host.model().workspace(h->host.windowId())->activeTab()->rootPane()->session());
         co_await waitUntil(&h->loop, [&] { return indicatorText() != "NEXT"; });
         CHECK(indicatorText() != "NEXT");
         CHECK_FALSE(indicatorText().empty());

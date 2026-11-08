@@ -92,13 +92,13 @@ namespace
 /// A no-op ModelEvents sink: these tests assert model state (window set), not event ordering.
 struct SilentEvents: ModelEvents
 {
-    void tabAboutToBeAdded(WindowId, int) override {}
-    void tabAdded(WindowId, TabId, int) override {}
-    void tabAboutToBeRemoved(WindowId, int) override {}
-    void tabClosed(WindowId, TabId, int) override {}
-    void tabAboutToBeMoved(WindowId, int, int) override {}
-    void tabMoved(WindowId, TabId, int, int) override {}
-    void activeTabChanged(WindowId, TabId, int) override {}
+    void tabAboutToBeAdded(WorkspaceId, int) override {}
+    void tabAdded(WorkspaceId, TabId, int) override {}
+    void tabAboutToBeRemoved(WorkspaceId, int) override {}
+    void tabClosed(WorkspaceId, TabId, int) override {}
+    void tabAboutToBeMoved(WorkspaceId, int, int) override {}
+    void tabMoved(WorkspaceId, TabId, int, int) override {}
+    void activeTabChanged(WorkspaceId, TabId, int) override {}
     void paneSplit(TabId, PaneId, PaneId) override {}
     void paneClosed(TabId, PaneId, PaneId) override {}
     void activePaneChanged(TabId, PaneId) override {}
@@ -119,43 +119,43 @@ TEST_CASE("SessionModel: the last-window decision tracks the live window set", "
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
 
     // One window: it IS the last window (closing it would be a full teardown).
-    auto* a = model.createWindow();
+    auto* a = model.createWorkspace();
     REQUIRE(a != nullptr);
-    REQUIRE(model.window(a->id()) == a);
+    REQUIRE(model.workspace(a->id()) == a);
 
     // A second in-process window: now closing either is NOT the last window (the sibling must survive).
-    auto* b = model.createWindow();
+    auto* b = model.createWorkspace();
     REQUIRE(b != nullptr);
     CHECK(a->id().value != b->id().value);
-    CHECK(model.window(a->id()) == a);
-    CHECK(model.window(b->id()) == b);
+    CHECK(model.workspace(a->id()) == a);
+    CHECK(model.workspace(b->id()) == b);
 
-    // Capture the ids BEFORE removal: removeWindow() destroys the Window, so a->id()/b->id() afterwards
+    // Capture the ids BEFORE removal: removeWorkspace() destroys the Workspace, so a->id()/b->id() afterwards
     // would read freed memory (caught by ASan).
     auto const aId = a->id();
     auto const bId = b->id();
 
     // Closing A leaves exactly B — so B is now the last window and its state is untouched.
-    model.removeWindow(aId);
-    CHECK(model.window(aId) == nullptr); // A is gone
-    CHECK(model.window(bId) == b);       // B survives intact (would-be full teardown target)
+    model.removeWorkspace(aId);
+    CHECK(model.workspace(aId) == nullptr); // A is gone
+    CHECK(model.workspace(bId) == b);       // B survives intact (would-be full teardown target)
 
     // Closing B (the last window) removes the final window.
-    model.removeWindow(bId);
-    CHECK(model.window(bId) == nullptr);
+    model.removeWorkspace(bId);
+    CHECK(model.workspace(bId) == nullptr);
 }
 
 TEST_CASE("SessionModel: removing a window with tabs closes only that window's tabs",
           "[contour][manager][window]")
 {
-    // The manager terminates a closing window's sessions and removes its vtworkspace::Window; a sibling
+    // The manager terminates a closing window's sessions and removes its vtworkspace::Workspace; a sibling
     // window's tabs/sessions must be untouched. This is the model half of the per-window teardown invariant.
     SilentEvents events;
     uint64_t nextSession = 1;
     SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
 
-    auto* a = model.createWindow();
-    auto* b = model.createWindow();
+    auto* a = model.createWorkspace();
+    auto* b = model.createWorkspace();
     (void) model.createTab(a->id());
     (void) model.createTab(a->id());
     auto* bTab = model.createTab(b->id());
@@ -165,10 +165,10 @@ TEST_CASE("SessionModel: removing a window with tabs closes only that window's t
 
     // Capture before removal: removeWindow() destroys A, so a->id() afterwards reads freed memory.
     auto const aId = a->id();
-    model.removeWindow(aId);
+    model.removeWorkspace(aId);
 
-    CHECK(model.window(aId) == nullptr);
-    REQUIRE(model.window(b->id()) == b);
+    CHECK(model.workspace(aId) == nullptr);
+    REQUIRE(model.workspace(b->id()) == b);
     CHECK(b->tabCount() == 1); // B's tab survived A's teardown
     CHECK(model.findTab(bTab->id()) == bTab);
 }
@@ -205,7 +205,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
 
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 
-    auto* window = app.manager().model().window(win.id);
+    auto* window = app.manager().model().workspace(win.id);
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 3); // three tabs created from the layout
     CHECK(window->tabAt(0)->color() == profileColor);
@@ -265,7 +265,7 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow realizes a daemon wire la
     std::ranges::sort(boundSessions);
     CHECK(boundSessions == std::vector<uint64_t> { 1, 2, 3 });
 
-    auto* window = app.manager().model().window(win.id);
+    auto* window = app.manager().model().workspace(win.id);
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 2);
 
@@ -448,10 +448,11 @@ TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[mana
     // Each failure is a distinct, reportable cause — not a bare "false".
     CHECK(app.manager().saveWindowLayout(win.id, "", contour::window::LayoutReplace::Replace).error()
           == contour::config::LayoutSaveError::EmptyName);
-    CHECK(app.manager()
-              .saveWindowLayout(vtworkspace::WindowId { 4711 }, "x", contour::window::LayoutReplace::Replace)
-              .error()
-          == contour::config::LayoutSaveError::UnknownWindow);
+    CHECK(
+        app.manager()
+            .saveWindowLayout(vtworkspace::WorkspaceId { 4711 }, "x", contour::window::LayoutReplace::Replace)
+            .error()
+        == contour::config::LayoutSaveError::UnknownWindow);
 
     store->loadError = "corrupt";
     CHECK(app.manager().saveWindowLayout(win.id, "x", contour::window::LayoutReplace::Replace).error()
@@ -528,14 +529,14 @@ TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layo
 
     contour::test::ScopedController const first { app.manager() };
     CHECK(app.manager().consumeDefaultLayout(first.controller));
-    auto* firstWindow = app.manager().model().window(first.id);
+    auto* firstWindow = app.manager().model().workspace(first.id);
     REQUIRE(firstWindow != nullptr);
     CHECK(firstWindow->tabCount() == 1);
 
     // A later window must NOT re-apply the layout (it gets its usual single default tab instead).
     contour::test::ScopedController const second { app.manager() };
     CHECK_FALSE(app.manager().consumeDefaultLayout(second.controller));
-    auto* secondWindow = app.manager().model().window(second.id);
+    auto* secondWindow = app.manager().model().workspace(second.id);
     REQUIRE(secondWindow != nullptr);
     CHECK(secondWindow->tabCount() == 0);
 }
@@ -734,7 +735,7 @@ TEST_CASE("TerminalSessionManager: openCommandPane runs a command beside the act
         CHECK(win->count() == 1);
 
         // Output reads top to bottom, so the pager keeps the acting pane's full width.
-        auto const* const root = app.manager().model().window(win.id)->activeTab()->rootPane();
+        auto const* const root = app.manager().model().workspace(win.id)->activeTab()->rootPane();
         CHECK(root->splitState() == SplitState::Horizontal);
         REQUIRE(root->second() != nullptr);
         CHECK(root->second()->session() == (*pane)->modelSessionId());
@@ -935,7 +936,7 @@ void drainPosted()
 [[nodiscard]] contour::session::TerminalSession* sessionAtRow(
     contour::session::TerminalSessionManager& manager, contour::window::WindowController& window, int row)
 {
-    auto const* tab = manager.model().window(window.windowId())->tabAt(row);
+    auto const* tab = manager.model().workspace(window.windowId())->tabAt(row);
     return tab != nullptr ? manager.sessionForId(tab->activePane()->session()) : nullptr;
 }
 
@@ -1370,7 +1371,7 @@ TEST_CASE("TerminalSessionManager: an application taskbar is told how many tabs 
     SECTION("moving a Blocked tab to another window changes nothing")
     {
         auto const calls = recording->applicationAttention.size();
-        manager.moveTabToWindow(windowA.id, 1, windowB.id, 0);
+        manager.moveTabToWorkspace(windowA.id, 1, windowB.id, 0);
         settle();
         CHECK(recording->applicationAttention.size() == calls);
     }
@@ -1424,7 +1425,7 @@ TEST_CASE("TerminalSessionManager: a per-window taskbar is told each window's ow
     CHECK(std::ranges::none_of(recording->windowAttention,
                                [&](Told const& told) { return told.first == windowB.id.value; }));
 
-    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 0);
     settle();
     CHECK(lastTold(windowB) == TaskbarAttention { .waiting = 1 });
     CHECK(lastTold(windowA) == TaskbarAttention {}); // windowA lost it, and was told so
@@ -2086,10 +2087,14 @@ namespace
     contour::session::TerminalSessionManager& manager, contour::window::WindowController& window, int row)
 {
     auto sessions = std::vector<contour::session::TerminalSession*> {};
-    manager.model().window(window.windowId())->tabAt(row)->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
-        if (pane.isLeaf())
-            sessions.push_back(manager.sessionForId(pane.session()));
-    });
+    manager.model()
+        .workspace(window.windowId())
+        ->tabAt(row)
+        ->rootPane()
+        ->walkTree([&](vtworkspace::Pane& pane) {
+            if (pane.isLeaf())
+                sessions.push_back(manager.sessionForId(pane.session()));
+        });
     return sessions;
 }
 
@@ -2322,7 +2327,7 @@ TEST_CASE("TerminalSessionManager: a pane header's button acts on its own pane",
     REQUIRE(added != nullptr);
     CHECK(added != left);
     CHECK(added != right);
-    auto const* const tab = manager.model().window(window->windowId())->tabAt(0);
+    auto const* const tab = manager.model().workspace(window->windowId())->tabAt(0);
     auto const* const addedLeaf = tab->rootPane()->findLeaf(added->modelSessionId());
     REQUIRE(addedLeaf != nullptr);
     CHECK(addedLeaf->parent() == tab->rootPane()->findLeaf(left->modelSessionId())->parent());
@@ -2895,10 +2900,10 @@ void pressReturn(contour::session::TerminalSession& session)
 
 /// The leaf of @p window's active tab that carries @p session.
 [[nodiscard]] vtworkspace::Pane* leafOf(contour::session::TerminalSessionManager& manager,
-                                        vtworkspace::WindowId window,
+                                        vtworkspace::WorkspaceId window,
                                         contour::session::TerminalSession const& session)
 {
-    return manager.model().window(window)->activeTab()->rootPane()->findLeaf(session.modelSessionId());
+    return manager.model().workspace(window)->activeTab()->rootPane()->findLeaf(session.modelSessionId());
 }
 } // namespace
 
@@ -2957,7 +2962,7 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
     CHECK(factory->requestedCwds.back() == std::optional { spawnCwd->path });
 
     // In the same pane: the leaf keeps its id and now carries a new session, which is live and active.
-    auto* tab = manager.model().window(window.id)->activeTab();
+    auto* tab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(tab->paneCount() == 2);
     auto const* sameLeaf = tab->rootPane()->findPane(leafId);
     REQUIRE(sameLeaf != nullptr);
@@ -3133,7 +3138,7 @@ TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][p
                          vtbackend::KeyboardEventType::Press,
                          std::chrono::steady_clock::now());
 
-    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+    CHECK(manager.model().workspace(window.id)->activeTab()->paneCount() == 1);
     CHECK(manager.sessionForId(endedId) == nullptr);
     CHECK(window->activeSession() == survivor);
 
@@ -3219,9 +3224,11 @@ struct LostSplit
 
 /// @return The session the leaf @p leaf of @p manager's window now carries; null when none.
 [[nodiscard]] contour::session::TerminalSession* sessionOfLeaf(
-    contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window, vtworkspace::PaneId leaf)
+    contour::session::TerminalSessionManager& manager,
+    vtworkspace::WorkspaceId window,
+    vtworkspace::PaneId leaf)
 {
-    auto const* pane = manager.model().window(window)->activeTab()->rootPane()->findPane(leaf);
+    auto const* pane = manager.model().workspace(window)->activeTab()->rootPane()->findPane(leaf);
     return pane != nullptr ? manager.sessionForId(pane->session()) : nullptr;
 }
 } // namespace
@@ -3252,7 +3259,7 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     using contour::window::PaneState;
     auto lost = LostSplit {};
     auto& manager = lost.app.manager();
-    auto const windows = manager.model().windowCount();
+    auto const windows = manager.model().workspaceCount();
     auto const leftBefore = lost.left->modelSessionId();
     auto const ptysBefore = lost.factory->createdPtys.size();
 
@@ -3283,8 +3290,8 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
         CHECK(session->endReason() == EndReason::None);
         CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
     }
-    CHECK(manager.model().windowCount() == windows);
-    CHECK(manager.model().window(lost.window.id)->activeTab()->paneCount() == 2);
+    CHECK(manager.model().workspaceCount() == windows);
+    CHECK(manager.model().workspace(lost.window.id)->activeTab()->paneCount() == 2);
 
     // Connected again, no pane shows the pill.
     manager.setHostConnection(vthost::client::ConnectionState::Connected);
@@ -3343,7 +3350,7 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
     using contour::window::PaneState;
     auto lost = LostSplit {};
     auto& manager = lost.app.manager();
-    auto const windows = manager.model().windowCount();
+    auto const windows = manager.model().workspaceCount();
 
     SECTION("the daemon refuses the handshake")
     {
@@ -3380,8 +3387,8 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
     }
 
     // No window was added, and no pane lost.
-    CHECK(manager.model().windowCount() == windows);
-    CHECK(manager.model().window(lost.window.id)->activeTab()->paneCount() == 2);
+    CHECK(manager.model().workspaceCount() == windows);
+    CHECK(manager.model().workspace(lost.window.id)->activeTab()->paneCount() == 2);
     CHECK(manager.sessionForId(lost.left->modelSessionId()) == lost.left);
 }
 
@@ -4158,7 +4165,7 @@ TEST_CASE("TerminalSessionManager: a preview session is in no window and a reloa
 {
     contour::test::ConfiguredTestApp testApp;
     contour::test::ScopedController const win { testApp.manager() };
-    auto* window = testApp.manager().model().window(win.id);
+    auto* window = testApp.manager().model().workspace(win.id);
     REQUIRE(window != nullptr);
     auto const tabsBefore = window->tabCount();
 
@@ -4221,7 +4228,7 @@ TEST_CASE("TerminalSessionManager: a window's only tab merged into another windo
     REQUIRE(targetSession != nullptr);
     auto const movedId = movedSession->modelSessionId();
     auto const targetId = targetSession->modelSessionId();
-    auto* const targetTab = manager.model().window(windowB.id)->activeTab();
+    auto* const targetTab = manager.model().workspace(windowB.id)->activeTab();
     REQUIRE(targetTab != nullptr);
     auto const targetTabId = targetTab->id();
     auto const targetLeaf = targetTab->rootPane()->id();
@@ -4232,7 +4239,7 @@ TEST_CASE("TerminalSessionManager: a window's only tab merged into another windo
     QCoreApplication::processEvents();
 
     // The source window held only that tab: it is gone, model and controller both.
-    CHECK(manager.model().window(windowA.id) == nullptr);
+    CHECK(manager.model().workspace(windowA.id) == nullptr);
     CHECK(manager.controllerFor(windowA.id) == nullptr);
 
     // Both sessions live in B's tab, which has one pane more; nothing was re-created.
@@ -4278,7 +4285,7 @@ TEST_CASE("TerminalSessionManager: a background tab merged into the active tab's
     REQUIRE(backgroundSession != nullptr);
     REQUIRE(activeSession != nullptr);
     REQUIRE(backgroundSession != activeSession);
-    auto* const activeTab = manager.model().window(window.id)->activeTab();
+    auto* const activeTab = manager.model().workspace(window.id)->activeTab();
     REQUIRE(activeTab != nullptr);
     auto const activeTabId = activeTab->id();
     auto const leaf = activeTab->activePane()->id();
@@ -4286,7 +4293,7 @@ TEST_CASE("TerminalSessionManager: a background tab merged into the active tab's
     manager.mergeTabIntoSplit(window.id, 0, window.id, activeTabId, leaf, vtworkspace::SplitSide::Bottom);
 
     CHECK(window->count() == 1);
-    auto* const merged = manager.model().window(window.id)->activeTab();
+    auto* const merged = manager.model().workspace(window.id)->activeTab();
     REQUIRE(merged != nullptr);
     CHECK(merged->id() == activeTabId);
     CHECK(merged->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
@@ -4305,8 +4312,8 @@ TEST_CASE("TerminalSessionManager: a refused merge leaves every session where it
     window->createNewTab();
     window->createNewTab(); // [t0, t1]
     auto* const model = &manager.model();
-    auto* const first = model->window(window.id)->tabAt(0);
-    auto* const second = model->window(window.id)->tabAt(1);
+    auto* const first = model->workspace(window.id)->tabAt(0);
+    auto* const second = model->workspace(window.id)->tabAt(1);
     auto const firstId = first->id();
     auto const secondId = second->id();
     auto const firstSession = first->rootPane()->session();
@@ -4353,8 +4360,8 @@ TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of
     window->createNewTab();
     window->createNewTab(); // [t0 (dragged), t1]
     auto* const model = &manager.model();
-    auto* const dragged = model->window(window.id)->tabAt(0);
-    auto* const target = model->window(window.id)->tabAt(1);
+    auto* const dragged = model->workspace(window.id)->tabAt(0);
+    auto* const target = model->workspace(window.id)->tabAt(1);
     auto const draggedSession = dragged->rootPane()->session();
     auto const targetSession = target->rootPane()->session();
     factory->reportedHosting = contour::session::SessionHosting::Remote;
@@ -4431,10 +4438,10 @@ TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of
     {
         factory->reportedTabMergeSupport = TabMergeSupport::Supported;
         CHECK(manager.tabMergeSupport(window.id, window.id) == TabMergeSupport::Supported);
-        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WindowId { window.id.value + 1 })
+        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WorkspaceId { window.id.value + 1 })
               == TabMergeSupport::Unsupported);
         factory->reportedHosting = contour::session::SessionHosting::Local;
-        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WindowId { window.id.value + 1 })
+        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WorkspaceId { window.id.value + 1 })
               == TabMergeSupport::Supported);
         factory->reportedHosting = contour::session::SessionHosting::Remote;
     }

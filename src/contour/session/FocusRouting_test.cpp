@@ -13,7 +13,7 @@
 // These are also the regression pins for the focus-ownership refactor. syncFocusForWindow used to
 // gate on `_activeDisplay != nullptr` — a raw Qt pointer that is null between a display teardown and
 // the next Qt focus-in, and null in every headless test. A tab switch in that gap notified nobody,
-// and the path was untestable. Ownership is now a modelled vtworkspace::WindowId, so the production path
+// and the path was untestable. Ownership is now a modelled vtworkspace::WorkspaceId, so the production path
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
 #include <contour/session/TerminalSession.hpp>
@@ -71,9 +71,9 @@ void clearPtyInput(contour::session::TerminalSession& session)
 
 /// The session backing the active pane of tab @p index in @p window.
 [[nodiscard]] contour::session::TerminalSession* sessionOfTabAt(
-    contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window, int index)
+    contour::session::TerminalSessionManager& manager, vtworkspace::WorkspaceId window, int index)
 {
-    auto* modelWindow = manager.model().window(window);
+    auto* modelWindow = manager.model().workspace(window);
     REQUIRE(modelWindow != nullptr);
     auto* tab = modelWindow->tabAt(index);
     REQUIRE(tab != nullptr);
@@ -185,7 +185,7 @@ TEST_CASE("focus: switching panes within a tab moves focus between the panes' se
     window->createNewTab();
     REQUIRE(window->count() == 1);
 
-    auto* modelWindow = manager.model().window(window.id);
+    auto* modelWindow = manager.model().workspace(window.id);
     REQUIRE(modelWindow != nullptr);
     auto* tab = modelWindow->tabAt(0);
     REQUIRE(tab != nullptr);
@@ -247,7 +247,7 @@ TEST_CASE("focus: moving a tab to another window does not carry VT focus into th
     // The transplant routes through activeTabChanged on the DESTINATION window, which does not own
     // focus — so the moved tab must not steal it. The model's move, not a drop: a drop raises and focuses
     // the window it landed in on purpose.
-    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 0);
     CHECK_FALSE(moved->terminal().focused());
     CHECK(stayed->terminal().focused());
 
@@ -287,7 +287,7 @@ TEST_CASE("focus: bindWindow wires OS window activation to focus ownership", "[c
 TEST_CASE("focus: closing the focused window drops focus ownership and leaves no terminal focused",
           "[contour][focus][multiwindow]")
 {
-    // Ownership must not outlive its window: a stale WindowId would let a later model event in an
+    // Ownership must not outlive its window: a stale WorkspaceId would let a later model event in an
     // unrelated window re-grant focus through syncFocusForWindow.
     TestApp app { std::make_unique<MockPtySessionFactory>() };
     auto& manager = app.manager();

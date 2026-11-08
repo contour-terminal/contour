@@ -190,9 +190,9 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
 {
     auto snapshot = WorkspaceSnapshot { .takenAt = now, .cellPixelSize = host.learnedCellPixelSize() };
     auto const& model = host.model();
-    for (auto const windowIndex: std::views::iota(0, model.windowCount()))
+    for (auto const windowIndex: std::views::iota(0, model.workspaceCount()))
     {
-        auto const* const window = model.windowAt(windowIndex);
+        auto const* const window = model.workspaceAt(windowIndex);
         if (window == nullptr || window->empty())
             continue;
         auto captured =

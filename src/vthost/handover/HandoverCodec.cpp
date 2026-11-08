@@ -259,7 +259,7 @@ template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::ModelIdState>
 static void visitStateFields(Visitor& visitor, T& ids)
 {
-    visitor(1, ids.nextWindow);
+    visitor(1, ids.nextWorkspace);
     visitor(2, ids.nextTab);
     visitor(3, ids.nextPane);
 }
@@ -312,7 +312,7 @@ static void visitStateFields(Visitor& visitor, T& tab)
 }
 
 template <typename Visitor, typename T>
-    requires std::same_as<std::remove_const_t<T>, vtworkspace::WindowState>
+    requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceState>
 static void visitStateFields(Visitor& visitor, T& window)
 {
     visitor(1, window.id);
@@ -325,7 +325,7 @@ template <typename Visitor, typename T>
     requires std::same_as<std::remove_const_t<T>, vtworkspace::WorkspaceTreeState>
 static void visitStateFields(Visitor& visitor, T& tree)
 {
-    visitor(1, tree.windows);
+    visitor(1, tree.workspaces);
 }
 
 // }}}

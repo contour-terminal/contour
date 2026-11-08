@@ -39,7 +39,7 @@ struct PresetObjectIds
 /// One window, tab or pane of the object registry, with the UUID it is known by.
 struct BoundObject
 {
-    uint64_t id = 0;         ///< The model's id (WindowId, TabId or SessionId, by the list it sits in).
+    uint64_t id = 0;         ///< The model's id (WorkspaceId, TabId or SessionId, by the list it sits in).
     vtcontrol::Uuid uuid {}; ///< Its UUID.
 
     /// Lists the fields for the handover codec.
@@ -68,7 +68,7 @@ struct LabeledObject
 /// so that a client holding a reference from before it still finds its object afterwards.
 struct ObjectRegistrySnapshot
 {
-    std::vector<BoundObject> windows;  ///< Windows by WindowId, ascending.
+    std::vector<BoundObject> windows;  ///< Windows by WorkspaceId, ascending.
     std::vector<BoundObject> tabs;     ///< Tabs by TabId, ascending.
     std::vector<BoundObject> panes;    ///< Panes by SessionId, ascending.
     std::vector<LabeledObject> labels; ///< Every label, ordered by object.
@@ -91,7 +91,7 @@ class ObjectRegistry
 {
   public:
     /// Any of the model's handles.
-    using Handle = std::variant<vtworkspace::WindowId, vtworkspace::TabId, vtworkspace::SessionId>;
+    using Handle = std::variant<vtworkspace::WorkspaceId, vtworkspace::TabId, vtworkspace::SessionId>;
 
     /// @param uuids Where fresh UUIDs come from.
     explicit ObjectRegistry(std::shared_ptr<vtcontrol::UuidSource> uuids);
@@ -103,7 +103,7 @@ class ObjectRegistry
     /// @param id The model's id.
     /// @param uuid Its UUID.
     /// @{
-    void bind(vtworkspace::WindowId id, vtcontrol::Uuid uuid);
+    void bind(vtworkspace::WorkspaceId id, vtcontrol::Uuid uuid);
     void bind(vtworkspace::TabId id, vtcontrol::Uuid uuid);
     void bind(vtworkspace::SessionId id, vtcontrol::Uuid uuid);
     /// @}
@@ -111,7 +111,7 @@ class ObjectRegistry
     /// Drops an object and its label; an unknown one is a no-op.
     /// @param id The model's id.
     /// @{
-    void forget(vtworkspace::WindowId id);
+    void forget(vtworkspace::WorkspaceId id);
     void forget(vtworkspace::TabId id);
     void forget(vtworkspace::SessionId id);
     /// @}
@@ -119,7 +119,7 @@ class ObjectRegistry
     /// @param id The model's id.
     /// @return Its UUID, or nothing when it is not bound.
     /// @{
-    [[nodiscard]] std::optional<vtcontrol::Uuid> uuidOf(vtworkspace::WindowId id) const;
+    [[nodiscard]] std::optional<vtcontrol::Uuid> uuidOf(vtworkspace::WorkspaceId id) const;
     [[nodiscard]] std::optional<vtcontrol::Uuid> uuidOf(vtworkspace::TabId id) const;
     [[nodiscard]] std::optional<vtcontrol::Uuid> uuidOf(vtworkspace::SessionId id) const;
     /// @}

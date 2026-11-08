@@ -299,28 +299,28 @@ void WorkspacePersistence::deferredExpired(void* self)
     static_cast<WorkspacePersistence*>(self)->consider(SnapshotTrigger::Periodic, Origin::Timer);
 }
 
-void WorkspacePersistence::tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int)
+void WorkspacePersistence::tabAdded(vtworkspace::WorkspaceId, vtworkspace::TabId, int)
 {
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }
 
-void WorkspacePersistence::tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int)
+void WorkspacePersistence::tabClosed(vtworkspace::WorkspaceId, vtworkspace::TabId, int)
 {
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }
 
-void WorkspacePersistence::tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int)
+void WorkspacePersistence::tabMoved(vtworkspace::WorkspaceId, vtworkspace::TabId, int, int)
 {
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }
 
-void WorkspacePersistence::tabMovedToWindow(
-    vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int)
+void WorkspacePersistence::tabMovedToWorkspace(
+    vtworkspace::WorkspaceId, vtworkspace::TabId, int, vtworkspace::WorkspaceId, int)
 {
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }
 
-void WorkspacePersistence::activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int)
+void WorkspacePersistence::activeTabChanged(vtworkspace::WorkspaceId, vtworkspace::TabId, int)
 {
     consider(SnapshotTrigger::LayoutChanged, Origin::Event);
 }

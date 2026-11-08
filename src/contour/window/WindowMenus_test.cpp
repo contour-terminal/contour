@@ -211,7 +211,7 @@ TEST_CASE("runTabAction by TabId resolves the row, and ignores a tab that has go
     for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
     {
         window->createNewTab();
-        auto const* tab = app.manager().model().window(window.id)->activeTab();
+        auto const* tab = app.manager().model().workspace(window.id)->activeTab();
         REQUIRE(tab != nullptr);
         ids.push_back(tab->id());
     }
@@ -267,7 +267,7 @@ TEST_CASE("CloseOtherTabs keeps the anchor when it is not the active tab",
 
     // Make the active tab one that is NOT the anchor, whatever order the tabs were created in.
     window->activateTab(2);
-    REQUIRE(app.manager().model().window(window.id)->activeTab()->id() == made.tabs[2]);
+    REQUIRE(app.manager().model().workspace(window.id)->activeTab()->id() == made.tabs[2]);
 
     window->runTabAction(0, actions::Action { actions::CloseOtherTabs {} });
 
@@ -504,7 +504,7 @@ TEST_CASE("the menu bar sees this window's tabs", "[contour][windowmenus][menuba
     CHECK(state.tabCount == 3);
     CHECK(state.activeTab == window->activeTabIndex());
     CHECK(state.tabTitles == window->tabTitles());
-    auto const* tab = app.manager().model().window(window->windowId())->activeTab();
+    auto const* tab = app.manager().model().workspace(window->windowId())->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(state.paneCount == tab->paneCount());
 }

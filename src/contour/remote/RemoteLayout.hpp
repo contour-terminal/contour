@@ -62,7 +62,7 @@ using LayoutSnapshot = std::map<uint64_t, std::shared_ptr<vthost::proto::LayoutS
 /// @param pageSize The size each realized pane's grid/pty is born at (the live window size), or nullopt
 ///        for the profile default.
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
-                       vtworkspace::WindowId window,
+                       vtworkspace::WorkspaceId window,
                        NativeController& controller,
                        LayoutSnapshot const& layouts,
                        std::optional<uint64_t> daemonWindow = std::nullopt,
@@ -71,7 +71,7 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
 /// Reconciles as above, against the controller's settled layouts as of now
 /// (NativeController::settledLayouts): for a window reconciled on its own.
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
-                       vtworkspace::WindowId window,
+                       vtworkspace::WorkspaceId window,
                        NativeController& controller,
                        std::optional<uint64_t> daemonWindow = std::nullopt,
                        std::optional<vtbackend::PageSize> pageSize = std::nullopt);
@@ -104,7 +104,7 @@ struct ReconciledWindow
 [[nodiscard]] std::vector<ReconciledWindow> windowsToReconcile(LayoutSnapshot const& layouts);
 
 /// The OS window showing each daemon window, by the daemon's id of it.
-using AttachWindowMap = std::unordered_map<uint64_t, vtworkspace::WindowId>;
+using AttachWindowMap = std::unordered_map<uint64_t, vtworkspace::WorkspaceId>;
 
 /// Brings every OS window of @p windows to one snapshot of the daemon's layouts: each daemon window an OS
 /// window shows is reconciled into it (applyRemoteLayout()), ascending, and every other one is handed to

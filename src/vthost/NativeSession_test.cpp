@@ -3289,7 +3289,7 @@ TEST_CASE("a ClientHello's settings reach the sessions that client creates", "[v
     // ServerHello, LayoutState, SessionState, Delta.
     std::ignore = h.exchange({ proto::DecodedPdu { hello } }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(terminal->terminalId() == vtbackend::VTType::VT420);
@@ -3322,7 +3322,7 @@ TEST_CASE("restated settings reach the sessions the client creates afterwards", 
                                proto::DecodedPdu { proto::CreateTab {} } },
                              4);
 
-    auto const* window = h.host.model().window(h.host.windowId());
+    auto const* window = h.host.model().workspace(h.host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 2);
     auto* first = h.host.terminal(window->tabAt(0)->rootPane()->session());
@@ -3346,7 +3346,7 @@ TEST_CASE("restating no settings returns later sessions to the host's own", "[vt
                                proto::DecodedPdu { proto::CreateTab {} } },
                              4);
 
-    auto const* window = h.host.model().window(h.host.windowId());
+    auto const* window = h.host.model().workspace(h.host.windowId());
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 2);
     auto* second = h.host.terminal(window->tabAt(1)->rootPane()->session());
@@ -3360,7 +3360,7 @@ TEST_CASE("a ClientHello without settings leaves the host's own in force", "[vth
 
     std::ignore = h.exchange({ proto::ClientHello {} }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount()) == 500);
@@ -3379,7 +3379,7 @@ TEST_CASE("a client cannot ask a session out of the host invariants", "[vthost][
 
     std::ignore = h.exchange({ proto::DecodedPdu { hello } }, 4);
 
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(sessionId);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount())
@@ -4315,7 +4315,7 @@ TEST_CASE("a PDU the client refused is not sent to it again", "[vthost][negotiat
         imageGoneArrived);
 
     REQUIRE(imageGoneArrived(received));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 2);
+    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == 2);
     CHECK(std::ranges::count_if(received, isLayout) == 1);
     CHECK(h.session->peerRefused(proto::PduType::LayoutState));
     CHECK_FALSE(h.session->peerRefused(proto::PduType::Delta));
@@ -5232,7 +5232,7 @@ namespace
 [[nodiscard]] std::set<uint64_t> sessionsOf(SessionHost& host, uint64_t window)
 {
     auto sessions = std::set<uint64_t> {};
-    host.model().forEachTab([&](vtworkspace::Window& owner, vtworkspace::Tab& tab) {
+    host.model().forEachTab([&](vtworkspace::Workspace& owner, vtworkspace::Tab& tab) {
         if (owner.id().value != window)
             return;
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
@@ -5568,7 +5568,7 @@ proto::ClientHello profileHello(std::string profile, proto::CapabilitySet capabi
 std::vector<std::string> profilesOf(SessionHost& host)
 {
     auto sessions = std::set<uint64_t> {};
-    host.model().forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
+    host.model().forEachTab([&](vtworkspace::Workspace&, vtworkspace::Tab& tab) {
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
                 sessions.insert(pane.session().value);
@@ -5590,7 +5590,7 @@ TEST_CASE("a client naming a profile gets it; its session settings are ignored",
                    AttachSnapshotFrames);
 
     CHECK(profilesOf(h.host) == std::vector<std::string> { "build" });
-    auto const session = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const session = h.host.model().workspace(h.host.windowId())->activeTab()->rootPane()->session();
     auto* terminal = h.host.terminal(session);
     REQUIRE(terminal != nullptr);
     CHECK(unbox<int>(terminal->primaryScreen().grid().maxHistoryLineCount()) == 5000);
@@ -5622,7 +5622,7 @@ TEST_CASE("a client without ProfileByName keeps the session-settings path", "[vt
         });
 
     CHECK(profilesOf(h.host) == std::vector<std::string> { std::string {}, std::string {} });
-    auto const session = h.host.model().window(h.host.windowId())->tabAt(0)->rootPane()->session();
+    auto const session = h.host.model().workspace(h.host.windowId())->tabAt(0)->rootPane()->session();
     auto* terminal = h.host.terminal(session);
     REQUIRE(terminal != nullptr);
     CHECK(terminal->terminalId() == vtbackend::VTType::VT420);
@@ -5697,7 +5697,7 @@ TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pu
     auto const draggedSession = dragged->rootPane()->session();
     auto const window = h.host.windowId().value;
     auto const tabCount = [&] {
-        return h.host.model().window(h.host.windowId())->tabCount();
+        return h.host.model().workspace(h.host.windowId())->tabCount();
     };
     auto const tabsBefore = tabCount();
     REQUIRE(tabsBefore >= 2);
@@ -5747,7 +5747,7 @@ TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, u
     auto const* target = h.host.createTab();
     auto const* dragged = h.host.createTab();
     REQUIRE((target != nullptr && dragged != nullptr));
-    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+    auto const tabsBefore = h.host.model().workspace(h.host.windowId())->tabCount();
 
     // The request names a tab as holding a session it does not: a stale view of it.
     auto const isRefusal = [](proto::DecodedFrame const& frame) {
@@ -5764,7 +5764,7 @@ TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, u
     CHECK(refusal->serial == 2); // the merge's: the second frame the client sent
     CHECK(std::get<proto::TabMergeRefused>(refusal->pdu).reason
           == std::to_underlying(vthost::TabMergeError::StaleTab));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == tabsBefore);
     CHECK(target->paneCount() == 1);
 }
 
@@ -5775,7 +5775,7 @@ TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupp
     auto const* target = h.host.createTab();
     auto const* dragged = h.host.createTab();
     REQUIRE((target != nullptr && dragged != nullptr));
-    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+    auto const tabsBefore = h.host.model().workspace(h.host.windowId())->tabCount();
 
     // An older client's hello offers nothing, and a daemon of today still refuses what it did not negotiate.
     auto const received = h.exchangeUntil(
@@ -5792,7 +5792,7 @@ TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupp
     REQUIRE(refused != received.end());
     CHECK(std::get<proto::Unsupported>(refused->pdu).ident
           == std::to_underlying(proto::PduType::MergeTabIntoSplit));
-    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(h.host.model().workspace(h.host.windowId())->tabCount() == tabsBefore);
     CHECK(target->paneCount() == 1);
 }
 
@@ -6550,7 +6550,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const* root = h.host.model().findTab(tab->id())->rootPane();
     auto const anchor = root->first()->session();
-    auto const window = h.host.model().windowOfTab(tab->id()).value;
+    auto const window = h.host.model().workspaceOfTab(tab->id()).value;
 
     auto const hello = encodeRequest({ proto::ClientHello {} });
     auto const setting = encodeRequest(
@@ -6588,7 +6588,7 @@ TEST_CASE("a SetSplitOrientation ends a layout batch, and a stale session or a s
     REQUIRE(tab != nullptr);
     h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
     auto const anchor = h.host.model().findTab(tab->id())->rootPane()->first()->session();
-    auto const window = h.host.model().windowOfTab(tab->id()).value;
+    auto const window = h.host.model().workspaceOfTab(tab->id()).value;
     auto const hello =
         proto::ClientHello { .capabilities = proto::CapabilitySet::of(
                                  { proto::Capability::MoveNode, proto::Capability::LayoutBatch }) };
@@ -6653,7 +6653,7 @@ TEST_CASE("a MoveNode onto the only sibling's edge pushes the tab re-split along
     auto const* root = h.host.model().findTab(tabId)->rootPane();
     auto const left = root->first()->session();
     auto const right = root->second()->session();
-    auto const window = h.host.model().windowOfTab(tabId).value;
+    auto const window = h.host.model().workspaceOfTab(tabId).value;
 
     auto const stacked = [&](auto const& got) {
         auto const* layout = lastLayoutOf(got, window);
@@ -6768,7 +6768,7 @@ TEST_CASE("a pane moved to a new window opens it for the client that asked, not 
         { moverHello,
           proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Pane),
                             .sourceSessions = { draggedSession.value },
-                            .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::NewWindow) } });
+                            .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::NewWorkspace) } });
 
     auto fromWatcher = std::vector<proto::DecodedFrame> {};
     auto fromMover = std::vector<proto::DecodedFrame> {};
@@ -6824,8 +6824,8 @@ TEST_CASE("a window a MoveNode empties is pushed empty, then removed", "[vthost]
         h.exchangeUntil({ movingHello(), intoTabWell(draggedSession, stayingSession) }, moved);
 
     CHECK(moved(received));
-    CHECK(h.host.model().window(emptiedWindow) == nullptr);
-    CHECK(h.host.model().windowCount() == 1);
+    CHECK(h.host.model().workspace(emptiedWindow) == nullptr);
+    CHECK(h.host.model().workspaceCount() == 1);
     CHECK_FALSE(h.host.objects().uuidOf(emptiedWindow).has_value());
     CHECK(h.host.terminal(draggedSession) != nullptr);
     CHECK(h.host.windowId() == primary);
@@ -6851,11 +6851,11 @@ TEST_CASE("the host's own window a MoveNode empties is removed, and another wind
         { movingHello(), intoTabWell(draggedSession, other->tabAt(0)->rootPane()->session()) }, moved);
 
     CHECK(moved(received));
-    CHECK(h.host.model().window(primary) == nullptr);
+    CHECK(h.host.model().workspace(primary) == nullptr);
     CHECK(h.host.windowId() == otherWindow);
     auto const* const created = h.host.createTab();
     REQUIRE(created != nullptr);
-    CHECK(h.host.model().windowOfTab(created->id()) == otherWindow);
+    CHECK(h.host.model().workspaceOfTab(created->id()) == otherWindow);
 }
 
 // A client of the release before MoveNode never moves anything, but sees the moves another client makes: it
@@ -6893,7 +6893,7 @@ TEST_CASE("a client that cannot move is pushed the window another client's move 
 
     CHECK(moved(fromMover));
     CHECK(moved(fromWatcher));
-    CHECK(h.host.model().window(emptiedWindow) == nullptr);
+    CHECK(h.host.model().workspace(emptiedWindow) == nullptr);
 }
 
 namespace
@@ -7083,7 +7083,7 @@ TEST_CASE("a move pushes each window it changed once, then ends its batch, to a 
 {
     auto f = PaneIntoOtherWindow {};
     auto const sourceWindow =
-        f.h.host.model().windowOfTab(std::get<1>(f.h.host.model().findSessionLeaf(f.dragged))->id()).value;
+        f.h.host.model().workspaceOfTab(std::get<1>(f.h.host.model().findSessionLeaf(f.dragged))->id()).value;
     auto const hello = encodeRequest({ batchingHello() });
     auto const move = encodedAt(2, intoTabWell(f.dragged, f.otherSession));
     auto const attachEnded = [](std::vector<proto::DecodedFrame> const& got) {
@@ -7146,7 +7146,7 @@ TEST_CASE("a move ends its batch for the client that asked, though it follows no
     CHECK(batchEndedBy(received, 2));
     CHECK(lastLayoutOf(received, fromWindow) == nullptr);
     CHECK(lastLayoutOf(received, intoWindow) == nullptr);
-    CHECK(h.host.model().windowOfTab(std::get<1>(h.host.model().findSessionLeaf(dragged))->id()).value
+    CHECK(h.host.model().workspaceOfTab(std::get<1>(h.host.model().findSessionLeaf(dragged))->id()).value
           == intoWindow);
 }
 

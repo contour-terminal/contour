@@ -102,7 +102,7 @@ namespace
     }
 
     /// Serializes the host window's whole tab/pane layout for the LayoutState PDU.
-    [[nodiscard]] proto::LayoutState serializeLayout(vtworkspace::Window& window)
+    [[nodiscard]] proto::LayoutState serializeLayout(vtworkspace::Workspace& window)
     {
         auto layout = proto::LayoutState {};
         layout.window = window.id().value;
@@ -288,11 +288,11 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
 {
     // Every model change (the host fans them here once subscribed) re-pushes the whole layout of the window
     // it is in — infrequent, so a full resend beats a granular diff.
-    _layoutObserver.onWindowChange = [this](vtworkspace::WindowId window) {
+    _layoutObserver.onWindowChange = [this](vtworkspace::WorkspaceId window) {
         layoutChanged(window);
     };
     _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
-        layoutChanged(_host.model().windowOfTab(tab));
+        layoutChanged(_host.model().workspaceOfTab(tab));
     };
 }
 
@@ -570,8 +570,8 @@ void NativeSession::pushLayout()
     // each and reconciles its tabs/splits independently.
     auto& model = _host.model();
     auto pushed = false;
-    for (auto const i: std::views::iota(0, model.windowCount()))
-        if (auto* window = model.windowAt(i); window != nullptr && follows(window->id()))
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+        if (auto* window = model.workspaceAt(i); window != nullptr && follows(window->id()))
         {
             sendLayout(serializeLayout(*window));
             pushed = true;
@@ -595,7 +595,7 @@ bool NativeSession::batchesLayouts() const noexcept
     return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::LayoutBatch);
 }
 
-void NativeSession::layoutChanged(vtworkspace::WindowId window)
+void NativeSession::layoutChanged(vtworkspace::WorkspaceId window)
 {
     if (!batchesLayouts())
     {
@@ -606,7 +606,7 @@ void NativeSession::layoutChanged(vtworkspace::WindowId window)
         return;
     // Whether this client follows the window is decided as the batch ends: a window it joins meanwhile (its
     // own NewWindow) is pushed as well.
-    if (window != vtworkspace::WindowId {})
+    if (window != vtworkspace::WorkspaceId {})
         _changedWindows.insert(window.value);
     // A change the move being served made is part of what that move's batch completes, followed or not: the
     // client that asked is told its move landed even when it shows none of what moved.
@@ -626,14 +626,15 @@ bool NativeSession::flushChangedLayouts()
     auto& model = _host.model();
     auto const changed = std::exchange(_changedWindows, {});
     // Asked before the followed set drops them: a window the batch emptied, which the host then removed.
-    auto const removed = std::ranges::to<std::vector>(changed | std::views::filter([&](uint64_t window) {
-                                                          auto const id = vtworkspace::WindowId { window };
-                                                          return model.window(id) == nullptr && follows(id);
-                                                      }));
+    auto const removed =
+        std::ranges::to<std::vector>(changed | std::views::filter([&](uint64_t window) {
+                                         auto const id = vtworkspace::WorkspaceId { window };
+                                         return model.workspace(id) == nullptr && follows(id);
+                                     }));
     refreshFollowedWindows();
     auto pushed = false;
-    for (auto const i: std::views::iota(0, model.windowCount()))
-        if (auto* window = model.windowAt(i);
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+        if (auto* window = model.workspaceAt(i);
             window != nullptr && changed.contains(window->id().value) && follows(window->id()))
         {
             sendLayout(serializeLayout(*window));
@@ -673,11 +674,11 @@ void NativeSession::refreshFollowedWindows()
         return;
     auto& model = _host.model();
     std::erase_if(_followedWindows, [&model](uint64_t window) {
-        return model.window(vtworkspace::WindowId { window }) == nullptr;
+        return model.workspace(vtworkspace::WorkspaceId { window }) == nullptr;
     });
-    for (auto const i: std::views::iota(0, model.windowCount()))
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
     {
-        auto* window = model.windowAt(i);
+        auto* window = model.workspaceAt(i);
         // An empty window is nothing to show yet; it is taken up once it holds a tab.
         if (window == nullptr || window->tabCount() == 0 || follows(window->id()))
             continue;
@@ -1913,7 +1914,7 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
             *move,
             MoveWindowHooks {
                 .create = [this] { return _host.createEmptyWindow(this).id(); },
-                .discard = [this](vtworkspace::WindowId window) { _host.discardWindow(window); } });
+                .discard = [this](vtworkspace::WorkspaceId window) { _host.discardWindow(window); } });
         _servingMove = 0;
         if (!moved)
         {
@@ -2349,14 +2350,14 @@ void NativeSession::attachClient(uint64_t serial,
     if (_scope == FollowScope::Listed)
         reply.followedWindows.assign(_followedWindows.begin(), _followedWindows.end());
     else
-        for (auto const i: std::views::iota(0, _host.model().windowCount()))
-            if (auto* window = _host.model().windowAt(i); window != nullptr && window->tabCount() > 0)
+        for (auto const i: std::views::iota(0, _host.model().workspaceCount()))
+            if (auto* window = _host.model().workspaceAt(i); window != nullptr && window->tabCount() > 0)
                 reply.followedWindows.push_back(window->id().value);
     reply.daemonInstance = _host.instance();
     // Told to the first attaching client only, whichever windows it follows: the host forgets it with the
     // answer.
     if (auto const restored = _host.takeRestoreAnnouncement(
-            [this](uint64_t window) { return follows(vtworkspace::WindowId { window }); }))
+            [this](uint64_t window) { return follows(vtworkspace::WorkspaceId { window }); }))
     {
         reply.restoredWindows = restored->windows;
         reply.restoredTabs = restored->tabs;
@@ -2399,7 +2400,7 @@ void NativeSession::attachClient(uint64_t serial,
     // The sessions that already existed take the stated preference before their snapshot is built; a change
     // only, so what a program set on one survives.
     if (colorPreference)
-        _host.model().forEachTab([&](vtworkspace::Window& window, vtworkspace::Tab& tab) {
+        _host.model().forEachTab([&](vtworkspace::Workspace& window, vtworkspace::Tab& tab) {
             if (!follows(window.id()))
                 return;
             tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
@@ -2411,7 +2412,7 @@ void NativeSession::attachClient(uint64_t serial,
     // The attach snapshot: every hosted session of every followed window, full state. QUEUED, not pushed:
     // this runs inside the PDU pump's handler, which cannot suspend, so pushing here would put
     // every pane's whole grid into the send queue before the drain coroutine had run once.
-    _host.model().forEachTab([this](vtworkspace::Window& window, vtworkspace::Tab& tab) {
+    _host.model().forEachTab([this](vtworkspace::Workspace& window, vtworkspace::Tab& tab) {
         if (!follows(window.id()))
             return;
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
@@ -2435,8 +2436,8 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
     auto context = AttachContext { .otherClients = _host.connectedClients(),
                                    .primaryWindow = _host.windowId().value,
                                    .windows = {} };
-    for (auto const i: std::views::iota(0, model.windowCount()))
-        if (auto const* window = model.windowAt(i))
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+        if (auto const* window = model.workspaceAt(i))
             context.windows.push_back(
                 WindowSummary { .id = window->id().value, .tabCount = window->tabCount() });
     std::ranges::sort(context.windows, {}, &WindowSummary::id);

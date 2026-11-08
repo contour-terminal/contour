@@ -1023,7 +1023,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The host's window (the daemon starts with exactly one): where a creation naming no window
     /// lands.
     ///         One a move emptied is removed, and another window takes this role (@see discardWindow).
-    [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _window; }
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const noexcept { return _window; }
 
     /// @return The UUIDs and labels of this host's windows, tabs and panes.
     [[nodiscard]] ObjectRegistry& objects() noexcept { return _objects; }
@@ -1150,26 +1150,26 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param creator The attached client the window is created for, which then claims it (@see
     ///        windowClaim) before its first tab is announced; null for a window no client claims.
     /// @return The created window, or nullptr on failure (nothing is leaked).
-    vtworkspace::Window* createWindow(SessionSpawnRequest const& request = {},
-                                      SessionStreamEvents const* creator = nullptr);
+    vtworkspace::Workspace* createWindow(SessionSpawnRequest const& request = {},
+                                         SessionStreamEvents const* creator = nullptr);
 
     /// Creates a NEW window with no tab and no session, named and claimed: the one way every window of this
     /// host is made -- createWindow() fills it with its first tab, a move lands its source in it. The caller
     /// either fills it or hands it back to discardWindow().
     /// @param creator The attached client the window is created for, which then claims it; null for none.
     /// @return The created, empty window.
-    [[nodiscard]] vtworkspace::Window& createEmptyWindow(SessionStreamEvents const* creator = nullptr);
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWindow(SessionStreamEvents const* creator = nullptr);
 
     /// Removes a window that holds no tab -- one createEmptyWindow() made and nothing filled, or one a move
     /// emptied -- forgetting its name and claim. The host's own window (windowId()) removed, the first window
     /// left becomes it.
     /// @param window The window; one that holds a tab is left alone.
-    void discardWindow(vtworkspace::WindowId window);
+    void discardWindow(vtworkspace::WorkspaceId window);
 
     /// @param window The window asked about.
     /// @param client The attached client asking.
     /// @return Whether @p window was created for @p client, for another client, or for none.
-    [[nodiscard]] WindowClaim windowClaim(vtworkspace::WindowId window,
+    [[nodiscard]] WindowClaim windowClaim(vtworkspace::WorkspaceId window,
                                           SessionStreamEvents const* client) const noexcept;
 
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
@@ -1453,19 +1453,22 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
 
     // vtworkspace::ModelEvents — every completed change fans out to subscribers.
-    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
-    void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
-    void tabAboutToBeMovedToWindow(vtworkspace::WindowId from,
-                                   int fromIndex,
-                                   vtworkspace::WindowId to,
-                                   int toIndex) override;
-    void tabMovedToWindow(vtworkspace::WindowId from,
-                          vtworkspace::TabId tab,
-                          int fromIndex,
-                          vtworkspace::WindowId to,
-                          int toIndex) override;
-    void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAdded(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void tabClosed(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
+    void tabMoved(vtworkspace::WorkspaceId window,
+                  vtworkspace::TabId tab,
+                  int fromIndex,
+                  int toIndex) override;
+    void tabAboutToBeMovedToWorkspace(vtworkspace::WorkspaceId from,
+                                      int fromIndex,
+                                      vtworkspace::WorkspaceId to,
+                                      int toIndex) override;
+    void tabMovedToWorkspace(vtworkspace::WorkspaceId from,
+                             vtworkspace::TabId tab,
+                             int fromIndex,
+                             vtworkspace::WorkspaceId to,
+                             int toIndex) override;
+    void activeTabChanged(vtworkspace::WorkspaceId window, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
                    vtworkspace::PaneId newLeaf) override;
@@ -1485,8 +1488,8 @@ class SessionHost final: public vtworkspace::ModelEvents
 
   private:
     /// createEmptyWindow(), named @p name.
-    [[nodiscard]] vtworkspace::Window& createEmptyWindow(SessionStreamEvents const* creator,
-                                                         vtcontrol::Uuid name);
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWindow(SessionStreamEvents const* creator,
+                                                            vtcontrol::Uuid name);
     /// Gives @p tab a name if no creation path did, as for a tab a move made.
     void bindUnnamed(vtworkspace::TabId tab);
 
@@ -1582,7 +1585,7 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @param window A window of the model.
     /// @return Its UUID, or the nil UUID for one the registry does not know.
-    [[nodiscard]] vtcontrol::Uuid windowUuid(vtworkspace::WindowId window) const;
+    [[nodiscard]] vtcontrol::Uuid windowUuid(vtworkspace::WorkspaceId window) const;
 
     /// Destroys a session the model refused, and forgets its pane's UUID.
     /// @param session The session that was just seeded.
@@ -1622,7 +1625,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// profile (else its tab's) the @ref SessionSpawnRequest::profileName.
     /// @param window The window to realize every tab into (the host's own, freshly created).
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
-    void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
+    void realizeStartupLayout(vtworkspace::WorkspaceId window, vtworkspace::Layout const& layout);
 
     /// A window a restore brought back.
     struct RestoredWindow
@@ -1655,7 +1658,7 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// Realizes one window of a restore into @p window.
     /// @return What was realized.
-    RealizedWindow realizeRestoredWindow(vtworkspace::WindowId window,
+    RealizedWindow realizeRestoredWindow(vtworkspace::WorkspaceId window,
                                          WindowSnapshot const& snapshot,
                                          WorkspaceRestore const& restore);
 
@@ -2098,7 +2101,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::optional<StagedTab> _stagedTab;
 
     vtworkspace::SessionModel _model; ///< Last member: its callbacks reach into the host.
-    vtworkspace::WindowId _window;
+    vtworkspace::WorkspaceId _window;
 };
 
 /// Scoped subscription: keeps @p Observer subscribed to @p Host for this object's

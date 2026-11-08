@@ -269,7 +269,7 @@ Pane* Tab::resizeActivePane(FocusDirection direction, double fraction)
     // `ratio` is the FIRST child's share of the split. The user presses a direction to move the shared
     // divider that way: pressing toward the second child (Right/Down) enlarges the first child's share
     // (+fraction); pressing toward the first child (Left/Up) shrinks it (-fraction). This "move the
-    // boundary in this direction" model matches Windows Terminal and is independent of which side the
+    // boundary in this direction" model matches Workspaces Terminal and is independent of which side the
     // active pane sits on. setRatio() clamps.
     auto const delta = pointsTowardSecondChild(direction) ? fraction : -fraction;
     split->setRatio(split->ratio() + delta);

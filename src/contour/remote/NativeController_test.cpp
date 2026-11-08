@@ -762,7 +762,7 @@ struct DaemonFixture
     {
         return onDaemon([this, text = std::move(text)] {
             host->createTab();
-            auto const id = host->model().window(host->windowId())->activeTab()->rootPane()->session();
+            auto const id = host->model().workspace(host->windowId())->activeTab()->rootPane()->session();
             host->terminal(id)->writeToScreen(text);
             return id;
         });
@@ -789,7 +789,7 @@ struct DaemonFixture
     void splitActive(vtworkspace::SplitState state, double ratio)
     {
         onDaemon([this, state, ratio] {
-            auto* tab = host->model().window(host->windowId())->activeTab();
+            auto* tab = host->model().workspace(host->windowId())->activeTab();
             host->splitActivePane(tab->id(), state, ratio);
             return 0;
         });
@@ -947,13 +947,13 @@ void requireConnected(contour::remote::RemoteController& controller, std::chrono
 /// @return The realized tab, or nullptr if no layout ever arrived.
 [[nodiscard]] vtworkspace::Tab* attachAndRealize(contour::remote::NativeController& controller,
                                                  contour::session::TerminalSessionManager& manager,
-                                                 vtworkspace::WindowId window)
+                                                 vtworkspace::WorkspaceId window)
 {
     requireConnected(controller);
     if (!waitUntil([&] { return controller.settledLayout() != nullptr; }))
         return nullptr;
     contour::remote::applyRemoteLayout(manager, window, controller);
-    return manager.model().window(window)->tabAt(0);
+    return manager.model().workspace(window)->tabAt(0);
 }
 } // namespace
 
@@ -1233,7 +1233,7 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     // Realize the daemon's tree into the GUI window.
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
 
-    auto* window = app.manager().model().window(win.id);
+    auto* window = app.manager().model().workspace(win.id);
     REQUIRE(window != nullptr);
     REQUIRE(window->tabCount() == 1);
     auto* tab = window->tabAt(0);
@@ -1263,7 +1263,7 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     // The settled layouts, as applyRemoteLayout realizes them: the push that brings a layout has ended.
     REQUIRE(waitUntil([&] { return ac->settledLayout() != nullptr; }));
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+    REQUIRE(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
 
     // Split the tab on the daemon (after the client attached) and wait for the
     // split to reach the client's layout.
@@ -1272,8 +1272,8 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
 
     // Reconcile: the already-shown tab grows a second pane.
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
-    CHECK(app.manager().model().window(win.id)->tabCount() == 1); // it stayed one tab, now split
+    CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 2);
+    CHECK(app.manager().model().workspace(win.id)->tabCount() == 1); // it stayed one tab, now split
 
     ac->stop();
 }
@@ -1349,7 +1349,7 @@ TEST_CASE("a daemon split the factory refuses ends the reconcile, leaving it for
     requireConnected(ac);
     REQUIRE(waitUntil([&] { return ac.settledLayout() != nullptr; }));
     contour::remote::applyRemoteLayout(app.manager(), win.id, ac);
-    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+    REQUIRE(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
 
     daemon.splitActive(vtworkspace::SplitState::Horizontal, 0.5);
     REQUIRE(waitUntil([&] { return ac.settledLayout()->tabs.front().root.isSplit(); }));
@@ -1357,7 +1357,7 @@ TEST_CASE("a daemon split the factory refuses ends the reconcile, leaving it for
 
     // Returns: the split is not realized, and the tab is as it was.
     contour::remote::applyRemoteLayout(app.manager(), win.id, ac);
-    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+    CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
     // And no session is left awaiting a pane: the next split the user makes here binds nothing of the
     // daemon's.
     CHECK_FALSE(ac.canCreateSession());
@@ -1382,7 +1382,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     for (auto i = 0; i < 200 && ac->settledLayout() == nullptr; ++i)
         std::this_thread::sleep_for(5ms);
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+    REQUIRE(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
 
     // A distinctly uneven split (0.7 to the first/acting child) authored on the daemon.
     daemon.splitActive(vtworkspace::SplitState::Vertical, 0.7);
@@ -1395,7 +1395,7 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     REQUIRE_FALSE(ac->settledLayout()->tabs.front().root.children.empty());
 
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    auto* root = app.manager().model().window(win.id)->tabAt(0)->rootPane();
+    auto* root = app.manager().model().workspace(win.id)->tabAt(0)->rootPane();
     REQUIRE_FALSE(root->isLeaf());
     // The first child's share is ~0.7, NOT the 0.5 default the dropped ratio produced.
     CHECK(root->ratio() > 0.6);
@@ -1412,7 +1412,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session(); // the new (active) pane's session
     });
@@ -1426,7 +1426,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
     for (auto i = 0; i < 200 && ac->settledLayout() == nullptr; ++i)
         std::this_thread::sleep_for(5ms);
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
+    REQUIRE(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 2);
 
     // Close the second pane ON THE DAEMON; wait for the layout to drop it.
     daemon.onDaemon([&daemon, second] {
@@ -1448,7 +1448,7 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
         for (auto i = 0; i < 200; ++i)
         {
             QCoreApplication::processEvents();
-            if (app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1)
+            if (app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1)
                 return true;
             std::this_thread::sleep_for(5ms);
         }
@@ -1527,7 +1527,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
         std::this_thread::sleep_for(5ms);
     }
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
+    REQUIRE(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 2);
     auto const liveSessions = [&daemon] {
         return daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); });
     };
@@ -1538,7 +1538,7 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
     app.manager().closeActivePane(win->activeSession(), contour::session::SessionEnd::Destroy);
 
     CHECK(waitUntil([&] { return liveSessions() == 1; }));
-    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 1);
+    CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 1);
 
     ac->stop();
 }
@@ -1752,7 +1752,7 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     // Settled as well: applyRemoteLayout realizes the settled layouts, not the live ones.
     REQUIRE(waitUntil([&] { return ac->settledLayout() != nullptr; }));
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
 
     auto const clientArea = [&] {
@@ -2146,7 +2146,7 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     for (auto i = 0; i < 200 && ac->settledLayout() == nullptr; ++i)
         std::this_thread::sleep_for(5ms);
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    auto* tab = app.manager().model().workspace(win.id)->tabAt(0);
     REQUIRE(app.manager().sessionsOfTab(tab).size() == 1);
 
     // A GUI split of the only pane routes to the daemon (requestRemoteSplit).
@@ -2161,8 +2161,8 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
 
     // Reconcile: the local tab grows a second pane, still one tab.
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
-    CHECK(app.manager().model().window(win.id)->tabCount() == 1);
+    CHECK(app.manager().model().workspace(win.id)->tabAt(0)->paneCount() == 2);
+    CHECK(app.manager().model().workspace(win.id)->tabCount() == 1);
 
     ac->stop();
 }
@@ -2188,7 +2188,7 @@ TEST_CASE("attach merges a tab into a split on the daemon, and the sessions live
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     auto& manager = app.manager();
-    auto* const localWindow = manager.model().window(win.id);
+    auto* const localWindow = manager.model().workspace(win.id);
     REQUIRE(localWindow->tabCount() == 2);
     REQUIRE(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Supported);
 
@@ -2248,8 +2248,8 @@ TEST_CASE("a tab dropped against a daemon without TabMerge is not offered a spli
     // The tab is left to tear off, as it was before the verb existed: the window offers no split and the
     // controller routes nothing.
     CHECK(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Unsupported);
-    auto* const first = manager.model().window(win.id)->tabAt(0);
-    auto* const second = manager.model().window(win.id)->tabAt(1);
+    auto* const first = manager.model().workspace(win.id)->tabAt(0);
+    auto* const second = manager.model().workspace(win.id)->tabAt(1);
     auto const* const firstPty = &manager.sessionsOfTab(first).front()->terminal().device();
     auto const* const secondPty = &manager.sessionsOfTab(second).front()->terminal().device();
     // And a request made anyway is refused, never left for the manager to merge here: the daemon owns this
@@ -2276,7 +2276,7 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
     // The daemon's split ratio, or nullopt while its root is still a single leaf.
     auto daemonRatio = [&daemon]() -> std::optional<double> {
         return daemon.onDaemon([&daemon]() -> std::optional<double> {
-            auto* root = daemon.host->model().window(daemon.host->windowId())->activeTab()->rootPane();
+            auto* root = daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane();
             return root->isLeaf() ? std::nullopt : std::optional { root->ratio() };
         });
     };
@@ -2350,7 +2350,7 @@ struct AttachedGui
     }
 
     /// The window's one tab.
-    [[nodiscard]] vtworkspace::Tab& tab() { return *app.manager().model().window(window.id)->tabAt(0); }
+    [[nodiscard]] vtworkspace::Tab& tab() { return *app.manager().model().workspace(window.id)->tabAt(0); }
 
     /// Reconciles what the daemon last pushed, as the app does on every push.
     void reconcile() { contour::remote::applyRemoteLayout(app.manager(), window.id, *controller); }
@@ -2397,7 +2397,7 @@ void requireDelivered(DaemonFixture& daemon, AttachedGui& gui, std::string const
 void requirePushed(DaemonFixture& daemon, AttachedGui& gui, std::string const& title)
 {
     daemon.onDaemon([&daemon, &title] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->model().setTabTitle(tab->id(), title);
         return 0;
     });
@@ -2646,7 +2646,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
 
     // What a SECOND client's ResizeSplit does to the daemon's model.
     auto const moved = daemon.onDaemon([&daemon] {
-        auto* daemonTab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* daemonTab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->model().setPaneRatio(daemonTab->id(), daemonTab->rootPane()->id(), 0.3);
         return true;
     });
@@ -2665,7 +2665,7 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
     CHECK_FALSE(waitUntil(
         [&] {
             return daemon.onDaemon([&daemon] {
-                auto* root = daemon.host->model().window(daemon.host->windowId())->activeTab()->rootPane();
+                auto* root = daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane();
                 return root->ratio() != 0.3;
             });
         },
@@ -2712,7 +2712,7 @@ TEST_CASE("a new tab with a profile asks the daemon for that profile", "[attach]
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return ac->settledLayout() != nullptr; }));
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win.id)->tabCount() == 1);
 
     // The CreateNewTab action's profile, through the manager as the keybinding takes it.
     app.manager().createNewTab(win.id, std::string { "ops" });
@@ -2720,7 +2720,7 @@ TEST_CASE("a new tab with a profile asks the daemon for that profile", "[attach]
     auto const profiles = [&] {
         return daemon->onDaemon([&] {
             auto names = std::vector<std::string> {};
-            daemon->host->model().forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
+            daemon->host->model().forEachTab([&](vtworkspace::Workspace&, vtworkspace::Tab& tab) {
                 names.push_back(daemon->host->hostedSession(tab.rootPane()->session())->profileName());
             });
             return names;
@@ -2751,7 +2751,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     for (auto i = 0; i < 200 && ac->settledLayout() == nullptr; ++i)
         std::this_thread::sleep_for(5ms);
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    REQUIRE(app.manager().model().window(win.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win.id)->tabCount() == 1);
 
     // A GUI "new tab" in attach mode routes to the daemon (requestRemoteTab ->
     // requestCreateTab) instead of creating a local tab; wait for the two-tab
@@ -2767,7 +2767,7 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
 
     // Reconcile: the daemon's new tab appears locally (the first is left untouched).
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
-    CHECK(app.manager().model().window(win.id)->tabCount() == 2);
+    CHECK(app.manager().model().workspace(win.id)->tabCount() == 2);
 
     ac->stop();
 }
@@ -2814,11 +2814,11 @@ TEST_CASE("a session the client creates gets the profile the GUI holds in memory
 
     auto const tabCount = [&] {
         return daemon.onDaemon(
-            [&] { return daemon.host->model().window(daemon.host->windowId())->tabCount(); });
+            [&] { return daemon.host->model().workspace(daemon.host->windowId())->tabCount(); });
     };
     auto const terminalIdOfTab = [&](int index) {
         return daemon.onDaemon([&] {
-            auto const* window = daemon.host->model().window(daemon.host->windowId());
+            auto const* window = daemon.host->model().workspace(daemon.host->windowId());
             return daemon.host->terminal(window->tabAt(index)->rootPane()->session())->terminalId();
         });
     };
@@ -2886,11 +2886,11 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     contour::remote::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
 
     // Each GUI window mirrors exactly its daemon window's single tab...
-    REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
-    REQUIRE(app.manager().model().window(win2.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win1.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win2.id)->tabCount() == 1);
     // ...bound to that window's own remote session (via the pane's pty).
-    auto const boundSession = [&](vtworkspace::WindowId window) -> std::optional<uint64_t> {
-        auto* tab = app.manager().model().window(window)->tabAt(0);
+    auto const boundSession = [&](vtworkspace::WorkspaceId window) -> std::optional<uint64_t> {
+        auto* tab = app.manager().model().workspace(window)->tabAt(0);
         auto const sessions = app.manager().sessionsOfTab(tab);
         if (sessions.empty())
             return std::nullopt;
@@ -2929,8 +2929,8 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     contour::test::ScopedController const win2 { app.manager() };
     contour::remote::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
     contour::remote::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
-    REQUIRE(app.manager().model().window(win1.id)->tabCount() == 1);
-    REQUIRE(app.manager().model().window(win2.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win1.id)->tabCount() == 1);
+    REQUIRE(app.manager().model().workspace(win2.id)->tabCount() == 1);
 
     // The "+" of the SECOND GUI window.
     app.manager().createNewTab(win2.id);
@@ -2958,8 +2958,8 @@ namespace
     contour::session::TerminalSessionManager& manager)
 {
     auto out = std::set<contour::session::TerminalSession*> {};
-    for (auto const w: std::views::iota(0, manager.model().windowCount()))
-        if (auto* const window = manager.model().windowAt(w))
+    for (auto const w: std::views::iota(0, manager.model().workspaceCount()))
+        if (auto* const window = manager.model().workspaceAt(w))
             for (auto const t: std::views::iota(0, window->tabCount()))
                 for (auto* session: manager.sessionsOfTab(window->tabAt(t)))
                     out.insert(session);
@@ -2979,7 +2979,7 @@ namespace
 }
 
 /// @return The window of @p manager showing @p session, if any.
-[[nodiscard]] std::optional<vtworkspace::WindowId> windowShowing(
+[[nodiscard]] std::optional<vtworkspace::WorkspaceId> windowShowing(
     contour::session::TerminalSessionManager& manager, contour::session::TerminalSession const* session)
 {
     auto const [window, tab, leaf] = manager.model().findSessionLeaf(session->modelSessionId());
@@ -3015,8 +3015,8 @@ TEST_CASE("a pane the daemon moves into another window keeps its TerminalSession
     contour::test::ScopedController const win2 { manager };
     contour::remote::applyRemoteLayout(manager, win1.id, *ac, ids[0]);
     contour::remote::applyRemoteLayout(manager, win2.id, *ac, ids[1]);
-    REQUIRE(manager.model().window(win1.id)->tabCount() == 2);
-    REQUIRE(manager.model().window(win2.id)->tabCount() == 1);
+    REQUIRE(manager.model().workspace(win1.id)->tabCount() == 2);
+    REQUIRE(manager.model().workspace(win2.id)->tabCount() == 1);
 
     auto* const movedSession = sessionMirroring(manager, *ac, moved.value);
     REQUIRE(movedSession != nullptr);
@@ -3043,9 +3043,9 @@ TEST_CASE("a pane the daemon moves into another window keeps its TerminalSession
     contour::remote::applyRemoteLayout(manager, win1.id, *ac, ids[0]);
     contour::remote::applyRemoteLayout(manager, win2.id, *ac, ids[1]);
 
-    CHECK(manager.model().window(win1.id)->tabCount() == 1);
-    REQUIRE(manager.model().window(win2.id)->tabCount() == 1);
-    auto* const destinationTab = manager.model().window(win2.id)->tabAt(0);
+    CHECK(manager.model().workspace(win1.id)->tabCount() == 1);
+    REQUIRE(manager.model().workspace(win2.id)->tabCount() == 1);
+    auto* const destinationTab = manager.model().workspace(win2.id)->tabAt(0);
     CHECK(destinationTab->paneCount() == 2);
     CHECK(std::ranges::contains(manager.sessionsOfTab(destinationTab), movedSession));
     // The very same object, and no other: nothing was spawned, nothing closed.
@@ -3082,7 +3082,7 @@ TEST_CASE("a pane the daemon moves into a new window is the same TerminalSession
 
     CHECK(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
                                   .sourceSessions = { moved.value },
-                                  .target = vtworkspace::MoveTargetKind::NewWindow,
+                                  .target = vtworkspace::MoveTargetKind::NewWorkspace,
                                   .targetSession = 0,
                                   .side = vtworkspace::SplitSide::Left,
                                   .index = 0,
@@ -3103,9 +3103,9 @@ TEST_CASE("a pane the daemon moves into a new window is the same TerminalSession
     contour::test::ScopedController const win2 { manager };
     contour::remote::applyRemoteLayout(manager, win2.id, *ac, ids[1]);
 
-    CHECK(manager.model().window(win1.id)->tabCount() == 1);
-    REQUIRE(manager.model().window(win2.id)->tabCount() == 1);
-    CHECK(manager.sessionsOfTab(manager.model().window(win2.id)->tabAt(0))
+    CHECK(manager.model().workspace(win1.id)->tabCount() == 1);
+    REQUIRE(manager.model().workspace(win2.id)->tabCount() == 1);
+    CHECK(manager.sessionsOfTab(manager.model().workspace(win2.id)->tabAt(0))
           == std::vector<contour::session::TerminalSession*> { movedSession });
     CHECK(shownSessions(manager) == before);
     CHECK(daemon.onDaemon([&] { return daemon.host->terminal(moved) != nullptr; }));
@@ -3141,7 +3141,7 @@ TEST_CASE("a moved pane whose new window's layout comes first is adopted, never 
     manager.createNewTab(win2.id);
     REQUIRE(waitUntil([&] { return ac->settledLayout(ids[1])->tabs.size() == 2; }));
     contour::remote::applyRemoteLayout(manager, win2.id, *ac, ids[1]);
-    REQUIRE(manager.model().window(win2.id)->tabCount() == 2);
+    REQUIRE(manager.model().workspace(win2.id)->tabCount() == 2);
     auto const moved = ac->settledLayout(ids[1])->tabs.back().root.session;
     auto* const movedSession = sessionMirroring(manager, *ac, moved);
     REQUIRE(movedSession != nullptr);
@@ -3173,8 +3173,8 @@ TEST_CASE("a moved pane whose new window's layout comes first is adopted, never 
 
     CHECK(shownSessions(manager) == before);
     CHECK(windowShowing(manager, movedSession) == win1.id);
-    CHECK(manager.model().window(win1.id)->tabAt(0)->paneCount() == 2);
-    CHECK(manager.model().window(win2.id)->tabCount() == 1);
+    CHECK(manager.model().workspace(win1.id)->tabAt(0)->paneCount() == 2);
+    CHECK(manager.model().workspace(win2.id)->tabCount() == 1);
 
     ac->stop();
 }
@@ -3325,7 +3325,7 @@ TEST_CASE("a moved pane whose new window's layout comes in a later read is adopt
     // Required: a pane closed meanwhile would leave movedSession dangling.
     REQUIRE(shownSessions(f.manager) == f.before);
     CHECK(windowShowing(f.manager, f.movedSession) == f.win2->id);
-    CHECK(f.manager.model().window(f.win2->id)->tabAt(0)->paneCount() == 2);
+    CHECK(f.manager.model().workspace(f.win2->id)->tabAt(0)->paneCount() == 2);
     CHECK(f.ac->sessionForPty(&f.movedSession->terminal().device()) == f.moved.value);
 }
 
@@ -3337,7 +3337,7 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     auto daemon = DaemonFixture {};
     auto const stays = daemon.seedSession("stays");
     auto const dragged = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -3352,8 +3352,8 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     REQUIRE(waitUntil(
         [&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.front().root.isSplit(); }));
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
-    REQUIRE(manager.model().window(win.id)->tabCount() == 1);
-    auto const tab = manager.model().window(win.id)->tabAt(0)->id();
+    REQUIRE(manager.model().workspace(win.id)->tabCount() == 1);
+    auto const tab = manager.model().workspace(win.id)->tabAt(0)->id();
     auto* const staysSession = sessionMirroring(manager, *ac, stays.value);
     auto* const draggedSession = sessionMirroring(manager, *ac, dragged.value);
     REQUIRE((staysSession != nullptr && draggedSession != nullptr));
@@ -3370,11 +3370,11 @@ TEST_CASE("a pane dragged out of its tab leaves the other pane in that tab",
     REQUIRE(waitUntil([&] { return ac->settledLayout()->tabs.size() == 2; }));
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
 
-    REQUIRE(manager.model().window(win.id)->tabCount() == 2);
+    REQUIRE(manager.model().workspace(win.id)->tabCount() == 2);
     CHECK(manager.sessionsOfTab(manager.model().findTab(tab))
           == std::vector<contour::session::TerminalSession*> { staysSession });
-    CHECK(manager.model().window(win.id)->tabAt(0)->id() == tab);
-    CHECK(manager.sessionsOfTab(manager.model().window(win.id)->tabAt(1))
+    CHECK(manager.model().workspace(win.id)->tabAt(0)->id() == tab);
+    CHECK(manager.sessionsOfTab(manager.model().workspace(win.id)->tabAt(1))
           == std::vector<contour::session::TerminalSession*> { draggedSession });
     CHECK(shownSessions(manager) == before);
 
@@ -3405,7 +3405,7 @@ TEST_CASE("a reconcile sees the layouts as of the last batch end, not a push sti
     CHECK(f.ac->settledLayout(f.ids[0])->tabs.size() == settledTabs);
 
     contour::remote::applyRemoteLayout(f.manager, f.win1.id, *f.ac, f.ids[0]);
-    CHECK(f.manager.model().window(f.win1.id)->tabCount() == 2);
+    CHECK(f.manager.model().workspace(f.win1.id)->tabCount() == 2);
     CHECK(windowShowing(f.manager, f.movedSession) == f.win1.id);
 
     f.daemon.releaseHeld();
@@ -3496,7 +3496,7 @@ TEST_CASE("a pane the GUI moves into a new window over a daemon opens where it w
     REQUIRE(screen != nullptr);
 
     REQUIRE(f.manager.moveNode(*drag,
-                               vtworkspace::NewWindowTarget {},
+                               vtworkspace::NewWorkspaceTarget {},
                                screen,
                                screen->availableGeometry().topLeft() + QPoint { 240, 160 }));
     auto const landed = f.landedMoves(1);
@@ -3565,7 +3565,7 @@ TEST_CASE("a landed move whose window is not open yet waits for the reconcile th
     auto* const screen = QGuiApplication::primaryScreen();
     REQUIRE(screen != nullptr);
     REQUIRE(f.manager.moveNode(*drag,
-                               vtworkspace::NewWindowTarget {},
+                               vtworkspace::NewWorkspaceTarget {},
                                screen,
                                screen->availableGeometry().topLeft() + QPoint { 240, 160 }));
     f.manager.noteRemoteMovesLanded(f.landedMoves(1));
@@ -3609,7 +3609,7 @@ TEST_CASE("a move the daemon refuses is no longer waited for", "[attach][control
         [&refused](int, int, quint64 request) { refused = request; },
         Qt::DirectConnection);
 
-    REQUIRE(f.manager.moveNode(*stale, vtworkspace::NewWindowTarget {}, nullptr, {}));
+    REQUIRE(f.manager.moveNode(*stale, vtworkspace::NewWorkspaceTarget {}, nullptr, {}));
     REQUIRE((f.manager.livePendingRemoteMove() != nullptr));
     REQUIRE(waitUntil([&] { return refused != 0; }));
     QObject::disconnect(refusalSeen);
@@ -3631,7 +3631,7 @@ TEST_CASE("a move the host will not take is refused with the host's answer",
     REQUIRE(forged.has_value());
     forged->sessions = { f.moved.value, f.target };
 
-    auto const moved = f.manager.moveNode(*forged, vtworkspace::NewWindowTarget {}, nullptr, {});
+    auto const moved = f.manager.moveNode(*forged, vtworkspace::NewWorkspaceTarget {}, nullptr, {});
     REQUIRE_FALSE(moved.has_value());
     CHECK(moved.error() == contour::session::MoveFailure { contour::session::RemoteRouting::Refused });
     CHECK_FALSE((f.manager.livePendingRemoteMove() != nullptr));
@@ -3681,7 +3681,7 @@ TEST_CASE("a reconnect clears the layouts while the GUI thread reconciles agains
     constexpr auto Reconnects = 3;
     auto f = TwoWindowMove {};
     auto const wireTab = f.ac->settledLayout(f.ids[0])->tabs.front().tabId;
-    auto const localTab = f.manager.model().window(f.win1.id)->tabAt(0)->id();
+    auto const localTab = f.manager.model().workspace(f.win1.id)->tabAt(0)->id();
 
     auto reconnected = std::atomic<int> { 0 };
     auto const dropper = std::jthread { [&] {
@@ -3736,7 +3736,7 @@ TEST_CASE("a move no connection can send is refused, and no longer waited for",
 
     f.daemon.refuseConnections();
     REQUIRE(waitUntil([&] { return f.ac->connectionState() == ConnectionState::Reconnecting; }));
-    REQUIRE(f.manager.moveNode(*drag, vtworkspace::NewWindowTarget {}, nullptr, {}));
+    REQUIRE(f.manager.moveNode(*drag, vtworkspace::NewWorkspaceTarget {}, nullptr, {}));
     REQUIRE((f.manager.livePendingRemoteMove() != nullptr));
     REQUIRE(waitUntil([&] { return refusal.has_value(); }));
 
@@ -3764,7 +3764,7 @@ TEST_CASE("the pairing of local and daemon tabs is dropped with the tab, and wit
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return ac->settledLayout() != nullptr; }));
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
-    auto const tab = manager.model().window(win.id)->tabAt(0)->id();
+    auto const tab = manager.model().workspace(win.id)->tabAt(0)->id();
     CHECK(ac->pairedWireTab(tab).has_value());
 
     SECTION("a tab that no longer exists is forgotten by the next reconcile")
@@ -3805,7 +3805,7 @@ TEST_CASE("a swap within one tab pushed by the daemon keeps both TerminalSession
     auto daemon = DaemonFixture {};
     auto const left = daemon.seedSession("left");
     auto const right = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -3838,7 +3838,7 @@ TEST_CASE("a swap within one tab pushed by the daemon keeps both TerminalSession
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
     QCoreApplication::processEvents();
 
-    auto const* const root = manager.model().window(win.id)->tabAt(0)->rootPane();
+    auto const* const root = manager.model().workspace(win.id)->tabAt(0)->rootPane();
     REQUIRE((root->first() != nullptr && root->second() != nullptr));
     CHECK(root->first()->session() == rightSession->modelSessionId());
     CHECK(root->second()->session() == leftSession->modelSessionId());
@@ -3883,7 +3883,7 @@ TEST_CASE("a tab reorder pushed by the daemon keeps the TerminalSessions",
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
     QCoreApplication::processEvents();
 
-    auto* const window = manager.model().window(win.id);
+    auto* const window = manager.model().workspace(win.id);
     REQUIRE(window->tabCount() == 3);
     CHECK(manager.sessionsOfTab(window->tabAt(0))
           == std::vector<contour::session::TerminalSession*> { thirdSession });
@@ -3936,9 +3936,9 @@ TEST_CASE("a window's last pane moved by the daemon closes the window and keeps 
     contour::remote::applyRemoteLayout(manager, win1.id, *ac, ids[0]);
     contour::remote::applyRemoteLayout(manager, win2.id, *ac, ids[1]);
 
-    CHECK(manager.model().window(win1.id) == nullptr);
-    REQUIRE(manager.model().window(win2.id) != nullptr);
-    CHECK(std::ranges::contains(manager.sessionsOfTab(manager.model().window(win2.id)->tabAt(0)),
+    CHECK(manager.model().workspace(win1.id) == nullptr);
+    REQUIRE(manager.model().workspace(win2.id) != nullptr);
+    CHECK(std::ranges::contains(manager.sessionsOfTab(manager.model().workspace(win2.id)->tabAt(0)),
                                 movedSession));
     CHECK(shownSessions(manager) == before);
     // A later push for the emptied daemon window finds no local window to reconcile, and moves nothing back.
@@ -3969,11 +3969,11 @@ namespace
 ///         tab by tab, the same sessions in the same tree order.
 [[nodiscard]] bool mirrors(contour::session::TerminalSessionManager& manager,
                            contour::remote::NativeController const& ac,
-                           vtworkspace::WindowId window,
+                           vtworkspace::WorkspaceId window,
                            uint64_t daemonWindow)
 {
     auto const layout = ac.settledLayout(daemonWindow);
-    auto const* const local = manager.model().window(window);
+    auto const* const local = manager.model().workspace(window);
     if (layout == nullptr || local == nullptr || std::cmp_not_equal(local->tabCount(), layout->tabs.size()))
         return false;
     for (auto const [index, wireTab]: core::views::enumerate(layout->tabs))
@@ -4046,7 +4046,7 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
     auto daemon = DaemonFixture {};
     auto const splitActive = [&daemon] {
         return daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-            auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+            auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
             daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
             return tab->activePane()->session();
         });
@@ -4067,8 +4067,8 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
     REQUIRE(mirrors(manager, *ac, win.id, settledWindows(*ac).front()));
-    auto const tabs = std::array { manager.model().window(win.id)->tabAt(0)->id(),
-                                   manager.model().window(win.id)->tabAt(1)->id() };
+    auto const tabs = std::array { manager.model().workspace(win.id)->tabAt(0)->id(),
+                                   manager.model().workspace(win.id)->tabAt(1)->id() };
     auto const before = shownSessions(manager);
 
     REQUIRE(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
@@ -4087,8 +4087,8 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
     CHECK(shownSessions(manager) == before);
     CHECK(mirrors(manager, *ac, win.id, settledWindows(*ac).front()));
     // The tabs stay the tabs they were: only the two panes moved.
-    CHECK(manager.model().window(win.id)->tabAt(0)->id() == tabs[0]);
-    CHECK(manager.model().window(win.id)->tabAt(1)->id() == tabs[1]);
+    CHECK(manager.model().workspace(win.id)->tabAt(0)->id() == tabs[0]);
+    CHECK(manager.model().workspace(win.id)->tabAt(1)->id() == tabs[1]);
 
     ac->stop();
 }
@@ -4123,7 +4123,7 @@ struct FollowingGui
     FollowingGui& operator=(FollowingGui&&) = delete;
 
     [[nodiscard]] contour::session::TerminalSessionManager& manager() { return app.manager(); }
-    [[nodiscard]] vtworkspace::WindowId windowId() const { return window->id; }
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const { return window->id; }
 
     /// Reconciles the window it follows, as of the last push's end.
     void reconcile() { contour::remote::applyRemoteLayout(manager(), windowId(), *controller, daemonWindow); }
@@ -4206,7 +4206,7 @@ TEST_CASE("a pane moved into another GUI process's window appears there, on ever
             auto daemon = DaemonFixture {};
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-                auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+                auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
                 daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
@@ -4339,7 +4339,7 @@ TEST_CASE("a pane dropped on an edge of its only sibling over a daemon re-splits
             auto daemon = DaemonFixture {};
             auto const first = daemon.seedSession("first");
             auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-                auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+                auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
                 daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
                 return tab->activePane()->session();
             });
@@ -4370,7 +4370,7 @@ TEST_CASE("a pane dropped on an edge of its only sibling over a daemon re-splits
                 contour::session::TerminalSessionManager::ReconcileReach::Whole);
             drainGuiEvents();
 
-            auto const* const tab = gui.manager().model().window(gui.windowId())->activeTab();
+            auto const* const tab = gui.manager().model().workspace(gui.windowId())->activeTab();
             REQUIRE(tab != nullptr);
             REQUIRE(tab->paneCount() == 2);
             auto const* const root = tab->rootPane();
@@ -4390,7 +4390,7 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
     auto daemon = DaemonFixture {};
     auto const first = daemon.seedSession("first");
     auto const tabId = daemon.onDaemon([&daemon]() -> vtworkspace::TabId {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->id();
     });
@@ -4402,7 +4402,7 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
     auto gui = FollowingGui { daemon, followed };
     auto* const acting = gui.showing(first.value);
     REQUIRE(acting != nullptr);
-    auto const* const localTab = gui.manager().model().window(gui.windowId())->activeTab();
+    auto const* const localTab = gui.manager().model().workspace(gui.windowId())->activeTab();
     REQUIRE(localTab != nullptr);
     REQUIRE(localTab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
 
@@ -4420,7 +4420,7 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
         return layout != nullptr && !layout->tabs.empty() && layout->tabs.front().title == "pushed";
     }));
     gui.reconcile();
-    CHECK(gui.manager().model().window(gui.windowId())->activeTab()->rootPane()->splitState()
+    CHECK(gui.manager().model().workspace(gui.windowId())->activeTab()->rootPane()->splitState()
           == vtworkspace::SplitState::Horizontal);
 }
 
@@ -4507,7 +4507,7 @@ TEST_CASE("a window a pass empties stays open for the pass that fills it again",
             drainGuiEvents();
 
             REQUIRE(shownSessions(manager) == before);
-            REQUIRE(manager.model().window(losingWindow.id) != nullptr);
+            REQUIRE(manager.model().workspace(losingWindow.id) != nullptr);
             CHECK(mirrors(manager, *ac, losingWindow.id, seeded.losing));
             CHECK(mirrors(manager, *ac, keepingWindow.id, seeded.keeping));
             CHECK(windows
@@ -4570,7 +4570,7 @@ TEST_CASE("a window a move leaves with no daemon tab closes after the reconcile,
     reconcile();
     drainGuiEvents();
 
-    CHECK(manager.model().window(win1.id) == nullptr);
+    CHECK(manager.model().workspace(win1.id) == nullptr);
     CHECK(windows == contour::remote::AttachWindowMap { { ids[1], win2.id } });
     CHECK(windowShowing(manager, movedSession) == win2.id);
     CHECK(shownSessions(manager) == before);
@@ -4597,8 +4597,8 @@ TEST_CASE("a closed window's daemon window, emptied and filled again, gets a win
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     // The second daemon window was shown in a window its user has closed since: one the model no longer has.
-    auto const closed = vtworkspace::WindowId { 4242 };
-    REQUIRE(manager.model().window(closed) == nullptr);
+    auto const closed = vtworkspace::WorkspaceId { 4242 };
+    REQUIRE(manager.model().workspace(closed) == nullptr);
     auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
     auto opened = std::vector<uint64_t> {};
     auto const reconcile = [&] {
@@ -4629,7 +4629,7 @@ TEST_CASE("a closed window's daemon window, emptied and filled again, gets a win
 
     // Filled again: it gets a window of its own.
     auto const refilled = daemon.onDaemon([&daemon, &ids] {
-        auto* const window = daemon.host->model().window(vtworkspace::WindowId { ids[1] });
+        auto* const window = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[1] });
         if (window == nullptr)
             return false;
         std::ignore = daemon.host->model().createTab(window->id());
@@ -4663,8 +4663,8 @@ TEST_CASE("a closed window stays closed when a snapshot lacks its daemon window"
     REQUIRE(ac->requestRemoteWindow({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
-    auto const closed = vtworkspace::WindowId { 4242 };
-    REQUIRE(manager.model().window(closed) == nullptr);
+    auto const closed = vtworkspace::WorkspaceId { 4242 };
+    REQUIRE(manager.model().workspace(closed) == nullptr);
     auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
     auto opened = std::vector<uint64_t> {};
     auto const reconcile = [&](contour::remote::LayoutSnapshot const& layouts) {
@@ -4702,8 +4702,8 @@ TEST_CASE("a closed window stays closed across a reconnect that settles one wind
     REQUIRE(ac->requestRemoteWindow({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
-    auto const closed = vtworkspace::WindowId { 4242 };
-    REQUIRE(manager.model().window(closed) == nullptr);
+    auto const closed = vtworkspace::WorkspaceId { 4242 };
+    REQUIRE(manager.model().workspace(closed) == nullptr);
     auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
     auto opened = std::vector<uint64_t> {};
     auto const reconcile = [&] {
@@ -4733,7 +4733,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     auto daemon = DaemonFixture { {}, servicesWithoutLayoutBatch() };
     std::ignore = daemon.seedSession("first");
     auto const second = daemon.onDaemon([&daemon]() -> vtworkspace::SessionId {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
         return tab->activePane()->session();
     });
@@ -4748,7 +4748,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     REQUIRE(waitUntil([&] { return ac->settledLayout() != nullptr; }));
     CHECK(ac->moveSupport() == contour::session::MoveSupport::Unsupported);
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
-    REQUIRE(manager.model().window(win.id)->tabAt(0)->paneCount() == 2);
+    REQUIRE(manager.model().workspace(win.id)->tabAt(0)->paneCount() == 2);
 
     daemon.onDaemon([&daemon, second] {
         daemon.host->handleSessionExit(second);
@@ -4759,7 +4759,7 @@ TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, a
     contour::remote::applyRemoteLayout(manager, win.id, *ac);
     CHECK(waitUntil([&] {
         drainGuiEvents();
-        return manager.model().window(win.id)->tabAt(0)->paneCount() == 1;
+        return manager.model().workspace(win.id)->tabAt(0)->paneCount() == 1;
     }));
     CHECK(sessionMirroring(manager, *ac, second.value) == nullptr);
 
@@ -4820,7 +4820,7 @@ TEST_CASE("a move names what it moves, or it is refused", "[attach][controller][
     // No session, and a pane source naming two, name no pane the daemon could move.
     CHECK(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
                                   .sourceSessions = {},
-                                  .target = vtworkspace::MoveTargetKind::NewWindow,
+                                  .target = vtworkspace::MoveTargetKind::NewWorkspace,
                                   .targetSession = 0,
                                   .side = vtworkspace::SplitSide::Left,
                                   .index = 0,
@@ -4828,7 +4828,7 @@ TEST_CASE("a move names what it moves, or it is refused", "[attach][controller][
           == contour::session::RemoteRouting::Refused);
     CHECK(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
                                   .sourceSessions = { one.value, two.value },
-                                  .target = vtworkspace::MoveTargetKind::NewWindow,
+                                  .target = vtworkspace::MoveTargetKind::NewWorkspace,
                                   .targetSession = 0,
                                   .side = vtworkspace::SplitSide::Left,
                                   .index = 0,
@@ -5382,7 +5382,7 @@ TEST_CASE("a wake probes the daemon", "[attach][controller][power]")
     // now.
     auto const before = controller.settledLayout();
     daemon.onDaemon([&daemon] {
-        auto* tab = daemon.host->model().window(daemon.host->windowId())->activeTab();
+        auto* tab = daemon.host->model().workspace(daemon.host->windowId())->activeTab();
         daemon.host->model().setTabTitle(tab->id(), "awake");
         return 0;
     });
@@ -5615,7 +5615,7 @@ TEST_CASE("windows the daemon no longer has are reported lost", "[attach][contro
     // The old pane is detached: what it is sent goes nowhere, least of all to the new session of its id.
     std::ignore = pane.pty().write("stale\r");
     auto const fresh = daemon.onDaemon([&] {
-        return daemon.host->model().window(daemon.host->windowId())->activeTab()->rootPane()->session();
+        return daemon.host->model().workspace(daemon.host->windowId())->activeTab()->rootPane()->session();
     });
     std::this_thread::sleep_for(50ms);
     CHECK_FALSE(daemon.ptyInput(fresh).contains("stale"));
@@ -5674,7 +5674,7 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
 
     // Closed on the daemon while this client was away: its only session ended.
     daemon.whileDisconnected([&] {
-        auto* window = daemon.host->model().window(vtworkspace::WindowId { gone });
+        auto* window = daemon.host->model().workspace(vtworkspace::WorkspaceId { gone });
         daemon.host->handleSessionExit(window->tabAt(0)->rootPane()->session());
     });
     REQUIRE(waitUntil([&] { return !log.windowsLost().empty(); }, 1000));
@@ -6178,7 +6178,7 @@ TEST_CASE("a refusing session factory blocks every creation entry point", "[atta
     auto controller = contour::test::ScopedController { app.manager() };
 
     CHECK(app.manager().createSessionInBackground(controller.id) == nullptr);
-    CHECK(app.manager().model().window(controller.id)->tabCount() == 0);
+    CHECK(app.manager().model().workspace(controller.id)->tabCount() == 0);
 }
 
 // Every SessionFactory verb has to survive the trip through RoutingSessionFactory, which the app
@@ -6456,7 +6456,7 @@ TEST_CASE("a client attaching to a titled multi-pane layout shows each tab's own
     }));
     gui.reconcile();
 
-    auto* const win = gui.app.manager().model().window(gui.window.id);
+    auto* const win = gui.app.manager().model().workspace(gui.window.id);
     REQUIRE(win != nullptr);
     REQUIRE(win->tabCount() == 2);
     CHECK(win->tabAt(0)->runtimeTitle() == "editor");
@@ -6467,7 +6467,7 @@ TEST_CASE("a client attaching to a titled multi-pane layout shows each tab's own
     std::this_thread::sleep_for(100ms);
     CHECK(editTabsReceived(capture.text()) == 0);
     auto const titles = daemon.onDaemon([&daemon] {
-        auto const* window = daemon.host->model().window(daemon.host->windowId());
+        auto const* window = daemon.host->model().workspace(daemon.host->windowId());
         return window->tabAt(0)->runtimeTitle().value_or("") + ","
                + window->tabAt(1)->runtimeTitle().value_or("");
     });

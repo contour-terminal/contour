@@ -512,7 +512,7 @@ TEST_CASE("Tab: zoom follows focus", "[vtworkspace][tab][zoom]")
     REQUIRE(tab.activePane() == right);
     REQUIRE(tab.toggleZoom());
 
-    // Moving focus while zoomed stays zoomed and shows the newly focused pane (Windows Terminal
+    // Moving focus while zoomed stays zoomed and shows the newly focused pane (Workspaces Terminal
     // semantics). No code implements this: layoutRoot() reads the active leaf, so focus carries it.
     auto* target = tab.focusDirection(FocusDirection::Left);
     REQUIRE(target == left);
