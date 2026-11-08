@@ -157,8 +157,8 @@ class DaemonLink final: public session::WindowBinding
     /// @param window The closed window.
     void windowClosed(vtworkspace::WorkspaceId window) override;
 
-    /// @return The OS windows the link has bound to a daemon workspace and not been told closed, in binding
-    ///         order.
+    /// @return The OS windows the link serves (@see bindPendingWindow) and has not been told closed, in
+    ///         binding order.
     [[nodiscard]] std::span<vtworkspace::WorkspaceId const> windows() const noexcept { return _windows; }
 
     /// @return What the link's drift badge shows.
@@ -184,7 +184,8 @@ class DaemonLink final: public session::WindowBinding
     /// controller stops, so that a reconnect does not start a daemon of its own. No-op once given up.
     void stopForDaemonRestart();
 
-    /// Stops the controller. Idempotent.
+    /// Stops the controller, and serves no window any more: what they make from then on is local
+    /// (@see session::TerminalSessionManager::releaseBinding). Idempotent.
     void stop();
 
     /// Brings the local OS windows in line with the daemon's workspaces: the primary daemon workspace maps
@@ -195,7 +196,9 @@ class DaemonLink final: public session::WindowBinding
 
     /// Called from a freshly spawned window's Main.qml (through the manager's attach-window binder): binds it
     /// to the daemon workspace staged for it, or, while the boot window is still to adopt one, to the
-    /// primary daemon workspace.
+    /// primary daemon workspace. Every window it is called for is served by the link from then on
+    /// (session::TerminalSessionManager::bindWindow), adopted or not: one link serves every window of the
+    /// process it attached. No-op once given up.
     /// @param window The freshly created controller of the spawned OS window.
     /// @return Whether the link adopted the window.
     [[nodiscard]] WindowAdoption bindPendingWindow(window::WindowController& window);
@@ -221,6 +224,10 @@ class DaemonLink final: public session::WindowBinding
 
     void connectReconnectSignals();
     void closeLostWindows(std::vector<uint64_t> const& daemonWorkspaces);
+
+    /// Serves @p window: binds it to this link on the manager, and records it among windows().
+    /// @param window A window of the manager.
+    void serve(vtworkspace::WorkspaceId window);
     void showDaemonDrift();
     void askHostedExtensions();
     void requireGuiThread() const;

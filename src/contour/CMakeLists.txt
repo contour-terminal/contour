@@ -361,7 +361,6 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
-        remote/RoutingSessionFactory.hpp
         remote/TmuxController.hpp
     )
     list(APPEND _core_source_files

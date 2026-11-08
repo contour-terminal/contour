@@ -2334,10 +2334,10 @@ void TerminalSession::noteReconnectFailure(std::string reason)
 
 FooterAction TerminalSession::endAction() const noexcept
 {
-    return offeredAction(_end,
-                         _hosting == SessionHosting::Local ? RestartSupport::Supported
-                                                           : RestartSupport::Unsupported,
-                         _manager != nullptr ? _manager->reconnectSupport() : ReconnectSupport::Unsupported);
+    return offeredAction(
+        _end,
+        _hosting == SessionHosting::Local ? RestartSupport::Supported : RestartSupport::Unsupported,
+        _manager != nullptr ? _manager->reconnectSupport(*this) : ReconnectSupport::Unsupported);
 }
 
 window::PaneFooterKind TerminalSession::paneFooter() const noexcept
@@ -2411,7 +2411,7 @@ void TerminalSession::runFooterAction()
         case FooterAction::Restart: restart(); return;
         case FooterAction::Reconnect:
             if (_manager != nullptr)
-                _manager->reconnectHost();
+                _manager->reconnectHost(*this);
             return;
         case FooterAction::RunAgain:
             if (_interruption)

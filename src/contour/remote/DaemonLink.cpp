@@ -194,6 +194,7 @@ std::expected<void, std::string> DaemonLink::awaitAttached(std::chrono::millisec
 void DaemonLink::stop()
 {
     requireGuiThread();
+    _sessions.releaseBinding(*this);
     if (_controller)
         _controller->stop();
 }
@@ -324,6 +325,8 @@ WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
     requireGuiThread();
     if (!_controller)
         return WindowAdoption::Declined;
+    // Before anything is realized in it: what it makes is made through this link.
+    serve(window.windowId());
 
     // A reconcile-spawned secondary OS window claims the daemon workspace staged for it.
     if (_pendingAttachWorkspace)
@@ -403,13 +406,19 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
     requireGuiThread();
     _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWorkspace, local);
-    if (!std::ranges::contains(_windows, local))
-        _windows.push_back(local);
+    serve(local);
     if (_reconcilingLayouts != nullptr)
         applyRemoteLayout(_sessions, local, *_controller, *_reconcilingLayouts, daemonWorkspace);
     else
         applyRemoteLayout(_sessions, local, *_controller, daemonWorkspace);
     _sessions.deliverRestoreSummaryTo(local);
+}
+
+void DaemonLink::serve(vtworkspace::WorkspaceId window)
+{
+    _sessions.bindWindow(window, *this);
+    if (!std::ranges::contains(_windows, window))
+        _windows.push_back(window);
 }
 
 void DaemonLink::expireRestoreSummaryAfterLayout()

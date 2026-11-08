@@ -2,7 +2,6 @@
 #include <contour/cli/HostTransport.hpp>
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/NativeController.hpp>
-#include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/remote/testing/DaemonFixture.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -177,41 +176,7 @@ class SharedLogCapture
     return std::ranges::to<std::vector>(controller.settledLayouts() | std::views::keys);
 }
 
-/// The router's default factory, unreachable in these tests: attach mode always installs a delegate.
-struct UnusedDefaultFactory final: contour::session::SessionFactory
-{
-    [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string>,
-                                                        std::optional<vtbackend::PageSize>,
-                                                        std::optional<vtpty::Process::ExecInfo>,
-                                                        std::optional<std::string>) override
-    {
-        return nullptr;
-    }
-};
-
-/// The production route to a `NativeController`.
-///
-/// The app never holds a controller as its factory: it holds a `RoutingSessionFactory` for its whole
-/// life and swaps the DELEGATE when attach mode starts, so every call a session makes travels through
-/// the router. Tests used to call the controller directly, which skips it — and a verb the router
-/// forgets to forward is then invisible, because the base `SessionFactory` gives every verb a no-op
-/// default. That is exactly how `bindTerminal` came to be dropped: a daemon-hosted pane rendered
-/// nothing at all in the real GUI while every test here passed. Going through the router is what
-/// makes these tests able to see it.
-struct AttachRoute
-{
-    contour::remote::RoutingSessionFactory router { std::make_unique<UnusedDefaultFactory>() };
-
-    explicit AttachRoute(contour::remote::NativeController& controller) { router.setDelegate(&controller); }
-
-    AttachRoute(AttachRoute const&) = delete;
-    AttachRoute& operator=(AttachRoute const&) = delete;
-    AttachRoute(AttachRoute&&) = delete;
-    AttachRoute& operator=(AttachRoute&&) = delete;
-    ~AttachRoute() = default;
-};
-
-/// The local half of a mirrored pane: the terminal a GUI session builds around a router-issued
+/// The local half of a mirrored pane: the terminal a GUI session builds around a controller-issued
 /// pty, wired up exactly as `TerminalSessionManager` wires it.
 ///
 /// Building the terminal is not scaffolding around the thing under test — it IS the production path.
@@ -234,7 +199,7 @@ struct MirrorPane
     MirrorPane& operator=(MirrorPane&&) = delete;
     ~MirrorPane() = default;
 
-    /// @param factory The ROUTER, not the controller — @see AttachRoute.
+    /// @param factory The controller, which a daemon-bound window's sessions are made by.
     /// @param pty The pty that factory handed out.
     /// @param interruptions Where the session is told what a restart stopped; none by default.
     MirrorPane(contour::session::SessionFactory& factory,
@@ -334,16 +299,14 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     REQUIRE(controller.canCreateSession());
     CHECK(controller.hosting() == contour::session::SessionHosting::Remote);
 
-    // Through the ROUTER, exactly as the app does — see AttachRoute.
-    auto route = AttachRoute { controller };
     // The factory hands out a pty bound to the remote session...
-    auto pty = route.router.createPty(std::nullopt);
+    auto pty = controller.createPty(std::nullopt);
     REQUIRE(pty != nullptr);
     CHECK(!controller.canCreateSession()); // the one pending session is consumed
 
     // ...and once the terminal built around it is announced, the mirror populates its grid with
     // the remote screen.
-    auto pane = MirrorPane { route.router, std::move(pty) };
+    auto pane = MirrorPane { controller, std::move(pty) };
     CHECK(pane.shows("hello attach"));
 
     // Input written by the terminal reaches the remote PTY.
@@ -409,14 +372,13 @@ TEST_CASE("NativeController.interruption.postedToTheSessionsThread", "[attach][c
     auto& controller = *controllerOwned;
     requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
-    auto route = AttachRoute { controller };
-    auto pty = route.router.createPty(std::nullopt);
+    auto pty = controller.createPty(std::nullopt);
     REQUIRE(pty != nullptr);
 
     auto context = QObject {}; // the session's stand-in: it lives on this thread, the GUI's
     auto told = std::vector<std::optional<vtbackend::CommandLineText>> {};
     auto threads = std::vector<std::thread::id> {};
-    auto pane = MirrorPane { route.router,
+    auto pane = MirrorPane { controller,
                              std::move(pty),
                              contour::session::InterruptionSink {
                                  .context = &context,
@@ -475,10 +437,9 @@ TEST_CASE("NativeController.extension.permission", "[attach][controller][extensi
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& controller = *controllerOwned;
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pty = route.router.createPty(std::nullopt);
+    auto pty = controller.createPty(std::nullopt);
     REQUIRE(pty != nullptr);
-    auto pane = MirrorPane { route.router, std::move(pty) };
+    auto pane = MirrorPane { controller, std::move(pty) };
 
     auto taken = std::vector<contour::remote::NativeController::HostedPermissionRequest> {};
     REQUIRE(waitUntil([&] {
@@ -845,10 +806,9 @@ TEST_CASE("releasing a mirrored pty leaves its remote session running", "[attach
     };
     REQUIRE(liveSessions() == 1);
 
-    auto route = AttachRoute { controller };
-    auto pty = route.router.createPty(std::nullopt);
+    auto pty = controller.createPty(std::nullopt);
     REQUIRE(pty != nullptr);
-    auto pane = std::make_unique<MirrorPane>(route.router, std::move(pty));
+    auto pane = std::make_unique<MirrorPane>(controller, std::move(pty));
     CHECK(pane->shows("keep me running"));
 
     // The pane's pty goes away with the connection still up. Inverted wait: give any ClosePane a
@@ -4282,10 +4242,9 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     REQUIRE(controller.pendingCount() == 1);
 
     // Bind the pending remote session to a local tab, then close that tab.
-    auto route = AttachRoute { controller };
-    auto pty = route.router.createPty(std::nullopt);
+    auto pty = controller.createPty(std::nullopt);
     REQUIRE(pty != nullptr);
-    auto pane = std::make_unique<MirrorPane>(route.router, std::move(pty));
+    auto pane = std::make_unique<MirrorPane>(controller, std::move(pty));
     CHECK(pane->shows("first line"));
     CHECK(controller.pendingCount() == 0);
     pane.reset(); // the terminal destroyed its pty: the user closed the tab
@@ -4370,8 +4329,7 @@ TEST_CASE("a restarted listener re-snapshots the same sessions into the same pan
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("before"));
 
     daemon.dropConnections();
@@ -4412,8 +4370,7 @@ TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][contro
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("before"));
     REQUIRE(controller.isBound(session.value));
 
@@ -4499,8 +4456,7 @@ TEST_CASE("a dark app's controller shows its first pane dark, never the host's l
         daemon.endpoint(), timeline, { .colorPreference = vtbackend::ColorPreference::Dark });
     auto& controller = *controllerOwned;
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("first"));
     {
         auto const guard = std::lock_guard { *pane.terminal };
@@ -4528,8 +4484,7 @@ TEST_CASE("a preference stated while disconnected reaches the daemon once it ans
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& controller = *controllerOwned;
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("colors"));
     auto const backgroundIsDark = [&] {
         auto const guard = std::lock_guard { *pane.terminal };
@@ -4566,8 +4521,7 @@ TEST_CASE("keys typed while reconnecting are dropped", "[attach][controller][rec
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("typing"));
 
     daemon.dropConnections();
@@ -4603,15 +4557,14 @@ TEST_CASE("a pane closed while reconnecting is closed on the daemon once it answ
     auto const log = StateLog { controller };
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     auto const closed = controller.sessionForPty(&pane.pty());
     REQUIRE(closed.has_value());
     REQUIRE(liveSessions() == 2);
 
     daemon.refuseConnections();
     REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
-    route.router.requestRemoteClose(&pane.pty());
+    controller.requestRemoteClose(&pane.pty());
     // Long enough for the close to reach the reactor while no connection is up; nothing reached the daemon.
     std::this_thread::sleep_for(100ms);
     CHECK(controller.connectionState() == ConnectionState::Reconnecting);
@@ -4803,8 +4756,7 @@ TEST_CASE("a pane closed as its connection ends is closed once the same daemon a
     auto const log = StateLog { controller };
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     auto const closed = controller.sessionForPty(&pane.pty());
     REQUIRE(closed.has_value());
     REQUIRE(liveSessions() == 2);
@@ -4843,8 +4795,7 @@ TEST_CASE("the daemon's echo report reaches the pane's device and its observer, 
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& controller = *controllerOwned;
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("prompt"));
     REQUIRE(controller.isBound(session.value));
 
@@ -4884,8 +4835,7 @@ TEST_CASE("a pane's echo state is not trusted while the connection is down",
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& controller = *controllerOwned;
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("prompt"));
     REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
 
@@ -4918,14 +4868,13 @@ TEST_CASE("a restarted daemon's new pane does not inherit the old run's echo sta
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    auto route = AttachRoute { controller };
-    auto old = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto old = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(old.shows("old run"));
     REQUIRE(waitUntil([&] { return old.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
 
     daemon.restartHost();
     REQUIRE(waitUntil([&] { return controller.pendingCount() == 1; }, 3000));
-    auto fresh = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto fresh = MirrorPane { controller, controller.createPty(std::nullopt) };
     CHECK(fresh.pty().inputEcho() == vtpty::InputEcho::Unknown);
 
     controller.stop();
@@ -4978,8 +4927,7 @@ TEST_CASE("workspaces the daemon no longer has are reported lost", "[attach][con
     auto const log = StateLog { controller };
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     REQUIRE(pane.shows("old run"));
 
     // Queued, as the GUI connects it: the lost windows must survive the trip to the GUI thread.
@@ -5331,15 +5279,14 @@ TEST_CASE("NativeController.reconnect.takesAPaneBackByItsRemoteSession",
     auto& controller = *controllerOwned;
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
     auto const session = controller.sessionForPty(&pane.pty());
     REQUIRE(session.has_value());
 
     CHECK(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
     // Bound for the next pty, which therefore may be made though nothing is pending.
     CHECK(controller.canCreateSession());
-    auto replacement = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto replacement = MirrorPane { controller, controller.createPty(std::nullopt) };
     CHECK(controller.sessionForPty(&replacement.pty()) == session);
     CHECK_FALSE(controller.canCreateSession());
 
@@ -5363,8 +5310,7 @@ TEST_CASE("NativeController.reconnect.cancelledBindingLeavesNothingForTheNextPty
     auto& controller = *controllerOwned;
     requireConnected(controller);
     REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
-    auto route = AttachRoute { controller };
-    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
 
     REQUIRE(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
     REQUIRE(controller.canCreateSession());
@@ -5574,148 +5520,6 @@ TEST_CASE("a refusing session factory blocks every creation entry point", "[atta
 
     CHECK(app.manager().createSessionInBackground(controller.id) == nullptr);
     CHECK(app.manager().model().workspace(controller.id)->tabCount() == 0);
-}
-
-// Every SessionFactory verb has to survive the trip through RoutingSessionFactory, which the app
-// installs permanently and re-routes when attach mode starts. A verb it forgets to forward is not a
-// compile error and not a test failure anywhere else -- the delegate simply never hears about it.
-//
-// `bindTerminal` was exactly that: it reached the router and stopped, so a daemon-hosted pane in the
-// real GUI never got its ScreenMirror and rendered nothing at all, while every headless test passed
-// because they call NativeController::bindTerminal directly.
-TEST_CASE("the routing session factory forwards every verb to its delegate", "[attach][factory]")
-{
-    struct RecordingFactory final: contour::session::SessionFactory
-    {
-        int ptys = 0;
-        int tabs = 0;
-        int splits = 0;
-        int windows = 0;
-        int closes = 0;
-        int binds = 0;
-        int ratios = 0;
-        int moves = 0;
-        std::vector<uint64_t> movedSessions {}; ///< What the last move request named.
-        double lastRatio = 0.0;
-        vtpty::Pty const* boundPty = nullptr;
-        vtpty::Pty const* tabPty = nullptr; ///< The window the last tab request named.
-        vtbackend::Terminal* boundTerminal = nullptr;
-
-        [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(std::optional<std::string>,
-                                                            std::optional<vtbackend::PageSize>,
-                                                            std::optional<vtpty::Process::ExecInfo>,
-                                                            std::optional<std::string>) override
-        {
-            ++ptys;
-            return nullptr;
-        }
-        [[nodiscard]] bool canCreateSession() const noexcept override { return false; }
-        [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
-        {
-            return contour::session::SessionHosting::Remote;
-        }
-        [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,
-                                            contour::session::RemoteSpawn const&) override
-        {
-            ++tabs;
-            tabPty = actingPty;
-            return true;
-        }
-        [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const*,
-                                              bool,
-                                              contour::session::RemoteSpawn const&) override
-        {
-            ++splits;
-            return true;
-        }
-        void reportSplitRatio(vtpty::Pty const*, vtpty::Pty const*, double ratio) override
-        {
-            ++ratios;
-            lastRatio = ratio;
-        }
-        [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override
-        {
-            return contour::session::MoveSupport::Supported;
-        }
-        [[nodiscard]] std::optional<uint64_t> daemonInstance() const noexcept override { return 7; }
-        [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const&) const noexcept override
-        {
-            return 42;
-        }
-        [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
-            contour::session::RemoteMove const& move) override
-        {
-            ++moves;
-            movedSessions = move.sourceSessions;
-            return contour::session::RemoteRouting::Routed;
-        }
-        [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const&) override
-        {
-            ++windows;
-            return true;
-        }
-        void requestRemoteClose(vtpty::Pty const*) override { ++closes; }
-        void bindTerminal(vtpty::Pty const* pty,
-                          vtbackend::Terminal& terminal,
-                          contour::session::InterruptionSink const& /*interruptions*/) override
-        {
-            ++binds;
-            boundPty = pty;
-            boundTerminal = &terminal;
-        }
-    };
-
-    auto delegate = RecordingFactory {};
-    auto router = contour::remote::RoutingSessionFactory { std::make_unique<RecordingFactory>() };
-    router.setDelegate(&delegate);
-
-    auto events = vtbackend::Terminal::NullEvents {};
-    auto settings = vtbackend::Settings {};
-    auto pty = std::make_unique<vtpty::MockPty>(settings.pageSize);
-    auto* device = pty.get();
-    auto terminal = vtbackend::Terminal { events,
-                                          core::defaultEnvironment(),
-                                          core::platform::NativeFileSystem::instance(),
-                                          std::move(pty),
-                                          std::move(settings),
-                                          std::nullopt,
-                                          vtbackend::TerminalClocks::system(),
-                                          vtbackend::randomSemanticBlockTokens() };
-
-    CHECK(router.createPty(std::nullopt) == nullptr);
-    CHECK_FALSE(router.canCreateSession());
-    CHECK(router.hosting() == contour::session::SessionHosting::Remote);
-    CHECK(router.requestRemoteTab(device, {}));
-    CHECK(router.requestRemoteSplit(device, true, {}));
-    CHECK(router.requestRemoteWorkspace({}));
-    router.requestRemoteClose(device);
-    router.reportSplitRatio(device, device, 0.7);
-    router.bindTerminal(device, terminal, {});
-    CHECK(router.moveSupport() == contour::session::MoveSupport::Supported);
-    CHECK(router.daemonInstance() == 7);
-    CHECK(router.hostSessionIdOf(*device) == 42);
-    CHECK(router.requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
-                                     .sourceSessions = { 5 },
-                                     .target = vtworkspace::MoveTargetKind::Edge,
-                                     .targetSession = 6,
-                                     .side = vtworkspace::SplitSide::Right,
-                                     .index = 0,
-                                     .request = 15 })
-          == contour::session::RemoteRouting::Routed);
-
-    CHECK(delegate.ptys == 1);
-    CHECK(delegate.tabs == 1);
-    CHECK(delegate.tabPty == device); // the acting pane names the target WINDOW; it must be routed
-    CHECK(delegate.splits == 1);
-    CHECK(delegate.windows == 1);
-    CHECK(delegate.closes == 1);
-    CHECK(delegate.ratios == 1);
-    CHECK(delegate.lastRatio == 0.7);
-    CHECK(delegate.binds == 1);
-    CHECK(delegate.moves == 1);
-    CHECK(delegate.movedSessions == std::vector<uint64_t> { 5 });
-    CHECK(delegate.boundPty == device);
-    CHECK(delegate.boundTerminal == &terminal);
 }
 
 namespace

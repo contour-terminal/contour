@@ -44,7 +44,6 @@
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
-#include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/remote/TmuxController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/Permission.hpp>
@@ -433,10 +432,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _gitFileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _linkProbeExecutor(cli::makeBackgroundExecutor(LinkProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
-    _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
-        sessionFactory ? std::move(sessionFactory)
-                       : std::make_unique<session::AppSessionFactory>(*this, _processPlacement))),
-    _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
+    _sessionFactory(sessionFactory ? std::move(sessionFactory)
+                                   : std::make_unique<session::AppSessionFactory>(*this, _processPlacement)),
     _externalLauncher(externalLauncher ? std::move(externalLauncher)
                                        : platform::makeExternalLauncher(_processPlacement)),
     _applicationRestart(applicationRestart ? std::move(applicationRestart)
@@ -935,7 +932,6 @@ std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::Daemon
 {
     if (auto attached = link.awaitAttached(budget); !attached)
         return attached;
-    _routingFactory->setDelegate(link.liveController());
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
     // can restart -- a local one, which is what _restartDaemon is set for -- is offered anything.
     link.offerDaemonRestartIfDrifted();
@@ -1241,7 +1237,13 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
         _tmuxController.reset();
         return std::unexpected(std::format("contour client --tmux: {}", connected.error()));
     }
-    _routingFactory->setDelegate(_tmuxController.get());
+    // Every window opened from here on shows tmux's panes; it opens its first tab as usual, through the tmux
+    // controller, and adopts the panes tmux already has once the GUI booted.
+    _sessionManager.setAttachWindowBinder([this](window::WindowController* controller) {
+        if (controller != nullptr)
+            _sessionManager.bindWindow(controller->windowId(), _tmuxController->windowBinding());
+        return false;
+    });
     _onGuiBooted = [this] {
         if (auto const window = _sessionManager.focusedWindow())
             _tmuxController->adoptPendingPanes(_sessionManager, *window);
@@ -1353,14 +1355,15 @@ void ContourGuiApp::releaseHosting()
     openDaemonSpawnGate();
     _awaitAttach = nullptr;
     _onGuiBooted = nullptr;
-    auto const anyLive =
-        std::ranges::any_of(_daemonLinks, [](auto const& link) { return link->liveController() != nullptr; });
-    if (anyLive || _tmuxController)
-        _routingFactory->setDelegate(nullptr);
+    // Each stops serving its windows as it stops.
     for (auto const& link: _daemonLinks)
         link->stop();
     if (_tmuxController)
+    {
+        _sessionManager.setAttachWindowBinder(nullptr);
+        _sessionManager.releaseBinding(_tmuxController->windowBinding());
         _tmuxController->stop();
+    }
 }
 
 void ContourGuiApp::openDaemonSpawnGate() noexcept
@@ -3328,7 +3331,13 @@ window::DragEndProbe& ContourGuiApp::dragEndProbe()
 
 bool ContourGuiApp::requestRemoteWorkspace(session::RemoteSpawn const& spawn)
 {
-    return _routingFactory != nullptr && _routingFactory->requestRemoteWorkspace(spawn);
+    // What the process attached to, whichever window asks: one attach serves every window of it.
+    if (_tmuxController)
+        return _tmuxController->requestRemoteWorkspace(spawn);
+    for (auto const& link: _daemonLinks)
+        if (link->isAttached())
+            return link->sessions().requestRemoteWorkspace(spawn);
+    return false;
 }
 
 window::SettingsController& ContourGuiApp::settingsController()

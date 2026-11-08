@@ -83,7 +83,7 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                platform::TaskbarProgressSink& taskbarProgressSink,
                                                platform::ISecureInput& secureInput):
     _app { app },
-    _sessionFactory { factory },
+    _localFactory { factory },
     _layoutStore { layouts },
     _commandHistoryStore { commands },
     _taskbarProgressSink { taskbarProgressSink },
@@ -383,6 +383,11 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     // (its initial winsize), the Terminal via the constructor (its birth page size). Both matter — the
     // PTY winsize for a shell that reads it immediately, the grid so a background tab that never attaches
     // a display still holds the right size.
+    // A notification is raised on this machine whatever host runs the session: a binding's factory that
+    // names no notifier of its own leaves it to the local factory's.
+    auto notifier = factory.createNotifier();
+    if (!notifier && &factory != &_localFactory)
+        notifier = _localFactory.createNotifier();
     auto* session =
         new TerminalSession(this,
                             factory.createPty(std::move(cwd), pageSize, commandOverride, profileName),
@@ -390,7 +395,7 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                             profileName.value_or(std::string {}),
                             pageSize,
                             std::move(launchedCommand),
-                            factory.createNotifier(),
+                            std::move(notifier),
                             role,
                             factory.hosting());
     // The manager owns what it makes: removeSession() frees a session that has ended, and those still
@@ -590,7 +595,83 @@ bool TerminalSessionManager::isPanelSession(TerminalSession const& session) cons
 
 SessionFactory& TerminalSessionManager::factoryFor(vtworkspace::WorkspaceId window) const noexcept
 {
-    return isPanelWindow(window) ? _sessionFactory.localSessions() : _sessionFactory;
+    if (isPanelWindow(window))
+        return _localFactory.localSessions();
+    auto const bound = _bindingOfWindow.find(window.value);
+    return bound != _bindingOfWindow.end() ? bound->second->sessions() : _localFactory;
+}
+
+SessionFactory& TerminalSessionManager::factoryOf(TerminalSession const& session) const noexcept
+{
+    auto const* const window = hostOf(&session).window;
+    return window != nullptr ? factoryFor(window->id()) : _localFactory;
+}
+
+void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowBinding& binding)
+{
+    _bindingOfWindow[window.value] = &binding;
+}
+
+WindowBinding const* TerminalSessionManager::bindingOf(vtworkspace::WorkspaceId window) const noexcept
+{
+    auto const bound = _bindingOfWindow.find(window.value);
+    return bound != _bindingOfWindow.end() ? bound->second : nullptr;
+}
+
+void TerminalSessionManager::releaseBinding(WindowBinding const& binding) noexcept
+{
+    std::erase_if(_bindingOfWindow, [&binding](auto const& entry) { return entry.second == &binding; });
+}
+
+namespace
+{
+    /// @return Who hosts what @p factory makes, as a drag payload names it.
+    [[nodiscard]] window::HostIdentity identityOf(SessionFactory const& factory)
+    {
+        // Ids a daemon hands out name the same sessions in every process attached to it: those drags are the
+        // daemon's. Everything else names this process's model only.
+        if (factory.hostKind() == SessionHostKind::Daemon)
+            if (auto const instance = factory.daemonInstance())
+                return window::HostIdentity { .kind = window::HostKind::Daemon,
+                                              .id = QString::number(*instance) };
+        return window::HostIdentity { .kind = window::HostKind::Process, .id = window::processToken() };
+    }
+} // namespace
+
+WindowBinding const* TerminalSessionManager::bindingServing(window::HostIdentity const& host) const
+{
+    // This process's own factory first: a binding that names no daemon would otherwise claim its drags.
+    if (identityOf(_localFactory) == host)
+        return nullptr;
+    auto const bindings = _bindingOfWindow | std::views::values;
+    auto const found = std::ranges::find_if(
+        bindings, [&host](WindowBinding* binding) { return identityOf(binding->sessions()) == host; });
+    return found != bindings.end() ? *found : nullptr;
+}
+
+bool TerminalSessionManager::isOwnHost(window::HostIdentity const& host) const
+{
+    return identityOf(_localFactory) == host || bindingServing(host) != nullptr;
+}
+
+SessionFactory& TerminalSessionManager::factoryServing(window::HostIdentity const& host) const
+{
+    // Found through a window, which hands the binding out mutable.
+    auto const* const binding = bindingServing(host);
+    auto const bound = std::ranges::find_if(_bindingOfWindow,
+                                            [binding](auto const& entry) { return entry.second == binding; });
+    return bound != _bindingOfWindow.end() ? bound->second->sessions() : _localFactory;
+}
+
+window::MoveRefusal TerminalSessionManager::moveRefusalIn(ResolvedDrag const& drag,
+                                                          vtworkspace::WorkspaceId window,
+                                                          window::MovePlace place) const
+{
+    // Only the host the drag names could make the move, and it does not serve that window.
+    if (place != window::MovePlace::NewWindow && isOwnHost(drag.drag.host)
+        && bindingServing(drag.drag.host) != bindingOf(window))
+        return window::MoveRefusal::OtherProcess;
+    return drag.refusalAt(place);
 }
 
 bool TerminalSessionManager::isNormalWindow(vtworkspace::WorkspaceId window) const noexcept
@@ -1412,6 +1493,9 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WorkspaceId win
     _taskbarProgressSink.removeWindow(windowId.value);
     if (controller != nullptr)
         controller->deleteLater();
+    // The binding is told last: its sessions are gone, and it may stop serving once it serves no window.
+    if (auto const bound = _bindingOfWindow.extract(windowId.value))
+        bound.mapped()->windowClosed(windowId);
 
     // Ownership must not survive the window that held it: a stale WorkspaceId would let a later model
     // event in an unrelated window re-grant focus through syncFocusForWindow. The window's sessions
@@ -1755,13 +1839,14 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
     auto const* first = ptyOfLeafUnder(split->first());
     auto const* second = ptyOfLeafUnder(split->second());
     if (first != nullptr && second != nullptr)
-        _sessionFactory.reportSplitRatio(first, second, ratio);
+        factoryFor(_model->workspaceOfTab(tab)).reportSplitRatio(first, second, ratio);
 }
 
 void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
 {
     // Every model event below reaches here, local tabs' included: nothing is computed for those.
-    if (_sessionFactory.hosting() != SessionHosting::Remote || isPanelWindow(_model->workspaceOfTab(tabId)))
+    auto& factory = factoryFor(_model->workspaceOfTab(tabId));
+    if (factory.hosting() != SessionHosting::Remote || isPanelWindow(_model->workspaceOfTab(tabId)))
         return;
     auto const* tab = _model->findTab(tabId);
     auto const* window = tab != nullptr ? _model->workspace(_model->workspaceOfTab(tabId)) : nullptr;
@@ -1774,7 +1859,7 @@ void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
     auto const* active = ptyOf(tab->activePane());
     if (active == nullptr)
         return; // the active pane has no session yet: a pane being built, which reports once it has one
-    _sessionFactory.reportTabPresentation(LocalTabPresentation {
+    factory.reportTabPresentation(LocalTabPresentation {
         .activePty = active,
         .zoomedPty = tab->isZoomed() ? ptyOf(tab->activePane()) : nullptr,
         .title = tab->runtimeTitle(),
@@ -2265,7 +2350,8 @@ void TerminalSessionManager::moveTabToWorkspace(vtworkspace::WorkspaceId from,
     // Resolve the tab in tab-space of the source window, then hand the model TabIds — the model owns
     // the transplant (and fires the cross-window events the two controllers react to).
     auto* tab = tabAtRow(from, fromIndex);
-    if (tab == nullptr)
+    // Two hosts share no layout: a tab shown here would stay on the host it came from.
+    if (tab == nullptr || bindingOf(from) != bindingOf(to))
         return;
     _model->moveTabToWorkspace(from, tab->id(), to, toIndex);
     updateStatusLine();
@@ -2299,7 +2385,14 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WorkspaceId from,
     // merge issued BY the reconciler itself (while realizing that re-push) is the local half of one the
     // daemon already made, and the factory answers Local for it. Anything else the daemon does not take is
     // refused, never made here: it would leave this window showing a layout the daemon does not have.
-    if (_sessionFactory.hosting() == SessionHosting::Remote)
+    // Two hosts share no layout: neither could make the merge, and none is made here.
+    if (bindingOf(from) != bindingOf(to))
+    {
+        postTabMergeRefused(sessionForId(source->activePane()->session()));
+        return;
+    }
+    auto& factory = factoryFor(from);
+    if (factory.hosting() == SessionHosting::Remote)
     {
         auto* const targetTab = _model->findTab(target);
         auto const* const targetLeaf = targetTab != nullptr ? targetTab->rootPane()->findPane(leaf) : nullptr;
@@ -2315,7 +2408,7 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WorkspaceId from,
         }
         // A session that is not found is asked about as no pane at all, so the factory decides (a
         // reconciler's merge is let through, any other is refused).
-        switch (_sessionFactory.requestRemoteTabMerge(
+        switch (factory.requestRemoteTabMerge(
             tabPtys, targetSession != nullptr ? &targetSession->terminal().device() : nullptr, side))
         {
             case RemoteRouting::Routed: return;
@@ -2343,10 +2436,9 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WorkspaceId from,
     closeWindowIfEmpty(from);
 }
 
-std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionManager::applyNodeMove(
-    vtworkspace::MoveSource const& source, vtworkspace::MoveTarget const& target)
+vtworkspace::WorkspaceId TerminalSessionManager::windowOfSource(vtworkspace::MoveSource const& source) const
 {
-    auto const sourceWindow = std::visit(
+    return std::visit(
         [this](auto const& named) -> vtworkspace::WorkspaceId {
             using Named = std::decay_t<decltype(named)>;
             if constexpr (std::is_same_v<Named, vtworkspace::TabSource>)
@@ -2358,6 +2450,12 @@ std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionMa
             }
         },
         source);
+}
+
+std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionManager::applyNodeMove(
+    vtworkspace::MoveSource const& source, vtworkspace::MoveTarget const& target)
+{
+    auto const sourceWindow = windowOfSource(source);
     // Where a pane lands beside or onto another, its tab is known before the move: the move's own events look
     // sessions up by their tab (focus follows the moved pane), so the index names it before they fire.
     auto const paneTarget = std::visit(
@@ -2416,31 +2514,34 @@ std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> TerminalSessionMa
     return moved;
 }
 
-window::HostIdentity TerminalSessionManager::hostIdentity() const
+window::HostIdentity TerminalSessionManager::hostIdentity(vtworkspace::WorkspaceId window) const
 {
-    // Ids a daemon hands out name the same sessions in every process attached to it: those drags are the
-    // daemon's. Everything else names this process's model only.
-    if (_sessionFactory.hostKind() == SessionHostKind::Daemon)
-        if (auto const instance = _sessionFactory.daemonInstance())
-            return window::HostIdentity { .kind = window::HostKind::Daemon,
-                                          .id = QString::number(*instance) };
-    return window::HostIdentity { .kind = window::HostKind::Process, .id = window::processToken() };
+    return identityOf(factoryFor(window));
 }
 
 std::optional<uint64_t> TerminalSessionManager::hostSessionIdOf(TerminalSession const& session) const
 {
-    if (hostIdentity().kind == window::HostKind::Daemon)
-        return _sessionFactory.hostSessionIdOf(session.terminal().device());
+    auto const& factory = factoryOf(session);
+    if (identityOf(factory).kind == window::HostKind::Daemon)
+        return factory.hostSessionIdOf(session.terminal().device());
     return session.modelSessionId().value;
 }
 
-TerminalSession* TerminalSessionManager::sessionForHostId(uint64_t hostSession) const
+TerminalSession* TerminalSessionManager::sessionForHostId(window::HostIdentity const& host,
+                                                          uint64_t hostSession) const
 {
-    if (hostIdentity().kind == window::HostKind::Process)
-        return sessionForId(vtworkspace::SessionId { hostSession });
+    auto const hostedThere = [&](TerminalSession const& session) {
+        return identityOf(factoryOf(session)) == host;
+    };
+    if (host.kind == window::HostKind::Process)
+    {
+        auto* const session = sessionForId(vtworkspace::SessionId { hostSession });
+        return session != nullptr && hostedThere(*session) ? session : nullptr;
+    }
     auto const sessions = _sessionsById | std::views::values;
-    auto const found = std::ranges::find_if(
-        sessions, [&](TerminalSession const* session) { return hostSessionIdOf(*session) == hostSession; });
+    auto const found = std::ranges::find_if(sessions, [&](TerminalSession const* session) {
+        return session != nullptr && hostedThere(*session) && hostSessionIdOf(*session) == hostSession;
+    });
     return found != sessions.end() ? *found : nullptr;
 }
 
@@ -2451,7 +2552,7 @@ std::optional<window::NodeDrag> TerminalSessionManager::paneDragOf(TerminalSessi
     if (leaf == nullptr || !host)
         return std::nullopt;
     return window::NodeDrag { .payload = window::DropPayload::Pane,
-                              .host = hostIdentity(),
+                              .host = hostIdentity(win->id()),
                               .window = win->id(),
                               .tabIndex = win->indexOf(tab->id()),
                               .sessions = { *host } };
@@ -2481,7 +2582,7 @@ std::optional<window::NodeDrag> TerminalSessionManager::tabDragOf(vtworkspace::W
         return std::nullopt;
     return window::NodeDrag { .payload = tab->hasMultiplePanes() ? window::DropPayload::Tab
                                                                  : window::DropPayload::Pane,
-                              .host = hostIdentity(),
+                              .host = hostIdentity(window),
                               .window = window,
                               .tabIndex = tabIndex,
                               .sessions = std::move(sessions) };
@@ -2496,7 +2597,7 @@ ResolvedDrag TerminalSessionManager::resolveNodeDrag(window::NodeDrag drag) cons
                                    .places = {},
                                    .layout = _layoutGeneration };
     auto const& named = resolved.drag;
-    auto const from = named.host == hostIdentity() ? window::DragHost::Own : window::DragHost::Other;
+    auto const from = isOwnHost(named.host) ? window::DragHost::Own : window::DragHost::Other;
 
     // The tab showing every session the drag names: a pane names the tab it is in; a tab names all of its
     // panes, and only them.
@@ -2506,7 +2607,7 @@ ResolvedDrag TerminalSessionManager::resolveNodeDrag(window::NodeDrag drag) cons
         auto local = std::vector<vtworkspace::SessionId> {};
         for (auto const host: named.sessions)
         {
-            auto const* const session = sessionForHostId(host);
+            auto const* const session = sessionForHostId(named.host, host);
             if (session == nullptr)
                 return nullptr;
             local.push_back(session->modelSessionId());
@@ -2528,7 +2629,7 @@ ResolvedDrag TerminalSessionManager::resolveNodeDrag(window::NodeDrag drag) cons
     if (named.payload == window::DropPayload::Tab || (tab != nullptr && !tab->hasMultiplePanes()))
         resolved.subject = window::MoveSubject::WholeTab;
 
-    auto const host = _sessionFactory.hostMoves();
+    auto const host = factoryServing(named.host).hostMoves();
     for (auto const index: std::views::iota(std::size_t { 0 }, window::MovePlaceCount))
     {
         auto route = window::moveRouteOf(host, static_cast<window::MovePlace>(index), resolved.subject);
@@ -2638,7 +2739,7 @@ std::optional<vtworkspace::MoveSource> TerminalSessionManager::localSourceOf(Res
         return std::nullopt;
     if (drag.drag.payload == window::DropPayload::Tab)
         return vtworkspace::TabSource { .workspace = drag.workspace, .tab = *drag.tab };
-    auto const* const session = sessionForHostId(drag.drag.sessions.front());
+    auto const* const session = sessionForHostId(drag.drag.host, drag.drag.sessions.front());
     if (session == nullptr)
         return std::nullopt;
     return vtworkspace::PaneSource { .session = session->modelSessionId() };
@@ -2652,15 +2753,17 @@ std::expected<void, MoveFailure> TerminalSessionManager::requestHostMove(Resolve
     if (!target.hostSession)
         return std::unexpected { MoveFailure { vtworkspace::MoveError::UnknownTarget } };
     auto const number = _nextRemoteMove++;
-    auto const routing = _sessionFactory.requestRemoteMove(RemoteMove {
-        .source = drag.drag.payload == window::DropPayload::Tab ? vtworkspace::MoveSourceKind::Tab
-                                                                : vtworkspace::MoveSourceKind::Pane,
-        .sourceSessions = drag.drag.sessions,
-        .target = target.kind,
-        .targetSession = *target.hostSession,
-        .side = target.side,
-        .index = target.index,
-        .request = number });
+    auto const routing =
+        factoryServing(drag.drag.host)
+            .requestRemoteMove(RemoteMove { .source = drag.drag.payload == window::DropPayload::Tab
+                                                          ? vtworkspace::MoveSourceKind::Tab
+                                                          : vtworkspace::MoveSourceKind::Pane,
+                                            .sourceSessions = drag.drag.sessions,
+                                            .target = target.kind,
+                                            .targetSession = *target.hostSession,
+                                            .side = target.side,
+                                            .index = target.index,
+                                            .request = number });
     switch (routing)
     {
         case RemoteRouting::Routed: break;
@@ -2672,6 +2775,7 @@ std::expected<void, MoveFailure> TerminalSessionManager::requestHostMove(Resolve
     // focus. A later move replaces it; the earlier one's push still lands, unannounced.
     _pendingRemoteMove = PendingRemoteMove {
         .request = number,
+        .host = drag.drag.host,
         .sessions = drag.drag.sessions,
         .payload = drag.announcedAs(target.landing),
         .landing = target.landing,
@@ -2749,8 +2853,8 @@ void TerminalSessionManager::completeRemoteMoves(ReconcileReach reach)
         || reach == ReconcileReach::Partial)
         return;
     // Placed once every session it moved is in a pane of some window; one not yet mirrored waits as well.
-    auto const placed = [this](uint64_t hostId) {
-        auto const* const session = sessionForHostId(hostId);
+    auto const placed = [this, &host = pending->host](uint64_t hostId) {
+        auto const* const session = sessionForHostId(host, hostId);
         if (session == nullptr)
             return false;
         auto const [window, tab, leaf] = _model->findSessionLeaf(session->modelSessionId());
@@ -2759,7 +2863,7 @@ void TerminalSessionManager::completeRemoteMoves(ReconcileReach reach)
     if (!std::ranges::all_of(pending->sessions, placed))
         return;
     auto const landed = *std::exchange(_pendingRemoteMove, std::nullopt);
-    auto* const moved = sessionForHostId(landed.sessions.front());
+    auto* const moved = sessionForHostId(landed.host, landed.sessions.front());
     auto const [window, tab, leaf] = _model->findSessionLeaf(moved->modelSessionId());
     // Where the user looks now: the window it landed in, the tab holding it, and the moved pane in that.
     _model->activateTab(window->id(), tab->id());
@@ -2874,8 +2978,11 @@ std::expected<void, MoveFailure> TerminalSessionManager::moveNode(ResolvedDrag c
     // Decided again here, not taken from the window that asked: into a window, the window refuses it; out of
     // every window, it names nothing of this host's. Either way the refusal is the reason.
     auto const& verdict = drag.at(described->place);
-    if (verdict.refusal != window::MoveRefusal::None)
-        return std::unexpected { MoveFailure { verdict.refusal } };
+    if (auto const refusal = described->workspace
+                                 ? moveRefusalIn(drag, *described->workspace, described->place)
+                                 : verdict.refusal;
+        refusal != window::MoveRefusal::None)
+        return std::unexpected { MoveFailure { refusal } };
 
     auto const sourceWindow = drag.tab ? drag.workspace : vtworkspace::WorkspaceId {};
     // The whole of a window, torn off, would only recreate itself: here, and on any daemon.
@@ -2893,7 +3000,7 @@ std::expected<void, MoveFailure> TerminalSessionManager::moveNode(ResolvedDrag c
     }
 
     // The daemon owns the layout: it makes the move, and its push brings it here.
-    if (_sessionFactory.hostKind() == SessionHostKind::Daemon)
+    if (factoryServing(drag.drag.host).hostKind() == SessionHostKind::Daemon)
         return requestHostMove(drag, *described, screen, at);
 
     auto const source = localSourceOf(drag);
@@ -2952,6 +3059,10 @@ bool TerminalSessionManager::consumePendingTransplant(window::WindowController* 
     // The destination window currently has no tabs (its first-tab creation was deferred pending this). The
     // staged node moves in as its first tab, the same sessions alive; a source window it empties closes. One
     // closed since it was staged moves nothing, and the window opens its own first tab instead.
+    // The window is served by whatever served the one the node came from: its sessions are that host's.
+    if (auto const bound = _bindingOfWindow.find(windowOfSource(pending.source).value);
+        bound != _bindingOfWindow.end())
+        bindWindow(newController->windowId(), *bound->second);
     auto const moved = applyNodeMove(
         pending.source, vtworkspace::TabWellTarget { .workspace = newController->windowId(), .index = 0 });
     if (!moved)
@@ -2983,7 +3094,7 @@ void TerminalSessionManager::authorRemoteEnd(TerminalSession* session)
 {
     // A panel's sessions run here and the host never heard of them.
     if (session != nullptr && !isPanelSession(*session))
-        _sessionFactory.requestRemoteClose(&session->terminal().device());
+        factoryOf(*session).requestRemoteClose(&session->terminal().device());
 }
 
 void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const> sessions, SessionEnd end)
@@ -3071,7 +3182,7 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // returns false and builds locally below, as does a local factory.
     // No profile is named: a local split runs the default profile too.
     if (acting != nullptr && !isPanelSession(*acting)
-        && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical, RemoteSpawn {}))
+        && factoryOf(*acting).requestRemoteSplit(&acting->terminal().device(), vertical, RemoteSpawn {}))
         return;
 
     auto const direction = vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal;
@@ -3164,13 +3275,13 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
     return replaceEndedSession(ended);
 }
 
-void TerminalSessionManager::reconnectHost()
+void TerminalSessionManager::reconnectHost(TerminalSession const& acting)
 {
     // A failure of an earlier try is not this one's.
     for (auto* session: _sessionsById | std::views::values)
         if (session != nullptr && session->endReason() == EndReason::Disconnected)
             session->noteReconnectFailure({});
-    auto const started = _sessionFactory.reconnect();
+    auto const started = factoryOf(acting).reconnect();
     if (!started)
     {
         managerLog()("Not reconnecting: {}.", describe(started.error()));
@@ -3196,13 +3307,16 @@ void TerminalSessionManager::rebindDisconnected()
         if (session != nullptr && session->endReason() == EndReason::Disconnected)
             lost.push_back(session);
     for (auto* session: lost)
-        if (_sessionFactory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
+    {
+        auto& factory = factoryOf(*session);
+        if (factory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
             if (auto const rebound = replaceEndedSession(*session); !rebound)
             {
                 managerLog()("Not taking a pane back: {}.", describe(rebound.error()));
                 // Left set, the binding would hand the ended pane's remote session to the next one made.
-                _sessionFactory.cancelReconnectBinding();
+                factory.cancelReconnectBinding();
             }
+    }
     // The daemon pushes one layout per workspace and each arrives in its own turn: the run stays up for the
     // workspaces still to come, and ends once no pane is left to take back (or on reconnectFailed()).
     auto const isLost = [](auto const* session) {
@@ -3312,10 +3426,11 @@ std::optional<CommandPaneError> TerminalSessionManager::commandPaneRefusal(
 {
     // An attach-mode factory binds each pane it makes to a session the remote end hosts and drops the
     // command: the pane would show that session, on the host, which never sees a file written here.
-    if (_sessionFactory.hosting() == SessionHosting::Remote)
+    auto const& factory = acting != nullptr ? factoryOf(*acting) : _localFactory;
+    if (factory.hosting() == SessionHosting::Remote)
         return CommandPaneError::RemoteSessions;
 
-    if (!_sessionFactory.canCreateSession())
+    if (!factory.canCreateSession())
         return CommandPaneError::NoPane;
 
     switch (placement)
@@ -3400,7 +3515,8 @@ void TerminalSessionManager::toggleActivePaneOrientation(TerminalSession* acting
         auto const axis = split->splitState() == vtworkspace::SplitState::Horizontal
                               ? vtworkspace::SplitState::Vertical
                               : vtworkspace::SplitState::Horizontal;
-        if (_sessionFactory.requestRemoteSplitOrientation(&anchor->terminal().device(), axis)
+        if (factoryFor(_model->workspaceOfTab(tab->id()))
+                .requestRemoteSplitOrientation(&anchor->terminal().device(), axis)
             != RemoteRouting::Local)
             return;
     }

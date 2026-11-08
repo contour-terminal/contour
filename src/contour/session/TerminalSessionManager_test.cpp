@@ -64,6 +64,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <ranges>
 #include <sstream>
@@ -4504,3 +4505,298 @@ TEST_CASE("TerminalSessionManager: the quick terminal's window stays out of the 
     contour::test::closeAllTabs(*quick);
     CHECK(host->requestedRemoteCloses == 0);
 }
+
+// {{{ Each window resolves its sessions through the link it is bound to
+
+namespace
+{
+
+/// Makes @p host a daemon of run @p instance that hosts every session, serves moves and merges, and offers
+/// Reconnect: what a daemon link's controller is to the windows it serves.
+void hostAsDaemon(contour::test::MockPtySessionFactory& host, uint64_t instance)
+{
+    host.reportedHosting = contour::session::SessionHosting::Remote;
+    host.reportedHostKind = contour::session::SessionHostKind::Daemon;
+    host.reportedDaemonInstance = instance;
+    host.reportedMoveSupport = contour::session::MoveSupport::Supported;
+    host.reportedTabMergeSupport = contour::session::TabMergeSupport::Supported;
+    host.reportedReconnectSupport = contour::session::ReconnectSupport::Supported;
+}
+
+/// Two windows of one process, each bound to a daemon of its own: A shows one pane, B a tab split in two
+/// beside a tab of one. Every tab and split the daemons are asked for from then on is theirs to author.
+struct TwoLinks
+{
+    contour::test::MockPtySessionFactory hostA;
+    contour::test::MockPtySessionFactory hostB;
+    contour::test::FactoryBinding linkA { hostA, "alpha" };
+    contour::test::FactoryBinding linkB { hostB, "beta" };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::session::TerminalSessionManager& manager = app.manager();
+    contour::test::ScopedController windowA { manager };
+    contour::test::ScopedController windowB { manager };
+    contour::session::TerminalSession* paneA = nullptr;
+    contour::session::TerminalSession* leftB = nullptr;
+    contour::session::TerminalSession* rightB = nullptr;
+    contour::session::TerminalSession* loneB = nullptr;
+
+    TwoLinks()
+    {
+        hostAsDaemon(hostA, 7);
+        hostAsDaemon(hostB, 11);
+        manager.bindWindow(windowA.id, linkA);
+        manager.bindWindow(windowB.id, linkB);
+        paneA = manager.createSession(windowA.id);
+        leftB = manager.createSession(windowB.id);
+        REQUIRE(paneA != nullptr);
+        REQUIRE(leftB != nullptr);
+        manager.splitActivePane(/*vertical*/ true, leftB);
+        rightB = windowB->activeSession();
+        loneB = manager.createSession(windowB.id);
+        REQUIRE(rightB != leftB);
+        REQUIRE(loneB != nullptr);
+        hostA.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::ToHost;
+        hostB.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::ToHost;
+    }
+
+    ~TwoLinks()
+    {
+        contour::test::closeAllTabs(*windowA);
+        contour::test::closeAllTabs(*windowB);
+    }
+
+    TwoLinks(TwoLinks const&) = delete;
+    TwoLinks& operator=(TwoLinks const&) = delete;
+    TwoLinks(TwoLinks&&) = delete;
+    TwoLinks& operator=(TwoLinks&&) = delete;
+
+    /// @return The split tab of window B.
+    [[nodiscard]] vtworkspace::Tab* splitTabB() const
+    {
+        return manager.model().workspace(windowB.id)->tabAt(0);
+    }
+};
+
+/// A request a window makes of its host, and how a host counts having been asked it.
+struct RoutedRequest
+{
+    std::string_view name;
+    std::function<void(TwoLinks&)> make;
+    std::function<std::size_t(contour::test::MockPtySessionFactory const&)> calls;
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: each remote request goes to its window's factory", "[manager][link]")
+{
+    using contour::test::MockPtySessionFactory;
+    auto const requests = std::vector<RoutedRequest> {
+        { .name = "new tab",
+          .make = [](TwoLinks& links) { links.windowB->createNewTab(); },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedRemoteTabs.size(); } },
+        { .name = "split",
+          .make = [](TwoLinks& links) { links.manager.splitActivePane(/*vertical*/ false, links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteSplits);
+              } },
+        { .name = "close",
+          .make = [](TwoLinks& links) { links.windowB->closeTabAtIndex(1); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteCloses);
+              } },
+        { .name = "split orientation",
+          .make = [](TwoLinks& links) { links.manager.toggleActivePaneOrientation(links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedSplitOrientations);
+              } },
+        { .name = "split ratio",
+          .make =
+              [](TwoLinks& links) {
+                  auto* const tab = links.splitTabB();
+                  links.manager.setPaneRatio(tab->id(), tab->rootPane()->id(), 0.3);
+              },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.reportedSplitRatios);
+              } },
+        { .name = "tab presentation",
+          .make = [](TwoLinks& links) { links.manager.activateTab(links.windowB.id, 0); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.reportedTabPresentations);
+              } },
+        { .name = "hosted operation",
+          .make =
+              [](TwoLinks& links) {
+                  std::ignore = links.manager.requestHostedOperation(
+                      &links.leftB->terminal().device(), contour::session::HostedOperationRequest {});
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedHostedOperations.size(); } },
+        { .name = "reconnect",
+          .make = [](TwoLinks& links) { links.manager.reconnectHost(*links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) { return static_cast<std::size_t>(host.reconnects); } },
+        { .name = "move",
+          .make =
+              [](TwoLinks& links) {
+                  auto const drag = links.manager.paneDragOf(*links.rightB);
+                  REQUIRE(drag.has_value());
+                  auto const moved = links.manager.moveNode(
+                      *drag,
+                      vtworkspace::TabWellTarget { .workspace = links.windowB.id, .index = 2 },
+                      nullptr,
+                      {});
+                  CHECK(moved.has_value());
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedMoves.size(); } },
+        { .name = "tab merge",
+          .make =
+              [](TwoLinks& links) {
+                  auto* const tab = links.splitTabB();
+                  links.manager.mergeTabIntoSplit(links.windowB.id,
+                                                  1,
+                                                  links.windowB.id,
+                                                  tab->id(),
+                                                  tab->rootPane()->firstLeaf()->id(),
+                                                  vtworkspace::SplitSide::Top);
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedTabMerges.size(); } },
+    };
+
+    for (auto const& request: requests)
+    {
+        DYNAMIC_SECTION(request.name)
+        {
+            auto links = TwoLinks {};
+            auto const askedOfA = request.calls(links.hostA);
+            auto const askedOfB = request.calls(links.hostB);
+            request.make(links);
+            CHECK(request.calls(links.hostB) == askedOfB + 1);
+            CHECK(request.calls(links.hostA) == askedOfA);
+        }
+    }
+}
+
+TEST_CASE("TerminalSessionManager: each window names its sessions as its own host does", "[manager][link]")
+{
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    CHECK(manager.bindingOf(links.windowA.id) == &links.linkA);
+    CHECK(manager.bindingOf(links.windowB.id) == &links.linkB);
+    CHECK(manager.hostIdentity(links.windowA.id)
+          == contour::window::HostIdentity { .kind = contour::window::HostKind::Daemon,
+                                             .id = QStringLiteral("7") });
+    CHECK(manager.hostIdentity(links.windowB.id)
+          == contour::window::HostIdentity { .kind = contour::window::HostKind::Daemon,
+                                             .id = QStringLiteral("11") });
+
+    // Both daemons number their sessions alike: the host tells them apart.
+    auto const idA = manager.hostSessionIdOf(*links.paneA);
+    auto const idB = manager.hostSessionIdOf(*links.leftB);
+    REQUIRE(idA.has_value());
+    REQUIRE(idB.has_value());
+    CHECK(*idA == *idB);
+    CHECK(manager.sessionForHostId(manager.hostIdentity(links.windowA.id), *idA) == links.paneA);
+    CHECK(manager.sessionForHostId(manager.hostIdentity(links.windowB.id), *idB) == links.leftB);
+
+    // A window no link claims makes its sessions here, and its daemon hears nothing of them.
+    auto const local = contour::test::ScopedController { manager };
+    CHECK(manager.bindingOf(local.id) == nullptr);
+    auto const tabsAskedOfA = links.hostA.requestedRemoteTabs.size();
+    local->createNewTab();
+    CHECK(local->count() == 1);
+    CHECK(links.hostA.requestedRemoteTabs.size() == tabsAskedOfA);
+    CHECK(links.hostB.requestedRemoteTabs.empty());
+    contour::test::closeAllTabs(*local);
+}
+
+TEST_CASE("TerminalSessionManager: moving a tab across links is refused", "[manager][link][drop]")
+{
+    using contour::window::MoveRefusal;
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    auto* const target = links.splitTabB();
+    auto const merges = [&] {
+        return links.hostA.requestedTabMerges.size() + links.hostB.requestedTabMerges.size();
+    };
+
+    SECTION("a pane dropped beside one of the other link's")
+    {
+        auto const drag = manager.paneDragOf(*links.paneA);
+        REQUIRE(drag.has_value());
+        auto const resolved = manager.resolveNodeDrag(*drag);
+        // Hovered, its drop zones there say why; in its own window nothing stands in the way.
+        CHECK(manager.moveRefusalIn(resolved, links.windowB.id, contour::window::MovePlace::EdgeOtherWindow)
+              == MoveRefusal::OtherProcess);
+        CHECK(manager.moveRefusalIn(resolved, links.windowA.id, contour::window::MovePlace::Edge)
+              == MoveRefusal::None);
+
+        auto const moved = manager.moveNode(*drag,
+                                            vtworkspace::EdgeTarget { .pane = links.leftB->modelSessionId(),
+                                                                      .side = vtworkspace::SplitSide::Right },
+                                            nullptr,
+                                            {});
+        REQUIRE_FALSE(moved.has_value());
+        CHECK(moved.error() == contour::session::MoveFailure { MoveRefusal::OtherProcess });
+    }
+
+    SECTION("a tab dropped into the other link's tab strip")
+    {
+        auto const drag = manager.tabDragOf(links.windowA.id, 0);
+        REQUIRE(drag.has_value());
+        auto const moved = manager.moveNode(
+            *drag, vtworkspace::TabWellTarget { .workspace = links.windowB.id, .index = 0 }, nullptr, {});
+        REQUIRE_FALSE(moved.has_value());
+        CHECK(moved.error() == contour::session::MoveFailure { MoveRefusal::OtherProcess });
+        manager.moveTabToWorkspace(links.windowA.id, 0, links.windowB.id, 0);
+    }
+
+    SECTION("a tab merged into a split of the other link's")
+    {
+        CHECK(manager.tabMergeSupport(links.windowA.id, links.windowB.id)
+              == contour::session::TabMergeSupport::Unsupported);
+        manager.mergeTabIntoSplit(links.windowA.id,
+                                  0,
+                                  links.windowB.id,
+                                  target->id(),
+                                  target->rootPane()->firstLeaf()->id(),
+                                  vtworkspace::SplitSide::Top);
+        CHECK(merges() == 0);
+        REQUIRE(links.windowA->notices().toastShown());
+        CHECK(links.windowA->notices().toastText().toStdString()
+              == std::string { contour::window::TabMergeRefusedText });
+    }
+
+    // Neither daemon was asked anything, and nothing moved here.
+    CHECK(links.hostA.requestedMoves.empty());
+    CHECK(links.hostB.requestedMoves.empty());
+    CHECK(merges() == 0);
+    CHECK(links.windowA->count() == 1);
+    CHECK(links.windowB->count() == 2);
+    CHECK(target->paneCount() == 2);
+}
+
+TEST_CASE("TerminalSessionManager: a bound window's close is told to its binding", "[manager][link]")
+{
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    {
+        auto const third = contour::test::ScopedController { manager };
+        manager.bindWindow(third.id, links.linkA);
+        manager.removeWindowController(third.id);
+        CHECK(links.linkA.closedWindows == std::vector { third.id });
+        CHECK(manager.bindingOf(third.id) == nullptr);
+    }
+    CHECK(links.linkB.closedWindows.empty());
+
+    // A binding that stops serves its windows no more: what they make from then on is made here.
+    manager.releaseBinding(links.linkB);
+    CHECK(manager.bindingOf(links.windowB.id) == nullptr);
+    CHECK(manager.bindingOf(links.windowA.id) == &links.linkA);
+    CHECK(links.linkB.closedWindows.empty());
+}
+
+// }}}

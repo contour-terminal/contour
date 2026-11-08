@@ -17,6 +17,7 @@
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/session/WindowBinding.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include <vthost/tmux/LayoutString.hpp>
@@ -132,6 +134,11 @@ class TmuxController final:
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~TmuxController() override;
+
+    /// @return What every window of a `contour client --tmux` is bound to (@see
+    ///         contour::session::TerminalSessionManager::bindWindow): its sessions are this controller's
+    ///         panes.
+    [[nodiscard]] contour::session::WindowBinding& windowBinding() noexcept { return _windowBinding; }
 
     TmuxController(TmuxController const&) = delete;
     TmuxController& operator=(TmuxController const&) = delete;
@@ -320,6 +327,22 @@ class TmuxController final:
     }
 
   private:
+    /// What a window of a tmux attach is bound to: this controller, which hosts every pane on this machine.
+    class Binding final: public contour::session::WindowBinding
+    {
+      public:
+        explicit Binding(TmuxController& controller) noexcept: _controller(controller) {}
+
+        [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _controller; }
+        /// @return Nothing: the tmux server runs on this machine.
+        [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+        /// A tmux window keeps no per-window state here: its panes unregister as their sessions end.
+        void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
+
+      private:
+        TmuxController& _controller;
+    };
+
     /// @param pty The pty to resolve.
     /// @return The tmux pane @p pty is bound to, or nullopt for a pty this controller did not hand
     ///         out. Callers must hold `_mutex`: the registry is shared with the reactor thread.
@@ -362,6 +385,7 @@ class TmuxController final:
         false; ///< True while adoptPendingPanes realizes tmux panes, so its splits build locally.
     vthost::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
+    Binding _windowBinding { *this }; ///< @see windowBinding()
 
     /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister from _feeds and the
     /// (base-owned) _mutex in their destructors, which must still be alive — _feeds is destroyed

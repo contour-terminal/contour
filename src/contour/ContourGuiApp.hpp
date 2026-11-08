@@ -150,7 +150,6 @@ namespace remote
 {
     class DaemonLink;
     class NativeController;
-    class RoutingSessionFactory;
     class TmuxController;
 } // namespace remote
 
@@ -1216,11 +1215,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     // platform each one holds. Built by keyboardLayout() on first use, once the Qt application exists.
     mutable std::once_flag _keyboardLayoutOnce;
     mutable std::unique_ptr<input::KeyboardLayout> _keyboardLayout;
-    // Declared before _sessionManager: the manager holds a reference to the factory.
-    // Always a RoutingSessionFactory wrapping the injected/default factory,
-    // so attach mode can switch the route without touching the manager.
+    // Declared before _sessionManager: the manager holds a reference to the factory. What every window no
+    // daemon link or tmux attach binds makes its sessions through (@see TerminalSessionManager::bindWindow).
     std::unique_ptr<session::SessionFactory> _sessionFactory;
-    remote::RoutingSessionFactory* _routingFactory = nullptr; ///< The concrete view of _sessionFactory.
     // The external-resource launcher (URL open / process spawn), reached by sessions via _app.
     std::unique_ptr<platform::ExternalLauncher> _externalLauncher;
     // How the operating system starts this application again after an installer closed it. Registered once

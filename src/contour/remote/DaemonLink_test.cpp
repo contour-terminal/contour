@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/remote/DaemonLink.hpp>
-#include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/remote/testing/DaemonFixture.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
@@ -57,18 +56,17 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     contour::session::TerminalSessionManager& _manager;
 };
 
-/// A test app whose sessions are created through a router, as the real app's are, so that the link's
-/// controller can be made the delegate once the link exists.
+/// A test app and a link on it: the windows the link adopts make their sessions through its controller, the
+/// others through the app's mock factory.
 struct LinkRig
 {
     TestTimeline timeline;
     /// Declared before the app: the panes the manager holds unregister from the link's controller as they go.
     std::unique_ptr<contour::remote::DaemonLink> link;
-    contour::remote::RoutingSessionFactory* router = nullptr;
-    contour::test::TestApp app { makeRouter(router) };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     FakeLinkHost host { app.manager() };
 
-    /// Builds the link to @p endpoint and routes the app's sessions to its controller.
+    /// Builds the link to @p endpoint.
     /// @param endpoint The daemon.
     /// @param hostLabel The host label the link is configured with.
     LinkRig(vthost::TcpEndpoint endpoint, std::string hostLabel = {})
@@ -95,7 +93,6 @@ struct LinkRig
             },
             host,
             app.manager());
-        router->setDelegate(link->liveController());
     }
 
     LinkRig(LinkRig const&) = delete;
@@ -106,19 +103,8 @@ struct LinkRig
     ~LinkRig()
     {
         link->stop();
-        router->setDelegate(nullptr);
         host.opened.clear();
         drainGuiEvents();
-    }
-
-  private:
-    [[nodiscard]] static std::unique_ptr<contour::session::SessionFactory> makeRouter(
-        contour::remote::RoutingSessionFactory*& observed)
-    {
-        auto router = std::make_unique<contour::remote::RoutingSessionFactory>(
-            std::make_unique<contour::test::MockPtySessionFactory>());
-        observed = router.get();
-        return router;
     }
 };
 
@@ -163,6 +149,12 @@ TEST_CASE("DaemonLink: start connects and reconcile asks the host for one window
                            contour::remote::WindowAdoption::Adopted });
     auto const windows = std::vector<vtworkspace::WorkspaceId>(link.windows().begin(), link.windows().end());
     CHECK(windows == std::vector { boot.id, rig.host.opened[0]->id, rig.host.opened[1]->id });
+    // Every window it serves is bound to it, until it stops.
+    for (auto const window: windows)
+        CHECK(rig.app.manager().bindingOf(window) == &link);
+    link.stop();
+    for (auto const window: windows)
+        CHECK(rig.app.manager().bindingOf(window) == nullptr);
 }
 
 TEST_CASE("DaemonLink: lost workspaces close their windows", "[attach][link][reconnect]")

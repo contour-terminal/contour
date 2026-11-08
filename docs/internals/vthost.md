@@ -955,11 +955,14 @@ display/render/input machinery learns the session is remote:
 Each controller (`contour/remote/NativeController`,
 `contour/remote/TmuxController`, sharing `contour/remote/RemoteController`)
 runs the Qt-free client engine on its own reactor thread (`ReactorThread`) and
-doubles as the app's `SessionFactory`: the manager's creation entry points ask
+doubles as a `SessionFactory`: the manager's creation entry points ask
 `canCreateSession()` first, so a "+" click inside a mirror window cannot spawn
-a stray local shell. The app's factory is permanently a
-`RoutingSessionFactory`; attach mode switches the route, never the manager's
-reference. v1 mapping: one tab per daemon session; tmux windows become tabs
+a stray local shell. The manager holds the app's local factory for its whole
+life and resolves every request through the window it is about: a window that
+a `DaemonLink` (or the tmux attach) adopts is bound to it
+(`TerminalSessionManager::bindWindow`, through `session::WindowBinding`), and
+its sessions are made by, and every request about them goes to, that binding's
+controller; an unbound window's go to the local factory. v1 mapping: one tab per daemon session; tmux windows become tabs
 and additional panes split the tab.
 
 ### One grid, several clients

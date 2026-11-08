@@ -17,6 +17,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/session/WindowBinding.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/LauncherFixtures.hpp>
@@ -281,6 +282,37 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// Records the call, as a host would be told a session was ended for good.
     void requestRemoteClose(vtpty::Pty const* /*pty*/) override { ++requestedRemoteCloses; }
 
+    /// Records the call, as a host would be told a divider was dragged.
+    void reportSplitRatio(vtpty::Pty const* /*firstPty*/,
+                          vtpty::Pty const* /*secondPty*/,
+                          double /*ratio*/) override
+    {
+        ++reportedSplitRatios;
+    }
+
+    /// Records the call, as a host would be told a tab's title, colour, zoom or activity.
+    void reportTabPresentation(contour::session::LocalTabPresentation const& /*presentation*/) override
+    {
+        ++reportedTabPresentations;
+    }
+
+    /// Records the request; routed to the host under Remote hosting, local otherwise.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteSplitOrientation(
+        vtpty::Pty const* /*anchorPty*/, vtworkspace::SplitState /*axis*/) override
+    {
+        ++requestedSplitOrientations;
+        return reportedHosting == contour::session::SessionHosting::Remote
+                   ? contour::session::RemoteRouting::Routed
+                   : contour::session::RemoteRouting::Local;
+    }
+
+    /// How often reportSplitRatio() was called.
+    int reportedSplitRatios = 0;
+    /// How often reportTabPresentation() was called.
+    int reportedTabPresentations = 0;
+    /// How often requestRemoteSplitOrientation() was called.
+    int requestedSplitOrientations = 0;
+
     /// The factory of sessions that run here whatever the host. Under Remote hosting it is a view of this
     /// mock that allows creation, hosts locally and routes nothing, as the app's own factory does behind
     /// an attached host; else it is this mock.
@@ -471,6 +503,30 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
                                                                contour::session::SessionHosting::Local,
                                                                std::move(keyboardPlatforms));
 }
+
+/// A window binding over a factory the test owns: what a daemon link is to the windows it serves, without a
+/// connection. Bind a window to it with TerminalSessionManager::bindWindow().
+class FactoryBinding final: public contour::session::WindowBinding
+{
+  public:
+    /// @param factory What the bound windows' sessions are made by. Borrowed: it must outlive the binding.
+    /// @param hostLabel What hostLabel() reports.
+    explicit FactoryBinding(contour::session::SessionFactory& factory, std::string hostLabel = {}):
+        _factory(factory), _hostLabel(std::move(hostLabel))
+    {
+    }
+
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return _hostLabel; }
+    void windowClosed(vtworkspace::WorkspaceId window) override { closedWindows.push_back(window); }
+
+    /// Every window windowClosed() was told of, in order.
+    std::vector<vtworkspace::WorkspaceId> closedWindows;
+
+  private:
+    contour::session::SessionFactory& _factory;
+    std::string _hostLabel;
+};
 
 /// A real session factory with every call passed through, except that a session it would hand the
 /// platform's own notifier raises through makeTestNotifier() instead.
