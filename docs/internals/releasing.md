@@ -22,6 +22,19 @@ tag. Binaries keep the run number as a fourth version field (`0.9.0.9500`); the 
 4. The tag's run builds, tests and packages that commit and creates the draft release.
 5. Publish the draft.
 
+## Writing release notes
+
+The notes in `metainfo.xml` are what Flathub's store page and every AppStream software centre show,
+so they are AppStream markup, not Markdown: a `<description>` holds `<p>` and `<ul>`/`<ol>` of
+`<li>`, and inline only `<em>` and `<code>`. A backtick reaches the page as a literal character, and
+`<kbd>` or `<strong>` fails Flathub's build. Only the in-progress release at the top, marked
+`type="development"`, may go undated; step 1 above stamps it. A screenshot caption is at most 100
+characters.
+
+`scripts/check-appstream.py` checks all of it, then runs `appstreamcli` and `desktop-file-validate`
+where installed. It runs as the `check_appstream` ctest (`ctest -L lint`) and as CI's
+`check_appstream` job, which installs both validators and fails rather than skips without them.
+
 ## Submitting the release to winget
 
 Publishing the release (the draft made public; not a pre-release) starts

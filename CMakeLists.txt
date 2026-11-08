@@ -270,6 +270,12 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)
         contour_add_lint_gate(check_wix_patch_selftest check-wix-patch.py --self-test)
 
+        # metainfo.xml and the application .desktop files, held to what Flathub's build accepts: its markup,
+        # caption and dating rules in Python, then appstreamcli and desktop-file-validate where installed
+        # (CI sets CHECK_APPSTREAM_REQUIRE_TOOL so a missing validator fails there instead of skipping).
+        contour_add_lint_gate(check_appstream check-appstream.py)
+        contour_add_lint_gate(check_appstream_selftest check-appstream.py --self-test)
+
         # The release/tag rules of scripts/check-release.py (CI's check_release job), against inline samples.
         contour_add_lint_gate(check_release_selftest check-release.py --self-test)
 
