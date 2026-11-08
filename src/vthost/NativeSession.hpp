@@ -98,7 +98,8 @@ struct HandshakePolicy
                                                                    proto::Capability::LayoutBatch,
                                                                    proto::Capability::TabEditAcks,
                                                                    proto::Capability::ColorPreference,
-                                                                   proto::Capability::ClipboardTargets });
+                                                                   proto::Capability::ClipboardTargets,
+                                                                   proto::Capability::SoftFonts });
 };
 
 /// When a connection sends a session's program-status set.
@@ -831,6 +832,16 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param when Whether an empty set is news (a change emptied it) or not worth a PDU (a snapshot).
     void pushProgramStatus(vtworkspace::SessionId session, ProgramStatusPush when);
 
+    /// Whether this connection mirrors soft fonts (shares Capability::SoftFonts): it is sent each session's
+    /// fonts, and the soft-glyph cells beside the rows.
+    [[nodiscard]] bool mirrorsSoftFonts() const noexcept;
+
+    /// Sends @p session's soft fonts when they differ from what this connection was last told, read under
+    /// the terminal lock. Called ahead of every delta and snapshot, so a Delta never names a glyph its
+    /// receiver has not been given.
+    /// @param session The session.
+    void pushSoftFonts(vtworkspace::SessionId session);
+
     /// Whether this connection is a viewer that mirrors the echo state (shares Capability::InputEcho).
     [[nodiscard]] bool mirrorsInputEcho() const noexcept;
 
@@ -1123,6 +1134,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// What this connection was last told of each session's echo, as its wire byte; absent is Unknown, which
     /// a client assumes before it is told anything.
     std::unordered_map<uint64_t, uint8_t> _inputEchoSent;
+    /// Per session, the soft font store generation this connection was last sent (absent: none yet, which
+    /// reads as generation 0, the generation of a store nothing was ever loaded into).
+    std::unordered_map<uint64_t, uint64_t> _softFontsSent;
     /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
     core::platform::SteadyTimePoint _nextInputEchoCheck {};
     /// Until when the idle check keeps itself armed. @see noteInputEchoActivity

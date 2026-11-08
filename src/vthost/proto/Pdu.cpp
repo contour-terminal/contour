@@ -297,6 +297,10 @@ namespace
     {
         return std::to_underlying(PduType::PanesReprojected);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(SoftFontState const&) noexcept
+    {
+        return std::to_underlying(PduType::SoftFontState);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -756,6 +760,14 @@ namespace
             out.varint(id);
         out.u8(pdu.tabNameChanged);
         out.string(pdu.tabName);
+        out.varint(pdu.softGlyphCells.size());
+        for (auto const& entry: pdu.softGlyphCells)
+        {
+            out.svarint(entry.stableId);
+            out.u16(entry.column);
+            out.u8(entry.font);
+            out.u8(entry.position);
+        }
     }
 
     void encodeBody(Writer& out, SessionBell const& pdu)
@@ -945,6 +957,39 @@ namespace
 
     void encodeBody(Writer&, PanesReprojected const&)
     {
+    }
+
+    void encodeSoftGlyph(Writer& out, WireSoftGlyph const& glyph)
+    {
+        out.u8(glyph.position);
+        out.u8(glyph.width);
+        out.u8(glyph.height);
+        out.blob(glyph.bits);
+    }
+
+    void encodeBody(Writer& out, SoftFontState const& pdu)
+    {
+        out.varint(pdu.session);
+        out.varint(pdu.generation);
+        out.varint(pdu.fonts.size());
+        // A record of its own, so the fields a later version appends to a font stay inside it.
+        for (auto const& font: pdu.fonts)
+        {
+            auto record = Writer {};
+            record.u8(font.fontNumber);
+            record.string(font.designator);
+            record.u8(font.charsetSize);
+            record.u8(font.usage);
+            record.u8(font.fullWidth);
+            record.u8(font.fullHeight);
+            record.u8(font.textWidth);
+            record.varint(font.glyphs.size());
+            for (auto const& glyph: font.glyphs)
+                encodeSoftGlyph(record, glyph);
+            encodeSoftGlyph(record, font.errorGlyph);
+            record.u8(font.loadRank);
+            out.blob(record.view());
+        }
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1618,6 +1663,27 @@ namespace
         if (in.remaining() != 0
             && (!assign(in.u8(), pdu.tabNameChanged, error) || !assign(in.string(), pdu.tabName, error)))
             return std::unexpected(error);
+        if (in.remaining() != 0)
+        {
+            auto const decoded = decodeVector(
+                in, pdu.softGlyphCells, [](Reader& reader) -> std::expected<SoftGlyphCellEntry, DecodeError> {
+                    auto entry = SoftGlyphCellEntry {};
+                    auto error = DecodeError {};
+                    if (!assign(reader.svarint(), entry.stableId, error)
+                        || !assign(reader.u16(), entry.column, error)
+                        || !assign(reader.u8(), entry.font, error)
+                        || !assign(reader.u8(), entry.position, error))
+                        return std::unexpected(error);
+                    // Judged here, not by the mirror: a cell names a glyph of a set only DECDLD fills, and
+                    // the set's space and DEL are never a cell's character.
+                    if (entry.font >= MaxSoftFonts || entry.position < FirstSoftCellPosition
+                        || entry.position > LastSoftCellPosition)
+                        return std::unexpected(DecodeError::MalformedPdu);
+                    return entry;
+                });
+            if (!decoded)
+                return std::unexpected(decoded.error());
+        }
         return pdu;
     }
 
@@ -1928,6 +1994,67 @@ namespace
         return pdu;
     }
 
+    /// Reads one glyph, judging that its bitmap is the size its width and height state.
+    [[nodiscard]] std::expected<WireSoftGlyph, DecodeError> decodeSoftGlyph(Reader& in)
+    {
+        auto glyph = WireSoftGlyph {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), glyph.position, error) || !assign(in.u8(), glyph.width, error)
+            || !assign(in.u8(), glyph.height, error))
+            return std::unexpected(error);
+        auto const bits = in.blob();
+        if (!bits)
+            return std::unexpected(bits.error());
+        auto const rowBytes = (std::size_t { glyph.width } + 7) / 8;
+        if (bits->size() != rowBytes * glyph.height)
+            return std::unexpected(DecodeError::MalformedPdu);
+        glyph.bits.assign(bits->begin(), bits->end());
+        return glyph;
+    }
+
+    [[nodiscard]] std::expected<WireSoftFont, DecodeError> decodeSoftFont(Reader& outer)
+    {
+        auto const record = outer.blob();
+        if (!record)
+            return std::unexpected(record.error());
+        auto in = Reader { *record };
+        auto font = WireSoftFont {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), font.fontNumber, error) || !assign(in.string(), font.designator, error)
+            || !assign(in.u8(), font.charsetSize, error) || !assign(in.u8(), font.usage, error)
+            || !assign(in.u8(), font.fullWidth, error) || !assign(in.u8(), font.fullHeight, error)
+            || !assign(in.u8(), font.textWidth, error))
+            return std::unexpected(error);
+        auto const decodeDefined = [](Reader& reader) -> std::expected<WireSoftGlyph, DecodeError> {
+            auto glyph = decodeSoftGlyph(reader);
+            if (glyph
+                && (glyph->position < FirstSoftGlyphPosition || glyph->position > LastSoftGlyphPosition))
+                return std::unexpected(DecodeError::MalformedPdu);
+            return glyph;
+        };
+        if (auto const decoded = decodeVector(in, font.glyphs, decodeDefined); !decoded)
+            return std::unexpected(decoded.error());
+        auto errorGlyph = decodeSoftGlyph(in);
+        if (!errorGlyph)
+            return std::unexpected(errorGlyph.error());
+        font.errorGlyph = std::move(*errorGlyph);
+        // Appended by a later version; an older sender's record ends before it.
+        if (in.remaining() != 0 && !assign(in.u8(), font.loadRank, error))
+            return std::unexpected(error);
+        return font;
+    }
+
+    DecodeResult decodeSoftFontState(Reader& in)
+    {
+        auto pdu = SoftFontState {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.generation, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.fonts, decodeSoftFont); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
     DecodeResult decodePanesReprojected(Reader&)
     {
         return PanesReprojected {};
@@ -2143,6 +2270,7 @@ namespace
         DecodeRow { PduType::UpgradeDaemonReply, decodeUpgradeDaemonReply },
         DecodeRow { PduType::DaemonUpgrading, decodeDaemonUpgrading },
         DecodeRow { PduType::PanesReprojected, decodePanesReprojected },
+        DecodeRow { PduType::SoftFontState, decodeSoftFontState },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

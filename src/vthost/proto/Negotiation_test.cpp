@@ -125,3 +125,11 @@ TEST_CASE("the cell-pixel-size capability keeps its ident and name", "[vthost][n
     REQUIRE(row != CapabilityTable.end());
     CHECK(row->name == "cell-pixel-size");
 }
+
+TEST_CASE("the soft-fonts capability keeps its ident and name", "[vthost][negotiation][softfont]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::SoftFonts) == 22);
+    auto const row = std::ranges::find(CapabilityTable, Capability::SoftFonts, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "soft-fonts");
+}

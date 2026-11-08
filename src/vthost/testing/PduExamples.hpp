@@ -200,6 +200,8 @@ namespace vthost::testing
         { proto::PduType::DaemonUpgrading,
           proto::DecodedPdu { proto::DaemonUpgrading { .toRelease = "0.9.0" } } },
         { proto::PduType::PanesReprojected, proto::DecodedPdu { proto::PanesReprojected {} } },
+        { proto::PduType::SoftFontState,
+          proto::DecodedPdu { proto::SoftFontState { .session = 3, .generation = 2 } } },
     };
 }
 

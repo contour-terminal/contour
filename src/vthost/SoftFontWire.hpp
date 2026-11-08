@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// DECDLD soft fonts as they travel on the native protocol (proto::SoftFontState).
+///
+/// Both directions live here so the daemon's capture and the mirror's rebuild agree bit for bit on the
+/// bitmap layout. The mirror rebuilds fonts through vtbackend's own `makeSoftGlyph`/`makeSoftFont`, which
+/// stamp a glyph's identity from its content: nothing about identity crosses the wire.
+
+#include <vtbackend/vt/SoftFont.hpp>
+#include <vtbackend/vt/SoftFontStore.hpp>
+
+#include <array>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <span>
+#include <vector>
+
+#include <vthost/proto/Pdu.hpp>
+
+namespace vthost
+{
+
+/// Why a set of wire fonts is not one a mirror takes.
+enum class SoftFontWireError : uint8_t
+{
+    FontNumber,  ///< A font number above the last DECDLD has (2), or a number named twice.
+    LoadRank,    ///< A load rank above the last font's.
+    Designator,  ///< A designator longer than two intermediates and a final.
+    Enumeration, ///< A usage or charset size no enumerator names.
+    Glyph,       ///< A glyph out of its set, out of order, or not the font's cell size.
+};
+
+/// Captures a store's fonts for the wire.
+/// @param store The session's soft fonts (the caller holds the terminal lock).
+/// @return One entry per loaded font, by font number.
+[[nodiscard]] std::vector<proto::WireSoftFont> softFontsToWire(vtbackend::SoftFontStore const& store);
+
+/// The fonts of a wire set, built and checked aside, for the caller to put in place whole.
+struct StagedSoftFonts
+{
+    std::array<std::shared_ptr<vtbackend::SoftFont const>, 3> fonts {}; ///< By font number; null = none.
+    std::array<uint8_t, 3> loadRanks {};                                ///< By font number.
+};
+
+/// Rebuilds the fonts a peer sent.
+///
+/// Judges what the decoder cannot: a font number and rank outside DECDLD's three, a number sent twice, and
+/// glyphs that are not the font's own cell size. Nothing is built into the caller's state until the whole set
+/// is accepted, so a refused set leaves the mirror's fonts as they were.
+/// @param fonts The fonts a SoftFontState carried.
+/// @return The staged fonts, or why the set was refused.
+[[nodiscard]] std::expected<StagedSoftFonts, SoftFontWireError> softFontsFromWire(
+    std::span<proto::WireSoftFont const> fonts);
+
+} // namespace vthost

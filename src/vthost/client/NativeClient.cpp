@@ -123,6 +123,12 @@ void RemoteScreen::apply(proto::ProgramStatus const& status)
     programStatus.assign(records.end() - static_cast<std::ptrdiff_t>(kept), records.end());
 }
 
+void RemoteScreen::apply(proto::SoftFontState const& fonts)
+{
+    softFonts = fonts.fonts;
+    softFontGeneration = fonts.generation;
+}
+
 void RemoteScreen::apply(proto::SessionState const& state)
 {
     session = state.session;
@@ -207,6 +213,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     {
         rows.clear();
         imageCells.clear();
+        softGlyphCells.clear();
         // The pixel caches stay valid: image ids are pool-scoped, not
         // generation-scoped, so a rebuild does not invalidate a fetched image.
     }
@@ -265,9 +272,12 @@ void RemoteScreen::apply(proto::Delta const& delta)
         // re-sends any that survived in delta.imageCells (which only references
         // rows present in delta.lines), so clearing first is loss-free.
         imageCells.erase(line.stableId);
+        softGlyphCells.erase(line.stableId); // likewise: the row's cells are restated beside it
     }
     for (auto const& entry: delta.imageCells)
         imageCells[entry.stableId][entry.column] = entry;
+    for (auto const& entry: delta.softGlyphCells)
+        softGlyphCells[entry.stableId][entry.column] = entry;
     for (auto const& entry: delta.hyperlinks)
         hyperlinks.insert_or_assign(entry.id, entry.uri);
 
@@ -321,6 +331,7 @@ void RemoteScreen::apply(proto::Delta const& delta)
     auto const evictBelow = historyKeep ? std::max(stableFloor, viewportBase - *historyKeep) : stableFloor;
     rows.erase(rows.begin(), rows.lower_bound(evictBelow));
     imageCells.erase(imageCells.begin(), imageCells.lower_bound(evictBelow));
+    softGlyphCells.erase(softGlyphCells.begin(), softGlyphCells.lower_bound(evictBelow));
 }
 
 proto::ImageCellEntry const* RemoteScreen::imageAt(int64_t stableId, uint16_t column) const
@@ -796,6 +807,10 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         // The program-status set is state, not an event: the screen keeps it for a mirror bound later.
         if (auto const* status = std::get_if<proto::ProgramStatus>(&*event))
             screen.apply(*status);
+        // The soft fonts are state too, and a snapshot's rows may be replayed before the mirror hears of
+        // them.
+        if (auto const* fonts = std::get_if<proto::SoftFontState>(&*event))
+            screen.apply(*fonts);
         if (_onSessionEvent)
             _onSessionEvent(screen, *event);
         return;

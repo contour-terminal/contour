@@ -99,6 +99,10 @@ enum class Capability : uint8_t
     /// daemon sends a client without it only a write that names the clipboard, as `c`: a write to the primary
     /// selection alone would otherwise overwrite what its user copied.
     ClipboardTargets = 21,
+    /// The peer mirrors DECDLD soft fonts: the daemon sends a SoftFontState whenever a session's fonts change
+    /// and the soft-glyph cells beside each Delta's rows (`softGlyphCells`). Without it a client shows the
+    /// cells' real characters, which the rows carry either way.
+    SoftFonts = 22,
 };
 
 /// One row of the table naming a Capability.
@@ -131,6 +135,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::PanesReprojected, .name = "panes-reprojected" },
     CapabilityRow { .capability = Capability::CellPixelSize, .name = "cell-pixel-size" },
     CapabilityRow { .capability = Capability::ClipboardTargets, .name = "clipboard-targets" },
+    CapabilityRow { .capability = Capability::SoftFonts, .name = "soft-fonts" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

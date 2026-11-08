@@ -2404,8 +2404,9 @@ TEST_CASE("an older sender's Delta and SessionState decode without the OSC 30 ta
 
     SECTION("a Delta that ends before the tab name")
     {
-        // The gate byte and the empty string's length are what the older sender did not send.
-        CHECK(decodeAs<Delta>(encodeWithoutTrailingField(DecodedPdu { delta }, /*bytesToDrop=*/2)) == delta);
+        // The gate byte, the empty string's length and the soft-glyph cells' count are what the older sender
+        // did not send.
+        CHECK(decodeAs<Delta>(encodeWithoutTrailingField(DecodedPdu { delta }, /*bytesToDrop=*/3)) == delta);
     }
 
     SECTION("a SessionState that ends before the tab name")
@@ -2433,4 +2434,162 @@ TEST_CASE("DaemonStatusReply carries the relocation request, and a body from bef
     CHECK(decodeAs<DaemonStatusReply>(encodeWithoutTrailingField(DecodedPdu { refused }, /*bytesToDrop=*/1))
           == legacy);
     CHECK(roundTrip(DecodedPdu { legacy }) == DecodedPdu { legacy });
+}
+
+namespace
+{
+/// A 3x2 glyph at @p position: rows are byte-aligned, so two bytes carry it.
+WireSoftGlyph glyphAt(uint8_t position)
+{
+    return WireSoftGlyph {
+        .position = position, .width = 3, .height = 2, .bits = { std::byte { 0b101 }, std::byte { 0b010 } }
+    };
+}
+
+/// A font with two glyphs, a designator and a load rank.
+WireSoftFont sampleFont(uint8_t number)
+{
+    return WireSoftFont { .fontNumber = number,
+                          .designator = " @",
+                          .charsetSize = 0,
+                          .usage = 1,
+                          .fullWidth = 3,
+                          .fullHeight = 2,
+                          .textWidth = 3,
+                          .glyphs = { glyphAt(0x21), glyphAt(0x7F) },
+                          .errorGlyph = glyphAt(0),
+                          .loadRank = 2 };
+}
+
+/// @return The body of a SoftFontState holding one font whose single glyph is written as given.
+std::vector<std::byte> softFontBody(uint8_t position, uint8_t width, uint8_t height, std::size_t bits)
+{
+    auto font = Writer {};
+    font.u8(0);
+    font.string(" @");
+    font.u8(0);
+    font.u8(0);
+    font.u8(width);
+    font.u8(height);
+    font.u8(0);
+    font.varint(1);
+    font.u8(position);
+    font.u8(width);
+    font.u8(height);
+    font.blob(std::vector<std::byte>(bits));
+    font.u8(0);
+    font.u8(width);
+    font.u8(height);
+    font.blob(std::vector<std::byte>((static_cast<std::size_t>(width) + 7) / 8 * height));
+    auto body = Writer {};
+    body.varint(1);
+    body.varint(2);
+    body.varint(1);
+    body.blob(font.view());
+    return body.take();
+}
+} // namespace
+
+TEST_CASE("SoftFontState round-trips, and carries each font's load rank", "[vthost][pdu][softfont]")
+{
+    auto const state =
+        SoftFontState { .session = 4, .generation = 9, .fonts = { sampleFont(0), sampleFont(2) } };
+    CHECK(roundTrip(DecodedPdu { state }) == DecodedPdu { state });
+    // The empty set is how a viewer hears every font is gone.
+    CHECK(roundTrip(DecodedPdu { SoftFontState { .session = 4, .generation = 10 } })
+          == DecodedPdu { SoftFontState { .session = 4, .generation = 10 } });
+    CHECK(std::get<SoftFontState>(roundTrip(DecodedPdu { state })).fonts.back().loadRank == 2);
+    STATIC_CHECK(std::to_underlying(PduType::SoftFontState) == 45);
+    STATIC_CHECK(std::to_underlying(Capability::SoftFonts) == 22);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::SoftFonts && row.name == "soft-fonts";
+    }));
+    // A SoftFontState is a per-session push, so a mirror receives it with the other session events.
+    CHECK(asSessionEvent(DecodedPdu { state }).has_value());
+}
+
+TEST_CASE("a font from before the load rank reads as rank 0", "[vthost][pdu][softfont]")
+{
+    // The rank is the font record's last field; a sender from before it ends the record one byte short,
+    // and the record being a blob keeps the fields after it in place.
+    auto font = sampleFont(1);
+    auto record = Writer {};
+    record.u8(font.fontNumber);
+    record.string(font.designator);
+    record.u8(font.charsetSize);
+    record.u8(font.usage);
+    record.u8(font.fullWidth);
+    record.u8(font.fullHeight);
+    record.u8(font.textWidth);
+    record.varint(font.glyphs.size());
+    for (auto const& glyph: font.glyphs)
+    {
+        record.u8(glyph.position);
+        record.u8(glyph.width);
+        record.u8(glyph.height);
+        record.blob(glyph.bits);
+    }
+    record.u8(font.errorGlyph.position);
+    record.u8(font.errorGlyph.width);
+    record.u8(font.errorGlyph.height);
+    record.blob(font.errorGlyph.bits);
+    auto body = Writer {};
+    body.varint(4);
+    body.varint(9);
+    body.varint(1);
+    body.blob(record.view());
+    auto const decoded = decodeAs<SoftFontState>(frameOf(PduType::SoftFontState, body.view()));
+    REQUIRE(decoded.fonts.size() == 1);
+    font.loadRank = 0;
+    CHECK(decoded.fonts.front() == font);
+}
+
+TEST_CASE("a SoftFontState glyph that does not fit its bitmap is malformed", "[vthost][pdu][softfont]")
+{
+    auto const accepted = [](std::vector<std::byte> const& body) {
+        return decodePdu(frameOf(PduType::SoftFontState, body)).has_value();
+    };
+    CHECK(accepted(softFontBody(0x21, 3, 2, 2)));
+    CHECK_FALSE(accepted(softFontBody(0x21, 3, 2, 1))); // a byte short
+    CHECK_FALSE(accepted(softFontBody(0x21, 3, 2, 3))); // a byte over
+    CHECK_FALSE(accepted(softFontBody(0x21, 9, 2, 2))); // a nine-wide row takes two bytes
+    CHECK_FALSE(accepted(softFontBody(0x1F, 3, 2, 2))); // below the set
+    CHECK_FALSE(accepted(softFontBody(0x80, 3, 2, 2))); // above it
+}
+
+TEST_CASE("a Delta carries soft-glyph cells, and a body from before them reads as none",
+          "[vthost][pdu][softfont]")
+{
+    auto delta = Delta {};
+    delta.session = 3;
+    delta.generation = 1;
+    delta.softGlyphCells = { SoftGlyphCellEntry { .stableId = -4, .column = 7, .font = 2, .position = 0x7E },
+                             SoftGlyphCellEntry {
+                                 .stableId = 12, .column = 0, .font = 0, .position = 0x21 } };
+    CHECK(roundTrip(DecodedPdu { delta }) == DecodedPdu { delta });
+
+    // An older sender's body ends after the tab name: the cells' count varint is what it did not send.
+    auto without = delta;
+    without.softGlyphCells.clear();
+    CHECK(decodeAs<Delta>(encodeWithoutTrailingField(DecodedPdu { without }, /*bytesToDrop=*/1)) == without);
+}
+
+TEST_CASE("an out-of-range soft-glyph cell entry is malformed", "[vthost][pdu][softfont]")
+{
+    auto const accepted = [](uint8_t font, uint8_t position) {
+        auto delta = Delta {};
+        delta.session = 3;
+        delta.generation = 1;
+        delta.softGlyphCells = { SoftGlyphCellEntry {
+            .stableId = 1, .column = 2, .font = font, .position = position } };
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { delta });
+        return decodePdu(stream.view()).has_value();
+    };
+    CHECK(accepted(0, 0x21));
+    CHECK(accepted(2, 0x7E));
+    CHECK_FALSE(accepted(3, 0x21));
+    CHECK_FALSE(accepted(0, 0x20)); // a cell never shows the space of the set
+    CHECK_FALSE(accepted(0, 0x7F));
+    CHECK_FALSE(accepted(0, 0));
 }
