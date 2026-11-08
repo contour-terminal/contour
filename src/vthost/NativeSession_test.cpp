@@ -6,6 +6,7 @@
 #include <vtpty/MockPty.hpp>
 
 #include <core/Base64.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <deque>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <future>
@@ -7498,4 +7500,126 @@ TEST_CASE("a clipboard write reaches a client only where it can land it", "[vtho
         CHECK(forwardedClipboardTargets(both, shared) == clipboard); // narrowed, so its `selection` reads "c"
         CHECK_FALSE(forwardedClipboardTargets(primary, shared));     // never moved onto its user's clipboard
     }
+}
+
+namespace
+{
+
+/// The directory each session a harness spawns starts in, in spawn order: empty for one spawned without
+/// a directory of its own.
+using SpawnedDirectories = std::shared_ptr<std::vector<std::filesystem::path>>;
+
+/// @param spawned Receives the directory of every session the factory spawns.
+/// @return Harness options whose PTY factory records the directory each spawn asks for.
+[[nodiscard]] HarnessOptions recordingSpawnDirectories(SpawnedDirectories const& spawned)
+{
+    auto options = HarnessOptions {};
+    options.ptyFactory =
+        [spawned](
+            vtbackend::PageSize size,
+            std::optional<vtpty::Process::ExecInfo> const& commandOverride) -> std::unique_ptr<vtpty::Pty> {
+        spawned->push_back(commandOverride ? commandOverride->workingDirectory : std::filesystem::path {});
+        return std::make_unique<vtpty::MockPty>(size);
+    };
+    return options;
+}
+
+/// @return An absolute directory on every platform; it need not exist, as no shell is started in it.
+[[nodiscard]] std::filesystem::path statedDirectory()
+{
+    return std::filesystem::temp_directory_path() / "contour-attach-cwd";
+}
+
+/// @param kind What the client asks to follow.
+/// @param directory The working directory the hello states, as it travels.
+/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
+/// @return A hello stating that intent and that directory.
+[[nodiscard]] proto::ClientHello directoryHello(proto::AttachIntentKind kind,
+                                                std::string directory,
+                                                std::vector<uint64_t> workspaces = {})
+{
+    auto hello = intentHello(kind, std::move(workspaces));
+    hello.workingDirectory = std::move(directory);
+    return hello;
+}
+
+} // namespace
+
+TEST_CASE("the first session of an attach starts in the directory its hello states",
+          "[vthost][native][attach-intent][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+
+    std::ignore = h.exchangeUntil(
+        { directoryHello(proto::AttachIntentKind::Launch, core::pathToUtf8(statedDirectory())) },
+        [](auto const& got) { return snapshotRunCount(got) >= 1; });
+
+    CHECK(*spawned == std::vector { statedDirectory() });
+}
+
+TEST_CASE("a hello's relative working directory is ignored", "[vthost][native][attach-intent][cwd]")
+{
+    // A relative path names a place under the client's own directory, which the daemon cannot see.
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+
+    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Launch, "relative/dir") },
+                                  [](auto const& got) { return snapshotRunCount(got) >= 1; });
+
+    CHECK(*spawned == std::vector { std::filesystem::path {} });
+}
+
+TEST_CASE("a launch stating a directory opens a tab in it beside the workspaces the daemon kept",
+          "[vthost][native][attach-intent][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+    spawned->clear();
+
+    auto const received = h.exchangeUntil(
+        { directoryHello(proto::AttachIntentKind::Launch, core::pathToUtf8(statedDirectory())) },
+        [](auto const& got) { return snapshotRunCount(got) >= 2; });
+
+    CHECK(*spawned == std::vector { statedDirectory() });
+    CHECK(sessionsOf(h.host, workspace).size() == 2);
+    auto const* hello = serverHelloOf(received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->followedWorkspaces == std::vector { workspace });
+}
+
+TEST_CASE("a launch stating no directory adds nothing to the workspaces the daemon kept",
+          "[vthost][native][attach-intent][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+    spawned->clear();
+
+    std::ignore = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Launch) },
+                                  [](auto const& got) { return snapshotRunCount(got) >= 1; });
+
+    CHECK(spawned->empty());
+    CHECK(sessionsOf(h.host, workspace).size() == 1);
+}
+
+TEST_CASE("an attach to named workspaces stating a directory adds nothing to them",
+          "[vthost][native][attach-intent][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId().value;
+    spawned->clear();
+
+    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Workspaces,
+                                                   core::pathToUtf8(statedDirectory()),
+                                                   { workspace }) },
+                                  [](auto const& got) { return snapshotRunCount(got) >= 1; });
+
+    CHECK(spawned->empty());
+    CHECK(sessionsOf(h.host, workspace).size() == 1);
 }

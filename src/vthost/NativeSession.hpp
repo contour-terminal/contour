@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -683,10 +684,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                       proto::Negotiated negotiated);
 
     /// Decides which workspaces this connection follows and creates what that asks for: a first tab in the
-    /// primary workspace, or a workspace of its own. Counts the connection as the host's client after
-    /// deciding, so that it is not among the clients it is decided against.
+    /// primary workspace, a workspace of its own, or a tab in the first workspace followed. Counts the
+    /// connection as the host's client after deciding, so that it is not among the clients it is decided
+    /// against.
     /// @param intent What the hello asked for; AllWorkspaces when Capability::AttachIntent is not shared.
-    void executeAttachPlan(proto::AttachIntent const& intent);
+    /// @param workingDirectory The absolute directory the session the attach creates starts in; empty for
+    ///        its profile's.
+    void executeAttachPlan(proto::AttachIntent const& intent, std::filesystem::path const& workingDirectory);
 
     /// Bounds the cell size a client states alongside a grid (vthost::sanePixelSize); an out-of-range one is
     /// logged and dropped, and the grid still applies.
@@ -1004,14 +1008,15 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// What the session the attach itself creates is spawned with: @ref spawnRequest, its shell started in
     /// the directory the hello stated, when it stated one. The directory is the attach's alone -- a tab
     /// the client opens later starts where its profile says.
-    [[nodiscard]] SessionSpawnRequest attachSpawnRequest() const
+    /// @param workingDirectory The absolute directory the hello stated; empty for the profile's.
+    [[nodiscard]] SessionSpawnRequest attachSpawnRequest(std::filesystem::path const& workingDirectory) const
     {
         auto request = spawnRequest({});
-        if (!_attachWorkingDirectory.empty())
+        if (!workingDirectory.empty())
         {
             // A directory-only override: an empty program keeps the profile's shell and its arguments.
             request.commandOverride.emplace();
-            request.commandOverride->workingDirectory = _attachWorkingDirectory;
+            request.commandOverride->workingDirectory = workingDirectory;
         }
         return request;
     }
@@ -1101,9 +1106,6 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// The host profile this client's sessions run under, as its hello named it with
     /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
     std::string _profileName;
-    /// The directory the hello asked the attach's own session to start in (proto::ClientHello::
-    /// workingDirectory); empty for the profile's. Read by @ref attachSpawnRequest only.
-    std::filesystem::path _attachWorkingDirectory;
     /// Whether this connection follows every workspace or a listed set; Every until the attach plan says.
     FollowScope _scope = FollowScope::Every;
     /// The workspaces followed under FollowScope::Listed, by id. @see follows
