@@ -787,15 +787,9 @@ endif()
 
 # {{{ platform specific target set_target_properties
 if(WIN32)
-    if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
-        set_target_properties(contour PROPERTIES
-            # Tell MSVC to create a GUI application.
-            WIN32_EXECUTABLE ON
-
-            # Tell MSVC to use main instead of WinMain for Windows subsystem executables.
-            LINK_FLAGS "/ENTRY:mainCRTStartup"
-        )
-    endif()
+    # Shells wait for console executables. The manifest suppresses allocation of a new
+    # console for desktop launches on Windows 11 24H2 and later.
+    set_target_properties(contour PROPERTIES WIN32_EXECUTABLE OFF)
 elseif(CONTOUR_MACOS_APP_BUNDLE)
     # qt_add_executable() sets MACOSX_BUNDLE_INFO_PLIST, so Info.plist comes from Qt's
     # template and only the properties it substitutes have any effect -- which excludes

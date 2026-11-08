@@ -122,6 +122,7 @@
           <li>Fixes a client reporting an unchanged window area to the daemon discarding the per-pane sizes other attached clients had reported, which put their split panes back on the daemon's estimate (#2227)</li>
           <li>Fixes text after a space on a double-width line, and text in another color right after a wide character in the sticky header, a fold label or a gutter chip, being drawn starting at the wrong column</li>
           <li>Fixes a release build on Windows, started by <code>cmd.exe</code> with its output redirected (<code>contour version &gt; out.txt</code>, a pipe, or <code>NUL</code>), writing to the console instead of where it was redirected (#2239)</li>
+          <li>Fixes Windows shells returning the prompt before Contour CLI commands finish (#2257)</li>
           <li>Fixes a Windows installer needing the installed Contour uninstalled first: every build now upgrades it in place</li>
           <li>Adds a per-user Windows installer (<code>contour-&lt;version&gt;-win64-user.msi</code>) beside the per-machine one: it needs no administrator, installs into <code>%LOCALAPPDATA%\Programs\Contour</code>, and the two are separate products that never upgrade each other</li>
           <li>Installs the Windows packages into a folder named <code>Contour</code> that upgrades keep, a folder chosen at install time included, instead of a folder per version</li>
