@@ -983,11 +983,10 @@ namespace
             record.u8(font.fullWidth);
             record.u8(font.fullHeight);
             record.u8(font.textWidth);
+            record.u8(font.loadRank);
             record.varint(font.glyphs.size());
             for (auto const& glyph: font.glyphs)
                 encodeSoftGlyph(record, glyph);
-            encodeSoftGlyph(record, font.errorGlyph);
-            record.u8(font.loadRank);
             out.blob(record.view());
         }
     }
@@ -2023,7 +2022,7 @@ namespace
         if (!assign(in.u8(), font.fontNumber, error) || !assign(in.string(), font.designator, error)
             || !assign(in.u8(), font.charsetSize, error) || !assign(in.u8(), font.usage, error)
             || !assign(in.u8(), font.fullWidth, error) || !assign(in.u8(), font.fullHeight, error)
-            || !assign(in.u8(), font.textWidth, error))
+            || !assign(in.u8(), font.textWidth, error) || !assign(in.u8(), font.loadRank, error))
             return std::unexpected(error);
         auto const decodeDefined = [](Reader& reader) -> std::expected<WireSoftGlyph, DecodeError> {
             auto glyph = decodeSoftGlyph(reader);
@@ -2034,13 +2033,6 @@ namespace
         };
         if (auto const decoded = decodeVector(in, font.glyphs, decodeDefined); !decoded)
             return std::unexpected(decoded.error());
-        auto errorGlyph = decodeSoftGlyph(in);
-        if (!errorGlyph)
-            return std::unexpected(errorGlyph.error());
-        font.errorGlyph = std::move(*errorGlyph);
-        // Appended by a later version; an older sender's record ends before it.
-        if (in.remaining() != 0 && !assign(in.u8(), font.loadRank, error))
-            return std::unexpected(error);
         return font;
     }
 

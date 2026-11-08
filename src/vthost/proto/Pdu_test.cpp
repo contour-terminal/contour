@@ -2456,9 +2456,8 @@ WireSoftFont sampleFont(uint8_t number)
                           .fullWidth = 3,
                           .fullHeight = 2,
                           .textWidth = 3,
-                          .glyphs = { glyphAt(0x21), glyphAt(0x7F) },
-                          .errorGlyph = glyphAt(0),
-                          .loadRank = 2 };
+                          .loadRank = 2,
+                          .glyphs = { glyphAt(0x21), glyphAt(0x7F) } };
 }
 
 /// @return The body of a SoftFontState holding one font whose single glyph is written as given.
@@ -2472,15 +2471,12 @@ std::vector<std::byte> softFontBody(uint8_t position, uint8_t width, uint8_t hei
     font.u8(width);
     font.u8(height);
     font.u8(0);
+    font.u8(0); // load rank
     font.varint(1);
     font.u8(position);
     font.u8(width);
     font.u8(height);
     font.blob(std::vector<std::byte>(bits));
-    font.u8(0);
-    font.u8(width);
-    font.u8(height);
-    font.blob(std::vector<std::byte>((static_cast<std::size_t>(width) + 7) / 8 * height));
     auto body = Writer {};
     body.varint(1);
     body.varint(2);
@@ -2506,42 +2502,6 @@ TEST_CASE("SoftFontState round-trips, and carries each font's load rank", "[vtho
     }));
     // A SoftFontState is a per-session push, so a mirror receives it with the other session events.
     CHECK(asSessionEvent(DecodedPdu { state }).has_value());
-}
-
-TEST_CASE("a font from before the load rank reads as rank 0", "[vthost][pdu][softfont]")
-{
-    // The rank is the font record's last field; a sender from before it ends the record one byte short,
-    // and the record being a blob keeps the fields after it in place.
-    auto font = sampleFont(1);
-    auto record = Writer {};
-    record.u8(font.fontNumber);
-    record.string(font.designator);
-    record.u8(font.charsetSize);
-    record.u8(font.usage);
-    record.u8(font.fullWidth);
-    record.u8(font.fullHeight);
-    record.u8(font.textWidth);
-    record.varint(font.glyphs.size());
-    for (auto const& glyph: font.glyphs)
-    {
-        record.u8(glyph.position);
-        record.u8(glyph.width);
-        record.u8(glyph.height);
-        record.blob(glyph.bits);
-    }
-    record.u8(font.errorGlyph.position);
-    record.u8(font.errorGlyph.width);
-    record.u8(font.errorGlyph.height);
-    record.blob(font.errorGlyph.bits);
-    auto body = Writer {};
-    body.varint(4);
-    body.varint(9);
-    body.varint(1);
-    body.blob(record.view());
-    auto const decoded = decodeAs<SoftFontState>(frameOf(PduType::SoftFontState, body.view()));
-    REQUIRE(decoded.fonts.size() == 1);
-    font.loadRank = 0;
-    CHECK(decoded.fonts.front() == font);
 }
 
 TEST_CASE("a SoftFontState glyph that does not fit its bitmap is malformed", "[vthost][pdu][softfont]")

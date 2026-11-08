@@ -929,7 +929,7 @@ Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepo
     // A designated set never covers SP (0x20) or DEL (0x7F) in GL (DEC STD 070), nor anything beyond
     // ASCII: those take the ordinary path. (GR, where a 96-set would reach 0xA0..0xFF, is not routed to
     // soft fonts: the text paths ask only for the font invoked into GL.)
-    if (sourceCodepoint < 0x21 || sourceCodepoint > 0x7E
+    if (sourceCodepoint < FirstSoftCellPosition || sourceCodepoint > LastSoftCellPosition
         || _terminal->softFonts().font(static_cast<uint8_t>(font)) == nullptr)
         return SoftFontGlyph::Absent;
 
@@ -3031,6 +3031,9 @@ bool Screen::tryDesignateSoftFont(Sequence const& seq)
     if (!request)
         return false;
     auto const fontNumber = _terminal->softFonts().fontForDesignator(request->designator);
+    // Every ESC sequence asks first, and a terminal with no soft font (nearly all) has nothing to name.
+    if (!_terminal->softFonts().hasFonts())
+        return false;
     if (!fontNumber)
         return false;
     _cursor.charsets.selectDRCS(request->table, *fontNumber);

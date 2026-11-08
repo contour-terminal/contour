@@ -101,8 +101,12 @@ change, only defects 1 and 4 fixed and a test that proves it.
   glyphs) join up between cells.
 - **`Pfn` accepts 0–2**, as DEC specifies. Other values ignore the sequence. Contour keeps one definition per
   font number. The current map already allows several.
-- **`Pcn=0` in a 94-character set** follows Windows Terminal: position 2/0, which a 94-set never displays, so
-  the first pattern is effectively unused. Existing tests that rely on `Pcn=0` meaning `!` are corrected.
+- **`Pcn=0` in a 94-character set** loads at position 2/1 (`!`), the same as `Pcn=1`; it does **not** follow
+  Windows Terminal's 2/0. Contour's parser stores an empty parameter as 0, so `;;` and `;0;` are
+  indistinguishable, and an omitted `Pcn` has to mean "the first displayable position" -- a 94-set has no
+  displayable 2/0 to start at. (In a 96-character set `Pcn=0` is 2/0, the position the set does have.)
+  Applications sending `Pcn=0` to mean 2/0 explicitly lose their first pattern's slot alignment; no known
+  font does.
 - **Double-width and double-height lines** (DECDWL/DECDHL) scale the glyph across the doubled cell, as
   `BoxDrawingRenderer` does through its line flags.
 - **Older daemon clients** that do not negotiate the new capability see the underlying characters as plain

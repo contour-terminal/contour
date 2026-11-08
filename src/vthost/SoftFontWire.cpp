@@ -11,8 +11,12 @@ namespace vthost
 
 namespace
 {
-    constexpr auto GlyphPositions = size_t { 96 };
-    constexpr auto MaxDesignatorLength = size_t { 3 }; ///< Up to two intermediates and a final.
+    // The protocol is dependency-free and states these numbers itself; they are the DECDLD ones.
+    static_assert(proto::MaxSoftFonts == vtbackend::SoftFontCount);
+    static_assert(proto::FirstSoftGlyphPosition == vtbackend::FirstSoftGlyphPosition);
+    static_assert(proto::LastSoftGlyphPosition == vtbackend::LastSoftGlyphPosition);
+    static_assert(proto::FirstSoftCellPosition == vtbackend::FirstSoftCellPosition);
+    static_assert(proto::LastSoftCellPosition == vtbackend::LastSoftCellPosition);
 
     /// @return The bytes a row of @p width pixels takes.
     constexpr size_t rowBytesOf(size_t width) noexcept
@@ -48,6 +52,17 @@ namespace
                     & 1U;
         return coverage;
     }
+
+    /// @return The wire error for a font vtbackend::assembleSoftFont refused.
+    constexpr SoftFontWireError wireErrorOf(vtbackend::SoftFontError error) noexcept
+    {
+        switch (error)
+        {
+            case vtbackend::SoftFontError::FontNumber: return SoftFontWireError::FontNumber;
+            case vtbackend::SoftFontError::Designator: return SoftFontWireError::Designator;
+            default: return SoftFontWireError::Glyph;
+        }
+    }
 } // namespace
 
 std::vector<proto::WireSoftFont> softFontsToWire(vtbackend::SoftFontStore const& store)
@@ -73,8 +88,6 @@ std::vector<proto::WireSoftFont> softFontsToWire(vtbackend::SoftFontStore const&
             if (auto const& glyph = font->glyphs[index])
                 wire.glyphs.push_back(
                     glyphToWire(static_cast<uint8_t>(proto::FirstSoftGlyphPosition + index), *glyph));
-        if (font->errorGlyph)
-            wire.errorGlyph = glyphToWire(0, *font->errorGlyph);
     }
     return result;
 }
@@ -89,26 +102,22 @@ std::expected<StagedSoftFonts, SoftFontWireError> softFontsFromWire(
             return std::unexpected(SoftFontWireError::FontNumber);
         if (wire.loadRank >= staged.fonts.size())
             return std::unexpected(SoftFontWireError::LoadRank);
-        if (wire.designator.size() > MaxDesignatorLength)
-            return std::unexpected(SoftFontWireError::Designator);
         if (wire.usage > std::to_underlying(vtbackend::SoftFontUsage::FullCell)
             || wire.charsetSize > std::to_underlying(vtbackend::SoftCharsetSize::Size96))
             return std::unexpected(SoftFontWireError::Enumeration);
 
-        auto glyphs = std::array<std::shared_ptr<vtbackend::SoftGlyph const>, GlyphPositions> {};
-        auto previous = std::optional<uint8_t> {};
+        // The decoder judged the position range and each bitmap's size. The font itself -- designator,
+        // cell, and glyph positions, order and sizes -- is judged by vtbackend::assembleSoftFont, the
+        // validator the state codec uses too.
+        auto glyphs = std::vector<vtbackend::SoftGlyphInput> {};
         for (auto const& glyph: wire.glyphs)
         {
-            // The decoder judged the position range and the bitmap's size; what is left is the font's own
-            // geometry, and an order that names each position once.
-            if (glyph.position < proto::FirstSoftGlyphPosition
-                || glyph.position > proto::LastSoftGlyphPosition || (previous && *previous >= glyph.position)
-                || glyph.width != wire.fullWidth || glyph.height != wire.fullHeight || glyph.width == 0
-                || glyph.height == 0 || glyph.bits.size() != rowBytesOf(glyph.width) * glyph.height)
+            if (glyph.bits.size() != rowBytesOf(glyph.width) * glyph.height)
                 return std::unexpected(SoftFontWireError::Glyph);
-            previous = glyph.position;
-            glyphs[glyph.position - proto::FirstSoftGlyphPosition] =
-                vtbackend::makeSoftGlyph(glyph.width, glyph.height, coverageOf(glyph));
+            glyphs.push_back(vtbackend::SoftGlyphInput { .position = glyph.position,
+                                                         .width = glyph.width,
+                                                         .height = glyph.height,
+                                                         .coverage = coverageOf(glyph) });
         }
 
         auto const declaration = vtbackend::SoftFontDeclaration {
@@ -119,8 +128,10 @@ std::expected<StagedSoftFonts, SoftFontWireError> softFontsFromWire(
         auto const geometry = vtbackend::SoftCellGeometry { .fullWidth = wire.fullWidth,
                                                             .fullHeight = wire.fullHeight,
                                                             .textWidth = wire.textWidth };
-        staged.fonts[wire.fontNumber] = std::make_shared<vtbackend::SoftFont const>(
-            vtbackend::makeSoftFont(declaration, wire.designator, geometry, std::move(glyphs)));
+        auto font = vtbackend::assembleSoftFont(declaration, wire.designator, geometry, glyphs);
+        if (!font)
+            return std::unexpected(wireErrorOf(font.error()));
+        staged.fonts[wire.fontNumber] = std::make_shared<vtbackend::SoftFont const>(std::move(*font));
         staged.loadRanks[wire.fontNumber] = wire.loadRank;
     }
     return staged;

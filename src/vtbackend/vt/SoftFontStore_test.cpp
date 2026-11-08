@@ -145,7 +145,7 @@ TEST_CASE("SoftFontStore: replaceAll installs fonts and bumps the generation", "
 
     auto store = SoftFontStore {};
     auto const before = store.generation();
-    store.replaceAll(source.fonts());
+    store.replaceAll(source.fonts(), source.loadRanks());
     CHECK(store.generation() > before);
     CHECK(store.font(1) == source.font(1));
     CHECK(store.fontForDesignator("B") == 1);

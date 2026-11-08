@@ -8,12 +8,6 @@
 namespace vtbackend
 {
 
-namespace
-{
-    constexpr auto FirstPosition = 0x20;
-    constexpr auto LastPosition = 0x7F;
-} // namespace
-
 std::expected<void, SoftFontError> SoftFontStore::define(DecdldParameters const& parameters,
                                                          std::string_view body)
 {
@@ -63,27 +57,19 @@ std::optional<uint8_t> SoftFontStore::fontForDesignator(std::string_view dscs) c
 
 SoftGlyphResolution SoftFontStore::resolve(SoftGlyphRef ref) const noexcept
 {
-    if (ref.position < FirstPosition || ref.position > LastPosition)
+    if (ref.position < FirstSoftGlyphPosition || ref.position > LastSoftGlyphPosition)
         return { .lookup = SoftGlyphLookup::FontGone, .glyph = nullptr };
     auto const loaded = font(ref.font);
     if (!loaded)
         return { .lookup = SoftGlyphLookup::FontGone, .glyph = nullptr };
-    auto const& glyph = loaded->glyphs[static_cast<size_t>(ref.position - FirstPosition)];
+    auto const& glyph = loaded->glyphs[static_cast<size_t>(ref.position - FirstSoftGlyphPosition)];
     if (!glyph)
         return { .lookup = SoftGlyphLookup::Undefined, .glyph = loaded->errorGlyph };
     return { .lookup = SoftGlyphLookup::Defined, .glyph = glyph };
 }
 
-void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts)
-{
-    _fonts = std::move(fonts);
-    for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
-        _loadedAt[number] = _fonts[number] ? _nextTicket++ : 0;
-    ++_generation;
-}
-
-void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts,
-                               std::array<uint8_t, 3> loadRanks)
+void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, SoftFontCount> fonts,
+                               std::array<uint8_t, SoftFontCount> loadRanks)
 {
     _fonts = std::move(fonts);
     for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
@@ -92,9 +78,9 @@ void SoftFontStore::replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fo
     ++_generation;
 }
 
-std::array<uint8_t, 3> SoftFontStore::loadRanks() const noexcept
+std::array<uint8_t, SoftFontCount> SoftFontStore::loadRanks() const noexcept
 {
-    auto ranks = std::array<uint8_t, 3> {};
+    auto ranks = std::array<uint8_t, SoftFontCount> {};
     for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
         if (_fonts[number])
             ranks[number] = static_cast<uint8_t>(std::ranges::count_if(

@@ -1,19 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/SoftGlyphRef.hpp>
+
 #include <crispy/StrongHash.hpp>
 
 #include <array>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace vtbackend
 {
+
+/// The positions a font defines (0x20..0x7F, so 96 glyphs) and the largest cell it can have. The one place
+/// these numbers live: the decoder, the state codec and the daemon mirror all judge against them.
+inline constexpr uint8_t FirstSoftGlyphPosition = 0x20;
+inline constexpr uint8_t LastSoftGlyphPosition = 0x7F;
+inline constexpr size_t SoftGlyphCount = LastSoftGlyphPosition - FirstSoftGlyphPosition + 1;
+inline constexpr uint8_t MaxSoftCellWidth = 16;
+inline constexpr uint8_t MaxSoftCellHeight = 32;
+inline constexpr size_t MaxSoftDesignatorLength = 3; ///< Up to two intermediates and a final.
 
 /// DECDLD's Pt: what the downloaded glyphs are for.
 enum class SoftFontUsage : uint8_t
@@ -48,6 +61,7 @@ enum class SoftFontError : uint8_t
     CharsetSize,
     TooLarge,
     Designator,
+    Glyph, ///< A glyph out of its set, out of order, or not the font's cell size.
 };
 
 /// @return A short phrase naming why a DECDLD was refused, for logs.
@@ -127,8 +141,9 @@ struct SoftFont
     SoftFontDeclaration declaration;
     std::string designator; ///< Dscs: 0-2 intermediates followed by one final.
     SoftCellGeometry geometry;
-    std::array<std::shared_ptr<SoftGlyph const>, 96> glyphs; ///< Index = position - 0x20; null = undefined.
-    std::shared_ptr<SoftGlyph const> errorGlyph;             ///< Reverse '?', at the geometry's size.
+    std::array<std::shared_ptr<SoftGlyph const>, SoftGlyphCount>
+        glyphs;                                  ///< Index = position - 0x20; null = undefined.
+    std::shared_ptr<SoftGlyph const> errorGlyph; ///< Reverse '?', at the geometry's size.
 };
 
 /// Makes a glyph and stamps its content-hash id. The one factory the decoder, the state codec and the
@@ -137,12 +152,37 @@ struct SoftFont
                                                              uint8_t height,
                                                              std::vector<uint8_t> coverage);
 
-/// Assembles a font from already-built glyphs (codec and mirror path; no sixel decoding), building the
-/// error glyph from the geometry.
+/// Assembles a font from already-built glyphs, building the error glyph from the geometry. Trusts its
+/// arguments; a font that crossed a trust boundary goes through assembleSoftFont.
 [[nodiscard]] SoftFont makeSoftFont(SoftFontDeclaration const& declaration,
                                     std::string designator,
                                     SoftCellGeometry geometry,
-                                    std::array<std::shared_ptr<SoftGlyph const>, 96> glyphs);
+                                    std::array<std::shared_ptr<SoftGlyph const>, SoftGlyphCount> glyphs);
+
+/// A glyph as a codec carries it: a position and a one-byte-per-pixel bitmap, not yet checked.
+struct SoftGlyphInput
+{
+    uint8_t position = 0;
+    uint8_t width = 0;
+    uint8_t height = 0;
+    std::vector<uint8_t> coverage; ///< Row-major, top row first, each 0 or 1.
+};
+
+/// The one validator of a font that comes from outside the DECDLD parser (state codec, daemon mirror).
+///
+/// Judges the font number, the designator's length, the cell (1..MaxSoftCellWidth by 1..MaxSoftCellHeight,
+/// the text clipped to no more than the cell), and every glyph: a position in the set, named once and in
+/// ascending order, of exactly the cell's size, with one coverage byte per pixel. A font it accepts cannot
+/// make a later Pe=1 merge or a render index out of range.
+/// @param declaration The font's header.
+/// @param designator The Dscs.
+/// @param geometry The font's cell.
+/// @param glyphs The defined glyphs, ascending by position.
+/// @return The font, with identities stamped and the error glyph built, or why it is refused.
+[[nodiscard]] std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration const& declaration,
+                                                                      std::string designator,
+                                                                      SoftCellGeometry geometry,
+                                                                      std::span<SoftGlyphInput> glyphs);
 
 /// Builds a font from a DECDLD body (Dscs followed by sixel data).
 /// @param declaration The validated header.

@@ -30,7 +30,7 @@ enum class SoftFontWireError : uint8_t
     LoadRank,    ///< A load rank above the last font's.
     Designator,  ///< A designator longer than two intermediates and a final.
     Enumeration, ///< A usage or charset size no enumerator names.
-    Glyph,       ///< A glyph out of its set, out of order, or not the font's cell size.
+    Glyph, ///< A cell outside 1..16 x 1..32, or a glyph out of its set, out of order, or not the cell's size.
 };
 
 /// Captures a store's fonts for the wire.
@@ -41,8 +41,9 @@ enum class SoftFontWireError : uint8_t
 /// The fonts of a wire set, built and checked aside, for the caller to put in place whole.
 struct StagedSoftFonts
 {
-    std::array<std::shared_ptr<vtbackend::SoftFont const>, 3> fonts {}; ///< By font number; null = none.
-    std::array<uint8_t, 3> loadRanks {};                                ///< By font number.
+    std::array<std::shared_ptr<vtbackend::SoftFont const>, vtbackend::SoftFontCount>
+        fonts {};                                               ///< By font number; null = none.
+    std::array<uint8_t, vtbackend::SoftFontCount> loadRanks {}; ///< By font number.
 };
 
 /// Rebuilds the fonts a peer sent.

@@ -5,6 +5,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -47,7 +48,9 @@ namespace
 TEST_CASE("decodeDecdld: Pcn is a position, not a code point", "[SoftFont]")
 {
     CHECK(decodeDecdld({ .pfn = 0, .pcn = 1 }).value().startPosition == 0x21);
-    CHECK(decodeDecdld({ .pcn = 0 }).value().startPosition == 0x21); // absent in a 94-set means 1
+    // Pcn=0 and an absent Pcn are the same to the parser, so a 94-set loads both at 0x21, not at 0x20
+    // (which it never displays).
+    CHECK(decodeDecdld({ .pcn = 0 }).value().startPosition == 0x21);
     CHECK(decodeDecdld({ .pcn = 0, .pcss = 1 }).value().startPosition == 0x20);
     CHECK(decodeDecdld({ .pcn = 95 }).value().startPosition == 0x7F);
     CHECK(decodeDecdld({ .pcn = 96 }).error() == SoftFontError::TooLarge);
@@ -334,4 +337,63 @@ TEST_CASE("buildSoftFont: a flood of character separators stops at position 0x7F
         buildSoftFont(declaration, "B" + repeat(sixel({ 0 }), 15) + repeat(';', 100000), nullptr).value();
     CHECK(font.glyphs[1] != nullptr);
     CHECK(std::ranges::count(font.glyphs, nullptr) == 1);
+}
+
+namespace
+{
+/// @return A glyph of @p width by @p height at @p position, all pixels set.
+SoftGlyphInput inputGlyph(uint8_t position, uint8_t width, uint8_t height)
+{
+    return SoftGlyphInput { .position = position,
+                            .width = width,
+                            .height = height,
+                            .coverage = std::vector<uint8_t>(size_t { width } * height, uint8_t { 1 }) };
+}
+
+/// @return Why assembleSoftFont refused a font of @p geometry with @p glyphs, or nullopt if it took it.
+std::optional<SoftFontError> assembleError(SoftCellGeometry geometry,
+                                           std::vector<SoftGlyphInput> glyphs,
+                                           std::string designator = " A")
+{
+    auto const result = assembleSoftFont(fullCellDeclaration(), std::move(designator), geometry, glyphs);
+    return result ? std::nullopt : std::optional { result.error() };
+}
+} // namespace
+
+TEST_CASE("assembleSoftFont: accepts a font and stamps identities", "[SoftFont]")
+{
+    auto glyphs = std::vector { inputGlyph(0x20, 15, 12), inputGlyph(0x7F, 15, 12) };
+    auto const font = assembleSoftFont(fullCellDeclaration(), " A", { 15, 12, 0 }, glyphs);
+    REQUIRE(font.has_value());
+    CHECK(font->glyphs[0] != nullptr);
+    CHECK(font->glyphs[95] != nullptr);
+    CHECK(std::ranges::count(font->glyphs, nullptr) == 94);
+    CHECK(font->errorGlyph != nullptr);
+    // The largest cell and a text glyph exactly as wide as the cell are fine.
+    CHECK(!assembleError({ 16, 32, 16 }, { inputGlyph(0x21, 16, 32) }));
+}
+
+TEST_CASE("assembleSoftFont: refuses what no DECDLD could have produced", "[SoftFont]")
+{
+    CHECK(assembleError({ 17, 12, 0 }, {}) == SoftFontError::CellMatrix);
+    CHECK(assembleError({ 15, 33, 0 }, {}) == SoftFontError::CellMatrix);
+    CHECK(assembleError({ 0, 12, 0 }, {}) == SoftFontError::CellMatrix);
+    CHECK(assembleError({ 15, 0, 0 }, {}) == SoftFontError::CellMatrix);
+    CHECK(assembleError({ 10, 12, 11 }, {}) == SoftFontError::CellMatrix);
+    CHECK(assembleError({ 15, 12, 0 }, {}, " @AB") == SoftFontError::Designator);
+    CHECK(assembleError({ 15, 12, 0 }, { inputGlyph(0x1F, 15, 12) }) == SoftFontError::Glyph);
+    CHECK(assembleError({ 15, 12, 0 }, { inputGlyph(0x80, 15, 12) }) == SoftFontError::Glyph);
+    CHECK(assembleError({ 15, 12, 0 }, { inputGlyph(0x30, 15, 12), inputGlyph(0x30, 15, 12) })
+          == SoftFontError::Glyph);
+    CHECK(assembleError({ 15, 12, 0 }, { inputGlyph(0x31, 15, 12), inputGlyph(0x30, 15, 12) })
+          == SoftFontError::Glyph);
+    CHECK(assembleError({ 15, 12, 0 }, { inputGlyph(0x30, 14, 12) }) == SoftFontError::Glyph);
+    auto truncated = inputGlyph(0x30, 15, 12);
+    truncated.coverage.pop_back();
+    CHECK(assembleError({ 15, 12, 0 }, { truncated }) == SoftFontError::Glyph);
+
+    auto glyphs = std::vector<SoftGlyphInput> {};
+    auto declaration = fullCellDeclaration();
+    declaration.fontNumber = 3;
+    CHECK(assembleSoftFont(declaration, " A", { 15, 12, 0 }, glyphs).error() == SoftFontError::FontNumber);
 }

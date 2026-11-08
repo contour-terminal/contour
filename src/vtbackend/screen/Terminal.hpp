@@ -5923,8 +5923,8 @@ class Terminal: public IStatusLinePublishTarget
     void commitRestore(TerminalState const& state,
                        RestoredImageTable const& images,
                        std::span<StagedScreen> screens,
-                       std::array<std::shared_ptr<SoftFont const>, 3> softFonts,
-                       std::array<uint8_t, 3> softFontLoadRanks);
+                       std::array<std::shared_ptr<SoftFont const>, SoftFontCount> softFonts,
+                       std::array<uint8_t, SoftFontCount> softFontLoadRanks);
 
     /// Tells the listener every fact it keeps a copy of, as a restore replaced them all. Defined in
     /// state/TerminalState.cpp.

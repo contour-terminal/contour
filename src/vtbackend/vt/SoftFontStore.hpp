@@ -4,6 +4,7 @@
 #include <vtbackend/core/SoftGlyphRef.hpp>
 #include <vtbackend/vt/SoftFont.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -43,38 +44,44 @@ class SoftFontStore
     /// Drops every font (RIS).
     void clear() noexcept;
 
+    /// @return Whether any font is loaded.
+    [[nodiscard]] bool hasFonts() const noexcept
+    {
+        return std::ranges::any_of(_fonts, [](auto const& font) { return font != nullptr; });
+    }
+
     /// @return The font loaded under @p number, or null.
     [[nodiscard]] std::shared_ptr<SoftFont const> font(uint8_t number) const noexcept;
 
     /// @return The font number whose designator is @p dscs; the most recently loaded wins.
     [[nodiscard]] std::optional<uint8_t> fontForDesignator(std::string_view dscs) const noexcept;
 
-    /// Looks a glyph up. An out-of-range ref (font > 2, position outside 0x20..0x7F) is FontGone.
+    /// Looks a glyph up. An out-of-range ref (font > 2, position outside
+    /// FirstSoftGlyphPosition..LastSoftGlyphPosition) is FontGone.
     [[nodiscard]] SoftGlyphResolution resolve(SoftGlyphRef ref) const noexcept;
 
     /// @return A counter that increases on every change.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
 
-    /// Replaces every font (daemon mirror); index order stands in for load order.
-    void replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts);
-
-    /// Replaces every font (state codec), keeping the order they were loaded in, which decides which of two
-    /// fonts sharing a designator fontForDesignator() answers.
+    /// Replaces every font (state codec and daemon mirror), keeping the order they were loaded in, which
+    /// decides which of two fonts sharing a designator fontForDesignator() answers.
     /// @param fonts     The fonts, by number.
     /// @param loadRanks Per number, the font's place in load order, 0 = loaded first. Unused for a null font.
-    void replaceAll(std::array<std::shared_ptr<SoftFont const>, 3> fonts, std::array<uint8_t, 3> loadRanks);
+    void replaceAll(std::array<std::shared_ptr<SoftFont const>, SoftFontCount> fonts,
+                    std::array<uint8_t, SoftFontCount> loadRanks);
 
     /// @return Per number, the font's place in load order, 0 = loaded first; 0 for an absent font.
-    [[nodiscard]] std::array<uint8_t, 3> loadRanks() const noexcept;
+    [[nodiscard]] std::array<uint8_t, SoftFontCount> loadRanks() const noexcept;
 
-    [[nodiscard]] std::array<std::shared_ptr<SoftFont const>, 3> const& fonts() const noexcept
+    /// @return The loaded fonts by font number; null where none is loaded.
+    [[nodiscard]] std::array<std::shared_ptr<SoftFont const>, SoftFontCount> const& fonts() const noexcept
     {
         return _fonts;
     }
 
   private:
-    std::array<std::shared_ptr<SoftFont const>, 3> _fonts {};
-    std::array<uint64_t, 3> _loadedAt {}; ///< Ticket of the load that produced each font.
+    std::array<std::shared_ptr<SoftFont const>, SoftFontCount> _fonts {};
+    std::array<uint64_t, SoftFontCount> _loadedAt {}; ///< Ticket of the load that produced each font.
     uint64_t _nextTicket = 1;
     uint64_t _generation = 0;
 };

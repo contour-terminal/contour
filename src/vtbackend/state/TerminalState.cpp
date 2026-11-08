@@ -283,11 +283,6 @@ std::expected<void, StateDecodeError> HyperlinkStorage::restoreState(HyperlinkSt
 
 namespace
 {
-    constexpr auto FirstSoftPosition = uint8_t { 0x20 };
-    constexpr auto SoftFontCount = size_t { 3 };
-    constexpr auto SoftFontGlyphCount = size_t { 96 };
-    constexpr auto MaxDesignatorLength = size_t { 3 }; ///< Up to two intermediates and a final.
-
     /// @return @p coverage (one byte per pixel, 0 or 1) at one bit per pixel, least significant bit first.
     std::vector<uint8_t> packCoverage(std::span<uint8_t const> coverage)
     {
@@ -337,7 +332,7 @@ namespace
             for (auto const index: std::views::iota(size_t { 0 }, font->glyphs.size()))
                 if (auto const& glyph = font->glyphs[index])
                     out.glyphs.push_back(
-                        SoftGlyphState { .position = static_cast<uint8_t>(FirstSoftPosition + index),
+                        SoftGlyphState { .position = static_cast<uint8_t>(FirstSoftGlyphPosition + index),
                                          .width = glyph->width,
                                          .height = glyph->height,
                                          .packedCoverage = packCoverage(glyph->coverage) });
@@ -359,30 +354,28 @@ namespace
         auto staged = StagedSoftFonts {};
         for (auto const& state: states)
         {
-            if (state.number >= SoftFontCount || staged.fonts[state.number]
-                || state.designator.size() > MaxDesignatorLength || state.loadRank >= SoftFontCount
+            // What is judged here is the encoding: the numbers an enumeration or a rank can take, and a
+            // bitmap that is exactly its pixels. The font itself -- number, designator, cell, glyph
+            // positions and sizes -- is judged by assembleSoftFont, as the daemon mirror's fonts are.
+            if (state.number >= SoftFontCount || staged.fonts[state.number] || state.loadRank >= SoftFontCount
                 || state.erase > static_cast<uint8_t>(SoftFontErase::AllRenditions)
                 || state.sizeSource > static_cast<uint8_t>(SoftFontSizeSource::Matrix)
                 || state.usage > static_cast<uint8_t>(SoftFontUsage::FullCell)
                 || state.charsetSize > static_cast<uint8_t>(SoftCharsetSize::Size96)
-                || state.glyphs.size() > SoftFontGlyphCount)
+                || state.glyphs.size() > SoftGlyphCount)
                 return StateFailure { StateDecodeError::InvalidValue };
 
-            auto glyphs = std::array<std::shared_ptr<SoftGlyph const>, 96> {};
-            auto previous = std::optional<uint8_t> {};
+            auto glyphs = std::vector<SoftGlyphInput> {};
             for (auto const& glyph: state.glyphs)
             {
                 auto const pixels = size_t { glyph.width } * glyph.height;
-                if (glyph.position < FirstSoftPosition || glyph.position >= FirstSoftPosition + glyphs.size()
-                    || (previous && *previous >= glyph.position) || glyph.width != state.fullWidth
-                    || glyph.height != state.fullHeight
-                    || pixels == 0
-                    // The packed bits are exactly the pixels, padded to a byte.
-                    || glyph.packedCoverage.size() != (pixels + 7) / 8)
+                // The packed bits are exactly the pixels, padded to a byte.
+                if (glyph.packedCoverage.size() != (pixels + 7) / 8)
                     return StateFailure { StateDecodeError::InvalidValue };
-                previous = glyph.position;
-                glyphs[glyph.position - FirstSoftPosition] =
-                    makeSoftGlyph(glyph.width, glyph.height, unpackCoverage(glyph.packedCoverage, pixels));
+                glyphs.push_back(SoftGlyphInput { .position = glyph.position,
+                                                  .width = glyph.width,
+                                                  .height = glyph.height,
+                                                  .coverage = unpackCoverage(glyph.packedCoverage, pixels) });
             }
 
             auto const declaration =
@@ -399,8 +392,10 @@ namespace
             auto const geometry = SoftCellGeometry { .fullWidth = state.fullWidth,
                                                      .fullHeight = state.fullHeight,
                                                      .textWidth = state.textWidth };
-            staged.fonts[state.number] = std::make_shared<SoftFont const>(
-                makeSoftFont(declaration, state.designator, geometry, std::move(glyphs)));
+            auto font = assembleSoftFont(declaration, state.designator, geometry, glyphs);
+            if (!font)
+                return StateFailure { StateDecodeError::InvalidValue };
+            staged.fonts[state.number] = std::make_shared<SoftFont const>(std::move(*font));
             staged.loadRanks[state.number] = state.loadRank;
         }
         return staged;

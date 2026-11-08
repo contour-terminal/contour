@@ -133,6 +133,17 @@ TEST_CASE("a wire set that DECDLD could not have produced is refused", "[vthost]
     font.glyphs.front().bits.clear();
     CHECK(refused(font, Error::Glyph));
     font = good;
+    font.glyphs.clear();
+    for (auto const [width, height]: { std::pair<uint8_t, uint8_t> { 17, 10 }, { 10, 33 }, { 0, 0 } })
+    {
+        font.fullWidth = width;
+        font.fullHeight = height;
+        CHECK(refused(font, Error::Glyph)); // a cell outside 1..16 x 1..32, even with no glyph to judge
+    }
+    font = good;
+    font.textWidth = static_cast<uint8_t>(font.fullWidth + 1);
+    CHECK(refused(font, Error::Glyph));
+    font = good;
     font.glyphs.front().bits.pop_back(); // a hand-built glyph the decoder never saw
     CHECK(refused(font, Error::Glyph));
 

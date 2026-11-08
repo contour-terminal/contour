@@ -14,11 +14,11 @@ namespace vtbackend
 namespace
 {
     /// The largest cell a soft font can have, and the scratch every glyph is first drawn into.
-    constexpr auto MaxWidth = 16;
-    constexpr auto MaxHeight = 32;
+    constexpr auto MaxWidth = int { MaxSoftCellWidth };
+    constexpr auto MaxHeight = int { MaxSoftCellHeight };
 
-    constexpr auto FirstPosition = 0x20;
-    constexpr auto LastPosition = 0x7F;
+    constexpr auto FirstPosition = int { FirstSoftGlyphPosition };
+    constexpr auto LastPosition = int { LastSoftGlyphPosition };
 
     // Pe, Pt and Pcss are small enumerations: the raw value is the enumerator.
     template <typename Enum>
@@ -192,6 +192,7 @@ std::expected<SoftFontDeclaration, SoftFontError> decodeDecdld(DecdldParameters 
     auto const erase = toEnum<SoftFontErase>(p.pe, 2);
     if (!erase)
         return std::unexpected(SoftFontError::EraseControl);
+        case SoftFontError::Glyph: return "invalid glyph";
     declaration.erase = *erase;
 
     auto const format = std::ranges::find(PageFormats, p.pss, &PageFormat::pss);
@@ -307,7 +308,7 @@ std::shared_ptr<SoftGlyph const> makeSoftGlyph(uint8_t width, uint8_t height, st
 SoftFont makeSoftFont(SoftFontDeclaration const& declaration,
                       std::string designator,
                       SoftCellGeometry geometry,
-                      std::array<std::shared_ptr<SoftGlyph const>, 96> glyphs)
+                      std::array<std::shared_ptr<SoftGlyph const>, SoftGlyphCount> glyphs)
 {
     return SoftFont { .declaration = declaration,
                       .designator = std::move(designator),
@@ -331,6 +332,35 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
             else if (ch >= 0x30 && ch <= 0x7E)
             {
                 designator.push_back(static_cast<char>(ch));
+std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration const& declaration,
+                                                        std::string designator,
+                                                        SoftCellGeometry geometry,
+                                                        std::span<SoftGlyphInput> glyphs)
+{
+    if (declaration.fontNumber >= SoftFontCount)
+        return std::unexpected(SoftFontError::FontNumber);
+    if (designator.size() > MaxSoftDesignatorLength)
+        return std::unexpected(SoftFontError::Designator);
+    if (geometry.fullWidth < 1 || geometry.fullWidth > MaxSoftCellWidth || geometry.fullHeight < 1
+        || geometry.fullHeight > MaxSoftCellHeight || geometry.textWidth > geometry.fullWidth)
+        return std::unexpected(SoftFontError::CellMatrix);
+
+    auto placed = std::array<std::shared_ptr<SoftGlyph const>, SoftGlyphCount> {};
+    auto previous = std::optional<uint8_t> {};
+    for (auto& glyph: glyphs)
+    {
+        if (glyph.position < FirstSoftGlyphPosition || glyph.position > LastSoftGlyphPosition
+            || (previous && *previous >= glyph.position) || glyph.width != geometry.fullWidth
+            || glyph.height != geometry.fullHeight
+            || glyph.coverage.size() != size_t { glyph.width } * glyph.height)
+            return std::unexpected(SoftFontError::Glyph);
+        previous = glyph.position;
+        placed[glyph.position - FirstSoftGlyphPosition] =
+            makeSoftGlyph(glyph.width, glyph.height, std::move(glyph.coverage));
+    }
+    return makeSoftFont(declaration, std::move(designator), geometry, std::move(placed));
+}
+
                 return body.substr(index + 1);
             }
             if (designator.size() > 2)
@@ -408,7 +438,7 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
                         && sameFontKind(previous->declaration, declaration);
     auto const geometry = merges ? previous->geometry
                                  : detectTargetCell(declaration, clampByte(usedWidth), clampByte(usedHeight));
-    auto glyphs = merges ? previous->glyphs : std::array<std::shared_ptr<SoftGlyph const>, 96> {};
+    auto glyphs = merges ? previous->glyphs : std::array<std::shared_ptr<SoftGlyph const>, SoftGlyphCount> {};
 
     // Clip text to its width and centre it in the cell.
     auto const textWidth =

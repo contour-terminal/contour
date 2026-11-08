@@ -588,9 +588,6 @@ namespace
                                                                       uint32_t columns,
                                                                       LineSoA& storage)
     {
-        constexpr auto LastFont = uint64_t { 2 };
-        constexpr auto FirstPosition = uint64_t { 0x20 };
-        constexpr auto LastPosition = uint64_t { 0x7F };
         auto& map = storage.softGlyphs.ensure();
         auto in = StateReader::ofPayload(payload);
         auto previous = std::optional<uint64_t> {};
@@ -605,8 +602,9 @@ namespace
             auto const position = in.varint();
             if (!position)
                 return StateFailure { position.error() };
-            if (*column >= uint64_t { columns } || (previous && *previous >= *column) || *font > LastFont
-                || *position < FirstPosition || *position > LastPosition)
+            if (*column >= uint64_t { columns } || (previous && *previous >= *column)
+                || *font >= SoftFontCount || *position < FirstSoftCellPosition
+                || *position > LastSoftCellPosition)
                 return StateFailure { StateDecodeError::InvalidValue };
             previous = *column;
             map.emplace(static_cast<uint16_t>(*column),
@@ -735,6 +733,12 @@ std::expected<Line, StateDecodeError> Line::decodeState(StateReader& in, LineDec
     if (*softGlyphs)
         if (auto const done = getSoftGlyphs(**softGlyphs, scalars->columns, storage); !done)
             return StateFailure { done.error() };
+
+    // Side tables are only ever cleared on a Spanning line, so a line that holds an entry is one whatever
+    // shape the state claimed.
+    if ((storage.imageFragments && !storage.imageFragments->empty())
+        || (storage.softGlyphs && !storage.softGlyphs->empty()))
+        storage.shape = LineShape::Spanning;
     return line;
 }
 // }}}

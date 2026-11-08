@@ -1061,7 +1061,7 @@ struct SessionInputEcho
 /// leftmost, each row padded to a whole byte.
 struct WireSoftGlyph
 {
-    uint8_t position = 0; ///< 0x20..0x7F in the set; unused (0) for an error glyph.
+    uint8_t position = 0; ///< 0x20..0x7F in the set.
     uint8_t width = 0;
     uint8_t height = 0;
     std::vector<std::byte> bits = {}; ///< `height * ceil(width / 8)` bytes, which the decoder checks.
@@ -1069,8 +1069,9 @@ struct WireSoftGlyph
 };
 
 /// One soft font on the wire. Nothing about identity travels: a glyph's atlas id is a hash of its content
-/// and the receiver derives it, and the declaration's parameters that only a DECDLD sender needs
-/// (the erase control, the page geometry) are not the mirror's to know.
+/// and the receiver derives it, as it does the error glyph of an undefined position, and the declaration's
+/// parameters that only a DECDLD sender needs (the erase control, the page geometry) are not the mirror's to
+/// know.
 struct WireSoftFont
 {
     uint8_t fontNumber = 0;      ///< DECDLD Pfn, 0..2.
@@ -1079,14 +1080,11 @@ struct WireSoftFont
     uint8_t usage = 0;           ///< vtbackend::SoftFontUsage: 0 text, 1 full cell.
     uint8_t fullWidth = 0;       ///< The cell the glyphs fill, in pixels.
     uint8_t fullHeight = 0;
-    uint8_t textWidth = 0;                  ///< Pixels of the cell a text glyph occupies; 0 = unclipped.
-    std::vector<WireSoftGlyph> glyphs = {}; ///< The defined glyphs, ascending by position.
-    WireSoftGlyph
-        errorGlyph = {}; ///< What an undefined position shows. Informational: a mirror builds its own.
+    uint8_t textWidth = 0; ///< Pixels of the cell a text glyph occupies; 0 = unclipped.
     /// Where the font sits in load order, 0 the first loaded: of two fonts sharing a designator the later
-    /// loaded is the one a designation selects. Appended by a later version, so an older record ends before
-    /// it.
+    /// loaded is the one a designation selects.
     uint8_t loadRank = 0;
+    std::vector<WireSoftGlyph> glyphs = {}; ///< The defined glyphs, ascending by position.
     bool operator==(WireSoftFont const&) const = default;
 };
 
