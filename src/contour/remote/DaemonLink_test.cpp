@@ -483,6 +483,60 @@ TEST_CASE("ContourGuiApp: a link that ended is destroyed once its panes are gone
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }
 
+TEST_CASE("Two links in one process: windows on two daemons stay apart", "[attach][link][integration]")
+{
+    using vthost::client::ConnectionState;
+    auto daemonA = DaemonFixture {};
+    auto daemonB = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemonA, 1);
+    std::ignore = seedWorkspaces(daemonB, 1);
+    auto timelineA = TestTimeline {};
+    auto timelineB = TestTimeline {};
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto& linkA = app.app().startDaemonLink(linkConfig(daemonA.endpoint(), timelineA, "alpha"));
+    auto& linkB = app.app().startDaemonLink(linkConfig(daemonB.endpoint(), timelineB, "beta"));
+    auto const windowA = contour::test::ScopedController { manager };
+    auto const windowB = contour::test::ScopedController { manager };
+    REQUIRE(linkA.awaitAttached(10s).has_value());
+    REQUIRE(linkB.awaitAttached(10s).has_value());
+    REQUIRE(linkA.bindPendingWindow(*windowA.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(linkB.bindPendingWindow(*windowB.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(waitUntil([&] {
+        return sessionsOf(manager, windowA.id).size() == 1 && sessionsOf(manager, windowB.id).size() == 1;
+    }));
+    CHECK(manager.hostLabelOf(windowA.id) == "alpha");
+    CHECK(manager.hostLabelOf(windowB.id) == "beta");
+
+    // What is typed into a window's pane reaches its own daemon only.
+    auto* const paneA = sessionsOf(manager, windowA.id).front();
+    auto* const paneB = sessionsOf(manager, windowB.id).front();
+    auto const remoteA = daemonA.onDaemon([&] { return daemonA.host->sessionIds().front(); });
+    auto const remoteB = daemonB.onDaemon([&] { return daemonB.host->sessionIds().front(); });
+    std::ignore = paneA->terminal().device().write("typed-in-a");
+    std::ignore = paneB->terminal().device().write("typed-in-b");
+    REQUIRE(waitUntil([&] { return daemonA.ptyInput(remoteA).contains("typed-in-a"); }));
+    REQUIRE(waitUntil([&] { return daemonB.ptyInput(remoteB).contains("typed-in-b"); }));
+    CHECK_FALSE(daemonA.ptyInput(remoteA).contains("typed-in-b"));
+    CHECK_FALSE(daemonB.ptyInput(remoteB).contains("typed-in-a"));
+
+    // A split in window B makes a pane on daemon B, and in window B only.
+    manager.splitActivePane(/*vertical*/ false, paneB);
+    REQUIRE(daemonB.waitUntilOnDaemon([&] { return daemonB.host->sessionIds().size() == 2; }));
+    REQUIRE(waitUntil([&] { return sessionsOf(manager, windowB.id).size() == 2; }));
+    CHECK(daemonA.onDaemon([&] { return daemonA.host->sessionIds().size(); }) == 1);
+    CHECK(sessionsOf(manager, windowA.id).size() == 1);
+
+    // Daemon A goes away: window A seeks it again, window B stays connected and keeps typing.
+    daemonA.refuseConnections();
+    REQUIRE(waitUntil([&] { return manager.hostConnection(windowA.id) != ConnectionState::Connected; }));
+    CHECK(manager.hostConnection(windowB.id) == ConnectionState::Connected);
+    CHECK(linkB.liveController()->connectionState() == ConnectionState::Connected);
+    std::ignore = paneB->terminal().device().write("still-b");
+    CHECK(waitUntil([&] { return daemonB.ptyInput(remoteB).contains("still-b"); }));
+    daemonA.serveAgain();
+}
+
 TEST_CASE("the attach boot window adopts the primary daemon workspace", "[contour][app][attach]")
 {
     using contour::remote::primaryDaemonWorkspaceToAdopt;
