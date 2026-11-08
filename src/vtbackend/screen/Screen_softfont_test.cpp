@@ -504,3 +504,42 @@ TEST_CASE("a wide character written over soft cells leaves no soft glyph behind"
     CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
     CHECK_FALSE(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph().has_value());
 }
+
+TEST_CASE("insert mode shifts the line right for soft text", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("ABC\033[1;1H\033[4h\033(B!");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x21 });
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).codepoint(0) == U'A');
+    CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoint(0) == U'B');
+    CHECK(screen.at(LineOffset(0), ColumnOffset(3)).codepoint(0) == U'C');
+}
+
+TEST_CASE("soft text over the second half of a wide character erases the whole character",
+          "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("世\033[1;2H\033(B!");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoint(0) != U'世');
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 1);
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).softGlyph()
+          == SoftGlyphRef { .font = 0, .position = 0x21 });
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 1);
+}
+
+TEST_CASE("soft text over a scaled block erases the whole block", "[screen][softfont]")
+{
+    auto mock = MockTerm { OneLine };
+    mock.writeToScreen(sevenBitFont());
+    mock.writeToScreen("\033]66;s=2;X\033\\\033[1;1H\033(B!");
+    auto& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).softGlyph().has_value());
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).codepoint(0) != U'X');
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).width() == 1);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoint(0) == 0);
+}

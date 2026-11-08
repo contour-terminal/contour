@@ -935,15 +935,14 @@ Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepo
 
     // The cell keeps the character as received, so copy, search and the accessibility tree see what the
     // application wrote; the reference makes the renderer draw the font's glyph instead. An undefined
-    // position is still a reference: the renderer shows the font's error glyph.
+    // position is still a reference: the renderer shows the font's error glyph. It goes through the
+    // ordinary write, so insert mode and the overlap of wide and scaled cells are handled alike.
+    writeCharToCurrentAndAdvance(sourceCodepoint);
     {
-        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
-        cell.write(_cursor.graphicsRendition, sourceCodepoint, 1, _cursor.hyperlink);
+        // The write left the cell at _lastCursorPosition, and the cursor already past it.
+        auto cell = useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
         cell.setSoftGlyph(SoftGlyphRef { .font = static_cast<uint8_t>(font),
                                          .position = static_cast<uint8_t>(sourceCodepoint) });
-        _lastCursorPosition = _cursor.position;
-        advanceCursorAfterWrite(ColumnCount(1));
-        _terminal->markCellDirty(_lastCursorPosition);
     }
     (void) _cursor.charsets.map(sourceCodepoint); // Consume the single shift, now that a glyph used it.
     return SoftFontGlyph::Written;

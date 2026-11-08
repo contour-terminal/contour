@@ -1747,6 +1747,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// continuation, keeping the fold ranges, the user-mark index and the command blocks in step.
     void shedHeadOnlyMarks() noexcept;
 
+    /// Writes @p codepoint at the cursor and advances it, making room first in insert mode and clearing
+    /// whatever wide or scaled cell the write lands in.
+    /// @param codepoint The character to write.
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
 
     /// What becomes of a character about to be written at the cursor.
