@@ -564,7 +564,8 @@ TEST_CASE("a configuration generated on one platform binds no chord twice on ano
                 INFO("edition " << token << ", written on " << static_cast<int>(from) << ", read on "
                                 << static_cast<int>(to));
                 auto const mappings = carriedMappings(defaultInputMappings(edition, from), from, to);
-                CHECK(describe(mappings) == std::string {});
+                INFO(describe(mappings));
+                CHECK(findBindingCollisions(mappings).empty());
             }
 }
 
@@ -574,10 +575,12 @@ TEST_CASE("portablePrimarySpellings respells whichever row of a folding pair hol
     // Written on a Mac, Command+C (Primary) and a literal Ctrl+Shift+C both read back as Ctrl+Shift+C on the
     // desktop. The later row has no Primary to give up, so the earlier one is written literally.
     auto const rows = std::vector<CharInputMapping> {
-        CharInputMapping { .modifiers = Modifiers { Modifier::Super },
+        CharInputMapping { .modes = {},
+                           .modifiers = Modifiers { Modifier::Super },
                            .input = U'C',
                            .binding = { actions::CopySelection {} } },
-        CharInputMapping { .modifiers = Modifiers { Modifier::Control, Modifier::Shift },
+        CharInputMapping { .modes = {},
+                           .modifiers = Modifiers { Modifier::Control, Modifier::Shift },
                            .input = U'C',
                            .binding = { actions::ToggleFullscreen {} } },
     };

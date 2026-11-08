@@ -27,9 +27,10 @@ namespace
 /// A command deliberately bound on one platform only.
 struct Exemption
 {
-    std::string_view action;      ///< The action's name.
-    KeyboardPlatformKind boundOn; ///< The one platform that binds it (Xkb stands for Linux and Windows).
-    std::string_view reason;      ///< Why the other platform does not.
+    std::string_view action {}; ///< The action's name.
+    KeyboardPlatformKind boundOn =
+        KeyboardPlatformKind::Xkb; ///< The one platform that binds it (Xkb stands for Linux and Windows).
+    std::string_view reason {};    ///< Why the other platform does not.
 };
 
 /// The commands bound on one platform only (@see
