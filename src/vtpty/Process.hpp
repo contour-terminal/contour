@@ -3,6 +3,7 @@
 
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/Pty.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -187,6 +188,13 @@ class [[nodiscard]] Process: public Pty
 
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();
+
+    /// Where a spawn from this process runs its program, and so where the program's name is resolved:
+    /// programHostFor() for the sandbox this process runs in. The one rule start() spawns by, for any
+    /// caller that must answer the same question beforehand.
+    /// @param escape The profile's `escape_sandbox`.
+    /// @return The host the program runs on.
+    [[nodiscard]] static ProgramHost programHost(SandboxEscape escape);
 
     // A Process has a child only once start() has spawned one. Before that, and for good when start()
     // failed before spawning, there is nothing to ask about, wait for or signal, and the calls below

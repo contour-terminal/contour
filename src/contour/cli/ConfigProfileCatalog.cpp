@@ -34,8 +34,7 @@ vthost::ResolvedProfile ConfigProfileCatalog::resolve(std::string_view name) con
                                      .settings = std::move(session.settings),
                                      .shell = std::move(session.shell),
                                      .match = match,
-                                     .sandbox = session.escapeSandbox ? vthost::SandboxEscape::Escapes
-                                                                      : vthost::SandboxEscape::Contained };
+                                     .sandbox = vtpty::sandboxEscapeFromConfig(session.escapeSandbox) };
 }
 
 vtbackend::ColorPalette ConfigProfileCatalog::colorPalette(std::string_view name,

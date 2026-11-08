@@ -374,7 +374,9 @@ namespace
     }
 } // namespace
 
-VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
+VerbatimCommand classifyVerbatimCommand(std::string_view token,
+                                        ProgramReachablePredicate isReachable,
+                                        vtpty::ProgramHost host)
 {
     auto const path = core::pathFromUtf8(token).value_or(fs::path {});
     auto ec = std::error_code {};
@@ -395,8 +397,11 @@ VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachable
 
     // Nothing on disk under that name -- but `contour terminal echo hello` names its program the way
     // anyone names one, and the spawn resolves it through execvp()'s PATH search. Ask the same
-    // question here, or the documented way to run a command is reported as a mistake (#2102).
-    if (isReachable(token))
+    // question here, or the documented way to run a command is reported as a mistake (#2102). On
+    // the sandbox's host it is flatpak-spawn that searches, in a PATH this process cannot see -- for a
+    // bare name only: a path that is not on disk here is no more a program than it is outside Flatpak.
+    auto const resolvedOnSandboxHost = host == vtpty::ProgramHost::SandboxHost && !path.has_parent_path();
+    if (resolvedOnSandboxHost || isReachable(token))
         return VerbatimCommand { .kind = VerbatimCommandKind::Program, .workingDirectory = {} };
 
     return VerbatimCommand { .kind = VerbatimCommandKind::Unknown, .workingDirectory = {} };
@@ -2521,7 +2526,10 @@ bool ContourGuiApp::loadConfig(string const& target)
         else
         {
             auto const frontCommand = flags.verbatim.front();
-            auto const verbatim = classifyVerbatimCommand(frontCommand, isReachableProgram);
+            auto const verbatim = classifyVerbatimCommand(
+                frontCommand,
+                isReachableProgram,
+                vtpty::Process::programHost(vtpty::sandboxEscapeFromConfig(profile->escapeSandbox.value())));
 
             switch (verbatim.kind)
             {

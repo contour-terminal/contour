@@ -21,6 +21,21 @@ enum class SandboxState : uint8_t
     Flatpak = 1, ///< A Flatpak sandbox.
 };
 
+/// Whether a profile's shell runs on the sandbox's host or inside the sandbox -- `escape_sandbox`.
+enum class SandboxEscape : uint8_t
+{
+    Contained = 0, ///< The shell runs inside the sandbox (`escape_sandbox: false`).
+    Escapes = 1,   ///< The shell runs on the host (`escape_sandbox: true`, the default).
+};
+
+/// Converts the configuration's `escape_sandbox` at the boundary where it is read.
+/// @param escapeSandbox The parsed `escape_sandbox` value; a bool because the schema spells it so.
+/// @return The policy it names.
+[[nodiscard]] constexpr SandboxEscape sandboxEscapeFromConfig(bool escapeSandbox) noexcept
+{
+    return escapeSandbox ? SandboxEscape::Escapes : SandboxEscape::Contained;
+}
+
 /// Whether the sandbox lets this process reach the network.
 ///
 /// A Flatpak without `--share=network` is placed in a network namespace holding nothing but

@@ -6,6 +6,7 @@
 // is then a FACT: a Flatpak without --share=network breaks DNS resolution and connect() alike, and
 // no errno tells that apart from a misspelt host name. @see issue #2075.
 
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
 
@@ -162,4 +163,25 @@ TEST_CASE("describeSshConnectFailure does not trail off when the platform said n
 {
     CHECK(describeSshConnectFailure(SshConnectStage::Connect, NetworkAccess::Permitted, "host:22", "")
           == "Failed to connect to host:22.");
+}
+
+TEST_CASE("programHostFor runs a program on the host only from a Flatpak that escapes it", "[vtpty][sandbox]")
+{
+    using vtpty::ProgramHost;
+    using vtpty::SandboxEscape;
+    using vtpty::SandboxState;
+
+    // The rule Process::start() spawns by and the CLI classifies by (#2112): all four cases, so an
+    // inverted condition cannot pass for the one combination a test happened to name.
+    STATIC_CHECK(vtpty::programHostFor(SandboxState::Flatpak, SandboxEscape::Escapes)
+                 == ProgramHost::SandboxHost);
+    STATIC_CHECK(vtpty::programHostFor(SandboxState::Flatpak, SandboxEscape::Contained)
+                 == ProgramHost::ThisMachine);
+    STATIC_CHECK(vtpty::programHostFor(SandboxState::Host, SandboxEscape::Escapes)
+                 == ProgramHost::ThisMachine);
+    STATIC_CHECK(vtpty::programHostFor(SandboxState::Host, SandboxEscape::Contained)
+                 == ProgramHost::ThisMachine);
+
+    STATIC_CHECK(vtpty::sandboxEscapeFromConfig(true) == SandboxEscape::Escapes);
+    STATIC_CHECK(vtpty::sandboxEscapeFromConfig(false) == SandboxEscape::Contained);
 }
