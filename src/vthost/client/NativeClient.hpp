@@ -338,6 +338,9 @@ class NativeClient final
         /// one).
         /// @see proto::ClientHello::cellPixelSize.
         std::optional<proto::WireCellPixelSize> cellPixelSize = std::nullopt;
+        /// The absolute directory, UTF-8, the session this attach creates starts in; empty for the profile's.
+        /// @see proto::ClientHello::workingDirectory.
+        std::string workingDirectory = {};
     };
 
     /// @param loop The event loop everything runs on.

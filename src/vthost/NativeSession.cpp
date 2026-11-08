@@ -6,6 +6,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/vt/ClipboardSelection.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
@@ -2307,6 +2308,17 @@ void NativeSession::attachClient(uint64_t serial,
     else
         adoptClientSessionSettings(hello.sessionSettings);
 
+    // The directory the attach's own session starts in, handed to the plan that spawns it. Only an absolute
+    // one: a relative path names a place under the client's working directory, which the daemon cannot see.
+    auto const workingDirectory = [&]() -> std::filesystem::path {
+        if (hello.workingDirectory.empty())
+            return {};
+        if (auto path = core::pathFromUtf8(hello.workingDirectory); path && path->is_absolute())
+            return *std::move(path);
+        errorLog()("{}: ignoring the hello's working directory (not an absolute path)", _id);
+        return {};
+    }();
+
     // The stated client area, applied BEFORE the spawn and the attach snapshots below, so the first
     // session spawns at the size the client displays and its snapshot needs no resize and resync. An
     // area out of range is refused as a ResizeRequest's is; the session then spawns at the host's
@@ -2346,7 +2358,8 @@ void NativeSession::attachClient(uint64_t serial,
     // After the client area, so whatever the plan spawns spawns at the size the client displays (D7). A
     // client that cannot state an intent follows every workspace, as every client did before intents existed.
     executeAttachPlan(negotiated.shared.contains(proto::Capability::AttachIntent) ? hello.attachIntent
-                                                                                  : proto::AttachIntent {});
+                                                                                  : proto::AttachIntent {},
+                      workingDirectory);
 
     // Under Every, the workspaces there are to show now; later ones follow without being named.
     if (_scope == FollowScope::Listed)
@@ -2433,12 +2446,16 @@ void NativeSession::attachClient(uint64_t serial,
             send(0, proto::DecodedPdu { request });
 }
 
-void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
+void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
+                                      std::filesystem::path const& workingDirectory)
 {
     auto& model = _host.model();
-    auto context = AttachContext { .otherClients = _host.connectedClients(),
-                                   .primaryWorkspace = _host.workspaceId().value,
-                                   .workspaces = {} };
+    auto context =
+        AttachContext { .otherClients = _host.connectedClients(),
+                        .primaryWorkspace = _host.workspaceId().value,
+                        .workspaces = {},
+                        .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
+                                                                     : WorkingDirectoryStated::Yes };
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i))
             context.workspaces.push_back(
@@ -2461,10 +2478,10 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
         case AttachCreation::None: break;
         case AttachCreation::FirstTabInPrimary:
             connectionLog()("{}: daemon has no tabs; spawning the first session", _id);
-            std::ignore = _host.createTab(spawnRequest({}));
+            std::ignore = _host.createTab(attachSpawnRequest(workingDirectory));
             break;
         case AttachCreation::NewWorkspace:
-            if (auto const* workspace = _host.createWorkspace(spawnRequest({}), this))
+            if (auto const* workspace = _host.createWorkspace(attachSpawnRequest(workingDirectory), this))
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _followedWorkspaces.insert(workspace->id().value);
@@ -2472,6 +2489,21 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);
             break;
+        case AttachCreation::TabInFirstFollowed: {
+            // The workspaces brought back create nothing, so the terminal asked for in the stated directory
+            // joins them, as a tab of the first: named by a session it hosts, which is how createTab finds a
+            // workspace.
+            auto const workspace = vtworkspace::WorkspaceId { plan.follow.front() };
+            auto const* shown = model.workspace(workspace);
+            auto const* tab = shown != nullptr ? shown->activeTab() : nullptr;
+            auto const beside =
+                tab != nullptr ? std::optional { tab->rootPane()->firstLeaf()->session() } : std::nullopt;
+            connectionLog()(
+                "{}: opening a tab in workspace {} for the stated directory", _id, workspace.value);
+            if (_host.createTab(attachSpawnRequest(workingDirectory), beside) == nullptr)
+                errorLog()("{}: the tab for the stated directory could not be created", _id);
+            break;
+        }
     }
 }
 

@@ -1362,6 +1362,30 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    /// `working-directory`, as a file manager's "open terminal here" passes it, for a daemon attach: the
+    /// daemon spawns the attach's session, so the directory travels in the hello rather than in the profile
+    /// this process resolved.
+    /// @param given The directory the command line names, UTF-8; empty for none.
+    /// @return @p given made absolute against this process's own directory, which the daemon does not
+    ///         share; empty for none, or for a path that cannot be made absolute.
+    [[nodiscard]] std::filesystem::path attachWorkingDirectory(std::string const& given)
+    {
+        if (given.empty())
+            return {};
+        auto error = std::error_code {};
+        auto const path = core::pathFromUtf8(given);
+        auto absolute = path ? std::filesystem::absolute(*path, error) : std::filesystem::path {};
+        if (!path || error)
+        {
+            errorLog()("attach: ignoring working directory '{}': not a usable path", given);
+            return {};
+        }
+        return absolute;
+    }
+} // namespace
+
 void ContourGuiApp::openDaemonSpawnGate() noexcept
 {
     _daemonSpawnGate->store(DaemonSpawnGate::Open);
@@ -1508,6 +1532,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         std::move(target->transport),
         std::move(target->intent),
         profileName(),
+        attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory")),
         std::move(attachSettings),
         [this] { return currentEmulationSettings(); },
         _colorPreference,

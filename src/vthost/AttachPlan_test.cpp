@@ -110,3 +110,40 @@ TEST_CASE("Resume with no surviving workspace falls back to Launch", "[vthost][a
     CHECK(planAttach({ .kind = AttachIntentKind::Resume, .workspaces = { 99 } }, busy).creation
           == AttachCreation::NewWorkspace);
 }
+
+TEST_CASE("a first Launch naming a directory opens a tab in the first workspace it brings back",
+          "[vthost][attach-plan][cwd]")
+{
+    auto stated = twoWorkspaces();
+    stated.workingDirectory = WorkingDirectoryStated::Yes;
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, stated)
+          == AttachPlan { .scope = FollowScope::Listed,
+                          .follow = { 1, 3 },
+                          .creation = AttachCreation::TabInFirstFollowed });
+}
+
+TEST_CASE("a Launch naming a directory creates what it would without one, when it creates anything",
+          "[vthost][attach-plan][cwd]")
+{
+    // An empty daemon's first tab, and a later client's own workspace, start in the directory themselves.
+    auto empty = AttachContext { .otherClients = 0, .primaryWorkspace = 1, .workspaces = { { 1, 0 } } };
+    empty.workingDirectory = WorkingDirectoryStated::Yes;
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, empty).creation
+          == AttachCreation::FirstTabInPrimary);
+    auto busy = twoWorkspaces();
+    busy.otherClients = 1;
+    busy.workingDirectory = WorkingDirectoryStated::Yes;
+    CHECK(planAttach({ .kind = AttachIntentKind::Launch }, busy).creation == AttachCreation::NewWorkspace);
+}
+
+TEST_CASE("only a Launch opens a tab for a stated directory", "[vthost][attach-plan][cwd]")
+{
+    // Following every workspace, named workspaces, or the survivors of a reconnect never adds a tab to them.
+    auto stated = twoWorkspaces();
+    stated.workingDirectory = WorkingDirectoryStated::Yes;
+    CHECK(planAttach({ .kind = AttachIntentKind::AllWorkspaces }, stated).creation == AttachCreation::None);
+    CHECK(planAttach({ .kind = AttachIntentKind::Workspaces, .workspaces = { 3 } }, stated).creation
+          == AttachCreation::None);
+    CHECK(planAttach({ .kind = AttachIntentKind::Resume, .workspaces = { 3 } }, stated).creation
+          == AttachCreation::None);
+}

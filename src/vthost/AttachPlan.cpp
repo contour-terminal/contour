@@ -43,10 +43,16 @@ namespace
         return { .scope = FollowScope::Listed, .follow = {}, .creation = AttachCreation::NewWorkspace };
     }
 
-    /// The first client of a daemon takes what is there; a later one gets a workspace of its own.
+    /// The first client of a daemon takes what is there; a later one gets a workspace of its own. A first one
+    /// that names a working directory also opens a tab in it, when what is there leaves it nothing to create.
     [[nodiscard]] AttachPlan launch(AttachContext const& context)
     {
-        return context.otherClients == 0 ? takeEverything(FollowScope::Listed, context) : newWorkspace();
+        if (context.otherClients != 0)
+            return newWorkspace();
+        auto plan = takeEverything(FollowScope::Listed, context);
+        if (plan.creation == AttachCreation::None && context.workingDirectory == WorkingDirectoryStated::Yes)
+            plan.creation = AttachCreation::TabInFirstFollowed;
+        return plan;
     }
 } // namespace
 

@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -683,10 +684,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                       proto::Negotiated negotiated);
 
     /// Decides which workspaces this connection follows and creates what that asks for: a first tab in the
-    /// primary workspace, or a workspace of its own. Counts the connection as the host's client after
-    /// deciding, so that it is not among the clients it is decided against.
+    /// primary workspace, a workspace of its own, or a tab in the first workspace followed. Counts the
+    /// connection as the host's client after deciding, so that it is not among the clients it is decided
+    /// against.
     /// @param intent What the hello asked for; AllWorkspaces when Capability::AttachIntent is not shared.
-    void executeAttachPlan(proto::AttachIntent const& intent);
+    /// @param workingDirectory The absolute directory the session the attach creates starts in; empty for
+    ///        its profile's.
+    void executeAttachPlan(proto::AttachIntent const& intent, std::filesystem::path const& workingDirectory);
 
     /// Bounds the cell size a client states alongside a grid (vthost::sanePixelSize); an out-of-range one is
     /// logged and dropped, and the grid still applies.
@@ -999,6 +1003,22 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         return SessionSpawnRequest { .settings = _clientSessionSettings,
                                      .profileName =
                                          verbNamesProfile ? std::string { verbProfile } : _profileName };
+    }
+
+    /// What the session the attach itself creates is spawned with: @ref spawnRequest, its shell started in
+    /// the directory the hello stated, when it stated one. The directory is the attach's alone -- a tab
+    /// the client opens later starts where its profile says.
+    /// @param workingDirectory The absolute directory the hello stated; empty for the profile's.
+    [[nodiscard]] SessionSpawnRequest attachSpawnRequest(std::filesystem::path const& workingDirectory) const
+    {
+        auto request = spawnRequest({});
+        if (!workingDirectory.empty())
+        {
+            // A directory-only override: an empty program keeps the profile's shell and its arguments.
+            request.commandOverride.emplace();
+            request.commandOverride->workingDirectory = workingDirectory;
+        }
+        return request;
     }
 
     /// Tells whether this client is asked extensions' permission questions: both ends offered

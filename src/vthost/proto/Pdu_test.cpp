@@ -877,6 +877,49 @@ TEST_CASE("a truncated cell pixel size is a decode error", "[vthost][proto][cell
     }
 }
 
+TEST_CASE("a ClientHello's working directory round-trips, with or without a cell pixel size",
+          "[vthost][proto][cwd]")
+{
+    auto const size = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 9, .height = 18 } };
+    for (auto const& hello:
+         { ClientHello { .profileName = "work", .workingDirectory = "/home/user/docs" },
+           ClientHello {
+               .profileName = "work", .cellPixelSize = size, .workingDirectory = "/home/user/docs" } })
+        CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+}
+
+TEST_CASE("a ClientHello that states no working directory encodes as it did before the field",
+          "[vthost][proto][cwd]")
+{
+    // The directory travels only when stated: a hello without one ends at the color preference (no cell) or
+    // the cell size, the bytes every daemon predating the field has always read.
+    auto const withoutDirectory = encodeWithFieldsCut(
+        DecodedPdu { ClientHello { .profileName = "work", .colorPreference = WireColorPreference::Dark } },
+        [](auto) { return std::size_t { 0 }; });
+    auto const withDirectory = encodeWithFieldsCut(
+        DecodedPdu { ClientHello {
+            .profileName = "work", .colorPreference = WireColorPreference::Dark, .workingDirectory = "/d" } },
+        [](auto) { return std::size_t { 0 }; });
+    // The stated directory adds the 0x0 cell (two varints) and the string (length varint and its two bytes).
+    CHECK(withDirectory.size() == withoutDirectory.size() + 2 + 1 + 2);
+    CHECK(decodeAs<ClientHello>(withoutDirectory).workingDirectory.empty());
+}
+
+TEST_CASE("a ClientHello that ends at the cell pixel size decodes with no working directory",
+          "[vthost][proto][cwd]")
+{
+    // Every negotiating client released before the working directory ends its hello at the cell size.
+    auto const size = std::optional<WireCellPixelSize> { WireCellPixelSize { .width = 9, .height = 18 } };
+    // The string "/d": its length varint and its two bytes.
+    auto const hello = encodeWithFieldsCut(
+        DecodedPdu { ClientHello { .profileName = "work", .cellPixelSize = size, .workingDirectory = "/d" } },
+        [](auto) { return std::size_t { 3 }; });
+    auto const decoded = decodeAs<ClientHello>(hello);
+    CHECK(decoded.workingDirectory.empty());
+    CHECK(decoded.cellPixelSize == size);
+    CHECK(decoded.profileName == "work");
+}
+
 TEST_CASE("a ClientHello's client area round-trips and an absent one decodes as none", "[vthost][proto]")
 {
     auto const hello = ClientHello { .clientArea = WireClientArea { .columns = 132, .lines = 43 } };
@@ -1287,8 +1330,9 @@ TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost
                           .capabilities = { .idents = { 1, 77 } },
                           .token = "s3cr3t",
                           .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+                          .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 },
                           // The last field this version knows, stated: a byte after it is a newer peer's.
-                          .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 } };
+                          .workingDirectory = "/home/user" };
         auto const decoded = decodePdu(withAppendedField(PduType::ClientHello, hello));
         REQUIRE(decoded.has_value());
         CHECK(decoded->pdu == DecodedPdu { hello });

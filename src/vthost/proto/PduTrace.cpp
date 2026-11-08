@@ -119,7 +119,7 @@ namespace
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
                            "versions={} caps={} token={} settings={} role={} area={} intent={} workspaces={} "
-                           "profile=\"{}\"{}{}",
+                           "profile=\"{}\"{}{}{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
@@ -137,7 +137,9 @@ namespace
                                : std::format(" color={}",
                                              value.colorPreference == WireColorPreference::Dark ? "dark"
                                                                                                 : "light"),
-                           formatCell(value.cellPixelSize));
+                           formatCell(value.cellPixelSize),
+                           // A path names the user's files: its presence only, and only when stated.
+                           value.workingDirectory.empty() ? std::string {} : std::string { " cwd=yes" });
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",

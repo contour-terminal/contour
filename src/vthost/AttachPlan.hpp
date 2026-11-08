@@ -22,6 +22,14 @@ struct WorkspaceSummary
     int tabCount = 0; ///< How many tabs it holds; zero for a workspace nothing has been created in yet.
 };
 
+/// Whether the attaching connection's hello names the directory the session it creates starts in
+/// (proto::ClientHello::workingDirectory).
+enum class WorkingDirectoryStated : uint8_t
+{
+    No = 0,  ///< It names none: whatever the attach creates starts where its profile says.
+    Yes = 1, ///< It names one, which a launch that would create nothing opens a tab in.
+};
+
 /// What the daemon looks like to a connection that is attaching.
 struct AttachContext
 {
@@ -32,6 +40,9 @@ struct AttachContext
     uint64_t primaryWorkspace = 0;
     /// Every workspace, ascending by id.
     std::vector<WorkspaceSummary> workspaces = {};
+    /// Whether the hello names a working directory; a launch that would create nothing then opens a tab in
+    /// it.
+    WorkingDirectoryStated workingDirectory = WorkingDirectoryStated::No;
 };
 
 /// Which workspaces a connection follows.
@@ -47,6 +58,10 @@ enum class AttachCreation : uint8_t
     None = 0,              ///< Nothing.
     FirstTabInPrimary = 1, ///< The first tab (and session) of the primary workspace.
     NewWorkspace = 2,      ///< A new workspace of its own, which joins `follow` once it exists.
+    /// A tab of the first workspace in `follow`, beside the sessions it brings back: what a launch that
+    /// states a working directory creates when the daemon already has workspaces to show, so the terminal
+    /// asked for in that directory is not dropped.
+    TabInFirstFollowed = 3,
 };
 
 /// The decision: what to follow, and what to create.

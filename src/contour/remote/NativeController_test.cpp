@@ -14,6 +14,8 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -114,6 +116,8 @@ struct ControllerOptions
     core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
     /// How long its reconnects wait after a loss; the production schedule by default.
     vthost::client::BackoffSchedule backoff = {};
+    /// The directory its first hello asks the attach's session to start in; empty for the profile's.
+    std::filesystem::path workingDirectory = {};
 };
 
 /// Builds a controller as every test here does: no attach settings of its own, on the steady clock.
@@ -130,6 +134,7 @@ struct ControllerOptions
         vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                       .workspaces = {} },
         std::string {},
+        std::move(options.workingDirectory),
         std::move(options.attachSettings),
         std::move(options.sessionSettings),
         options.colorPreference,
@@ -274,6 +279,7 @@ class ClientFrameCounts
         {
             auto const lock = std::lock_guard { _areasMutex };
             _helloCells.push_back(hello->cellPixelSize);
+            _helloDirectories.push_back(hello->workingDirectory);
         }
     }
 
@@ -301,6 +307,14 @@ class ClientFrameCounts
         return _helloCells;
     }
 
+    /// @return The working directory each ClientHello stated so far (empty for none), in arrival order.
+    [[nodiscard]] std::vector<std::string> helloDirectories() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _helloDirectories;
+    }
+
     /// @return Every client area a ResizeRequest stated so far, in arrival order.
     [[nodiscard]] std::vector<vtpty::PageSize> areas() const
     {
@@ -323,6 +337,7 @@ class ClientFrameCounts
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _requestCells {}; ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _paneCells {};    ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.
+    std::vector<std::string> _helloDirectories {};                                 ///< Under _areasMutex.
 };
 
 /// A daemon end of a connection that decodes the frames the client sends, keeping partial frames across
@@ -1877,7 +1892,9 @@ struct ResizedWindow
     contour::test::ScopedController win;
     contour::session::TerminalSession* session = nullptr;
 
-    ResizedWindow(): daemon(), app(makeOwned()), win(app.manager())
+    /// @param workingDirectory The directory the controller's first hello states; empty for none.
+    explicit ResizedWindow(std::filesystem::path workingDirectory = {}):
+        daemon(), app(makeOwned(std::move(workingDirectory))), win(app.manager())
     {
         auto* tab = attachAndRealize(*ac, app.manager(), win.id);
         REQUIRE(tab != nullptr);
@@ -1908,11 +1925,13 @@ struct ResizedWindow
     }
 
   private:
-    std::unique_ptr<contour::remote::NativeController> makeOwned()
+    std::unique_ptr<contour::remote::NativeController> makeOwned(std::filesystem::path workingDirectory)
     {
         std::ignore = daemon.seedSession("root");
-        auto owned =
-            makeNativeController(daemon.endpoint(), timeline, { .attachSettings = profileSettings() });
+        auto owned = makeNativeController(
+            daemon.endpoint(),
+            timeline,
+            { .attachSettings = profileSettings(), .workingDirectory = std::move(workingDirectory) });
         ac = owned.get();
         return owned;
     }
@@ -1997,6 +2016,25 @@ TEST_CASE("NativeController.states_the_last_cell_size_in_the_hello_on_reconnect"
     auto const hellos = f.daemon.clientFrames.helloCells();
     CHECK_FALSE(hellos.front().has_value());
     CHECK(hellos.back() == std::optional { vthost::proto::WireCellPixelSize { .width = 9, .height = 18 } });
+    f.daemon.releaseHeld();
+}
+
+TEST_CASE("NativeController.states_the_working_directory_in_the_first_hello_only",
+          "[attach][controller][reconnect][cwd]")
+{
+    // A reconnect resumes the windows it lost and creates nothing, so a directory it stated again would ask
+    // the daemon for a terminal the user opened once already.
+    auto const directory = std::filesystem::temp_directory_path() / "contour-attach-cwd";
+    auto f = ResizedWindow { directory };
+
+    f.daemon.holdNewConnectionsAtLayout();
+    f.daemon.dropConnections();
+    f.awaitReconnected();
+
+    REQUIRE(waitUntil([&] { return f.daemon.clientFrames.helloDirectories().size() >= 2; }));
+    auto const hellos = f.daemon.clientFrames.helloDirectories();
+    CHECK(hellos.front() == core::pathToUtf8(directory));
+    CHECK(hellos.back().empty());
     f.daemon.releaseHeld();
 }
 
@@ -4152,6 +4190,7 @@ struct FollowingGui
             vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
                                           .workspaces = { followed } },
             std::string {},
+            std::filesystem::path {},
             std::nullopt,
             contour::remote::NativeController::SessionSettingsSource {},
             std::nullopt,
@@ -5739,6 +5778,7 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
         transport,
         vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
         std::string {},
+        std::filesystem::path {},
         std::nullopt,
         {},
         std::nullopt,
@@ -6069,6 +6109,7 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
             vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                           .workspaces = {} },
             std::string {},
+            std::filesystem::path {},
             std::nullopt,
             {},
             std::nullopt,
@@ -6139,6 +6180,7 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                       .workspaces = {} },
         std::string {},
+        std::filesystem::path {},
         std::nullopt,
         {},
         std::nullopt,
@@ -6542,6 +6584,7 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
         vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                       .workspaces = {} },
         std::string {},
+        std::filesystem::path {},
         std::nullopt,
         contour::remote::NativeController::SessionSettingsSource {},
         std::nullopt,

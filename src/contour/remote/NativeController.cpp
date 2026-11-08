@@ -5,6 +5,7 @@
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
 
@@ -72,6 +73,7 @@ namespace
 NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
                                    vthost::proto::AttachIntent intent,
                                    std::string profileName,
+                                   std::filesystem::path workingDirectory,
                                    std::optional<vtbackend::Settings> attachSettings,
                                    SessionSettingsSource sessionSettings,
                                    std::optional<vtbackend::ColorPreference> colorPreference,
@@ -83,6 +85,7 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
     _transport(std::move(transport)),
     _intent(std::move(intent)),
     _profileName(std::move(profileName)),
+    _workingDirectory(std::move(workingDirectory)),
     _attachSettings(std::move(attachSettings)),
     _sessionSettings(std::move(sessionSettings)),
     _timeline(timeline),
@@ -245,6 +248,10 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             .profileName = _profileName,
             .colorPreference = _statedColors.load(),
             .cellPixelSize = toWireCell(helloCell),
+            // The first connection's alone: it is the one whose attach creates the session the directory was
+            // asked for. A reconnect resumes the windows it lost and creates nothing of its own.
+            .workingDirectory =
+                _acceptedConnections == 0 ? core::pathToUtf8(_workingDirectory) : std::string {},
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.

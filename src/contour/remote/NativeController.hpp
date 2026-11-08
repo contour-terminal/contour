@@ -122,6 +122,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///        workspaces the lost connection followed.
     /// @param profileName The host profile this client's sessions run, stated in every ClientHello; empty for
     ///        the daemon's default.
+    /// @param workingDirectory The absolute directory the session the first connection creates starts in,
+    ///        stated in that connection's ClientHello only -- a reconnect creates nothing of its own; empty
+    ///        for the profile's.
     /// @param attachSettings The emulation settings to state in the ClientHello — this client's own
     ///        resolved profile — or nullopt to take whatever the daemon hosts with.
     /// @param sessionSettings Asked before every session this client creates, so a session created
@@ -143,6 +146,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
                      vthost::proto::AttachIntent intent,
                      std::string profileName,
+                     std::filesystem::path workingDirectory,
                      std::optional<vtbackend::Settings> attachSettings,
                      SessionSettingsSource sessionSettings,
                      std::optional<vtbackend::ColorPreference> colorPreference,
@@ -763,8 +767,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in RemoteController; the registry below is attach-specific.
     std::shared_ptr<vthost::ITransportFactory> _transport;
-    vthost::proto::AttachIntent _intent; ///< What the first connection follows.
-    std::string _profileName;            ///< Stated in every ClientHello.
+    vthost::proto::AttachIntent _intent;     ///< What the first connection follows.
+    std::string _profileName;                ///< Stated in every ClientHello.
+    std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.
     /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
     /// connection creates.
     std::optional<vtbackend::Settings> _attachSettings;

@@ -974,7 +974,8 @@ core::async::Task<void> NativeClient::run()
                                                   .attachIntent = _handshake.attachIntent,
                                                   .profileName = _handshake.profileName,
                                                   .colorPreference = _handshake.colorPreference,
-                                                  .cellPixelSize = _handshake.cellPixelSize } });
+                                                  .cellPixelSize = _handshake.cellPixelSize,
+                                                  .workingDirectory = _handshake.workingDirectory } });
 
     auto outcome = co_await pumpPdus(
         _connection.get(),
