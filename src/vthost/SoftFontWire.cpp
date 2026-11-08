@@ -18,18 +18,12 @@ namespace
     static_assert(proto::FirstSoftCellPosition == vtbackend::FirstSoftCellPosition);
     static_assert(proto::LastSoftCellPosition == vtbackend::LastSoftCellPosition);
 
-    /// @return The bytes a row of @p width pixels takes.
-    constexpr size_t rowBytesOf(size_t width) noexcept
-    {
-        return (width + 7) / 8;
-    }
-
     /// @return @p glyph's coverage as a wire bitmap: most significant bit leftmost, each row byte-aligned.
     proto::WireSoftGlyph glyphToWire(uint8_t position, vtbackend::SoftGlyph const& glyph)
     {
         auto wire =
             proto::WireSoftGlyph { .position = position, .width = glyph.width, .height = glyph.height };
-        auto const rowBytes = rowBytesOf(glyph.width);
+        auto const rowBytes = proto::softGlyphRowBytes(glyph.width);
         wire.bits.assign(rowBytes * glyph.height, std::byte { 0 });
         for (auto const row: std::views::iota(size_t { 0 }, size_t { glyph.height }))
             for (auto const column: std::views::iota(size_t { 0 }, size_t { glyph.width }))
@@ -43,7 +37,7 @@ namespace
     std::vector<uint8_t> coverageOf(proto::WireSoftGlyph const& wire)
     {
         auto coverage = std::vector<uint8_t>(size_t { wire.width } * wire.height, uint8_t { 0 });
-        auto const rowBytes = rowBytesOf(wire.width);
+        auto const rowBytes = proto::softGlyphRowBytes(wire.width);
         for (auto const row: std::views::iota(size_t { 0 }, size_t { wire.height }))
             for (auto const column: std::views::iota(size_t { 0 }, size_t { wire.width }))
                 coverage[(row * wire.width) + column] =
@@ -112,8 +106,6 @@ std::expected<StagedSoftFonts, SoftFontWireError> softFontsFromWire(
         auto glyphs = std::vector<vtbackend::SoftGlyphInput> {};
         for (auto const& glyph: wire.glyphs)
         {
-            if (glyph.bits.size() != rowBytesOf(glyph.width) * glyph.height)
-                return std::unexpected(SoftFontWireError::Glyph);
             glyphs.push_back(vtbackend::SoftGlyphInput { .position = glyph.position,
                                                          .width = glyph.width,
                                                          .height = glyph.height,

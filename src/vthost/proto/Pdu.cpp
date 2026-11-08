@@ -2004,8 +2004,7 @@ namespace
         auto const bits = in.blob();
         if (!bits)
             return std::unexpected(bits.error());
-        auto const rowBytes = (std::size_t { glyph.width } + 7) / 8;
-        if (bits->size() != rowBytes * glyph.height)
+        if (bits->size() != softGlyphRowBytes(glyph.width) * glyph.height)
             return std::unexpected(DecodeError::MalformedPdu);
         glyph.bits.assign(bits->begin(), bits->end());
         return glyph;

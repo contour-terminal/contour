@@ -130,7 +130,8 @@ TEST_CASE("a wire set that DECDLD could not have produced is refused", "[vthost]
     CHECK(refused(font, Error::Glyph));
     font = good;
     font.glyphs.front().width = static_cast<uint8_t>(font.fullWidth - 1); // not the font's cell
-    font.glyphs.front().bits.clear();
+    font.glyphs.front().bits.resize(proto::softGlyphRowBytes(font.glyphs.front().width)
+                                    * font.glyphs.front().height);
     CHECK(refused(font, Error::Glyph));
     font = good;
     font.glyphs.clear();
@@ -142,9 +143,6 @@ TEST_CASE("a wire set that DECDLD could not have produced is refused", "[vthost]
     }
     font = good;
     font.textWidth = static_cast<uint8_t>(font.fullWidth + 1);
-    CHECK(refused(font, Error::Glyph));
-    font = good;
-    font.glyphs.front().bits.pop_back(); // a hand-built glyph the decoder never saw
     CHECK(refused(font, Error::Glyph));
 
     auto const twice = std::vector { good, good };

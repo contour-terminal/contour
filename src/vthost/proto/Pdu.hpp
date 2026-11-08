@@ -1057,6 +1057,13 @@ struct SessionInputEcho
     bool operator==(SessionInputEcho const&) const = default;
 };
 
+/// @return The bytes a bitmap row of @p width pixels takes on the wire: one bit per pixel, padded to a
+///         whole byte.
+[[nodiscard]] constexpr std::size_t softGlyphRowBytes(std::size_t width) noexcept
+{
+    return (width + 7) / 8;
+}
+
 /// One glyph of a soft font: a bitmap of the font's full cell, one bit per pixel, most significant bit
 /// leftmost, each row padded to a whole byte.
 struct WireSoftGlyph
