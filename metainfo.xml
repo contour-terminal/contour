@@ -305,6 +305,7 @@
           <li>Adds automatic winget updates: publishing a release now submits it to the Windows Package Manager as <code>contour-terminal.Contour</code>, with the per-machine and the per-user installer and the portable package; a plain <code>winget install contour-terminal.Contour</code> now installs for the current user, so pass <code>--scope machine</code> to install for all users, and the portable package stays available with <code>--installer-type portable</code></li>
           <li>Prepares the Windows packages for code signing: contour.exe and both installers (and, with most certificates, its libraries) are signed once a certificate is configured, and the packages stay unsigned until then</li>
           <li>Release packages are built with link-time optimization and each platform's exploit mitigations (Control Flow Guard and CET shadow-stack compatibility on Windows; on Linux the build now sets position-independent executables, full RELRO, the stack protector and fortified C library calls itself instead of relying on the compiler's defaults), and the Windows and macOS debug symbols are published beside them (#2250)</li>
+          <li>Adds closing a tab with a middle click on it, as in a browser</li>
         </ul>
       </description>
     </release>

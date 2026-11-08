@@ -741,6 +741,16 @@ Item {
         }
     }
 
+    // A middle click closes the tab, as in a browser: the same request as its close button, which an
+    // inactive or icon-only pill does not show.
+    TapHandler {
+        acceptedButtons: Qt.MiddleButton
+        onTapped: (eventPoint, button) => {
+            if (root.controller)
+                root.controller.closeTabAtIndex(root.tabIndex)
+        }
+    }
+
     // The context menu is the strip's, one for every tab, built from the table the controller publishes:
     // the right-click asks the controller, which publishes the rows for THIS tab and asks the strip to pop
     // its menu under it. "Rename…" and "Custom…" come back as the requests the Connections below
