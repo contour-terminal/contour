@@ -255,15 +255,11 @@ void RenderBufferBuilder::renderDetachedLine(std::vector<RenderCell>& output,
                                          rapidBlink,
                                          std::nullopt);
 
+        // Soft-font glyphs are not resolved here: this copy has no render buffer to keep one alive, so it
+        // shows the cell's own codepoint.
         // The row's own line flags stay behind: the copy is drawn single width and single height.
-        output.emplace_back(makeRenderCell(palette,
-                                           terminal.softFonts(),
-                                           cell,
-                                           LineFlags {},
-                                           fg,
-                                           bg,
-                                           screenRow,
-                                           ColumnOffset::cast_from(column)));
+        output.emplace_back(
+            makeRenderCell(palette, cell, LineFlags {}, fg, bg, screenRow, ColumnOffset::cast_from(column)));
 
         if (auto const hyperlink = cell.hyperlink();
             hyperlink != HyperlinkId {} && isHyperlinkLive(terminal.hyperlinks(), hyperlink))
@@ -426,7 +422,6 @@ RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& color
 }
 
 RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
-                                               SoftFontStore const& softFonts,
                                                ConstCellProxy screenCell,
                                                LineFlags lineFlags,
                                                RGBColor fg,
@@ -454,11 +449,6 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
     }
 
     renderCell.image = screenCell.imageFragment();
-
-    // A line without soft glyphs costs one null test here. A font that is gone resolves to no glyph, so
-    // the cell falls back to drawing its codepoints.
-    if (auto const ref = screenCell.softGlyph())
-        renderCell.softGlyph = softFonts.resolve(*ref).glyph;
 
     return renderCell;
 }
@@ -848,6 +838,9 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId 
     _currentContextTint = tintFor(contextId);
 
     auto const gridLine = gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line;
+    _lineFirstCell = _output->cells.size();
+    auto const& softGlyphs = _screen->grid().lineAt(gridLine).storage().softGlyphs;
+    _lineSoftGlyphs = softGlyphs ? &*softGlyphs : nullptr;
     prepareSearchHighlights(gridLine);
     prepareLinkOverlay(gridLine);
 }
@@ -858,8 +851,14 @@ bool RenderBufferBuilder::isCursorLine(LineOffset line) const
            && line == screenLineOf(_cursorPosition->line);
 }
 
-void RenderBufferBuilder::endLine() noexcept
+void RenderBufferBuilder::endLine()
 {
+    if (_lineSoftGlyphs != nullptr) [[unlikely]]
+    {
+        attachSoftGlyphs(*_lineSoftGlyphs);
+        _lineSoftGlyphs = nullptr;
+    }
+
     if (!_output->cells.empty())
     {
         _output->cells.back().groupEnd = true;
@@ -1094,6 +1093,24 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
     return true;
 }
 
+void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
+{
+    auto const lineCells = std::span { _output->cells }.subspan(_lineFirstCell);
+    for (auto const& [column, ref]: glyphs)
+    {
+        // A font that is gone resolves to no glyph, so the cell falls back to drawing its codepoints.
+        auto glyph = _terminal->softFonts().resolve(ref).glyph;
+        if (!glyph)
+            continue;
+        auto const position = CellLocation { .line = _baseLine + _lineNr,
+                                             .column = displayColumn(ColumnOffset::cast_from(column)) };
+        // A cell the line did not render (under the input method editor, say) has nothing to attach to.
+        if (std::ranges::any_of(lineCells, [&](RenderCell const& cell) { return cell.position == position; }))
+            _output->softGlyphs.push_back(
+                RenderSoftGlyph { .position = position, .glyph = std::move(glyph) });
+    }
+}
+
 void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line, ColumnOffset column)
 {
     auto const screenPosition = CellLocation { .line = line, .column = column };
@@ -1109,7 +1126,6 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
-                                               _terminal->softFonts(),
                                                screenCell,
                                                _currentLineFlags,
                                                fg,

@@ -76,11 +76,6 @@ struct RenderCell
     std::u32string codepoints;
     std::shared_ptr<ImageFragment> image;
 
-    /// The soft-font glyph this cell draws instead of its codepoints (DECDLD), or null for ordinary text.
-    /// Non-null exactly when the cell's font exists: the defined glyph, or that font's error glyph for an
-    /// undefined position. It shares ownership of the bitmap, so the renderer may read it after the state
-    /// lock is released even if the font is redefined meanwhile.
-    std::shared_ptr<SoftGlyph const> softGlyph;
     CellLocation position;
     RenderAttributes attributes;
     uint8_t width = 1;
@@ -94,6 +89,15 @@ struct RenderCell
 
     bool groupStart = false;
     bool groupEnd = false;
+};
+
+/// A soft-font glyph (DECDLD) one cell draws in place of its codepoints.
+struct RenderSoftGlyph
+{
+    CellLocation position; ///< The cell, as in RenderCell::position.
+
+    /// The glyph: the defined one, or that font's error glyph for an undefined position. Never null.
+    std::shared_ptr<SoftGlyph const> glyph;
 };
 
 /**
@@ -294,6 +298,15 @@ struct RenderBuffer
     std::vector<RenderLine> lines {};
     std::vector<RenderGutterCell> gutter {};
 
+    /// The soft-font glyphs (DECDLD) cells of this frame draw instead of their codepoints, one entry per such
+    /// cell, in no particular order (find a cell's by its position). A cell with no entry draws its
+    /// codepoints: its font is gone, or it never had a soft glyph. The entry owns the glyph, so the bitmap
+    /// outlives a redefinition of its font for as long as this frame is on display.
+    ///
+    /// Beside the cells and not in them, because every ordinary cell would pay for a field only a soft font
+    /// uses: RenderCell has no room to spare, and a frame of plain text leaves this empty.
+    std::vector<RenderSoftGlyph> softGlyphs {};
+
     /// The indicator status line's bar, edge to edge. Absent for a host-writable status line: that one is
     /// the application's, gets no wider than the main page, and leaves the strip beside it to the default
     /// background.
@@ -342,6 +355,7 @@ struct RenderBuffer
         cells.clear();
         lines.clear();
         gutter.clear();
+        softGlyphs.clear();
         statusBar.reset();
         annotations.clear();
         chipBands.clear();

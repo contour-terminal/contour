@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -267,7 +268,7 @@ namespace
 struct RenderedCell
 {
     bool found = false;
-    std::shared_ptr<SoftGlyph const> glyph;
+    std::optional<crispy::StrongHash> glyph; ///< the id of the glyph the cell carries, if any
     std::u32string codepoints;
 };
 
@@ -278,7 +279,13 @@ struct RenderedCell
     auto const buffer = mock.terminal.renderBuffer();
     for (auto const& cell: buffer.get().cells)
         if (cell.position.line == LineOffset(0) && cell.position.column == ColumnOffset(column))
-            return { .found = true, .glyph = cell.softGlyph, .codepoints = cell.codepoints };
+        {
+            auto const glyphs = std::span { buffer.get().softGlyphs };
+            auto const it = std::ranges::find(glyphs, cell.position, &RenderSoftGlyph::position);
+            return { .found = true,
+                     .glyph = it != glyphs.end() ? std::optional { it->glyph->id } : std::nullopt,
+                     .codepoints = cell.codepoints };
+        }
     return {};
 }
 
@@ -291,10 +298,10 @@ TEST_CASE("render cell carries the defined glyph", "[screen][softfont]")
     mock.writeToScreen("\033(B!");
     auto const rendered = renderedCellAt(mock, 0);
     REQUIRE(rendered.found);
-    REQUIRE(rendered.glyph != nullptr);
+    REQUIRE(rendered.glyph.has_value());
     auto const expected = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x21 });
     CHECK(expected.lookup == SoftGlyphLookup::Defined);
-    CHECK(rendered.glyph->id == expected.glyph->id);
+    CHECK(rendered.glyph == expected.glyph->id);
 }
 
 TEST_CASE("render cell carries the error glyph for an undefined position", "[screen][softfont]")
@@ -305,8 +312,8 @@ TEST_CASE("render cell carries the error glyph for an undefined position", "[scr
     auto const undefined = mock.terminal.softFonts().resolve({ .font = 0, .position = 0x30 });
     REQUIRE(undefined.lookup == SoftGlyphLookup::Undefined);
     auto const rendered = renderedCellAt(mock, 0);
-    REQUIRE(rendered.glyph != nullptr);
-    CHECK(rendered.glyph->id == undefined.glyph->id);
+    REQUIRE(rendered.glyph.has_value());
+    CHECK(rendered.glyph == undefined.glyph->id);
 }
 
 TEST_CASE("render cell has no soft glyph after RIS, and shows its codepoint", "[screen][softfont]")
@@ -314,13 +321,13 @@ TEST_CASE("render cell has no soft glyph after RIS, and shows its codepoint", "[
     auto mock = MockTerm { OneLine };
     mock.writeToScreen(sevenBitFont());
     mock.writeToScreen("\033(B!");
-    REQUIRE(renderedCellAt(mock, 0).glyph != nullptr);
+    REQUIRE(renderedCellAt(mock, 0).glyph.has_value());
 
     // The cell outlives its font only when the font goes while the reference stays: erase the font alone.
     mock.writeToScreen("\033P1;1;2;0;0;2;0;0{C\033\\");
     auto const rendered = renderedCellAt(mock, 0);
     REQUIRE(rendered.found);
-    CHECK(rendered.glyph == nullptr);
+    CHECK_FALSE(rendered.glyph.has_value());
     CHECK(rendered.codepoints == U"!");
 }
 
@@ -330,13 +337,13 @@ TEST_CASE("redefinition shows on the next render buffer", "[screen][softfont]")
     mock.writeToScreen(sevenBitFont());
     mock.writeToScreen("\033(B!");
     auto const before = renderedCellAt(mock, 0);
-    REQUIRE(before.glyph != nullptr);
+    REQUIRE(before.glyph.has_value());
 
     // Same position, different bitmap.
     mock.writeToScreen("\033P0;1;0;0;0;2;0;0{B?~~~~~~~~~~~~~~/~~~~~~~~~~~~~~~\033\\");
     auto const after = renderedCellAt(mock, 0);
-    REQUIRE(after.glyph != nullptr);
-    CHECK(after.glyph->id != before.glyph->id);
+    REQUIRE(after.glyph.has_value());
+    CHECK(after.glyph != before.glyph);
 }
 
 TEST_CASE("soft font redefinition races rendering", "[softfont][threading]")
@@ -362,15 +369,14 @@ TEST_CASE("soft font redefinition races rendering", "[softfont][threading]")
         (void) index;
         (void) mock.terminal.refreshRenderBuffer();
         auto const buffer = mock.terminal.renderBuffer();
-        for (auto const& cell: buffer.get().cells)
-            if (cell.softGlyph)
-            {
-                // Every byte must be readable: the glyph is owned by the buffer, not the live font.
-                auto sum = size_t { 0 };
-                for (auto const value: cell.softGlyph->coverage)
-                    sum += value;
-                checked.fetch_add(1 + (sum & 0), std::memory_order_relaxed);
-            }
+        for (auto const& entry: buffer.get().softGlyphs)
+        {
+            // Every byte must be readable: the glyph is owned by the buffer, not the live font.
+            auto sum = size_t { 0 };
+            for (auto const value: entry.glyph->coverage)
+                sum += value;
+            checked.fetch_add(1 + (sum & 0), std::memory_order_relaxed);
+        }
     }
     writer.join();
     CHECK(checked.load() > 0);

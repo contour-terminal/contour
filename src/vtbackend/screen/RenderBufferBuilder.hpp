@@ -109,10 +109,17 @@ class RenderBufferBuilder
     ///
     /// @see renderTrivialLine
     void renderCell(ConstCellProxy cell, LineOffset line, ColumnOffset column);
+
+    /// Gives the cells of the line just rendered their soft-font glyphs (DECDLD), for those whose font still
+    /// exists; a cell whose font is gone keeps drawing its codepoints.
+    /// A pass of its own, run by endLine() for a line that has soft glyphs only, so ordinary text pays
+    /// nothing per cell.
+    /// @param glyphs The line's column to glyph reference table.
+    void attachSoftGlyphs(SoftGlyphMap const& glyphs);
     /// Not noexcept: the cursor-line decision it makes goes through the viewport's coordinate
     /// translation, which builds the fold projection lazily and therefore allocates.
     void startLine(LineOffset line, LineFlags flags, ContextId contextId);
-    void endLine() noexcept;
+    void endLine();
 
     /// Renders a trivial line.
     ///
@@ -194,7 +201,6 @@ class RenderBufferBuilder
 
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
-                                                   SoftFontStore const& softFonts,
                                                    ConstCellProxy cell,
                                                    LineFlags lineFlags,
                                                    RGBColor fg,
@@ -382,6 +388,9 @@ class RenderBufferBuilder
     int _prevWidth = 0;
     bool _prevHasCursor = false;
     LineOffset _lineNr = LineOffset(0);
+    /// The soft-font glyph table of the line being rendered; null for a line without one.
+    SoftGlyphMap const* _lineSoftGlyphs = nullptr;
+    size_t _lineFirstCell = 0; ///< Index in the output of the line being rendered's first cell.
     bool _useCursorlineColoring = false;
 
     /// The OSC 3008 tint in force on the line currently being rendered, resolved once per line.
