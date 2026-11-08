@@ -862,6 +862,48 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
     ac->stop();
 }
 
+// The same action on a window a daemon link serves, on a tab of one pane: closing that pane closes the tab,
+// and the window it was in is what names the host to tell. Told after the model closed the tab, the close
+// went to the process's own factory instead, and the session lived on on the daemon with no view.
+TEST_CASE("the ClosePane action ends a remote session of a one-pane tab on a bound window",
+          "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    std::ignore = daemon.seedSession("second");
+
+    auto timeline = TestTimeline {};
+    // Declared before the app, whose sessions hold ptys of it until they go.
+    auto const controller = makeNativeController(daemon.endpoint(), timeline);
+    auto binding = contour::session::FactoryBinding { *controller };
+    // The process's own factory is local, as an attached GUI's is: only the binding reaches the daemon.
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const win { app.manager() };
+    app.manager().bindWindow(win.id, binding);
+
+    requireConnected(*controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = controller->settledLayout();
+        return layout != nullptr && layout->tabs.size() == 2;
+    }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *controller);
+    auto* const workspace = app.manager().model().workspace(win.id);
+    REQUIRE(workspace->tabCount() == 2);
+    REQUIRE(workspace->tabAt(1)->paneCount() == 1);
+    auto const liveSessions = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); });
+    };
+    REQUIRE(liveSessions() == 2);
+
+    auto* const lone = app.manager().sessionsOfTab(workspace->tabAt(1)).front();
+    app.manager().closeActivePane(lone, contour::session::SessionEnd::Destroy);
+
+    CHECK(workspace->tabCount() == 1);
+    CHECK(waitUntil([&] { return liveSessions() == 1; }));
+
+    controller->stop();
+}
+
 TEST_CASE("an action that changes hosted state is performed by the daemon, and the mirror follows",
           "[attach][controller][operations][threading]")
 {
@@ -1628,8 +1670,11 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
         auto timeline = TestTimeline {};
         auto acOwned = makeNativeController(daemon.endpoint(), timeline);
         auto* ac = acOwned.get();
+        // Bound, as a daemon link binds its windows: only a bound window tells its host of a divider.
+        auto binding = contour::session::FactoryBinding { *ac };
         contour::test::TestApp app { std::move(acOwned) };
         contour::test::ScopedController const win { app.manager() };
+        app.manager().bindWindow(win.id, binding);
 
         auto* tab = attachAndRealize(*ac, app.manager(), win.id);
         REQUIRE(tab != nullptr);
@@ -1661,8 +1706,10 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
     auto timeline = TestTimeline {};
     auto acOwned = makeNativeController(daemon.endpoint(), timeline);
     auto* ac = acOwned.get();
+    auto binding = contour::session::FactoryBinding { *ac };
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
+    app.manager().bindWindow(win.id, binding);
 
     auto* tab = attachAndRealize(*ac, app.manager(), win.id);
     REQUIRE(tab != nullptr);
@@ -1683,6 +1730,9 @@ struct AttachedGui
 {
     TestTimeline timeline;
     contour::remote::NativeController* controller;
+    /// What the window is bound to, as a daemon link binds its windows: only a bound window tells its host
+    /// what it shows. Declared before the app, whose manager names it to the end.
+    contour::session::FactoryBinding binding;
     contour::test::TestApp app;
     contour::test::ScopedController window;
 
@@ -1706,8 +1756,9 @@ struct AttachedGui
 
   private:
     explicit AttachedGui(std::unique_ptr<contour::remote::NativeController> owned):
-        controller { owned.get() }, app { std::move(owned) }, window { app.manager() }
+        controller { owned.get() }, binding { *owned }, app { std::move(owned) }, window { app.manager() }
     {
+        app.manager().bindWindow(window.id, binding);
     }
 };
 
@@ -3487,18 +3538,20 @@ struct FollowingGui
     [[nodiscard]] std::unique_ptr<contour::remote::NativeController> makeOwned(DaemonFixture const& daemon,
                                                                                uint64_t followed)
     {
-        auto owned = std::make_unique<contour::remote::NativeController>(
-            std::make_shared<vthost::TlsTransportFactory>(daemon.endpoint()),
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                          .workspaces = { followed } },
-            std::string {},
-            std::filesystem::path {},
-            std::nullopt,
-            contour::remote::NativeController::SessionSettingsSource {},
-            std::nullopt,
-            core::platform::defaultSteadyClock(),
-            timeline.timeline,
-            nullptr);
+        auto owned =
+            std::make_unique<contour::remote::NativeController>(contour::remote::NativeController::Config {
+                .transport = std::make_shared<vthost::TlsTransportFactory>(daemon.endpoint()),
+                .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
+                                                        .workspaces = { followed } },
+                .profileName = std::string {},
+                .workingDirectory = {},
+                .attachSettings = std::nullopt,
+                .sessionSettings = contour::remote::NativeController::SessionSettingsSource {},
+                .colorPreference = std::nullopt,
+                .clock = core::platform::defaultSteadyClock(),
+                .timeline = timeline.timeline,
+                .powerMonitor = nullptr,
+            });
         controller = owned.get();
         return owned;
     }
@@ -4882,6 +4935,36 @@ TEST_CASE("a restarted daemon's new pane does not inherit the old run's echo sta
     old.terminal.reset();
 }
 
+// Review (PR 2, item 2): a restarted daemon's reconnect detaches every binding, but the panes' ptys live on
+// and call back into the controller until they are destroyed. The controller says it still binds panes until
+// the last one is gone, or a link ended meanwhile would be destroyed under them.
+TEST_CASE("a pty a restarted daemon detached still keeps its controller", "[attach][controller][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("old run");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto unbound = 0;
+    QObject::connect(&controller, &contour::remote::NativeController::paneUnbound, [&unbound] { ++unbound; });
+    requireConnected(controller);
+    auto old = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
+    REQUIRE(old->shows("old run"));
+    CHECK(controller.bindsPanes());
+
+    daemon.restartHost();
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 1; }, 3000));
+    // Detached from the old run's session, and alive.
+    CHECK(controller.bindsPanes());
+
+    old.reset();
+    CHECK_FALSE(controller.bindsPanes());
+    CHECK(unbound == 1);
+
+    controller.stop();
+}
+
 TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attach][controller][reconnect]")
 {
     // The daemon may have been upgraded or downgraded meanwhile: what was agreed is the new connection's.
@@ -5064,18 +5147,19 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
             return std::expected<void, vthost::TransportError> {};
         });
     auto timeline = TestTimeline {};
-    auto controller = contour::remote::NativeController {
-        transport,
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
-        std::string {},
-        std::filesystem::path {},
-        std::nullopt,
-        {},
-        std::nullopt,
-        core::platform::defaultSteadyClock(),
-        timeline.timeline,
-        nullptr
-    };
+    auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
+        .transport = transport,
+        .intent =
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
+        .profileName = std::string {},
+        .workingDirectory = {},
+        .attachSettings = std::nullopt,
+        .sessionSettings = {},
+        .colorPreference = std::nullopt,
+        .clock = core::platform::defaultSteadyClock(),
+        .timeline = timeline.timeline,
+        .powerMonitor = nullptr,
+    } };
     controller.startConnecting();
     REQUIRE(waitUntil([&] { return started.load(); }));
 
@@ -5392,19 +5476,19 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
     {
         INFO(row.name);
         auto timeline = TestTimeline {};
-        auto controller = contour::remote::NativeController {
-            std::make_shared<FailingTransportFactory>("ssh://me@homepc", row.message),
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                          .workspaces = {} },
-            std::string {},
-            std::filesystem::path {},
-            std::nullopt,
-            {},
-            std::nullopt,
-            core::platform::defaultSteadyClock(),
-            timeline.timeline,
-            nullptr
-        };
+        auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
+            .transport = std::make_shared<FailingTransportFactory>("ssh://me@homepc", row.message),
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                    .workspaces = {} },
+            .profileName = std::string {},
+            .workingDirectory = {},
+            .attachSettings = std::nullopt,
+            .sessionSettings = {},
+            .colorPreference = std::nullopt,
+            .clock = core::platform::defaultSteadyClock(),
+            .timeline = timeline.timeline,
+            .powerMonitor = nullptr,
+        } };
         auto const connected = controller.connectAndWait(10s);
         REQUIRE_FALSE(connected.has_value());
         CHECK(connected.error() == row.expected);
@@ -5460,22 +5544,22 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
     auto constexpr TransportBound = std::chrono::milliseconds { 2500 };
     static_assert(TransportBound > contour::remote::MinimumConnectAwait);
     auto timeline = TestTimeline {};
-    auto controller = contour::remote::NativeController {
-        std::make_shared<vthost::SshTransportFactory>(
+    auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
+        .transport = std::make_shared<vthost::SshTransportFactory>(
             vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
             std::make_shared<SilentStdioSpawner>(),
             TransportBound),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                      .workspaces = {} },
-        std::string {},
-        std::filesystem::path {},
-        std::nullopt,
-        {},
-        std::nullopt,
-        core::platform::defaultSteadyClock(),
-        timeline.timeline,
-        nullptr
-    };
+        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                .workspaces = {} },
+        .profileName = std::string {},
+        .workingDirectory = {},
+        .attachSettings = std::nullopt,
+        .sessionSettings = {},
+        .colorPreference = std::nullopt,
+        .clock = core::platform::defaultSteadyClock(),
+        .timeline = timeline.timeline,
+        .powerMonitor = nullptr,
+    } };
     auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "ssh://me@homepc did not answer within 3 seconds");
@@ -5488,6 +5572,9 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
 // it is inert (like an ordinary local window).
 TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder", "[attach][factory]")
 {
+    auto hosts = contour::test::MockPtySessionFactory {};
+    auto owner = contour::session::FactoryBinding { hosts };
+    auto other = contour::session::FactoryBinding { hosts };
     auto app = contour::test::TestApp { std::make_unique<RefusingFactory>() };
     auto controller = contour::test::ScopedController { app.manager() };
 
@@ -5499,10 +5586,11 @@ TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder",
     // verdict is returned verbatim.
     contour::window::WindowController* seen = nullptr;
     auto verdict = false;
-    app.manager().setAttachWindowBinder([&](contour::window::WindowController* c) {
+    app.manager().setAttachWindowBinder(owner, [&](contour::window::WindowController* c) {
         seen = c;
         return verdict;
     });
+    CHECK(app.manager().attachWindowBinderOwner() == &owner);
     CHECK_FALSE(app.manager().consumeAttachWindow(controller.controller));
     CHECK(seen == controller.controller);
     verdict = true;
@@ -5511,6 +5599,19 @@ TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder",
     seen = nullptr;
     CHECK_FALSE(app.manager().consumeAttachWindow(nullptr));
     CHECK(seen == nullptr);
+
+    // Only what installed it removes it, by asking or by being released.
+    app.manager().clearAttachWindowBinder(other);
+    CHECK(app.manager().attachWindowBinderOwner() == &owner);
+    app.manager().releaseBinding(other);
+    CHECK(app.manager().consumeAttachWindow(controller.controller));
+    app.manager().clearAttachWindowBinder(owner);
+    CHECK(app.manager().attachWindowBinderOwner() == nullptr);
+    CHECK_FALSE(app.manager().consumeAttachWindow(controller.controller));
+    app.manager().setAttachWindowBinder(owner, [](contour::window::WindowController*) { return true; });
+    app.manager().releaseBinding(owner);
+    CHECK(app.manager().attachWindowBinderOwner() == nullptr);
+    CHECK_FALSE(app.manager().consumeAttachWindow(controller.controller));
 }
 
 TEST_CASE("a refusing session factory blocks every creation entry point", "[attach][factory]")
@@ -5720,23 +5821,25 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
 {
     auto gate = std::make_shared<StartGate>();
     auto timeline = TestTimeline {};
-    auto live = std::make_unique<contour::remote::NativeController>(
-        std::make_shared<vthost::UnixTransportFactory>(
-            "contour-giveup-test.sock",
-            [gate]() -> std::expected<void, vthost::TransportError> {
-                gate->enterAndWait();
-                return {};
-            }),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                      .workspaces = {} },
-        std::string {},
-        std::filesystem::path {},
-        std::nullopt,
-        contour::remote::NativeController::SessionSettingsSource {},
-        std::nullopt,
-        core::platform::defaultSteadyClock(),
-        timeline.timeline,
-        nullptr);
+    auto live =
+        std::make_unique<contour::remote::NativeController>(contour::remote::NativeController::Config {
+            .transport = std::make_shared<vthost::UnixTransportFactory>(
+                "contour-giveup-test.sock",
+                [gate]() -> std::expected<void, vthost::TransportError> {
+                    gate->enterAndWait();
+                    return {};
+                }),
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                    .workspaces = {} },
+            .profileName = std::string {},
+            .workingDirectory = {},
+            .attachSettings = std::nullopt,
+            .sessionSettings = contour::remote::NativeController::SessionSettingsSource {},
+            .colorPreference = std::nullopt,
+            .clock = core::platform::defaultSteadyClock(),
+            .timeline = timeline.timeline,
+            .powerMonitor = nullptr,
+        });
     live->startConnecting();
     REQUIRE(gate->waitUntilEntered(10s));
 

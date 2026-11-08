@@ -12,31 +12,18 @@
 #include <contour/session/WindowBinding.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
-#include <contour/window/NoticeQueue.hpp>
-
-#include <vtbackend/screen/Settings.hpp>
-
-#include <core/platform/Clock.hpp>
-#include <core/platform/SystemPower.hpp>
 
 #include <QtCore/QObject>
 
 #include <chrono>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
-#include <vthost/Transport.hpp>
-#include <vthost/client/ClientSupervisor.hpp>
-#include <vthost/latency/StartupTimeline.hpp>
-#include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 namespace vtextension
@@ -67,35 +54,14 @@ enum class WindowAdoption : uint8_t
 /// Everything a DaemonLink is built with.
 struct DaemonLinkConfig
 {
-    /// How the link reaches its daemon.
-    std::shared_ptr<vthost::ITransportFactory> transport;
-    /// Which daemon workspaces it follows.
-    vthost::proto::AttachIntent intent;
+    /// What its controller is built with.
+    NativeController::Config controller;
     /// The remote host, as `contour client --host` named it; empty for a local daemon and `--connect-tcp`.
     std::string hostLabel;
     /// Whether the daemon is this machine's, which this client may restart and upgrade.
     window::DaemonLocality locality = window::DaemonLocality::Remote;
-    /// The profile the hello names.
-    std::string profileName;
-    /// The absolute directory the session the first connection creates starts in, stated in that hello only;
-    /// empty for the profile's.
-    std::filesystem::path workingDirectory;
-    /// The emulation settings the hello states; none to have the daemon use its own profile.
-    std::optional<vtbackend::Settings> attachSettings;
-    /// Asked before each session the controller creates.
-    NativeController::SessionSettingsSource sessionSettings;
-    /// The light/dark preference the first hello states.
-    std::optional<vtbackend::ColorPreference> colorPreference;
     /// This client's release, which the daemon's is judged against for the drift badge.
     std::string clientRelease;
-    /// What the connect budget is measured on. Borrowed, never null; it must outlive the link.
-    core::platform::IClock const* clock = nullptr;
-    /// What the controller stamps. Borrowed, never null; it must outlive the link.
-    vthost::latency::StartupTimeline* timeline = nullptr;
-    /// Where the controller hears of system sleep and wake. Borrowed; may be null.
-    core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
-    /// How long its reconnects wait after a loss.
-    vthost::client::BackoffSchedule backoff {};
 };
 
 /// One daemon connection and the windows it serves.
@@ -110,7 +76,10 @@ class DaemonLink final: public session::WindowBinding
     /// Names a link among the application's.
     using Id = DaemonLinkId;
 
-    /// Builds the link and its controller, not yet connecting.
+    /// Builds the link and its controller, and starts connecting: wires the controller's signals to the
+    /// link's windows, installs the attach-window binder on the manager (removed again as the link stops or
+    /// gives up), and starts the connect on the controller's reactor. Nothing of it can fail here; a connect
+    /// that fails is told by awaitAttached().
     /// @param id The link's name among the application's.
     /// @param config What it connects with.
     /// @param host The application. Borrowed; it must outlive the link.
@@ -139,7 +108,7 @@ class DaemonLink final: public session::WindowBinding
     ///         link has not stopped since.
     [[nodiscard]] bool isAttached() const noexcept { return _state == AttachState::Attached; }
 
-    /// @return Whether the link stopped because its last window closed (@see windowClosed), and its
+    /// @return Whether the link stopped because its last window went (@see lastWindowReleased), and its
     ///         controller binds no pane any more: nothing needs it, and it may be destroyed.
     [[nodiscard]] bool isFinished() const;
 
@@ -151,31 +120,29 @@ class DaemonLink final: public session::WindowBinding
     ///         awaitAttached() succeeded, and once the link stopped.
     [[nodiscard]] std::string_view hostLabel() const noexcept override;
 
-    /// Records @p window among windows(). No-op once stopped.
-    /// @param window The window the manager bound to the link.
-    void windowBound(vtworkspace::WorkspaceId window) override;
+    /// The last window the link served went (closed, or bound elsewhere): nothing is left for the connection
+    /// to show. The link stops -- its controller from the event loop, not inside the window close that may
+    /// have called this, as its detach can take up to DefaultDetachBound -- and tells the host it ended
+    /// (IDaemonLinkHost::linkEnded) -- again as each
+    /// pane of its closed windows lets its controller go. Its daemon workspaces' mappings are kept meanwhile,
+    /// so that a window its user closed does not open again. No-op once stopped.
+    void lastWindowReleased() override;
 
-    /// Forgets @p window as one the link serves. Its daemon workspace's mapping is kept, so that the window
-    /// its user closed does not open again (@see reconcileAttachWindows()). When it was the last window the
-    /// link served, the link stops and tells the host it ended (IDaemonLinkHost::linkEnded).
-    /// @param window The closed window.
-    void windowClosed(vtworkspace::WorkspaceId window) override;
-
-    /// @return The OS windows the link serves -- every window the manager bound to it
-    ///         (session::TerminalSessionManager::bindWindow) and has not been told closed -- in binding
-    ///         order; none once stopped.
-    [[nodiscard]] std::span<vtworkspace::WorkspaceId const> windows() const noexcept { return _windows; }
+    /// Asks the daemon for a new workspace, whose layout push then opens the window showing it -- while the
+    /// link still boots only: its first layout is pending, so a window opened meanwhile would be claimed as
+    /// one more boot window and stay empty. A link serving windows is asked through them instead
+    /// (session::TerminalSessionManager::requestRemoteWorkspace).
+    /// @param spawn What the new workspace's first session runs.
+    /// @return Routed when the daemon took the request; Local when the caller is to open a window itself.
+    [[nodiscard]] session::RemoteRouting requestBootWorkspace(session::RemoteSpawn const& spawn);
 
     /// @return What the link's drift badge shows.
     [[nodiscard]] window::DaemonDriftModel& drift() noexcept { return _drift; }
 
-    /// Wires the controller's signals to the link's windows, installs the attach-window binder on the
-    /// manager, and starts the connect on the controller's reactor. Call once.
-    void start();
-
-    /// Waits for the connect start() began, with what remains of @p budget; gives the controller up when it
-    /// does not connect in time (@see awaitConnectedOrAbandon()).
-    /// @param budget How long the connect may take since start().
+    /// Waits for the connect the constructor began, with what remains of @p budget; gives the controller up
+    /// when it does not connect in time (@see awaitConnectedOrAbandon()), and with it the attach-window
+    /// binder.
+    /// @param budget How long the connect may take since the link was built.
     /// @return Nothing once attached; why not otherwise.
     [[nodiscard]] std::expected<void, std::string> awaitAttached(std::chrono::milliseconds budget);
 
@@ -192,7 +159,8 @@ class DaemonLink final: public session::WindowBinding
 
     /// Stops the controller, and serves no window any more: what they make from then on is local
     /// (@see session::TerminalSessionManager::releaseBinding). A signal of the controller still queued is
-    /// ignored from then on. Idempotent.
+    /// ignored from then on. Idempotent; stops the controller of a link that ended too, whose stop
+    /// lastWindowReleased() only posted.
     void stop();
 
     /// Has the controller state the reloaded configuration's session settings, to the daemon and in the hello
@@ -204,6 +172,11 @@ class DaemonLink final: public session::WindowBinding
     /// and each window's tab/pane tree is reconciled. Idempotent; re-run on every layout change. No-op once
     /// given up or stopped.
     void reconcile();
+
+    /// What every layout of the daemon brings, and the GUI's boot once: reconcile(), then a restore summary
+    /// no window took is forgotten, once no window of the layout is still to be bound. No-op once given up or
+    /// stopped.
+    void followLayout();
 
     /// Called from a freshly spawned window's Main.qml (through the manager's attach-window binder): binds it
     /// to the daemon workspace staged for it, or, while the boot window is still to adopt one, to the
@@ -220,19 +193,19 @@ class DaemonLink final: public session::WindowBinding
     /// @param local The local workspace of the OS window that mirrors it.
     void bindDaemonWorkspace(uint64_t daemonWorkspace, vtworkspace::WorkspaceId local);
 
+  private:
     /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
     /// still to be bound: a toast about a restore must not surface in a window opened later.
     void expireRestoreSummaryAfterLayout();
 
-  private:
-    /// Whether the attach is still to settle, succeeded, was given up, or the link stopped.
+    /// Whether the attach is still to settle, succeeded, or the link stopped. One given up stays Connecting:
+    /// that it was given up is that its live controller is gone (@see isLive()).
     enum class AttachState : uint8_t
     {
         Connecting = 0,
         Attached,
-        GivenUp,
         Stopped, ///< stop() ran.
-        Ended,   ///< Stopped, because the last window it served closed; asks the host to be destroyed.
+        Ended,   ///< Stopped, because the last window it served went; asks the host to be destroyed.
     };
 
     /// @return Whether the link stopped, ended or not: what its controller still signals is ignored.
@@ -241,15 +214,23 @@ class DaemonLink final: public session::WindowBinding
         return _state == AttachState::Stopped || _state == AttachState::Ended;
     }
 
+    /// @return Whether the link has a live controller to act on: not given up, and not stopped.
+    [[nodiscard]] bool isLive() const noexcept { return _controller != nullptr && !isStopped(); }
+
+    /// @return The live controller, else the given-up one: the one the link's ptys were made by.
+    [[nodiscard]] NativeController& anyController() const noexcept
+    {
+        return _controller ? *_controller : *_givenUp;
+    }
+
     /// @return Whether the live or the given-up controller still binds a pane (NativeController::bindsPanes).
     [[nodiscard]] bool bindsPanes() const;
 
+    /// The constructor's wiring and connect start (@see DaemonLink()).
+    void connectController();
     void connectReconnectSignals();
     void closeLostWindows(std::vector<uint64_t> const& daemonWorkspaces);
 
-    /// Serves @p window: binds it to this link on the manager, and records it among windows().
-    /// @param window A window of the manager.
-    void serve(vtworkspace::WorkspaceId window);
     void showDaemonDrift();
     void askHostedExtensions();
     void requireGuiThread() const;
@@ -277,8 +258,6 @@ class DaemonLink final: public session::WindowBinding
 
     /// Each daemon workspace mapped to the OS window that mirrors it.
     AttachWindowMap _attachWindowMap;
-    /// The OS windows the manager bound to the link, and not told closed (@see windows()).
-    std::vector<vtworkspace::WorkspaceId> _windows;
     /// The daemon workspace whose OS window is being spawned right now: reconcile() stages it just before
     /// openWindowFor(), and that window claims it through bindPendingWindow(). Single-slot: the QML load is
     /// synchronous, so a stage is always consumed before the next is made.
@@ -298,14 +277,11 @@ class DaemonLink final: public session::WindowBinding
 };
 
 /// The daemon workspace the boot (first) OS window should adopt when attaching, rather than authoring
-/// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) workspace; a
-/// later OS window is not a boot window (@p anyWindowMapped is then true). Pure so the boot-adoption
-/// rule is unit-testable without the QML boot flow.
-/// @param anyWindowMapped True if at least one OS window is already bound to a daemon workspace.
+/// a fresh tab: in attach mode the boot window mirrors the daemon's primary (lowest-id) workspace. Pure so
+/// the boot-adoption rule is unit-testable without the QML boot flow.
 /// @param daemonWorkspaceIds The daemon's known workspace ids, ascending (workspaceIds() ordering).
-/// @return The daemon workspace to adopt, or nullopt if this is not the boot window, or the daemon has
-///         not reported a workspace yet.
+/// @return The daemon workspace to adopt, or nullopt if the daemon has not reported a workspace yet.
 [[nodiscard]] std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds);
+    std::vector<std::uint64_t> const& daemonWorkspaceIds);
 
 } // namespace contour::remote

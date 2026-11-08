@@ -218,12 +218,6 @@ class SessionFactory
         return hosting() == SessionHosting::Local ? SessionHostKind::Local : SessionHostKind::Daemon;
     }
 
-    /// The factory of sessions that run in this process whatever host the app is attached to. A window that
-    /// is no part of the host's workspace -- the quick terminal -- makes its sessions through it, so the
-    /// host neither authors nor remembers them.
-    /// @return This factory for one that spawns here (the default); the factory that does, for a routing one.
-    [[nodiscard]] virtual SessionFactory& localSessions() noexcept { return *this; }
-
     /// Whether a tab can be merged into a split of a pane here: a local factory merges in-process, an attach
     /// factory only when its remote end serves the merge (a remote end's model would undo a local one).
     /// @return Supported for a local factory (the default); Unsupported for a remote one that does not

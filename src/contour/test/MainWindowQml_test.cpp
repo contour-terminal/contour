@@ -1281,6 +1281,22 @@ TEST_CASE("the Terminal row sets the active tab apart where its fill is the bar'
 TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its chip (offscreen)",
           "[contour][gui][qml][mainwindow][window][hosts]")
 {
+    SECTION("a window bound to its host after it loaded")
+    {
+        // The boot window is bound from Main.qml's onCompleted, after the title binding first ran.
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+        CHECK(root->property("title").toString().isEmpty());
+
+        controller.rebindHost(QStringLiteral("home"));
+        CHECK(root->property("title").toString() == QStringLiteral("home"));
+        controller.rebindHost({});
+        CHECK(root->property("title").toString().isEmpty());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
     SECTION("a remote window")
     {
         QQmlEngine engine;

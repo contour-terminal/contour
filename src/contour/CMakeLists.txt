@@ -298,6 +298,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/PaneProxy.hpp
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
+        session/FactoryBinding.hpp
         session/WindowBinding.hpp
         window/SettingsController.hpp
         window/QtString.hpp

@@ -70,32 +70,22 @@ namespace
     }
 } // namespace
 
-NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
-                                   vthost::proto::AttachIntent intent,
-                                   std::string profileName,
-                                   std::filesystem::path workingDirectory,
-                                   std::optional<vtbackend::Settings> attachSettings,
-                                   SessionSettingsSource sessionSettings,
-                                   std::optional<vtbackend::ColorPreference> colorPreference,
-                                   core::platform::IClock const& clock,
-                                   vthost::latency::StartupTimeline& timeline,
-                                   core::platform::ISystemPowerMonitor* powerMonitor,
-                                   vthost::client::BackoffSchedule backoff):
-    RemoteController(clock),
-    _transport(std::move(transport)),
-    _intent(std::move(intent)),
-    _profileName(std::move(profileName)),
-    _workingDirectory(std::move(workingDirectory)),
-    _attachSettings(std::move(attachSettings)),
-    _sessionSettings(std::move(sessionSettings)),
-    _timeline(timeline),
-    _backoff(backoff)
+NativeController::NativeController(Config config):
+    RemoteController(config.clock),
+    _transport(std::move(config.transport)),
+    _intent(std::move(config.intent)),
+    _profileName(std::move(config.profileName)),
+    _workingDirectory(std::move(config.workingDirectory)),
+    _attachSettings(std::move(config.attachSettings)),
+    _sessionSettings(std::move(config.sessionSettings)),
+    _timeline(config.timeline),
+    _backoff(config.backoff)
 {
-    if (colorPreference)
-        _statedColors = wireOf(*colorPreference);
+    if (config.colorPreference)
+        _statedColors = wireOf(*config.colorPreference);
     // On the monitor's platform thread: only marshaled from there, as its contract asks.
-    if (powerMonitor != nullptr)
-        _powerSubscription = powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
+    if (config.powerMonitor != nullptr)
+        _powerSubscription = config.powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
             // The monitor's dispatch is noexcept, so a throw here would terminate; a hint lost to a failed
             // post costs only the hint: on macOS the late liveness tick still reveals the sleep, and where
             // the steady clock stops during suspend there is no silence to mistake for a loss.
@@ -1525,24 +1515,26 @@ bool NativeController::isBinding(uint64_t session, uint64_t serial) const
 
 void NativeController::unbind(uint64_t session, uint64_t serial)
 {
-    if (forgetBinding(session, serial) == BindingForgotten::Yes)
-        // Outside the lock: a receiver asks bindsPanes(), which takes it.
-        emit paneUnbound();
+    forgetBinding(session, serial);
+    // Also for a detached binding's pty: it was counted live until now. Outside the lock: a receiver asks
+    // bindsPanes(), which takes it.
+    emit paneUnbound();
 }
 
 bool NativeController::bindsPanes() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return !_bindings.empty();
+    return _livePtys != 0;
 }
 
-NativeController::BindingForgotten NativeController::forgetBinding(uint64_t session, uint64_t serial)
+void NativeController::forgetBinding(uint64_t session, uint64_t serial)
 {
     auto const lock = std::lock_guard { _mutex };
+    --_livePtys;
     auto const binding = _bindings.find(session);
     // A detached binding's pty: the session id, if bound at all, is a new session's now.
     if (binding == _bindings.end() || binding->second.serial != serial)
-        return BindingForgotten::No;
+        return;
     _bindings.erase(binding);
     _inputEchoes.erase(session); // a session id is never reused within a run
     // The pane is gone: its grid must not keep contributing to a composed client area, and the
@@ -1568,7 +1560,6 @@ NativeController::BindingForgotten NativeController::forgetBinding(uint64_t sess
     // window destroy the user's shells.
     if (!_stopped)
         _closedSessions.insert(session);
-    return BindingForgotten::Yes;
 }
 
 void NativeController::closeAllBindings()
@@ -1684,6 +1675,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
         },
         [this, session, serial] { unbind(session, serial); });
     _bindings[session] = Binding { .serial = serial, .pty = pty.get(), .terminal = nullptr, .mirror = {} };
+    ++_livePtys; // until its destructor's unbind(), however long the binding itself lasts
     // A prompt that was waiting before this pane was bound.
     if (auto const echo = _inputEchoes.find(session); echo != _inputEchoes.end())
         pty->setInputEcho(echo->second);

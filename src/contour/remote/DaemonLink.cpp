@@ -4,6 +4,7 @@
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/NoticeQueue.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <core/Assert.hpp>
@@ -37,21 +38,10 @@ DaemonLink::DaemonLink(Id id,
     _sessions(sessions),
     _hostLabel(std::move(config.hostLabel)),
     _locality(config.locality),
-    _clientRelease(std::move(config.clientRelease))
+    _clientRelease(std::move(config.clientRelease)),
+    _controller(std::make_unique<NativeController>(std::move(config.controller)))
 {
-    Require(config.clock != nullptr);
-    Require(config.timeline != nullptr);
-    _controller = std::make_unique<NativeController>(std::move(config.transport),
-                                                     std::move(config.intent),
-                                                     std::move(config.profileName),
-                                                     std::move(config.workingDirectory),
-                                                     std::move(config.attachSettings),
-                                                     std::move(config.sessionSettings),
-                                                     config.colorPreference,
-                                                     *config.clock,
-                                                     *config.timeline,
-                                                     config.powerMonitor,
-                                                     config.backoff);
+    connectController();
 }
 
 DaemonLink::~DaemonLink()
@@ -69,7 +59,7 @@ void DaemonLink::requireGuiThread() const
 
 session::SessionFactory& DaemonLink::sessions() noexcept
 {
-    return _controller ? *_controller : *_givenUp;
+    return anyController();
 }
 
 std::string_view DaemonLink::hostLabel() const noexcept
@@ -79,8 +69,7 @@ std::string_view DaemonLink::hostLabel() const noexcept
 
 bool DaemonLink::bindsPanes() const
 {
-    auto const* const controller = _controller ? _controller.get() : _givenUp.get();
-    return controller != nullptr && controller->bindsPanes();
+    return anyController().bindsPanes();
 }
 
 bool DaemonLink::isFinished() const
@@ -88,48 +77,41 @@ bool DaemonLink::isFinished() const
     return _state == AttachState::Ended && !bindsPanes();
 }
 
-void DaemonLink::windowBound(vtworkspace::WorkspaceId window)
+void DaemonLink::lastWindowReleased()
 {
     requireGuiThread();
-    if (!isStopped() && !std::ranges::contains(_windows, window))
-        _windows.push_back(window);
-}
-
-void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
-{
-    requireGuiThread();
-    if (std::erase(_windows, window) == 0 || !_windows.empty() || isStopped())
+    if (isStopped())
         return;
-    // The last window it served closed: nothing is left for the connection to show.
-    stop();
+    // stop(), less the controller's stop, which waits up to DefaultDetachBound for the daemon to see this
+    // client detach: not inside the window close that got here, while the application lives on (the quick
+    // terminal, a local window). Posted to the receiver, ahead of the destruction linkEnded() asks for, so
+    // it runs first; a link destroyed before it stops its controller in the controller's destructor.
     _state = AttachState::Ended;
-    _host.linkEnded(*this);
+    _sessions.releaseBinding(*this);
+    QMetaObject::invokeMethod(&_receiver, [this] { stop(); }, Qt::QueuedConnection);
+    // From now on only: the panes of its closed windows let its controller go one by one, and the last one
+    // has the link destroyed.
+    QObject::connect(
+        &anyController(),
+        &NativeController::paneUnbound,
+        &_receiver,
+        [this] {
+            if (isFinished())
+                _host.linkEnded();
+        },
+        Qt::QueuedConnection);
+    _host.linkEnded();
 }
 
-void DaemonLink::start()
+void DaemonLink::connectController()
 {
     requireGuiThread();
     // A window spawned to host a daemon workspace binds itself here (from its Main.qml, via
     // consumeAttachWindow) instead of creating a fresh first tab.
-    _sessions.setAttachWindowBinder([this](window::WindowController* controller) {
+    // Removed by the manager as the link stops (releaseBinding()), and by awaitAttached() on giving up.
+    _sessions.setAttachWindowBinder(*this, [this](window::WindowController* controller) {
         return controller != nullptr && bindPendingWindow(*controller) == WindowAdoption::Adopted;
     });
-    // First: a Reconnect from a footer has the panes lost with the connection take their sessions back
-    // before the layout is reconciled, which would otherwise find no live pane for them and realize them
-    // again beside the ended ones.
-    QObject::connect(
-        _controller.get(),
-        &NativeController::layoutChanged,
-        &_receiver,
-        [this] {
-            if (!isStopped())
-                _sessions.rebindDisconnected(*this);
-        },
-        Qt::QueuedConnection);
-    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree: whenever a layout
-    // arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by another
-    // client), map each daemon workspace onto an OS window and realize any tab not yet shown, each pane bound
-    // to its remote session. Incremental — what is already shown is left untouched.
     QObject::connect(
         _controller.get(),
         &NativeController::layoutChanged,
@@ -137,8 +119,11 @@ void DaemonLink::start()
         [this] {
             if (isStopped())
                 return;
-            reconcile();
-            expireRestoreSummaryAfterLayout();
+            // First: a Reconnect from a footer has the panes lost with the connection take their sessions
+            // back before the layout is reconciled, which would otherwise find no live pane for them and
+            // realize them again beside the ended ones.
+            _sessions.rebindDisconnected(*this);
+            followLayout();
         },
         Qt::QueuedConnection);
     // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
@@ -162,8 +147,8 @@ void DaemonLink::start()
         &NativeController::connectionClosed,
         &_receiver,
         [this] {
-            // Null once a connect that failed has been given up on (see awaitAttached()).
-            if (!_controller || isStopped())
+            // Not once a connect that failed has been given up on (see awaitAttached()).
+            if (!isLive())
                 return;
             // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
             // that ends here did not bring the daemon back: the panes it was for say so, with the
@@ -180,9 +165,10 @@ void DaemonLink::start()
         [this] {
             if (isStopped())
                 return;
-            _host.postNotice(*this,
-                             window::Notice { .kind = window::NoticeKind::DropRefused,
-                                              .text = std::string { window::TabMergeRefusedText } });
+            _sessions.postNoticeToWindowsOf(
+                *this,
+                window::Notice { .kind = window::NoticeKind::DropRefused,
+                                 .text = std::string { window::TabMergeRefusedText } });
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -195,7 +181,7 @@ void DaemonLink::start()
             _sessions.remoteMoveRefused(request);
             // A drop onto itself, or one that would leave everything where it is, has nothing to tell.
             if (auto const text = window::moveRefusedText(reason, modelReason); !text.empty())
-                _host.postNotice(
+                _sessions.postNoticeToWindowsOf(
                     *this,
                     window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { text } });
         },
@@ -211,18 +197,6 @@ void DaemonLink::start()
         },
         Qt::QueuedConnection);
 #endif
-    // An ended link waits for the last pane of its closed windows to let its controller go, and asks to be
-    // destroyed then.
-    QObject::connect(
-        _controller.get(),
-        &NativeController::paneUnbound,
-        &_receiver,
-        [this] {
-            if (isFinished())
-                _host.linkEnded(*this);
-        },
-        Qt::QueuedConnection);
-
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots; the
     // application waits for them through awaitAttached() just before the first window. The signals above are
     // connected first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part
@@ -236,7 +210,8 @@ std::expected<void, std::string> DaemonLink::awaitAttached(std::chrono::millisec
     // Given up, not destroyed: see awaitConnectedOrAbandon(). Kept until the link ends instead.
     if (auto attached = awaitConnectedOrAbandon(_controller, _givenUp, budget, &_receiver); !attached)
     {
-        _state = AttachState::GivenUp;
+        // A window spawned from now on is no daemon workspace's: it opens a tab of its own.
+        _sessions.clearAttachWindowBinder(*this);
         return attached;
     }
     _state = AttachState::Attached;
@@ -246,19 +221,22 @@ std::expected<void, std::string> DaemonLink::awaitAttached(std::chrono::millisec
 void DaemonLink::stop()
 {
     requireGuiThread();
-    if (isStopped())
-        return;
-    _state = AttachState::Stopped;
-    _windows.clear();
-    _sessions.releaseBinding(*this);
-    if (_controller)
-        _controller->stop();
+    if (!isStopped())
+    {
+        _state = AttachState::Stopped;
+        // The attach-window binder goes with the windows.
+        _sessions.releaseBinding(*this);
+    }
+    // Also once ended: lastWindowReleased() posts this stop, and the application's teardown may stop the
+    // link before that event runs. Left running, the reactor would go on writing the mirrors of the sessions
+    // the teardown deletes. Idempotent, as is a given-up controller's stop.
+    anyController().stop();
 }
 
 void DaemonLink::onConfigurationReloaded()
 {
     requireGuiThread();
-    if (_controller && !isStopped())
+    if (isLive())
         _controller->restateSessionSettings();
 }
 
@@ -268,7 +246,7 @@ void DaemonLink::stopForDaemonRestart()
     // Ended here, rather than lost when the daemon stops: a lost connection is sought again, and a
     // reconnect would start a daemon of its own while the restart waits for none to accept.
     // Before stop(), which closes every mirror pty -- @see TerminalSession::noteTransportLost
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
     _sessions.noteTransportLost(*this);
     _controller->stop();
@@ -292,7 +270,7 @@ void DaemonLink::showDaemonDrift()
 void DaemonLink::offerDaemonRestartIfDrifted()
 {
     requireGuiThread();
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
     showDaemonDrift();
     // An upgrade closes this client's connection and holds it for the daemon's return; the badge says so
@@ -317,10 +295,20 @@ void DaemonLink::offerDaemonRestartIfDrifted()
     });
 }
 
+void DaemonLink::followLayout()
+{
+    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree: whenever a layout
+    // arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by another
+    // client), map each daemon workspace onto an OS window and realize any tab not yet shown, each pane bound
+    // to its remote session. Incremental — what is already shown is left untouched.
+    reconcile();
+    expireRestoreSummaryAfterLayout();
+}
+
 void DaemonLink::reconcile()
 {
     requireGuiThread();
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
 
     // Taken before the settled layouts are read, so they are at least as new as the push of each move named.
@@ -375,7 +363,7 @@ void DaemonLink::reconcile()
         // synchronous, so the stage is consumed before this returns. A window a move of this process asked
         // for opens where the pane was dropped.
         _pendingAttachWorkspace = daemonWorkspace;
-        _host.openWindowFor(*this, _sessions.stageRemoteMoveWindow(sessions));
+        _host.openWindowFor(_sessions.stageRemoteMoveWindow(sessions));
     };
     reconcileAttachWindows(_sessions, *_controller, layouts, _attachWindowMap, openWindow);
     _reconcilingLayouts = nullptr;
@@ -388,10 +376,10 @@ void DaemonLink::reconcile()
 WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
 {
     requireGuiThread();
-    if (!_controller || isStopped())
+    if (!isLive())
         return WindowAdoption::Declined;
     // Before anything is realized in it: what it makes is made through this link.
-    serve(window.windowId());
+    _sessions.bindWindow(window.windowId(), *this);
 
     // A reconcile-spawned secondary OS window claims the daemon workspace staged for it.
     if (_pendingAttachWorkspace)
@@ -412,12 +400,21 @@ WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
         // As of the last push's end, as every reconcile reads them: the next push's first frame may name a
         // window whose layout is not complete yet.
         auto const settled = std::ranges::to<std::vector>(_controller->settledLayouts() | std::views::keys);
-        if (auto const adopt = primaryDaemonWorkspaceToAdopt(false, settled))
+        if (auto const adopt = primaryDaemonWorkspaceToAdopt(settled))
             bindDaemonWorkspace(*adopt, window.windowId());
         return WindowAdoption::Adopted;
     }
 
     return WindowAdoption::Declined;
+}
+
+session::RemoteRouting DaemonLink::requestBootWorkspace(session::RemoteSpawn const& spawn)
+{
+    requireGuiThread();
+    return isLive() && _attachBoot == session::AttachBoot::Pending
+                   && _controller->requestRemoteWorkspace(spawn)
+               ? session::RemoteRouting::Routed
+               : session::RemoteRouting::Local;
 }
 
 void DaemonLink::connectReconnectSignals()
@@ -429,7 +426,7 @@ void DaemonLink::connectReconnectSignals()
         &NativeController::connectionStateChanged,
         &_receiver,
         [this] {
-            if (_controller && !isStopped())
+            if (isLive())
                 _sessions.setHostConnection(*this, _controller->connectionState());
         },
         Qt::QueuedConnection);
@@ -446,7 +443,7 @@ void DaemonLink::connectReconnectSignals()
 
 void DaemonLink::closeLostWindows(std::vector<std::uint64_t> const& daemonWorkspaces)
 {
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
     auto doomed = std::vector<vtworkspace::WorkspaceId> {};
     for (auto const daemonWorkspace: daemonWorkspaces)
@@ -456,17 +453,16 @@ void DaemonLink::closeLostWindows(std::vector<std::uint64_t> const& daemonWorksp
             continue;
         // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
         // @see TerminalSession::noteTransportLost
-        if (auto* workspace = _sessions.model().workspace(mapped->second))
-            for (auto const index: std::views::iota(0, workspace->tabCount()))
-                for (auto* session: _sessions.sessionsOfTab(workspace->tabAt(index)))
-                    session->noteTransportLost();
+        for (auto* session: _sessions.sessionsOfWindow(mapped->second))
+            session->noteTransportLost();
         doomed.push_back(mapped->second);
         _attachWindowMap.erase(mapped);
     }
     // The windows that came instead first: closing the last stale window before would end the application.
     reconcile();
     for (auto const window: doomed)
-        _host.closeWindow(window);
+        if (auto* const controller = _sessions.controllerFor(window))
+            controller->closeWindow();
 }
 
 void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId local)
@@ -474,7 +470,7 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
     requireGuiThread();
     _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWorkspace, local);
-    serve(local);
+    _sessions.bindWindow(local, *this);
     if (_reconcilingLayouts != nullptr)
         applyRemoteLayout(_sessions, local, *_controller, *_reconcilingLayouts, daemonWorkspace);
     else
@@ -482,16 +478,10 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
     _sessions.deliverRestoreSummaryTo(local);
 }
 
-void DaemonLink::serve(vtworkspace::WorkspaceId window)
-{
-    // The manager tells windowBound(), which records it among windows().
-    _sessions.bindWindow(window, *this);
-}
-
 void DaemonLink::expireRestoreSummaryAfterLayout()
 {
     requireGuiThread();
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
     auto const layout = _controller->workspaceIds().empty() ? session::LayoutWorkspaces::None
                                                             : session::LayoutWorkspaces::Some;
@@ -505,7 +495,7 @@ void DaemonLink::expireRestoreSummaryAfterLayout()
 void DaemonLink::askHostedExtensions()
 {
 #ifdef CONTOUR_EXTENSIONS
-    if (!_controller || isStopped())
+    if (!isLive())
         return;
     if (!_grants)
     {
@@ -536,9 +526,9 @@ void DaemonLink::askHostedExtensions()
 }
 
 std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds)
+    std::vector<std::uint64_t> const& daemonWorkspaceIds)
 {
-    if (anyWindowMapped || daemonWorkspaceIds.empty())
+    if (daemonWorkspaceIds.empty())
         return std::nullopt;
     return daemonWorkspaceIds.front(); // workspaceIds() is ascending, so front() is the primary workspace
 }

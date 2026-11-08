@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/ContextMenu.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/testing/DaemonFixture.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -33,33 +35,28 @@ namespace
 {
 
 /// An application that records what a link asks of it. A window it opens is a manager-minted controller that
-/// claims the link's staged daemon workspace at once, as a spawned window's Main.qml does while it loads.
+/// asks the attach-window binder at once, as a spawned window's Main.qml does while it loads.
 class FakeLinkHost final: public contour::remote::IDaemonLinkHost
 {
   public:
     explicit FakeLinkHost(contour::session::TerminalSessionManager& manager): _manager(manager) {}
 
-    void openWindowFor(contour::remote::DaemonLink& link, QScreen* /*screen*/) override
+    void openWindowFor(QScreen* /*screen*/) override
     {
         auto& window = *opened.emplace_back(std::make_unique<contour::test::ScopedController>(_manager));
-        adoptions.push_back(link.bindPendingWindow(*window.controller));
-    }
-    void closeWindow(vtworkspace::WorkspaceId window) override { closed.push_back(window); }
-    void postNotice(contour::remote::DaemonLink& /*link*/, contour::window::Notice notice) override
-    {
-        notices.push_back(std::move(notice));
+        adoptions.push_back(_manager.consumeAttachWindow(window.controller)
+                                ? contour::remote::WindowAdoption::Adopted
+                                : contour::remote::WindowAdoption::Declined);
     }
     void upgradeDaemon(contour::remote::DaemonLink& /*link*/) override { ++upgrades; }
     void restartDaemon(contour::remote::DaemonLink& /*link*/) override { ++restarts; }
-    void linkEnded(contour::remote::DaemonLink& link) override { ended.push_back(&link); }
+    void linkEnded() override { ++endings; }
 
     std::vector<std::unique_ptr<contour::test::ScopedController>> opened; ///< Every window opened, in order.
-    std::vector<contour::remote::WindowAdoption> adoptions;               ///< What the link said to each.
-    std::vector<vtworkspace::WorkspaceId> closed;                         ///< Every window asked closed.
-    std::vector<contour::window::Notice> notices;
+    std::vector<contour::remote::WindowAdoption> adoptions;               ///< What the binder said to each.
     int upgrades = 0;
     int restarts = 0;
-    std::vector<contour::remote::DaemonLink*> ended; ///< Every linkEnded(), in order.
+    int endings = 0; ///< How often linkEnded() was told.
 
   private:
     contour::session::TerminalSessionManager& _manager;
@@ -91,21 +88,13 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
         if (auto resolved = sessionSettings())
             attachSettings = *std::move(resolved);
     return contour::remote::DaemonLinkConfig {
-        .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
-        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                .workspaces = {} },
+        .controller = controllerConfig(std::move(endpoint),
+                                       timeline,
+                                       ControllerOptions { .sessionSettings = std::move(sessionSettings),
+                                                           .attachSettings = std::move(attachSettings) }),
         .hostLabel = std::move(hostLabel),
         .locality = contour::window::DaemonLocality::Remote,
-        .profileName = {},
-        .workingDirectory = {},
-        .attachSettings = std::move(attachSettings),
-        .sessionSettings = std::move(sessionSettings),
-        .colorPreference = std::nullopt,
         .clientRelease = "test",
-        .clock = &core::platform::defaultSteadyClock(),
-        .timeline = &timeline.timeline,
-        .powerMonitor = nullptr,
-        .backoff = {},
     };
 }
 
@@ -153,12 +142,7 @@ struct LinkRig
 [[nodiscard]] std::vector<contour::session::TerminalSession*> sessionsOf(
     contour::session::TerminalSessionManager& manager, vtworkspace::WorkspaceId window)
 {
-    auto sessions = std::vector<contour::session::TerminalSession*> {};
-    if (auto const* const workspace = manager.model().workspace(window))
-        for (auto const index: std::views::iota(0, workspace->tabCount()))
-            for (auto* const session: manager.sessionsOfTab(workspace->tabAt(index)))
-                sessions.push_back(session);
-    return sessions;
+    return manager.sessionsOfWindow(window);
 }
 
 /// @return The sessions @p window shows, watched for their destruction.
@@ -197,7 +181,8 @@ std::vector<uint64_t> seedWorkspaces(DaemonFixture& daemon, int count)
 
 } // namespace
 
-TEST_CASE("DaemonLink: start connects and reconcile asks the host for one window per further workspace",
+TEST_CASE("DaemonLink: a link connects as it is built, and reconcile asks the host for one window per "
+          "further workspace",
           "[attach][link]")
 {
     auto daemon = DaemonFixture {};
@@ -206,7 +191,6 @@ TEST_CASE("DaemonLink: start connects and reconcile asks the host for one window
     auto& link = *rig.link;
     auto const boot = contour::test::ScopedController { rig.app.manager() };
 
-    link.start();
     // The label is the attach's only once it settled.
     CHECK(link.hostLabel().empty());
     REQUIRE(link.awaitAttached(10s).has_value());
@@ -221,7 +205,7 @@ TEST_CASE("DaemonLink: start connects and reconcile asks the host for one window
     CHECK(rig.host.adoptions
           == std::vector { contour::remote::WindowAdoption::Adopted,
                            contour::remote::WindowAdoption::Adopted });
-    auto const windows = std::vector<vtworkspace::WorkspaceId>(link.windows().begin(), link.windows().end());
+    auto const windows = std::ranges::to<std::vector>(rig.app.manager().windowsBoundTo(link));
     CHECK(windows == std::vector { boot.id, rig.host.opened[0]->id, rig.host.opened[1]->id });
     // Every window it serves is bound to it, until it stops.
     for (auto const window: windows)
@@ -238,7 +222,6 @@ TEST_CASE("DaemonLink: lost workspaces close their windows", "[attach][link][rec
     auto rig = LinkRig { daemon.endpoint() };
     auto& link = *rig.link;
     auto const boot = contour::test::ScopedController { rig.app.manager() };
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
     REQUIRE(waitUntil([&] { return rig.host.opened.size() == 1; }));
     auto const lostWindow = rig.host.opened.front()->id;
@@ -248,8 +231,8 @@ TEST_CASE("DaemonLink: lost workspaces close their windows", "[attach][link][rec
         auto* workspace = daemon.host->model().workspace(vtworkspace::WorkspaceId { workspaces[1] });
         daemon.host->handleSessionExit(workspace->tabAt(0)->rootPane()->session());
     });
-    REQUIRE(waitUntil([&] { return !rig.host.closed.empty(); }, 1000));
-    CHECK(rig.host.closed == std::vector { lostWindow });
+    REQUIRE(waitUntil([&] { return rig.app.manager().controllerFor(lostWindow) == nullptr; }, 1000));
+    CHECK(rig.app.manager().controllerFor(boot.id) != nullptr);
 }
 
 TEST_CASE("DaemonLink: stop is idempotent and stops the controller", "[attach][link]")
@@ -258,7 +241,6 @@ TEST_CASE("DaemonLink: stop is idempotent and stops the controller", "[attach][l
     std::ignore = seedWorkspaces(daemon, 1);
     auto rig = LinkRig { daemon.endpoint() };
     auto& link = *rig.link;
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 1; }));
 
@@ -268,6 +250,26 @@ TEST_CASE("DaemonLink: stop is idempotent and stops the controller", "[attach][l
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }
 
+TEST_CASE("DaemonLink: a stopped link no longer owns the attach-window binder", "[attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint() };
+    auto& link = *rig.link;
+    auto& manager = rig.app.manager();
+    auto const boot = contour::test::ScopedController { manager };
+    CHECK(manager.attachWindowBinderOwner() == &link);
+    REQUIRE(link.awaitAttached(10s).has_value());
+    CHECK(manager.attachWindowBinderOwner() == &link);
+
+    link.stop();
+    CHECK(manager.attachWindowBinderOwner() == nullptr);
+    // A window spawned now is nobody's: it opens a first tab of its own, and stays local.
+    auto const spawned = contour::test::ScopedController { manager };
+    CHECK_FALSE(manager.consumeAttachWindow(spawned.controller));
+    CHECK(manager.bindingOf(spawned.id) == nullptr);
+}
+
 TEST_CASE("DaemonLink: a connect that fails is given up, and adopts no window", "[attach][link]")
 {
     auto daemon = DaemonFixture {};
@@ -275,9 +277,11 @@ TEST_CASE("DaemonLink: a connect that fails is given up, and adopts no window", 
     auto rig = LinkRig { daemon.endpoint(), "home" };
     auto& link = *rig.link;
     auto const window = contour::test::ScopedController { rig.app.manager() };
-    link.start();
 
+    CHECK(rig.app.manager().attachWindowBinderOwner() == &link);
     CHECK_FALSE(link.awaitAttached(100ms).has_value());
+    // Given up with the controller: a window spawned from now on opens a tab of its own.
+    CHECK(rig.app.manager().attachWindowBinderOwner() == nullptr);
     CHECK_FALSE(link.isAttached());
     CHECK(link.liveController() == nullptr);
     CHECK(link.hostLabel().empty());
@@ -294,34 +298,62 @@ TEST_CASE("DaemonLink: closing its last window stops and releases the link", "[a
     // A local window stays open: the link's last window is not the process's.
     auto const local = contour::test::ScopedController { rig.app.manager() };
     auto const boot = contour::test::ScopedController { rig.app.manager() };
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
     REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
     REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 1; }));
     auto const panes = watchedSessionsOf(rig.app.manager(), boot.id);
+    auto const* const controller = link.liveController();
+    REQUIRE(controller != nullptr);
 
     boot.controller->closeWindow();
 
-    // It stopped at once: it serves nothing, shows no host, and the daemon saw this client go.
-    CHECK(rig.host.ended == std::vector { &link });
-    CHECK(link.windows().empty());
+    // It stopped at once: it serves nothing and shows no host.
+    CHECK(rig.host.endings == 1);
+    CHECK(rig.app.manager().windowsBoundTo(link).empty());
     CHECK_FALSE(link.isAttached());
     CHECK(link.hostLabel().empty());
     CHECK(rig.app.manager().bindingOf(boot.id) == nullptr);
+    // Its controller's stop, which may wait for the daemon, is not made inside the window close but from the
+    // event loop; then the daemon sees this client go.
+    CHECK(controller->connectionState() == vthost::client::ConnectionState::Connected);
+    drainGuiEvents();
+    CHECK(controller->connectionState() != vthost::client::ConnectionState::Connected);
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
     // Not destroyed yet: the closed window's pane still holds its pty.
     drainGuiEvents();
     CHECK_FALSE(link.isFinished());
-    CHECK(rig.host.ended.size() == 1);
+    CHECK(rig.host.endings == 1);
     // It may be destroyed once the closed window's panes let its controller go, and asks again then.
     endClosedSessions(panes);
     CHECK(waitUntil([&] {
         drainGuiEvents();
         return link.isFinished();
     }));
-    CHECK(rig.host.ended.size() >= 2);
-    CHECK(std::ranges::all_of(rig.host.ended, [&](auto const* ended) { return ended == &link; }));
+    CHECK(rig.host.endings >= 2);
+}
+
+// What the application's teardown relies on: a link whose last window just went has only posted its
+// controller's stop, and the teardown stops every link before that event may run.
+TEST_CASE("DaemonLink: stop() stops the controller of a link that just ended", "[attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), "home" };
+    auto& link = *rig.link;
+    auto const local = contour::test::ScopedController { rig.app.manager() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(link.awaitAttached(10s).has_value());
+    REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
+    auto const* const controller = link.liveController();
+    REQUIRE(controller != nullptr);
+    boot.controller->closeWindow();
+    REQUIRE(controller->connectionState() == vthost::client::ConnectionState::Connected);
+
+    link.stop();
+
+    CHECK(controller->connectionState() != vthost::client::ConnectionState::Connected);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }
 
 TEST_CASE("DaemonLink: closing one of two windows keeps the link serving the other", "[attach][link]")
@@ -331,18 +363,17 @@ TEST_CASE("DaemonLink: closing one of two windows keeps the link serving the oth
     auto rig = LinkRig { daemon.endpoint(), "home" };
     auto& link = *rig.link;
     auto const boot = contour::test::ScopedController { rig.app.manager() };
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
     REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
     REQUIRE(waitUntil([&] { return rig.host.opened.size() == 1; }));
     auto const second = rig.host.opened.front()->id;
-    REQUIRE(link.windows().size() == 2);
+    REQUIRE(rig.app.manager().windowsBoundTo(link).size() == 2);
 
     rig.host.opened.front()->controller->closeWindow();
     drainGuiEvents();
 
-    CHECK(rig.host.ended.empty());
-    CHECK(std::vector(link.windows().begin(), link.windows().end()) == std::vector { boot.id });
+    CHECK(rig.host.endings == 0);
+    CHECK(std::ranges::to<std::vector>(rig.app.manager().windowsBoundTo(link)) == std::vector { boot.id });
     CHECK(link.isAttached());
     CHECK_FALSE(link.isFinished());
     CHECK(rig.app.manager().bindingOf(boot.id) == &link);
@@ -360,7 +391,6 @@ TEST_CASE("DaemonLink: what its controller signals after stop() is ignored", "[a
     auto& link = *rig.link;
     auto& manager = rig.app.manager();
     auto const boot = contour::test::ScopedController { manager };
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
     REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
     drainGuiEvents();
@@ -406,7 +436,6 @@ TEST_CASE("DaemonLink: a configuration reload restates the session settings", "[
                              return settingsWithHistory(historyLines);
                          } };
     auto& link = *rig.link;
-    link.start();
     REQUIRE(link.awaitAttached(10s).has_value());
 
     historyLines = 2000;
@@ -483,6 +512,70 @@ TEST_CASE("ContourGuiApp: a link that ended is destroyed once its panes are gone
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }
 
+// Review (PR 2, item 2): a restarted daemon's reconnect detaches every binding while the panes' ptys live on,
+// capturing the link's controller. The lost window's close ends the link, which must then wait for those
+// ptys: destroyed at once, the pane's later destruction called into a freed controller.
+TEST_CASE("ContourGuiApp: a link ended by a restarted daemon outlives the ptys it detached",
+          "[contour][app][attach][link][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto timeline = TestTimeline {};
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& link = app.app().startDaemonLink(linkConfig(daemon.endpoint(), timeline, "home"));
+    // A local window stays open: the link's last window is not the process's.
+    auto const local = contour::test::ScopedController { app.manager() };
+    auto const window = contour::test::ScopedController { app.manager() };
+    REQUIRE(link.awaitAttached(10s).has_value());
+    REQUIRE(link.bindPendingWindow(*window.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(waitUntil([&] { return !sessionsOf(app.manager(), window.id).empty(); }));
+    auto const panes = watchedSessionsOf(app.manager(), window.id);
+
+    // The daemon comes back as a new run: the window's workspace is gone, and the link closes the window.
+    daemon.restartHost();
+    REQUIRE(waitUntil([&] { return app.manager().controllerFor(window.id) == nullptr; }, 3000));
+    drainGuiEvents();
+
+    // Ended, and kept: the closed window's pane still holds a pty of its controller.
+    CHECK(app.app().daemonLinks().size() == 1);
+    REQUIRE(std::ranges::all_of(panes, [](auto const& pane) { return !pane.isNull(); }));
+
+    // The pane ends and is deleted later, as a closed session is; only then may the link go.
+    endClosedSessions(panes);
+    CHECK(waitUntil([&] {
+        drainGuiEvents();
+        return std::ranges::none_of(panes, [](auto const& pane) { return !pane.isNull(); });
+    }));
+    CHECK(waitUntil([&] {
+        drainGuiEvents();
+        return app.app().daemonLinks().empty();
+    }));
+}
+
+// Review (PR 2, item 9): "New Terminal" from the menu bar while the link boots -- its first layout pending,
+// no window showing a session -- has the daemon author the workspace, as before per-window links. A local
+// window opened instead would be claimed as one more boot window, and stay empty.
+TEST_CASE("ContourGuiApp: New Terminal while a link boots is its daemon's to author",
+          "[contour][app][attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto timeline = TestTimeline {};
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& link = app.app().startDaemonLink(linkConfig(daemon.endpoint(), timeline, "home"));
+    REQUIRE(link.awaitAttached(10s).has_value());
+    auto const workspaces = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->model().workspaceCount(); });
+    };
+    REQUIRE(workspaces() == 1);
+
+    app.app().runMenuBarAction(contour::actions::NewTerminal { .profileName = std::nullopt },
+                               contour::command::ActionScope::Application);
+
+    CHECK(daemon.waitUntilOnDaemon([&daemon] { return daemon.host->model().workspaceCount() == 2; }));
+    CHECK(workspaces() == 2);
+}
+
 TEST_CASE("Two links in one process: windows on two daemons stay apart", "[attach][link][integration]")
 {
     using vthost::client::ConnectionState;
@@ -541,15 +634,12 @@ TEST_CASE("the attach boot window adopts the primary daemon workspace", "[contou
 {
     using contour::remote::primaryDaemonWorkspaceToAdopt;
 
-    // The boot window (no OS window mapped yet) adopts the primary — lowest-id — daemon workspace,
-    // so Main.qml adopts it instead of authoring a spurious fresh tab on the daemon.
-    CHECK(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, { 7, 12, 30 }) == 7);
-
-    // A later OS window (one already mapped) is NOT the boot window — it adopts nothing here (it is
-    // handled by the staged pending-workspace path instead).
-    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/true, { 7, 12 }).has_value());
+    // The boot window adopts the primary — lowest-id — daemon workspace, so Main.qml adopts it instead of
+    // authoring a spurious fresh tab on the daemon. (A later OS window takes the staged pending-workspace
+    // path instead, and never asks.)
+    CHECK(primaryDaemonWorkspaceToAdopt({ 7, 12, 30 }) == 7);
 
     // No daemon workspace reported yet: nothing to bind now — the caller still claims the boot window
     // and the link's reconcile binds it once the first layout arrives.
-    CHECK_FALSE(primaryDaemonWorkspaceToAdopt(/*anyWindowMapped=*/false, {}).has_value());
+    CHECK_FALSE(primaryDaemonWorkspaceToAdopt({}).has_value());
 }

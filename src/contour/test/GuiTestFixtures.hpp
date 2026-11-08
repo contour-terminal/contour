@@ -14,10 +14,10 @@
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
+#include <contour/session/FactoryBinding.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
-#include <contour/session/WindowBinding.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/LauncherFixtures.hpp>
@@ -271,6 +271,13 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     }
 
     /// Records the request; routes it to the host when remoteTabs says so.
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
+    {
+        requestedRemoteWorkspaces.push_back(spawn);
+        return remoteTabs == RemoteTabRouting::ToHost;
+    }
+
+    /// Records the request; routes it to the host when remoteTabs says so.
     [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* /*actingPty*/,
                                           bool /*vertical*/,
                                           contour::session::RemoteSpawn const& /*spawn*/) override
@@ -313,17 +320,8 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// How often requestRemoteSplitOrientation() was called.
     int requestedSplitOrientations = 0;
 
-    /// The factory of sessions that run here whatever the host. Under Remote hosting it is a view of this
-    /// mock that allows creation, hosts locally and routes nothing, as the app's own factory does behind
-    /// an attached host; else it is this mock.
-    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
-    {
-        return reportedHosting == contour::session::SessionHosting::Remote
-                   ? static_cast<contour::session::SessionFactory&>(_localView)
-                   : *this;
-    }
-
-    /// Whether requestRemoteTab() and requestRemoteSplit() hand the request to the host.
+    /// Whether requestRemoteTab(), requestRemoteSplit() and requestRemoteWorkspace() hand the request to the
+    /// host.
     enum class RemoteTabRouting : uint8_t
     {
         Local = 0, ///< No: the manager builds the tab or split itself.
@@ -332,12 +330,12 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     RemoteTabRouting remoteTabs = RemoteTabRouting::Local;
     /// Every requestRemoteTab() call, in order.
     std::vector<contour::session::RemoteSpawn> requestedRemoteTabs;
+    /// Every requestRemoteWorkspace() call, in order.
+    std::vector<contour::session::RemoteSpawn> requestedRemoteWorkspaces;
     /// How often requestRemoteSplit() was asked.
     int requestedRemoteSplits = 0;
     /// How often requestRemoteClose() was called.
     int requestedRemoteCloses = 0;
-    /// How many ptys localSessions() made, a subset of createdPtys.
-    int localCreations = 0;
 
     [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
     {
@@ -423,35 +421,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<vtpty::MockPty*> createdPtys;
     /// Makes each pty instead of a MockPty when set -- a ChannelPty, for a test that feeds a mirror's bytes.
     std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)> makePty {};
-
-  private:
-    /// What localSessions() hands out under Remote hosting: a local factory over this mock's ptys.
-    class LocalView final: public contour::session::SessionFactory
-    {
-      public:
-        explicit LocalView(MockPtySessionFactory& owner): _owner { owner } {}
-
-        [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
-            std::optional<std::string> cwd,
-            std::optional<vtbackend::PageSize> pageSize = std::nullopt,
-            std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
-            std::optional<std::string> profileName = std::nullopt) override
-        {
-            ++_owner.localCreations;
-            return _owner.createPty(
-                std::move(cwd), pageSize, std::move(commandOverride), std::move(profileName));
-        }
-
-        [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
-        {
-            return _owner.createNotifier();
-        }
-
-      private:
-        MockPtySessionFactory& _owner;
-    };
-
-    LocalView _localView { *this };
 };
 
 /// A TerminalSession a test builds itself, outside any session factory: over @p pty, raising through
@@ -504,33 +473,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
                                                                std::move(keyboardPlatforms));
 }
 
-/// A window binding over a factory the test owns: what a daemon link is to the windows it serves, without a
-/// connection. Bind a window to it with TerminalSessionManager::bindWindow().
-class FactoryBinding final: public contour::session::WindowBinding
-{
-  public:
-    /// @param factory What the bound windows' sessions are made by. Borrowed: it must outlive the binding.
-    /// @param hostLabel What hostLabel() reports.
-    explicit FactoryBinding(contour::session::SessionFactory& factory, std::string hostLabel = {}):
-        _factory(factory), _hostLabel(std::move(hostLabel))
-    {
-    }
-
-    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
-    [[nodiscard]] std::string_view hostLabel() const noexcept override { return _hostLabel; }
-    void windowBound(vtworkspace::WorkspaceId window) override { boundWindows.push_back(window); }
-    void windowClosed(vtworkspace::WorkspaceId window) override { closedWindows.push_back(window); }
-
-    /// Every window windowBound() was told of, in order.
-    std::vector<vtworkspace::WorkspaceId> boundWindows;
-    /// Every window windowClosed() was told of, in order.
-    std::vector<vtworkspace::WorkspaceId> closedWindows;
-
-  private:
-    contour::session::SessionFactory& _factory;
-    std::string _hostLabel;
-};
-
 /// A real session factory with every call passed through, except that a session it would hand the
 /// platform's own notifier raises through makeTestNotifier() instead.
 ///
@@ -567,12 +509,6 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
     [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
     {
         return _factory->hosting();
-    }
-
-    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
-    {
-        auto& local = _factory->localSessions();
-        return &local == _factory.get() ? *this : local;
     }
 
     [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override

@@ -98,8 +98,32 @@ struct ControllerOptions
     std::filesystem::path workingDirectory = {};
 };
 
-/// Builds a controller as every test here does: no attach settings of its own, on the steady clock.
-/// The one place the constructor is spelled, so a collaborator it gains is added here alone.
+/// What a controller is built with in every test here: no attach settings of its own, on the steady clock.
+/// The one place its configuration is spelled, so a collaborator it gains is added here alone.
+/// @param endpoint The daemon to attach to, over TLS.
+/// @param timeline What the controller stamps; it must outlive the controller.
+/// @param options What else it is built with; none of it by default.
+/// @return The configuration.
+[[nodiscard]] inline contour::remote::NativeController::Config controllerConfig(
+    vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
+{
+    return contour::remote::NativeController::Config {
+        .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
+        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                .workspaces = {} },
+        .profileName = std::string {},
+        .workingDirectory = std::move(options.workingDirectory),
+        .attachSettings = std::move(options.attachSettings),
+        .sessionSettings = std::move(options.sessionSettings),
+        .colorPreference = options.colorPreference,
+        .clock = core::platform::defaultSteadyClock(),
+        .timeline = timeline.timeline,
+        .powerMonitor = options.powerMonitor,
+        .backoff = options.backoff,
+    };
+}
+
+/// Builds a controller as every test here does (@see controllerConfig()).
 /// @param endpoint The daemon to attach to, over TLS.
 /// @param timeline What the controller stamps; it must outlive the controller.
 /// @param options What else it is built with; none of it by default.
@@ -108,18 +132,7 @@ struct ControllerOptions
     vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
 {
     return std::make_unique<contour::remote::NativeController>(
-        std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                      .workspaces = {} },
-        std::string {},
-        std::move(options.workingDirectory),
-        std::move(options.attachSettings),
-        std::move(options.sessionSettings),
-        options.colorPreference,
-        core::platform::defaultSteadyClock(),
-        timeline.timeline,
-        options.powerMonitor,
-        options.backoff);
+        controllerConfig(std::move(endpoint), timeline, std::move(options)));
 }
 
 /// A daemon end of a connection that the fixture can drop, as a crashing daemon would: it is listed in

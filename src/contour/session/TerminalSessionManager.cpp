@@ -151,11 +151,38 @@ void TerminalSessionManager::noteTransportLost(WindowBinding const& binding)
 std::vector<TerminalSession*> TerminalSessionManager::sessionsBoundTo(WindowBinding const& binding) const
 {
     auto bound = std::vector<TerminalSession*> {};
-    for (auto* session: _sessionsById | std::views::values)
-        if (auto const* const window = session != nullptr ? hostOf(session).window : nullptr;
-            window != nullptr && bindingOf(window->id()) == &binding)
-            bound.push_back(session);
+    for (auto const window: windowsBoundTo(binding))
+        std::ranges::copy(sessionsOfWindow(window), std::back_inserter(bound));
     return bound;
+}
+
+std::vector<TerminalSession*> TerminalSessionManager::sessionsOfWindow(vtworkspace::WorkspaceId window) const
+{
+    auto sessions = std::vector<TerminalSession*> {};
+    if (auto const* const workspace = _model->workspace(window))
+        for (auto const index: std::views::iota(0, workspace->tabCount()))
+            std::ranges::copy(sessionsInTab(workspace->tabAt(index)), std::back_inserter(sessions));
+    return sessions;
+}
+
+std::vector<TerminalSession*> TerminalSessionManager::disconnectedOf(WindowBinding const& binding) const
+{
+    auto lost = std::vector<TerminalSession*> {};
+    std::ranges::copy_if(
+        sessionsBoundTo(binding), std::back_inserter(lost), [](TerminalSession const* session) {
+            return session->endReason() == EndReason::Disconnected;
+        });
+    return lost;
+}
+
+std::vector<window::WindowController*> TerminalSessionManager::controllersBoundTo(
+    WindowBinding const& binding) const
+{
+    auto controllers = std::vector<window::WindowController*> {};
+    for (auto const window: windowsBoundTo(binding))
+        if (auto* const controller = controllerFor(window))
+            controllers.push_back(controller);
+    return controllers;
 }
 
 vtworkspace::Tab* TerminalSessionManager::tabHostingSession(TerminalSession const* session) const noexcept
@@ -202,12 +229,8 @@ vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::Workspa
         if (auto* leaf = tab->activePane(); leaf != nullptr)
             if (auto const* pty = ptyOf(leaf->session()); pty != nullptr)
                 return pty;
-    for (auto const row: std::views::iota(0, win->tabCount()))
-        if (auto* tab = win->tabAt(row); tab != nullptr)
-            for (auto* session: sessionsInTab(tab))
-                if (session != nullptr)
-                    return &session->terminal().device();
-    return nullptr;
+    auto const sessions = sessionsOfWindow(window);
+    return sessions.empty() ? nullptr : &sessions.front()->terminal().device();
 }
 
 int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
@@ -562,7 +585,7 @@ void TerminalSessionManager::windowStateChanged(vtworkspace::WorkspaceId window)
     notifyDisplaysExposureChanged(window);
 }
 
-void TerminalSessionManager::windowExposed(vtworkspace::WorkspaceId window)
+void TerminalSessionManager::windowExposed(vtworkspace::WorkspaceId window) const
 {
     notifyDisplaysExposureChanged(window);
 }
@@ -595,19 +618,16 @@ bool TerminalSessionManager::isPanelWindow(vtworkspace::WorkspaceId window) cons
            && window::windowRoleRow(controller->role()).level == window::WindowLevel::Panel;
 }
 
-bool TerminalSessionManager::isPanelSession(TerminalSession const& session) const noexcept
-{
-    auto const [tab, win, controller] = hostOf(&session);
-    return controller != nullptr
-           && window::windowRoleRow(controller->role()).level == window::WindowLevel::Panel;
-}
-
 SessionFactory& TerminalSessionManager::factoryFor(vtworkspace::WorkspaceId window) const noexcept
 {
-    if (isPanelWindow(window))
-        return _localFactory.localSessions();
+    auto* const binding = mutableBindingOf(window);
+    return binding != nullptr ? binding->sessions() : _localFactory;
+}
+
+WindowBinding* TerminalSessionManager::mutableBindingOf(vtworkspace::WorkspaceId window) const noexcept
+{
     auto const bound = _bindingOfWindow.find(window.value);
-    return bound != _bindingOfWindow.end() ? bound->second->sessions() : _localFactory;
+    return bound != _bindingOfWindow.end() ? bound->second : nullptr;
 }
 
 SessionFactory& TerminalSessionManager::factoryOf(TerminalSession const& session) const noexcept
@@ -621,26 +641,51 @@ void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowB
     auto& bound = _bindingOfWindow[window.value];
     if (bound == &binding)
         return;
-    bound = &binding;
-    binding.windowBound(window);
+    auto* const previous = std::exchange(bound, &binding);
+    _windowsOfBinding[&binding].push_back(window);
+    auto const left = previous != nullptr ? forgetMember(*previous, window) : BindingMembers::Remaining;
     notifyHostBindingChanged(window);
+    // Last: the binding the window left may stop, and release what it still holds here.
+    if (left == BindingMembers::None)
+        previous->lastWindowReleased();
 }
 
 WindowBinding const* TerminalSessionManager::bindingOf(vtworkspace::WorkspaceId window) const noexcept
 {
-    auto const bound = _bindingOfWindow.find(window.value);
-    return bound != _bindingOfWindow.end() ? bound->second : nullptr;
+    return mutableBindingOf(window);
+}
+
+std::span<vtworkspace::WorkspaceId const> TerminalSessionManager::windowsBoundTo(
+    WindowBinding const& binding) const noexcept
+{
+    auto const bound = _windowsOfBinding.find(&binding);
+    return bound != _windowsOfBinding.end() ? std::span<vtworkspace::WorkspaceId const> { bound->second }
+                                            : std::span<vtworkspace::WorkspaceId const> {};
+}
+
+TerminalSessionManager::BindingMembers TerminalSessionManager::forgetMember(WindowBinding const& binding,
+                                                                            vtworkspace::WorkspaceId window)
+{
+    auto const bound = _windowsOfBinding.find(&binding);
+    if (bound == _windowsOfBinding.end())
+        return BindingMembers::None;
+    std::erase(bound->second, window);
+    if (!bound->second.empty())
+        return BindingMembers::Remaining;
+    _windowsOfBinding.erase(bound);
+    return BindingMembers::None;
 }
 
 void TerminalSessionManager::releaseBinding(WindowBinding const& binding)
 {
-    auto released = std::vector<vtworkspace::WorkspaceId> {};
-    for (auto const& [window, bound]: _bindingOfWindow)
-        if (bound == &binding)
-            released.emplace_back(window);
-    std::erase_if(_bindingOfWindow, [&binding](auto const& entry) { return entry.second == &binding; });
+    clearAttachWindowBinder(binding);
     _linkStates.erase(&binding);
-    for (auto const window: released)
+    auto const released = _windowsOfBinding.extract(&binding);
+    if (released.empty())
+        return;
+    for (auto const window: released.mapped())
+        _bindingOfWindow.erase(window.value);
+    for (auto const window: released.mapped())
         notifyHostBindingChanged(window);
 }
 
@@ -662,13 +707,16 @@ std::string_view TerminalSessionManager::hostLabelOf(TerminalSession const& sess
     return window != nullptr ? hostLabelOf(window->id()) : std::string_view {};
 }
 
-bool TerminalSessionManager::requestRemoteWorkspace(TerminalSession const& acting, RemoteSpawn const& spawn)
+RemoteRouting TerminalSessionManager::requestRemoteWorkspace(TerminalSession const& acting,
+                                                             RemoteSpawn const& spawn)
 {
     // Only a window a host serves authors its new window there; a local one, the quick terminal among them,
     // opens a local window.
     auto const* const window = hostOf(&acting).window;
     return window != nullptr && bindingOf(window->id()) != nullptr
-           && factoryFor(window->id()).requestRemoteWorkspace(spawn);
+                   && factoryFor(window->id()).requestRemoteWorkspace(spawn)
+               ? RemoteRouting::Routed
+               : RemoteRouting::Local;
 }
 
 namespace
@@ -686,7 +734,7 @@ namespace
     }
 } // namespace
 
-WindowBinding const* TerminalSessionManager::bindingServing(window::HostIdentity const& host) const
+WindowBinding* TerminalSessionManager::bindingServing(window::HostIdentity const& host) const
 {
     // This process's own factory first: a binding that names no daemon would otherwise claim its drags.
     if (identityOf(_localFactory) == host)
@@ -704,20 +752,18 @@ bool TerminalSessionManager::isOwnHost(window::HostIdentity const& host) const
 
 SessionFactory& TerminalSessionManager::factoryServing(window::HostIdentity const& host) const
 {
-    // Found through a window, which hands the binding out mutable.
-    auto const* const binding = bindingServing(host);
-    auto const bound = std::ranges::find_if(_bindingOfWindow,
-                                            [binding](auto const& entry) { return entry.second == binding; });
-    return bound != _bindingOfWindow.end() ? bound->second->sessions() : _localFactory;
+    auto* const binding = bindingServing(host);
+    return binding != nullptr ? binding->sessions() : _localFactory;
 }
 
 window::MoveRefusal TerminalSessionManager::moveRefusalIn(ResolvedDrag const& drag,
                                                           vtworkspace::WorkspaceId window,
                                                           window::MovePlace place) const
 {
-    // Only the host of the window the drag came from could make the move, and it does not serve that window.
+    // Only the host of the window the drag came from could make the move, and it does not serve that window:
+    // two windows of this process, served by two hosts (two daemons, or one and this process itself).
     if (place != window::MovePlace::NewWindow && drag.tab && bindingOf(drag.workspace) != bindingOf(window))
-        return window::MoveRefusal::OtherProcess;
+        return window::MoveRefusal::OtherHost;
     return drag.refusalAt(place);
 }
 
@@ -1164,9 +1210,8 @@ void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notic
 
 void TerminalSessionManager::postNoticeToWindowsOf(WindowBinding const& binding, window::Notice const& notice)
 {
-    for (auto const& [window, controller]: _controllersByWindow)
-        if (controller != nullptr && bindingOf(vtworkspace::WorkspaceId { window }) == &binding)
-            controller->notices().post(notice);
+    for (auto* const controller: controllersBoundTo(binding))
+        controller->notices().post(notice);
 }
 
 void TerminalSessionManager::noteWorkspaceRestored(WindowBinding const& binding,
@@ -1557,7 +1602,8 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WorkspaceId win
         controller->deleteLater();
     // The binding is told last: its sessions are gone, and it may stop serving once it serves no window.
     if (auto const bound = _bindingOfWindow.extract(windowId.value))
-        bound.mapped()->windowClosed(windowId);
+        if (forgetMember(*bound.mapped(), windowId) == BindingMembers::None)
+            bound.mapped()->lastWindowReleased();
 
     // Ownership must not survive the window that held it: a stale WorkspaceId would let a later model
     // event in an unrelated window re-grant focus through syncFocusForWindow. The window's sessions
@@ -1886,8 +1932,12 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
                                               vtworkspace::PaneId splitNode,
                                               double ratio)
 {
+    // A local window's splits are its own: no host is told of them.
+    auto* const binding = mutableBindingOf(_model->workspaceOfTab(tab));
+    if (binding == nullptr)
+        return;
     auto* split = _model->findPane(tab, splitNode);
-    if (split == nullptr || split->isLeaf() || isPanelWindow(_model->workspaceOfTab(tab)))
+    if (split == nullptr || split->isLeaf())
         return;
 
     // Name the split by ANY leaf from each side — the daemon resolves their lowest common ancestor,
@@ -1901,17 +1951,21 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
     auto const* first = ptyOfLeafUnder(split->first());
     auto const* second = ptyOfLeafUnder(split->second());
     if (first != nullptr && second != nullptr)
-        factoryFor(_model->workspaceOfTab(tab)).reportSplitRatio(first, second, ratio);
+        binding->sessions().reportSplitRatio(first, second, ratio);
 }
 
 void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
 {
     // Every model event below reaches here, local tabs' included: nothing is computed for those.
-    auto& factory = factoryFor(_model->workspaceOfTab(tabId));
-    if (factory.hosting() != SessionHosting::Remote || isPanelWindow(_model->workspaceOfTab(tabId)))
+    auto const windowId = _model->workspaceOfTab(tabId);
+    auto* const binding = mutableBindingOf(windowId);
+    if (binding == nullptr)
+        return;
+    auto& factory = binding->sessions();
+    if (factory.hosting() != SessionHosting::Remote)
         return;
     auto const* tab = _model->findTab(tabId);
-    auto const* window = tab != nullptr ? _model->workspace(_model->workspaceOfTab(tabId)) : nullptr;
+    auto const* window = tab != nullptr ? _model->workspace(windowId) : nullptr;
     if (window == nullptr || tab->activePane() == nullptr)
         return;
     auto const ptyOf = [this](vtworkspace::Pane const* leaf) -> vtpty::Pty const* {
@@ -2181,21 +2235,10 @@ void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
         refreshTabBadgeOf(session.modelSessionId());
 }
 
-void TerminalSessionManager::notifyDisplaysExposureChanged(vtworkspace::WorkspaceId window)
+void TerminalSessionManager::notifyDisplaysExposureChanged(vtworkspace::WorkspaceId window) const
 {
-    auto const* win = _model->workspace(window);
-    if (win == nullptr)
-        return;
-    for (auto const row: std::views::iota(0, win->tabCount()))
-    {
-        auto const* tab = win->tabAt(row);
-        if (tab == nullptr || tab->rootPane() == nullptr)
-            continue;
-        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
-            if (auto* const s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr; s != nullptr)
-                s->displayExposureChanged();
-        });
-    }
+    for (auto* const session: sessionsOfWindow(window))
+        session->displayExposureChanged();
 }
 
 void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WorkspaceId window)
@@ -2235,9 +2278,8 @@ void TerminalSessionManager::setHostConnection(WindowBinding const& binding,
     for (auto* session: sessionsBoundTo(binding))
         session->setHostConnection(state);
     if (chipChanged)
-        for (auto const& [window, controller]: _controllersByWindow)
-            if (controller != nullptr && bindingOf(vtworkspace::WorkspaceId { window }) == &binding)
-                controller->notifyHostConnectionChanged();
+        for (auto* const controller: controllersBoundTo(binding))
+            controller->notifyHostConnectionChanged();
 }
 
 vthost::client::ConnectionState TerminalSessionManager::hostConnection(
@@ -2610,9 +2652,18 @@ TerminalSession* TerminalSessionManager::sessionForHostId(window::HostIdentity c
         auto* const session = sessionForId(vtworkspace::SessionId { hostSession });
         return session != nullptr && hostedThere(*session) ? session : nullptr;
     }
+    // A daemon's ids name its sessions only: the binding serving it is resolved once, and each session is
+    // judged by the binding of its window. Null for the factory this manager was constructed with.
+    auto const* const binding = bindingServing(host);
+    if (binding == nullptr && identityOf(_localFactory) != host)
+        return nullptr;
     auto const sessions = _sessionsById | std::views::values;
     auto const found = std::ranges::find_if(sessions, [&](TerminalSession const* session) {
-        return session != nullptr && hostedThere(*session) && hostSessionIdOf(*session) == hostSession;
+        if (session == nullptr)
+            return false;
+        auto const* const window = hostOf(session).window;
+        auto const* const bound = window != nullptr ? bindingOf(window->id()) : nullptr;
+        return bound == binding && hostSessionIdOf(*session) == hostSession;
     });
     return found != sessions.end() ? *found : nullptr;
 }
@@ -3131,9 +3182,8 @@ bool TerminalSessionManager::consumePendingTransplant(window::WindowController* 
     // staged node moves in as its first tab, the same sessions alive; a source window it empties closes. One
     // closed since it was staged moves nothing, and the window opens its own first tab instead.
     // The window is served by whatever served the one the node came from: its sessions are that host's.
-    if (auto const bound = _bindingOfWindow.find(windowOfSource(pending.source).value);
-        bound != _bindingOfWindow.end())
-        bindWindow(newController->windowId(), *bound->second);
+    if (auto* const binding = mutableBindingOf(windowOfSource(pending.source)))
+        bindWindow(newController->windowId(), *binding);
     auto const moved = applyNodeMove(
         pending.source, vtworkspace::TabWellTarget { .workspace = newController->windowId(), .index = 0 });
     if (!moved)
@@ -3163,9 +3213,15 @@ std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace:
 
 void TerminalSessionManager::authorRemoteEnd(TerminalSession* session)
 {
-    // A panel's sessions run here and the host never heard of them.
-    if (session != nullptr && !isPanelSession(*session))
+    // A panel's sessions, as every local window's, run here and the host never heard of them.
+    if (session != nullptr)
         factoryOf(*session).requestRemoteClose(&session->terminal().device());
+}
+
+void TerminalSessionManager::authorRemoteEnds(std::span<TerminalSession* const> sessions)
+{
+    for (auto* session: sessions)
+        authorRemoteEnd(session);
 }
 
 void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const> sessions, SessionEnd end)
@@ -3179,14 +3235,13 @@ void TerminalSessionManager::terminateSessions(std::span<TerminalSession* const>
     //
     // A Destroy also has to be authored UPSTREAM for a session this process does not own: a
     // daemon-hosted one outlives its pty, so closing the local view is not closing the session.
-    // Done before the terminate() below, while each session still holds the pty the remote factory
-    // identifies it by.
+    // Every end is authored before the first terminate(): each session must still hold the pty the remote
+    // factory identifies it by, and still sit in its tab, whose window names the factory -- terminating the
+    // tab's last pane takes the tab, and possibly the window and the link serving it, away.
+    if (end == SessionEnd::Destroy)
+        authorRemoteEnds(sessions);
     for (auto* session: sessions)
-    {
-        if (end == SessionEnd::Destroy)
-            authorRemoteEnd(session);
         session->terminate();
-    }
 }
 
 std::vector<TerminalSession*> TerminalSessionManager::gatherSessionsOfTabsWhere(
@@ -3216,8 +3271,11 @@ void TerminalSessionManager::closeOtherTabs(vtworkspace::WorkspaceId window, int
 
     auto const doomed = gatherSessionsOfTabsWhere(
         *win, [keep](int, vtworkspace::Tab* tab) { return tab->id() != keep->id(); });
+    // Authored while the doomed tabs still name their window, and so the host serving it: the model's close
+    // takes them away. What is left to do after it is only the local view's.
+    authorRemoteEnds(doomed);
     _model->closeOtherTabs(window, keep->id());
-    terminateSessions(doomed, SessionEnd::Destroy);
+    terminateSessions(doomed, SessionEnd::Detach);
 }
 
 void TerminalSessionManager::closeTabsToRight(vtworkspace::WorkspaceId window, int index)
@@ -3231,8 +3289,10 @@ void TerminalSessionManager::closeTabsToRight(vtworkspace::WorkspaceId window, i
     // so compare it directly instead of re-deriving it with a linear rowOfTab() scan per candidate.
     auto const doomed =
         gatherSessionsOfTabsWhere(*win, [index](int row, vtworkspace::Tab*) { return row > index; });
+    // As closeOtherTabs(): ended upstream while the tabs still name their window's host.
+    authorRemoteEnds(doomed);
     _model->closeTabsToRight(window, anchor->id());
-    terminateSessions(doomed, SessionEnd::Destroy);
+    terminateSessions(doomed, SessionEnd::Detach);
 }
 
 QVariantList TerminalSessionManager::tabColorPalette() const
@@ -3252,7 +3312,7 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // reconciles the new pane in. A reconciliation-driven split (during realization)
     // returns false and builds locally below, as does a local factory.
     // No profile is named: a local split runs the default profile too.
-    if (acting != nullptr && !isPanelSession(*acting)
+    if (acting != nullptr
         && factoryOf(*acting).requestRemoteSplit(&acting->terminal().device(), vertical, RemoteSpawn {}))
         return;
 
@@ -3349,14 +3409,13 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
 void TerminalSessionManager::reconnectHost(TerminalSession const& acting)
 {
     auto const* const window = hostOf(&acting).window;
-    auto const bound = window != nullptr ? _bindingOfWindow.find(window->id().value) : _bindingOfWindow.end();
-    if (bound == _bindingOfWindow.end())
+    auto* const bound = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
+    if (bound == nullptr)
         return; // a window no link claims has no connection to seek
-    auto& binding = *bound->second;
+    auto& binding = *bound;
     // A failure of an earlier try is not this one's.
-    for (auto* session: sessionsBoundTo(binding))
-        if (session->endReason() == EndReason::Disconnected)
-            session->noteReconnectFailure({});
+    for (auto* session: disconnectedOf(binding))
+        session->noteReconnectFailure({});
     auto const started = binding.sessions().reconnect();
     _linkStates[&binding].reconnect = ReconnectRun::Running;
     if (!started)
@@ -3373,19 +3432,14 @@ void TerminalSessionManager::reconnectHost(TerminalSession const& acting)
     setHostConnection(binding, vthost::client::ConnectionState::Reconnecting);
 }
 
-void TerminalSessionManager::rebindDisconnected(WindowBinding const& binding)
+void TerminalSessionManager::rebindDisconnected(WindowBinding& binding)
 {
     auto const state = _linkStates.find(&binding);
     if (state == _linkStates.end() || state->second.reconnect == ReconnectRun::Idle)
         return;
-    auto const isLost = [](TerminalSession const* session) {
-        return session->endReason() == EndReason::Disconnected;
-    };
-    auto lost = std::vector<TerminalSession*> {};
-    std::ranges::copy_if(sessionsBoundTo(binding), std::back_inserter(lost), isLost);
-    for (auto* session: lost)
+    auto& factory = binding.sessions();
+    for (auto* session: disconnectedOf(binding))
     {
-        auto& factory = factoryOf(*session);
         if (factory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
             if (auto const rebound = replaceEndedSession(*session); !rebound)
             {
@@ -3396,7 +3450,7 @@ void TerminalSessionManager::rebindDisconnected(WindowBinding const& binding)
     }
     // The daemon pushes one layout per workspace and each arrives in its own turn: the run stays up for the
     // workspaces still to come, and ends once no pane is left to take back (or on reconnectFailed()).
-    if (std::ranges::none_of(sessionsBoundTo(binding), isLost))
+    if (disconnectedOf(binding).empty())
         _linkStates[&binding].reconnect = ReconnectRun::Idle;
 }
 
@@ -3406,9 +3460,8 @@ void TerminalSessionManager::reconnectFailed(WindowBinding const& binding, std::
     if (state == _linkStates.end()
         || std::exchange(state->second.reconnect, ReconnectRun::Idle) == ReconnectRun::Idle)
         return;
-    for (auto* session: sessionsBoundTo(binding))
-        if (session->endReason() == EndReason::Disconnected)
-            session->noteReconnectFailure(std::string { reason });
+    for (auto* session: disconnectedOf(binding))
+        session->noteReconnectFailure(std::string { reason });
 }
 
 void TerminalSessionManager::connectionClosed(WindowBinding const& binding, std::string_view reason)
@@ -3532,19 +3585,18 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting, SessionEnd
     if (active == nullptr)
         return;
     auto const sessionId = active->session();
+    // On Destroy, a daemon-hosted session must be closed upstream too, or it lingers there with no view.
+    // Authored before the model pane closes: a tab's only pane takes the tab with it, and with the tab goes
+    // the window that names the host to tell (and its pty, which identifies the session there, goes later).
+    if (end == SessionEnd::Destroy)
+        authorRemoteEnd(sessionForId(sessionId));
     // Close the model pane FIRST, then terminate the backing session. terminate() fires
     // sessionClosed -> removeSession, but by then the leaf is already gone from the model, so
     // removeSession's findLeaf() returns nullptr and it does not close the pane a second time — it
     // only drops the local bookkeeping.
     _model->closePane(_model->workspaceOfTab(tab->id()), tab->id(), active->id());
     if (auto* session = sessionForId(sessionId))
-    {
-        // On Destroy, a daemon-hosted session must be closed upstream too, or it lingers there with
-        // no view. Authored while the pty still exists, since that is what identifies it.
-        if (end == SessionEnd::Destroy)
-            authorRemoteEnd(session);
         session->terminate();
-    }
 }
 
 void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
@@ -3586,7 +3638,7 @@ void TerminalSessionManager::toggleActivePaneOrientation(TerminalSession* acting
     auto const* const leaf = tab->activePane();
     auto const* const split = leaf != nullptr ? leaf->parent() : nullptr;
     auto const* const anchor = leaf != nullptr ? sessionForId(leaf->session()) : nullptr;
-    if (split != nullptr && anchor != nullptr && !isPanelWindow(_model->workspaceOfTab(tab->id())))
+    if (split != nullptr && anchor != nullptr)
     {
         auto const axis = split->splitState() == vtworkspace::SplitState::Horizontal
                               ? vtworkspace::SplitState::Vertical

@@ -200,7 +200,8 @@ TEST_CASE("dropZone.multiPaneTabInTheMiddlePassesThrough", "[dropzone]")
 
 TEST_CASE("dropZone.refusalWinsOverEveryZoneForMoves", "[dropzone]")
 {
-    for (auto const refusal: { MoveRefusal::OtherProcess, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
+    for (auto const refusal:
+         { MoveRefusal::OtherProcess, MoveRefusal::OtherHost, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
         for (auto const payload: { DropPayload::Pane, DropPayload::Tab })
             for (auto const origin: { DropOrigin::OtherTab, DropOrigin::OwnTab, DropOrigin::OwnPane })
                 for (auto const [x, y]:
@@ -218,7 +219,8 @@ TEST_CASE("dropZone.refusalWinsOverEveryZoneForMoves", "[dropzone]")
 
 TEST_CASE("dropZone.refusalNeverAffectsFilesOrText", "[dropzone]")
 {
-    for (auto const refusal: { MoveRefusal::OtherProcess, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
+    for (auto const refusal:
+         { MoveRefusal::OtherProcess, MoveRefusal::OtherHost, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
         for (auto const payload: { DropPayload::Files, DropPayload::Text })
         {
             auto in = pane(500, 250);
@@ -255,6 +257,8 @@ TEST_CASE("dropZone.refusalTexts", "[dropzone]")
     CHECK(refusalTextOf(MoveRefusal::OtherProcess)
           == "This window belongs to another Contour process. Run Contour in daemon mode to move panes "
              "between any windows.");
+    CHECK(refusalTextOf(MoveRefusal::OtherHost)
+          == "This window's sessions run on another host. Panes can't be moved between hosts.");
     CHECK(refusalTextOf(MoveRefusal::OldDaemon)
           == "This window's daemon is too old to move panes. Update Contour on the daemon side.");
     CHECK(refusalTextOf(MoveRefusal::Tmux) == "Panes can't be moved into a tmux window yet.");

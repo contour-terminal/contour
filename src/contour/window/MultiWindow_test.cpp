@@ -157,8 +157,8 @@ TEST_CASE("WindowController: the title prefix comes from the window's own link",
 {
     // Declared before the app: the windows tell their bindings of their close.
     contour::test::MockPtySessionFactory hosts;
-    contour::test::FactoryBinding home { hosts, "home" };
-    contour::test::FactoryBinding unnamed { hosts };
+    contour::session::FactoryBinding home { hosts, "home" };
+    contour::session::FactoryBinding unnamed { hosts };
     contour::test::TestApp app;
     auto& manager = app.manager();
     contour::test::ScopedController const first { manager };
@@ -173,7 +173,7 @@ TEST_CASE("WindowController: the title prefix comes from the window's own link",
     manager.bindWindow(first.id, home); // bound anew to the same: nothing changes
 
     CHECK(labelChanges == 1);
-    CHECK(home.boundWindows == std::vector { first.id });
+    CHECK(std::ranges::to<std::vector>(manager.windowsBoundTo(home)) == std::vector { first.id });
     CHECK(first.controller->hostLabel() == QStringLiteral("home"));
     CHECK(first.controller->windowTitle(QStringLiteral("vim"))
           == QString::fromStdString(contour::window::remoteWindowTitle("home", "vim")));
@@ -2745,7 +2745,7 @@ TEST_CASE("a move asked of the daemon is waited for until refused, timed out or 
     f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
     f.factory->reportedMoveSupport = contour::session::MoveSupport::Supported;
     // Both windows on the daemon link the move is asked over.
-    auto link = contour::test::FactoryBinding { *f.factory };
+    auto link = contour::session::FactoryBinding { *f.factory };
     f.manager.bindWindow(f.a.id, link);
     f.manager.bindWindow(f.b.id, link);
     auto const unbind = core::Finally { [&] { f.manager.releaseBinding(link); } };
@@ -2782,7 +2782,7 @@ TEST_CASE("a move asked of the daemon is waited for until refused, timed out or 
     {
         std::ignore = ask();
         // Another link's connection is not this move's.
-        auto other = contour::test::FactoryBinding { *f.factory };
+        auto other = contour::session::FactoryBinding { *f.factory };
         f.manager.setHostConnection(other, vthost::client::ConnectionState::Reconnecting);
         CHECK((f.manager.livePendingRemoteMove() != nullptr));
         f.manager.setHostConnection(link, vthost::client::ConnectionState::Reconnecting);

@@ -60,7 +60,7 @@ struct Rig
     TestApp app;
     /// What the window is bound to: its label is the host the window is attached to. Declared before the
     /// window, which tells it of its close.
-    contour::test::FactoryBinding binding;
+    contour::session::FactoryBinding binding;
     ScopedController window;
     TerminalSession* session = nullptr;
 

@@ -652,12 +652,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     }
 
     // remote::IDaemonLinkHost
-    void openWindowFor(remote::DaemonLink& link, QScreen* screen) override;
-    void closeWindow(vtworkspace::WorkspaceId window) override;
-    void postNotice(remote::DaemonLink& link, window::Notice notice) override;
+    void openWindowFor(QScreen* screen) override;
     void upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
-    void linkEnded(remote::DaemonLink& link) override;
+    void linkEnded() override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }

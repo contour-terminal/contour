@@ -942,10 +942,8 @@ std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::Daemon
 
 remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig config)
 {
-    auto& link = *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
+    return *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
         remote::DaemonLinkId { _nextDaemonLinkId++ }, std::move(config), *this, _sessionManager));
-    link.start();
-    return link;
 }
 
 remote::DaemonLink* ContourGuiApp::daemonLink(remote::DaemonLinkId id) const noexcept
@@ -954,7 +952,7 @@ remote::DaemonLink* ContourGuiApp::daemonLink(remote::DaemonLinkId id) const noe
     return found != _daemonLinks.end() ? found->get() : nullptr;
 }
 
-void ContourGuiApp::linkEnded(remote::DaemonLink& /*link*/)
+void ContourGuiApp::linkEnded()
 {
     // Not from inside the link, which is still running the call that ended it.
     QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
@@ -1068,21 +1066,10 @@ void ContourGuiApp::restartDaemon(remote::DaemonLink& link)
     } };
 }
 
-void ContourGuiApp::openWindowFor(remote::DaemonLink& /*link*/, QScreen* screen)
+void ContourGuiApp::openWindowFor(QScreen* screen)
 {
     // The window's Main.qml claims the daemon workspace the link staged, through the attach-window binder.
     newWindow(screen);
-}
-
-void ContourGuiApp::closeWindow(vtworkspace::WorkspaceId window)
-{
-    if (auto* controller = _sessionManager.controllerFor(window))
-        controller->closeWindow();
-}
-
-void ContourGuiApp::postNotice(remote::DaemonLink& link, window::Notice notice)
-{
-    _sessionManager.postNoticeToWindowsOf(link, notice);
 }
 
 std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string const& label,
@@ -1277,11 +1264,12 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
     }
     // Every window opened from here on shows tmux's panes; it opens its first tab as usual, through the tmux
     // controller, and adopts the panes tmux already has once the GUI booted.
-    _sessionManager.setAttachWindowBinder([this](window::WindowController* controller) {
-        if (controller != nullptr)
-            _sessionManager.bindWindow(controller->windowId(), _tmuxController->windowBinding());
-        return false;
-    });
+    _sessionManager.setAttachWindowBinder(
+        _tmuxController->windowBinding(), [this](window::WindowController* controller) {
+            if (controller != nullptr)
+                _sessionManager.bindWindow(controller->windowId(), _tmuxController->windowBinding());
+            return false;
+        });
     _onGuiBooted = [this] {
         if (auto const window = _sessionManager.focusedWindow())
             _tmuxController->adoptPendingPanes(_sessionManager, *window);
@@ -1398,7 +1386,7 @@ void ContourGuiApp::releaseHosting()
         link->stop();
     if (_tmuxController)
     {
-        _sessionManager.setAttachWindowBinder(nullptr);
+        // Its attach-window binder goes with its windows.
         _sessionManager.releaseBinding(_tmuxController->windowBinding());
         _tmuxController->stop();
     }
@@ -1552,33 +1540,34 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
     // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
     // has already spent part of the budget, and settles the hosting there.
-    auto const id = startDaemonLink(remote::DaemonLinkConfig {
-                                        .transport = std::move(target->transport),
-                                        .intent = std::move(target->intent),
-                                        .hostLabel = std::move(hostLabel),
-                                        .locality = locality,
-                                        .profileName = profileName(),
-                                        .workingDirectory = attachWorkingDirectory(
-                                            parameters().get<string>("contour.terminal.working-directory")),
-                                        .attachSettings = std::move(attachSettings),
-                                        .sessionSettings = [this] { return currentEmulationSettings(); },
-                                        .colorPreference = _colorPreference,
-                                        .clientRelease = CONTOUR_VERSION_STRING,
-                                        .clock = &core::platform::defaultSteadyClock(),
-                                        .timeline = &_startupTimeline,
-                                        .powerMonitor = _powerMonitor.get(),
-                                        .backoff = {},
-                                    })
-                        .id();
+    auto const id =
+        startDaemonLink(remote::DaemonLinkConfig {
+                            .controller =
+                                remote::NativeController::Config {
+                                    .transport = std::move(target->transport),
+                                    .intent = std::move(target->intent),
+                                    .profileName = profileName(),
+                                    .workingDirectory = attachWorkingDirectory(
+                                        parameters().get<string>("contour.terminal.working-directory")),
+                                    .attachSettings = std::move(attachSettings),
+                                    .sessionSettings = [this] { return currentEmulationSettings(); },
+                                    .colorPreference = _colorPreference,
+                                    .clock = core::platform::defaultSteadyClock(),
+                                    .timeline = _startupTimeline,
+                                    .powerMonitor = _powerMonitor.get(),
+                                    .backoff = {},
+                                },
+                            .hostLabel = std::move(hostLabel),
+                            .locality = locality,
+                            .clientRelease = CONTOUR_VERSION_STRING,
+                        })
+            .id();
     // Attach mode adopts the daemon's workspaces into the windows once the first one booted, and on every
     // layout change after (which the link wires itself). Both find the link by its id, which no window has
     // ended before the first one opens.
     _onGuiBooted = [this, id] {
         if (auto* const link = daemonLink(id))
-        {
-            link->reconcile();
-            link->expireRestoreSummaryAfterLayout();
-        }
+            link->followLayout();
     };
     _awaitAttach = [this, id, budget]() -> std::expected<void, std::string> {
         auto* const link = daemonLink(id);
@@ -1597,13 +1586,13 @@ std::expected<void, std::string> ContourGuiApp::settleHosting(
         case cli::HostingDecision::InProcess:
         case cli::HostingDecision::Attached: return {};
         case cli::HostingDecision::InProcessWithNotice:
-            // The attach is given up (awaitNativeAttach() released the controller): nothing waits for the
-            // daemon's workspaces, and the first window opens a tab of its own, which runs here.
+            // The attach is given up (awaitNativeAttach() released the controller and its attach-window
+            // binder): nothing waits for the daemon's workspaces, and the first window opens a tab of its
+            // own, which runs here.
             errorLog()("Hosting this window's sessions in-process: {}", attached.error());
             _onGuiBooted = nullptr;
             _restartDaemon = nullptr;
             _upgradeDaemon = nullptr;
-            _sessionManager.setAttachWindowBinder(nullptr);
             _hostingNotice = cli::hostingNotice(attached.error());
             return {};
         case cli::HostingDecision::Fail:
@@ -2281,12 +2270,17 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
         QCoreApplication::exit(EXIT_SUCCESS);
         return;
     }
-    if (std::holds_alternative<actions::NewTerminal>(action))
+    if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
     {
-        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give. A
-        // local window: a new window is authored on the host of the window it is asked from, and no window
-        // is open -- a daemon link ends with the last window it served.
-        newWindow();
+        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give. A new
+        // window is authored on the host of the window it is asked from, and none shows a session: a daemon
+        // link ends with the last window it served. Only one still booting, its first window waiting for the
+        // first layout, has its daemon author it, as a window opened now would be claimed as its boot window.
+        auto const spawn = session::RemoteSpawn { .profileName = newTerminal->profileName.value_or("") };
+        if (std::ranges::none_of(_daemonLinks, [&spawn](auto const& link) {
+                return link->requestBootWorkspace(spawn) == session::RemoteRouting::Routed;
+            }))
+            newWindow();
         return;
     }
     if (std::holds_alternative<actions::NewWindowTo>(action))

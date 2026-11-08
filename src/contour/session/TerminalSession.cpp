@@ -7593,7 +7593,8 @@ void TerminalSession::spawnNewTerminal(std::optional<std::string> const& request
         // hello, where a local window would run this session's own -- a name the daemon may not have.
         if (_manager != nullptr
             && _manager->requestRemoteWorkspace(*this,
-                                                RemoteSpawn { .profileName = requestedProfile.value_or("") }))
+                                                RemoteSpawn { .profileName = requestedProfile.value_or("") })
+                   == RemoteRouting::Routed)
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory =

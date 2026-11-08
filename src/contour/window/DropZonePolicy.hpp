@@ -38,6 +38,7 @@ enum class MoveRefusal : uint8_t
 {
     None = 0,     //!< Nothing stands in the way.
     OtherProcess, //!< The window belongs to another Contour process.
+    OtherHost,    //!< The window is this process's, but another host (a daemon, or this process) serves it.
     OldDaemon,    //!< The window's daemon is too old to move panes.
     Tmux,         //!< The window is a tmux window.
 };
@@ -56,6 +57,8 @@ inline constexpr std::string_view RefusalTitle = "Can't move a pane here";
         case MoveRefusal::OtherProcess:
             return "This window belongs to another Contour process. Run Contour in daemon mode to move panes "
                    "between any windows.";
+        case MoveRefusal::OtherHost:
+            return "This window's sessions run on another host. Panes can't be moved between hosts.";
         case MoveRefusal::OldDaemon:
             return "This window's daemon is too old to move panes. Update Contour on the daemon side.";
         case MoveRefusal::Tmux: return "Panes can't be moved into a tmux window yet.";

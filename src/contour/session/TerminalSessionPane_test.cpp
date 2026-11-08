@@ -1213,7 +1213,7 @@ TEST_CASE("TerminalSessionManager: the host connection reaches every remotely ho
     using vthost::client::ConnectionState;
     auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
     owned->reportedHosting = contour::session::SessionHosting::Remote;
-    auto link = contour::test::FactoryBinding { *owned };
+    auto link = contour::session::FactoryBinding { *owned };
     auto app = TestApp { std::move(owned) };
     auto const win = contour::test::ScopedController { app.manager() };
     app.manager().bindWindow(win.id, link);
