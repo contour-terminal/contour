@@ -1014,9 +1014,8 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
     ZoneValue(static_cast<int64_t>(cells.size()));
 
     // The soft glyphs are sorted by position, as the cells of a line are: one cursor, advanced alongside the
-    // cells, finds each cell's glyph, and a frame without any pays this one test.
+    // cells, finds each cell's glyph.
     assert(std::ranges::is_sorted(softGlyphs, {}, &vtbackend::RenderSoftGlyph::position));
-    auto const hasSoftGlyphs = !softGlyphs.empty();
     auto glyphCursor = SoftGlyphCursor { softGlyphs };
     for (auto const& cell: cells)
     {
@@ -1024,7 +1023,7 @@ void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells,
         {
             _backgroundRenderer.renderCell(cell);
             _decorationRenderer.renderCell(cell);
-            if (auto const* const glyph = hasSoftGlyphs ? glyphCursor.find(cell.position) : nullptr)
+            if (auto const* const glyph = glyphCursor.find(cell.position))
                 _textRenderer.renderCell(cell, *glyph);
             else
                 _textRenderer.renderCell(cell);

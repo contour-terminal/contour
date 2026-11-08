@@ -13,13 +13,6 @@ namespace vtbackend
 
 namespace
 {
-    /// The largest cell a soft font can have, and the scratch every glyph is first drawn into.
-    constexpr auto MaxWidth = int { MaxSoftCellWidth };
-    constexpr auto MaxHeight = int { MaxSoftCellHeight };
-
-    constexpr auto FirstPosition = int { FirstSoftGlyphPosition };
-    constexpr auto LastPosition = int { LastSoftGlyphPosition };
-
     // Pe, Pt and Pcss are small enumerations: the raw value is the enumerator.
     template <typename Enum>
     [[nodiscard]] constexpr std::optional<Enum> toEnum(int value, int maxValue)
@@ -141,9 +134,8 @@ namespace
                                                uint8_t height,
                                                std::span<uint8_t const> coverage)
     {
-        auto bytes = std::vector<uint8_t> { width, height };
-        bytes.insert(bytes.end(), coverage.begin(), coverage.end());
-        return crispy::StrongHash::compute(bytes.data(), bytes.size());
+        return crispy::StrongHash { width, height, 0, 0 }
+               * crispy::StrongHash::compute(coverage.data(), coverage.size());
     }
 
     [[nodiscard]] std::shared_ptr<SoftGlyph const> makeErrorGlyph(SoftCellGeometry geometry)
@@ -156,7 +148,7 @@ namespace
         {
             if (((rowMask >> row) & 1U) == 0)
                 continue;
-            for (auto const column: std::views::iota(0, MaxWidth) | std::views::reverse)
+            for (auto const column: std::views::iota(uint8_t { 0 }, MaxSoftCellWidth) | std::views::reverse)
                 if (((columnMask >> column) & 1U) != 0)
                     coverage.push_back(static_cast<uint8_t>((ErrorGlyphPattern[row] >> column) & 1U));
         }
@@ -166,7 +158,7 @@ namespace
     /// One character as drawn from sixel data, before it is fitted to the cell.
     struct Scratch
     {
-        std::array<uint8_t, static_cast<size_t>(MaxWidth) * MaxHeight> pixels {};
+        std::array<uint8_t, static_cast<size_t>(MaxSoftCellWidth) * MaxSoftCellHeight> pixels {};
         int position = 0;
     };
 
@@ -241,7 +233,8 @@ std::expected<SoftFontDeclaration, SoftFontError> decodeDecdld(DecdldParameters 
     }
     else
     {
-        if (p.pcmw > MaxWidth || p.pcmh < 0 || p.pcmh > MaxHeight)
+        if (std::cmp_greater(p.pcmw, MaxSoftCellWidth) || p.pcmh < 0
+            || std::cmp_greater(p.pcmh, MaxSoftCellHeight))
             return std::unexpected(SoftFontError::TooLarge);
         declaration.declaredWidth = static_cast<uint8_t>(p.pcmw);
         declaration.declaredHeight = static_cast<uint8_t>(p.pcmh);
@@ -250,9 +243,9 @@ std::expected<SoftFontDeclaration, SoftFontError> decodeDecdld(DecdldParameters 
     // Pcn is a position in the set: absent means 1 in a 94-set (position 0x20 is the space) and 0 in a
     // 96-set.
     auto const pcn = p.pcn == 0 && declaration.charsetSize == SoftCharsetSize::Size94 ? 1 : p.pcn;
-    if (pcn < 0 || FirstPosition + pcn > LastPosition)
+    if (pcn < 0 || FirstSoftGlyphPosition + pcn > LastSoftGlyphPosition)
         return std::unexpected(SoftFontError::TooLarge);
-    declaration.startPosition = static_cast<uint8_t>(FirstPosition + pcn);
+    declaration.startPosition = static_cast<uint8_t>(FirstSoftGlyphPosition + pcn);
 
     return declaration;
 }
@@ -299,7 +292,7 @@ SoftCellGeometry detectTargetCell(SoftFontDeclaration const& declaration,
         return cell.columns == declaration.columnsPerPage && inRange(cell);
     });
     if (match == TargetCells.end())
-        return { MaxWidth, MaxHeight, declaredText };
+        return { MaxSoftCellWidth, MaxSoftCellHeight, declaredText };
 
     switch (match->textWidth)
     {
@@ -307,7 +300,7 @@ SoftCellGeometry detectTargetCell(SoftFontDeclaration const& declaration,
         case TextWidthRule::Clip8: return { match->fullWidth, match->fullHeight, 8 };
         case TextWidthRule::Unclipped: return { match->fullWidth, match->fullHeight, 0 };
     }
-    return { MaxWidth, MaxHeight, declaredText };
+    return { MaxSoftCellWidth, MaxSoftCellHeight, declaredText };
 }
 
 std::shared_ptr<SoftGlyph const> makeSoftGlyph(uint8_t width, uint8_t height, std::vector<uint8_t> coverage)
@@ -404,7 +397,7 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
     auto const beginCharacter = [&] {
         // Positions past the 7-bit range can never be stored, so they get no scratch (the body is untrusted
         // and may hold any number of them); they still count toward the used size.
-        storing = position <= LastPosition;
+        storing = std::cmp_less_equal(position, LastSoftGlyphPosition);
         if (storing)
             characters.push_back(Scratch { .position = position });
         row = 0;
@@ -423,10 +416,10 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
         if (ch >= '?' && ch <= '~')
         {
             touched = true;
-            if (storing && column < MaxWidth)
+            if (storing && std::cmp_less(column, MaxSoftCellWidth))
                 for (auto const bit: std::views::iota(0, 6))
-                    if (row + bit < MaxHeight && (((ch - '?') >> bit) & 1) != 0)
-                        characters.back().pixels.at((static_cast<size_t>(row + bit) * MaxWidth)
+                    if (row + bit < MaxSoftCellHeight && (((ch - '?') >> bit) & 1) != 0)
+                        characters.back().pixels.at((static_cast<size_t>(row + bit) * MaxSoftCellWidth)
                                                     + static_cast<size_t>(column)) = 1;
             ++column;
         }
@@ -465,8 +458,8 @@ std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& 
         for (auto const y: std::views::iota(0, int { geometry.fullHeight }))
             for (auto const x: std::views::iota(0, int { textWidth }))
                 coverage.at((static_cast<size_t>(y) * geometry.fullWidth) + static_cast<size_t>(x + offset)) =
-                    character.pixels.at((static_cast<size_t>(y) * MaxWidth) + static_cast<size_t>(x));
-        glyphs.at(static_cast<size_t>(character.position - FirstPosition)) =
+                    character.pixels.at((static_cast<size_t>(y) * MaxSoftCellWidth) + static_cast<size_t>(x));
+        glyphs.at(static_cast<size_t>(character.position - FirstSoftGlyphPosition)) =
             makeSoftGlyph(geometry.fullWidth, geometry.fullHeight, std::move(coverage));
     }
 

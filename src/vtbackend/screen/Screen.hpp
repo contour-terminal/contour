@@ -722,7 +722,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void designateCharset(CharsetTable table, CharsetId charset);
 
     /// Attempts to handle an unmatched ESC sequence as SCS designation.
-    /// Returns true if the sequence was recognized as SCS (including DRCS two-byte designators).
+    /// Returns true if the sequence was recognized as SCS. Soft-font designators are tried separately, by
+    /// tryDesignateSoftFont().
     [[nodiscard]] bool tryHandleSCS(Sequence const& seq);
 
     /// Designates a loaded soft font if @p seq is an SCS naming the designator it was loaded under.
