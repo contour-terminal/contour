@@ -7587,11 +7587,11 @@ void TerminalSession::spawnNewTerminal(std::optional<std::string> const& request
     }
     else
     {
-        // Attach mode: author the window on the daemon (B4); its new-window layout push spawns and
+        // Attach mode: author a workspace on the daemon (B4); its new-workspace layout push spawns and
         // binds the matching OS window. A local factory returns false and we open an ordinary window.
         // The profile the action named, else none: the daemon then runs the one this client named in its
         // hello, where a local window would run this session's own -- a name the daemon may not have.
-        if (_app.requestRemoteWindow(RemoteSpawn { .profileName = requestedProfile.value_or("") }))
+        if (_app.requestRemoteWorkspace(RemoteSpawn { .profileName = requestedProfile.value_or("") }))
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory =

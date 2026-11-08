@@ -584,9 +584,9 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         _factory->reportTabPresentation(presentation);
     }
 
-    [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const& spawn) override
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
     {
-        return _factory->requestRemoteWindow(spawn);
+        return _factory->requestRemoteWorkspace(spawn);
     }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { _factory->requestRemoteClose(pty); }

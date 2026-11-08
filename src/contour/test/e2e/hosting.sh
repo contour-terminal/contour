@@ -4,7 +4,7 @@
 #
 # The table itself is unit-tested (contour_test "[hosting]"); what only a real launch can show is the
 # wiring around it: that `required` ends the launch before any window exists, that `auto` comes up
-# in-process instead -- saying why -- and that `contour client --window` names a window the daemon lacks.
+# in-process instead -- saying why -- and that `contour client --workspace` names a workspace the daemon lacks.
 #
 # The daemon this configuration names can never start: its socket lies below a regular file, so the
 # directory it needs cannot be made. Every launch below spawns one on demand, and gives up after the
@@ -90,7 +90,7 @@ status=$?
 grep -q "^contour: unknown --daemon-mode 'sometimes'" "$OUT/unknown.log" \
     || fail "unknown mode: the rejection does not name the option" "$OUT/unknown.log"
 
-# --- contour client --window: a window the daemon does not have ------------------------------------
+# --- contour client --workspace: a workspace the daemon does not have ---------------------------
 mkdir -m 700 "$OUT/run"
 "$CONTOUR" daemon --socket "$OUT/run/sock" > "$OUT/daemon.log" 2>&1 &
 DAEMON_PID=$!
@@ -99,14 +99,14 @@ for _ in $(seq 100); do
     sleep 0.1
 done
 [ -S "$OUT/run/sock" ] || fail "the daemon never bound its socket" "$OUT/daemon.log"
-timeout 60 "$CONTOUR" client --socket "$OUT/run/sock" --window 99 > "$OUT/window.log" 2>&1
+timeout 60 "$CONTOUR" client --socket "$OUT/run/sock" --workspace 99 > "$OUT/workspace.log" 2>&1
 status=$?
-[ "$status" -eq 1 ] || fail "--window: expected exit status 1, got $status" "$OUT/window.log"
-grep -q "^contour client: the daemon has no window 99$" "$OUT/window.log" \
-    || fail "--window: the client did not name the missing window" "$OUT/window.log"
+[ "$status" -eq 1 ] || fail "--workspace: expected exit status 1, got $status" "$OUT/workspace.log"
+grep -q "^contour client: the daemon has no workspace 99$" "$OUT/workspace.log" \
+    || fail "--workspace: the client did not name the missing workspace" "$OUT/workspace.log"
 
 # Nothing Qt reports at teardown follows any of the launches.
-for log in required auto named-auto named-required unknown window; do
+for log in required auto named-auto named-required unknown workspace; do
     if grep -qiE "QApplication|destroyed while|still in use|QObject::|ASSERT" "$OUT/$log.log"; then
         fail "the $log launch warned at teardown:" "$OUT/$log.log"
     fi

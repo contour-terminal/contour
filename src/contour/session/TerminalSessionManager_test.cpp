@@ -3302,7 +3302,8 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
           "[manager][paneend][reconnect]")
 {
     using contour::session::EndReason;
-    // Two daemon windows: the daemon pushes one layout per window, and each reaches the GUI in its own turn.
+    // Two daemon workspaces: the daemon pushes one layout per window, and each reaches the GUI in its own
+    // turn.
     auto lost = LostSplit {};
     auto& manager = lost.app.manager();
     auto const second = contour::test::ScopedController { manager };
@@ -4493,7 +4494,7 @@ TEST_CASE("TerminalSessionManager: the quick terminal's window stays out of the 
     CHECK(host->requestedRemoteSplits == 0);
     CHECK(host->localCreations == 2);
 
-    // Nor does it adopt a daemon window the host staged for the next window to come.
+    // Nor does it adopt a daemon workspace the host staged for the next window to come.
     manager.setAttachWindowBinder([](contour::window::WindowController*) { return true; });
     CHECK_FALSE(manager.consumeAttachWindow(quick.controller));
     CHECK(manager.consumeAttachWindow(normal.controller));

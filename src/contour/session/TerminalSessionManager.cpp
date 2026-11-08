@@ -136,7 +136,7 @@ TerminalSessionManager::~TerminalSessionManager() = default;
 
 bool TerminalSessionManager::consumeAttachWindow(contour::window::WindowController* controller)
 {
-    // A panel is no daemon window: it never adopts one, and its own first tab is made here.
+    // A panel is no daemon workspace: it never adopts one, and its own first tab is made here.
     return _attachWindowBinder && controller != nullptr && !isPanelWindow(controller->windowId())
                ? _attachWindowBinder(controller)
                : false;
@@ -183,7 +183,7 @@ vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::Workspa
         return nullptr;
     // The active tab's active pane first — that is the pane the user is looking at, so it is the
     // most faithful "this window" the remote side can be given. Any live leaf of the window would
-    // resolve to the same window on the daemon, so the scan below is a fallback for a window whose
+    // resolve to the same workspace on the daemon, so the scan below is a fallback for a window whose
     // active pane happens to have no live session (a tab mid-teardown), not a different answer.
     auto const ptyOf = [this](vtworkspace::SessionId id) -> vtpty::Pty const* {
         auto* session = sessionForId(id);
@@ -2607,7 +2607,7 @@ std::optional<TerminalSessionManager::DescribedTarget> TerminalSessionManager::d
                 auto const* const window = _model->workspace(well.workspace);
                 if (window == nullptr)
                     return std::nullopt;
-                // The daemon is told the window by any pane of it: its active one.
+                // The daemon is told the workspace by any pane of it: its active one.
                 auto const* const tab = window->activeTab();
                 return DescribedTarget { .place = window::MovePlace::Gap,
                                          .landing = window::MoveLanding::NewTab,
@@ -3203,8 +3203,8 @@ void TerminalSessionManager::rebindDisconnected()
                 // Left set, the binding would hand the ended pane's remote session to the next one made.
                 _sessionFactory.cancelReconnectBinding();
             }
-    // The daemon pushes one layout per window and each arrives in its own turn: the run stays up for the
-    // windows still to come, and ends once no pane is left to take back (or on reconnectFailed()).
+    // The daemon pushes one layout per workspace and each arrives in its own turn: the run stays up for the
+    // workspaces still to come, and ends once no pane is left to take back (or on reconnectFailed()).
     auto const isLost = [](auto const* session) {
         return session != nullptr && session->endReason() == EndReason::Disconnected;
     };

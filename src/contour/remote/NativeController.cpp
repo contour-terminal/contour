@@ -200,9 +200,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // ExtensionPermissions is offered because this client passes a PermissionHandler below: its
             // panes ask the user, ControlPermissions because their prompt lists the control permissions a
             // question asks for (vthost::client::consentRequestOf). InitialClientArea because the hello
-            // states the area below. AttachIntent so that the daemon names the windows a reconnect resumes,
-            // Heartbeat so that a connection gone half-open is noticed and replaced. ProfileByName because
-            // the hello and every spawning verb name a profile for the daemon to resolve in its own
+            // states the area below. AttachIntent so that the daemon names the workspaces a reconnect
+            // resumes, Heartbeat so that a connection gone half-open is noticed and replaced. ProfileByName
+            // because the hello and every spawning verb name a profile for the daemon to resolve in its own
             // configuration. TabEdits because the user's changes to a tab's presentation are reported
             // (reportTabPresentation). ProgramStatus because the mirrors take the OSC 7501 records the daemon
             // pushes, for the tab strip to show. InputEcho because a pane at a password prompt is locked, and
@@ -213,7 +213,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // flipping back until the echo arrives. MoveNode so that a pane or tab dragged in a daemon-hosted
             // window is moved by the daemon (requestRemoteMove), whose layout pushes are then realized here.
             // LayoutBatch so that the daemon says where each push ends, and the GUI reconciles each push
-            // whole: a pane a move took out of one window is then always seen in the window it went to.
+            // whole: a pane a move took out of one workspace is then always seen in the workspace it went to.
             // LiveUpgrade so that a daemon replacing itself in place says so first, and the supervisor waits
             // for that same daemon to come back rather than starting another one into the gap.
             .capabilities =
@@ -329,7 +329,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     using vthost::client::ConnectionState;
     auto const where = _transport->describe();
     auto closed = false;
-    auto missingWindows = false;
+    auto missingWorkspaces = false;
     auto restored = std::optional<vthost::RestoredCounts> {};
     {
         auto const lock = std::lock_guard { _mutex };
@@ -355,10 +355,10 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 else if (_client != nullptr)
                 {
                     _daemonInstance = _client->daemonInstance();
-                    // Asked for windows the daemon does not have, a first attach would wait out its budget
+                    // Asked for workspaces the daemon does not have, a first attach would wait out its budget
                     // for a session that never comes: it ends now, saying which.
-                    missingWindows = _intent.kind == vthost::proto::AttachIntentKind::Workspaces
-                                     && _client->followedWorkspaces().empty();
+                    missingWorkspaces = _intent.kind == vthost::proto::AttachIntentKind::Workspaces
+                                        && _client->followedWorkspaces().empty();
                 }
                 ++_acceptedConnections;
                 _inputConnection = _acceptedConnections;
@@ -403,10 +403,11 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         }
     }
     _connected.notify_all();
-    if (missingWindows)
-        failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.workspaces)));
+    if (missingWorkspaces)
+        failConnect(
+            std::format("the daemon has no workspace {}", core::joinHumanReadable(_intent.workspaces)));
     // After the lock is released, and ahead of the layout that follows the hello, so the GUI holds the
-    // summary by the time it realizes the windows it is for.
+    // summary by the time it realizes the workspaces it is for.
     if (restored)
         emit workspaceRestored(restored->workspaces, restored->tabs);
     emit connectionStateChanged();
@@ -446,7 +447,7 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     if (client == nullptr)
         return;
     auto const mapped = std::ranges::to<std::vector>(_layouts | std::views::keys);
-    // Window and session ids count from 1 in every run of a daemon: once it restarted, the ids this client
+    // Workspace and session ids count from 1 in every run of a daemon: once it restarted, the ids this client
     // holds name nothing of the new run, however many of them it reuses.
     auto const restarted =
         _daemonInstance != 0 && client->daemonInstance() != 0 && _daemonInstance != client->daemonInstance();
@@ -454,7 +455,7 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     _daemonInstance = client->daemonInstance();
     if (restarted)
     {
-        _lostWindows = mapped;
+        _lostWorkspaces = mapped;
         // Every binding is detached, its pty left to the window closing it: a new session with the same id
         // must not reach the old pane, nor the old pane's input the new session.
         _bindings.clear();
@@ -470,13 +471,13 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     }
     else
     {
-        // A daemon that predates attach intents names no windows, and every window is followed.
+        // A daemon that predates attach intents names no workspaces, and every workspace is followed.
         if (client->negotiated()
             && client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
-            _lostWindows = std::ranges::to<std::vector>(mapped | std::views::filter([&](uint64_t window) {
-                                                            return !std::ranges::contains(
-                                                                client->followedWorkspaces(), window);
-                                                        }));
+            _lostWorkspaces = std::ranges::to<std::vector>(
+                mapped | std::views::filter([&](uint64_t workspace) {
+                    return !std::ranges::contains(client->followedWorkspaces(), workspace);
+                }));
         // The same sessions, re-snapshotted: each mirror takes the new connection's first snapshot as a
         // first.
         for (auto& binding: _bindings | std::views::values)
@@ -524,9 +525,10 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
         attachLog()("Dropped {} bytes of input typed while the connection to {} was down.",
                     dropped,
                     _transport->describe());
-    if (!_lostWindows.empty())
-        attachLog()(
-            "{} window(s) of {} are gone after the reconnect.", _lostWindows.size(), _transport->describe());
+    if (!_lostWorkspaces.empty())
+        attachLog()("{} workspace(s) of {} are gone after the reconnect.",
+                    _lostWorkspaces.size(),
+                    _transport->describe());
 }
 
 vthost::client::ConnectionState NativeController::connectionState() const
@@ -606,9 +608,9 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     auto batched = false;
     {
         auto const lock = std::lock_guard { _mutex };
-        // Announced with the first window that came instead, so the GUI has a window to show before it
+        // Announced with the first workspace that came instead, so the GUI has a window to show before it
         // closes the lost ones -- closing the last one first would end the application.
-        lost = std::exchange(_lostWindows, {});
+        lost = std::exchange(_lostWorkspaces, {});
         captureHandshake();
         auto held = std::make_shared<vthost::proto::LayoutState const>(layout);
         // A daemon that ends its pushes settles them itself (onLayoutBatchEnd); one that does not settles
@@ -637,12 +639,12 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     }
     replayUnsentCloses(layout);
     if (!lost.empty())
-        emit windowsLost(std::move(lost));
+        emit workspacesLost(std::move(lost));
     // The GUI (on its own thread, via a queued connection) reconciles each daemon
-    // window's tab/split tree against wireLayout(window) — the authoritative
+    // workspace's tab/split tree against wireLayout(workspace) — the authoritative
     // structure — mapping one OS window to each (B4). (The per-session snapshot
     // deltas that follow set State::Ready via onUpdate.) A push the daemon ends is reconciled at its end
-    // only: until then the layouts held mix this push's windows with the last one's.
+    // only: until then the layouts held mix this push's workspaces with the last one's.
     if (!batched)
         emit layoutChanged();
 }
@@ -713,10 +715,11 @@ LayoutSnapshot NativeController::settledLayouts() const
     return _settledLayouts;
 }
 
-std::shared_ptr<vthost::proto::LayoutState const> NativeController::settledLayout(uint64_t daemonWindow) const
+std::shared_ptr<vthost::proto::LayoutState const> NativeController::settledLayout(
+    uint64_t daemonWorkspace) const
 {
     auto const lock = std::lock_guard { _mutex };
-    auto const it = _settledLayouts.find(daemonWindow);
+    auto const it = _settledLayouts.find(daemonWorkspace);
     return it != _settledLayouts.end() ? it->second : nullptr;
 }
 
@@ -726,17 +729,17 @@ std::shared_ptr<vthost::proto::LayoutState const> NativeController::settledLayou
     return _settledLayouts.empty() ? nullptr : _settledLayouts.begin()->second;
 }
 
-std::vector<uint64_t> NativeController::windowIds() const
+std::vector<uint64_t> NativeController::workspaceIds() const
 {
     auto const lock = std::lock_guard { _mutex };
-    // std::map keeps the keys ascending, so the primary (lowest-id) window comes first.
+    // std::map keeps the keys ascending, so the primary (lowest-id) workspace comes first.
     return std::ranges::to<std::vector>(_layouts | std::views::keys);
 }
 
-std::optional<vthost::proto::LayoutState> NativeController::layout(uint64_t daemonWindow) const
+std::optional<vthost::proto::LayoutState> NativeController::layout(uint64_t daemonWorkspace) const
 {
     auto const lock = std::lock_guard { _mutex };
-    auto const it = _layouts.find(daemonWindow);
+    auto const it = _layouts.find(daemonWorkspace);
     return it != _layouts.end() ? std::optional { *it->second } : std::nullopt;
 }
 
@@ -745,7 +748,7 @@ std::optional<vthost::proto::LayoutState> NativeController::layout() const
     auto const lock = std::lock_guard { _mutex };
     if (_layouts.empty())
         return std::nullopt;
-    return *_layouts.begin()->second; // the primary (lowest-id) window
+    return *_layouts.begin()->second; // the primary (lowest-id) workspace
 }
 
 vthost::client::WireLayout NativeController::wireLayout() const
@@ -766,8 +769,8 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
         return std::unexpected(isConnecting() ? ReconnectError::AlreadyConnected
                                               : ReconnectError::ConnectionEnding);
     {
-        // The windows this client showed, as a reconnect inside one run resumes them; a client that follows
-        // every window keeps doing so (@see ClientSupervisor::resumeIntent).
+        // The workspaces this client showed, as a reconnect inside one run resumes them; a client that
+        // follows every workspace keeps doing so (@see ClientSupervisor::resumeIntent).
         auto const lock = std::lock_guard { _mutex };
         // The new run is Connecting from here on: a reactor that dies before it enters Connecting itself
         // must not find the previous run's Failed and swallow its own death (@see reactorDied).
@@ -888,8 +891,8 @@ std::optional<uint64_t> NativeController::sessionForPty(vtpty::Pty const* pty) c
 void NativeController::requestCreateTab(vtpty::Pty const* actingPty,
                                         contour::session::RemoteSpawn const& spawn)
 {
-    // The acting pane names the WINDOW: the daemon hosts several (B4), and a request naming none
-    // lands in its first one — so a "+" clicked in a second window opened a tab in the first. An
+    // The acting pane names the WORKSPACE: the daemon hosts several (B4), and a request naming none
+    // lands in its first one — so a "+" clicked in a second OS window opened a tab in the first. An
     // unbound (or null) pty resolves to 0, which is exactly that fallback.
     auto const beside = actingPty != nullptr ? sessionForPty(actingPty).value_or(0) : 0;
     // The client's send verbs must run on the reactor thread that owns it.
@@ -898,7 +901,7 @@ void NativeController::requestCreateTab(vtpty::Pty const* actingPty,
     });
 }
 
-void NativeController::requestCreateWindow(contour::session::RemoteSpawn const& spawn)
+void NativeController::requestCreateWorkspace(contour::session::RemoteSpawn const& spawn)
 {
     postSessionCreation([profile = spawn.profileName](NativeClient& client) mutable {
         client.createWorkspace(std::move(profile));
@@ -1296,7 +1299,7 @@ std::optional<vtpty::PageSize> NativeController::composedClientArea() const
         return std::nullopt;
     };
 
-    // Every mirrored tab, in window-id then tab order — `_layouts` is ordered, so the fallback the
+    // Every mirrored tab, in workspace-id then tab order — `_layouts` is ordered, so the fallback the
     // composer picks is deterministic rather than a hash-order accident.
     auto const roots =
         _layouts | std::views::values
@@ -1507,7 +1510,7 @@ void NativeController::unbind(uint64_t session, uint64_t serial)
         // composed from, and a session id is never reused, so once the pane is gone the anchor can
         // only ever miss. Left set, a flush already queued when this ran would compose the fallback
         // tab while still believing it had anchored — reporting a client area for a window the user
-        // never touched, which the daemon answers by re-projecting every pane of every window.
+        // never touched, which the daemon answers by re-projecting every pane of every workspace.
         if (_geometryAnchor == session)
             _geometryAnchor.reset();
     }

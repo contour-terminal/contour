@@ -268,7 +268,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         //
         // @p window travels along as one of its ptys: a remote model mints its own window ids, so
         // a session it already hosts is the only name both ends share. Dropping it entirely — as
-        // this did — sent every window's "+" to the daemon's FIRST window, so a tab opened in a
+        // this did — sent every window's "+" to the daemon's FIRST workspace, so a tab opened in a
         // second attach-mode window appeared in the wrong one and the window clicked in gained
         // nothing.
         //
@@ -713,12 +713,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// this manager waits for, if among them, lands with the reconcile now running.
     void noteRemoteMovesLanded(std::span<uint64_t const> landed);
 
-    /// The reconcile is about to open an OS window for a daemon window holding @p daemonSessions: when that
-    /// is the window a landing move asked for, stages where it opens.
+    /// The reconcile is about to open an OS window for a daemon workspace holding @p daemonSessions: when
+    /// that is the window a landing move asked for, stages where it opens.
     /// @return The screen it opens on; null for wherever windows open.
     [[nodiscard]] QScreen* stageRemoteMoveWindow(std::span<uint64_t const> daemonSessions);
 
-    /// How much of the daemon's windows a reconcile placed (@see completeRemoteMoves).
+    /// How much of the daemon's workspaces a reconcile placed (@see completeRemoteMoves).
     enum class ReconcileReach : uint8_t
     {
         Partial =
@@ -730,12 +730,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// focus, and the window's screen reader is told. Nothing waits for the move after. A reconcile that
     /// reached only part of the windows leaves the move waiting, until its deadline, for the one that places
     /// the window it landed in: dropped, that window would open without its position or announcement.
-    /// @param reach How much of the daemon's windows the reconcile placed.
+    /// @param reach How much of the daemon's workspaces the reconcile placed.
     void completeRemoteMoves(ReconcileReach reach);
 
     /// Holds back the closing of a window a move empties (applyNodeMove()) while it lives. A reconcile of one
     /// push takes one for all of its windows' passes: a pass may take every tab out of a window that a later
-    /// pass fills again, and closing it in between would drop the daemon window it shows. Holds nest; the
+    /// pass fills again, and closing it in between would drop the daemon workspace it shows. Holds nest; the
     /// last one to go closes each window a move emptied that is still empty and not kept.
     class EmptiedWindowHold
     {
@@ -748,8 +748,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         EmptiedWindowHold(EmptiedWindowHold&&) = delete;
         EmptiedWindowHold& operator=(EmptiedWindowHold&&) = delete;
 
-        /// Keeps @p window open once the last hold goes, though a move emptied it: it shows a daemon window
-        /// that still holds tabs, which the next reconcile realizes into it.
+        /// Keeps @p window open once the last hold goes, though a move emptied it: it shows a daemon
+        /// workspace that still holds tabs, which the next reconcile realizes into it.
         /// @param window The window.
         void keep(vtworkspace::WorkspaceId window) const;
 
@@ -765,7 +765,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void endWindowSpawn() noexcept;
     /// Whether a tab of window @p from can be merged into a split of window @p to: where the sessions are
     /// hosted locally, or on a daemon that serves the merge (a remote end that does not would undo a local
-    /// one). A daemon's layout is pushed per window and a client reconciles one window at a time, so a merge
+    /// one). A daemon's layout is pushed per workspace and a client reconciles one at a time, so a merge
     /// there stays within one window.
     /// @param from The window holding the dragged tab.
     /// @param to   The window holding the pane to split.
@@ -869,7 +869,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// The daemon is back and has pushed its layout: every Disconnected pane whose remote session that layout
     /// still names mirrors it again, in place (its PaneId, the active pane and a zoom unchanged); one it does
-    /// not name keeps its footer. Called for every layout the daemon pushes (one per window): a Reconnect
+    /// not name keeps its footer. Called for every layout the daemon pushes (one per workspace): a Reconnect
     /// that is running ends once no Disconnected pane is left, or in reconnectFailed().
     void rebindDisconnected();
 
@@ -1281,7 +1281,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     Q_INVOKABLE bool consumeDefaultLayout(contour::window::WindowController* controller);
 
     /// Installs the attach-mode window binder (ContourGuiApp installs it once attached). It decides
-    /// whether a freshly-spawned OS window should adopt a pending daemon window's layout instead of
+    /// whether a freshly-spawned OS window should adopt a pending daemon workspace's layout instead of
     /// creating the usual fresh first tab. Cleared (nullptr) when detaching. @see consumeAttachWindow.
     /// @param binder Invoked with each spawned window's controller; returns true if it adopted it.
     void setAttachWindowBinder(std::function<bool(contour::window::WindowController*)> binder)
@@ -1290,11 +1290,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     }
 
     /// Main.qml calls this in Component.onCompleted (like consumeDefaultLayout): in attach mode a
-    /// window may have been spawned to host a specific daemon window (B4). If the installed binder
-    /// adopts @p controller's window for that daemon window, this returns true and the window must NOT
-    /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
+    /// window may have been spawned to host a specific daemon workspace (B4). If the installed binder
+    /// adopts @p controller's window for that daemon workspace, this returns true and the window must NOT
+    /// create its own first tab — its tabs come from reconciling the daemon workspace's layout instead.
     /// @param controller The freshly-created controller of the just-spawned window.
-    /// @return true if the window was bound to a pending daemon window; false otherwise.
+    /// @return true if the window was bound to a pending daemon workspace; false otherwise.
     Q_INVOKABLE bool consumeAttachWindow(contour::window::WindowController* controller);
 
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
@@ -1896,7 +1896,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     uint64_t _nextRemoteMove = 1;
 
     // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
-    // (via consumeAttachWindow, from Main.qml) whether it hosts a pending daemon window. Empty when
+    // (via consumeAttachWindow, from Main.qml) whether it hosts a pending daemon workspace. Empty when
     // not attached, so consumeAttachWindow is a no-op for ordinary local windows.
     std::function<bool(contour::window::WindowController*)> _attachWindowBinder;
 

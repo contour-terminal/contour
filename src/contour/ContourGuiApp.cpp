@@ -1116,8 +1116,9 @@ namespace
         cli::OptionPresence { .name = "token", .givenAs = cli::GivenAs::Text },
         cli::OptionPresence { .name = "token-file", .givenAs = cli::GivenAs::Text },
         cli::OptionPresence { .name = "tls-ca", .givenAs = cli::GivenAs::Text },
-        // A host attach mirrors all of the remote daemon's windows; one window would need its own intent.
-        cli::OptionPresence { .name = "window", .givenAs = cli::GivenAs::Text },
+        // A host attach mirrors all of the remote daemon's workspaces; one workspace would need its own
+        // intent.
+        cli::OptionPresence { .name = "workspace", .givenAs = cli::GivenAs::Text },
     };
 } // namespace
 
@@ -1171,17 +1172,18 @@ int ContourGuiApp::clientAction()
     request.connectTcp = parameters().get<string>("contour.client.connect-tcp");
     request.tlsCaPath = parameters().get<string>("contour.client.tls-ca");
     request.sizePolicy = parameters().get<string>("contour.client.size-policy");
-    if (auto const window = parameters().get<string>("contour.client.window"); !window.empty())
+    if (auto const workspace = parameters().get<string>("contour.client.workspace"); !workspace.empty())
     {
         auto id = uint64_t {};
-        if (auto const [end, error] = std::from_chars(window.data(), window.data() + window.size(), id);
-            error != std::errc {} || end != window.data() + window.size())
+        if (auto const [end, error] =
+                std::from_chars(workspace.data(), workspace.data() + workspace.size(), id);
+            error != std::errc {} || end != workspace.data() + workspace.size())
         {
-            cerr << std::format("contour client: invalid --window '{}' (expected a daemon window id)\n",
-                                window);
+            cerr << std::format("contour client: invalid --workspace '{}' (expected a daemon workspace id)\n",
+                                workspace);
             return EXIT_FAILURE;
         }
-        request.window = id;
+        request.workspace = id;
     }
     auto token = vthost::resolveToken(parameters().get<string>("contour.client.token"),
                                       parameters().get<string>("contour.client.token-file"));
@@ -1454,12 +1456,12 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             return {};
         };
         // A plain launch opens one new window beside whatever the daemon already shows, or brings them all
-        // back when no other client does; `--window` shows exactly one.
+        // back when no other client does; `--workspace` shows exactly one.
         auto intent =
             vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} };
-        if (_clientRequest && _clientRequest->window)
+        if (_clientRequest && _clientRequest->workspace)
             intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                                   .workspaces = { *_clientRequest->window } };
+                                                   .workspaces = { *_clientRequest->workspace } };
         target = NativeAttachTarget {
             .transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, std::move(ensureDaemon)),
             .intent = std::move(intent),
@@ -1512,14 +1514,14 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         core::platform::defaultSteadyClock(),
         _startupTimeline,
         _powerMonitor.get());
-    // A window spawned to host a daemon window binds itself here (from its Main.qml, via
+    // A window spawned to host a daemon workspace binds itself here (from its Main.qml, via
     // consumeAttachWindow) instead of creating a fresh first tab.
     _sessionManager.setAttachWindowBinder(
         [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
-    // Reconcile the GUI against the daemon's authoritative window→tab→split tree (B2/B4): whenever a layout
-    // arrives or changes (GUI boot, or a window/tab/split authored on the daemon, here or by another
-    // client), map each daemon window onto an OS window and realize any tab not yet shown, each pane bound
-    // to its remote session. Incremental — what is already shown is left untouched.
+    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree (B2/B4): whenever a
+    // layout arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by
+    // another client), map each daemon workspace onto an OS window and realize any tab not yet shown, each
+    // pane bound to its remote session. Incremental — what is already shown is left untouched.
     _onGuiBooted = [this] {
         reconcileAttachWindows();
         expireRestoreSummaryAfterLayout();
@@ -1622,7 +1624,7 @@ std::expected<void, std::string> ContourGuiApp::settleHosting(
         case cli::HostingDecision::Attached: return {};
         case cli::HostingDecision::InProcessWithNotice:
             // The attach is given up (awaitNativeAttach() released the controller): nothing waits for the
-            // daemon's windows, and the first window opens a tab of its own, which runs here.
+            // daemon's workspaces, and the first window opens a tab of its own, which runs here.
             errorLog()("Hosting this window's sessions in-process: {}", attached.error());
             _onGuiBooted = nullptr;
             _restartDaemon = nullptr;
@@ -1766,11 +1768,11 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "auto-spawned daemon; one already running keeps the policy it was "
                               "started with.",
                               "POLICY" },
-                CLI::Option { "window",
+                CLI::Option { "workspace",
                               CLI::Value { ""s },
-                              "Shows only the daemon window with this id (see `contour daemon "
+                              "Shows only the daemon workspace with this id (see `contour daemon "
                               "status`) instead of opening a new one; fails when the daemon has "
-                              "no such window.",
+                              "no such workspace.",
                               "ID" },
             },
         });
@@ -2308,7 +2310,7 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
     if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
     {
         // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give.
-        if (!requestRemoteWindow(
+        if (!requestRemoteWorkspace(
                 session::RemoteSpawn { .profileName = newTerminal->profileName.value_or("") }))
             newWindow();
         return;
@@ -3402,9 +3404,9 @@ window::DragEndProbe& ContourGuiApp::dragEndProbe()
     return *_dragEndProbe;
 }
 
-bool ContourGuiApp::requestRemoteWindow(session::RemoteSpawn const& spawn)
+bool ContourGuiApp::requestRemoteWorkspace(session::RemoteSpawn const& spawn)
 {
-    return _routingFactory != nullptr && _routingFactory->requestRemoteWindow(spawn);
+    return _routingFactory != nullptr && _routingFactory->requestRemoteWorkspace(spawn);
 }
 
 void ContourGuiApp::reconcileAttachWindows()
@@ -3427,43 +3429,43 @@ void ContourGuiApp::reconcileAttachWindows()
     auto const layouts = _nativeController->settledLayouts();
     _reconcilingLayouts = &layouts;
 
-    // Daemon window ids come ascending, so the primary (lowest-id) window is handled
+    // Daemon workspace ids come ascending, so the primary (lowest-id) workspace is handled
     // first — it maps to the boot window; the rest each get their own OS window. One already shown is brought
     // up to date; this places the others.
-    auto const openWindow = [&](contour::remote::ReconciledWindow const& window) {
-        auto const& [daemonWindow, tabs, sessions] = window;
-        if (_pendingAttachWindow == daemonWindow)
+    auto const openWindow = [&](contour::remote::ReconciledWorkspace const& window) {
+        auto const& [daemonWorkspace, tabs, sessions] = window;
+        if (_pendingAttachWorkspace == daemonWorkspace)
         {
             reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return; // an OS window is already spawning for this daemon window
+            return; // an OS window is already spawning for this daemon workspace
         }
 
         if (_attachBoot == session::AttachBoot::Pending)
         {
-            // The primary daemon window adopts the boot window (already created before
+            // The primary daemon workspace adopts the boot window (already created before
             // the first layout arrived). A missing focused window (mid-boot) stages
-            // the daemon window so bindPendingAttachWindow can bind it once the boot
+            // the daemon workspace so bindPendingAttachWindow can bind it once the boot
             // window becomes ready, instead of hoping for another layout push.
-            // Never the quick terminal, which is no daemon window: an ordinary window adopts it.
+            // Never the quick terminal, which is no daemon workspace: an ordinary window adopts it.
             if (auto const* const boot = _sessionManager.applicationController())
-                bindDaemonWindow(daemonWindow, boot->windowId());
-            else if (!_pendingAttachWindow)
-                _pendingAttachWindow = daemonWindow;
+                bindDaemonWorkspace(daemonWorkspace, boot->windowId());
+            else if (!_pendingAttachWorkspace)
+                _pendingAttachWorkspace = daemonWorkspace;
             reach = session::TerminalSessionManager::ReconcileReach::Partial;
             return;
         }
 
-        // A daemon window holding no tab is nothing to show yet -- one a reconnect found emptied, under a
+        // A daemon workspace holding no tab is nothing to show yet -- one a reconnect found emptied, under a
         // client that follows every window -- and gets its OS window once it holds one.
-        if (tabs == contour::remote::DaemonWindowTabs::None)
+        if (tabs == contour::remote::DaemonWorkspaceTabs::None)
             return;
 
-        // A new daemon window: spawn an OS window to host it. Its Main.qml claims the
+        // A new daemon workspace: spawn an OS window to host it. Its Main.qml claims the
         // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
         // and reconciles — so it never creates a stray fresh tab. The QML load is
         // synchronous, so the stage is consumed before this returns. A window a move of this process asked
         // for opens where the pane was dropped.
-        _pendingAttachWindow = daemonWindow;
+        _pendingAttachWorkspace = daemonWorkspace;
         newWindow(_sessionManager.stageRemoteMoveWindow(sessions));
     };
     contour::remote::reconcileAttachWindows(
@@ -3475,12 +3477,12 @@ void ContourGuiApp::reconcileAttachWindows()
     _sessionManager.completeRemoteMoves(reach);
 }
 
-std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
-                                                        std::vector<std::uint64_t> const& daemonWindowIds)
+std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
+    bool anyWindowMapped, std::vector<std::uint64_t> const& daemonWorkspaceIds)
 {
-    if (anyWindowMapped || daemonWindowIds.empty())
+    if (anyWindowMapped || daemonWorkspaceIds.empty())
         return std::nullopt;
-    return daemonWindowIds.front(); // windowIds() is ascending, so front() is the primary window
+    return daemonWorkspaceIds.front(); // workspaceIds() is ascending, so front() is the primary workspace
 }
 
 bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller)
@@ -3488,19 +3490,19 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     if (!_nativeController || controller == nullptr)
         return false;
 
-    // A reconcile-spawned secondary OS window claims the daemon window staged for it.
-    if (_pendingAttachWindow)
+    // A reconcile-spawned secondary OS window claims the daemon workspace staged for it.
+    if (_pendingAttachWorkspace)
     {
-        auto const daemonWindow = *_pendingAttachWindow;
-        _pendingAttachWindow.reset();
-        bindDaemonWindow(daemonWindow, controller->windowId());
+        auto const daemonWorkspace = *_pendingAttachWorkspace;
+        _pendingAttachWorkspace.reset();
+        bindDaemonWorkspace(daemonWorkspace, controller->windowId());
         return true;
     }
 
-    // The boot (first) OS window in attach mode ADOPTS the daemon's primary window instead of
+    // The boot (first) OS window in attach mode ADOPTS the daemon's primary workspace instead of
     // authoring a fresh tab. Claiming it here makes Main.qml skip win.createNewTab(), which in
     // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
-    // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
+    // Bind the primary workspace now if the daemon already reported one; otherwise still claim the boot
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
     if (_attachBoot == session::AttachBoot::Pending)
     {
@@ -3508,8 +3510,8 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
         // window whose layout is not complete yet.
         auto const settled =
             std::ranges::to<std::vector>(_nativeController->settledLayouts() | std::views::keys);
-        if (auto const adopt = primaryDaemonWindowToAdopt(false, settled))
-            bindDaemonWindow(*adopt, controller->windowId());
+        if (auto const adopt = primaryDaemonWorkspaceToAdopt(false, settled))
+            bindDaemonWorkspace(*adopt, controller->windowId());
         return true;
     }
 
@@ -3531,20 +3533,22 @@ void ContourGuiApp::connectReconnectSignals()
         Qt::QueuedConnection);
     connect(
         _nativeController.get(),
-        &remote::NativeController::windowsLost,
+        &remote::NativeController::workspacesLost,
         this,
-        [this](std::vector<std::uint64_t> const& daemonWindows) { closeLostAttachWindows(daemonWindows); },
+        [this](std::vector<std::uint64_t> const& daemonWorkspaces) {
+            closeLostAttachWindows(daemonWorkspaces);
+        },
         Qt::QueuedConnection);
 }
 
-void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWindows)
+void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWorkspaces)
 {
     if (!_nativeController)
         return;
     auto doomed = std::vector<window::WindowController*> {};
-    for (auto const daemonWindow: daemonWindows)
+    for (auto const daemonWorkspace: daemonWorkspaces)
     {
-        auto const mapped = _attachWindowMap.find(daemonWindow);
+        auto const mapped = _attachWindowMap.find(daemonWorkspace);
         if (mapped == _attachWindowMap.end())
             continue;
         // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
@@ -3563,15 +3567,15 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
         controller->closeWindow();
 }
 
-void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WorkspaceId osWindow)
+void ContourGuiApp::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId osWindow)
 {
     _attachBoot = session::AttachBoot::Adopted;
-    _attachWindowMap.emplace(daemonWindow, osWindow);
+    _attachWindowMap.emplace(daemonWorkspace, osWindow);
     if (_reconcilingLayouts != nullptr)
         contour::remote::applyRemoteLayout(
-            _sessionManager, osWindow, *_nativeController, *_reconcilingLayouts, daemonWindow);
+            _sessionManager, osWindow, *_nativeController, *_reconcilingLayouts, daemonWorkspace);
     else
-        contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+        contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWorkspace);
     _sessionManager.deliverRestoreSummaryTo(osWindow);
 }
 
@@ -3579,9 +3583,9 @@ void ContourGuiApp::expireRestoreSummaryAfterLayout()
 {
     if (!_nativeController)
         return;
-    auto const layout =
-        _nativeController->windowIds().empty() ? session::LayoutWindows::None : session::LayoutWindows::Some;
-    auto const spawn = _pendingAttachWindow ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
+    auto const layout = _nativeController->workspaceIds().empty() ? session::LayoutWindows::None
+                                                                  : session::LayoutWindows::Some;
+    auto const spawn = _pendingAttachWorkspace ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
     if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
         == session::RestoreSummaryFate::Keep)
         return;

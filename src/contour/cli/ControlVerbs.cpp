@@ -381,7 +381,7 @@ namespace
     };
 
     /// `new` takes its trailing words as the command, so an unknown option lands there instead of being
-    /// refused; these are the flags that used to name a daemon window, caught before they are run as one.
+    /// refused; these are the flags that used to name a daemon workspace, caught before they are run as one.
     constexpr auto RemovedNewFlags = std::array {
         RemovedFlag { .removed = "--window", .replacement = "--workspace" },
         RemovedFlag { .removed = "--new-window", .replacement = "--new-workspace" },

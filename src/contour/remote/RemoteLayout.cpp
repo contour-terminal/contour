@@ -594,31 +594,31 @@ namespace
     }
 } // namespace
 
-std::vector<ReconciledWindow> windowsToReconcile(LayoutSnapshot const& layouts)
+std::vector<ReconciledWorkspace> workspacesToReconcile(LayoutSnapshot const& layouts)
 {
-    return std::ranges::to<std::vector>(layouts | std::views::transform([](auto const& entry) {
-                                            auto sessions = std::vector<uint64_t> {};
-                                            for (auto const& tab: entry.second->tabs)
-                                                collectSessions(tab.root, sessions);
-                                            return ReconciledWindow {
-                                                .daemonWindow = entry.first,
-                                                .tabs = entry.second->tabs.empty() ? DaemonWindowTabs::None
-                                                                                   : DaemonWindowTabs::Some,
-                                                .sessions = std::move(sessions),
-                                            };
-                                        }));
+    return std::ranges::to<std::vector>(
+        layouts | std::views::transform([](auto const& entry) {
+            auto sessions = std::vector<uint64_t> {};
+            for (auto const& tab: entry.second->tabs)
+                collectSessions(tab.root, sessions);
+            return ReconciledWorkspace {
+                .daemonWorkspace = entry.first,
+                .tabs = entry.second->tabs.empty() ? DaemonWorkspaceTabs::None : DaemonWorkspaceTabs::Some,
+                .sessions = std::move(sessions),
+            };
+        }));
 }
 
-std::vector<ReconciledWindow> windowsToReconcile(NativeController const& controller)
+std::vector<ReconciledWorkspace> workspacesToReconcile(NativeController const& controller)
 {
-    return windowsToReconcile(controller.settledLayouts());
+    return workspacesToReconcile(controller.settledLayouts());
 }
 
 void reconcileAttachWindows(contour::session::TerminalSessionManager& manager,
                             NativeController& controller,
                             LayoutSnapshot const& layouts,
                             AttachWindowMap& windows,
-                            std::function<void(ReconciledWindow const&)> const& openWindow)
+                            std::function<void(ReconciledWorkspace const&)> const& openWindow)
 {
     auto const isOpen = [&](vtworkspace::WorkspaceId window) {
         return manager.model().workspace(window) != nullptr;
@@ -628,30 +628,30 @@ void reconcileAttachWindows(contour::session::TerminalSessionManager& manager,
         | std::views::keys);
     {
         auto const hold = manager.holdEmptiedWindows();
-        auto const reconciled = windowsToReconcile(layouts);
+        auto const reconciled = workspacesToReconcile(layouts);
         for (auto const& window: reconciled)
         {
-            if (auto const mapped = windows.find(window.daemonWindow); mapped != windows.end())
+            if (auto const mapped = windows.find(window.daemonWorkspace); mapped != windows.end())
             {
-                applyRemoteLayout(manager, mapped->second, controller, layouts, window.daemonWindow);
+                applyRemoteLayout(manager, mapped->second, controller, layouts, window.daemonWorkspace);
                 manager.deliverRestoreSummaryTo(mapped->second);
                 continue;
             }
             openWindow(window);
         }
-        // A window a pass emptied that shows a daemon window holding tabs is the next reconcile's to fill.
+        // A window a pass emptied that shows a daemon workspace holding tabs is the next reconcile's to fill.
         for (auto const& window: reconciled)
-            if (auto const mapped = windows.find(window.daemonWindow);
-                window.tabs == DaemonWindowTabs::Some && mapped != windows.end())
+            if (auto const mapped = windows.find(window.daemonWorkspace);
+                window.tabs == DaemonWorkspaceTabs::Some && mapped != windows.end())
                 hold.keep(mapped->second);
     }
     // A window this pass closed goes with its mapping, and so does one closed before -- by its user -- once
-    // its daemon window is pushed empty: the daemon window filled again then gets an OS window of its own,
-    // where a mapping to the closed one would show it nowhere. One whose daemon window still holds tabs, or
-    // is merely absent from this snapshot (a reconnect settles windows frame by frame, a partial snapshot
-    // lacks some), keeps its mapping, so that the window its user closed does not open again.
-    auto const isPushedEmpty = [&](uint64_t daemonWindow) {
-        auto const found = layouts.find(daemonWindow);
+    // its daemon workspace is pushed empty: the daemon workspace filled again then gets an OS window of its
+    // own, where a mapping to the closed one would show it nowhere. One whose daemon workspace still holds
+    // tabs, or is merely absent from this snapshot (a reconnect settles windows frame by frame, a partial
+    // snapshot lacks some), keeps its mapping, so that the window its user closed does not open again.
+    auto const isPushedEmpty = [&](uint64_t daemonWorkspace) {
+        auto const found = layouts.find(daemonWorkspace);
         return found != layouts.end() && found->second->tabs.empty();
     };
     std::erase_if(windows, [&](auto const& entry) {
@@ -672,26 +672,26 @@ void forgetClosedTabPairings(contour::session::TerminalSessionManager const& man
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                        vtworkspace::WorkspaceId window,
                        NativeController& controller,
-                       std::optional<uint64_t> daemonWindow,
+                       std::optional<uint64_t> daemonWorkspace,
                        std::optional<vtbackend::PageSize> pageSize)
 {
-    applyRemoteLayout(manager, window, controller, controller.settledLayouts(), daemonWindow, pageSize);
+    applyRemoteLayout(manager, window, controller, controller.settledLayouts(), daemonWorkspace, pageSize);
 }
 
 void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                        vtworkspace::WorkspaceId window,
                        NativeController& controller,
                        LayoutSnapshot const& layouts,
-                       std::optional<uint64_t> daemonWindow,
+                       std::optional<uint64_t> daemonWorkspace,
                        std::optional<vtbackend::PageSize> pageSize)
 {
-    // Select the daemon window to reconcile: the caller's, or the primary (lowest-id)
+    // Select the daemon workspace to reconcile: the caller's, or the primary (lowest-id)
     // window for the single-window path.
-    auto const found = daemonWindow ? layouts.find(*daemonWindow) : layouts.begin();
+    auto const found = daemonWorkspace ? layouts.find(*daemonWorkspace) : layouts.begin();
     if (found == layouts.end())
         return;
     auto const& layout = *found->second;
-    // A window a move emptied is closed here while its daemon window may still be pushed (empty): there is
+    // A window a move emptied is closed here while its daemon workspace may still be pushed (empty): there is
     // nothing to reconcile, and realizing into it would pull back what the move took out.
     if (manager.model().workspace(window) == nullptr)
         return;

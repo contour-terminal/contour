@@ -836,7 +836,8 @@ void drainGuiEvents()
     return vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
 }
 
-/// @return The daemon windows of the layouts a reconcile reads (NativeController::settledLayouts), ascending.
+/// @return The daemon workspaces of the layouts a reconcile reads (NativeController::settledLayouts),
+/// ascending.
 [[nodiscard]] std::vector<uint64_t> settledWindows(contour::remote::NativeController const& controller)
 {
     return std::ranges::to<std::vector>(controller.settledLayouts() | std::views::keys);
@@ -2847,13 +2848,13 @@ TEST_CASE("a session the client creates gets the profile the GUI holds in memory
     controller.stop();
 }
 
-// B4: a second daemon window (authored via requestRemoteWindow) is reconciled into
-// its OWN GUI window — the client maps one OS window per daemon window, each mirroring
+// B4: a second daemon workspace (authored via requestRemoteWorkspace) is reconciled into
+// its OWN GUI window — the client maps one OS window per daemon workspace, each mirroring
 // only that window's tabs, with no cross-window session bleed.
-TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][controller]")
+TEST_CASE("attach maps each daemon workspace onto its own GUI window", "[attach][controller]")
 {
     auto daemon = DaemonFixture {};
-    std::ignore = daemon.seedSession("win one"); // the primary daemon window
+    std::ignore = daemon.seedSession("win one"); // the primary daemon workspace
 
     auto timeline = TestTimeline {};
     auto acOwned = makeNativeController(daemon.endpoint(), timeline);
@@ -2866,10 +2867,10 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 1);
 
-    // A GUI "new window" in attach mode authors it on the daemon (requestRemoteWindow
-    // -> requestCreateWindow) rather than opening a stray local one; wait for the
+    // A GUI "new window" in attach mode authors it on the daemon (requestRemoteWorkspace
+    // -> requestCreateWorkspace) rather than opening a stray local one; wait for the
     // daemon to grow and push the second window's layout.
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     for (auto i = 0; i < 200 && settledWindows(*ac).size() < 2; ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 2);
@@ -2882,12 +2883,12 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     };
     CHECK(sessionOf(ids[0]) != sessionOf(ids[1]));
 
-    // Reconcile each daemon window into its own GUI window.
+    // Reconcile each daemon workspace into its own GUI window.
     contour::test::ScopedController const win2 { app.manager() };
     contour::remote::applyRemoteLayout(app.manager(), win1.id, *ac, ids[0]);
     contour::remote::applyRemoteLayout(app.manager(), win2.id, *ac, ids[1]);
 
-    // Each GUI window mirrors exactly its daemon window's single tab...
+    // Each GUI window mirrors exactly its daemon workspace's single tab...
     REQUIRE(app.manager().model().workspace(win1.id)->tabCount() == 1);
     REQUIRE(app.manager().model().workspace(win2.id)->tabCount() == 1);
     // ...bound to that window's own remote session (via the pane's pty).
@@ -2922,7 +2923,7 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     requireConnected(*ac);
     for (auto i = 0; i < 200 && settledWindows(*ac).empty(); ++i)
         std::this_thread::sleep_for(5ms);
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     for (auto i = 0; i < 200 && settledWindows(*ac).size() < 2; ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 2);
@@ -2992,7 +2993,7 @@ namespace
 
 // A pane the daemon moves into another window is the same TerminalSession there: the pushed layouts are
 // realized by moving it, never by closing it in one window and mirroring it anew in the other. The source
-// window is reconciled first, as ContourGuiApp does (ascending daemon window ids), which is the order that
+// window is reconciled first, as ContourGuiApp does (ascending daemon workspace ids), which is the order that
 // would close the pane before the destination could take it.
 TEST_CASE("a pane the daemon moves into another window keeps its TerminalSession",
           "[attach][controller][move][daemon]")
@@ -3011,7 +3012,7 @@ TEST_CASE("a pane the daemon moves into another window keeps its TerminalSession
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -3133,7 +3134,7 @@ TEST_CASE("a moved pane whose new window's layout comes first is adopted, never 
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -3221,7 +3222,7 @@ struct TwoWindowMove
         requireConnected(*ac);
         REQUIRE(waitUntil(
             [&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
-        REQUIRE(ac->requestRemoteWindow({}));
+        REQUIRE(ac->requestRemoteWorkspace({}));
         REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
         ids = settledWindows(*ac);
         app.app().config().accessibilityAnnouncements = true;
@@ -3414,7 +3415,7 @@ TEST_CASE("a reconcile sees the layouts as of the last batch end, not a push sti
     CHECK(waitUntil([&] { return f.ac->settledLayout(f.ids[0])->tabs.size() == 1; }));
 }
 
-// A daemon window the first frame of a push adds is not given an OS window before the push has ended: it
+// A daemon workspace the first frame of a push adds is not given an OS window before the push has ended: it
 // would stay blank until then, since applyRemoteLayout realizes the settled view only.
 TEST_CASE("a window a push still arriving adds is reconciled once the push has ended",
           "[attach][controller][move][daemon]")
@@ -3422,23 +3423,24 @@ TEST_CASE("a window a push still arriving adds is reconciled once the push has e
     auto f = TwoWindowMove {};
     auto const reconciled = [&] {
         return std::ranges::to<std::vector>(
-            contour::remote::windowsToReconcile(*f.ac)
-            | std::views::transform(&contour::remote::ReconciledWindow::daemonWindow));
+            contour::remote::workspacesToReconcile(*f.ac)
+            | std::views::transform(&contour::remote::ReconciledWorkspace::daemonWorkspace));
     };
     REQUIRE(reconciled() == f.ids);
 
     // Window ids count up: the new window is the next one.
     auto const added = f.ids.back() + 1;
     f.daemon.holdAfterLayoutOf(added);
-    REQUIRE(f.ac->requestRemoteWindow({}));
-    REQUIRE(waitUntil([&] { return f.ac->windowIds().size() == 3; }, 400, GuiEvents::Held));
+    REQUIRE(f.ac->requestRemoteWorkspace({}));
+    REQUIRE(waitUntil([&] { return f.ac->workspaceIds().size() == 3; }, 400, GuiEvents::Held));
     CHECK(reconciled() == f.ids);
 
     f.daemon.releaseHeld();
     REQUIRE(waitUntil([&] { return reconciled().size() == 3; }));
     auto const all = reconciled();
     CHECK(all.back() == added);
-    CHECK(contour::remote::windowsToReconcile(*f.ac).back().tabs == contour::remote::DaemonWindowTabs::Some);
+    CHECK(contour::remote::workspacesToReconcile(*f.ac).back().tabs
+          == contour::remote::DaemonWorkspaceTabs::Some);
 }
 
 // The GUI's own move, made by the daemon: once the push that makes it has ended, the reconcile places it, and
@@ -3506,12 +3508,12 @@ TEST_CASE("a pane the GUI moves into a new window over a daemon opens where it w
 
     auto said3 = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
     auto win3 = std::optional<contour::test::ScopedController> {};
-    for (auto const& [daemonWindow, tabs, sessions]: contour::remote::windowsToReconcile(*f.ac))
+    for (auto const& [daemonWorkspace, tabs, sessions]: contour::remote::workspacesToReconcile(*f.ac))
     {
-        if (daemonWindow == f.ids[0])
-            contour::remote::applyRemoteLayout(f.manager, f.win1.id, *f.ac, daemonWindow);
-        else if (daemonWindow == f.ids[1])
-            contour::remote::applyRemoteLayout(f.manager, f.win2->id, *f.ac, daemonWindow);
+        if (daemonWorkspace == f.ids[0])
+            contour::remote::applyRemoteLayout(f.manager, f.win1.id, *f.ac, daemonWorkspace);
+        else if (daemonWorkspace == f.ids[1])
+            contour::remote::applyRemoteLayout(f.manager, f.win2->id, *f.ac, daemonWorkspace);
         else
         {
             // The window the daemon made for the move: it opens where the pane was dropped, on that screen.
@@ -3519,7 +3521,7 @@ TEST_CASE("a pane the GUI moves into a new window over a daemon opens where it w
             win3.emplace(f.manager, TwoWindowMove::recordInto(said3));
             REQUIRE((*win3)->initialPosition().has_value());
             CHECK((*win3)->initialPosition()->position == QPoint { 240, 160 });
-            contour::remote::applyRemoteLayout(f.manager, win3->id, *f.ac, daemonWindow);
+            contour::remote::applyRemoteLayout(f.manager, win3->id, *f.ac, daemonWorkspace);
             f.manager.endWindowSpawn();
         }
     }
@@ -3580,12 +3582,12 @@ TEST_CASE("a landed move whose window is not open yet waits for the reconcile th
     // Once the window is there, the move is placed.
     auto said3 = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
     auto win3 = std::optional<contour::test::ScopedController> {};
-    for (auto const& [daemonWindow, tabs, sessions]: contour::remote::windowsToReconcile(*f.ac))
-        if (daemonWindow != f.ids[0] && daemonWindow != f.ids[1])
+    for (auto const& [daemonWorkspace, tabs, sessions]: contour::remote::workspacesToReconcile(*f.ac))
+        if (daemonWorkspace != f.ids[0] && daemonWorkspace != f.ids[1])
         {
             std::ignore = f.manager.stageRemoteMoveWindow(sessions);
             win3.emplace(f.manager, TwoWindowMove::recordInto(said3));
-            contour::remote::applyRemoteLayout(f.manager, win3->id, *f.ac, daemonWindow);
+            contour::remote::applyRemoteLayout(f.manager, win3->id, *f.ac, daemonWorkspace);
             f.manager.endWindowSpawn();
         }
     REQUIRE(win3.has_value());
@@ -3654,7 +3656,7 @@ TEST_CASE("a pane survives a reconnect to the same daemon as the same TerminalSe
     f.daemon.dropConnections();
     REQUIRE(waitUntil([&] { return f.ac->connectionState() == ConnectionState::Reconnecting; }));
     REQUIRE(waitUntil(
-        [&] { return f.ac->connectionState() == ConnectionState::Connected && f.ac->windowIds().empty(); },
+        [&] { return f.ac->connectionState() == ConnectionState::Connected && f.ac->workspaceIds().empty(); },
         1000));
     CHECK(f.ac->settledLayouts().empty());
 
@@ -3912,7 +3914,7 @@ TEST_CASE("a window's last pane moved by the daemon closes the window and keeps 
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -3943,7 +3945,8 @@ TEST_CASE("a window's last pane moved by the daemon closes the window and keeps 
     CHECK(std::ranges::contains(manager.sessionsOfTab(manager.model().workspace(win2.id)->tabAt(0)),
                                 movedSession));
     CHECK(shownSessions(manager) == before);
-    // A later push for the emptied daemon window finds no local window to reconcile, and moves nothing back.
+    // A later push for the emptied daemon workspace finds no local window to reconcile, and moves nothing
+    // back.
     contour::remote::applyRemoteLayout(manager, win1.id, *ac, ids[0]);
     CHECK(windowShowing(manager, movedSession) == win2.id);
 
@@ -3967,14 +3970,15 @@ namespace
     return wire;
 }
 
-/// @return Whether the tabs of @p window show the daemon window @p daemonWindow's, as of the settled layouts:
+/// @return Whether the tabs of @p window show the daemon workspace @p daemonWorkspace's, as of the settled
+/// layouts:
 ///         tab by tab, the same sessions in the same tree order.
 [[nodiscard]] bool mirrors(contour::session::TerminalSessionManager& manager,
                            contour::remote::NativeController const& ac,
                            vtworkspace::WorkspaceId window,
-                           uint64_t daemonWindow)
+                           uint64_t daemonWorkspace)
 {
-    auto const layout = ac.settledLayout(daemonWindow);
+    auto const layout = ac.settledLayout(daemonWorkspace);
     auto const* const local = manager.model().workspace(window);
     if (layout == nullptr || local == nullptr || std::cmp_not_equal(local->tabCount(), layout->tabs.size()))
         return false;
@@ -4097,8 +4101,8 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
 
 namespace
 {
-/// A GUI process following exactly one daemon window -- what a second launch beside a first is given -- whose
-/// screen reader records what it is told.
+/// A GUI process following exactly one daemon workspace -- what a second launch beside a first is given --
+/// whose screen reader records what it is told.
 struct FollowingGui
 {
     TestTimeline timeline;
@@ -4106,15 +4110,15 @@ struct FollowingGui
     contour::test::TestApp app;
     contour::test::RecordingAnnouncer* said = nullptr; ///< What the window's screen reader was told.
     std::optional<contour::test::ScopedController> window;
-    uint64_t daemonWindow = 0; ///< The one daemon window it follows.
+    uint64_t daemonWorkspace = 0; ///< The one daemon workspace it follows.
 
     FollowingGui(DaemonFixture const& daemon, uint64_t followed):
-        app(makeOwned(daemon, followed)), daemonWindow(followed)
+        app(makeOwned(daemon, followed)), daemonWorkspace(followed)
     {
         app.app().config().accessibilityAnnouncements = true;
         window.emplace(app.manager(), TwoWindowMove::recordInto(said));
         requireConnected(*controller);
-        REQUIRE(waitUntil([&] { return controller->settledLayout(daemonWindow) != nullptr; }));
+        REQUIRE(waitUntil([&] { return controller->settledLayout(daemonWorkspace) != nullptr; }));
         reconcile();
     }
 
@@ -4128,7 +4132,10 @@ struct FollowingGui
     [[nodiscard]] vtworkspace::WorkspaceId windowId() const { return window->id; }
 
     /// Reconciles the window it follows, as of the last push's end.
-    void reconcile() { contour::remote::applyRemoteLayout(manager(), windowId(), *controller, daemonWindow); }
+    void reconcile()
+    {
+        contour::remote::applyRemoteLayout(manager(), windowId(), *controller, daemonWorkspace);
+    }
 
     /// @return The local session showing the daemon's @p remote; null for none.
     [[nodiscard]] contour::session::TerminalSession* showing(uint64_t remote)
@@ -4194,11 +4201,11 @@ constexpr auto CrossProcessDrops = std::array {
 };
 } // namespace
 
-// A pane dragged out of one GUI process into another's window, each following only its own daemon window: the
-// receiving GUI never mirrored the pane, so it realizes it into whichever side of the tree the daemon grafted
-// it, and the drop is announced and focused there. The GUI it left shows it no more. Every side, and a swap
-// with either child, since a pane the daemon puts FIRST in a split is the shape a realizer that only adds
-// second children never reproduces.
+// A pane dragged out of one GUI process into another's window, each following only its own daemon workspace:
+// the receiving GUI never mirrored the pane, so it realizes it into whichever side of the tree the daemon
+// grafted it, and the drop is announced and focused there. The GUI it left shows it no more. Every side, and
+// a swap with either child, since a pane the daemon puts FIRST in a split is the shape a realizer that only
+// adds second children never reproduces.
 TEST_CASE("a pane moved into another GUI process's window appears there, on every side",
           "[attach][controller][move][daemon]")
 {
@@ -4527,8 +4534,8 @@ TEST_CASE("a window a pass empties stays open for the pass that fills it again",
 }
 
 // The last pane of a window moved out through the reconcile ContourGuiApp runs: the window closes once every
-// window had its pass, and its mapping goes with it, so a daemon window that held tabs again would get an OS
-// window of its own.
+// window had its pass, and its mapping goes with it, so a daemon workspace that held tabs again would get an
+// OS window of its own.
 TEST_CASE("a window a move leaves with no daemon tab closes after the reconcile, and is unmapped",
           "[attach][controller][move][daemon]")
 {
@@ -4542,7 +4549,7 @@ TEST_CASE("a window a move leaves with no daemon tab closes after the reconcile,
     contour::test::ScopedController const win1 { manager };
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -4579,10 +4586,10 @@ TEST_CASE("a window a move leaves with no daemon tab closes after the reconcile,
     ac->stop();
 }
 
-// A window its user closed keeps its mapping while its daemon window holds tabs, so it does not open again;
-// once the daemon window holds none the mapping goes, and the daemon window filled again opens a window of
-// its own instead of being shown in the closed one, which is to say nowhere.
-TEST_CASE("a closed window's daemon window, emptied and filled again, gets a window of its own",
+// A window its user closed keeps its mapping while its daemon workspace holds tabs, so it does not open
+// again; once the daemon workspace holds none the mapping goes, and the daemon workspace filled again opens a
+// window of its own instead of being shown in the closed one, which is to say nowhere.
+TEST_CASE("a closed window's daemon workspace, emptied and filled again, gets a window of its own",
           "[attach][controller][move][daemon]")
 {
     auto daemon = DaemonFixture {};
@@ -4595,10 +4602,11 @@ TEST_CASE("a closed window's daemon window, emptied and filled again, gets a win
     contour::test::ScopedController const win1 { manager };
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
-    // The second daemon window was shown in a window its user has closed since: one the model no longer has.
+    // The second daemon workspace was shown in a window its user has closed since: one the model no longer
+    // has.
     auto const closed = vtworkspace::WorkspaceId { 4242 };
     REQUIRE(manager.model().workspace(closed) == nullptr);
     auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
@@ -4606,7 +4614,7 @@ TEST_CASE("a closed window's daemon window, emptied and filled again, gets a win
     auto const reconcile = [&] {
         contour::remote::reconcileAttachWindows(
             manager, *ac, ac->settledLayouts(), windows, [&](auto const& window) {
-                opened.push_back(window.daemonWindow);
+                opened.push_back(window.daemonWorkspace);
             });
     };
 
@@ -4647,9 +4655,9 @@ TEST_CASE("a closed window's daemon window, emptied and filled again, gets a win
     ac->stop();
 }
 
-// A snapshot that lacks a daemon window (a reconnect settling one window per frame, or a partial one) says
+// A snapshot that lacks a daemon workspace (a reconnect settling one window per frame, or a partial one) says
 // nothing about that window: only an explicit empty layout does. The window its user closed stays closed.
-TEST_CASE("a closed window stays closed when a snapshot lacks its daemon window",
+TEST_CASE("a closed window stays closed when a snapshot lacks its daemon workspace",
           "[attach][controller][move][daemon]")
 {
     auto daemon = DaemonFixture {};
@@ -4662,7 +4670,7 @@ TEST_CASE("a closed window stays closed when a snapshot lacks its daemon window"
     contour::test::ScopedController const win1 { manager };
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     auto const closed = vtworkspace::WorkspaceId { 4242 };
@@ -4671,7 +4679,7 @@ TEST_CASE("a closed window stays closed when a snapshot lacks its daemon window"
     auto opened = std::vector<uint64_t> {};
     auto const reconcile = [&](contour::remote::LayoutSnapshot const& layouts) {
         contour::remote::reconcileAttachWindows(manager, *ac, layouts, windows, [&](auto const& window) {
-            opened.push_back(window.daemonWindow);
+            opened.push_back(window.daemonWorkspace);
         });
     };
 
@@ -4701,7 +4709,7 @@ TEST_CASE("a closed window stays closed across a reconnect that settles one wind
     contour::test::ScopedController const win1 { manager };
     requireConnected(*ac);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWindow({}));
+    REQUIRE(ac->requestRemoteWorkspace({}));
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     auto const closed = vtworkspace::WorkspaceId { 4242 };
@@ -4711,7 +4719,7 @@ TEST_CASE("a closed window stays closed across a reconnect that settles one wind
     auto const reconcile = [&] {
         contour::remote::reconcileAttachWindows(
             manager, *ac, ac->settledLayouts(), windows, [&](auto const& window) {
-                opened.push_back(window.daemonWindow);
+                opened.push_back(window.daemonWorkspace);
             });
     };
 
@@ -4941,10 +4949,10 @@ struct StateLog
                 states.push_back(controller.connectionState());
             });
         QObject::connect(&controller,
-                         &contour::remote::NativeController::windowsLost,
-                         [this](std::vector<uint64_t> const& daemonWindows) {
+                         &contour::remote::NativeController::workspacesLost,
+                         [this](std::vector<uint64_t> const& daemonWorkspaces) {
                              auto const lock = std::lock_guard { mutex };
-                             lost.push_back(daemonWindows);
+                             lost.push_back(daemonWorkspaces);
                          });
     }
 
@@ -4955,8 +4963,8 @@ struct StateLog
         return static_cast<std::size_t>(std::ranges::count(states, state));
     }
 
-    /// @return Every windowsLost() so far.
-    [[nodiscard]] std::vector<std::vector<uint64_t>> windowsLost() const
+    /// @return Every workspacesLost() so far.
+    [[nodiscard]] std::vector<std::vector<uint64_t>> workspacesLost() const
     {
         auto const lock = std::lock_guard { mutex };
         return lost;
@@ -4989,7 +4997,7 @@ TEST_CASE("a restarted listener re-snapshots the same sessions into the same pan
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
     CHECK(log.count(ConnectionState::Reconnecting) == 1);
     CHECK(controller.connectionState() == ConnectionState::Connected);
-    CHECK(log.windowsLost().empty());
+    CHECK(log.workspacesLost().empty());
     CHECK(pane.shows("before"));
 
     // The same session reaches the same pane over the new connection.
@@ -5036,7 +5044,7 @@ TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][contro
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
     CHECK(log.count(ConnectionState::Upgrading) == 1);
     CHECK(log.count(ConnectionState::Reconnecting) == 0);
-    CHECK(log.windowsLost().empty());
+    CHECK(log.workspacesLost().empty());
 
     // The same session reaches the same pane over the new connection.
     daemon.onDaemon([&] {
@@ -5575,7 +5583,7 @@ TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attac
     controller.stop();
 }
 
-TEST_CASE("windows the daemon no longer has are reported lost", "[attach][controller][reconnect]")
+TEST_CASE("workspaces the daemon no longer has are reported lost", "[attach][controller][reconnect]")
 {
     // Review focus 2: the daemon restarted, and none of the windows exists any more.
     using vthost::client::ConnectionState;
@@ -5598,14 +5606,14 @@ TEST_CASE("windows the daemon no longer has are reported lost", "[attach][contro
     auto queued = std::vector<uint64_t> {};
     QObject::connect(
         &controller,
-        &contour::remote::NativeController::windowsLost,
+        &contour::remote::NativeController::workspacesLost,
         &receiver,
-        [&queued](std::vector<uint64_t> const& daemonWindows) { queued = daemonWindows; },
+        [&queued](std::vector<uint64_t> const& daemonWorkspaces) { queued = daemonWorkspaces; },
         Qt::QueuedConnection);
 
     daemon.restartHost();
-    REQUIRE(waitUntil([&] { return !log.windowsLost().empty(); }, 1000));
-    CHECK(log.windowsLost() == std::vector<std::vector<uint64_t>> { { window } });
+    REQUIRE(waitUntil([&] { return !log.workspacesLost().empty(); }, 1000));
+    CHECK(log.workspacesLost() == std::vector<std::vector<uint64_t>> { { window } });
     CHECK(waitUntil([&] { return !queued.empty(); }));
     CHECK(queued == std::vector<uint64_t> { window });
     // The Resume found nothing to resume, fell back to a launch, and the new run's first window arrived:
@@ -5640,18 +5648,18 @@ TEST_CASE("a client following every window still gets new windows after a reconn
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    REQUIRE(waitUntil([&] { return controller.windowIds().size() == 1; }));
+    REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 1; }));
 
     daemon.dropConnections();
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
-    REQUIRE(waitUntil([&] { return controller.windowIds().size() == 1; }));
+    REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 1; }));
 
     // Claimed by another client: a client following only listed windows would never see it.
     auto const otherClient = vthost::SessionStreamEvents {};
     auto const created =
         daemon.onDaemon([&] { return daemon.host->createWorkspace({}, &otherClient)->id().value; });
-    CHECK(waitUntil([&] { return std::ranges::contains(controller.windowIds(), created); }));
-    CHECK(log.windowsLost().empty());
+    CHECK(waitUntil([&] { return std::ranges::contains(controller.workspaceIds(), created); }));
+    CHECK(log.workspacesLost().empty());
 
     controller.stop();
 }
@@ -5672,15 +5680,15 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    REQUIRE(waitUntil([&] { return controller.windowIds().size() == 2; }));
+    REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 2; }));
 
     // Closed on the daemon while this client was away: its only session ended.
     daemon.whileDisconnected([&] {
         auto* window = daemon.host->model().workspace(vtworkspace::WorkspaceId { gone });
         daemon.host->handleSessionExit(window->tabAt(0)->rootPane()->session());
     });
-    REQUIRE(waitUntil([&] { return !log.windowsLost().empty(); }, 1000));
-    CHECK(log.windowsLost() == std::vector<std::vector<uint64_t>> { { gone } });
+    REQUIRE(waitUntil([&] { return !log.workspacesLost().empty(); }, 1000));
+    CHECK(log.workspacesLost() == std::vector<std::vector<uint64_t>> { { gone } });
     CHECK(controller.connectionState() == ConnectionState::Connected);
     // Still followed (every window is), but with nothing in it: no OS window is opened for it.
     CHECK(controller.layout(kept).has_value());
@@ -5693,7 +5701,7 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
 TEST_CASE("a daemon that states no instance is judged by its window ids alone",
           "[attach][controller][reconnect]")
 {
-    // Instance 0 on either side is the old rule, mapped − followed: the restarted daemon's window 1 passes
+    // Instance 0 on either side is the old rule, mapped − followed: the restarted daemon's workspace 1 passes
     // for the one this client showed.
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture { {}, {}, /*instance=*/0 };
@@ -5709,7 +5717,7 @@ TEST_CASE("a daemon that states no instance is judged by its window ids alone",
     daemon.restartHost();
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
     CHECK(waitUntil([&] { return controller.layout().has_value(); }));
-    CHECK(log.windowsLost().empty());
+    CHECK(log.workspacesLost().empty());
 
     controller.stop();
 }
@@ -6146,7 +6154,7 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
 
 // B4: the manager's attach-window seam (consumeAttachWindow) routes a freshly-spawned
 // window to the binder ContourGuiApp installs — the QML-side hook that lets a spawned
-// window adopt a daemon window instead of creating a fresh first tab. Without a binder
+// window adopt a daemon workspace instead of creating a fresh first tab. Without a binder
 // it is inert (like an ordinary local window).
 TEST_CASE("consumeAttachWindow routes a spawned window to the installed binder", "[attach][factory]")
 {
@@ -6257,7 +6265,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
             movedSessions = move.sourceSessions;
             return contour::session::RemoteRouting::Routed;
         }
-        [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const&) override
+        [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const&) override
         {
             ++windows;
             return true;
@@ -6295,7 +6303,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(router.hosting() == contour::session::SessionHosting::Remote);
     CHECK(router.requestRemoteTab(device, {}));
     CHECK(router.requestRemoteSplit(device, true, {}));
-    CHECK(router.requestRemoteWindow({}));
+    CHECK(router.requestRemoteWorkspace({}));
     router.requestRemoteClose(device);
     router.reportSplitRatio(device, device, 0.7);
     router.bindTerminal(device, terminal, {});
