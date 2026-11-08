@@ -217,10 +217,7 @@ ColumnCount Line::trimmedColumns() const noexcept
         auto const blankText = _storage.clusterSize[column] == 0
                                || (_storage.clusterSize[column] == 1 && _storage.codepoints[column] == U' ');
         return blankText && _storage.sgr[column] == GraphicsAttributes {}
-               && _storage.hyperlinks[column] == HyperlinkId {}
-               && !(_storage.imageFragments
-                    && _storage.imageFragments->contains(static_cast<uint16_t>(column)))
-               && !(_storage.softGlyphs && _storage.softGlyphs->contains(static_cast<uint16_t>(column)));
+               && _storage.hyperlinks[column] == HyperlinkId {} && !hasSideTableEntryAt(_storage, column);
     };
 
     auto end = unbox<size_t>(_columns);

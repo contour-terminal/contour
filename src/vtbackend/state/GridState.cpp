@@ -736,8 +736,7 @@ std::expected<Line, StateDecodeError> Line::decodeState(StateReader& in, LineDec
 
     // Side tables are only ever cleared on a Spanning line, so a line that holds an entry is one whatever
     // shape the state claimed.
-    if ((storage.imageFragments && !storage.imageFragments->empty())
-        || (storage.softGlyphs && !storage.softGlyphs->empty()))
+    if (hasSideTableEntries(storage))
         storage.shape = LineShape::Spanning;
     return line;
 }

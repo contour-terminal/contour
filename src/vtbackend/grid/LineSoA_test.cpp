@@ -8,6 +8,7 @@
 
 #include <format>
 #include <ranges>
+#include <unordered_map>
 
 using namespace vtbackend;
 
@@ -1032,6 +1033,66 @@ TEST_CASE("LineSoA.softGlyph copy/reflow carries soft glyphs with their cells", 
     CHECK(dst.storage().shape == LineShape::Spanning);
 }
 
+TEST_CASE("LineSoA.softGlyph copying a range that holds none creates no table", "[LineSoA][SoftGlyph]")
+{
+    auto src = Line(ColumnCount(10));
+    auto dst = Line(ColumnCount(10));
+    static_cast<void>(dst.materializedStorage());
+    src.useCellAt(ColumnOffset(9)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x56 });
+
+    copyColumns(src.storage(), 0, dst.storage(), 0, 4); // the glyph sits outside the copied range
+    CHECK(!dst.storage().softGlyphs);
+
+    // A copy over a destination's own glyph clears it, and the table goes with its last entry.
+    dst.useCellAt(ColumnOffset(1)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    copyColumns(src.storage(), 0, dst.storage(), 0, 4);
+    CHECK(!dst.useCellAt(ColumnOffset(1)).softGlyph());
+    CHECK(!dst.storage().softGlyphs);
+}
+
+TEST_CASE("LineSoA.softGlyph the table goes with its last entry", "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(10));
+    line.useCellAt(ColumnOffset(1)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x21 });
+    line.useCellAt(ColumnOffset(2)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x22 });
+
+    line.useCellAt(ColumnOffset(1)).clearSoftGlyph();
+    CHECK(line.storage().softGlyphs);
+    line.useCellAt(ColumnOffset(2)).clearSoftGlyph();
+    CHECK(!line.storage().softGlyphs);
+
+    line.useCellAt(ColumnOffset(3)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x23 });
+    clearRange(line.storage(), 0, 10, GraphicsAttributes {});
+    CHECK(!line.storage().softGlyphs);
+}
+
+TEST_CASE("eraseColumnRange erases the range whether it is narrow or wide", "[LineSoA]")
+{
+    auto const entries = [] {
+        auto map = std::unordered_map<uint16_t, int> {};
+        for (auto const column: std::views::iota(0, 8))
+            map[static_cast<uint16_t>(column)] = column;
+        return map;
+    };
+
+    auto narrow = entries();
+    eraseColumnRange(narrow, 3, 2); // fewer columns than entries: erased key by key
+    CHECK(narrow.size() == 6);
+    CHECK(!narrow.contains(3));
+    CHECK(!narrow.contains(4));
+    CHECK(narrow.contains(5));
+
+    auto wide = entries();
+    eraseColumnRange(wide, 2, 20); // wider than the map: one pass over it
+    CHECK(wide.size() == 2);
+    CHECK(wide.contains(1));
+    CHECK(!wide.contains(2));
+
+    CHECK(hasColumnInRange(entries(), 7, 3));
+    CHECK(!hasColumnInRange(entries(), 8, 3));
+    CHECK(!hasColumnInRange(entries(), 100, 50));
+}
+
 TEST_CASE("LineSoA.softGlyph a copied line owns its own table", "[LineSoA][SoftGlyph]")
 {
     auto line = Line(ColumnCount(10));
@@ -1073,8 +1134,9 @@ TEST_CASE("LineSoA.softGlyph shrinking drops entries at or beyond the new width,
         CHECK(!line.useCellAt(ColumnOffset(col)).softGlyph());
 }
 
-TEST_CASE("LineSoA.imageFragment shrinking drops entries at or beyond the new width, and regrowing shows none",
-          "[LineSoA][ImageFragment]")
+TEST_CASE(
+    "LineSoA.imageFragment shrinking drops entries at or beyond the new width, and regrowing shows none",
+    "[LineSoA][ImageFragment]")
 {
     auto line = Line(ColumnCount(20));
     line.useCellAt(ColumnOffset(0)).setCharacter(U'x'); // materializes the lazily blank line

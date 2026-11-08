@@ -274,6 +274,22 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
 // Column-keyed side table helpers (image fragments, soft glyphs)
 // ---------------------------------------------------------------------------
 
+/// @return Whether the column-keyed @p map holds an entry within [from, from+count).
+/// @param map   The map to inspect.
+/// @param from  First column.
+/// @param count Number of columns.
+template <typename Map>
+[[nodiscard]] bool hasColumnInRange(Map const& map, size_t from, size_t count)
+{
+    // A narrow range is cheaper probed key by key than by walking a wide map, and the other way around.
+    if (count < map.size())
+        return std::ranges::any_of(std::views::iota(from, from + count), [&](size_t column) {
+            return map.contains(static_cast<uint16_t>(column));
+        });
+    return std::ranges::any_of(
+        map, [&](auto const& entry) { return entry.first >= from && entry.first < from + count; });
+}
+
 /// Erases the entries of a column-keyed map within [from, from+count).
 /// @param map   The map to prune.
 /// @param from  First column.
@@ -281,6 +297,13 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
 template <typename Map>
 void eraseColumnRange(Map& map, size_t from, size_t count)
 {
+    // A one-column write (the hot case) erases by key; only a range wider than the map walks the map.
+    if (count < map.size())
+    {
+        for (auto const column: std::views::iota(from, from + count))
+            map.erase(static_cast<uint16_t>(column));
+        return;
+    }
     std::erase_if(map, [&](auto const& entry) { return entry.first >= from && entry.first < from + count; });
 }
 
@@ -294,6 +317,11 @@ void eraseColumnRange(Map& map, size_t from, size_t count)
 template <typename Map>
 void copyColumnRange(Map const& src, Map& dst, size_t srcCol, size_t dstCol, size_t count)
 {
+    if (!hasColumnInRange(src, srcCol, count))
+    {
+        eraseColumnRange(dst, dstCol, count);
+        return;
+    }
     auto copied = std::vector<typename Map::value_type> {};
     for (auto const& entry: src)
         if (entry.first >= srcCol && entry.first < srcCol + count)
@@ -316,6 +344,11 @@ void moveColumnRange(Map& map, size_t srcCol, size_t dstCol, size_t count)
 {
     if (map.empty() || count == 0 || srcCol == dstCol)
         return;
+    if (!hasColumnInRange(map, srcCol, count))
+    {
+        eraseColumnRange(map, dstCol, count);
+        return;
+    }
     auto moved = std::vector<typename Map::value_type> {};
     for (auto const& entry: map)
         if (entry.first >= srcCol && entry.first < srcCol + count)
@@ -324,6 +357,44 @@ void moveColumnRange(Map& map, size_t srcCol, size_t dstCol, size_t count)
     eraseColumnRange(map, dstCol, count);
     for (auto const& [col, value]: moved)
         map[static_cast<uint16_t>(dstCol + (col - srcCol))] = value;
+}
+
+/// Calls @p visit with each column-keyed side table @p line holds (image fragments, then soft glyphs),
+/// skipping the absent ones: the one place that lists them, so a third table is one line here.
+/// @param line  The line; const or not, and @p visit receives the maps as the line is.
+/// @param visit Called as `visit(map)`.
+template <typename Line, typename Visitor>
+void forEachSideTable(Line& line, Visitor const& visit)
+{
+    if (line.imageFragments)
+        visit(*line.imageFragments);
+    if (line.softGlyphs)
+        visit(*line.softGlyphs);
+}
+
+/// @return Whether any side table of @p line has an entry at @p column.
+[[nodiscard]] inline bool hasSideTableEntryAt(LineSoA const& line, size_t column)
+{
+    auto found = false;
+    forEachSideTable(line,
+                     [&](auto const& map) { found = found || map.contains(static_cast<uint16_t>(column)); });
+    return found;
+}
+
+/// @return Whether any side table of @p line has an entry at all.
+[[nodiscard]] inline bool hasSideTableEntries(LineSoA const& line)
+{
+    auto found = false;
+    forEachSideTable(line, [&](auto const& map) { found = found || !map.empty(); });
+    return found;
+}
+
+/// Drops the soft glyph table of @p line once its last entry is gone, so a line that shows none is one
+/// that holds none (the renderer tests the table's presence, not its size).
+inline void dropEmptySoftGlyphs(LineSoA& line) noexcept
+{
+    if (line.softGlyphs && line.softGlyphs->empty())
+        line.softGlyphs.reset();
 }
 
 /// Drops every cell side table of @p line (out of line: @see dropSideTables).

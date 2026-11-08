@@ -354,7 +354,10 @@ class BasicCellProxy
     {
         markDirty();
         if (_line->softGlyphs)
+        {
             _line->softGlyphs->erase(static_cast<uint16_t>(_col));
+            dropEmptySoftGlyphs(*_line);
+        }
     }
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept
@@ -391,10 +394,8 @@ class BasicCellProxy
             clearClusterExtras(*_line, _col);
         if (_line->shape == LineShape::Spanning)
         {
-            if (_line->imageFragments)
-                _line->imageFragments->erase(static_cast<uint16_t>(_col));
-            if (_line->softGlyphs)
-                _line->softGlyphs->erase(static_cast<uint16_t>(_col));
+            forEachSideTable(*_line, [&](auto& map) { map.erase(static_cast<uint16_t>(_col)); });
+            dropEmptySoftGlyphs(*_line);
         }
     }
 
