@@ -1041,10 +1041,9 @@ void ContourGuiApp::closeWindow(vtworkspace::WorkspaceId window)
         controller->closeWindow();
 }
 
-void ContourGuiApp::postNotice(remote::DaemonLink& /*link*/, window::Notice notice)
+void ContourGuiApp::postNotice(remote::DaemonLink& link, window::Notice notice)
 {
-    // One link per process: its windows are every window.
-    _sessionManager.postNoticeToEveryWindow(notice);
+    _sessionManager.postNoticeToWindowsOf(link, notice);
 }
 
 std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string const& label,

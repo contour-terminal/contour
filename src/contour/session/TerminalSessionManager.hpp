@@ -394,21 +394,28 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Tells the user of @p notice in every window: what is about the application, not one session.
     void postNoticeToEveryWindow(window::Notice const& notice);
 
-    /// Holds what the daemon's restore brought back until a window of the layout that follows is up to be
-    /// told it in (@see deliverRestoreSummaryTo). A summary still held is replaced. GUI thread.
-    /// @param counts The windows and tabs that came back.
-    void noteWorkspaceRestored(vthost::RestoredCounts counts);
+    /// Tells the user of @p notice in every window bound to @p binding: what is about its connection.
+    /// @param binding The binding whose windows are told.
+    /// @param notice  The notice.
+    void postNoticeToWindowsOf(WindowBinding const& binding, window::Notice const& notice);
 
-    /// Tells the window @p window of the summary held by noteWorkspaceRestored(), once: posts the
+    /// Holds what @p binding's daemon restored until a window of the layout that follows is up to be told it
+    /// in (@see deliverRestoreSummaryTo). A summary @p binding still holds is replaced. GUI thread.
+    /// @param binding The binding whose daemon restored it.
+    /// @param counts  The windows and tabs that came back.
+    void noteWorkspaceRestored(WindowBinding const& binding, vthost::RestoredCounts counts);
+
+    /// Tells the window @p window of the summary its binding holds (noteWorkspaceRestored()), once: posts the
     /// "Restored 2 windows, 7 tabs" notice there and forgets it, so a second window shows nothing. Without a
-    /// held summary, or a controller for @p window, does nothing. GUI thread.
+    /// held summary, a binding, or a controller for @p window, does nothing. GUI thread.
     /// @param window The window the daemon's restored layout was just realized or reconciled in.
     void deliverRestoreSummaryTo(vtworkspace::WorkspaceId window);
 
-    /// Forgets the summary held by noteWorkspaceRestored(), undelivered: the layout it belonged to showed no
-    /// window it could go to, and a toast about a restore must not surface in a window opened later. GUI
-    /// thread.
-    void expireRestoreSummary() noexcept;
+    /// Forgets the summary @p binding holds (noteWorkspaceRestored()), undelivered: the layout it belonged to
+    /// showed no window it could go to, and a toast about a restore must not surface in a window opened
+    /// later. GUI thread.
+    /// @param binding The binding whose summary goes.
+    void expireRestoreSummary(WindowBinding const& binding) noexcept;
 
     /// Takes every notice of @p kind away, in every window.
     void clearNoticeInEveryWindow(window::NoticeKind kind);
@@ -621,7 +628,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] ResolvedDrag resolveNodeDrag(window::NodeDrag drag) const;
 
     /// Why @p drag cannot be dropped at @p place in @p window: the place's own refusal, or, for a window
-    /// bound to another host than the one the drag names (@see bindWindow), that it belongs to another host.
+    /// bound to another host than the window the drag came from (@see bindWindow), that it belongs to
+    /// another host.
     /// @param drag   The drag, resolved (resolveNodeDrag()).
     /// @param window The window it hovers.
     /// @param place  Where in @p window.
@@ -702,11 +710,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// A move asked of the daemon, waited for until the push that makes it ends (@see moveNode).
     struct PendingRemoteMove
     {
-        uint64_t request = 0;           ///< Its number (RemoteMove::request).
-        window::HostIdentity host;      ///< The daemon asked, which names @ref sessions.
-        std::vector<uint64_t> sessions; ///< What moves, by the daemon's ids.
-        window::DropPayload payload;    ///< What the receiving window's screen reader is told moved.
-        window::MoveLanding landing;    ///< Where it lands, as the screen reader is told it.
+        uint64_t request = 0;                   ///< Its number (RemoteMove::request).
+        window::HostIdentity host;              ///< The daemon asked, which names @ref sessions.
+        WindowBinding const* binding = nullptr; ///< What serves that daemon's windows; null for none.
+        std::vector<uint64_t> sessions;         ///< What moves, by the daemon's ids.
+        window::DropPayload payload;            ///< What the receiving window's screen reader is told moved.
+        window::MoveLanding landing;            ///< Where it lands, as the screen reader is told it.
         std::optional<window::WindowPosition> spawnAt; ///< NewWindow only: where its window opens.
         core::platform::SteadyTimePoint deadline;      ///< When it is given up (RemoteMoveTimeout).
         /// Whether its push has ended, so the reconcile now running places it.
@@ -885,26 +894,34 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// The footer's Reconnect: seeks the daemon again, and every pane lost with the connection shows it is
     /// reconnecting meanwhile. A refusal to even start puts "Could not reconnect: {reason}." back in their
     /// footers. Once the daemon's layout is back, rebindDisconnected() takes the panes' sessions back.
+    /// Only the panes of windows bound to the same link as @p acting's are touched; a window no link claims
+    /// has no connection to seek.
     /// @param acting The session whose footer asked: the connection sought is its window's.
     void reconnectHost(TerminalSession const& acting);
 
-    /// The daemon is back and has pushed its layout: every Disconnected pane whose remote session that layout
-    /// still names mirrors it again, in place (its PaneId, the active pane and a zoom unchanged); one it does
-    /// not name keeps its footer. Called for every layout the daemon pushes (one per workspace): a Reconnect
-    /// that is running ends once no Disconnected pane is left, or in reconnectFailed().
-    void rebindDisconnected();
+    /// @p binding's daemon is back and has pushed its layout: every Disconnected pane of a window bound to it
+    /// whose remote session that layout still names mirrors it again, in place (its PaneId, the active pane
+    /// and a zoom unchanged); one it does not name keeps its footer. Called for every layout the daemon
+    /// pushes (one per workspace): a Reconnect that is running ends once no Disconnected pane of the
+    /// binding's is left, or in reconnectFailed().
+    /// @param binding The binding whose daemon pushed the layout.
+    void rebindDisconnected(WindowBinding const& binding);
 
-    /// The reconnect that was running ended for good without bringing the daemon back: the Disconnected
-    /// panes say so in their footers, as "Could not reconnect: {reason}.". Nothing when none was running.
-    /// @param reason Why it ended, as the connection says it.
-    void reconnectFailed(std::string_view reason);
+    /// The reconnect @p binding was running ended for good without bringing the daemon back: its
+    /// Disconnected panes say so in their footers, as "Could not reconnect: {reason}.". Nothing when none was
+    /// running.
+    /// @param binding The binding whose reconnect ended.
+    /// @param reason  Why it ended, as the connection says it.
+    void reconnectFailed(WindowBinding const& binding, std::string_view reason);
 
-    /// The connection to the daemon ended for good: a Reconnect that was running is over (@see
-    /// reconnectFailed), and then every live pane is told it lost the connection. In that order, so the
-    /// "Could not reconnect" footer reaches only the panes that were already Disconnected, never those that
-    /// this loss has just made so. Call before the controller's stop() closes the mirror ptys.
-    /// @param reason Why the connection ended, as it says it.
-    void connectionClosed(std::string_view reason);
+    /// @p binding's connection to its daemon ended for good: a Reconnect that was running is over (@see
+    /// reconnectFailed), and then every live pane of its windows is told it lost the connection. In that
+    /// order, so the "Could not reconnect" footer reaches only the panes that were already Disconnected,
+    /// never those that this loss has just made so. Call before the controller's stop() closes the mirror
+    /// ptys.
+    /// @param binding The binding whose connection ended.
+    /// @param reason  Why the connection ended, as it says it.
+    void connectionClosed(WindowBinding const& binding, std::string_view reason);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
@@ -1387,23 +1404,28 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     }
     // }}}
 
-    /// Tells every live session that the daemon connection died, before its ptys are closed.
-    ///
-    /// Every session in an attached GUI is fed by that one connection, so losing it ends all of
-    /// them at once. @see TerminalSession::noteTransportLost
-    void noteTransportLost() noexcept;
+    /// Tells every live session of a window bound to @p binding that its daemon connection died, before
+    /// their ptys are closed: that one connection feeds them all, so losing it ends them at once. The
+    /// sessions of every other window are not touched. @see TerminalSession::noteTransportLost
+    /// @param binding The binding whose connection died.
+    void noteTransportLost(WindowBinding const& binding);
 
-    /// Tells every session where the connection to the daemon (or tmux server) its pane mirrors stands: each
-    /// whose factory hosts it remotely shows that it is reconnecting while the connection is sought again;
-    /// a local one ignores it. @see TerminalSession::setHostConnection
+    /// Tells every session of a window bound to @p binding where the connection to the daemon (or tmux
+    /// server) its pane mirrors stands: each whose factory hosts it remotely shows that it is reconnecting
+    /// while the connection is sought again; a local one ignores it. @see TerminalSession::setHostConnection
     ///
-    /// Also what every window's host chip shows: each controller is told when the chip's state changes.
-    /// @param state Where the connection stands now.
-    void setHostConnection(vthost::client::ConnectionState state);
+    /// Also what those windows' host chips show: each of their controllers is told when the chip's state
+    /// changes. Every other window keeps its own.
+    /// @param binding The binding whose connection it is.
+    /// @param state   Where the connection stands now.
+    void setHostConnection(WindowBinding const& binding, vthost::client::ConnectionState state);
 
-    /// @return Where the connection to the host stands, as setHostConnection() was last told; Connected
-    ///         until it is told otherwise (a local application has no connection to lose).
-    [[nodiscard]] vthost::client::ConnectionState hostConnection() const noexcept { return _hostConnection; }
+    /// @param window A window of this manager.
+    /// @return Where the connection of @p window's binding stands, as setHostConnection() was last told;
+    ///         Connected until it is told otherwise, and for a window no binding claims (a local session has
+    ///         no connection to lose).
+    [[nodiscard]] vthost::client::ConnectionState hostConnection(
+        vtworkspace::WorkspaceId window) const noexcept;
 
     /// Returns whether the Qt multimedia backend has been initialized.
     [[nodiscard]] bool isMultimediaReady() const noexcept { return _multimediaReady; }
@@ -1593,6 +1615,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The factory of that host's windows: the binding serving it, else the one this manager was
     ///         constructed with.
     [[nodiscard]] SessionFactory& factoryServing(window::HostIdentity const& host) const;
+
+    /// @param drag A drag, resolved.
+    /// @return What would make its move: the factory of the window it came from, where this process shows
+    ///         it; else the one serving the host it names (@see factoryServing).
+    [[nodiscard]] SessionFactory& factoryOfDrag(ResolvedDrag const& drag) const;
 
     /// @param session A session of this manager.
     /// @return Whether it is hosted in a panel window.
@@ -1899,11 +1926,24 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     bool _multimediaReady = false;
 
-    /// Where the connection to the host stands. @see setHostConnection
-    vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
-    /// Whether a Reconnect from a footer is running: begun by reconnectHost(), over by rebindDisconnected()
-    /// or reconnectFailed().
-    ReconnectRun _reconnectRun = ReconnectRun::Idle;
+    /// What one binding's connection is in, as its link reports it. A binding absent from _linkStates is in
+    /// the default of each.
+    struct LinkState
+    {
+        /// Where the connection to the host stands. @see setHostConnection
+        vthost::client::ConnectionState connection = vthost::client::ConnectionState::Connected;
+        /// Whether a Reconnect from a footer is running: begun by reconnectHost(), over by
+        /// rebindDisconnected() or reconnectFailed().
+        ReconnectRun reconnect = ReconnectRun::Idle;
+        /// What the daemon's restore brought back, until a window is told it. @see noteWorkspaceRestored
+        std::optional<vthost::RestoredCounts> restoreSummary;
+    };
+    /// Each binding's connection, keyed by the binding; dropped by releaseBinding(). GUI thread.
+    std::unordered_map<WindowBinding const*, LinkState> _linkStates;
+
+    /// @param binding A binding.
+    /// @return The live sessions of every window bound to @p binding.
+    [[nodiscard]] std::vector<TerminalSession*> sessionsBoundTo(WindowBinding const& binding) const;
 
     /// Every session's unseen output and finished commands. Keyed by session, so the marks follow a session
     /// from window to window. @see noteSessionOutput
@@ -1919,8 +1959,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     std::unordered_map<uint64_t, window::WindowController*> _controllersByWindow;
     /// What the next createWindowController() window is for. @see stageWindowRole
     window::WindowRole _stagedRole = window::WindowRole::Normal;
-    /// What the daemon's restore brought back, until a window is told it. @see noteWorkspaceRestored
-    std::optional<vthost::RestoredCounts> _pendingRestoreSummary;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse
     // (TerminalSession -> SessionId) needs no map: each TerminalSession stores its own
     // modelSessionId().

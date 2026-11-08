@@ -180,8 +180,9 @@ class DaemonLink final: public session::WindowBinding
     /// No-op once given up.
     void offerDaemonRestartIfDrifted();
 
-    /// Ends the connection ahead of a restart of its daemon: every pane notes the transport lost, then the
-    /// controller stops, so that a reconnect does not start a daemon of its own. No-op once given up.
+    /// Ends the connection ahead of a restart of its daemon: every pane of its windows notes the transport
+    /// lost, then the controller stops, so that a reconnect does not start a daemon of its own. No-op once
+    /// given up.
     void stopForDaemonRestart();
 
     /// Stops the controller, and serves no window any more: what they make from then on is local

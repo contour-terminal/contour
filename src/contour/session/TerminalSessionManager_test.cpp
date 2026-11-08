@@ -1253,9 +1253,11 @@ TEST_CASE(
 
     auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
     factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::FactoryBinding link { *factory };
     contour::test::TestApp app { std::move(factory) };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     window->createNewTab();
     window->createNewTab();
     auto* const background = sessionAtRow(manager, *window, 0);
@@ -1264,7 +1266,7 @@ TEST_CASE(
 
     SECTION("a bell while the mirror is connected badges the tab")
     {
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Connected);
         app.steadyClock().advance(contour::window::ResyncGracePeriod);
         background->terminal().writeToScreen("\a");
         drainPosted();
@@ -1273,7 +1275,7 @@ TEST_CASE(
 
     SECTION("a bell in the resync after a reconnect is not news")
     {
-        manager.setHostConnection(ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
         background->terminal().writeToScreen("\a");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
@@ -1287,7 +1289,7 @@ TEST_CASE(
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
     }
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     contour::test::closeAllTabs(*window);
 }
 
@@ -1571,9 +1573,11 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
 
     auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
     factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::FactoryBinding link { *factory };
     contour::test::TestApp app { std::move(factory) };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     window->createNewTab();
     window->createNewTab();
     auto* const background = sessionAtRow(manager, *window, 0);
@@ -1582,12 +1586,12 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
 
     SECTION("the mirror's repaint around a reconnect is not news")
     {
-        manager.setHostConnection(ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
 
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Connected);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
@@ -1605,14 +1609,14 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
         drainPosted();
         REQUIRE(badgeAt(*window, 0) == TabBadgeKind::Blocked);
 
-        manager.setHostConnection(ConnectionState::Reconnecting);
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Connected);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Blocked);
     }
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     contour::test::closeAllTabs(*window);
 }
 
@@ -1773,29 +1777,41 @@ TEST_CASE("TerminalSessionManager: the host chip follows the connection", "[mana
     using contour::window::HostChipState;
     using vthost::client::ConnectionState;
 
+    contour::test::MockPtySessionFactory host;
+    contour::test::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
-    CHECK(manager.hostConnection() == ConnectionState::Connected);
+    contour::test::ScopedController const local { manager };
+    manager.bindWindow(window.id, link);
+    CHECK(manager.hostConnection(window.id) == ConnectionState::Connected);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
 
     auto spy = QSignalSpy { &*window, &contour::window::WindowController::hostChipStateChanged };
 
-    manager.setHostConnection(ConnectionState::Reconnecting);
+    manager.setHostConnection(link, ConnectionState::Reconnecting);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Reconnecting));
     CHECK(spy.count() == 1);
 
     // Connecting folds onto the same chip state, so the chip is not told twice.
-    manager.setHostConnection(ConnectionState::Connecting);
+    manager.setHostConnection(link, ConnectionState::Connecting);
     CHECK(spy.count() == 1);
 
-    manager.setHostConnection(ConnectionState::Refused);
+    manager.setHostConnection(link, ConnectionState::Refused);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Disconnected));
     CHECK(spy.count() == 2);
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
     CHECK(spy.count() == 3);
+
+    // A window no link claims has no connection, whatever another link's does.
+    auto localSpy = QSignalSpy { &*local, &contour::window::WindowController::hostChipStateChanged };
+    manager.setHostConnection(link, ConnectionState::Refused);
+    CHECK(manager.hostConnection(local.id) == ConnectionState::Connected);
+    CHECK(local->hostChipState() == static_cast<int>(HostChipState::Connected));
+    CHECK(localSpy.count() == 0);
+    manager.setHostConnection(link, ConnectionState::Connected);
 }
 
 // }}}
@@ -3176,11 +3192,13 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
 namespace
 {
 /// A split of two panes of a remote-hosted manager, both lost with the connection: their ptys closed after
-/// noteTransportLost(), so each shows the Disconnected footer.
+/// noteTransportLost(), so each shows the Disconnected footer. Its window is bound to @ref link, which
+/// stands for the daemon link it was attached through.
 struct LostSplit
 {
     contour::test::MockPtySessionFactory* factory;
     contour::test::TestApp app;
+    contour::test::FactoryBinding link;
     contour::test::ScopedController window;
     contour::session::TerminalSession* left = nullptr;
     contour::session::TerminalSession* right = nullptr;
@@ -3196,8 +3214,9 @@ struct LostSplit
     }
 
     explicit LostSplit(std::unique_ptr<contour::test::MockPtySessionFactory> owned = makeFactory()):
-        factory { owned.get() }, app { std::move(owned) }, window { app.manager() }
+        factory { owned.get() }, app { std::move(owned) }, link { *factory }, window { app.manager() }
     {
+        app.manager().bindWindow(window.id, link);
         left = app.manager().createSession(window.id);
         REQUIRE(left != nullptr);
         app.manager().splitActivePane(/*vertical*/ true, left);
@@ -3278,7 +3297,7 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     CHECK(lost.left->isReconnecting());
 
     // The daemon's layout is back and names both sessions.
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     CHECK(lost.factory->createdPtys.size() == ptysBefore + 2);
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
@@ -3295,7 +3314,7 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     CHECK(manager.model().workspace(lost.window.id)->activeTab()->paneCount() == 2);
 
     // Connected again, no pane shows the pill.
-    manager.setHostConnection(vthost::client::ConnectionState::Connected);
+    manager.setHostConnection(lost.link, vthost::client::ConnectionState::Connected);
     CHECK(newLeft->getPaneState() == static_cast<int>(PaneState::Live));
 }
 
@@ -3308,6 +3327,7 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     auto lost = LostSplit {};
     auto& manager = lost.app.manager();
     auto const second = contour::test::ScopedController { manager };
+    manager.bindWindow(second.id, lost.link);
     auto* const other = manager.createSession(second.id);
     REQUIRE(other != nullptr);
     auto const otherLeaf = leafOf(manager, second.id, *other)->id();
@@ -3322,13 +3342,13 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     lost.left->runFooterAction();
     REQUIRE(lost.factory->reconnects == 1);
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     CHECK(sessionOfLeaf(manager, lost.window.id, lost.leftLeaf)->endReason() == EndReason::None);
     CHECK(manager.sessionForId(other->modelSessionId()) == other);
 
     // Then the second window's layout arrives: its pane comes back in the same run.
     lost.factory->namedForReconnect = { otherDevice };
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     auto* const newOther = sessionOfLeaf(manager, second.id, otherLeaf);
     REQUIRE(newOther != nullptr);
     CHECK(newOther->endReason() == EndReason::None);
@@ -3339,7 +3359,7 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     newOther->terminal().device().close();
     newOther->onClosed();
     REQUIRE(newOther->endReason() == EndReason::Disconnected);
-    manager.reconnectFailed("the connection closed");
+    manager.reconnectFailed(lost.link, "the connection closed");
     CHECK(newOther->getFooterMessage()
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 
@@ -3360,8 +3380,8 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
         REQUIRE(lost.left->getPaneState() == static_cast<int>(PaneState::Reconnecting));
 
         // The supervised run ends for good: the connection says why, and settles in Refused.
-        manager.setHostConnection(vthost::client::ConnectionState::Refused);
-        manager.reconnectFailed("the daemon refused the handshake");
+        manager.setHostConnection(lost.link, vthost::client::ConnectionState::Refused);
+        manager.reconnectFailed(lost.link, "the daemon refused the handshake");
 
         for (auto* session: { lost.left, lost.right })
         {
@@ -3383,7 +3403,7 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
 
     SECTION("a failure with no reconnect running is nobody's to report")
     {
-        manager.reconnectFailed("the connection closed");
+        manager.reconnectFailed(lost.link, "the connection closed");
         CHECK(lost.left->getFooterMessage()
               == "Disconnected from the Contour daemon. Its sessions are still running.");
     }
@@ -3404,14 +3424,14 @@ TEST_CASE(
     // The returned layout omits the right pane's session, so the run stays up for it.
     lost.factory->namedForReconnect = { &lost.left->terminal().device() };
     lost.left->runFooterAction();
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
     REQUIRE(newLeft != nullptr);
     REQUIRE(newLeft->endReason() == EndReason::None);
 
     // The connection then drops for good: the Reconnect's pane says so, the pane this loss just ended does
     // not.
-    manager.connectionClosed("the connection closed");
+    manager.connectionClosed(lost.link, "the connection closed");
     newLeft->terminal().device().close();
     newLeft->onClosed();
 
@@ -3420,7 +3440,7 @@ TEST_CASE(
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 
     // And that ended the run: a failure now is nobody's to report.
-    manager.reconnectFailed("another");
+    manager.reconnectFailed(lost.link, "another");
     CHECK(newLeft->getFooterMessage()
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 }
@@ -3434,7 +3454,7 @@ TEST_CASE("TerminalSessionManager: Return pressed as the connection fails shows 
     lost.factory->reconnectResult = std::unexpected(contour::session::ReconnectError::ConnectionEnding);
     lost.left->runFooterAction();
 
-    manager.connectionClosed("the daemon refused the handshake");
+    manager.connectionClosed(lost.link, "the daemon refused the handshake");
 
     for (auto* session: { lost.left, lost.right })
         CHECK(session->getFooterMessage()
@@ -3450,7 +3470,7 @@ TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
     lost.factory->namedForReconnect = { &lost.left->terminal().device() };
     lost.left->runFooterAction();
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
     REQUIRE(newLeft != nullptr);
@@ -3470,7 +3490,7 @@ TEST_CASE("TerminalSessionManager: a failed take-back leaves no binding for the 
     lost.factory->creation = contour::test::MockPtySessionFactory::SessionCreation::Refused;
     lost.left->runFooterAction();
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     CHECK_FALSE(lost.factory->boundForReconnect);
     CHECK(lost.left->endReason() == contour::session::EndReason::Disconnected);
@@ -4109,14 +4129,22 @@ TEST_CASE("TerminalSessionManager: turning secure_input off at runtime releases 
 TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and tells one",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::test::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
 
     // Nothing to post it in yet.
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
 
     contour::test::ScopedController const first { manager };
     contour::test::ScopedController const second { manager };
+    contour::test::ScopedController const local { manager };
+    manager.bindWindow(first.id, link);
+    manager.bindWindow(second.id, link);
+    // A window of no link's is told of none's restore.
+    manager.deliverRestoreSummaryTo(local.id);
+    CHECK(local->notices().toastText().isEmpty());
     CHECK(first->notices().toastText().isEmpty());
     CHECK(second->notices().toastText().isEmpty());
 
@@ -4130,9 +4158,12 @@ TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and t
 
 TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::test::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     contour::test::ScopedController const window { app.manager() };
-    app.manager().noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
+    app.manager().bindWindow(window.id, link);
+    app.manager().noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
     app.manager().deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 1 window, 1 tab");
 }
@@ -4140,12 +4171,15 @@ TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "
 TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not posted to a later window",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::test::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
-    manager.expireRestoreSummary();
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.expireRestoreSummary(link);
 
     contour::test::ScopedController const later { manager };
+    manager.bindWindow(later.id, link);
     manager.deliverRestoreSummaryTo(later->windowId());
     CHECK(later->notices().toastText().isEmpty());
 }
@@ -4153,11 +4187,14 @@ TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not
 TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still held",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::test::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 5, .tabs = 5 });
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 5, .tabs = 5 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     manager.deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");
 }
@@ -4797,6 +4834,73 @@ TEST_CASE("TerminalSessionManager: a bound window's close is told to its binding
     CHECK(manager.bindingOf(links.windowB.id) == nullptr);
     CHECK(manager.bindingOf(links.windowA.id) == &links.linkA);
     CHECK(links.linkB.closedWindows.empty());
+}
+
+TEST_CASE("TerminalSessionManager: a lost link marks only its own sessions reconnecting",
+          "[manager][link][reconnect]")
+{
+    using contour::session::EndReason;
+    using contour::window::HostChipState;
+    using vthost::client::ConnectionState;
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+
+    SECTION("its connection is sought again")
+    {
+        manager.setHostConnection(links.linkA, ConnectionState::Reconnecting);
+        CHECK(links.paneA->isReconnecting());
+        CHECK_FALSE(links.leftB->isReconnecting());
+        CHECK(manager.hostConnection(links.windowA.id) == ConnectionState::Reconnecting);
+        CHECK(manager.hostConnection(links.windowB.id) == ConnectionState::Connected);
+        CHECK(links.windowA->hostChipState() == static_cast<int>(HostChipState::Reconnecting));
+        CHECK(links.windowB->hostChipState() == static_cast<int>(HostChipState::Connected));
+        manager.setHostConnection(links.linkA, ConnectionState::Connected);
+        CHECK_FALSE(links.paneA->isReconnecting());
+    }
+
+    SECTION("its connection ends for good, and is sought again from a footer")
+    {
+        manager.connectionClosed(links.linkA, "the connection closed");
+        // A's pane was told the connection went: its pty closing ends it Disconnected, not exited.
+        links.paneA->terminal().device().close();
+        links.paneA->onClosed();
+        REQUIRE(links.paneA->endReason() == EndReason::Disconnected);
+        CHECK(links.leftB->endReason() == EndReason::None);
+
+        // Its Reconnect seeks its own daemon, and only its own panes wait for it.
+        manager.reconnectHost(*links.paneA);
+        CHECK(links.hostA.reconnects == 1);
+        CHECK(links.hostB.reconnects == 0);
+        CHECK(links.paneA->isReconnecting());
+        CHECK_FALSE(links.leftB->isReconnecting());
+        CHECK(links.windowB->hostChipState() == static_cast<int>(HostChipState::Connected));
+
+        // The other link's reconnect ending is not this one's.
+        manager.reconnectFailed(links.linkB, "beta refused");
+        CHECK_FALSE(links.paneA->getFooterMessage().contains(QStringLiteral("beta refused")));
+        manager.reconnectFailed(links.linkA, "alpha refused");
+        CHECK(links.paneA->getFooterMessage().contains(QStringLiteral("alpha refused")));
+        manager.setHostConnection(links.linkA, ConnectionState::Connected);
+    }
+
+    SECTION("a notice about it is posted in its windows alone")
+    {
+        manager.postNoticeToWindowsOf(
+            links.linkA,
+            contour::window::Notice { .kind = contour::window::NoticeKind::DropRefused,
+                                      .text = std::string { contour::window::TabMergeRefusedText } });
+        CHECK(links.windowA->notices().toastShown());
+        CHECK_FALSE(links.windowB->notices().toastShown());
+    }
+
+    SECTION("its restore is told in one of its windows")
+    {
+        manager.noteWorkspaceRestored(links.linkA, vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
+        manager.deliverRestoreSummaryTo(links.windowB.id);
+        CHECK(links.windowB->notices().toastText().isEmpty());
+        manager.deliverRestoreSummaryTo(links.windowA.id);
+        CHECK(links.windowA->notices().toastText() == "Restored 1 window, 1 tab");
+    }
 }
 
 // }}}

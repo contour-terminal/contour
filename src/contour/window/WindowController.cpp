@@ -429,7 +429,7 @@ QString WindowController::shortcutText(QString const& commandName) const
 
 int WindowController::hostChipState() const noexcept
 {
-    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection())));
+    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_windowId))));
 }
 
 QString WindowController::applicationVersion() const
@@ -2254,7 +2254,7 @@ TitleBand WindowController::titleBand() const
         .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
         .position = _tabBarPosition,
         .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
-                               hostChipStateOf(_manager.hostConnection())),
+                               hostChipStateOf(_manager.hostConnection(_windowId))),
     });
 }
 

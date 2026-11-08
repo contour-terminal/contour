@@ -94,7 +94,7 @@ void DaemonLink::start()
         _controller.get(),
         &NativeController::layoutChanged,
         &_receiver,
-        [this] { _sessions.rebindDisconnected(); },
+        [this] { _sessions.rebindDisconnected(*this); },
         Qt::QueuedConnection);
     // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree: whenever a layout
     // arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by another
@@ -117,7 +117,7 @@ void DaemonLink::start()
         &_receiver,
         [this](quint32 workspaces, quint32 tabs) {
             _sessions.noteWorkspaceRestored(
-                vthost::RestoredCounts { .workspaces = workspaces, .tabs = tabs });
+                *this, vthost::RestoredCounts { .workspaces = workspaces, .tabs = tabs });
         },
         Qt::QueuedConnection);
     connectReconnectSignals();
@@ -134,7 +134,7 @@ void DaemonLink::start()
             // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
             // that ends here did not bring the daemon back: the panes it was for say so, with the
             // connection's own words. @see TerminalSessionManager::connectionClosed
-            _sessions.connectionClosed(_controller->failure());
+            _sessions.connectionClosed(*this, _controller->failure());
             _controller->stop();
         },
         Qt::QueuedConnection);
@@ -207,7 +207,7 @@ void DaemonLink::stopForDaemonRestart()
     // Before stop(), which closes every mirror pty -- @see TerminalSession::noteTransportLost
     if (!_controller)
         return;
-    _sessions.noteTransportLost();
+    _sessions.noteTransportLost(*this);
     _controller->stop();
 }
 
@@ -357,15 +357,15 @@ WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
 
 void DaemonLink::connectReconnectSignals()
 {
-    // Every pane says it is reconnecting while the connection is sought again, rather than showing a
-    // grid that merely stopped.
+    // Every pane of the link's windows says it is reconnecting while the connection is sought again, rather
+    // than showing a grid that merely stopped.
     QObject::connect(
         _controller.get(),
         &NativeController::connectionStateChanged,
         &_receiver,
         [this] {
             if (_controller)
-                _sessions.setHostConnection(_controller->connectionState());
+                _sessions.setHostConnection(*this, _controller->connectionState());
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -432,7 +432,7 @@ void DaemonLink::expireRestoreSummaryAfterLayout()
     if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
         == session::RestoreSummaryFate::Keep)
         return;
-    _sessions.expireRestoreSummary();
+    _sessions.expireRestoreSummary(*this);
 }
 
 void DaemonLink::askHostedExtensions()

@@ -142,11 +142,20 @@ bool TerminalSessionManager::consumeAttachWindow(contour::window::WindowControll
                : false;
 }
 
-void TerminalSessionManager::noteTransportLost() noexcept
+void TerminalSessionManager::noteTransportLost(WindowBinding const& binding)
 {
+    for (auto* session: sessionsBoundTo(binding))
+        session->noteTransportLost();
+}
+
+std::vector<TerminalSession*> TerminalSessionManager::sessionsBoundTo(WindowBinding const& binding) const
+{
+    auto bound = std::vector<TerminalSession*> {};
     for (auto* session: _sessionsById | std::views::values)
-        if (session != nullptr)
-            session->noteTransportLost();
+        if (auto const* const window = session != nullptr ? hostOf(session).window : nullptr;
+            window != nullptr && bindingOf(window->id()) == &binding)
+            bound.push_back(session);
+    return bound;
 }
 
 vtworkspace::Tab* TerminalSessionManager::tabHostingSession(TerminalSession const* session) const noexcept
@@ -621,6 +630,7 @@ WindowBinding const* TerminalSessionManager::bindingOf(vtworkspace::WorkspaceId 
 void TerminalSessionManager::releaseBinding(WindowBinding const& binding) noexcept
 {
     std::erase_if(_bindingOfWindow, [&binding](auto const& entry) { return entry.second == &binding; });
+    _linkStates.erase(&binding);
 }
 
 namespace
@@ -667,11 +677,15 @@ window::MoveRefusal TerminalSessionManager::moveRefusalIn(ResolvedDrag const& dr
                                                           vtworkspace::WorkspaceId window,
                                                           window::MovePlace place) const
 {
-    // Only the host the drag names could make the move, and it does not serve that window.
-    if (place != window::MovePlace::NewWindow && isOwnHost(drag.drag.host)
-        && bindingServing(drag.drag.host) != bindingOf(window))
+    // Only the host of the window the drag came from could make the move, and it does not serve that window.
+    if (place != window::MovePlace::NewWindow && drag.tab && bindingOf(drag.workspace) != bindingOf(window))
         return window::MoveRefusal::OtherProcess;
     return drag.refusalAt(place);
+}
+
+SessionFactory& TerminalSessionManager::factoryOfDrag(ResolvedDrag const& drag) const
+{
+    return drag.tab ? factoryFor(drag.workspace) : factoryServing(drag.drag.host);
 }
 
 bool TerminalSessionManager::isNormalWindow(vtworkspace::WorkspaceId window) const noexcept
@@ -1110,28 +1124,38 @@ void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notic
             controller->notices().post(notice);
 }
 
-void TerminalSessionManager::noteWorkspaceRestored(vthost::RestoredCounts counts)
+void TerminalSessionManager::postNoticeToWindowsOf(WindowBinding const& binding, window::Notice const& notice)
 {
-    _pendingRestoreSummary = counts;
+    for (auto const& [window, controller]: _controllersByWindow)
+        if (controller != nullptr && bindingOf(vtworkspace::WorkspaceId { window }) == &binding)
+            controller->notices().post(notice);
+}
+
+void TerminalSessionManager::noteWorkspaceRestored(WindowBinding const& binding,
+                                                   vthost::RestoredCounts counts)
+{
+    _linkStates[&binding].restoreSummary = counts;
 }
 
 void TerminalSessionManager::deliverRestoreSummaryTo(vtworkspace::WorkspaceId window)
 {
-    if (!_pendingRestoreSummary)
+    auto const state = _linkStates.find(bindingOf(window));
+    if (state == _linkStates.end() || !state->second.restoreSummary)
         return;
     auto* const controller = controllerFor(window);
     if (controller == nullptr)
         return;
-    controller->notices().post(window::Notice {
-        .kind = window::NoticeKind::RestoreSummary,
-        .text =
-            window::restoreSummaryText(_pendingRestoreSummary->workspaces, _pendingRestoreSummary->tabs) });
-    _pendingRestoreSummary.reset();
+    auto& summary = state->second.restoreSummary;
+    controller->notices().post(
+        window::Notice { .kind = window::NoticeKind::RestoreSummary,
+                         .text = window::restoreSummaryText(summary->workspaces, summary->tabs) });
+    summary.reset();
 }
 
-void TerminalSessionManager::expireRestoreSummary() noexcept
+void TerminalSessionManager::expireRestoreSummary(WindowBinding const& binding) noexcept
 {
-    _pendingRestoreSummary.reset();
+    if (auto const state = _linkStates.find(&binding); state != _linkStates.end())
+        state->second.restoreSummary.reset();
 }
 
 void TerminalSessionManager::clearNoticeInEveryWindow(window::NoticeKind kind)
@@ -2158,21 +2182,31 @@ void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WorkspaceId wi
     }
 }
 
-void TerminalSessionManager::setHostConnection(vthost::client::ConnectionState state)
+void TerminalSessionManager::setHostConnection(WindowBinding const& binding,
+                                               vthost::client::ConnectionState state)
 {
-    auto const chipChanged = window::hostChipStateOf(state) != window::hostChipStateOf(_hostConnection);
-    _hostConnection = state;
+    auto& connection = _linkStates[&binding].connection;
+    auto const chipChanged = window::hostChipStateOf(state) != window::hostChipStateOf(connection);
+    connection = state;
     // A move asked of a connection that is gone is answered on it or not at all.
-    if (state != vthost::client::ConnectionState::Connected)
+    if (state != vthost::client::ConnectionState::Connected && _pendingRemoteMove
+        && _pendingRemoteMove->binding == &binding)
         _pendingRemoteMove.reset();
     // What the host serves, and which run of it, may differ once it is back.
     layoutChanged();
-    for (auto* session: _sessionsById | std::views::values)
-        if (session != nullptr)
-            session->setHostConnection(state);
+    for (auto* session: sessionsBoundTo(binding))
+        session->setHostConnection(state);
     if (chipChanged)
-        for (auto* controller: _controllersByWindow | std::views::values)
-            controller->notifyHostConnectionChanged();
+        for (auto const& [window, controller]: _controllersByWindow)
+            if (controller != nullptr && bindingOf(vtworkspace::WorkspaceId { window }) == &binding)
+                controller->notifyHostConnectionChanged();
+}
+
+vthost::client::ConnectionState TerminalSessionManager::hostConnection(
+    vtworkspace::WorkspaceId window) const noexcept
+{
+    auto const state = _linkStates.find(bindingOf(window));
+    return state != _linkStates.end() ? state->second.connection : vthost::client::ConnectionState::Connected;
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
@@ -2629,7 +2663,7 @@ ResolvedDrag TerminalSessionManager::resolveNodeDrag(window::NodeDrag drag) cons
     if (named.payload == window::DropPayload::Tab || (tab != nullptr && !tab->hasMultiplePanes()))
         resolved.subject = window::MoveSubject::WholeTab;
 
-    auto const host = factoryServing(named.host).hostMoves();
+    auto const host = factoryOfDrag(resolved).hostMoves();
     for (auto const index: std::views::iota(std::size_t { 0 }, window::MovePlaceCount))
     {
         auto route = window::moveRouteOf(host, static_cast<window::MovePlace>(index), resolved.subject);
@@ -2753,17 +2787,15 @@ std::expected<void, MoveFailure> TerminalSessionManager::requestHostMove(Resolve
     if (!target.hostSession)
         return std::unexpected { MoveFailure { vtworkspace::MoveError::UnknownTarget } };
     auto const number = _nextRemoteMove++;
-    auto const routing =
-        factoryServing(drag.drag.host)
-            .requestRemoteMove(RemoteMove { .source = drag.drag.payload == window::DropPayload::Tab
-                                                          ? vtworkspace::MoveSourceKind::Tab
-                                                          : vtworkspace::MoveSourceKind::Pane,
-                                            .sourceSessions = drag.drag.sessions,
-                                            .target = target.kind,
-                                            .targetSession = *target.hostSession,
-                                            .side = target.side,
-                                            .index = target.index,
-                                            .request = number });
+    auto const routing = factoryOfDrag(drag).requestRemoteMove(RemoteMove {
+        .source = drag.drag.payload == window::DropPayload::Tab ? vtworkspace::MoveSourceKind::Tab
+                                                                : vtworkspace::MoveSourceKind::Pane,
+        .sourceSessions = drag.drag.sessions,
+        .target = target.kind,
+        .targetSession = *target.hostSession,
+        .side = target.side,
+        .index = target.index,
+        .request = number });
     switch (routing)
     {
         case RemoteRouting::Routed: break;
@@ -2776,6 +2808,7 @@ std::expected<void, MoveFailure> TerminalSessionManager::requestHostMove(Resolve
     _pendingRemoteMove = PendingRemoteMove {
         .request = number,
         .host = drag.drag.host,
+        .binding = drag.tab ? bindingOf(drag.workspace) : bindingServing(drag.drag.host),
         .sessions = drag.drag.sessions,
         .payload = drag.announcedAs(target.landing),
         .landing = target.landing,
@@ -3000,7 +3033,7 @@ std::expected<void, MoveFailure> TerminalSessionManager::moveNode(ResolvedDrag c
     }
 
     // The daemon owns the layout: it makes the move, and its push brings it here.
-    if (factoryServing(drag.drag.host).hostKind() == SessionHostKind::Daemon)
+    if (factoryOfDrag(drag).hostKind() == SessionHostKind::Daemon)
         return requestHostMove(drag, *described, screen, at);
 
     auto const source = localSourceOf(drag);
@@ -3277,35 +3310,41 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
 
 void TerminalSessionManager::reconnectHost(TerminalSession const& acting)
 {
+    auto const* const window = hostOf(&acting).window;
+    auto const bound = window != nullptr ? _bindingOfWindow.find(window->id().value) : _bindingOfWindow.end();
+    if (bound == _bindingOfWindow.end())
+        return; // a window no link claims has no connection to seek
+    auto& binding = *bound->second;
     // A failure of an earlier try is not this one's.
-    for (auto* session: _sessionsById | std::views::values)
-        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+    for (auto* session: sessionsBoundTo(binding))
+        if (session->endReason() == EndReason::Disconnected)
             session->noteReconnectFailure({});
-    auto const started = factoryOf(acting).reconnect();
+    auto const started = binding.sessions().reconnect();
+    _linkStates[&binding].reconnect = ReconnectRun::Running;
     if (!started)
     {
         managerLog()("Not reconnecting: {}.", describe(started.error()));
-        _reconnectRun = ReconnectRun::Running;
         // The connection that just failed reports itself through connectionClosed(), with its own reason:
         // that is the one to show, so the run is left for it to end.
         if (started.error() != ReconnectError::ConnectionEnding)
-            reconnectFailed(describe(started.error()));
+            reconnectFailed(binding, describe(started.error()));
         return;
     }
-    _reconnectRun = ReconnectRun::Running;
     // Ahead of the controller's own report of it, which comes queued: the pill shows as the button is
     // pressed.
-    setHostConnection(vthost::client::ConnectionState::Reconnecting);
+    setHostConnection(binding, vthost::client::ConnectionState::Reconnecting);
 }
 
-void TerminalSessionManager::rebindDisconnected()
+void TerminalSessionManager::rebindDisconnected(WindowBinding const& binding)
 {
-    if (_reconnectRun == ReconnectRun::Idle)
+    auto const state = _linkStates.find(&binding);
+    if (state == _linkStates.end() || state->second.reconnect == ReconnectRun::Idle)
         return;
+    auto const isLost = [](TerminalSession const* session) {
+        return session->endReason() == EndReason::Disconnected;
+    };
     auto lost = std::vector<TerminalSession*> {};
-    for (auto* session: _sessionsById | std::views::values)
-        if (session != nullptr && session->endReason() == EndReason::Disconnected)
-            lost.push_back(session);
+    std::ranges::copy_if(sessionsBoundTo(binding), std::back_inserter(lost), isLost);
     for (auto* session: lost)
     {
         auto& factory = factoryOf(*session);
@@ -3319,26 +3358,25 @@ void TerminalSessionManager::rebindDisconnected()
     }
     // The daemon pushes one layout per workspace and each arrives in its own turn: the run stays up for the
     // workspaces still to come, and ends once no pane is left to take back (or on reconnectFailed()).
-    auto const isLost = [](auto const* session) {
-        return session != nullptr && session->endReason() == EndReason::Disconnected;
-    };
-    if (std::ranges::none_of(_sessionsById | std::views::values, isLost))
-        _reconnectRun = ReconnectRun::Idle;
+    if (std::ranges::none_of(sessionsBoundTo(binding), isLost))
+        _linkStates[&binding].reconnect = ReconnectRun::Idle;
 }
 
-void TerminalSessionManager::reconnectFailed(std::string_view reason)
+void TerminalSessionManager::reconnectFailed(WindowBinding const& binding, std::string_view reason)
 {
-    if (std::exchange(_reconnectRun, ReconnectRun::Idle) == ReconnectRun::Idle)
+    auto const state = _linkStates.find(&binding);
+    if (state == _linkStates.end()
+        || std::exchange(state->second.reconnect, ReconnectRun::Idle) == ReconnectRun::Idle)
         return;
-    for (auto* session: _sessionsById | std::views::values)
-        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+    for (auto* session: sessionsBoundTo(binding))
+        if (session->endReason() == EndReason::Disconnected)
             session->noteReconnectFailure(std::string { reason });
 }
 
-void TerminalSessionManager::connectionClosed(std::string_view reason)
+void TerminalSessionManager::connectionClosed(WindowBinding const& binding, std::string_view reason)
 {
-    reconnectFailed(reason);
-    noteTransportLost();
+    reconnectFailed(binding, reason);
+    noteTransportLost(binding);
 }
 
 std::expected<TerminalSession*, RestartError> TerminalSessionManager::replaceEndedSession(
