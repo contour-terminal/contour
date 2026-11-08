@@ -150,7 +150,7 @@ class OwnedHandle
 {
     struct Search
     {
-        DWORD processId;
+        DWORD processId = 0;
         Awaited found = Awaited::TimedOut; // set by the EnumWindows callback
     };
     auto search = Search { .processId = processId };
@@ -277,7 +277,9 @@ TEST_CASE("Restart Manager closes Contour without asking and reopens it", "[win3
     available = needed;
     REQUIRE(RmGetList(session.handle(), &needed, &available, affected.data(), &reasons) == ERROR_SUCCESS);
     REQUIRE(available == 1);
-    CHECK(affected.front().ApplicationType == RmMainWindow);
+    // The detached policy lets the GUI open without a new console on supported Windows versions.
+    // Restart Manager still classifies the executable by its console subsystem.
+    CHECK(affected.front().ApplicationType == RmConsole);
     CHECK(affected.front().bRestartable == TRUE);
     CHECK(core::toUtf8(affected.front().strAppName) == "Contour Terminal Emulator");
 
