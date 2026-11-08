@@ -6,6 +6,7 @@
 #include <contour/config/ConfigEnumReader.hpp>
 #include <contour/config/KeyboardPlatformKind.hpp>
 #include <contour/config/ModifierNames.hpp>
+#include <contour/config/PortableSpelling.hpp>
 
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
@@ -583,26 +584,29 @@ struct Writer
         return std::vformat(replaceCommentPlaceholder(std::string(doc)), std::make_format_args(args...));
     }
 
-    [[nodiscard]] std::string format(KeyInputMapping const& v)
+    [[nodiscard]] std::string format(KeyInputMapping const& v, PrimarySpelling spelling)
     {
-        return formatKeyBinding(v, std::format("{}", v.input));
+        return formatKeyBinding(v, std::format("{}", v.input), spelling);
     }
 
-    [[nodiscard]] std::string format(CharInputMapping const& v)
+    [[nodiscard]] std::string format(CharInputMapping const& v, PrimarySpelling spelling)
     {
         // As UTF-8, which is how the reader takes a one-character key back.
-        return formatKeyBinding(v, unicode::convert_to<char>(v.input));
+        return formatKeyBinding(v, unicode::convert_to<char>(v.input), spelling);
     }
 
     /// One `key:` binding row.
     /// @param v The binding.
     /// @param key How the binding's key is spelled, unquoted.
+    /// @param spelling How its modifiers are spelled (@see portablePrimarySpellings).
     /// @return The row, ending in a newline.
     template <typename Binding>
-    [[nodiscard]] std::string formatKeyBinding(Binding const& v, std::string_view key)
+    [[nodiscard]] std::string formatKeyBinding(Binding const& v,
+                                               std::string_view key,
+                                               PrimarySpelling spelling)
     {
         return format("{:<30},{:<30},{:<30}\n",
-                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format("- {{ mods: [{}]", format(v.modifiers, spelling)),
                       format(" key: {}", SingleQuoted { key }),
                       formatActionAndModes(v));
     }
@@ -616,12 +620,12 @@ struct Writer
         return format(" action: {}, mode: {} }}", v.binding[0], SingleQuoted { std::format("{}", v.modes) });
     }
 
-    [[nodiscard]] std::string format(MouseInputMapping v)
+    [[nodiscard]] std::string format(MouseInputMapping v, PrimarySpelling spelling)
     {
         auto button = v.clickCount ? format(" mouse: {}, clicks: {}", v.input, *v.clickCount)
                                    : format(" mouse: {}", v.input);
         return format("{:<30},{:<30},{:<30}\n",
-                      format("- {{ mods: [{}]", format(v.modifiers)),
+                      format("- {{ mods: [{}]", format(v.modifiers, spelling)),
                       button,
                       formatActionAndModes(v));
     }
@@ -636,14 +640,15 @@ struct Writer
         return result;
     }
 
-    /// Spells @p flags as a `mods:` list body: `Primary` for the host's Primary set (@see
-    /// canonicalModifierSpellings), then every other modifier by name.
+    /// Spells @p flags as a `mods:` list body: `Primary` for the host's Primary set where @p spelling
+    /// allows it (@see canonicalModifierSpellings), then every other modifier by name.
     /// @param flags The chord's modifiers.
+    /// @param spelling Whether `Primary` may be used.
     /// @return The comma-separated spellings.
-    [[nodiscard]] std::string format(vtbackend::Modifiers const& flags) const
+    [[nodiscard]] std::string format(vtbackend::Modifiers const& flags, PrimarySpelling spelling) const
     {
         auto result = std::string {};
-        result.append(canonicalModifierSpellings(flags, keyboardPlatform)
+        result.append(modifierSpellings(flags, keyboardPlatform, spelling)
                       | core::views::joinWith(std::string_view(",")));
         return result;
     }

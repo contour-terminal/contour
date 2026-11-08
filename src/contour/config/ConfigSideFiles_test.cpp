@@ -2646,6 +2646,28 @@ TEST_CASE("a written config round-trips on its own platform", "[config][primary]
     }
 }
 
+TEST_CASE("a generated config folds no two rows into one on another platform", "[config][primary]")
+{
+    auto dir = QTemporaryDir {};
+    REQUIRE(dir.isValid());
+
+    // A contour.yml generated on a Mac and copied to Linux (or the reverse) must keep every row its own: two
+    // rows the loader folds into one binding run both actions, e.g. Command+W and Shift+Command+W both read
+    // as Ctrl+Shift+W, closing the pane and then the whole tab.
+    auto const rowCount = [](contour::config::InputMappings const& mappings) {
+        return mappings.keyMappings.size() + mappings.charMappings.size() + mappings.mouseMappings.size();
+    };
+    for (auto const from: PlatformKinds)
+        for (auto const to: PlatformKinds)
+        {
+            CAPTURE(static_cast<int>(from), static_cast<int>(to));
+            auto const original = contour::config::Config { .keyboardPlatformKind = from };
+            auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(original);
+            auto const reloaded = loadFromYaml(dir, written, to);
+            CHECK(rowCount(reloaded.inputMappings.value()) == rowCount(original.inputMappings.value()));
+        }
+}
+
 TEST_CASE("Primary+Shift and Primary collide on the desktop", "[config][primary]")
 {
     auto dir = QTemporaryDir {};

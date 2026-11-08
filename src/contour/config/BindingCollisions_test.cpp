@@ -6,6 +6,9 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/BindingCollisions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/DefaultBindings.hpp>
+#include <contour/config/ModifierNames.hpp>
+#include <contour/config/PortableSpelling.hpp>
 
 #include <vtbackend/input/InputGenerator.hpp>
 
@@ -148,6 +151,35 @@ template <typename Input>
                                                          char32_t input)
 {
     return fallbackRow(builtinFallbackCharMappings(kind), modifiers, input);
+}
+
+/// @p rows as a configuration written on @p from reads them back on @p to: each row's modifiers go through
+/// the writer's spellings for @p from (@see portablePrimarySpellings) and the reader's meaning of them on @p
+/// to.
+template <typename Input>
+[[nodiscard]] std::vector<vtbackend::InputBinding<Input, ActionList>> carried(
+    std::vector<vtbackend::InputBinding<Input, ActionList>> rows,
+    KeyboardPlatformKind from,
+    KeyboardPlatformKind to)
+{
+    auto const spellings =
+        portablePrimarySpellings(std::span<vtbackend::InputBinding<Input, ActionList> const> { rows }, from);
+    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
+    {
+        auto const written = modifierSpellings(rows[index].modifiers, from, spellings[index]);
+        rows[index].modifiers = readBack(written, to);
+    }
+    return rows;
+}
+
+/// A configuration's bindings, written on @p from and read back on @p to.
+[[nodiscard]] InputMappings carriedMappings(InputMappings const& mappings,
+                                            KeyboardPlatformKind from,
+                                            KeyboardPlatformKind to)
+{
+    return InputMappings { .keyMappings = carried(mappings.keyMappings, from, to),
+                           .charMappings = carried(mappings.charMappings, from, to),
+                           .mouseMappings = carried(mappings.mouseMappings, from, to) };
 }
 
 /// Shorthand for an expected list of action names.
@@ -530,4 +562,20 @@ TEST_CASE("the desktop steps between commands as VS Code does", "[bindings]")
     // macOS keeps Control+Shift+Up/Down as the jump between prompts.
     CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::UpArrow) == Names { "ScrollMarkUp" });
     CHECK(keyActions(KeyboardPlatformKind::Mac, ctrlShift, Key::DownArrow) == Names { "ScrollMarkDown" });
+}
+
+TEST_CASE("a configuration generated on one platform binds no chord twice on another", "[bindings][primary]")
+{
+    // Primary exists so that one contour.yml works on every machine. A generated file whose rows fold onto
+    // one chord elsewhere runs both actions there (the loader merges them), e.g. Command+W and
+    // Shift+Command+W both reading back as Ctrl+Shift+W, closing the pane and then the whole tab.
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const from: AllKinds)
+            for (auto const to: AllKinds)
+            {
+                INFO("edition " << token << ", written on " << static_cast<int>(from) << ", read on "
+                                << static_cast<int>(to));
+                auto const mappings = carriedMappings(makeDefaultInputMappings(edition, from), from, to);
+                CHECK(describe(mappings) == std::string {});
+            }
 }

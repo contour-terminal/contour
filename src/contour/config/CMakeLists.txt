@@ -39,6 +39,7 @@ add_library(contour_config STATIC
     LayoutStore.cpp LayoutStore.hpp
     MaterialSupport.hpp
     ModifierNames.hpp
+    PortableSpelling.hpp
     NewDefaultsOffer.hpp
     OptionAsAlt.hpp
     QuickTerminalConfig.hpp
