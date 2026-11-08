@@ -276,7 +276,7 @@ class DaemonPersistence
 {
   public:
     /// @param loop The daemon's loop.
-    /// @param host The host whose workspace is kept. Borrowed: it must outlive this.
+    /// @param host The host whose workspaces are kept. Borrowed: it must outlive this.
     /// @param store The snapshot file. Borrowed: it must outlive this.
     /// @param restoredFrom Which file the host's SessionHostConfig::restore came from; nullopt when the host
     ///        was given none.

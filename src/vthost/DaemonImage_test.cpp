@@ -303,7 +303,7 @@ TEST_CASE("a lease that cannot be taken fails staging before anything is copied"
 
 TEST_CASE("a staged image stays leased while its StagedImage lives", "[vthost][image]")
 {
-    // Review Focus 4, the spawn workspace. Launcher A (0.8.1) stages and keeps its StagedImage, as
+    // Review Focus 4, the spawn window. Launcher A (0.8.1) stages and keeps its StagedImage, as
     // ensureDaemon does until the spawned daemon serves. Launcher B (0.8.2, same imagesRoot) stages
     // and prunes: 0.8.1's directory survives. A drops its StagedImage; B prunes again: removed.
     auto files = StagingFileSystem {};
@@ -409,7 +409,7 @@ TEST_CASE("clearing an incomplete target never removes a launcher's complete ima
     std::ignore = files.writeFile(AppImagePath, AppImageContent);
     auto const target = fs::path { "/state/bin" } / appImageName("0.8.1");
     std::ignore = files.writeFile(target / "Contour.AppImage", "EL"); // truncated, no .complete
-    // The workspace is between this launcher's check and its disposing of the target, by removal or by
+    // The window is between this launcher's check and its disposing of the target, by removal or by
     // a move: the other launcher's publish lands at whichever comes first.
     auto otherPublished = false;
     auto const otherPublishes = [&](fs::path const& path) {

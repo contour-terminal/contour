@@ -166,7 +166,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// An increment is emitted inline, unpaced, so whatever it carries must fit beside a backlog. A
     /// flood of OSC 133 cycles — a `cat` of a recorded session — can change a whole store's worth of
     /// records within one debounce window, at up to MaxRecordedCommandLineBytes each, which unbounded
-    /// is megabytes in one frame. Budgeted, the remainder waits for the next workspace: records arrive
+    /// is megabytes in one frame. Budgeted, the remainder waits for the next window: records arrive
     /// late, never lost, and never at the cost of the connection. A connection whose snapshot piece
     /// is smaller spends that instead, for the reason the piece is smaller; and while its send queue
     /// has no room, records wait altogether.

@@ -1266,7 +1266,7 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
 
             // Everything still queued for this session is about to be re-described in full,
             // so send the snapshot INSTEAD of them rather than behind them. Without this a
-            // burst of resyncs (a workspace drag, or an attach immediately followed by the
+            // burst of resyncs (a window drag, or an attach immediately followed by the
             // client asserting its area) stacks whole grids in the queue until it overflows
             // and the client is dropped — for frames the mirror would have thrown away.
             // A dropped frame may have carried hyperlink URIs this connection had recorded as

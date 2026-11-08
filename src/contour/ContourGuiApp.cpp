@@ -1546,9 +1546,9 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         _nativeController.get(),
         &remote::NativeController::workspaceRestored,
         this,
-        [this](quint32 windows, quint32 tabs) {
+        [this](quint32 workspaces, quint32 tabs) {
             _sessionManager.noteWorkspaceRestored(
-                vthost::RestoredCounts { .workspaces = windows, .tabs = tabs });
+                vthost::RestoredCounts { .workspaces = workspaces, .tabs = tabs });
         },
         Qt::QueuedConnection);
     connectReconnectSignals();
@@ -3432,8 +3432,8 @@ void ContourGuiApp::reconcileAttachWindows()
     // Daemon workspace ids come ascending, so the primary (lowest-id) workspace is handled
     // first — it maps to the boot window; the rest each get their own OS window. One already shown is brought
     // up to date; this places the others.
-    auto const openWindow = [&](contour::remote::ReconciledWorkspace const& window) {
-        auto const& [daemonWorkspace, tabs, sessions] = window;
+    auto const openWindow = [&](contour::remote::ReconciledWorkspace const& workspace) {
+        auto const& [daemonWorkspace, tabs, sessions] = workspace;
         if (_pendingAttachWorkspace == daemonWorkspace)
         {
             reach = session::TerminalSessionManager::ReconcileReach::Partial;
@@ -3553,9 +3553,9 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
             continue;
         // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
         // @see TerminalSession::noteTransportLost
-        if (auto* window = _sessionManager.model().workspace(mapped->second))
-            for (auto const index: std::views::iota(0, window->tabCount()))
-                for (auto* session: _sessionManager.sessionsOfTab(window->tabAt(index)))
+        if (auto* workspace = _sessionManager.model().workspace(mapped->second))
+            for (auto const index: std::views::iota(0, workspace->tabCount()))
+                for (auto* session: _sessionManager.sessionsOfTab(workspace->tabAt(index)))
                     session->noteTransportLost();
         if (auto* controller = _sessionManager.controllerFor(mapped->second))
             doomed.push_back(controller);
@@ -3567,24 +3567,26 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
         controller->closeWindow();
 }
 
-void ContourGuiApp::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId osWindow)
+void ContourGuiApp::bindDaemonWorkspace(std::uint64_t daemonWorkspace,
+                                        vtworkspace::WorkspaceId localWorkspace)
 {
     _attachBoot = session::AttachBoot::Adopted;
-    _attachWindowMap.emplace(daemonWorkspace, osWindow);
+    _attachWindowMap.emplace(daemonWorkspace, localWorkspace);
     if (_reconcilingLayouts != nullptr)
         contour::remote::applyRemoteLayout(
-            _sessionManager, osWindow, *_nativeController, *_reconcilingLayouts, daemonWorkspace);
+            _sessionManager, localWorkspace, *_nativeController, *_reconcilingLayouts, daemonWorkspace);
     else
-        contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWorkspace);
-    _sessionManager.deliverRestoreSummaryTo(osWindow);
+        contour::remote::applyRemoteLayout(
+            _sessionManager, localWorkspace, *_nativeController, daemonWorkspace);
+    _sessionManager.deliverRestoreSummaryTo(localWorkspace);
 }
 
 void ContourGuiApp::expireRestoreSummaryAfterLayout()
 {
     if (!_nativeController)
         return;
-    auto const layout = _nativeController->workspaceIds().empty() ? session::LayoutWindows::None
-                                                                  : session::LayoutWindows::Some;
+    auto const layout = _nativeController->workspaceIds().empty() ? session::LayoutWorkspaces::None
+                                                                  : session::LayoutWorkspaces::Some;
     auto const spawn = _pendingAttachWorkspace ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
     if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
         == session::RestoreSummaryFate::Keep)

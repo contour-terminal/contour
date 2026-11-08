@@ -302,58 +302,58 @@ Tab* SessionModel::createTab(WorkspaceId workspaceId)
         *win, static_cast<int>(win->_tabs.size()), std::make_unique<Tab>(tabId, rootPaneId, session));
 }
 
-Tab* SessionModel::insertTab(Workspace& win, int requestedIndex, std::unique_ptr<Tab> tab)
+Tab* SessionModel::insertTab(Workspace& workspace, int requestedIndex, std::unique_ptr<Tab> tab)
 {
-    auto const workspaceId = win.id();
+    auto const workspaceId = workspace.id();
     auto const tabId = tab->id();
-    auto const index = std::clamp(requestedIndex, 0, static_cast<int>(win._tabs.size()));
+    auto const index = std::clamp(requestedIndex, 0, static_cast<int>(workspace._tabs.size()));
 
     // Bracket the insertion so a Qt host's beginInsertRows() runs BEFORE the tab set grows (its contract
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
     _events.tabAboutToBeAdded(workspaceId, index);
-    win._tabs.insert(win._tabs.begin() + index, std::move(tab));
+    workspace._tabs.insert(workspace._tabs.begin() + index, std::move(tab));
     // Tabs at or after the new slot moved up by one; keep the active/previous slots on the same tabs.
-    if (win._activeTabIndex >= index)
-        ++win._activeTabIndex;
-    if (win._previousActiveTabIndex >= index)
-        ++win._previousActiveTabIndex;
+    if (workspace._activeTabIndex >= index)
+        ++workspace._activeTabIndex;
+    if (workspace._previousActiveTabIndex >= index)
+        ++workspace._previousActiveTabIndex;
     _events.tabAdded(workspaceId, tabId, index);
 
     // A new tab is a genuine activation: remember the outgoing active slot as the previous tab.
-    win._previousActiveTabIndex = win._activeTabIndex;
-    win._activeTabIndex = index;
+    workspace._previousActiveTabIndex = workspace._activeTabIndex;
+    workspace._activeTabIndex = index;
     _events.activeTabChanged(workspaceId, tabId, index);
 
-    return win._tabs[static_cast<size_t>(index)].get();
+    return workspace._tabs[static_cast<size_t>(index)].get();
 }
 
-void SessionModel::closeTabAt(Workspace& win, int index, std::function<void()> const& beforeErase)
+void SessionModel::closeTabAt(Workspace& workspace, int index, std::function<void()> const& beforeErase)
 {
-    assert(index >= 0 && std::cmp_less(index, win._tabs.size()));
-    auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
+    assert(index >= 0 && std::cmp_less(index, workspace._tabs.size()));
+    auto const tabId = workspace._tabs[static_cast<size_t>(index)]->id();
 
-    auto const previousActiveIndex = win._activeTabIndex;
+    auto const previousActiveIndex = workspace._activeTabIndex;
     // Bracket the removal: a Qt host's beginRemoveRows() must run while the tab is still present (old
     // rowCount), endRemoveRows() after the erase.
-    _events.tabAboutToBeRemoved(win.id(), index);
+    _events.tabAboutToBeRemoved(workspace.id(), index);
     if (beforeErase)
         beforeErase();
-    win._tabs.erase(win._tabs.begin() + index);
-    _events.tabClosed(win.id(), tabId, index);
+    workspace._tabs.erase(workspace._tabs.begin() + index);
+    _events.tabClosed(workspace.id(), tabId, index);
 
     // Translate/invalidate the "previous active tab" slot the same way as the active slot below: it must
     // never dangle at a wrong tab. If the closed tab WAS the previous one, there is no valid previous
     // anymore (-1); if it was before the previous slot, that slot shifted down by one.
-    if (win._previousActiveTabIndex == index)
-        win._previousActiveTabIndex = -1;
-    else if (index < win._previousActiveTabIndex)
-        --win._previousActiveTabIndex;
+    if (workspace._previousActiveTabIndex == index)
+        workspace._previousActiveTabIndex = -1;
+    else if (index < workspace._previousActiveTabIndex)
+        --workspace._previousActiveTabIndex;
 
     // Keep the active index pointing at the *same* surviving tab, and notify only if it changed.
-    if (win._tabs.empty())
+    if (workspace._tabs.empty())
     {
-        win._activeTabIndex = -1;
-        win._previousActiveTabIndex = -1;
+        workspace._activeTabIndex = -1;
+        workspace._previousActiveTabIndex = -1;
         return;
     }
 
@@ -362,16 +362,17 @@ void SessionModel::closeTabAt(Workspace& win, int index, std::function<void()> c
     //  - the erased tab was before the active one  -> the active tab shifted down by one (decrement);
     //  - the active tab itself was erased          -> adopt the tab now occupying that slot, clamped
     //                                                 to the new last index.
-    auto newActive = win._activeTabIndex;
-    if (index < win._activeTabIndex)
+    auto newActive = workspace._activeTabIndex;
+    if (index < workspace._activeTabIndex)
         --newActive;
-    else if (index == win._activeTabIndex)
-        newActive = std::min(newActive, static_cast<int>(win._tabs.size()) - 1);
+    else if (index == workspace._activeTabIndex)
+        newActive = std::min(newActive, static_cast<int>(workspace._tabs.size()) - 1);
     newActive = std::max(newActive, 0);
 
-    win._activeTabIndex = newActive;
+    workspace._activeTabIndex = newActive;
     if (newActive != previousActiveIndex || index == previousActiveIndex)
-        _events.activeTabChanged(win.id(), win._tabs[static_cast<size_t>(newActive)]->id(), newActive);
+        _events.activeTabChanged(
+            workspace.id(), workspace._tabs[static_cast<size_t>(newActive)]->id(), newActive);
 }
 
 void SessionModel::closeTab(WorkspaceId workspaceId, TabId tabId)

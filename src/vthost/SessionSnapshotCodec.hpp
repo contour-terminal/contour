@@ -10,7 +10,7 @@
 /// File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
 /// Magic    := the 8 bytes "CTRSNAP\n"
 /// Body     := TakenAt:svarint(unix seconds) WorkspaceCount:varint Workspace{WorkspaceCount}
-/// Workspace   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+/// Workspace := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
 /// Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
 /// Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
 /// Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?

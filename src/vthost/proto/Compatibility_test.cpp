@@ -357,9 +357,9 @@ TEST_CASE("the compatibility floor is two releases back, or the oldest", "[vthos
         return proto::compatibilityFloor(table);
     };
     CHECK(floorAfter(0) == 7); // Nothing released: the build answers only to itself.
-    CHECK(floorAfter(1) == 4); // 1.0.0 is within the workspace.
+    CHECK(floorAfter(1) == 4); // 1.0.0 is within the window.
     CHECK(floorAfter(2) == 4); // 1.0.0 and 1.1.0 are the previous two.
-    CHECK(floorAfter(3) == 5); // 1.1.0 and 1.2.0 are; 1.0.0 has left the workspace.
+    CHECK(floorAfter(3) == 5); // 1.1.0 and 1.2.0 are; 1.0.0 has left the window.
 }
 
 TEST_CASE("every dated release since negotiation has a ReleasedProtocols row",

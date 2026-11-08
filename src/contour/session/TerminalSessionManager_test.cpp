@@ -163,7 +163,7 @@ TEST_CASE("SessionModel: removing a window with tabs closes only that window's t
     REQUIRE(a->tabCount() == 2);
     REQUIRE(b->tabCount() == 1);
 
-    // Capture before removal: removeWindow() destroys A, so a->id() afterwards reads freed memory.
+    // Capture before removal: removeWorkspace() destroys A, so a->id() afterwards reads freed memory.
     auto const aId = a->id();
     model.removeWorkspace(aId);
 

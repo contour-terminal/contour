@@ -227,7 +227,7 @@ namespace
 
       private:
         /// posix_spawn()s @p image with @p stdio as its stdin and stdout and @p stderrFd as its stderr.
-        /// No fork in this multi-threaded process, so there is no workspace in which a child may only call
+        /// No fork in this multi-threaded process, so there is no window in which a child may only call
         /// async-signal-safe functions.
         /// @return 0, or the error number the spawn failed with.
         [[nodiscard]] static int spawnWithStdio(std::string const& image,

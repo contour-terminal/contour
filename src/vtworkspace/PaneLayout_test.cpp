@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tests for the pane-tree layout solver: the leaf->root ratio walk that computes how large the workspace
+// Tests for the pane-tree layout solver: the leaf->root ratio walk that computes how large the window
 // content area must be so a given leaf receives its requested extent (grid) with all ratios fixed.
 
 #include <catch2/catch_test_macros.hpp>
@@ -447,7 +447,7 @@ TEST_CASE("contentSizeForLeaf saturates instead of overflowing the int cast",
     // Each upward step divides by a share floored at Pane::MinimumRatio (0.05), so every nested
     // split multiplies the requirement by up to 20. Six of them from a modest leaf lands past
     // INT_MAX — and `static_cast<int>` of an out-of-range double is UNDEFINED, not saturating: a
-    // garbage (often negative) extent reaches the workspace sizing, and the project's default
+    // garbage (often negative) extent reaches the window sizing, and the project's default
     // -fsanitize=undefined presets abort outright.
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
     auto* node = &root;

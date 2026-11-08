@@ -1365,7 +1365,7 @@ int ContourApp::daemonAction()
         config.persistence =
             workspacePersistenceOf(hostConfig->daemon.value().restore, *std::move(snapshotPath));
     else
-        errorLog()("the label '{}' names no snapshot file; this daemon keeps no workspace", daemonLabel);
+        errorLog()("the label '{}' names no snapshot file; this daemon keeps no workspaces", daemonLabel);
     auto profiles = std::make_shared<ConfigProfileCatalog const>(
         *std::move(hostConfig), daemonProfile, vthost::HostedColorPreference);
     // Edits of the configuration reach the sessions spawned afterwards, and the scrollback of those

@@ -69,7 +69,7 @@ enum class ShutdownCause : std::uint8_t
     UpgradeRestart,    ///< A Control connection asked it to stop, to be replaced by a newer release.
     /// A Control connection asked it to stop and to keep its workspace for the next start
     /// (`contour daemon stop --keep-snapshot`).
-    StopRequestedKeepingWorkspace,
+    StopRequestedKeepingWorkspaces,
 };
 
 /// The causes' log text, single-sourced.
@@ -79,7 +79,7 @@ inline constexpr auto ShutdownCauseNames = std::to_array<std::pair<std::string_v
     { "idle", ShutdownCause::Idle },
     { "stop requested", ShutdownCause::StopRequested },
     { "restart for upgrade", ShutdownCause::UpgradeRestart },
-    { "stop requested, keeping the workspace", ShutdownCause::StopRequestedKeepingWorkspace },
+    { "stop requested, keeping the workspaces", ShutdownCause::StopRequestedKeepingWorkspaces },
 });
 
 /// @param cause The cause to name.

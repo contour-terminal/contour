@@ -74,7 +74,7 @@ enum class LocalHistory : uint8_t
     /// A RESIZE belongs here even though it destroys the server's row identity: this terminal
     /// reflowed the same rows at the same moment, so its history is the reflowed truth rather
     /// than something stale. Discarding it would shorten the user's scrollback to the daemon's
-    /// depth every time the workspace changed size — which local mode never does.
+    /// depth every time the window changed size — which local mode never does.
     ///
     /// Keep preserves history; it does not decline to HAVE any. Where the target page holds no
     /// local scrollback the replay streams the snapshot's rows in regardless, because there is no
@@ -103,7 +103,7 @@ enum class ReplayCause : uint8_t
     Resync,
     /// The announced size moved: the window manager's doing, not the program's.
     Resize,
-    /// The workspace into a larger host grid panned, or the host's page base moved back.
+    /// The window into a larger host grid panned, or the host's page base moved back.
     WindowMoved,
     /// The program entered or left the alternate screen (or another DEC page).
     ScreenSwitch,
@@ -332,7 +332,7 @@ class ScreenMirror
     /// @return The page the server's `screenType` names, on the mirror terminal.
     [[nodiscard]] vtbackend::Screen& activePage() const noexcept;
 
-    /// Which cell of @p screen's grid the mirror page's top-left cell shows: the origin of the workspace a
+    /// Which cell of @p screen's grid the mirror page's top-left cell shows: the origin of the window a
     /// page smaller than the host's grid shows into it, following the host's cursor (viewportOrigin), and
     /// (0,0) for a page at least as large. Under the terminal lock: it reads the page's size.
     [[nodiscard]] vtbackend::CellLocation originFor(RemoteScreen const& screen) const;

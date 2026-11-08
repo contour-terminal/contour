@@ -1970,7 +1970,7 @@ TEST_CASE("a scrollback eviction reaches the client though no row changed", "[vt
     // which deliberately bumps no generation and dirties no line — the floor is the ONLY signal.
     // Gated on what the delta itself knows, the PDU was dropped: the mirror's own detector for this
     // case (ScreenMirror's `floorOutranScroll`) waited on a delta that never arrived, so an attached
-    // workspace kept rendering the entire scrollback the daemon had thrown away.
+    // window kept rendering the entire scrollback the daemon had thrown away.
     auto h = NativeHarness { { .history = vtbackend::LineCount(10) } };
     auto const sessionId = newSession(h.host);
     // More than the 25-line page holds, so rows actually reach the scrollback: with no history at
@@ -3389,7 +3389,7 @@ TEST_CASE("a client cannot ask a session out of the host invariants", "[vthost][
 
 TEST_CASE("a resize one client asked for resyncs EVERY attached client", "[vthost][native]")
 {
-    // Maximizing one workspace left the other rendering the old grid. The resync was issued by the
+    // Maximizing one window left the other rendering the old grid. The resync was issued by the
     // connection that received the ResizeRequest, over its OWN follow map, so no other client heard
     // about it -- and `Terminal::resizeScreen` raises no screen update, so nothing else would tell
     // them either until the session next produced output. A shared grid has to announce itself.

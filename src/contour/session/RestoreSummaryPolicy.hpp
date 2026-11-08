@@ -14,7 +14,7 @@ enum class AttachBoot : uint8_t
 };
 
 /// Whether the daemon's layout names any workspace.
-enum class LayoutWindows : uint8_t
+enum class LayoutWorkspaces : uint8_t
 {
     None = 0, ///< No layout arrived yet, or it is empty: nothing has been realized.
     Some,     ///< At least one daemon workspace is to be shown.
@@ -41,11 +41,11 @@ enum class RestoreSummaryFate : uint8_t
 /// @param spawn Whether an OS window is being spawned for a daemon workspace.
 /// @param boot Whether the boot window has adopted the primary daemon workspace.
 /// @return Keep while a window may still receive the summary, else Expire.
-[[nodiscard]] constexpr RestoreSummaryFate restoreSummaryFateAfterLayout(LayoutWindows layout,
+[[nodiscard]] constexpr RestoreSummaryFate restoreSummaryFateAfterLayout(LayoutWorkspaces layout,
                                                                          AttachSpawn spawn,
                                                                          AttachBoot boot) noexcept
 {
-    if (layout == LayoutWindows::None || spawn == AttachSpawn::Spawning || boot == AttachBoot::Pending)
+    if (layout == LayoutWorkspaces::None || spawn == AttachSpawn::Spawning || boot == AttachBoot::Pending)
         return RestoreSummaryFate::Keep;
     return RestoreSummaryFate::Expire;
 }

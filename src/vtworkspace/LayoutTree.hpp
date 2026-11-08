@@ -25,7 +25,7 @@ struct LayoutPane
     std::vector<std::string> arguments;
     /// Working directory the pane's shell starts in. Unset uses the profile's. A filesystem::path, like
     /// every other resolved config path: a std::string narrowed from it with path::string() would be
-    /// spelled in the ANSI code page on Workspaces, which spells most of Unicode not at all.
+    /// spelled in the ANSI code page on Windows, which spells most of Unicode not at all.
     std::optional<std::filesystem::path> directory;
     /// Per-pane profile override (terminal-level settings only — not workspace ones).
     std::optional<std::string> profile;

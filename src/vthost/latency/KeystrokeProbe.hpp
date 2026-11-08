@@ -5,7 +5,7 @@
 /// The keystroke probe: types keys at the echo child and times each until a frame draws its echo.
 ///
 /// A pure state machine over an injected clock. The frontend feeds it the cursor column of every
-/// swapped frame and asks it for the next key to type; it never touches a workspace or a socket.
+/// swapped frame and asks it for the next key to type; it never touches a window or a socket.
 
 #include <core/platform/Clock.hpp>
 

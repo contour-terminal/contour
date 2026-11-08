@@ -1292,7 +1292,7 @@ single shutdown log line names it:
 | `Idle`              | an `ExitWhenIdle` daemon with nothing to serve for its grace period           | `idle`                           |
 | `StopRequested`     | a Control connection's `StopDaemon` with reason `User`                        | `stop requested`                 |
 | `UpgradeRestart`    | a Control connection's `StopDaemon` with reason `UpgradeRestart`              | `restart for upgrade`            |
-| `StopRequestedKeepingWorkspace` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspaces` | `stop requested, keeping the workspace` |
+| `StopRequestedKeepingWorkspaces` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspaces` | `stop requested, keeping the workspaces` |
 
 All of them funnel into one `ShutdownFunnel`, which runs on the loop thread and runs once: a second
 request — a `SIGTERM` racing a `StopDaemon` — logs nothing and does nothing. The shutdown first calls

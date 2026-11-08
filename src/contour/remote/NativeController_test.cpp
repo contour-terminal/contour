@@ -5634,17 +5634,17 @@ TEST_CASE("workspaces the daemon no longer has are reported lost", "[attach][con
     pane.terminal.reset();
 }
 
-TEST_CASE("a client following every window still gets new windows after a reconnect",
+TEST_CASE("a client following every workspace still gets new workspaces after a reconnect",
           "[attach][controller][reconnect]")
 {
-    // A reconnect must not narrow the view: AllWindows comes back as AllWindows, not as Resume of the windows
-    // it had, so a window another client creates afterwards still reaches it.
+    // A reconnect must not narrow the view: AllWorkspaces comes back as AllWorkspaces, not as Resume of the
+    // workspaces it had, so a workspace another client creates afterwards still reaches it.
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline); // AllWindows
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline); // AllWorkspaces
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
@@ -6370,7 +6370,7 @@ TEST_CASE("a controller attached after a daemon restore is told what came back, 
         &first,
         &contour::remote::NativeController::workspaceRestored,
         &context,
-        [&](quint32 windows, quint32 tabs) { restoredTold.emplace_back(windows, tabs); },
+        [&](quint32 workspaces, quint32 tabs) { restoredTold.emplace_back(workspaces, tabs); },
         Qt::QueuedConnection);
     QObject::connect(
         &first,
@@ -6393,7 +6393,7 @@ TEST_CASE("a controller attached after a daemon restore is told what came back, 
         &second,
         &contour::remote::NativeController::workspaceRestored,
         &context,
-        [&](quint32 windows, quint32 tabs) { untold.emplace_back(windows, tabs); },
+        [&](quint32 workspaces, quint32 tabs) { untold.emplace_back(workspaces, tabs); },
         Qt::QueuedConnection);
     REQUIRE(second.connectAndWait(10s).has_value());
     REQUIRE(waitUntil([&] { return second.layout().has_value(); }));
@@ -6433,7 +6433,7 @@ TEST_CASE("a hello that restored nothing raises no summary", "[attach][controlle
         &controller,
         &contour::remote::NativeController::workspaceRestored,
         &context,
-        [&](quint32 windows, quint32 tabs) { told.emplace_back(windows, tabs); },
+        [&](quint32 workspaces, quint32 tabs) { told.emplace_back(workspaces, tabs); },
         Qt::QueuedConnection);
     REQUIRE(controller.connectAndWait(10s).has_value());
     REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));

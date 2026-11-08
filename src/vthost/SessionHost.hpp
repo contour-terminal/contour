@@ -1107,7 +1107,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// applyPaneSize() instead, so a pane resizes its PTY once for both.
     ///
     /// A report counts as the client's latest word only when it differs from what the client last reported
-    /// (or is its first): clients re-assert their sizes on every attach and workspace event, and such a
+    /// (or is its first): clients re-assert their sizes on every attach and window event, and such a
     /// repeat must not take the cell back from a client that reported a new one since. A client that never
     /// reports one (tmux control mode, an older peer) takes no part.
     /// @param client The reporting client, identified by its stream observer; must not be null, and must be

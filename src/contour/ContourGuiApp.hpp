@@ -1178,11 +1178,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         vthost::DaemonSpawnOptions const& options);
 
     /// Records the daemon-workspace → OS-window mapping and immediately reconciles that daemon workspace's
-    /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
+    /// tab/pane tree into @p localWorkspace — the one place the "a mapping always implies a reconcile"
     /// invariant lives (shared by the primary-window and spawned-window paths).
     /// @param daemonWorkspace The daemon workspace id.
     /// @param osWindow The OS window that mirrors it.
-    void bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId osWindow);
+    void bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId localWorkspace);
 
     /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
     /// still to be bound: a toast about a restore must not surface in a window opened later.

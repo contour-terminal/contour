@@ -417,7 +417,7 @@ TEST_CASE("daemon stop with no daemon running clears the saved workspace on cons
             stop(contour::cli::StopConsent::Ask, contour::cli::Confirmation::Declined);
         CHECK(status == contour::cli::ExitStatus::Unreachable);
         CHECK(saved.store.load().verdict == vthost::LoadVerdict::Restorable);
-        CHECK(err.str() == "no daemon is running; its saved workspace is kept\n");
+        CHECK(err.str() == "no daemon is running; its saved workspaces are kept\n");
     }
     SECTION("no terminal to ask on")
     {
@@ -482,7 +482,7 @@ TEST_CASE("daemon stop --keep-snapshot with no daemon running keeps it", "[conto
     CHECK(err.str() == "no daemon is running on /run/c/default\n");
 }
 
-TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspace", "[contour][cli][daemon]")
+TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspaces", "[contour][cli][daemon]")
 {
     auto status = sampleStatus();
     status.capabilities = vthost::proto::CapabilitySet::of(
@@ -500,7 +500,7 @@ TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspace", "
         CHECK(contour::cli::daemonStopVerb(port, "/run/c/default", keep, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
         CHECK(port.stops == std::vector { vthost::proto::StopReason::UserKeepingWorkspaces });
-        CHECK(out.str() == "daemon stopped; its workspace is kept\n");
+        CHECK(out.str() == "daemon stopped; its workspaces are kept\n");
     }
     SECTION("a plain stop")
     {
@@ -509,13 +509,13 @@ TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspace", "
               == contour::cli::ExitStatus::Ok);
         CHECK(port.stops == std::vector { vthost::proto::StopReason::User });
     }
-    SECTION("a daemon that keeps no workspace is stopped plainly")
+    SECTION("a daemon that keeps no workspaces is stopped plainly")
     {
         auto older = FakeControlPort { sampleStatus() };
         CHECK(contour::cli::daemonStopVerb(older, "/run/c/default", keep, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
         CHECK(older.stops == std::vector { vthost::proto::StopReason::User });
-        CHECK(err.str() == "contour daemon: this daemon keeps no workspace\n");
+        CHECK(err.str() == "contour daemon: this daemon keeps no workspaces\n");
         CHECK(out.str() == "daemon stopped\n");
     }
 }

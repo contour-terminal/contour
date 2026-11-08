@@ -768,7 +768,7 @@ TEST_CASE("workspaceFor discards only on a plain stop", "[vthost][daemon][snapsh
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::Idle) == ShutdownWorkspace::Keep);
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequested) == ShutdownWorkspace::Discard);
     STATIC_CHECK(vthost::workspaceFor(ShutdownCause::UpgradeRestart) == ShutdownWorkspace::Keep);
-    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequestedKeepingWorkspace)
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequestedKeepingWorkspaces)
                  == ShutdownWorkspace::Keep);
 }
 

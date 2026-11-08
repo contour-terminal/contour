@@ -148,7 +148,7 @@ probe() {
 # --- The configuration the daemon starts with -----------------------------------------------------------------
 #
 # A profile setting that is not the default, and a shell nothing uses: the program below is named on the
-# command line. 91x57 differs from the 80x24 default, and from what a client's workspace would impose; it is the
+# command line. 91x57 differs from the 80x24 default, and from what a client's window would impose; it is the
 # size of the pty, which the program reads with `stty size`. 57 lines because the ticks must outlive the
 # handover on the screen: the alternate screen keeps no history, and the run is checked for gaps there. At a
 # tick every 200 ms that is over 11 s of them, however slowly a loaded machine upgrades.
@@ -368,8 +368,8 @@ daemon_pid_alive || fail "the daemon died in the second upgrade"
 kill -0 "$PROGRAM_PID" 2>/dev/null || fail "the hosted program died in the second upgrade"
 contour daemon status --socket "$SOCKET"
 grep -qE '^upgrades: +2$' "$OUT/last.txt" || fail "the second upgrade did not count"
-contour new --new-workspace daemon "$SOCKET" json sh "$OUT/size.sh" "$OUT/size-carried"
-[ "$status" -eq 0 ] || fail "contour new --new-workspace exited $status"
+contour new new-workspace daemon "$SOCKET" json sh "$OUT/size.sh" "$OUT/size-carried"
+[ "$status" -eq 0 ] || fail "contour new new-workspace exited $status"
 wait_for 200 size_written carried || fail "the new workspace did not report its size within 20s"
 [ "$(tr -d ' \n' < "$OUT/size-carried")" = "3383" ] \
     || fail "a workspace after the upgrade is '$(cat "$OUT/size-carried")', not the edited profile's 33 83"

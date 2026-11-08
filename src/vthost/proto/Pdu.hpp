@@ -226,9 +226,9 @@ struct WireCellPixelSize
 /// Capability::AttachIntent does anyway.
 enum class AttachIntentKind : uint8_t
 {
-    AllWorkspaces =
-        0,      ///< Every workspace, including those created later: the behaviour before intents existed.
-    Launch = 1, ///< A fresh launch: every workspace when no other client is attached, else a new one.
+    /// Every workspace, including those created later: the behaviour before intents existed.
+    AllWorkspaces = 0,
+    Launch = 1,       ///< A fresh launch: every workspace when no other client is attached, else a new one.
     NewWorkspace = 2, ///< A new workspace of its own, mirroring none of the existing ones.
     Workspaces = 3,   ///< Exactly the listed workspaces (those that exist).
     Resume = 4,       ///< The listed workspaces after a reconnect; when none survives, as Launch.

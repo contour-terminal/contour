@@ -135,13 +135,19 @@ struct Run
     }
 };
 
-/// Parses @p args (after `contour`) against the application's own syntax.
-core::cli::FlagStore parseFlags(std::vector<std::string_view> const& args)
+/// Parses @p args (after `contour`) against the application's own syntax, keeping a refusal.
+auto tryParse(std::vector<std::string_view> const& args)
 {
     static auto const app = contour::cli::ContourApp { core::defaultEnvironment() };
     auto line = core::cli::StringViewList { "contour" };
     line.insert(line.end(), args.begin(), args.end());
-    auto parsed = core::cli::parse(app.parameterDefinition(), line);
+    return core::cli::parse(app.parameterDefinition(), line);
+}
+
+/// Parses @p args (after `contour`), which must be accepted.
+core::cli::FlagStore parseFlags(std::vector<std::string_view> const& args)
+{
+    auto parsed = tryParse(args);
     REQUIRE(parsed.has_value());
     return *std::move(parsed);
 }
@@ -169,41 +175,41 @@ TEST_CASE("split builds its request from flags", "[contour][cli][control]")
                                                              .focus = vtcontrol::FocusPolicy::Keep }));
 }
 
-TEST_CASE("ControlVerbs: new takes --new-workspace", "[contour][cli][control]")
-{
-    auto const flags = parseFlags({ "new", "--new-workspace" });
-    auto const params = verbNamed("new").buildParams(flags);
-    REQUIRE(params.has_value());
-    auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*params);
-    REQUIRE(request.has_value());
-    CHECK(request->placement == vtcontrol::WorkspacePlacement::New);
-    CHECK(request->workspace.empty());
-}
-
-TEST_CASE("ControlVerbs: ls and new take --workspace W", "[contour][cli][control]")
+TEST_CASE("ControlVerbs: ls and new take --workspace W and --new-workspace", "[contour][cli][control]")
 {
     auto const list = verbNamed("ls").buildParams(parseFlags({ "ls", "--workspace", "w1" }));
     REQUIRE(list.has_value());
     CHECK(*list == vtcontrol::encodeJson(vtcontrol::ListRequest { .workspace = "w1" }));
 
-    auto const created = verbNamed("new").buildParams(parseFlags({ "new", "--workspace", "w2" }));
-    REQUIRE(created.has_value());
-    auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*created);
-    REQUIRE(request.has_value());
-    CHECK(request->workspace == "w2");
-    CHECK(request->placement == vtcontrol::WorkspacePlacement::Existing);
+    struct Row
+    {
+        std::vector<std::string_view> args;
+        std::string_view workspace;
+        vtcontrol::WorkspacePlacement placement;
+    };
+    auto const rows = std::array {
+        Row { { "new", "--new-workspace" }, "", vtcontrol::WorkspacePlacement::New },
+        Row { { "new", "--workspace", "w2" }, "w2", vtcontrol::WorkspacePlacement::Existing },
+    };
+    for (auto const& row: rows)
+    {
+        auto const params = verbNamed("new").buildParams(parseFlags(row.args));
+        REQUIRE(params.has_value());
+        auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*params);
+        REQUIRE(request.has_value());
+        CHECK(request->workspace == row.workspace);
+        CHECK(request->placement == row.placement);
+    }
 }
 
 TEST_CASE("ControlVerbs: the old --window flag is an unknown option", "[contour][cli][control]")
 {
     // The parser refuses it, and ContourApp::run turns a refusal into EXIT_FAILURE (see App::run).
-    static auto const app = contour::cli::ContourApp { core::defaultEnvironment() };
-    for (auto const& line: { std::vector<std::string_view> { "contour", "ls", "--window", "1" },
-                             std::vector<std::string_view> { "contour", "ls", "--new-window" } })
+    for (auto const option: std::array<std::string_view, 2> { "--window", "--new-window" })
     {
-        auto const parsed = core::cli::parse(app.parameterDefinition(), line);
+        auto const parsed = tryParse({ "ls", option });
         REQUIRE_FALSE(parsed.has_value());
-        CHECK(parsed.error().message.contains("window"));
+        CHECK(parsed.error().message.contains(option));
     }
 }
 
@@ -221,6 +227,13 @@ TEST_CASE("ControlVerbs: new refuses the removed window flags, naming the new on
     CHECK(run.err.str().contains("--window is now --workspace"));
     CHECK(status({ "new", "--new-window" }) == 2);
     CHECK(run.err.str().contains("--new-window is now --new-workspace"));
+    // Every other spelling the parser accepts for an option name.
+    for (auto const word: std::array<std::string_view, 4> { "--window=W", "-window", "window", "new-window" })
+    {
+        run.err.str({});
+        CHECK(status({ "new", word, "daemon", "sh" }) == 2);
+        CHECK(run.err.str().contains(" is now --"));
+    }
     CHECK(channel.calls.empty());
 }
 

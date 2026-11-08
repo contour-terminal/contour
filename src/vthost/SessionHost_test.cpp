@@ -1068,13 +1068,13 @@ TEST_CASE("an area that matches no client lets the latest pane refinement throug
     h.host.unsubscribeStream(&h.client);
 }
 
-TEST_CASE("a client resizing its workspace under an area nobody displays leaves its panes still",
+TEST_CASE("a client resizing its window under an area nobody displays leaves its panes still",
           "[vthost][host][size]")
 {
     // Per axis, `smallest` of 100x20 and 80x30 is 80x20, which neither client displays. The first client
-    // widening its workspace moves neither the area nor whether anyone displays it: its pane must not pass
+    // widening its window moves neither the area nor whether anyone displays it: its pane must not pass
     // through the other client's refinement on the way, only to be put back by the re-send that follows the
-    // new area -- two resizes per pane, on every step of a workspace drag.
+    // new area -- two resizes per pane, on every step of a window drag.
     auto h = HostHarness { vthost::ClientSizePolicy::Smallest };
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
@@ -5065,7 +5065,7 @@ TEST_CASE("SessionHost.cellPixelSize.follows_the_latest_client", "[vthost][host]
     CHECK(h.host.learnedCellPixelSize() == pixels(18, 36));
     CHECK(h.everySessionAt(pixels(18, 36)));
 
-    // A's workspace moves to another screen: its new cell is the latest word again.
+    // A's window moves to another screen: its new cell is the latest word again.
     h.report(h.clientA, pixels(12, 24), cells(80, 24));
     CHECK(h.everySessionAt(pixels(12, 24)));
 }
@@ -5185,7 +5185,7 @@ TEST_CASE("SessionHost.cellPixelSize.an_unchanged_re_report_does_not_take_over",
     REQUIRE(h.everySessionAt(pixels(18, 36)));
     auto const resizesBefore = h.resizes();
 
-    // Clients re-assert their sizes on every attach and workspace event: a repeat is no newer word.
+    // Clients re-assert their sizes on every attach and window event: a repeat is no newer word.
     h.report(h.clientA, pixels(9, 18), cells(80, 24));
 
     CHECK(h.everySessionAt(pixels(18, 36)));

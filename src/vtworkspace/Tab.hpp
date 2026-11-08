@@ -31,7 +31,7 @@ namespace vtworkspace
 enum class TabColorSource : uint8_t
 {
     Profile,     //!< Default from the profile that created the tab.
-    Application, //!< Assigned by the terminal application via DECAC item 2 (workspace frame).
+    Application, //!< Assigned by the terminal application via DECAC item 2 (window frame).
     User,        //!< Chosen by the user via the tab's color flyout. Overrides Application.
 };
 
@@ -59,7 +59,7 @@ class Tab
     using SessionTitleResolver = std::function<std::string(SessionId)>;
 
     /// The label used for a tab whose active pane is part of a multi-pane split and which has no
-    /// runtime title override. Mirrors Workspaces Terminal's "MultiplePanes".
+    /// runtime title override. Mirrors Windows Terminal's "MultiplePanes".
     static constexpr std::string_view MultiplePanesLabel = "Multiple panes";
 
     /// Constructs a tab with a single leaf pane.

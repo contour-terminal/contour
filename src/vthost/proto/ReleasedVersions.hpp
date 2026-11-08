@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// The protocol range each release of contour shipped, and the compatibility workspace it implies: a build
+/// The protocol range each release of contour shipped, and the compatibility window it implies: a build
 /// speaks at least the protocol versions of the previous two releases, counted from the first release that
 /// ships version negotiation.
 ///

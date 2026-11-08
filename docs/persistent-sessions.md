@@ -9,7 +9,7 @@ moves your sessions into a **background process**, so they survive the window th
 Close the window, reattach later, or attach from another machine — the shells keep running
 either way.
 
-**Terms.** The *daemon* is the background process. A *workspace* is what it holds: a set of tabs, each a
+**Terms.** The *daemon* is the background process. A *workspace* is what it holds: a set of tabs, each an
 arrangement of panes. A *window* is an operating-system window of the Contour GUI, which shows one
 workspace; closing the window leaves the workspace and its shells with the daemon.
 

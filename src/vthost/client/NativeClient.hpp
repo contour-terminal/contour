@@ -322,7 +322,7 @@ class NativeClient final
         /// proto::Capability::ExtensionPermissions exactly when it passes a PermissionHandler.
         proto::CapabilitySet capabilities = {};
         /// The client area, in cells, the first session should spawn at; absent means "the daemon's
-        /// default". The ResizeRequest the client sends once its workspace is realized still corrects it.
+        /// default". The ResizeRequest the client sends once its window is realized still corrects it.
         std::optional<proto::WireClientArea> clientArea = std::nullopt;
         /// Which of the daemon's workspaces to follow; honoured by a daemon sharing Capability::AttachIntent,
         /// which every other daemon reads as AllWorkspaces.
@@ -334,7 +334,7 @@ class NativeClient final
         /// The light/dark preference this client shows: the daemon builds the sessions it follows under it,
         /// before their first snapshot. @see proto::ClientHello::colorPreference.
         proto::WireColorPreference colorPreference = proto::WireColorPreference::Unstated;
-        /// The pixel size of one cell of the client's workspace, when known (a reconnect repeats the last
+        /// The pixel size of one cell of the client's window, when known (a reconnect repeats the last
         /// one).
         /// @see proto::ClientHello::cellPixelSize.
         std::optional<proto::WireCellPixelSize> cellPixelSize = std::nullopt;
@@ -406,7 +406,7 @@ class NativeClient final
 
     /// Proposes the CLIENT AREA size — the whole content area the layout is rendered into, not any
     /// one pane. The server projects the pane tree into it and answers with fresh snapshots.
-    /// @param cell The pixel size of one cell of the client's workspace, when known: the daemon lays images
+    /// @param cell The pixel size of one cell of the client's window, when known: the daemon lays images
     ///             out on it (@see proto::Capability::CellPixelSize).
     void requestResize(uint32_t columns, uint32_t lines, std::optional<proto::WireCellPixelSize> cell);
 

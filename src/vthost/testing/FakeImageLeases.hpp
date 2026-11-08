@@ -32,11 +32,11 @@ class FakeImageLeases final: public ImageLeases
 {
   public:
     /// Runs at the start of every hold(), before the hold is recorded: what a test races a prune
-    /// through, the workspace between a launcher asking for a lease and getting it.
+    /// through, the window between a launcher asking for a lease and getting it.
     std::function<void(std::filesystem::path const&)> beforeHold;
 
     /// Runs at the start of every claim(), before it is decided: what a test races a hold through,
-    /// the workspace between a prune listing an image and claiming it.
+    /// the window between a prune listing an image and claiming it.
     std::function<void(std::filesystem::path const&)> beforeClaim;
 
     /// What every hold() fails with, when set.

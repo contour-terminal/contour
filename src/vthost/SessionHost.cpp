@@ -785,7 +785,7 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
         std::move(profileName),
         origin,
         _git.services());
-    // Neither pumped nor restored yet, so the application's first look at its workspace already sees the
+    // Neither pumped nor restored yet, so the application's first look at its window already sees the
     // host's cell -- a handover restore keeps it, as a cell size is not part of a terminal's state.
     pushCellPixelSize(hosted->terminal());
     return hosted;
@@ -1656,7 +1656,7 @@ SizeChange SessionHost::resizeLocked(SessionId session, vtbackend::Terminal& bac
 
     // Outside the guard above: an observer resyncs the session, which takes the very lock this
     // function was holding. Announced unconditionally rather than by the requesting connection —
-    // every attached client renders this grid, not only the one whose workspace moved.
+    // every attached client renders this grid, not only the one whose window moved.
     fanOutStream(&SessionStreamEvents::sessionResized, session);
     return SizeChange::Applied;
 }

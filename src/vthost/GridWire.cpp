@@ -202,7 +202,7 @@ void applyWireLine(vtbackend::Line& line,
     auto const received = vtbackend::LineFlags::fromValue(wire.flags);
     auto const isContinuation = received.contains(vtbackend::LineFlag::Wrapped);
     auto const flags = isContinuation ? received.without(vtbackend::HeadOnlyLineFlags) : received;
-    // A negative shift is no workspace into anything: it is read as none.
+    // A negative shift is no window into anything: it is read as none.
     auto const skipped = static_cast<std::size_t>(std::max(unbox<int>(firstColumn), 0));
     auto const shifted = [skipped](int32_t offset) {
         return vtbackend::ColumnOffset::cast_from(

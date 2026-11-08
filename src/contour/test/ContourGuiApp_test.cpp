@@ -94,9 +94,6 @@ TEST_CASE("contour client takes --workspace and refuses --window", "[contour][ap
 {
     TestApp app;
     auto const syntax = app.app().parameterDefinition();
-    auto const client =
-        std::ranges::find_if(syntax.children, [](core::cli::Command const& c) { return c.name == "client"; });
-    REQUIRE(client != syntax.children.end());
 
     auto const parse = [&](std::string_view option) {
         auto const line = core::cli::StringViewList { "contour", "client", option, "7" };
