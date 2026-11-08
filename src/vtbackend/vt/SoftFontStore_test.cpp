@@ -220,3 +220,47 @@ TEST_CASE("stageSoftFonts: refuses what an encoding can get wrong", "[SoftFontSt
     twice.push_back(good.front()); // the same number twice
     CHECK(stageSoftFonts(twice).error() == SoftFontError::FontNumber);
 }
+
+TEST_CASE("stageSoftFonts: refuses a duplicate load rank", "[SoftFontStore]")
+{
+    auto source = SoftFontStore {};
+    REQUIRE(source.define(forFont(1), body('B', '@')).has_value());
+    REQUIRE(source.define(forFont(2), body('C', '@')).has_value());
+    auto records = source.capture();
+    REQUIRE(records.size() == 2);
+    REQUIRE(stageSoftFonts(records).has_value());
+
+    auto clashing = source.capture();
+    clashing[1].loadRank = clashing[0].loadRank;
+    CHECK(stageSoftFonts(clashing).error() == SoftFontError::LoadRank);
+}
+
+TEST_CASE("stageSoftFonts: refuses header fields no DECDLD can produce", "[SoftFontStore]")
+{
+    auto source = SoftFontStore {};
+    REQUIRE(source.define(forFont(1), body('B', '@')).has_value());
+    auto const good = source.capture();
+    REQUIRE(good.size() == 1);
+
+    auto const outcome = [&](auto&& mutate) {
+        auto records = good;
+        mutate(records.front());
+        return stageSoftFonts(records);
+    };
+    CHECK(outcome([](SoftFontRecord& r) { r.startPosition = 0x1F; }).error() == SoftFontError::TooLarge);
+    CHECK(outcome([](SoftFontRecord& r) { r.startPosition = 0x80; }).error() == SoftFontError::TooLarge);
+    CHECK(outcome([](SoftFontRecord& r) { r.startPosition = 0x20; }).error()
+          == SoftFontError::TooLarge); // a 94-set starts at 0x21 at the lowest
+    CHECK(outcome([](SoftFontRecord& r) { r.columnsPerPage = 100; }).error() == SoftFontError::FontSet);
+    CHECK(outcome([](SoftFontRecord& r) { r.linesPerPage = 30; }).error() == SoftFontError::FontSet);
+    CHECK(outcome([](SoftFontRecord& r) { r.declaredWidth = 17; }).error() == SoftFontError::TooLarge);
+    CHECK(outcome([](SoftFontRecord& r) { r.declaredHeight = 33; }).error() == SoftFontError::TooLarge);
+
+    CHECK(outcome([](SoftFontRecord& r) {
+              r.columnsPerPage = 132;
+              r.linesPerPage = 48;
+              r.declaredWidth = 16;
+              r.declaredHeight = 32;
+              r.startPosition = 0x7F;
+          }).has_value());
+}

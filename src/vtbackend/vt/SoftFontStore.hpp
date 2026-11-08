@@ -55,7 +55,7 @@ struct SoftFontRecord
 /// The one stager of fonts that come from outside the DECDLD parser (state codec, daemon mirror).
 ///
 /// Judges what a codec's encoding can get wrong -- a font number past the last or named twice, a load rank
-/// no number has, an enumerator no enumeration names -- then hands each font to
+/// no number has or two fonts share, an enumerator no enumeration names -- then hands each font to
 /// assembleSoftFont, which judges the font itself. Builds aside: nothing is in place until the caller puts
 /// the returned set there.
 /// @param records The fonts. Consumed: the glyphs' coverage is moved out, even when the set is then refused.

@@ -140,12 +140,15 @@ std::array<uint8_t, SoftFontCount> SoftFontStore::loadRanks() const noexcept
 std::expected<SoftFontSet, SoftFontError> stageSoftFonts(std::span<SoftFontRecord> records)
 {
     auto staged = SoftFontSet {};
+    auto ranksTaken = std::array<bool, SoftFontCount> {};
     for (auto& record: records)
     {
         if (record.number >= SoftFontCount || staged.fonts[record.number])
             return std::unexpected(SoftFontError::FontNumber);
-        if (record.loadRank >= SoftFontCount)
+        // A rank is a place in the load order, so no two fonts share one.
+        if (record.loadRank >= SoftFontCount || ranksTaken[record.loadRank])
             return std::unexpected(SoftFontError::LoadRank);
+        ranksTaken[record.loadRank] = true;
         if (record.erase > std::to_underlying(SoftFontErase::AllRenditions))
             return std::unexpected(SoftFontError::EraseControl);
         if (record.sizeSource > std::to_underlying(SoftFontSizeSource::Matrix))

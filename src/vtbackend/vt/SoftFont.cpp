@@ -336,6 +336,17 @@ std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration cons
 {
     if (declaration.fontNumber >= SoftFontCount)
         return std::unexpected(SoftFontError::FontNumber);
+    // The header fields only decodeDecdld() sets, held to what it can produce: a 94-set starts no lower than
+    // 0x21 (Pcn 0 means 1 there), and nothing starts past the last position.
+    auto const lowestStart =
+        declaration.charsetSize == SoftCharsetSize::Size94 ? FirstSoftCellPosition : FirstSoftGlyphPosition;
+    if (declaration.startPosition < lowestStart || declaration.startPosition > LastSoftGlyphPosition
+        || declaration.declaredWidth > MaxSoftCellWidth || declaration.declaredHeight > MaxSoftCellHeight)
+        return std::unexpected(SoftFontError::TooLarge);
+    if (std::ranges::none_of(PageFormats, [&](PageFormat const& format) {
+            return format.columns == declaration.columnsPerPage && format.lines == declaration.linesPerPage;
+        }))
+        return std::unexpected(SoftFontError::FontSet);
     if (designator.size() > MaxSoftDesignatorLength)
         return std::unexpected(SoftFontError::Designator);
     if (geometry.fullWidth < 1 || geometry.fullWidth > MaxSoftCellWidth || geometry.fullHeight < 1

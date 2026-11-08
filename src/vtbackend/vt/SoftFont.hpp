@@ -62,7 +62,7 @@ enum class SoftFontError : uint8_t
     TooLarge,
     Designator,
     Glyph,    ///< A glyph out of its set, out of order, or not the font's cell size.
-    LoadRank, ///< Only from stageSoftFonts: a load rank no font number has.
+    LoadRank, ///< Only from stageSoftFonts: a load rank no font number has, or two fonts share.
 };
 
 /// @return A short phrase naming why a DECDLD was refused, for logs.
@@ -171,7 +171,9 @@ struct SoftGlyphInput
 
 /// The one validator of a font that comes from outside the DECDLD parser (state codec, daemon mirror).
 ///
-/// Judges the font number, the designator's length, the cell (1..MaxSoftCellWidth by 1..MaxSoftCellHeight,
+/// Judges the font number, the header fields only decodeDecdld() sets (start position, page format, declared
+/// size: held to what it can produce; the daemon wire carries none of them, so a mirror's fonts hold their
+/// defaults, which pass), the designator's length, the cell (1..MaxSoftCellWidth by 1..MaxSoftCellHeight,
 /// the text clipped to no more than the cell), and every glyph: a position in the set, named once and in
 /// ascending order, of exactly the cell's size, with one coverage byte per pixel. A font it accepts cannot
 /// make a later Pe=1 merge or a render index out of range.
