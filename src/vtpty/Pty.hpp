@@ -37,6 +37,13 @@ using PtyMasterHandle = boxed::boxed<std::uintptr_t, detail::PtyMasterHandle>;
 using PtySlaveHandle = boxed::boxed<std::uintptr_t, detail::PtySlaveHandle>;
 using PtyHandle = std::uintptr_t;
 
+/// Line endings a device expects in pasted input.
+enum class PasteLineEndings : std::uint8_t
+{
+    Preserve,       ///< Send line endings as supplied.
+    CarriageReturn, ///< Send one CR per line break, like an Enter key.
+};
+
 class PtySlave
 {
   public:
@@ -165,6 +172,12 @@ class Pty
     /// @returns Number of bytes written or -1 on error. Less than asked, with `errno` EINTR, where
     ///          interruptWrites() had the write stop rather than wait for the other end to read.
     [[nodiscard]] virtual int write(std::string_view buf) = 0;
+
+    /// Returns the line ending convention for paste payloads.
+    [[nodiscard]] virtual PasteLineEndings pasteLineEndings() const noexcept
+    {
+        return PasteLineEndings::Preserve;
+    }
 
     /// Has a write() in progress, and every later one until allowWrites(), return what it wrote so far
     /// rather than wait for the other end to read: a live upgrade stops the writer of a program that reads

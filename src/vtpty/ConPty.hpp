@@ -75,6 +75,10 @@ class ConPty final: public Pty
     /// @return What it wrote; less than asked, with errno EINTR, where interruptWrites() ended the wait; -1
     ///         with errno EPIPE once the pseudoconsole is gone.
     int write(std::string_view data) override;
+    [[nodiscard]] PasteLineEndings pasteLineEndings() const noexcept override
+    {
+        return PasteLineEndings::CarriageReturn;
+    }
     void interruptWrites() override;
     void allowWrites() override;
     [[nodiscard]] PageSize pageSize() const noexcept override;

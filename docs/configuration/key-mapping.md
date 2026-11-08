@@ -88,7 +88,7 @@ chord to `Primary` or `Control` instead, or name that side in `option_as_alt`.
 ## Writing bindings
 
 Each element in the `input_mapping` represents one key binding, whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as the `key` or `mouse` - in order to activate the corresponding action. 
-Additionally one can filter input mappings based on special terminal modes using the `modes` option:
+Additionally one can filter input mappings based on special terminal modes using the `mode` option:
 
 * Alt       : The terminal is currently in alternate screen buffer, otherwise it is in primary screen buffer.
 * AppCursor : The application key cursor mode is enabled (otherwise it's normal cursor mode).
@@ -98,7 +98,14 @@ Additionally one can filter input mappings based on special terminal modes using
 * Search    : A search term is currently set. It outlives the find bar, so this stays true for as long as the matches are still highlighted; an open bar with nothing typed into it does not match.
 * Trace     : The terminal is currently in trace-mode, i.e., each VT sequence can be interactively single-step executed using custom actions. See TraceEnter/TraceStep/TraceLeave actions.
 
-You can combine these modes by concatenating them via `|` and negate a single one by prefixing with `~`. The `modes` option defaults to not filter at all (the input mappings always match based on modifier and key press/mouse event).
+Every condition separated by `|` must match. Prefix a condition with `~` to require that mode to be inactive. For example, `Insert|Select` requires both Insert mode and a terminal selection. Omit `mode` to match regardless of the active modes.
+
+To make Ctrl+V paste from the clipboard in Insert mode, including at a prompt with no selection, use the following entry under `input_mapping`.
+
+```yaml
+- { mods: [Control], key: V, action: PasteClipboard, mode: Insert }
+```
+
 `key` represents keys on your keyboard, and `mouse` represents buttons as well as the scroll wheel.
 
 Modifiers, which are case-insensitive (`Control`, `control` and `CONTROL` are the

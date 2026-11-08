@@ -789,6 +789,37 @@ TEST_CASE("Terminal.a key typed in Insert mode does not wait for the state lock"
     CHECK(mc.replyData() == "a");
 }
 
+TEST_CASE("Terminal.paste uses the device line endings with or without brackets", "[terminal][paste]")
+{
+    class CarriageReturnPty: public vtpty::MockPty
+    {
+      public:
+        using MockPty::MockPty;
+
+        [[nodiscard]] vtpty::PasteLineEndings pasteLineEndings() const noexcept override
+        {
+            return vtpty::PasteLineEndings::CarriageReturn;
+        }
+    };
+
+    auto mc = MockTerm<CarriageReturnPty> { ColumnCount { 80 }, LineCount { 24 } };
+    auto const text = "first\nsecond\r\nthird\rfourth\r\n\n"sv;
+    mc.terminal.sendPaste(text);
+    CHECK(mc.replyData() == "first\rsecond\rthird\rfourth\r\r");
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033[?2004h");
+    CHECK_FALSE(mc.terminal.pastesUnchanged("first\nsecond"));
+    mc.terminal.sendPaste(text);
+    CHECK(mc.replyData() == "\033[200~first\rsecond\rthird\rfourth\r\r\033[201~");
+
+    auto other = MockTerm { ColumnCount { 80 }, LineCount { 24 } };
+    other.writeToScreen("\033[?2004h");
+    CHECK(other.terminal.pastesUnchanged("first\nsecond"));
+    other.terminal.sendPaste(text);
+    CHECK(other.replyData() == "\033[200~first\nsecond\r\nthird\rfourth\r\n\n\033[201~");
+}
+
 TEST_CASE("Terminal.a Vi paste reaches the frontend after the state lock is released",
           "[terminal][vi][threading]")
 {
