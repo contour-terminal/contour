@@ -298,6 +298,8 @@ if(CONTOUR_FRONTEND_GUI)
         session/PaneProxy.hpp
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
+        session/FactoryBinding.hpp
+        session/WindowBinding.hpp
         window/SettingsController.hpp
         window/QtString.hpp
         window/SettingsFields.hpp
@@ -354,11 +356,12 @@ if(CONTOUR_FRONTEND_GUI)
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         remote/DaemonDriftFollower.hpp
+        remote/DaemonLink.hpp
+        remote/DaemonLinkHost.hpp
         remote/NativeController.hpp
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
-        remote/RoutingSessionFactory.hpp
         remote/TmuxController.hpp
     )
     list(APPEND _core_source_files
@@ -405,6 +408,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
+        remote/DaemonLink.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
@@ -1100,6 +1104,7 @@ if(CONTOUR_FRONTEND_GUI)
             config/ConfigBlocksAndLinks_test.cpp
             display/DisplayRendering_test.cpp
             display/SettingsPreviewRendering_test.cpp
+            remote/DaemonLink_test.cpp
             remote/NativeController_test.cpp
             session/TerminalSessionBlocks_test.cpp
             session/TerminalSessionManager_test.cpp
@@ -1275,9 +1280,12 @@ if(CONTOUR_FRONTEND_GUI)
         # libssh2 initialisation in SshSession -- must have its races tested in an unsilenced module suite
         # (text_shaper_test, vtpty_test), not through contour_gui_test.
         set(CONTOUR_QML_TEST_TSAN_OPTIONS "TSAN_OPTIONS=string_append: ignore_noninstrumented_modules=1")
+        # The style runs above are the same suite over the same uninstrumented Qt: under the Fluent style
+        # alone, QPainter's parallel span fills (the popup shadow's mask) read as thousands of races.
         if(CONTOUR_SANITIZE STREQUAL "thread")
-            set_property(TEST contour_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION
-                         "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            set_property(TEST contour_gui_test contour_gui_test_fluent contour_gui_test_contourlinux
+                              contour_gui_test_contourtui
+                         APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
         endif()
 
         # The notification suite again, but against a session bus whose org.freedesktop.Notifications

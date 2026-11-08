@@ -16,6 +16,7 @@
 
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
+#include <contour/session/FactoryBinding.hpp>
 #include <contour/session/SessionFactory.hpp>
 
 #include <vtpty/ChannelPty.hpp>
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include <vthost/tmux/LayoutString.hpp>
@@ -132,6 +134,11 @@ class TmuxController final:
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~TmuxController() override;
+
+    /// @return What every window of a `contour client --tmux` is bound to (@see
+    ///         contour::session::TerminalSessionManager::bindWindow): its sessions are this controller's
+    ///         panes.
+    [[nodiscard]] contour::session::WindowBinding& windowBinding() noexcept { return _windowBinding; }
 
     TmuxController(TmuxController const&) = delete;
     TmuxController& operator=(TmuxController const&) = delete;
@@ -362,6 +369,9 @@ class TmuxController final:
         false; ///< True while adoptPendingPanes realizes tmux panes, so its splits build locally.
     vthost::tmux::TmuxGateway* _gateway = nullptr; ///< Reactor-owned; valid while serving.
     int _tmuxPid = -1;
+    /// What every window of the attach is bound to: this controller, which hosts every pane on this machine
+    /// and so names no host. @see windowBinding()
+    contour::session::FactoryBinding _windowBinding { *this };
 
     /// LAST member, destroyed FIRST: its pane sinks (PaneFeed) unregister from _feeds and the
     /// (base-owned) _mutex in their destructors, which must still be alive — _feeds is destroyed

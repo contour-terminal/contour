@@ -1207,23 +1207,25 @@ TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's 
     }
 }
 
-TEST_CASE("TerminalSessionManager: the host connection reaches every remotely hosted session",
+TEST_CASE("TerminalSessionManager: the host connection reaches every remotely hosted session of its link",
           "[contour][session][reconnect]")
 {
     using vthost::client::ConnectionState;
     auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
     owned->reportedHosting = contour::session::SessionHosting::Remote;
+    auto link = contour::session::FactoryBinding { *owned };
     auto app = TestApp { std::move(owned) };
     auto const win = contour::test::ScopedController { app.manager() };
+    app.manager().bindWindow(win.id, link);
     auto* first = app.manager().createSession(win.id);
     auto* second = app.manager().createSession(win.id);
     REQUIRE(first != nullptr);
     REQUIRE(second != nullptr);
 
-    app.manager().setHostConnection(ConnectionState::Reconnecting);
+    app.manager().setHostConnection(link, ConnectionState::Reconnecting);
     CHECK(first->isReconnecting());
     CHECK(second->isReconnecting());
-    app.manager().setHostConnection(ConnectionState::Connected);
+    app.manager().setHostConnection(link, ConnectionState::Connected);
     CHECK_FALSE(first->isReconnecting());
     CHECK_FALSE(second->isReconnecting());
 }

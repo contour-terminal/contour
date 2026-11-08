@@ -118,7 +118,7 @@ class MainWindowControllerMock: public QAbstractListModel
 {
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
-    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    Q_PROPERTY(QString hostLabel READ hostLabel NOTIFY hostLabelChanged)
     // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
     Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
     // Mirrors WindowController's version string, which the About dialog shows.
@@ -265,6 +265,15 @@ class MainWindowControllerMock: public QAbstractListModel
     }
 
     QString attachedHost; ///< The host hostLabel() reports; empty for a local window.
+
+    /// What WindowController::notifyHostBindingChanged() tells: the window was bound to another link after it
+    /// loaded, as the boot window is from Main.qml's onCompleted.
+    /// @param host The host hostLabel() reports from now on.
+    void rebindHost(QString host)
+    {
+        attachedHost = std::move(host);
+        emit hostLabelChanged();
+    }
 
     /// Mirrors WindowController::trayMessageClicked(), counting the calls.
     Q_INVOKABLE void trayMessageClicked() { ++trayClickCount; }
@@ -456,6 +465,7 @@ class MainWindowControllerMock: public QAbstractListModel
 
   signals:
     void hostChipStateChanged();
+    void hostLabelChanged();
     void commandPaletteRequested();
     void contextMenuRequested();
     void titleBarContextMenuRequested();

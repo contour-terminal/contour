@@ -176,8 +176,10 @@ ThemedWindow
     // terminalSessions.activeSession (which emits activeSessionChanged on a pane-focus change as well as on
     // a tab switch), and this binding also re-evaluates when that session's own title changes. Empty string
     // covers the brief startup window before the first session resolves. A window attached to a remote host
-    // (`contour client --host`) names it first, so it is never mistaken for a local one.
-    title: win ? win.windowTitle(win.activeSession ? win.activeSession.title : "") : ""
+    // (`contour client --host`) names it first, so it is never mistaken for a local one. windowTitle() reads
+    // the window's host label in C++, out of the binding's sight: hostLabel is read here so the title follows
+    // the window being bound to its link after it loaded (used, not merely mentioned, or the engine drops it).
+    title: win && win.hostLabel !== undefined ? win.windowTitle(win.activeSession ? win.activeSession.title : "") : ""
 
     // Create the first session/tab on startup. This used to be done by vtui's one-shot
     // `session: terminalSessions.createSession()`; with the pane tree as the sole renderer, Main.qml mints

@@ -99,8 +99,11 @@ TEST_CASE("tabBar.emptyStripIsGapZero", "[tabbar]")
 TEST_CASE("tabBar.shouldSpringOpenTable", "[tabbar]")
 {
     for (auto const subject: { DwellSubject::OtherTab, DwellSubject::DraggedTab, DwellSubject::SourceTab })
-        for (auto const refusal:
-             { MoveRefusal::None, MoveRefusal::OtherProcess, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
+        for (auto const refusal: { MoveRefusal::None,
+                                   MoveRefusal::OtherProcess,
+                                   MoveRefusal::OtherHost,
+                                   MoveRefusal::OldDaemon,
+                                   MoveRefusal::Tmux })
         {
             auto const expected = subject == DwellSubject::OtherTab && refusal == MoveRefusal::None
                                       ? DwellOpens::Yes

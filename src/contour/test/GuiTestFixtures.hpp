@@ -14,6 +14,7 @@
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
+#include <contour/session/FactoryBinding.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -270,6 +271,13 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     }
 
     /// Records the request; routes it to the host when remoteTabs says so.
+    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
+    {
+        requestedRemoteWorkspaces.push_back(spawn);
+        return remoteTabs == RemoteTabRouting::ToHost;
+    }
+
+    /// Records the request; routes it to the host when remoteTabs says so.
     [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* /*actingPty*/,
                                           bool /*vertical*/,
                                           contour::session::RemoteSpawn const& /*spawn*/) override
@@ -281,17 +289,39 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// Records the call, as a host would be told a session was ended for good.
     void requestRemoteClose(vtpty::Pty const* /*pty*/) override { ++requestedRemoteCloses; }
 
-    /// The factory of sessions that run here whatever the host. Under Remote hosting it is a view of this
-    /// mock that allows creation, hosts locally and routes nothing, as the app's own factory does behind
-    /// an attached host; else it is this mock.
-    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
+    /// Records the call, as a host would be told a divider was dragged.
+    void reportSplitRatio(vtpty::Pty const* /*firstPty*/,
+                          vtpty::Pty const* /*secondPty*/,
+                          double /*ratio*/) override
     {
-        return reportedHosting == contour::session::SessionHosting::Remote
-                   ? static_cast<contour::session::SessionFactory&>(_localView)
-                   : *this;
+        ++reportedSplitRatios;
     }
 
-    /// Whether requestRemoteTab() and requestRemoteSplit() hand the request to the host.
+    /// Records the call, as a host would be told a tab's title, colour, zoom or activity.
+    void reportTabPresentation(contour::session::LocalTabPresentation const& /*presentation*/) override
+    {
+        ++reportedTabPresentations;
+    }
+
+    /// Records the request; routed to the host under Remote hosting, local otherwise.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteSplitOrientation(
+        vtpty::Pty const* /*anchorPty*/, vtworkspace::SplitState /*axis*/) override
+    {
+        ++requestedSplitOrientations;
+        return reportedHosting == contour::session::SessionHosting::Remote
+                   ? contour::session::RemoteRouting::Routed
+                   : contour::session::RemoteRouting::Local;
+    }
+
+    /// How often reportSplitRatio() was called.
+    int reportedSplitRatios = 0;
+    /// How often reportTabPresentation() was called.
+    int reportedTabPresentations = 0;
+    /// How often requestRemoteSplitOrientation() was called.
+    int requestedSplitOrientations = 0;
+
+    /// Whether requestRemoteTab(), requestRemoteSplit() and requestRemoteWorkspace() hand the request to the
+    /// host.
     enum class RemoteTabRouting : uint8_t
     {
         Local = 0, ///< No: the manager builds the tab or split itself.
@@ -300,12 +330,12 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     RemoteTabRouting remoteTabs = RemoteTabRouting::Local;
     /// Every requestRemoteTab() call, in order.
     std::vector<contour::session::RemoteSpawn> requestedRemoteTabs;
+    /// Every requestRemoteWorkspace() call, in order.
+    std::vector<contour::session::RemoteSpawn> requestedRemoteWorkspaces;
     /// How often requestRemoteSplit() was asked.
     int requestedRemoteSplits = 0;
     /// How often requestRemoteClose() was called.
     int requestedRemoteCloses = 0;
-    /// How many ptys localSessions() made, a subset of createdPtys.
-    int localCreations = 0;
 
     [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
     {
@@ -391,35 +421,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<vtpty::MockPty*> createdPtys;
     /// Makes each pty instead of a MockPty when set -- a ChannelPty, for a test that feeds a mirror's bytes.
     std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)> makePty {};
-
-  private:
-    /// What localSessions() hands out under Remote hosting: a local factory over this mock's ptys.
-    class LocalView final: public contour::session::SessionFactory
-    {
-      public:
-        explicit LocalView(MockPtySessionFactory& owner): _owner { owner } {}
-
-        [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
-            std::optional<std::string> cwd,
-            std::optional<vtbackend::PageSize> pageSize = std::nullopt,
-            std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
-            std::optional<std::string> profileName = std::nullopt) override
-        {
-            ++_owner.localCreations;
-            return _owner.createPty(
-                std::move(cwd), pageSize, std::move(commandOverride), std::move(profileName));
-        }
-
-        [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
-        {
-            return _owner.createNotifier();
-        }
-
-      private:
-        MockPtySessionFactory& _owner;
-    };
-
-    LocalView _localView { *this };
 };
 
 /// A TerminalSession a test builds itself, outside any session factory: over @p pty, raising through
@@ -508,12 +509,6 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
     [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
     {
         return _factory->hosting();
-    }
-
-    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
-    {
-        auto& local = _factory->localSessions();
-        return &local == _factory.get() ? *this : local;
     }
 
     [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override

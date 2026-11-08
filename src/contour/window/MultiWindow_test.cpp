@@ -18,10 +18,13 @@
 #include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/NodeDrag.hpp>
+#include <contour/window/RemoteChrome.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtpty/MockPty.hpp>
+
+#include <core/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -147,6 +150,43 @@ TEST_CASE("a local window names no host in its chrome", "[contour][multiwindow][
     auto const& controller = *window.controller;
     CHECK(controller.hostLabel().isEmpty());
     CHECK(controller.windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+}
+
+TEST_CASE("WindowController: the title prefix comes from the window's own link",
+          "[contour][multiwindow][window][hosts]")
+{
+    // Declared before the app: the windows tell their bindings of their close.
+    contour::test::MockPtySessionFactory hosts;
+    contour::session::FactoryBinding home { hosts, "home" };
+    contour::session::FactoryBinding unnamed { hosts };
+    contour::test::TestApp app;
+    auto& manager = app.manager();
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    auto labelChanges = 0;
+    QObject::connect(first.controller, &contour::window::WindowController::hostLabelChanged, [&labelChanges] {
+        ++labelChanges;
+    });
+
+    manager.bindWindow(first.id, home);
+    manager.bindWindow(second.id, unnamed);
+    manager.bindWindow(first.id, home); // bound anew to the same: nothing changes
+
+    CHECK(labelChanges == 1);
+    CHECK(std::ranges::to<std::vector>(manager.windowsBoundTo(home)) == std::vector { first.id });
+    CHECK(first.controller->hostLabel() == QStringLiteral("home"));
+    CHECK(first.controller->windowTitle(QStringLiteral("vim"))
+          == QString::fromStdString(contour::window::remoteWindowTitle("home", "vim")));
+    CHECK(first.controller->windowTitle(QStringLiteral("vim")) != QStringLiteral("vim"));
+    CHECK(second.controller->hostLabel().isEmpty());
+    CHECK(second.controller->windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+
+    // Released, the window is local again, and says so.
+    manager.releaseBinding(home);
+    CHECK(labelChanges == 2);
+    CHECK(first.controller->hostLabel().isEmpty());
+    CHECK(first.controller->windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+    manager.releaseBinding(unnamed);
 }
 
 TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][tab-color]")
@@ -2704,6 +2744,11 @@ TEST_CASE("a move asked of the daemon is waited for until refused, timed out or 
     f.factory->reportedHosting = contour::session::SessionHosting::Remote;
     f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
     f.factory->reportedMoveSupport = contour::session::MoveSupport::Supported;
+    // Both windows on the daemon link the move is asked over.
+    auto link = contour::session::FactoryBinding { *f.factory };
+    f.manager.bindWindow(f.a.id, link);
+    f.manager.bindWindow(f.b.id, link);
+    auto const unbind = core::Finally { [&] { f.manager.releaseBinding(link); } };
     auto const ask = [&] {
         f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), f.paneOf(f.left));
         REQUIRE((f.manager.livePendingRemoteMove() != nullptr));
@@ -2736,9 +2781,13 @@ TEST_CASE("a move asked of the daemon is waited for until refused, timed out or 
     SECTION("the connection lost")
     {
         std::ignore = ask();
-        f.manager.setHostConnection(vthost::client::ConnectionState::Reconnecting);
+        // Another link's connection is not this move's.
+        auto other = contour::session::FactoryBinding { *f.factory };
+        f.manager.setHostConnection(other, vthost::client::ConnectionState::Reconnecting);
+        CHECK((f.manager.livePendingRemoteMove() != nullptr));
+        f.manager.setHostConnection(link, vthost::client::ConnectionState::Reconnecting);
         CHECK_FALSE((f.manager.livePendingRemoteMove() != nullptr));
-        f.manager.setHostConnection(vthost::client::ConnectionState::Connected);
+        f.manager.setHostConnection(link, vthost::client::ConnectionState::Connected);
     }
 
     SECTION("each request has a number of its own")

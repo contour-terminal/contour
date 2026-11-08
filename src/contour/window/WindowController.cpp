@@ -414,7 +414,8 @@ void WindowController::runSurfaceAction(MenuSurface surface,
 
 QString WindowController::hostLabel() const
 {
-    return QString::fromStdString(_manager.app().attachedHostLabel());
+    auto const label = _manager.hostLabelOf(_windowId);
+    return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
 }
 
 QString WindowController::shortcutText(QString const& commandName) const
@@ -428,7 +429,7 @@ QString WindowController::shortcutText(QString const& commandName) const
 
 int WindowController::hostChipState() const noexcept
 {
-    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection())));
+    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_windowId))));
 }
 
 QString WindowController::applicationVersion() const
@@ -439,7 +440,7 @@ QString WindowController::applicationVersion() const
 QString WindowController::windowTitle(QString const& sessionTitle) const
 {
     return QString::fromStdString(
-        remoteWindowTitle(_manager.app().attachedHostLabel(), sessionTitle.toStdString()));
+        remoteWindowTitle(_manager.hostLabelOf(_windowId), sessionTitle.toStdString()));
 }
 
 void WindowController::openTitleBarContextMenu()
@@ -884,9 +885,10 @@ int WindowController::dropPayloadOf(QString const& nodePayload) const
 QString WindowController::dragTitle(QString const& nodePayload) const
 {
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
-    if (drag == nullptr || drag->drag.host != _manager.hostIdentity())
+    if (drag == nullptr)
         return {};
-    auto const* const session = _manager.sessionForHostId(drag->drag.sessions.front());
+    // Null for a drag of a host this process does not show.
+    auto const* const session = _manager.sessionForHostId(drag->drag.host, drag->drag.sessions.front());
     return session != nullptr ? session->title() : QString {};
 }
 
@@ -924,7 +926,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
                 return none;
             // What the drag says it is, not what the card guessed: a tab of one pane drags as that pane.
             inputs.payload = drag->drag.payload;
-            inputs.refusal = drag->refusalAt(drag->edgePlaceIn(_windowId));
+            inputs.refusal = _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId));
             if (inputs.refusal != MoveRefusal::None)
                 break;
             // A drag of this process naming what is gone since (its shell exited) is taken, and moves
@@ -937,7 +939,8 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
                     drag->drag.payload == DropPayload::Pane ? DropOrigin::OwnPane : DropOrigin::OwnTab;
             // A swap is a place of its own: a daemon that serves the edges may not trade two.
             if (auto const zone = resolveDropZone(inputs);
-                zone == DropZone::Swap && drag->refusalAt(MovePlace::Swap) != MoveRefusal::None)
+                zone == DropZone::Swap
+                && _manager.moveRefusalIn(*drag, _windowId, MovePlace::Swap) != MoveRefusal::None)
                 return static_cast<int>(DropZone::Refused);
             break;
         }
@@ -963,9 +966,9 @@ QString WindowController::refusalText(QString const& nodePayload) const
     if (drag == nullptr)
         return {};
     // What a pane card that shows DropZone::Refused is refused for: its edges, else its middle.
-    auto refusal = drag->refusalAt(drag->edgePlaceIn(_windowId));
+    auto refusal = _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId));
     if (refusal == MoveRefusal::None)
-        refusal = drag->refusalAt(MovePlace::Swap);
+        refusal = _manager.moveRefusalIn(*drag, _windowId, MovePlace::Swap);
     return toQString(refusalTextOf(refusal));
 }
 
@@ -996,7 +999,8 @@ void WindowController::dropNodeOnTab(int tabIndex, QString const& nodePayload)
     auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
     // Beside the tab's active pane, but a place of its own: one an older daemon serves no route to.
-    if (tab == nullptr || drag == nullptr || drag->refusalAt(MovePlace::OnTab) != MoveRefusal::None)
+    if (tab == nullptr || drag == nullptr
+        || _manager.moveRefusalIn(*drag, _windowId, MovePlace::OnTab) != MoveRefusal::None)
         return;
     placeNode(*drag,
               vtworkspace::EdgeTarget { .pane = tab->activePane()->session(),
@@ -1041,7 +1045,8 @@ bool WindowController::springOpens(int tabIndex, QString const& nodePayload) con
     if (drag->tab == tab->id())
         subject = drag->movesWholeTab() ? DwellSubject::DraggedTab : DwellSubject::SourceTab;
     // Opened so the drag can be dropped beside one of that tab's panes.
-    return shouldSpringOpen(subject, drag->refusalAt(drag->edgePlaceIn(_windowId))) == DwellOpens::Yes;
+    return shouldSpringOpen(subject, _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId)))
+           == DwellOpens::Yes;
 }
 
 void WindowController::placeNode(session::ResolvedDrag drag, vtworkspace::MoveTarget target)
@@ -2248,8 +2253,8 @@ TitleBand WindowController::titleBand() const
         .mode = windowMode(),
         .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
         .position = _tabBarPosition,
-        .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
-                               hostChipStateOf(_manager.hostConnection())),
+        .notice = hostNoticeOf(hostChipPresence(_manager.hostLabelOf(_windowId)),
+                               hostChipStateOf(_manager.hostConnection(_windowId))),
     });
 }
 

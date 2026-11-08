@@ -114,46 +114,49 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Called on the GUI thread.
     using SessionSettingsSource = std::function<std::expected<vtbackend::Settings, std::string>()>;
 
-    /// @param transport How to reach the daemon: the local unix control socket, or a TLS-encrypted,
-    ///        token-authenticated TCP endpoint. Opened afresh for every reconnect; its describe() names the
-    ///        daemon in every log line and failure message.
-    /// @param intent Which of the daemon's workspaces the first connection follows; every reconnect resumes
-    /// the
-    ///        workspaces the lost connection followed.
-    /// @param profileName The host profile this client's sessions run, stated in every ClientHello; empty for
-    ///        the daemon's default.
-    /// @param workingDirectory The absolute directory the session the first connection creates starts in,
-    ///        stated in that connection's ClientHello only -- a reconnect creates nothing of its own; empty
-    ///        for the profile's.
-    /// @param attachSettings The emulation settings to state in the ClientHello — this client's own
-    ///        resolved profile — or nullopt to take whatever the daemon hosts with.
-    /// @param sessionSettings Asked before every session this client creates, so a session created
-    ///        after a configuration reload gets the reloaded settings; empty to keep @p attachSettings.
-    ///        When it fails, the settings last stated stay in force. Neither is defaulted, so a caller
-    ///        with no preference says so.
-    /// @param colorPreference The light/dark preference the app shows now, stated in every hello so the
-    ///        daemon builds the sessions this client follows under it; none states none. Later changes
-    ///        arrive through requestHostedOperation(), and are re-stated on every reconnect.
-    /// @param clock What the connect budget is measured on (@see RemoteController::awaitConnected).
-    ///        Borrowed: it must outlive the controller.
-    /// @param timeline Where the connect, the layout and the first session are stamped. Borrowed: it must
-    ///        outlive the controller.
-    /// @param powerMonitor Where the system's sleep and wake are heard of, so a wake has the daemon probed
-    ///        rather than the connection given up; null where nothing reports them. Subscribed to for the
-    ///        controller's lifetime. Borrowed: it must outlive the controller.
-    /// @param backoff How long each reconnect waits after a loss; a seam for tests, the production schedule
-    ///        by default.
-    NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
-                     vthost::proto::AttachIntent intent,
-                     std::string profileName,
-                     std::filesystem::path workingDirectory,
-                     std::optional<vtbackend::Settings> attachSettings,
-                     SessionSettingsSource sessionSettings,
-                     std::optional<vtbackend::ColorPreference> colorPreference,
-                     core::platform::IClock const& clock,
-                     vthost::latency::StartupTimeline& timeline,
-                     core::platform::ISystemPowerMonitor* powerMonitor,
-                     vthost::client::BackoffSchedule backoff = {});
+    /// Everything a controller is built with.
+    struct Config
+    {
+        /// How to reach the daemon: the local unix control socket, or a TLS-encrypted, token-authenticated
+        /// TCP endpoint. Opened afresh for every reconnect; its describe() names the daemon in every log line
+        /// and failure message.
+        std::shared_ptr<vthost::ITransportFactory> transport;
+        /// Which of the daemon's workspaces the first connection follows; every reconnect resumes the
+        /// workspaces the lost connection followed.
+        vthost::proto::AttachIntent intent;
+        /// The host profile this client's sessions run, stated in every ClientHello; empty for the daemon's
+        /// default.
+        std::string profileName;
+        /// The absolute directory the session the first connection creates starts in, stated in that
+        /// connection's ClientHello only -- a reconnect creates nothing of its own; empty for the profile's.
+        std::filesystem::path workingDirectory = {};
+        /// The emulation settings to state in the ClientHello -- this client's own resolved profile -- or
+        /// nullopt to take whatever the daemon hosts with.
+        std::optional<vtbackend::Settings> attachSettings;
+        /// Asked before every session this client creates, so a session created after a configuration reload
+        /// gets the reloaded settings; empty to keep @p attachSettings. When it fails, the settings last
+        /// stated stay in force.
+        SessionSettingsSource sessionSettings;
+        /// The light/dark preference the app shows now, stated in every hello so the daemon builds the
+        /// sessions this client follows under it; none states none. Later changes arrive through
+        /// requestHostedOperation(), and are re-stated on every reconnect.
+        std::optional<vtbackend::ColorPreference> colorPreference;
+        /// What the connect budget is measured on (@see RemoteController::awaitConnected). Borrowed: it must
+        /// outlive the controller.
+        core::platform::IClock const& clock;
+        /// Where the connect, the layout and the first session are stamped. Borrowed: it must outlive the
+        /// controller.
+        vthost::latency::StartupTimeline& timeline;
+        /// Where the system's sleep and wake are heard of, so a wake has the daemon probed rather than the
+        /// connection given up; null where nothing reports them. Subscribed to for the controller's
+        /// lifetime. Borrowed: it must outlive the controller.
+        core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
+        /// How long each reconnect waits after a loss; a seam for tests, the production schedule by default.
+        vthost::client::BackoffSchedule backoff {};
+    };
+
+    /// @param config What the controller is built with.
+    explicit NativeController(Config config);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~NativeController() override;
@@ -301,6 +304,17 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// GUI thread. Once the GUI reconciled a layout of a reconnect: re-sends every bound pane's size once
     /// (never the client area), even though no display geometry changed. No-op otherwise.
     void reassertGeometryAfterReconcile();
+
+    /// GUI thread. Resolves the session settings anew -- after a configuration reload -- and states them:
+    /// to the daemon at once, for the sessions this connection creates from now on, and in the hello of
+    /// every later connection. Keeps the settings last stated when they cannot be resolved; no-op without
+    /// a session settings source.
+    void restateSessionSettings();
+
+    /// @return Whether any pty this controller made is still alive, bound to a remote session or detached
+    ///         from one: the controller must outlive it, as the pty calls back into it until its destruction
+    ///         unbinds it here. Takes _mutex. @see paneUnbound
+    [[nodiscard]] bool bindsPanes() const;
 
     /// @return Whether a layout realization is in progress (so a split it triggers
     ///         is built locally, not re-authored on the daemon).
@@ -520,6 +534,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// connectionState() changed (fires on the reactor thread; connect queued).
     void connectionStateChanged();
+
+    /// A pty this controller made was destroyed, whether or not it still bound its remote session (fires on
+    /// whichever thread destroyed it; connect queued). @see bindsPanes
+    void paneUnbound();
 
     /// After a reconnect: daemon workspaces this client showed that the daemon no longer has for it -- it
     /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread, ahead
@@ -741,16 +759,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return The composed area, or nullopt while no tab fully resolves.
     [[nodiscard]] std::optional<vtpty::PageSize> composedClientArea() const;
 
-    /// GUI-side (from the pty's destructor): forgets a binding, and — while the connection is still
-    /// live (not `_stopped`) — tombstones the session id so a remote session that outlives its local
-    /// pane cannot resurrect it through the next delta. Only the binding @p serial names: a detached one's
-    /// pty leaves alone the binding a new session of the same id has.
+    /// GUI-side (from the pty's destructor): counts the pty gone, forgets its binding, and — while the
+    /// connection is still live (not `_stopped`) — tombstones the session id so a remote session that
+    /// outlives its local pane cannot resurrect it through the next delta. Only the binding @p serial names:
+    /// a detached one's pty leaves alone the binding a new session of the same id has.
     ///
     /// It does NOT decide whether the remote session should be closed: a pty is destroyed by a pane
     /// close, a window close, an app quit and a lost connection alike, and only the first of those
     /// means "end this session". That intent is authored upstream by whoever holds it
     /// (@see requestRemoteClose, contour::SessionEnd).
     void unbind(uint64_t session, uint64_t serial);
+
+    /// unbind() under _mutex: the pty is counted gone whether or not its binding is still there to forget.
+    void forgetBinding(uint64_t session, uint64_t serial);
 
     /// @return Whether @p session is bound, by the binding @p serial names. Takes _mutex.
     [[nodiscard]] bool isBinding(uint64_t session, uint64_t serial) const;
@@ -771,7 +792,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::string _profileName;                ///< Stated in every ClientHello.
     std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.
     /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
-    /// connection creates.
+    /// connection creates. Under _mutex: restateSessionSettings() replaces it on the GUI thread, and
+    /// makeClient() reads it on the reactor.
     std::optional<vtbackend::Settings> _attachSettings;
     /// This client's profile as it is now, restated before every session this connection creates.
     SessionSettingsSource _sessionSettings;
@@ -919,6 +941,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// _mutex.
     std::vector<uint64_t> _lostWorkspaces;
     uint64_t _nextBindingSerial = 1; ///< @see Binding::serial. Under _mutex.
+    /// The ptys createPty() bound that are not destroyed yet, still bound or detached: each captures this
+    /// controller in its sinks and its destructor's callback, so the controller must outlive every one (@see
+    /// bindsPanes). Not _bindings.size(): a restarted daemon's reconnect detaches every binding while the
+    /// ptys live on. Under _mutex.
+    std::size_t _livePtys = 0;
     /// Keeps the power monitor's handler, which posts each event to notePowerEvent() on the reactor; empty
     /// without a monitor. ~NativeController() stops and joins the reactor before members die, so a handler
     /// may still post onto the stopped loop until this unsubscribes: that is safe because

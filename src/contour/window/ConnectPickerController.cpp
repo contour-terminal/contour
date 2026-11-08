@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/window/ConnectPickerController.hpp>
 
 #include <core/log/LogStore.hpp>
 
-#include <QtCore/QMetaObject>
-#include <QtCore/QPointer>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
 
@@ -62,21 +61,19 @@ void ConnectPickerController::probeDaemon()
     // Off the GUI thread, like a host's check: a daemon that accepts and never answers holds the probe for
     // its whole timeout. The worker never touches this object; its answer is posted back.
     auto const probe = ++_probe;
-    _workers.emplace_back(
-        [this, probe, job = _services.daemon(), guard = QPointer<ConnectPickerController> { this }] {
-            auto state = job();
-            QMetaObject::invokeMethod(
-                guard.data(),
-                [this, probe, state] {
-                    if (probe != _probe)
-                        return;
-                    _daemon = state;
-                    // The selection stays on what the user has reached while the probe was asking.
-                    rebuild(_current >= 0 ? std::optional { _rows[static_cast<std::size_t>(_current)].text }
-                                          : std::nullopt);
-                },
-                Qt::QueuedConnection);
+    // Posted through postToObject(), which ThreadSanitizer sees order the answer before its delivery. The
+    // controller is alive for every post: its workers are joined with its members, before QObject goes.
+    _workers.emplace_back([this, probe, job = _services.daemon()] {
+        auto state = job();
+        platform::postToObject(this, [this, probe, state] {
+            if (probe != _probe)
+                return;
+            _daemon = state;
+            // The selection stays on what the user has reached while the probe was asking.
+            rebuild(_current >= 0 ? std::optional { _rows[static_cast<std::size_t>(_current)].text }
+                                  : std::nullopt);
         });
+    });
 }
 
 void ConnectPickerController::rebuild(std::optional<std::string> keep)
@@ -154,21 +151,14 @@ void ConnectPickerController::connectTo(config::LaunchTarget const& target)
     }
     setBusy(true);
     // Checked off the GUI thread: an ssh host takes seconds to answer or to fail. The worker never touches
-    // this object; its answer is posted back, and a controller gone by then simply ignores it.
+    // this object; its answer is posted back (as the probe's is, @see probeDaemon()).
     // A cancelled check keeps running to its end, so each gets its own thread, joined with the controller.
     auto const attempt = ++_attempt;
-    _workers.emplace_back([this,
-                           attempt,
-                           target,
-                           check = _services.check(target),
-                           guard = QPointer<ConnectPickerController> { this }] {
+    _workers.emplace_back([this, attempt, target, check = _services.check(target)] {
         auto result = check();
-        QMetaObject::invokeMethod(
-            guard.data(),
-            [this, attempt, target, result = std::move(result)]() mutable {
-                finishCheck(attempt, target, std::move(result));
-            },
-            Qt::QueuedConnection);
+        platform::postToObject(this, [this, attempt, target, result = std::move(result)]() mutable {
+            finishCheck(attempt, target, std::move(result));
+        });
     });
 }
 

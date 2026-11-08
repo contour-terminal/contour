@@ -955,12 +955,68 @@ display/render/input machinery learns the session is remote:
 Each controller (`contour/remote/NativeController`,
 `contour/remote/TmuxController`, sharing `contour/remote/RemoteController`)
 runs the Qt-free client engine on its own reactor thread (`ReactorThread`) and
-doubles as the app's `SessionFactory`: the manager's creation entry points ask
+doubles as a `SessionFactory`: the manager's creation entry points ask
 `canCreateSession()` first, so a "+" click inside a mirror window cannot spawn
-a stray local shell. The app's factory is permanently a
-`RoutingSessionFactory`; attach mode switches the route, never the manager's
-reference. v1 mapping: one tab per daemon session; tmux windows become tabs
+a stray local shell. The manager holds the app's local factory for its whole
+life and resolves every request through the window it is about: a window that
+a `DaemonLink` (or the tmux attach) adopts is bound to it
+(`TerminalSessionManager::bindWindow`, through `session::WindowBinding`), and
+its sessions are made by, and every request about them goes to, that binding's
+controller; an unbound window's go to the local factory. v1 mapping: one tab per daemon session; tmux windows become tabs
 and additional panes split the tab.
+
+### The window's daemon link
+
+A GUI process is not attached to *a* daemon; each of its windows is attached to the daemon of its own
+link. `contour/remote/DaemonLink` owns one `NativeController` and everything the attach keeps beside it:
+which daemon workspace each OS window mirrors, the boot window's adoption, the window being spawned, the
+drift badge and the answers to the daemon's extension questions. `ContourGuiApp` holds the links
+(`startDaemonLink()` makes one; a launch that attaches makes exactly one) and implements
+`remote::IDaemonLinkHost`, which is all a link asks of the application: open an OS window, upgrade or
+restart a local daemon, and destroy it once it ended. Closing its windows and posting notices to them it
+does through the manager.
+
+`session/` names a window's link only through `session::WindowBinding` (AGENT.md: `session/` must not
+include `remote/`), so everything the GUI reads of "the host" is read per window:
+
+- **Routing.** Every request about a window's sessions resolves its binding first
+  (`TerminalSessionManager::factoryFor`), and a pane, tab or merge that would cross two bindings is
+  refused before either daemon hears of it.
+- **Connection.** A link's connection events (`setHostConnection`, `connectionClosed`,
+  `reconnectFailed`, the restore summary, notices) reach only the windows bound to it; the manager keeps
+  that state per binding. One daemon going away leaves the other link's windows connected.
+- **Host label.** The title prefix, the host chip, the shell-integration offer and the "is this machine's
+  shell" guess read `TerminalSessionManager::hostLabelOf(window)` -- the window's binding's label, empty for
+  a local window. `WindowController::hostLabel` is therefore no longer `CONSTANT`: binding a window, or
+  releasing its binding, emits `hostLabelChanged`. A new OS window is authored on the daemon of the
+  window it is asked from (`TerminalSessionManager::requestRemoteWorkspace`); asked with no window open,
+  it is local.
+- **Configuration reload.** `ContourGuiApp::onConfigurationReloaded()` tells every link, which has its
+  controller re-resolve the session settings (`NativeController::restateSessionSettings`): stated to the
+  daemon at once, and in the hello of every later connection, so a reconnect after a reload no longer
+  states the profile of the launch.
+
+**Lifetime.** Which windows a binding serves is recorded once, in the manager
+(`TerminalSessionManager::windowsBoundTo`); a window bound anew leaves the binding it had. The manager tells
+a binding only that its last window went, closed or bound elsewhere (`WindowBinding::lastWindowReleased`).
+Then the link stops -- it
+releases its windows from the manager, stops its controller, and ignores every controller signal still
+queued, so nothing re-creates per-binding state for it -- and asks the host to destroy it. The host does
+so from its event loop, and only once the controller binds no pane (`NativeController::bindsPanes`):
+the closed windows' sessions end asynchronously, and their ptys unregister from the controller as they
+are destroyed; each such unbinding (`paneUnbound`, heard only once the link ended) has it ask again. A link destroyed without
+having stopped releases its windows itself; `ContourGuiApp`'s teardown stops every link while the manager
+still exists. Outcomes reported off the GUI thread (a daemon upgrade or restart) name the link by its id,
+for it may be gone by then.
+
+**Staging.** For now one link may still serve several windows: a launch that restores three
+daemon workspaces keeps one connection, and its windows follow it together. Making a link strictly one
+per window, together with the restore rule that needs, is the next step. Until then two caveats hold,
+both unreachable while a launch makes one link: the attach-window binder that a spawned window's
+`Main.qml` consults is one per manager (the last started link installs it, and removes it as it stops or
+gives up), and the drift badge reads
+the first link's model (`daemonDrift`). `DaemonLink_test.cpp` drives two links against two in-process
+daemons in one process -- typing, a split and a lost daemon each stay with their own window.
 
 ### One grid, several clients
 

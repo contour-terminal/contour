@@ -2901,7 +2901,8 @@ TEST_CASE("pane card: a refused drop shows the refusal note, is accepted, and no
     auto& note = drop.part("dropRefusal");
     CHECK_FALSE(note.isVisible());
 
-    for (auto const refusal: { MoveRefusal::OtherProcess, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
+    for (auto const refusal:
+         { MoveRefusal::OtherProcess, MoveRefusal::OtherHost, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
     {
         CAPTURE(static_cast<int>(refusal));
         drop.controller().refusal = refusal;

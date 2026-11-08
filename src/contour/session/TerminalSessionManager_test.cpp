@@ -64,6 +64,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <ranges>
 #include <sstream>
@@ -1252,9 +1253,11 @@ TEST_CASE(
 
     auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
     factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::session::FactoryBinding link { *factory };
     contour::test::TestApp app { std::move(factory) };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     window->createNewTab();
     window->createNewTab();
     auto* const background = sessionAtRow(manager, *window, 0);
@@ -1263,7 +1266,7 @@ TEST_CASE(
 
     SECTION("a bell while the mirror is connected badges the tab")
     {
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Connected);
         app.steadyClock().advance(contour::window::ResyncGracePeriod);
         background->terminal().writeToScreen("\a");
         drainPosted();
@@ -1272,7 +1275,7 @@ TEST_CASE(
 
     SECTION("a bell in the resync after a reconnect is not news")
     {
-        manager.setHostConnection(ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
         background->terminal().writeToScreen("\a");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
@@ -1286,7 +1289,7 @@ TEST_CASE(
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
     }
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     contour::test::closeAllTabs(*window);
 }
 
@@ -1570,9 +1573,11 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
 
     auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
     factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::session::FactoryBinding link { *factory };
     contour::test::TestApp app { std::move(factory) };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     window->createNewTab();
     window->createNewTab();
     auto* const background = sessionAtRow(manager, *window, 0);
@@ -1581,12 +1586,12 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
 
     SECTION("the mirror's repaint around a reconnect is not news")
     {
-        manager.setHostConnection(ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
 
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Connected);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
@@ -1604,14 +1609,14 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
         drainPosted();
         REQUIRE(badgeAt(*window, 0) == TabBadgeKind::Blocked);
 
-        manager.setHostConnection(ConnectionState::Reconnecting);
-        manager.setHostConnection(ConnectionState::Connected);
+        manager.setHostConnection(link, ConnectionState::Reconnecting);
+        manager.setHostConnection(link, ConnectionState::Connected);
         background->terminal().writeToScreen("x");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Blocked);
     }
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     contour::test::closeAllTabs(*window);
 }
 
@@ -1772,29 +1777,41 @@ TEST_CASE("TerminalSessionManager: the host chip follows the connection", "[mana
     using contour::window::HostChipState;
     using vthost::client::ConnectionState;
 
+    contour::test::MockPtySessionFactory host;
+    contour::session::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
     contour::test::ScopedController const window { manager };
-    CHECK(manager.hostConnection() == ConnectionState::Connected);
+    contour::test::ScopedController const local { manager };
+    manager.bindWindow(window.id, link);
+    CHECK(manager.hostConnection(window.id) == ConnectionState::Connected);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
 
     auto spy = QSignalSpy { &*window, &contour::window::WindowController::hostChipStateChanged };
 
-    manager.setHostConnection(ConnectionState::Reconnecting);
+    manager.setHostConnection(link, ConnectionState::Reconnecting);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Reconnecting));
     CHECK(spy.count() == 1);
 
     // Connecting folds onto the same chip state, so the chip is not told twice.
-    manager.setHostConnection(ConnectionState::Connecting);
+    manager.setHostConnection(link, ConnectionState::Connecting);
     CHECK(spy.count() == 1);
 
-    manager.setHostConnection(ConnectionState::Refused);
+    manager.setHostConnection(link, ConnectionState::Refused);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Disconnected));
     CHECK(spy.count() == 2);
 
-    manager.setHostConnection(ConnectionState::Connected);
+    manager.setHostConnection(link, ConnectionState::Connected);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
     CHECK(spy.count() == 3);
+
+    // A window no link claims has no connection, whatever another link's does.
+    auto localSpy = QSignalSpy { &*local, &contour::window::WindowController::hostChipStateChanged };
+    manager.setHostConnection(link, ConnectionState::Refused);
+    CHECK(manager.hostConnection(local.id) == ConnectionState::Connected);
+    CHECK(local->hostChipState() == static_cast<int>(HostChipState::Connected));
+    CHECK(localSpy.count() == 0);
+    manager.setHostConnection(link, ConnectionState::Connected);
 }
 
 // }}}
@@ -3175,11 +3192,13 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
 namespace
 {
 /// A split of two panes of a remote-hosted manager, both lost with the connection: their ptys closed after
-/// noteTransportLost(), so each shows the Disconnected footer.
+/// noteTransportLost(), so each shows the Disconnected footer. Its window is bound to @ref link, which
+/// stands for the daemon link it was attached through.
 struct LostSplit
 {
     contour::test::MockPtySessionFactory* factory;
     contour::test::TestApp app;
+    contour::session::FactoryBinding link;
     contour::test::ScopedController window;
     contour::session::TerminalSession* left = nullptr;
     contour::session::TerminalSession* right = nullptr;
@@ -3195,8 +3214,9 @@ struct LostSplit
     }
 
     explicit LostSplit(std::unique_ptr<contour::test::MockPtySessionFactory> owned = makeFactory()):
-        factory { owned.get() }, app { std::move(owned) }, window { app.manager() }
+        factory { owned.get() }, app { std::move(owned) }, link { *factory }, window { app.manager() }
     {
+        app.manager().bindWindow(window.id, link);
         left = app.manager().createSession(window.id);
         REQUIRE(left != nullptr);
         app.manager().splitActivePane(/*vertical*/ true, left);
@@ -3277,7 +3297,7 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     CHECK(lost.left->isReconnecting());
 
     // The daemon's layout is back and names both sessions.
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     CHECK(lost.factory->createdPtys.size() == ptysBefore + 2);
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
@@ -3294,7 +3314,7 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     CHECK(manager.model().workspace(lost.window.id)->activeTab()->paneCount() == 2);
 
     // Connected again, no pane shows the pill.
-    manager.setHostConnection(vthost::client::ConnectionState::Connected);
+    manager.setHostConnection(lost.link, vthost::client::ConnectionState::Connected);
     CHECK(newLeft->getPaneState() == static_cast<int>(PaneState::Live));
 }
 
@@ -3307,6 +3327,7 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     auto lost = LostSplit {};
     auto& manager = lost.app.manager();
     auto const second = contour::test::ScopedController { manager };
+    manager.bindWindow(second.id, lost.link);
     auto* const other = manager.createSession(second.id);
     REQUIRE(other != nullptr);
     auto const otherLeaf = leafOf(manager, second.id, *other)->id();
@@ -3321,13 +3342,13 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     lost.left->runFooterAction();
     REQUIRE(lost.factory->reconnects == 1);
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     CHECK(sessionOfLeaf(manager, lost.window.id, lost.leftLeaf)->endReason() == EndReason::None);
     CHECK(manager.sessionForId(other->modelSessionId()) == other);
 
     // Then the second window's layout arrives: its pane comes back in the same run.
     lost.factory->namedForReconnect = { otherDevice };
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     auto* const newOther = sessionOfLeaf(manager, second.id, otherLeaf);
     REQUIRE(newOther != nullptr);
     CHECK(newOther->endReason() == EndReason::None);
@@ -3338,7 +3359,7 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     newOther->terminal().device().close();
     newOther->onClosed();
     REQUIRE(newOther->endReason() == EndReason::Disconnected);
-    manager.reconnectFailed("the connection closed");
+    manager.reconnectFailed(lost.link, "the connection closed");
     CHECK(newOther->getFooterMessage()
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 
@@ -3359,8 +3380,8 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
         REQUIRE(lost.left->getPaneState() == static_cast<int>(PaneState::Reconnecting));
 
         // The supervised run ends for good: the connection says why, and settles in Refused.
-        manager.setHostConnection(vthost::client::ConnectionState::Refused);
-        manager.reconnectFailed("the daemon refused the handshake");
+        manager.setHostConnection(lost.link, vthost::client::ConnectionState::Refused);
+        manager.reconnectFailed(lost.link, "the daemon refused the handshake");
 
         for (auto* session: { lost.left, lost.right })
         {
@@ -3382,7 +3403,7 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
 
     SECTION("a failure with no reconnect running is nobody's to report")
     {
-        manager.reconnectFailed("the connection closed");
+        manager.reconnectFailed(lost.link, "the connection closed");
         CHECK(lost.left->getFooterMessage()
               == "Disconnected from the Contour daemon. Its sessions are still running.");
     }
@@ -3403,14 +3424,14 @@ TEST_CASE(
     // The returned layout omits the right pane's session, so the run stays up for it.
     lost.factory->namedForReconnect = { &lost.left->terminal().device() };
     lost.left->runFooterAction();
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
     REQUIRE(newLeft != nullptr);
     REQUIRE(newLeft->endReason() == EndReason::None);
 
     // The connection then drops for good: the Reconnect's pane says so, the pane this loss just ended does
     // not.
-    manager.connectionClosed("the connection closed");
+    manager.connectionClosed(lost.link, "the connection closed");
     newLeft->terminal().device().close();
     newLeft->onClosed();
 
@@ -3419,7 +3440,7 @@ TEST_CASE(
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 
     // And that ended the run: a failure now is nobody's to report.
-    manager.reconnectFailed("another");
+    manager.reconnectFailed(lost.link, "another");
     CHECK(newLeft->getFooterMessage()
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 }
@@ -3433,7 +3454,7 @@ TEST_CASE("TerminalSessionManager: Return pressed as the connection fails shows 
     lost.factory->reconnectResult = std::unexpected(contour::session::ReconnectError::ConnectionEnding);
     lost.left->runFooterAction();
 
-    manager.connectionClosed("the daemon refused the handshake");
+    manager.connectionClosed(lost.link, "the daemon refused the handshake");
 
     for (auto* session: { lost.left, lost.right })
         CHECK(session->getFooterMessage()
@@ -3449,7 +3470,7 @@ TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
     lost.factory->namedForReconnect = { &lost.left->terminal().device() };
     lost.left->runFooterAction();
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
     REQUIRE(newLeft != nullptr);
@@ -3469,7 +3490,7 @@ TEST_CASE("TerminalSessionManager: a failed take-back leaves no binding for the 
     lost.factory->creation = contour::test::MockPtySessionFactory::SessionCreation::Refused;
     lost.left->runFooterAction();
 
-    manager.rebindDisconnected();
+    manager.rebindDisconnected(lost.link);
 
     CHECK_FALSE(lost.factory->boundForReconnect);
     CHECK(lost.left->endReason() == contour::session::EndReason::Disconnected);
@@ -4108,14 +4129,22 @@ TEST_CASE("TerminalSessionManager: turning secure_input off at runtime releases 
 TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and tells one",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::session::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
 
     // Nothing to post it in yet.
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
 
     contour::test::ScopedController const first { manager };
     contour::test::ScopedController const second { manager };
+    contour::test::ScopedController const local { manager };
+    manager.bindWindow(first.id, link);
+    manager.bindWindow(second.id, link);
+    // A window of no link's is told of none's restore.
+    manager.deliverRestoreSummaryTo(local.id);
+    CHECK(local->notices().toastText().isEmpty());
     CHECK(first->notices().toastText().isEmpty());
     CHECK(second->notices().toastText().isEmpty());
 
@@ -4129,9 +4158,12 @@ TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and t
 
 TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::session::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     contour::test::ScopedController const window { app.manager() };
-    app.manager().noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
+    app.manager().bindWindow(window.id, link);
+    app.manager().noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
     app.manager().deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 1 window, 1 tab");
 }
@@ -4139,12 +4171,15 @@ TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "
 TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not posted to a later window",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::session::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
-    manager.expireRestoreSummary();
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.expireRestoreSummary(link);
 
     contour::test::ScopedController const later { manager };
+    manager.bindWindow(later.id, link);
     manager.deliverRestoreSummaryTo(later->windowId());
     CHECK(later->notices().toastText().isEmpty());
 }
@@ -4152,11 +4187,14 @@ TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not
 TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still held",
           "[manager][notices][restore]")
 {
+    contour::test::MockPtySessionFactory host;
+    contour::session::FactoryBinding link { host };
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.manager();
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 5, .tabs = 5 });
-    manager.noteWorkspaceRestored(vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 5, .tabs = 5 });
+    manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
     contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, link);
     manager.deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");
 }
@@ -4462,16 +4500,21 @@ TEST_CASE("TerminalSessionManager: the quick terminal's window stays out of the 
     using contour::window::WindowRole;
 
     // An attached app: the host refuses a local shell, authors every tab and split, and is told of every
-    // session ended -- except the sessions of the factory that spawns here whatever the host.
-    auto attached = std::make_unique<MockPtySessionFactory>();
-    auto* const host = attached.get();
+    // session ended. It serves the windows bound to it; the quick terminal is bound to none, so the factory
+    // that spawns here makes its sessions.
+    auto localOwned = std::make_unique<MockPtySessionFactory>();
+    auto* const local = localOwned.get();
+    MockPtySessionFactory hostFactory;
+    auto* const host = &hostFactory;
     host->reportedHosting = SessionHosting::Remote;
     host->creation = MockPtySessionFactory::SessionCreation::Refused;
     host->remoteTabs = MockPtySessionFactory::RemoteTabRouting::ToHost;
-    contour::test::TestApp app { std::move(attached) };
+    contour::session::FactoryBinding link { hostFactory };
+    contour::test::TestApp app { std::move(localOwned) };
     auto& manager = app.manager();
 
     contour::test::ScopedController const normal { manager };
+    manager.bindWindow(normal.id, link);
     manager.stageWindowRole(WindowRole::QuickTerminal);
     contour::test::ScopedController const quick { manager };
     REQUIRE(quick->role() == WindowRole::QuickTerminal);
@@ -4485,22 +4528,572 @@ TEST_CASE("TerminalSessionManager: the quick terminal's window stays out of the 
     quick->createNewTab();
     CHECK(host->requestedRemoteTabs.size() == 1);
     REQUIRE(quick->count() == 1);
-    CHECK(host->localCreations == 1);
-    CHECK(host->createdPtys.size() == 1);
+    CHECK(local->createdPtys.size() == 1);
+    CHECK(host->createdPtys.empty());
     auto* const session = sessionAtRow(manager, *quick, 0);
     REQUIRE(session != nullptr);
 
     manager.splitActivePane(true, session);
     CHECK(host->requestedRemoteSplits == 0);
-    CHECK(host->localCreations == 2);
+    CHECK(local->createdPtys.size() == 2);
 
     // Nor does it adopt a daemon workspace the host staged for the next window to come.
-    manager.setAttachWindowBinder([](contour::window::WindowController*) { return true; });
+    manager.setAttachWindowBinder(link, [](contour::window::WindowController*) { return true; });
     CHECK_FALSE(manager.consumeAttachWindow(quick.controller));
     CHECK(manager.consumeAttachWindow(normal.controller));
-    manager.setAttachWindowBinder(nullptr);
+    manager.clearAttachWindowBinder(link);
 
     // Ending its sessions is not authored on the host either.
     contour::test::closeAllTabs(*quick);
     CHECK(host->requestedRemoteCloses == 0);
 }
+
+// {{{ Each window resolves its sessions through the link it is bound to
+
+namespace
+{
+
+/// Makes @p host a daemon of run @p instance that hosts every session, serves moves and merges, and offers
+/// Reconnect: what a daemon link's controller is to the windows it serves.
+void hostAsDaemon(contour::test::MockPtySessionFactory& host, uint64_t instance)
+{
+    host.reportedHosting = contour::session::SessionHosting::Remote;
+    host.reportedHostKind = contour::session::SessionHostKind::Daemon;
+    host.reportedDaemonInstance = instance;
+    host.reportedMoveSupport = contour::session::MoveSupport::Supported;
+    host.reportedTabMergeSupport = contour::session::TabMergeSupport::Supported;
+    host.reportedReconnectSupport = contour::session::ReconnectSupport::Supported;
+}
+
+/// Two windows of one process, each bound to a daemon of its own: A shows one pane, B a tab split in two
+/// beside a tab of one. Every tab and split the daemons are asked for from then on is theirs to author.
+struct TwoLinks
+{
+    contour::test::MockPtySessionFactory hostA;
+    contour::test::MockPtySessionFactory hostB;
+    contour::session::FactoryBinding linkA { hostA, "alpha" };
+    contour::session::FactoryBinding linkB { hostB, "beta" };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::session::TerminalSessionManager& manager = app.manager();
+    contour::test::ScopedController windowA { manager };
+    contour::test::ScopedController windowB { manager };
+    contour::session::TerminalSession* paneA = nullptr;
+    contour::session::TerminalSession* leftB = nullptr;
+    contour::session::TerminalSession* rightB = nullptr;
+    contour::session::TerminalSession* loneB = nullptr;
+
+    TwoLinks()
+    {
+        hostAsDaemon(hostA, 7);
+        hostAsDaemon(hostB, 11);
+        manager.bindWindow(windowA.id, linkA);
+        manager.bindWindow(windowB.id, linkB);
+        paneA = manager.createSession(windowA.id);
+        leftB = manager.createSession(windowB.id);
+        REQUIRE(paneA != nullptr);
+        REQUIRE(leftB != nullptr);
+        manager.splitActivePane(/*vertical*/ true, leftB);
+        rightB = windowB->activeSession();
+        loneB = manager.createSession(windowB.id);
+        REQUIRE(rightB != leftB);
+        REQUIRE(loneB != nullptr);
+        hostA.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::ToHost;
+        hostB.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::ToHost;
+    }
+
+    ~TwoLinks()
+    {
+        contour::test::closeAllTabs(*windowA);
+        contour::test::closeAllTabs(*windowB);
+    }
+
+    TwoLinks(TwoLinks const&) = delete;
+    TwoLinks& operator=(TwoLinks const&) = delete;
+    TwoLinks(TwoLinks&&) = delete;
+    TwoLinks& operator=(TwoLinks&&) = delete;
+
+    /// @return The split tab of window B.
+    [[nodiscard]] vtworkspace::Tab* splitTabB() const
+    {
+        return manager.model().workspace(windowB.id)->tabAt(0);
+    }
+};
+
+/// A request a window makes of its host, and how a host counts having been asked it.
+struct RoutedRequest
+{
+    std::string_view name;
+    std::function<void(TwoLinks&)> make;
+    std::function<std::size_t(contour::test::MockPtySessionFactory const&)> calls;
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: each remote request goes to its window's factory", "[manager][link]")
+{
+    using contour::test::MockPtySessionFactory;
+    auto const requests = std::vector<RoutedRequest> {
+        { .name = "new tab",
+          .make = [](TwoLinks& links) { links.windowB->createNewTab(); },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedRemoteTabs.size(); } },
+        { .name = "split",
+          .make = [](TwoLinks& links) { links.manager.splitActivePane(/*vertical*/ false, links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteSplits);
+              } },
+        { .name = "close",
+          .make = [](TwoLinks& links) { links.windowB->closeTabAtIndex(1); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteCloses);
+              } },
+        // The tab's only pane: closing it closes the tab, and so the window the host is resolved from.
+        { .name = "close a one-pane tab's pane",
+          .make =
+              [](TwoLinks& links) {
+                  links.manager.closeActivePane(links.loneB, contour::session::SessionEnd::Destroy);
+              },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteCloses);
+              } },
+        { .name = "close other tabs",
+          .make = [](TwoLinks& links) { links.manager.closeOtherTabs(links.windowB.id, 0); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteCloses);
+              } },
+        { .name = "close tabs to the right",
+          .make = [](TwoLinks& links) { links.manager.closeTabsToRight(links.windowB.id, 0); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedRemoteCloses);
+              } },
+        { .name = "split orientation",
+          .make = [](TwoLinks& links) { links.manager.toggleActivePaneOrientation(links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.requestedSplitOrientations);
+              } },
+        { .name = "split ratio",
+          .make =
+              [](TwoLinks& links) {
+                  auto* const tab = links.splitTabB();
+                  links.manager.setPaneRatio(tab->id(), tab->rootPane()->id(), 0.3);
+              },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.reportedSplitRatios);
+              } },
+        { .name = "tab presentation",
+          .make = [](TwoLinks& links) { links.manager.activateTab(links.windowB.id, 0); },
+          .calls =
+              [](MockPtySessionFactory const& host) {
+                  return static_cast<std::size_t>(host.reportedTabPresentations);
+              } },
+        { .name = "hosted operation",
+          .make =
+              [](TwoLinks& links) {
+                  std::ignore = links.manager.requestHostedOperation(
+                      &links.leftB->terminal().device(), contour::session::HostedOperationRequest {});
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedHostedOperations.size(); } },
+        { .name = "reconnect",
+          .make = [](TwoLinks& links) { links.manager.reconnectHost(*links.leftB); },
+          .calls =
+              [](MockPtySessionFactory const& host) { return static_cast<std::size_t>(host.reconnects); } },
+        { .name = "move",
+          .make =
+              [](TwoLinks& links) {
+                  auto const drag = links.manager.paneDragOf(*links.rightB);
+                  REQUIRE(drag.has_value());
+                  auto const moved = links.manager.moveNode(
+                      *drag,
+                      vtworkspace::TabWellTarget { .workspace = links.windowB.id, .index = 2 },
+                      nullptr,
+                      {});
+                  CHECK(moved.has_value());
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedMoves.size(); } },
+        { .name = "tab merge",
+          .make =
+              [](TwoLinks& links) {
+                  auto* const tab = links.splitTabB();
+                  links.manager.mergeTabIntoSplit(links.windowB.id,
+                                                  1,
+                                                  links.windowB.id,
+                                                  tab->id(),
+                                                  tab->rootPane()->firstLeaf()->id(),
+                                                  vtworkspace::SplitSide::Top);
+              },
+          .calls = [](MockPtySessionFactory const& host) { return host.requestedTabMerges.size(); } },
+    };
+
+    for (auto const& request: requests)
+    {
+        DYNAMIC_SECTION(request.name)
+        {
+            auto links = TwoLinks {};
+            auto const askedOfA = request.calls(links.hostA);
+            auto const askedOfB = request.calls(links.hostB);
+            request.make(links);
+            CHECK(request.calls(links.hostB) == askedOfB + 1);
+            CHECK(request.calls(links.hostA) == askedOfA);
+        }
+    }
+}
+
+TEST_CASE("TerminalSessionManager: a new window is the host's to author from a window it serves only",
+          "[manager][link]")
+{
+    using contour::session::RemoteRouting;
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    CHECK(manager.requestRemoteWorkspace(*links.leftB, contour::session::RemoteSpawn { .profileName = "p" })
+          == RemoteRouting::Routed);
+    REQUIRE(links.hostB.requestedRemoteWorkspaces.size() == 1);
+    CHECK(links.hostB.requestedRemoteWorkspaces.front().profileName == "p");
+    CHECK(links.hostA.requestedRemoteWorkspaces.empty());
+
+    // A host that cannot author one leaves it to the caller, as a window no host serves does.
+    links.hostB.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::Local;
+    CHECK(manager.requestRemoteWorkspace(*links.leftB, {}) == RemoteRouting::Local);
+    auto const local = contour::test::ScopedController { manager };
+    auto* const localPane = manager.createSession(local.id);
+    REQUIRE(localPane != nullptr);
+    CHECK(manager.requestRemoteWorkspace(*localPane, {}) == RemoteRouting::Local);
+    CHECK(links.hostA.requestedRemoteWorkspaces.empty());
+    CHECK(links.hostB.requestedRemoteWorkspaces.size() == 2);
+    contour::test::closeAllTabs(*local);
+}
+
+TEST_CASE("TerminalSessionManager: each window names its sessions as its own host does", "[manager][link]")
+{
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    CHECK(manager.bindingOf(links.windowA.id) == &links.linkA);
+    CHECK(manager.bindingOf(links.windowB.id) == &links.linkB);
+    CHECK(manager.hostIdentity(links.windowA.id)
+          == contour::window::HostIdentity { .kind = contour::window::HostKind::Daemon,
+                                             .id = QStringLiteral("7") });
+    CHECK(manager.hostIdentity(links.windowB.id)
+          == contour::window::HostIdentity { .kind = contour::window::HostKind::Daemon,
+                                             .id = QStringLiteral("11") });
+
+    // Both daemons number their sessions alike: the host tells them apart.
+    auto const idA = manager.hostSessionIdOf(*links.paneA);
+    auto const idB = manager.hostSessionIdOf(*links.leftB);
+    REQUIRE(idA.has_value());
+    REQUIRE(idB.has_value());
+    CHECK(*idA == *idB);
+    CHECK(manager.sessionForHostId(manager.hostIdentity(links.windowA.id), *idA) == links.paneA);
+    CHECK(manager.sessionForHostId(manager.hostIdentity(links.windowB.id), *idB) == links.leftB);
+
+    // A window no link claims makes its sessions here, and its daemon hears nothing of them.
+    auto const local = contour::test::ScopedController { manager };
+    CHECK(manager.bindingOf(local.id) == nullptr);
+    auto const tabsAskedOfA = links.hostA.requestedRemoteTabs.size();
+    local->createNewTab();
+    CHECK(local->count() == 1);
+    CHECK(links.hostA.requestedRemoteTabs.size() == tabsAskedOfA);
+    CHECK(links.hostB.requestedRemoteTabs.empty());
+    contour::test::closeAllTabs(*local);
+}
+
+TEST_CASE("TerminalSessionManager: moving a tab across links is refused", "[manager][link][drop]")
+{
+    using contour::window::MoveRefusal;
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    auto* const target = links.splitTabB();
+    auto const merges = [&] {
+        return links.hostA.requestedTabMerges.size() + links.hostB.requestedTabMerges.size();
+    };
+
+    SECTION("a pane dropped beside one of the other link's")
+    {
+        auto const drag = manager.paneDragOf(*links.paneA);
+        REQUIRE(drag.has_value());
+        auto const resolved = manager.resolveNodeDrag(*drag);
+        // Hovered, its drop zones there say why; in its own window nothing stands in the way.
+        CHECK(manager.moveRefusalIn(resolved, links.windowB.id, contour::window::MovePlace::EdgeOtherWindow)
+              == MoveRefusal::OtherHost);
+        CHECK(manager.moveRefusalIn(resolved, links.windowA.id, contour::window::MovePlace::Edge)
+              == MoveRefusal::None);
+
+        auto const moved = manager.moveNode(*drag,
+                                            vtworkspace::EdgeTarget { .pane = links.leftB->modelSessionId(),
+                                                                      .side = vtworkspace::SplitSide::Right },
+                                            nullptr,
+                                            {});
+        REQUIRE_FALSE(moved.has_value());
+        CHECK(moved.error() == contour::session::MoveFailure { MoveRefusal::OtherHost });
+    }
+
+    SECTION("a tab dropped into the other link's tab strip")
+    {
+        auto const drag = manager.tabDragOf(links.windowA.id, 0);
+        REQUIRE(drag.has_value());
+        auto const moved = manager.moveNode(
+            *drag, vtworkspace::TabWellTarget { .workspace = links.windowB.id, .index = 0 }, nullptr, {});
+        REQUIRE_FALSE(moved.has_value());
+        CHECK(moved.error() == contour::session::MoveFailure { MoveRefusal::OtherHost });
+        manager.moveTabToWorkspace(links.windowA.id, 0, links.windowB.id, 0);
+    }
+
+    SECTION("a tab merged into a split of the other link's")
+    {
+        CHECK(manager.tabMergeSupport(links.windowA.id, links.windowB.id)
+              == contour::session::TabMergeSupport::Unsupported);
+        manager.mergeTabIntoSplit(links.windowA.id,
+                                  0,
+                                  links.windowB.id,
+                                  target->id(),
+                                  target->rootPane()->firstLeaf()->id(),
+                                  vtworkspace::SplitSide::Top);
+        CHECK(merges() == 0);
+        REQUIRE(links.windowA->notices().toastShown());
+        CHECK(links.windowA->notices().toastText().toStdString()
+              == std::string { contour::window::TabMergeRefusedText });
+    }
+
+    // Neither daemon was asked anything, and nothing moved here.
+    CHECK(links.hostA.requestedMoves.empty());
+    CHECK(links.hostB.requestedMoves.empty());
+    CHECK(merges() == 0);
+    CHECK(links.windowA->count() == 1);
+    CHECK(links.windowB->count() == 2);
+    CHECK(target->paneCount() == 2);
+}
+
+// Review (PR 2, item 3): within one process the quick terminal stays local while a daemon serves the ordinary
+// window: a drag between them is refused as a move between hosts, not as one from another Contour process.
+TEST_CASE("TerminalSessionManager: a pane between the quick terminal and a daemon window is refused as "
+          "another host's",
+          "[manager][link][drop][quickterminal]")
+{
+    using contour::window::MovePlace;
+    using contour::window::MoveRefusal;
+    contour::test::MockPtySessionFactory daemon;
+    hostAsDaemon(daemon, 7);
+    contour::session::FactoryBinding link { daemon, "home" };
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const normal { manager };
+    manager.bindWindow(normal.id, link);
+    manager.stageWindowRole(contour::window::WindowRole::QuickTerminal);
+    contour::test::ScopedController const quick { manager };
+    REQUIRE(quick->role() == contour::window::WindowRole::QuickTerminal);
+    auto* const daemonPane = manager.createSession(normal.id);
+    auto* const quickPane = manager.createSession(quick.id);
+    REQUIRE(daemonPane != nullptr);
+    REQUIRE(quickPane != nullptr);
+
+    struct Direction
+    {
+        std::string_view name;
+        contour::session::TerminalSession* from;
+        contour::session::TerminalSession* onto;
+        contour::window::WindowController* outOf;
+        contour::window::WindowController* into;
+    };
+    for (auto const& [name, from, onto, outOf, into]:
+         { Direction { .name = "quick terminal into the daemon's window",
+                       .from = quickPane,
+                       .onto = daemonPane,
+                       .outOf = quick.controller,
+                       .into = normal.controller },
+           Direction { .name = "daemon's window into the quick terminal",
+                       .from = daemonPane,
+                       .onto = quickPane,
+                       .outOf = normal.controller,
+                       .into = quick.controller } })
+    {
+        CAPTURE(name);
+        auto const drag = manager.paneDragOf(*from);
+        REQUIRE(drag.has_value());
+        auto const resolved = manager.resolveNodeDrag(*drag);
+        CHECK(manager.moveRefusalIn(resolved, into->windowId(), MovePlace::EdgeOtherWindow)
+              == MoveRefusal::OtherHost);
+        CHECK(into->refusalText(outOf->paneDragPayload(from)).toStdString()
+              == contour::window::refusalTextOf(MoveRefusal::OtherHost));
+        auto const moved = manager.moveNode(
+            *drag,
+            vtworkspace::EdgeTarget { .pane = onto->modelSessionId(), .side = vtworkspace::SplitSide::Right },
+            nullptr,
+            {});
+        REQUIRE_FALSE(moved.has_value());
+        CHECK(moved.error() == contour::session::MoveFailure { MoveRefusal::OtherHost });
+    }
+    CHECK(daemon.requestedMoves.empty());
+    CHECK(normal->count() == 1);
+    CHECK(quick->count() == 1);
+    contour::test::closeAllTabs(*quick);
+    contour::test::closeAllTabs(*normal);
+}
+
+namespace
+{
+
+/// A binding over a factory the test owns that counts how often it was told its last window went.
+class ReleaseCountingBinding final: public contour::session::WindowBinding
+{
+  public:
+    /// @param factory What the bound windows' sessions are made by. Borrowed: it must outlive the binding.
+    explicit ReleaseCountingBinding(contour::session::SessionFactory& factory): _factory(factory) {}
+
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    void lastWindowReleased() override { ++releases; }
+
+    /// How often lastWindowReleased() was told.
+    int releases = 0;
+
+  private:
+    contour::session::SessionFactory& _factory;
+};
+
+/// @return The windows @p manager has bound to @p binding, in binding order.
+[[nodiscard]] std::vector<vtworkspace::WorkspaceId> windowsOf(
+    contour::session::TerminalSessionManager const& manager, contour::session::WindowBinding const& binding)
+{
+    return std::ranges::to<std::vector>(manager.windowsBoundTo(binding));
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a binding is told when its last window closes", "[manager][link]")
+{
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    auto counting = ReleaseCountingBinding { links.hostA };
+    {
+        auto const third = contour::test::ScopedController { manager };
+        auto const fourth = contour::test::ScopedController { manager };
+        manager.bindWindow(third.id, counting);
+        manager.bindWindow(fourth.id, counting);
+        CHECK(windowsOf(manager, counting) == std::vector { third.id, fourth.id });
+
+        manager.removeWindowController(third.id);
+        CHECK(counting.releases == 0);
+        CHECK(windowsOf(manager, counting) == std::vector { fourth.id });
+        CHECK(manager.bindingOf(third.id) == nullptr);
+
+        manager.removeWindowController(fourth.id);
+        CHECK(counting.releases == 1);
+        CHECK(manager.windowsBoundTo(counting).empty());
+    }
+    CHECK(windowsOf(manager, links.linkB) == std::vector { links.windowB.id });
+
+    // A binding that stops serves its windows no more: what they make from then on is made here. It is not
+    // told: it released them itself.
+    manager.releaseBinding(links.linkB);
+    CHECK(manager.bindingOf(links.windowB.id) == nullptr);
+    CHECK(manager.bindingOf(links.windowA.id) == &links.linkA);
+    CHECK(manager.windowsBoundTo(links.linkB).empty());
+    CHECK(windowsOf(manager, links.linkA) == std::vector { links.windowA.id });
+}
+
+TEST_CASE("TerminalSessionManager: a window bound anew leaves the binding it had", "[manager][link]")
+{
+    auto hostA = contour::test::MockPtySessionFactory {};
+    auto hostB = contour::test::MockPtySessionFactory {};
+    auto from = ReleaseCountingBinding { hostA };
+    auto to = ReleaseCountingBinding { hostB };
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    auto const other = contour::test::ScopedController { manager };
+    manager.bindWindow(window.id, from);
+    manager.bindWindow(other.id, from);
+
+    manager.bindWindow(window.id, to);
+    CHECK(manager.bindingOf(window.id) == &to);
+    CHECK(windowsOf(manager, from) == std::vector { other.id });
+    CHECK(windowsOf(manager, to) == std::vector { window.id });
+    CHECK(from.releases == 0);
+
+    // Bound anew to the same, nothing changes.
+    manager.bindWindow(window.id, to);
+    CHECK(windowsOf(manager, to) == std::vector { window.id });
+
+    // Its last window gone elsewhere, the binding it had is told.
+    manager.bindWindow(other.id, to);
+    CHECK(manager.windowsBoundTo(from).empty());
+    CHECK(windowsOf(manager, to) == std::vector { window.id, other.id });
+    CHECK(from.releases == 1);
+    CHECK(to.releases == 0);
+    manager.releaseBinding(to);
+    CHECK(manager.windowsBoundTo(to).empty());
+    CHECK(to.releases == 0);
+}
+
+TEST_CASE("TerminalSessionManager: a lost link marks only its own sessions reconnecting",
+          "[manager][link][reconnect]")
+{
+    using contour::session::EndReason;
+    using contour::window::HostChipState;
+    using vthost::client::ConnectionState;
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+
+    SECTION("its connection is sought again")
+    {
+        manager.setHostConnection(links.linkA, ConnectionState::Reconnecting);
+        CHECK(links.paneA->isReconnecting());
+        CHECK_FALSE(links.leftB->isReconnecting());
+        CHECK(manager.hostConnection(links.windowA.id) == ConnectionState::Reconnecting);
+        CHECK(manager.hostConnection(links.windowB.id) == ConnectionState::Connected);
+        CHECK(links.windowA->hostChipState() == static_cast<int>(HostChipState::Reconnecting));
+        CHECK(links.windowB->hostChipState() == static_cast<int>(HostChipState::Connected));
+        manager.setHostConnection(links.linkA, ConnectionState::Connected);
+        CHECK_FALSE(links.paneA->isReconnecting());
+    }
+
+    SECTION("its connection ends for good, and is sought again from a footer")
+    {
+        manager.connectionClosed(links.linkA, "the connection closed");
+        // A's pane was told the connection went: its pty closing ends it Disconnected, not exited.
+        links.paneA->terminal().device().close();
+        links.paneA->onClosed();
+        REQUIRE(links.paneA->endReason() == EndReason::Disconnected);
+        CHECK(links.leftB->endReason() == EndReason::None);
+
+        // Its Reconnect seeks its own daemon, and only its own panes wait for it.
+        manager.reconnectHost(*links.paneA);
+        CHECK(links.hostA.reconnects == 1);
+        CHECK(links.hostB.reconnects == 0);
+        CHECK(links.paneA->isReconnecting());
+        CHECK_FALSE(links.leftB->isReconnecting());
+        CHECK(links.windowB->hostChipState() == static_cast<int>(HostChipState::Connected));
+
+        // The other link's reconnect ending is not this one's.
+        manager.reconnectFailed(links.linkB, "beta refused");
+        CHECK_FALSE(links.paneA->getFooterMessage().contains(QStringLiteral("beta refused")));
+        manager.reconnectFailed(links.linkA, "alpha refused");
+        CHECK(links.paneA->getFooterMessage().contains(QStringLiteral("alpha refused")));
+        manager.setHostConnection(links.linkA, ConnectionState::Connected);
+    }
+
+    SECTION("a notice about it is posted in its windows alone")
+    {
+        manager.postNoticeToWindowsOf(
+            links.linkA,
+            contour::window::Notice { .kind = contour::window::NoticeKind::DropRefused,
+                                      .text = std::string { contour::window::TabMergeRefusedText } });
+        CHECK(links.windowA->notices().toastShown());
+        CHECK_FALSE(links.windowB->notices().toastShown());
+    }
+
+    SECTION("its restore is told in one of its windows")
+    {
+        manager.noteWorkspaceRestored(links.linkA, vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
+        manager.deliverRestoreSummaryTo(links.windowB.id);
+        CHECK(links.windowB->notices().toastText().isEmpty());
+        manager.deliverRestoreSummaryTo(links.windowA.id);
+        CHECK(links.windowA->notices().toastText() == "Restored 1 window, 1 tab");
+    }
+}
+
+// }}}

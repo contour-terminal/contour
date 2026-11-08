@@ -207,8 +207,8 @@ class WindowController:
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
-    // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
-    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // The host of the window's own binding: it changes as the window is bound, and when its binding stops.
+    Q_PROPERTY(QString hostLabel READ hostLabel NOTIFY hostLabelChanged)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
@@ -1209,6 +1209,14 @@ class WindowController:
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
+    /// The manager bound the window to another host, or released it: its label and chip read anew.
+    /// @see hostLabel, hostChipState
+    void notifyHostBindingChanged()
+    {
+        emit hostLabelChanged();
+        emit hostChipStateChanged();
+    }
+
     /// The chord the configuration binds to a command, as this host spells shortcuts (an ended pane's
     /// footer names Close's). Each call reads the configuration as it is now, but nothing notifies a
     /// binding over it: a label already showing keeps its chord until it is evaluated again (the footer
@@ -1302,6 +1310,8 @@ class WindowController:
     void chromeHeightChanged();
     /// @see hostingNotice
     void hostingNoticeChanged();
+    /// @see hostLabel
+    void hostLabelChanged();
     /// @see hostChipState
     void hostChipStateChanged();
     /// @see requestNotification.
