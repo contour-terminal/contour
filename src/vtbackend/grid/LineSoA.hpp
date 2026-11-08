@@ -15,9 +15,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -274,20 +276,27 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
 // Column-keyed side table helpers (image fragments, soft glyphs)
 // ---------------------------------------------------------------------------
 
-/// @return Whether the column-keyed @p map holds an entry within [from, from+count).
-/// @param map   The map to inspect.
+/// @return A copy of the entries of the column-keyed @p map within [from, from+count); empty when it holds
+///         none, which one pass over the map settles.
+/// @param map   The map to read.
 /// @param from  First column.
 /// @param count Number of columns.
 template <typename Map>
-[[nodiscard]] bool hasColumnInRange(Map const& map, size_t from, size_t count)
+[[nodiscard]] std::vector<typename Map::value_type> entriesInRange(Map const& map, size_t from, size_t count)
 {
+    auto found = std::vector<typename Map::value_type> {};
     // A narrow range is cheaper probed key by key than by walking a wide map, and the other way around.
     if (count < map.size())
-        return std::ranges::any_of(std::views::iota(from, from + count), [&](size_t column) {
-            return map.contains(static_cast<uint16_t>(column));
-        });
-    return std::ranges::any_of(
-        map, [&](auto const& entry) { return entry.first >= from && entry.first < from + count; });
+    {
+        for (auto const column: std::views::iota(from, from + count))
+            if (auto const it = map.find(static_cast<uint16_t>(column)); it != map.end())
+                found.push_back(*it);
+        return found;
+    }
+    std::ranges::copy_if(map, std::back_inserter(found), [&](auto const& entry) {
+        return entry.first >= from && entry.first < from + count;
+    });
+    return found;
 }
 
 /// Erases the entries of a column-keyed map within [from, from+count).
@@ -307,27 +316,19 @@ void eraseColumnRange(Map& map, size_t from, size_t count)
     std::erase_if(map, [&](auto const& entry) { return entry.first >= from && entry.first < from + count; });
 }
 
-/// Copies the entries of @p src within [srcCol, srcCol+count) to the same offsets from @p dstCol.
+/// Puts @p entries, read from [srcCol, srcCol+count), at the same offsets from @p dstCol.
 /// The destination's own entries in the target range go first: those cells are overwritten.
-/// @param src    The map to copy from; may be @p dst, with overlapping ranges.
-/// @param dst    The map to copy into.
-/// @param srcCol First source column.
-/// @param dstCol First destination column.
-/// @param count  Number of columns.
+/// @param entries The entries to place, as entriesInRange() read them.
+/// @param dst     The map to place them in.
+/// @param srcCol  First column they were read from.
+/// @param dstCol  First destination column.
+/// @param count   Number of columns.
 template <typename Map>
-void copyColumnRange(Map const& src, Map& dst, size_t srcCol, size_t dstCol, size_t count)
+void placeColumnEntries(
+    std::span<typename Map::value_type const> entries, Map& dst, size_t srcCol, size_t dstCol, size_t count)
 {
-    if (!hasColumnInRange(src, srcCol, count))
-    {
-        eraseColumnRange(dst, dstCol, count);
-        return;
-    }
-    auto copied = std::vector<typename Map::value_type> {};
-    for (auto const& entry: src)
-        if (entry.first >= srcCol && entry.first < srcCol + count)
-            copied.push_back(entry);
     eraseColumnRange(dst, dstCol, count);
-    for (auto const& [col, value]: copied)
+    for (auto const& [col, value]: entries)
         dst[static_cast<uint16_t>(dstCol + (col - srcCol))] = value;
 }
 
@@ -344,19 +345,14 @@ void moveColumnRange(Map& map, size_t srcCol, size_t dstCol, size_t count)
 {
     if (map.empty() || count == 0 || srcCol == dstCol)
         return;
-    if (!hasColumnInRange(map, srcCol, count))
+    auto const moved = entriesInRange(map, srcCol, count);
+    if (moved.empty())
     {
         eraseColumnRange(map, dstCol, count);
         return;
     }
-    auto moved = std::vector<typename Map::value_type> {};
-    for (auto const& entry: map)
-        if (entry.first >= srcCol && entry.first < srcCol + count)
-            moved.push_back(entry);
     eraseColumnRange(map, srcCol, count);
-    eraseColumnRange(map, dstCol, count);
-    for (auto const& [col, value]: moved)
-        map[static_cast<uint16_t>(dstCol + (col - srcCol))] = value;
+    placeColumnEntries(moved, map, srcCol, dstCol, count);
 }
 
 /// Calls @p visit with each column-keyed side table @p line holds (image fragments, then soft glyphs),

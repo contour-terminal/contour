@@ -222,9 +222,13 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
     // Transfer side table entries in the copied range
     // A table is only created in the destination when the copied range brings an entry to put in it.
     auto const transfer = [&](auto const& srcTable, auto& dstTable, auto ensure) {
-        if (srcTable && hasColumnInRange(*srcTable, srcCol, count))
-            copyColumnRange(*srcTable, ensure(dstTable), srcCol, dstCol, count);
-        else if (dstTable)
+        if (srcTable)
+            if (auto const entries = entriesInRange(*srcTable, srcCol, count); !entries.empty())
+            {
+                placeColumnEntries(entries, ensure(dstTable), srcCol, dstCol, count);
+                return;
+            }
+        if (dstTable)
             eraseColumnRange(*dstTable, dstCol, count);
     };
     transfer(src.imageFragments, dst.imageFragments, [](auto& table) -> auto& {

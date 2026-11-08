@@ -827,19 +827,20 @@ LinkDecorationRole RenderBufferBuilder::linkRoleAt(HyperlinkId hyperlink, Column
     return role != LinkDecorationRole::None ? role : detectedRoleAt(column);
 }
 
-void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId contextId)
+void RenderBufferBuilder::startLine(LineOffset line, Line const& row)
 {
     _lineNr = line;
-    _currentLineFlags = flags;
+    _currentLineFlags = row.flags();
     _prevWidth = 0;
     _prevHasCursor = false;
 
     _useCursorlineColoring = isCursorLine(line);
-    _currentContextTint = tintFor(contextId);
+    _currentContextTint = tintFor(row.contextId());
 
     auto const gridLine = gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line;
     _lineFirstCell = _output->cells.size();
-    auto const& softGlyphs = _screen->grid().lineAt(gridLine).storage().softGlyphs;
+    _lineGridLine = gridLine;
+    auto const& softGlyphs = row.storage().softGlyphs;
     _lineSoftGlyphs = softGlyphs ? &*softGlyphs : nullptr;
     prepareSearchHighlights(gridLine);
     prepareLinkOverlay(gridLine);
@@ -1096,16 +1097,15 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
 void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
 {
     // The input method's preedit takes over the cursor line's cells from its first column on; the
-    // cells there are its text, not what the grid holds, so the grid's soft glyphs do not apply.
+    // cells there are its text, not what the grid holds, so the grid's soft glyphs do not apply. The
+    // placement is made once a frame (@see preeditPlacement), so a line only reads it.
     auto const preeditColumns = [&] {
-        auto const preeditLine =
-            _cursorPosition && !_inputMethodData.preeditString.empty()
-            && gridPositionOf(CellLocation { .line = _lineNr, .column = ColumnOffset(0) }).line
-                   == _cursorPosition->line;
-        return preeditLine ? std::pair { unbox<size_t>(preeditPlacement().start),
-                                         unbox<size_t>(preeditPlacement().start)
-                                             + unbox<size_t>(preeditPlacement().columns) }
-                           : std::pair<size_t, size_t> { 0, 0 };
+        if (!_cursorPosition || _inputMethodData.preeditString.empty()
+            || _lineGridLine != _cursorPosition->line)
+            return std::pair<size_t, size_t> { 0, 0 };
+        auto const& placement = preeditPlacement();
+        return std::pair { unbox<size_t>(placement.start),
+                           unbox<size_t>(placement.start) + unbox<size_t>(placement.columns) };
     }();
 
     // Appended straight to the output; the map is unordered, and the rasterizer walks cells and glyphs side

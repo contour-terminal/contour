@@ -1304,7 +1304,7 @@ struct MockGridRenderer
     size_t trivialCount = 0;
     size_t perCellCount = 0;
 
-    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags, [[maybe_unused]] ContextId contextId)
+    void startLine(LineOffset y, [[maybe_unused]] Line const& row)
     {
         renderedLines.push_back(y);
         ++perCellCount;

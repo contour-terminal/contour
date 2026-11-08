@@ -1111,9 +1111,10 @@ TEST_CASE("eraseColumnRange erases the range whether it is narrow or wide", "[Li
     CHECK(wide.contains(1));
     CHECK(!wide.contains(2));
 
-    CHECK(hasColumnInRange(entries(), 7, 3));
-    CHECK(!hasColumnInRange(entries(), 8, 3));
-    CHECK(!hasColumnInRange(entries(), 100, 50));
+    CHECK(entriesInRange(entries(), 7, 3).size() == 1);
+    CHECK(entriesInRange(entries(), 8, 3).empty());
+    CHECK(entriesInRange(entries(), 100, 50).empty());
+    CHECK(entriesInRange(entries(), 0, 100).size() == entries().size()); // wider than the map
 }
 
 TEST_CASE("LineSoA.softGlyph a copied line owns its own table", "[LineSoA][SoftGlyph]")

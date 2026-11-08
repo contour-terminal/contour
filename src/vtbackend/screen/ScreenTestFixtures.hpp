@@ -47,7 +47,7 @@ struct TextRenderBuilder
 {
     std::string text;
 
-    void startLine(LineOffset lineOffset, LineFlags flags, ContextId contextId);
+    void startLine(LineOffset lineOffset, Line const& row);
     void renderCell(ConstCellProxy cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
     void renderTrivialLine(TrivialLineBuffer const& lineBuffer,

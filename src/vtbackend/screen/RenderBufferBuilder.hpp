@@ -118,7 +118,7 @@ class RenderBufferBuilder
     void attachSoftGlyphs(SoftGlyphMap const& glyphs);
     /// Not noexcept: the cursor-line decision it makes goes through the viewport's coordinate
     /// translation, which builds the fold projection lazily and therefore allocates.
-    void startLine(LineOffset line, LineFlags flags, ContextId contextId);
+    void startLine(LineOffset line, Line const& row);
     void endLine();
 
     /// Renders a trivial line.
@@ -390,6 +390,7 @@ class RenderBufferBuilder
     LineOffset _lineNr = LineOffset(0);
     /// The soft-font glyph table of the line being rendered; null for a line without one.
     SoftGlyphMap const* _lineSoftGlyphs = nullptr;
+    LineOffset _lineGridLine = LineOffset(0); ///< The grid line of the line being rendered.
     size_t _lineFirstCell = 0; ///< Index in the output of the line being rendered's first cell.
     bool _useCursorlineColoring = false;
 
