@@ -109,15 +109,32 @@ namespace
         TargetCell { 132, 7, 30, SizeRule::Always, 7, 30, TextWidthRule::Declared }, // VT382
     };
 
-    /// 15x23 reverse question mark (Windows Terminal's), scaled to the cell on demand.
-    constexpr auto ErrorGlyphWidth = 15;
-    constexpr auto ErrorGlyphHeight = 23;
-    constexpr auto ErrorGlyphPattern = std::array<uint16_t, ErrorGlyphHeight> {
+    /// The reverse question mark of Windows Terminal's FontBuffer::_generateErrorGlyph, scaled to a cell by
+    /// picking whole rows and columns of a base bitmap: 16 columns wide as WT treats it (15 pattern bits,
+    /// bit 15 clear), 32 rows tall (23 drawn, the rest clear). Hand-tuned there for every cell size from
+    /// 1x1 to 16x32, and ported as the same data rather than resampled, which turns the glyph to mush at the
+    /// common sizes.
+    constexpr auto ErrorGlyphPattern = std::array<uint16_t, MaxSoftCellHeight> {
         0b000000000000000, 0b000000000000000, 0b000000000000000, 0b000000000000000, 0b000000000000000,
         0b000000000000000, 0b001111111110000, 0b011111111111000, 0b111000000011100, 0b111000000011100,
         0b111000000000000, 0b111000000000000, 0b111100000000000, 0b011111000000000, 0b000011110000000,
         0b000001110000000, 0b000001110000000, 0b000001110000000, 0b000001110000000, 0b000000000000000,
         0b000001110000000, 0b000001110000000, 0b000001110000000,
+    };
+
+    /// Per cell width (index), the set of base-bitmap columns the error glyph keeps: bit n is column n
+    /// counted from the right, and as many bits are set as the cell is wide.
+    constexpr auto ErrorGlyphColumnMasks = std::array<uint32_t, MaxSoftCellWidth + 1> {
+        0, 1, 3, 32771, 8457, 9481, 9545, 9673, 42441, 26061, 58829, 28141, 60909, 63453, 63485, 65533, 65535,
+    };
+
+    /// Per cell height (index), the set of base-bitmap rows the error glyph keeps: bit n is row n from the
+    /// top, and as many bits are set as the cell is tall.
+    constexpr auto ErrorGlyphRowMasks = std::array<uint32_t, MaxSoftCellHeight + 1> {
+        0,         1,         3,          7,          15,         1613952,    10002560,  10002816,  10068352,
+        10068353,  26845569,  26847617,   26847619,   26864003,   28961155,   28961219,  28961731,  62516163,
+        62516167,  129625031, 129625039,  129756111,  263973839,  263974863,  268169167, 536604623, 536608719,
+        536608735, 536870879, 1073741791, 2147483615, 2147483647, 4294967295,
     };
 
     [[nodiscard]] crispy::StrongHash hashGlyph(uint8_t width,
@@ -131,19 +148,17 @@ namespace
 
     [[nodiscard]] std::shared_ptr<SoftGlyph const> makeErrorGlyph(SoftCellGeometry geometry)
     {
-        // Sample the source at each target pixel's centre.
-        auto coverage = std::vector<uint8_t>(static_cast<size_t>(geometry.fullWidth) * geometry.fullHeight);
-        for (auto const y: std::views::iota(0, int { geometry.fullHeight }))
+        auto const columnMask = ErrorGlyphColumnMasks.at(geometry.fullWidth);
+        auto const rowMask = ErrorGlyphRowMasks.at(geometry.fullHeight);
+        auto coverage = std::vector<uint8_t> {};
+        coverage.reserve(static_cast<size_t>(geometry.fullWidth) * geometry.fullHeight);
+        for (auto const row: std::views::iota(size_t { 0 }, ErrorGlyphPattern.size()))
         {
-            auto const srcY = (((2 * y) + 1) * ErrorGlyphHeight) / (2 * geometry.fullHeight);
-            for (auto const x: std::views::iota(0, int { geometry.fullWidth }))
-            {
-                auto const srcX = (((2 * x) + 1) * ErrorGlyphWidth) / (2 * geometry.fullWidth);
-                auto const bit =
-                    (ErrorGlyphPattern.at(static_cast<size_t>(srcY)) >> (ErrorGlyphWidth - 1 - srcX)) & 1;
-                coverage.at((static_cast<size_t>(y) * geometry.fullWidth) + static_cast<size_t>(x)) =
-                    static_cast<uint8_t>(bit);
-            }
+            if (((rowMask >> row) & 1U) == 0)
+                continue;
+            for (auto const column: std::views::iota(0, MaxWidth) | std::views::reverse)
+                if (((columnMask >> column) & 1U) != 0)
+                    coverage.push_back(static_cast<uint8_t>((ErrorGlyphPattern[row] >> column) & 1U));
         }
         return makeSoftGlyph(geometry.fullWidth, geometry.fullHeight, std::move(coverage));
     }
@@ -177,6 +192,7 @@ std::string_view toString(SoftFontError error) noexcept
         case SoftFontError::CharsetSize: return "invalid character set size";
         case SoftFontError::TooLarge: return "cell or start position too large";
         case SoftFontError::Designator: return "invalid designator";
+        case SoftFontError::Glyph: return "invalid glyph";
     }
     return "unknown error";
 }
@@ -192,7 +208,6 @@ std::expected<SoftFontDeclaration, SoftFontError> decodeDecdld(DecdldParameters 
     auto const erase = toEnum<SoftFontErase>(p.pe, 2);
     if (!erase)
         return std::unexpected(SoftFontError::EraseControl);
-        case SoftFontError::Glyph: return "invalid glyph";
     declaration.erase = *erase;
 
     auto const format = std::ranges::find(PageFormats, p.pss, &PageFormat::pss);
@@ -317,21 +332,6 @@ SoftFont makeSoftFont(SoftFontDeclaration const& declaration,
                       .errorGlyph = makeErrorGlyph(geometry) };
 }
 
-std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& declaration,
-                                                     std::string_view body,
-                                                     SoftFont const* previous)
-{
-    // Dscs: up to two intermediates and one final; bytes that are neither are ignored.
-    auto designator = std::string {};
-    auto const bodyAfterDscs = [&]() -> std::optional<std::string_view> {
-        for (auto const index: std::views::iota(size_t { 0 }, body.size()))
-        {
-            auto const ch = static_cast<unsigned char>(body[index]);
-            if (ch >= 0x20 && ch <= 0x2F)
-                designator.push_back(static_cast<char>(ch));
-            else if (ch >= 0x30 && ch <= 0x7E)
-            {
-                designator.push_back(static_cast<char>(ch));
 std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration const& declaration,
                                                         std::string designator,
                                                         SoftCellGeometry geometry,
@@ -361,6 +361,21 @@ std::expected<SoftFont, SoftFontError> assembleSoftFont(SoftFontDeclaration cons
     return makeSoftFont(declaration, std::move(designator), geometry, std::move(placed));
 }
 
+std::expected<SoftFont, SoftFontError> buildSoftFont(SoftFontDeclaration const& declaration,
+                                                     std::string_view body,
+                                                     SoftFont const* previous)
+{
+    // Dscs: up to two intermediates and one final; bytes that are neither are ignored.
+    auto designator = std::string {};
+    auto const bodyAfterDscs = [&]() -> std::optional<std::string_view> {
+        for (auto const index: std::views::iota(size_t { 0 }, body.size()))
+        {
+            auto const ch = static_cast<unsigned char>(body[index]);
+            if (ch >= 0x20 && ch <= 0x2F)
+                designator.push_back(static_cast<char>(ch));
+            else if (ch >= 0x30 && ch <= 0x7E)
+            {
+                designator.push_back(static_cast<char>(ch));
                 return body.substr(index + 1);
             }
             if (designator.size() > 2)

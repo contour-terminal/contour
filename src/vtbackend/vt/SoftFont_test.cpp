@@ -8,6 +8,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace vtbackend;
@@ -310,13 +311,78 @@ TEST_CASE("buildSoftFont: positions past 0x7F are dropped", "[SoftFont]")
     CHECK(std::ranges::count(font.glyphs, nullptr) == 95);
 }
 
-TEST_CASE("makeSoftFont: the error glyph at 15x23 is the reference pattern", "[SoftFont]")
+namespace
 {
-    auto const font = makeSoftFont(fullCellDeclaration(), "B", { 15, 23, 0 }, {});
-    auto const& glyph = *font.errorGlyph;
-    CHECK(row(glyph, 0) == std::vector<uint8_t>(15, 0));
-    CHECK(row(glyph, 6) == std::vector<uint8_t> { 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0 });
-    CHECK(row(glyph, 19) == std::vector<uint8_t>(15, 0));
+/// @return The rows of @p glyph as strings of '#' and '.', top row first.
+std::vector<std::string> picture(SoftGlyph const& glyph)
+{
+    auto rows = std::vector<std::string> {};
+    for (auto const y: std::views::iota(size_t { 0 }, size_t { glyph.height }))
+        rows.push_back(std::ranges::to<std::string>(
+            row(glyph, y) | std::views::transform([](uint8_t pixel) { return pixel != 0 ? '#' : '.'; })));
+    return rows;
+}
+} // namespace
+
+// The error glyph is Windows Terminal's reverse question mark at every size, taken from its hand-tuned
+// row and column masks, so the common cells keep a recognisable shape.
+TEST_CASE("makeSoftFont: the error glyph at 10x10 is the reference pattern", "[SoftFont]")
+{
+    auto const font = makeSoftFont(fullCellDeclaration(), "B", { 10, 10, 0 }, {});
+    CHECK(picture(*font.errorGlyph)
+          == std::vector<std::string> {
+              "..........",
+              "..######..",
+              ".##....##.",
+              "..##......",
+              "....##....",
+              "....##....",
+              "..........",
+              "....##....",
+              "..........",
+              "..........",
+          });
+}
+
+TEST_CASE("makeSoftFont: the error glyph at 15x12 is the reference pattern", "[SoftFont]")
+{
+    auto const font = makeSoftFont(fullCellDeclaration(), "B", { 15, 12, 0 }, {});
+    CHECK(picture(*font.errorGlyph)
+          == std::vector<std::string> {
+              "...............",
+              "...............",
+              "..###########..",
+              ".###.......###.",
+              ".###...........",
+              "..#####........",
+              "......###......",
+              "......###......",
+              "...............",
+              "......###......",
+              "...............",
+              "...............",
+          });
+}
+
+TEST_CASE("makeSoftFont: the error glyph at 10x20 is the reference pattern", "[SoftFont]")
+{
+    auto const font = makeSoftFont(fullCellDeclaration(), "B", { 10, 20, 0 }, {});
+    CHECK(picture(*font.errorGlyph)
+          == std::vector<std::string> {
+              "..........", "..........", "..........", "..........", "...####...",
+              "..######..", ".##....##.", ".##....##.", ".##.......", "..##......",
+              "...###....", "....##....", "....##....", "..........", "....##....",
+              "....##....", "..........", "..........", "..........", "..........",
+          });
+}
+
+TEST_CASE("makeSoftFont: the error glyph exists at the smallest and largest cell", "[SoftFont]")
+{
+    for (auto const [width, height]: { std::pair<uint8_t, uint8_t> { 1, 1 }, { 16, 32 } })
+    {
+        auto const font = makeSoftFont(fullCellDeclaration(), "B", { width, height, 0 }, {});
+        CHECK(font.errorGlyph->coverage.size() == size_t { width } * height);
+    }
 }
 
 TEST_CASE("makeSoftGlyph: identity is the content", "[SoftFont]")
