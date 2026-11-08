@@ -87,6 +87,16 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     auto const n = unbox<size_t>(newCols);
     forEachCellArray(fillAttrs, [&](auto array, auto const& empty) { (line.*array).resize(n, empty); });
 
+    // Side tables are keyed by column; an entry at or beyond the new width would outlive its cell
+    // (a ghost glyph on regrow, and a column the state codec rejects).
+    if (n < oldSize)
+    {
+        if (line.imageFragments)
+            std::erase_if(*line.imageFragments, [&](auto const& entry) { return entry.first >= n; });
+        if (line.softGlyphs)
+            std::erase_if(*line.softGlyphs, [&](auto const& entry) { return entry.first >= n; });
+    }
+
     // Clamp usedColumns to new size
     if (line.usedColumns > newCols)
         line.usedColumns = newCols;

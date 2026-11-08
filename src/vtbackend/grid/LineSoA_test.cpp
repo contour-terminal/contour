@@ -1051,3 +1051,44 @@ TEST_CASE("LineSoA.softGlyph a line with one is not trimmed away", "[LineSoA][So
     line.useCellAt(ColumnOffset(4)).setSoftGlyph(SoftGlyphRef { .font = 0, .position = 0x20 });
     CHECK(line.trimmedColumns() == ColumnCount(5));
 }
+
+TEST_CASE("LineSoA.softGlyph shrinking drops entries at or beyond the new width, and regrowing shows none",
+          "[LineSoA][SoftGlyph]")
+{
+    auto line = Line(ColumnCount(20));
+    line.useCellAt(ColumnOffset(2)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x21 });
+    line.useCellAt(ColumnOffset(9)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x22 });
+    line.useCellAt(ColumnOffset(10)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x23 });
+    line.useCellAt(ColumnOffset(16)).setSoftGlyph(SoftGlyphRef { .font = 1, .position = 0x24 });
+
+    line.resize(ColumnCount(10));
+    REQUIRE(line.storage().softGlyphs);
+    CHECK(line.storage().softGlyphs->size() == 2);
+    CHECK(line.storage().softGlyphs->contains(2));
+    CHECK(line.storage().softGlyphs->contains(9));
+
+    line.resize(ColumnCount(20));
+    CHECK(line.storage().softGlyphs->size() == 2);
+    for (auto const col: std::views::iota(10, 20))
+        CHECK(!line.useCellAt(ColumnOffset(col)).softGlyph());
+}
+
+TEST_CASE("LineSoA.imageFragment shrinking drops entries at or beyond the new width, and regrowing shows none",
+          "[LineSoA][ImageFragment]")
+{
+    auto line = Line(ColumnCount(20));
+    line.useCellAt(ColumnOffset(0)).setCharacter(U'x'); // materializes the lazily blank line
+    auto& storage = line.storage();
+    storage.imageFragments.emplace();
+    for (auto const col: { uint16_t { 3 }, uint16_t { 12 }, uint16_t { 19 } })
+        storage.imageFragments->emplace(col, std::shared_ptr<ImageFragment> {});
+    storage.shape = LineShape::Spanning;
+
+    line.resize(ColumnCount(10));
+    REQUIRE(line.storage().imageFragments);
+    CHECK(line.storage().imageFragments->size() == 1);
+    CHECK(line.storage().imageFragments->contains(3));
+
+    line.resize(ColumnCount(20));
+    CHECK(line.storage().imageFragments->size() == 1);
+}

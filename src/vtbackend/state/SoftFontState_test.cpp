@@ -221,3 +221,22 @@ TEST_CASE("an out-of-range soft-glyph triple is rejected", "[StateRoundTrip][Sof
     CHECK(rejected({ .font = 1, .position = 0x80 }));
     CHECK(rejected({ .font = 1, .position = 0 }));
 }
+
+TEST_CASE("a screen shrunk below its soft glyphs still hands over", "[StateRoundTrip][SoftFont]")
+{
+    auto const setup = test::HandoverSetup { .pageSize = PageSize { LineCount(3), ColumnCount(20) },
+                                             .history = LineCount(10) };
+    auto source = setup.makeTerminal();
+    source->writeToScreen(FontOne);
+    source->writeToScreen("\033[1;16H\033) A\x0E!\"\x0F");
+    source->terminal.flushInput();
+    source->terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(10) });
+
+    auto const target = test::handedOver(*source, setup);
+    REQUIRE(target.has_value());
+
+    source->terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(20) });
+    auto& screen = source->terminal.primaryScreen();
+    for (auto const col: std::views::iota(0, 20))
+        CHECK(!screen.at(LineOffset(0), ColumnOffset(col)).softGlyph());
+}
