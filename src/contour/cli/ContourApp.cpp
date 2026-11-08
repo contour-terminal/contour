@@ -323,8 +323,8 @@ namespace
                     "yes", CLI::Value { false }, "Ends the daemon's sessions without asking first." });
                 options.emplace_back(CLI::Option { "keep-snapshot",
                                                    CLI::Value { false },
-                                                   "Keeps the daemon's workspace, so that the next daemon "
-                                                   "restores its windows, tabs and panes." });
+                                                   "Keeps the daemon's workspaces, so that the next daemon "
+                                                   "restores them with their tabs and panes." });
                 break;
             case DaemonVerb::Logs:
                 options.emplace_back(CLI::Option {

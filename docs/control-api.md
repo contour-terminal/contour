@@ -124,7 +124,7 @@ separated list of:
 | 0 | Done. |
 | 1 | The call failed; the reason is on standard error as `Error: <message>`. |
 | 2 | The command line was malformed, or a setting it names cannot be used (a `--tls-ca` that does not parse). |
-| 3 | The pane, tab, window or block named does not exist, or the name matches several. |
+| 3 | The pane, tab, workspace or block named does not exist, or the name matches several. |
 | 4 | No daemon could be reached. |
 | 5 | The daemon declined; the reason is on standard error. |
 | 130 | Interrupted by Ctrl+C. |

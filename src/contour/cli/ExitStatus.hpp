@@ -39,7 +39,7 @@ enum class ExitStatus : uint8_t
                    "does "
                    "not parse).";
         case ExitStatus::TargetNotFound:
-            return "The pane, tab, window or block named does not exist, or the name matches several.";
+            return "The pane, tab, workspace or block named does not exist, or the name matches several.";
         case ExitStatus::Unreachable: return "No daemon could be reached.";
         case ExitStatus::Refused: return "The daemon declined; the reason is on standard error.";
         case ExitStatus::Interrupted: return "Interrupted by Ctrl+C.";

@@ -169,6 +169,61 @@ TEST_CASE("split builds its request from flags", "[contour][cli][control]")
                                                              .focus = vtcontrol::FocusPolicy::Keep }));
 }
 
+TEST_CASE("ControlVerbs: new takes --new-workspace", "[contour][cli][control]")
+{
+    auto const flags = parseFlags({ "new", "--new-workspace" });
+    auto const params = verbNamed("new").buildParams(flags);
+    REQUIRE(params.has_value());
+    auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*params);
+    REQUIRE(request.has_value());
+    CHECK(request->placement == vtcontrol::WorkspacePlacement::New);
+    CHECK(request->workspace.empty());
+}
+
+TEST_CASE("ControlVerbs: ls and new take --workspace W", "[contour][cli][control]")
+{
+    auto const list = verbNamed("ls").buildParams(parseFlags({ "ls", "--workspace", "w1" }));
+    REQUIRE(list.has_value());
+    CHECK(*list == vtcontrol::encodeJson(vtcontrol::ListRequest { .workspace = "w1" }));
+
+    auto const created = verbNamed("new").buildParams(parseFlags({ "new", "--workspace", "w2" }));
+    REQUIRE(created.has_value());
+    auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*created);
+    REQUIRE(request.has_value());
+    CHECK(request->workspace == "w2");
+    CHECK(request->placement == vtcontrol::WorkspacePlacement::Existing);
+}
+
+TEST_CASE("ControlVerbs: the old --window flag is an unknown option", "[contour][cli][control]")
+{
+    // The parser refuses it, and ContourApp::run turns a refusal into EXIT_FAILURE (see App::run).
+    static auto const app = contour::cli::ContourApp { core::defaultEnvironment() };
+    for (auto const& line: { std::vector<std::string_view> { "contour", "ls", "--window", "1" },
+                             std::vector<std::string_view> { "contour", "ls", "--new-window" } })
+    {
+        auto const parsed = core::cli::parse(app.parameterDefinition(), line);
+        REQUIRE_FALSE(parsed.has_value());
+        CHECK(parsed.error().message.contains("window"));
+    }
+}
+
+TEST_CASE("ControlVerbs: new refuses the removed window flags, naming the new ones",
+          "[contour][cli][control]")
+{
+    // `new` keeps unknown options as its command, so the parser cannot refuse these.
+    auto run = Run {};
+    auto channel = ScriptedChannel { "{}"s };
+    auto const status = [&](std::vector<std::string_view> const& args) {
+        return contour::cli::runControlVerb(verbNamed("new"), parseFlags(args), channel, run.io());
+    };
+
+    CHECK(status({ "new", "--window", "1" }) == 2);
+    CHECK(run.err.str().contains("--window is now --workspace"));
+    CHECK(status({ "new", "--new-window" }) == 2);
+    CHECK(run.err.str().contains("--new-window is now --new-workspace"));
+    CHECK(channel.calls.empty());
+}
+
 TEST_CASE("contradictory or malformed flags are bad usage", "[contour][cli][control]")
 {
     auto run = Run {};
@@ -182,7 +237,7 @@ TEST_CASE("contradictory or malformed flags are bad usage", "[contour][cli][cont
     CHECK(status({ "split", "--ratio", "0" }) == 2);
     CHECK(status({ "split", "--ratio", "x" }) == 2);
     CHECK(status({ "split", "--ratio", "100" }) == 2);
-    CHECK(status({ "new", "--window", "w", "--new-window" }) == 2);
+    CHECK(status({ "new", "--workspace", "w", "--new-workspace" }) == 2);
     CHECK(status({ "close", "--pane", "p", "--tab", "t" }) == 2);
     CHECK(status({ "label", "only-one" }) == 2);
     CHECK(channel.calls.empty());
