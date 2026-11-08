@@ -2593,6 +2593,16 @@ TEST_CASE("the writer spells a row containing the Primary set as Primary", "[con
     CHECK(canonicalModifierSpellings(Modifiers { Modifier::Super }, KeyboardPlatformKind::Xkb)
           == Spellings { "Super" });
     CHECK(canonicalModifierSpellings(Modifiers {}, KeyboardPlatformKind::Mac).empty());
+    // A chord whose other modifiers another platform's Primary already holds is written literally:
+    // Control+Command as [Primary, Control] would read back on the desktop as Ctrl+Shift, a different chord
+    // taken by another command. Shift is the one exception, as [Primary, Shift] means the same command
+    // everywhere.
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Super },
+                                     KeyboardPlatformKind::Mac)
+          == Spellings { "Control", "Super" });
+    CHECK(canonicalModifierSpellings(Modifiers { Modifier::Control, Modifier::Shift, Modifier::Super },
+                                     KeyboardPlatformKind::Xkb)
+          == Spellings { "Shift", "Control", "Super" });
 
     SECTION("a written configuration says Primary where the host's set is")
     {

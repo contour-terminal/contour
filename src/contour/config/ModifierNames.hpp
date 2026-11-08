@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <optional>
+#include <ranges>
 #include <string_view>
 #include <vector>
 
@@ -109,9 +111,22 @@ inline constexpr std::string_view PrimaryModifierName = "Primary";
     return std::nullopt;
 }
 
+/// The modifiers that must not sit beside a written `Primary`: those some platform's Primary set holds,
+/// Shift excepted. `[Primary, Control]` written on macOS would read back on the desktop as Ctrl+Shift, a
+/// different chord, while `[Primary, Shift]` means the same command everywhere by design.
+/// @return The union of every platform's Primary set, without Shift.
+[[nodiscard]] constexpr vtbackend::Modifiers modifiersAmbiguousBesidePrimary() noexcept
+{
+    auto result = vtbackend::Modifiers {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, KeyboardPlatformKindCount))
+        result |= primaryModifiers(static_cast<KeyboardPlatformKind>(index));
+    return result.without(vtbackend::Modifiers { vtbackend::Modifier::Shift });
+}
+
 /// The spellings a writer emits for @p modifiers on @p kind: "Primary" first when they contain the Primary
 /// set, then each remaining modifier by its canonical name. So a row means the same on every platform it is
-/// carried to, and a config written on one OS works on another.
+/// carried to, and a config written on one OS works on another. A chord whose remaining modifiers another
+/// platform's Primary set holds is written literally instead (@see modifiersAmbiguousBesidePrimary).
 /// @param modifiers The chord's modifiers.
 /// @param kind The keyboard platform the configuration is written for.
 /// @return The spellings, in the order they are written.
@@ -120,7 +135,8 @@ inline constexpr std::string_view PrimaryModifierName = "Primary";
 {
     auto result = std::vector<std::string_view> {};
     auto const primary = primaryModifiers(kind);
-    auto const hasPrimary = modifiers.contains(primary);
+    auto const hasPrimary =
+        modifiers.contains(primary) && !modifiers.without(primary).any(modifiersAmbiguousBesidePrimary());
     if (hasPrimary)
         result.push_back(PrimaryModifierName);
     auto const rest = hasPrimary ? modifiers.without(primary) : modifiers;
