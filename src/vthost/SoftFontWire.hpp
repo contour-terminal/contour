@@ -38,22 +38,15 @@ enum class SoftFontWireError : uint8_t
 /// @return One entry per loaded font, by font number.
 [[nodiscard]] std::vector<proto::WireSoftFont> softFontsToWire(vtbackend::SoftFontStore const& store);
 
-/// The fonts of a wire set, built and checked aside, for the caller to put in place whole.
-struct StagedSoftFonts
-{
-    std::array<std::shared_ptr<vtbackend::SoftFont const>, vtbackend::SoftFontCount>
-        fonts {};                                               ///< By font number; null = none.
-    std::array<uint8_t, vtbackend::SoftFontCount> loadRanks {}; ///< By font number.
-};
-
 /// Rebuilds the fonts a peer sent.
 ///
 /// Judges what the decoder cannot: a font number and rank outside DECDLD's three, a number sent twice, and
 /// glyphs that are not the font's own cell size. Nothing is built into the caller's state until the whole set
-/// is accepted, so a refused set leaves the mirror's fonts as they were.
+/// is accepted, so a refused set leaves the mirror's fonts as they were. The bitmaps must be the size the
+/// decoder checked (proto::softGlyphRowBytes by height).
 /// @param fonts The fonts a SoftFontState carried.
-/// @return The staged fonts, or why the set was refused.
-[[nodiscard]] std::expected<StagedSoftFonts, SoftFontWireError> softFontsFromWire(
+/// @return The staged fonts, for SoftFontStore::replaceAll, or why the set was refused.
+[[nodiscard]] std::expected<vtbackend::SoftFontSet, SoftFontWireError> softFontsFromWire(
     std::span<proto::WireSoftFont const> fonts);
 
 } // namespace vthost

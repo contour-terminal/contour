@@ -91,7 +91,7 @@ TEST_CASE("a mirror's most recently loaded designator is the daemon's", "[vthost
     auto const staged = softFontsFromWire(softFontsToWire(store));
     REQUIRE(staged.has_value());
     auto mirrored = vtbackend::SoftFontStore {};
-    mirrored.replaceAll(staged->fonts, staged->loadRanks);
+    mirrored.replaceAll(*staged);
     CHECK(mirrored.fontForDesignator(" B") == 1);
 }
 

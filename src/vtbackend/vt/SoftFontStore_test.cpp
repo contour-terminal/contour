@@ -3,7 +3,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <string>
+#include <vector>
 
 using namespace vtbackend;
 
@@ -143,8 +145,63 @@ TEST_CASE("SoftFontStore: replaceAll installs fonts and bumps the generation", "
 
     auto store = SoftFontStore {};
     auto const before = store.generation();
-    store.replaceAll(source.fonts(), source.loadRanks());
+    store.replaceAll(SoftFontSet { .fonts = source.fonts(), .loadRanks = source.loadRanks() });
     CHECK(store.generation() > before);
     CHECK(store.font(1) == source.font(1));
     CHECK(store.fontForDesignator("B") == 1);
+}
+
+TEST_CASE("SoftFontStore: capture then stage rebuilds the same fonts in the same load order",
+          "[SoftFontStore]")
+{
+    auto source = SoftFontStore {};
+    REQUIRE(source.define(forFont(2), body('B', '@')).has_value());
+    REQUIRE(source.define(forFont(0), body('B', 'A')).has_value()); // the later load, so it wins "B"
+
+    auto records = source.capture();
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].number == 0);
+    CHECK(records[0].loadRank == 1);
+    CHECK(records[1].number == 2);
+    CHECK(records[1].loadRank == 0);
+
+    auto staged = stageSoftFonts(records);
+    REQUIRE(staged.has_value());
+    auto mirror = SoftFontStore {};
+    mirror.replaceAll(*staged);
+    CHECK(mirror.fontForDesignator("B") == 0);
+    for (auto const number: { uint8_t { 0 }, uint8_t { 2 } })
+    {
+        REQUIRE(mirror.font(number) != nullptr);
+        CHECK(mirror.font(number)->declaration == source.font(number)->declaration);
+        CHECK(mirror.font(number)->glyphs[1]->id == source.font(number)->glyphs[1]->id);
+    }
+    CHECK(mirror.font(1) == nullptr);
+}
+
+TEST_CASE("stageSoftFonts: refuses what an encoding can get wrong", "[SoftFontStore]")
+{
+    auto source = SoftFontStore {};
+    REQUIRE(source.define(forFont(1), body('B', '@')).has_value());
+    auto const good = source.capture();
+    REQUIRE(good.size() == 1);
+
+    auto const refused = [&](auto&& mutate) {
+        auto records = good;
+        mutate(records.front());
+        return stageSoftFonts(records);
+    };
+    CHECK(refused([](SoftFontRecord& r) { r.number = 3; }).error() == SoftFontError::FontNumber);
+    CHECK(refused([](SoftFontRecord& r) { r.loadRank = 3; }).error() == SoftFontError::LoadRank);
+    CHECK(refused([](SoftFontRecord& r) { r.erase = 3; }).error() == SoftFontError::EraseControl);
+    CHECK(refused([](SoftFontRecord& r) { r.sizeSource = 2; }).error() == SoftFontError::CellMatrix);
+    CHECK(refused([](SoftFontRecord& r) { r.usage = 2; }).error() == SoftFontError::Usage);
+    CHECK(refused([](SoftFontRecord& r) { r.charsetSize = 2; }).error() == SoftFontError::CharsetSize);
+    CHECK(refused([](SoftFontRecord& r) { r.designator = "abcd"; }).error() == SoftFontError::Designator);
+    CHECK(refused([](SoftFontRecord& r) { r.glyphs.front().position = 0x80; }).error()
+          == SoftFontError::Glyph);
+
+    auto twice = good;
+    twice.push_back(good.front()); // the same number twice
+    CHECK(stageSoftFonts(twice).error() == SoftFontError::FontNumber);
 }

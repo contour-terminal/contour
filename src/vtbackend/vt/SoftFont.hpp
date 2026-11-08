@@ -61,7 +61,8 @@ enum class SoftFontError : uint8_t
     CharsetSize,
     TooLarge,
     Designator,
-    Glyph, ///< A glyph out of its set, out of order, or not the font's cell size.
+    Glyph,    ///< A glyph out of its set, out of order, or not the font's cell size.
+    LoadRank, ///< Only from stageSoftFonts: a load rank no font number has.
 };
 
 /// @return A short phrase naming why a DECDLD was refused, for logs.

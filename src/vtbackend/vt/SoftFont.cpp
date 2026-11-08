@@ -185,6 +185,7 @@ std::string_view toString(SoftFontError error) noexcept
         case SoftFontError::TooLarge: return "cell or start position too large";
         case SoftFontError::Designator: return "invalid designator";
         case SoftFontError::Glyph: return "invalid glyph";
+        case SoftFontError::LoadRank: return "invalid load rank";
     }
     return "unknown error";
 }

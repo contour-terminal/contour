@@ -1055,7 +1055,7 @@ void ScreenMirror::syncSoftFonts(std::span<proto::WireSoftFont const> fonts, uin
             std::to_underlying(staged.error()));
         return;
     }
-    _terminal->softFonts().replaceAll(staged->fonts, staged->loadRanks);
+    _terminal->softFonts().replaceAll(*std::move(staged));
     _softFontGeneration = generation;
     _terminal->markScreenDirty();
 }
