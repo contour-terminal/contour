@@ -323,3 +323,18 @@ TEST_CASE("a restored line holding soft glyphs is Spanning whatever shape the st
     target->writeToScreen("\033[1;1Hx");
     CHECK(!target->terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).softGlyph());
 }
+
+TEST_CASE("a text font declared wider than its 36-line cell hands over", "[StateRoundTrip][SoftFont]")
+{
+    // Pss 11 is 80x36: a 10x10 cell, so a declared width of 12 is clipped to 10 when the font is built.
+    auto const setup = test::HandoverSetup {};
+    auto source = setup.makeTerminal();
+    source->writeToScreen("\033P1;0;1;12;11;0;10;0{ A~~~~~/~~~~~\033\\"sv);
+    auto const font = source->terminal.softFonts().font(1);
+    REQUIRE(font);
+    CHECK(int { font->geometry.textWidth } <= int { font->geometry.fullWidth });
+
+    auto const target = test::handedOver(*source, setup);
+    REQUIRE(target.has_value());
+    CHECK(static_cast<bool>((*target)->terminal.softFonts().font(1)));
+}

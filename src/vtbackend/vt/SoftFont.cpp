@@ -272,9 +272,12 @@ SoftCellGeometry detectTargetCell(SoftFontDeclaration const& declaration,
 
     // Anything but 24 lines targets a VT420 or VT5xx.
     if (declaration.linesPerPage != 24)
-        return { static_cast<uint8_t>(is132 ? 6 : 10),
+    {
+        auto const cellWidth = static_cast<uint8_t>(is132 ? 6 : 10);
+        return { cellWidth,
                  static_cast<uint8_t>(declaration.linesPerPage == 48 ? 8 : 10),
-                 declaredText };
+                 std::min(declaredText, cellWidth) };
+    }
 
     // Used heights are always multiples of six, so a candidate height is compared rounded up to six.
     auto const noDeclaredSize = declaration.declaredWidth == 0 && declaration.declaredHeight == 0;

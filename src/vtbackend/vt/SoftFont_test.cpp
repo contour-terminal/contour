@@ -159,6 +159,11 @@ TEST_CASE("detectTargetCell: one row per terminal", "[SoftFont]")
         check({ { .pss = 21, .pt = 2 }, 15, 12, { 10, 8, 0 } });
         check({ { .pss = 12, .pt = 2 }, 15, 12, { 6, 10, 0 } });
         check({ { .pcmw = 6, .pss = 22 }, 6, 12, { 6, 8, 6 } });
+        // A declared text width wider than the cell is clipped to the cell.
+        check({ { .pcmw = 12, .pss = 11 }, 12, 12, { 10, 10, 10 } });
+        check({ { .pcmw = 12, .pss = 21 }, 12, 12, { 10, 8, 10 } });
+        check({ { .pcmw = 8, .pss = 12 }, 8, 12, { 6, 10, 6 } });
+        check({ { .pcmw = 8, .pss = 22 }, 8, 12, { 6, 8, 6 } });
     }
 }
 
