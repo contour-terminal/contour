@@ -79,6 +79,21 @@ TEST_CASE("SoftFontStore: most recently loaded designator wins", "[SoftFontStore
     CHECK_FALSE(store.fontForDesignator("C").has_value());
 }
 
+TEST_CASE("SoftFontStore: a designator is told apart by the set size", "[SoftFontStore]")
+{
+    auto store = SoftFontStore {};
+    auto parameters96 = forFont(2);
+    parameters96.pcss = 1;
+    REQUIRE(store.define(forFont(1), body('B', '@')).has_value());
+    CHECK(store.fontForDesignator("B", SoftCharsetSize::Size94) == 1);
+    CHECK_FALSE(store.fontForDesignator("B", SoftCharsetSize::Size96).has_value());
+
+    REQUIRE(store.define(parameters96, body('B', '@')).has_value());
+    CHECK(store.fontForDesignator("B", SoftCharsetSize::Size94) == 1);
+    CHECK(store.fontForDesignator("B", SoftCharsetSize::Size96) == 2);
+    CHECK(store.fontForDesignator("B") == 2); // either size: the newest
+}
+
 TEST_CASE("SoftFontStore: redefinition is copy-on-write", "[SoftFontStore]")
 {
     auto store = SoftFontStore {};

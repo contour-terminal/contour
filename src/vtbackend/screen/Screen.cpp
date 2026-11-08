@@ -3037,7 +3037,10 @@ bool Screen::tryDesignateSoftFont(Sequence const& seq)
     auto const request = decodeSCS(seq);
     if (!request)
         return false;
-    auto const fontNumber = _terminal->softFonts().fontForDesignator(request->designator);
+    // The SCS names the set's size (DEC STD 070: ESC ( ) * + take a 94-character set, ESC - . / a
+    // 96-character one, and the same Dscs may name one of each), so a font of the other size is not
+    // meant and the designator falls through to the standard sets.
+    auto const fontNumber = _terminal->softFonts().fontForDesignator(request->designator, request->size);
     if (!fontNumber)
         return false;
     _cursor.charsets.selectDRCS(request->table, *fontNumber);

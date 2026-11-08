@@ -45,14 +45,28 @@ std::shared_ptr<SoftFont const> SoftFontStore::font(uint8_t number) const noexce
     return number < _fonts.size() ? _fonts[number] : nullptr;
 }
 
-std::optional<uint8_t> SoftFontStore::fontForDesignator(std::string_view dscs) const noexcept
+template <typename Predicate>
+std::optional<uint8_t> SoftFontStore::newestWithDesignator(std::string_view dscs,
+                                                           Predicate accepts) const noexcept
 {
     auto best = std::optional<uint8_t> {};
     for (auto const number: std::views::iota(size_t { 0 }, _fonts.size()))
-        if (_fonts[number] && _fonts[number]->designator == dscs
+        if (_fonts[number] && _fonts[number]->designator == dscs && accepts(*_fonts[number])
             && (!best || _loadedAt[number] >= _loadedAt[*best]))
             best = static_cast<uint8_t>(number);
     return best;
+}
+
+std::optional<uint8_t> SoftFontStore::fontForDesignator(std::string_view dscs) const noexcept
+{
+    return newestWithDesignator(dscs, [](SoftFont const&) noexcept { return true; });
+}
+
+std::optional<uint8_t> SoftFontStore::fontForDesignator(std::string_view dscs,
+                                                        SoftCharsetSize size) const noexcept
+{
+    return newestWithDesignator(
+        dscs, [size](SoftFont const& font) noexcept { return font.declaration.charsetSize == size; });
 }
 
 std::shared_ptr<SoftGlyph const> SoftFontStore::resolve(SoftGlyphRef ref) const noexcept

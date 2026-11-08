@@ -55,8 +55,9 @@ struct SoftFontRecord
 /// The one stager of fonts that come from outside the DECDLD parser (state codec, daemon mirror).
 ///
 /// Judges what a codec's encoding can get wrong -- a font number past the last or named twice, a load rank
-/// no number has, an enumerator no enumeration names -- then hands each font to assembleSoftFont, which
-/// judges the font itself. Builds aside: nothing is in place until the caller puts the returned set there.
+/// no number has, an enumerator no enumeration names -- then hands each font to
+/// assembleSoftFont, which judges the font itself. Builds aside: nothing is in place until the caller puts
+/// the returned set there.
 /// @param records The fonts. Consumed: the glyphs' coverage is moved out, even when the set is then refused.
 /// @return The fonts by number with their load ranks, or why the set is refused. The reasons are
 ///         FontNumber, LoadRank, EraseControl, CellMatrix (a size source), Usage and CharsetSize for the
@@ -86,8 +87,15 @@ class SoftFontStore
     /// @return The font loaded under @p number, or null.
     [[nodiscard]] std::shared_ptr<SoftFont const> font(uint8_t number) const noexcept;
 
-    /// @return The font number whose designator is @p dscs; the most recently loaded wins.
+    /// @return The font number whose designator is @p dscs, of whatever set size; the most recently loaded
+    ///         wins.
     [[nodiscard]] std::optional<uint8_t> fontForDesignator(std::string_view dscs) const noexcept;
+
+    /// @return The font number whose designator is @p dscs and whose set has @p size (DEC STD 070: the
+    ///         same Dscs may name a 94- and a 96-character set, told apart by the SCS that designates it);
+    ///         the most recently loaded wins.
+    [[nodiscard]] std::optional<uint8_t> fontForDesignator(std::string_view dscs,
+                                                           SoftCharsetSize size) const noexcept;
 
     /// Looks a glyph up.
     /// @return The glyph; the font's error glyph when the font never defined that position; null when the
@@ -115,6 +123,12 @@ class SoftFontStore
     }
 
   private:
+    /// @return The most recently loaded font under @p dscs that @p accepts (defined in the .cpp, its only
+    /// user).
+    template <typename Predicate>
+    [[nodiscard]] std::optional<uint8_t> newestWithDesignator(std::string_view dscs,
+                                                              Predicate accepts) const noexcept;
+
     std::array<std::shared_ptr<SoftFont const>, SoftFontCount> _fonts {};
     std::array<uint64_t, SoftFontCount> _loadedAt {}; ///< Ticket of the load that produced each font.
     uint64_t _nextTicket = 1;
