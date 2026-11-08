@@ -420,6 +420,15 @@ namespace
         fields.string(pdu.profileName);
         fields.u8(std::to_underlying(pdu.colorPreference));
         encodeCellPixelSize(fields, pdu.cellPixelSize);
+        // Only a stated directory travels, so a hello that states none is byte for byte what it was. The cell
+        // size before it is omitted when absent, and would read this string as its own: stated as 0x0
+        // instead, which decodeCellPixelSize reads as none.
+        if (!pdu.workingDirectory.empty())
+        {
+            if (!pdu.cellPixelSize)
+                encodeCellPixelSize(fields, WireCellPixelSize { .width = 0, .height = 0 });
+            fields.string(pdu.workingDirectory);
+        }
         out.blob(fields.view());
         out.u8(0);
     }
@@ -1189,12 +1198,17 @@ namespace
         return decodeCellPixelSize(in, pdu.cellPixelSize, error);
     }
 
+    [[nodiscard]] bool decodeHelloWorkingDirectory(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        return assign(in.string(), pdu.workingDirectory, error);
+    }
+
     /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
     /// inserted.
-    constexpr auto ClientHelloFields = std::array<ClientHelloField, 8> {
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 9> {
         decodeHelloToken,           decodeHelloSessionSettings, decodeHelloRole,
         decodeHelloClientArea,      decodeHelloAttachIntent,    decodeHelloProfileName,
-        decodeHelloColorPreference, decodeHelloCellPixelSize,
+        decodeHelloColorPreference, decodeHelloCellPixelSize,   decodeHelloWorkingDirectory,
     };
 
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the

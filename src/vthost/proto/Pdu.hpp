@@ -289,6 +289,12 @@ struct ClientHello
     /// means the client states none. Informational like Capability::CellPixelSize: a daemon predating it
     /// ignores the field.
     std::optional<WireCellPixelSize> cellPixelSize = std::nullopt;
+    /// The directory, UTF-8, the session this attach spawns starts its shell in -- `contour terminal
+    /// working-directory`, as a file manager's "open terminal here" passes it. Empty means the profile's
+    /// `initial_working_directory`. Applies only to a session the attach itself creates, never to one that
+    /// already exists nor to a tab the client opens later. Informational like @ref cellPixelSize: a daemon
+    /// predating it ignores the field.
+    std::string workingDirectory = {};
     bool operator==(ClientHello const&) const = default;
 };
 

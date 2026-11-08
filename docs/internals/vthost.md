@@ -1038,11 +1038,17 @@ creates:
 | Intent | Follows | Creates |
 | --- | --- | --- |
 | `AllWorkspaces` (no capability: every client before intents) | every workspace, later ones included (`FollowScope::Every`) | the first tab, on an empty daemon |
-| `Launch`, no other client attached | every workspace with a tab | the first tab, on an empty daemon |
+| `Launch`, no other client attached | every workspace with a tab | the first tab, on an empty daemon; with a working directory stated, a tab in the first workspace followed otherwise |
 | `Launch`, another client attached | a new workspace of its own | that workspace |
 | `NewWorkspace` | a new workspace of its own | that workspace |
 | `Workspaces` | the listed workspaces that exist (possibly none) | nothing |
 | `Resume` | the listed workspaces that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
+
+A `ClientHello` may state a `workingDirectory` (`contour working-directory DIR`, the first connection
+only): an absolute directory the session the attach creates starts in, laid over the profile's shell
+as a directory-only `commandOverride`. A relative one is ignored, as it names a place under the
+client's directory, which the daemon cannot see. Only a `Launch` that would otherwise create nothing
+creates a tab for it; following named workspaces, every workspace or a reconnect's survivors never adds one.
 
 "Another client" is `SessionHost::connectedClients()`: handshaken native `Attach` connections,
 counted after the plan (so a connection never counts against itself) and uncounted as the
