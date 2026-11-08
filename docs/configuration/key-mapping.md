@@ -21,7 +21,8 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 |---------|--------|
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
-| `Ctrl+Shift+G` | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
+| `Ctrl+Shift+G` (Linux, Windows) / `Cmd+Shift+O` (macOS) | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
+| `Ctrl+Shift+L` (Linux, Windows) / `Cmd+K` (macOS) | Clear the scrollback and the screen above the current prompt (`ClearToPrompt`). On the primary screen only; with nothing to clear the chord is swallowed rather than typed |
 | `Alt+Shift+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. Some desktops and keyboard-layout switchers grab `Alt+Shift`; if the chord never reaches Contour, bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
 | `Ctrl+Shift+E` / `Ctrl+Shift+O` (Linux, Windows) | Split the active pane side by side / stacked |
 | `Cmd+D` / `Cmd+Shift+D` (macOS) | Split the active pane side by side / stacked |
@@ -46,26 +47,68 @@ lets a new binding still reach you, while anything you bind explicitly keeps win
     so a terminal application that wants it (via the Kitty keyboard protocol) will not receive it.
     Bind it in your own `input_mapping` to give it back to the application.
 
+## Default chords
+
+Every command with a default chord has one on Linux and Windows **and** on macOS. On macOS the
+application's chords are Command chords: a `Ctrl+Shift+letter` default answers to `⌘letter` there
+(`Primary`, see below). Where macOS already gives the plain `⌘` chord another meaning, the Mac chord adds
+Shift or moves, and the table says why.
+
+| Command | Linux / Windows | macOS | Note |
+|---------|-----------------|-------|------|
+| Command palette (`OpenCommandPalette`) | `Ctrl+Shift+P` | `⌘P`, `⇧⌘P` | `⇧⌘P` for VS Code, Zed and Ghostty habits |
+| Copy (`CopySelection`) | `Ctrl+Shift+C`; `Ctrl+C` while selecting | `⌘C` | |
+| Paste (`PasteClipboard`) | `Ctrl+Shift+V` | `⌘V` | |
+| Paste without control characters | `Ctrl+Alt+V` | `⌃⌘V` | Option composes characters on a Mac, so the `Ctrl+Alt` chords become `⌃⌘` |
+| New window (`NewTerminal`) | `Ctrl+Shift+N` | `⌘N` | |
+| New window to… (`NewWindowTo`) | `Ctrl+Shift+K` | `⇧⌘K` | `⌘K` clears to the prompt |
+| New tab (`CreateNewTab`) | `Ctrl+Shift+T` | `⌘T` | |
+| Close pane (`ClosePane`) | `Ctrl+Shift+W`, `Ctrl+Shift+X` | `⌘W` | Closes the tab with its last pane |
+| Close tab (`CloseTab`) | — | `⇧⌘W` | On Linux and Windows, `Ctrl+Shift` already holds Shift |
+| Select tab 1…9 (`SwitchToTab`) | `Alt+1` … `Alt+9`, `Alt+0` for the tenth | `⌘1` … `⌘9` | `⌘0` resets the font size |
+| Previous / next tab | `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Shift+←` / `Shift+→` | the same, and `⇧⌘[` / `⇧⌘]` | |
+| Move tab left / right | `Ctrl+Shift+PageUp` / `PageDown` | `⌘PageUp` / `⌘PageDown` | |
+| Split side by side / stacked | `Ctrl+Shift+E` / `Ctrl+Shift+O` | `⌘D` / `⇧⌘D` | iTerm2's chords |
+| Focus the pane on that side | `Alt+Shift+Arrow` | `⌥⌘Arrow` | |
+| Swap with the pane on that side | `Ctrl+Alt+Arrow` | `⌃⌥Arrow` | |
+| Resize the pane | `Ctrl+Shift+Alt+Arrow` | `⌃⇧⌥Arrow` | |
+| Zoom the pane (`TogglePaneZoom`) | `Ctrl+Shift+Z` | `⇧⌘↩` | iTerm2's chord |
+| Toggle split orientation | `Ctrl+Shift+\` | `⌃⇧\` | |
+| Find (`SearchReverse`) | `Ctrl+Shift+F` | `⌘F` | |
+| Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
+| Find the selection (`SearchSelection`) | — | `⌘E` | A macOS convention; `Ctrl+Shift+E` splits |
+| Clear search highlight | `Ctrl+Shift+H` | `⇧⌘H` | `⌘H` hides the application |
+| Previous / next command (`FocusPreviousCommand`) | `Ctrl+↑` / `Ctrl+↓` | `⌘↑` / `⌘↓` | At the prompt only, as in VS Code's terminal |
+| Select previous / next command's output | `Ctrl+Shift+↑` / `Ctrl+Shift+↓` | `⇧⌘↑` / `⇧⌘↓` | At the prompt only |
+| Previous / next prompt (`ScrollMarkUp`) | `Ctrl+Alt+K` / `Ctrl+Alt+J` | `⌃⇧↑` / `⌃⇧↓` | At the prompt only |
+| Open the last command's output | `Ctrl+Shift+G` | `⇧⌘O` | `⌘G` finds the next match |
+| Clear to the prompt (`ClearToPrompt`) | `Ctrl+Shift+L` | `⌘K` | The shell's `Ctrl+L`, plus Shift |
+| Open URLs by hint (`HintMode`) | `Ctrl+Shift+U` | `⌘U` | |
+| Font size larger / smaller / reset | `Ctrl+Shift+=` / `Ctrl+Shift+-` / `Ctrl+0` | `⌘+` / `⌘-` / `⌘0` | |
+| Toggle the status line | `Ctrl+Alt+.` | `⌃⌘.` | |
+| Open the file manager | `Ctrl+Alt+O` | `⌃⌘O` | |
+| Screenshot (`ScreenshotVT`) | `Ctrl+Alt+S` | `⌃⌘S` | |
+| Toggle input method handling | `Ctrl+Alt+,` | `⌃⌘,` | |
+| Settings (`OpenConfiguration`) | `Ctrl+Shift+,` | `⌘,` (menu bar), `⌃⇧,` | |
+| Vi normal mode | `Ctrl+Shift+Space` | `⌃⇧Space` | |
+| Full screen | `Alt+Enter` | `⌥↩` | |
+| Speak the selection | `Ctrl+Shift+S` | — | macOS has its own Speak Selection (`⌥Esc`) |
+| Quit | `Ctrl+Shift+Q` | `⌘Q` (menu bar) | |
+
+A test (`ChordParity_test.cpp`) keeps the two columns complete: a command bound on one platform only fails
+the build unless it is listed there with its reason.
+
 ## macOS defaults
 
-On macOS the application's chords are Command chords, as in any Mac application, and the default
-bindings follow that:
-
-* The Ctrl+Shift defaults answer to `⌘` instead (`⌘C`, `⌘V`, `⌘T`, `⌘W`, `⌘N`, `⌘K`, `⇧⌘P`, …), and
-  `Ctrl+Shift+letter` reaches the program in the terminal. A `⌘` chord nothing is bound to is consumed rather
-  than typed as its letter.
 * The menu bar provides `⌘Q` (Quit) and `⌘,` (Settings…), and `⌘H`, `⌥⌘H` and `⌘M`; Contour binds none of them by
-  default, so they never reach `input_mapping`.
+  default, so they never reach `input_mapping`. `Ctrl+Shift+letter` reaches the program in the terminal, and a
+  `⌘` chord nothing is bound to is consumed rather than typed as its letter.
 * `⌘K` clears to the prompt (`ClearToPrompt`) on the primary screen; in the alternate screen it is consumed, so a
   running vim or tmux is never reset. `ClearHistoryAndReset` has no macOS default.
 * Font size is on `⌘0`, `⌘-` and `⌘+` only; `Ctrl+0` reaches the program.
-* `⌘X` and `⌘S` are deliberately unbound (a terminal cannot cut, and there is nothing to save), so
-  `ClosePane` and `SpeakSelection` have no macOS default; bind them if you want them. The same holds for the
-  stripping paste (`Ctrl+Alt+V`), `ScreenshotVT`, `OpenFileManager`, `ToggleStatusLine`,
-  `ToggleInputMethodHandling`, `ScrollMarkUp`/`ScrollMarkDown` (`Ctrl+Alt+K`/`J`), `OpenCommandOutput` and
-  selecting the tenth tab.
-* The defaults that hung on `Alt` plus a character are not installed on macOS, because Option composes
-  characters there (see below). Tabs stay on `⌘1` to `⌘9`.
+* `⌘X` and `⌘S` are deliberately unbound (a terminal cannot cut, and there is nothing to save).
+* The defaults that hang on `Ctrl+Alt` plus a character answer to `⌃⌘` on macOS instead, because Option
+  composes characters there (see below).
 * `⌥←` / `⌥→` move by word (`ESC b` / `ESC f`) outside the alternate screen, and `⌘←` / `⌘→` / `⌘⌫` edit the
   line, so these shell conventions work out of the box. Inside the alternate screen `⌥←` reaches the program as the Alt+Left it is (`CSI 1;3D`).
 
