@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/SandboxInfo.hpp>
+
 #include <core/platform/FileSystem.hpp>
 
 #include <cstdint>
@@ -91,6 +93,17 @@ enum class ProgramHost : std::uint8_t
     ThisMachine, ///< The program runs here.
     SandboxHost, ///< flatpak-spawn runs it on the host, outside the sandbox Contour runs in.
 };
+
+/// Where a spawn runs its program: on the sandbox's host when this process is a Flatpak and the
+/// profile escapes it, here otherwise. Process::start() spawns by this rule.
+/// @param sandbox The sandbox this process runs in.
+/// @param escape  The profile's `escape_sandbox`.
+/// @return The machine the program runs on.
+[[nodiscard]] constexpr ProgramHost programHostFor(SandboxState sandbox, SandboxEscape escape) noexcept
+{
+    return sandbox == SandboxState::Flatpak && escape == SandboxEscape::Escapes ? ProgramHost::SandboxHost
+                                                                                : ProgramHost::ThisMachine;
+}
 
 /// @return Whether a string names a program the spawn runs on @p host: as namesProgram() finds it in
 ///         @p search for this machine; never for the sandbox's host, whose files and PATH the sandbox

@@ -10,6 +10,7 @@
 #include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/SandboxInfo.hpp>
 
 #include <cstdint>
 #include <string>
@@ -26,12 +27,8 @@ enum class ProfileMatch : uint8_t
 };
 
 /// Whether a profile's sessions escape the sandbox the daemon runs in (Flatpak), as its `escape_sandbox`
-/// says.
-enum class SandboxEscape : uint8_t
-{
-    Contained = 0, ///< The shell runs inside the daemon's sandbox (`escape_sandbox: false`).
-    Escapes = 1,   ///< The shell runs on the host (`escape_sandbox: true`, the default).
-};
+/// says. vtpty's, since the spawn is what acts on it.
+using vtpty::SandboxEscape;
 
 /// The light/dark preference a host resolves a session's palette under until a client states its own
 /// (proto::EngineOperation::UseDarkColors / UseLightColors): a daemon has no display to ask.

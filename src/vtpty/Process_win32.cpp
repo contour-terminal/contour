@@ -186,6 +186,11 @@ bool Process::isFlatpak()
     return false;
 }
 
+ProgramHost Process::programHost(SandboxEscape escape)
+{
+    return programHostFor(SandboxState::Host, escape); // No sandbox to escape on Windows.
+}
+
 StartResult Process::start()
 {
     Require(static_cast<ConPty const*>(_d->pty.get()));

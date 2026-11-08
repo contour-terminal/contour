@@ -49,6 +49,7 @@
 
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SshSession.hpp>
 
 #include <core/async/StopToken.hpp>
@@ -245,11 +246,17 @@ using ProgramReachablePredicate = bool (*)(std::string_view);
 /// spawn fail, but the distinction is what keeps `contour terminal echo hello` from being reported
 /// as a mistake.
 ///
+/// When the program runs on the sandbox's host, a bare name that names nothing on disk is a program:
+/// flatpak-spawn resolves it against the host's PATH, which the sandbox cannot see, so the sandbox's
+/// own PATH has no say in it (#2112). A path is judged on disk as anywhere else.
+///
 /// @param token       The first verbatim argument, as typed.
-/// @param isReachable The reachability test to use.
+/// @param isReachable The reachability test to use, for a program that runs on this machine.
+/// @param host        Where the spawn runs the program, and so resolves its name.
 /// @return What the token names, and where to start the shell if that is what it names.
 [[nodiscard]] VerbatimCommand classifyVerbatimCommand(std::string_view token,
-                                                      ProgramReachablePredicate isReachable);
+                                                      ProgramReachablePredicate isReachable,
+                                                      vtpty::ProgramHost host);
 
 /// Whether a local daemon may be spawned yet. @see ContourGuiApp::_daemonSpawnGate
 enum class DaemonSpawnGate : std::uint8_t

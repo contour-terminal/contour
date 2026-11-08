@@ -176,20 +176,22 @@ def _install(binary: bytes, destination: Path) -> None:
     os.replace(staged, destination)
 
 
-def unavailable(spec: ToolSpec, reason: str) -> NoReturn:
-    """Reports that the tool could not be obtained, then skips or fails, and does not return.
+def missing_tool(name: str, require_env: str, reason: str) -> int:
+    """Reports a tool that is not there, and returns 1 when `require_env` makes that a failure, else 0.
 
-    CI wants a red build -- a gate that silently passes because it could not download its tool is
+    CI wants a red build -- a gate that silently passes because it could not obtain its tool is
     worse than no gate. A developer offline in a fresh clone wants to get on with their day.
     """
-    if os.environ.get(spec.require_env) == "1":
-        print(
-            f"{spec.name} v{spec.version} is required but could not be obtained: {reason}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    print(f"{spec.name} not available ({reason}); skipping check.", file=sys.stderr)
-    sys.exit(0)
+    if os.environ.get(require_env) == "1":
+        print(f"{name} is required ({require_env}=1) but not available: {reason}", file=sys.stderr)
+        return 1
+    print(f"{name} not available ({reason}); skipping check.", file=sys.stderr)
+    return 0
+
+
+def unavailable(spec: ToolSpec, reason: str) -> NoReturn:
+    """Reports that the tool could not be obtained, then skips or fails, and does not return."""
+    sys.exit(missing_tool(f"{spec.name} v{spec.version}", spec.require_env, reason))
 
 
 def resolve(spec: ToolSpec) -> Path:

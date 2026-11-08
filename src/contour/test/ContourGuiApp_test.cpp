@@ -22,6 +22,7 @@
 #include <vtbackend/core/Color.hpp>
 
 #include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 
@@ -272,6 +273,13 @@ namespace
     return program == "echo";
 }
 
+/// classifyVerbatimCommand() for a program that runs on this machine, as everywhere outside Flatpak.
+[[nodiscard]] contour::VerbatimCommand classifyHere(std::string_view token,
+                                                    contour::ProgramReachablePredicate isReachable)
+{
+    return contour::classifyVerbatimCommand(token, isReachable, vtpty::ProgramHost::ThisMachine);
+}
+
 /// Creates a file under @p directory that this platform will execute, named after @p stem.
 ///
 /// What makes a file executable is platform-specific, and so is the fixture: POSIX has the exec
@@ -327,10 +335,39 @@ TEST_CASE("classifyVerbatimCommand resolves a bare program name through PATH", "
 {
     using contour::VerbatimCommandKind;
 
-    CHECK(contour::classifyVerbatimCommand("echo", onlyEchoIsReachable).kind == VerbatimCommandKind::Program);
+    CHECK(classifyHere("echo", onlyEchoIsReachable).kind == VerbatimCommandKind::Program);
 
     // Nothing on disk and nothing to reach is the one case that is genuinely unknown.
-    CHECK(contour::classifyVerbatimCommand("echo", nothingIsReachable).kind == VerbatimCommandKind::Unknown);
+    CHECK(classifyHere("echo", nothingIsReachable).kind == VerbatimCommandKind::Unknown);
+}
+
+TEST_CASE("classifyVerbatimCommand leaves a bare name to the sandbox host that resolves it",
+          "[contour][app][cli]")
+{
+    using contour::VerbatimCommandKind;
+    using vtpty::ProgramHost;
+
+    // Under Flatpak with escape_sandbox, flatpak-spawn resolves the name on the host, whose PATH
+    // the sandbox cannot see: a name the sandbox cannot reach is still a program there (#2112).
+    CHECK(contour::classifyVerbatimCommand("htop", nothingIsReachable, ProgramHost::SandboxHost).kind
+          == VerbatimCommandKind::Program);
+
+    // Without the escape the program runs in the sandbox, so its PATH is the right one to ask.
+    CHECK(contour::classifyVerbatimCommand("htop", nothingIsReachable, ProgramHost::ThisMachine).kind
+          == VerbatimCommandKind::Unknown);
+
+    // Only a bare name is the host's to resolve: a path that is not on disk is as unknown here as
+    // anywhere else, and keeps its diagnostic.
+    CHECK(contour::classifyVerbatimCommand("/no/such/dir/htop", nothingIsReachable, ProgramHost::SandboxHost)
+              .kind
+          == VerbatimCommandKind::Unknown);
+
+    // What is on disk still answers first: a directory is a place to open the shell in.
+    auto const tempDir = contour::test::TempDir();
+    REQUIRE(tempDir.isValid());
+    auto const directory = contour::classifyVerbatimCommand(
+        core::pathToUtf8(tempDir.path()), nothingIsReachable, ProgramHost::SandboxHost);
+    CHECK(directory.kind == VerbatimCommandKind::WorkingDirectory);
 }
 
 TEST_CASE("classifyVerbatimCommand tells a program from a place to open a shell in", "[contour][app][cli]")
@@ -348,14 +385,13 @@ TEST_CASE("classifyVerbatimCommand tells a program from a place to open a shell 
 
     // An executable file runs; a plain file opens the shell where it lives; a directory opens the
     // shell in it. None of the three consults PATH -- what is on disk answers first.
-    CHECK(contour::classifyVerbatimCommand(core::pathToUtf8(script), nothingIsReachable).kind
-          == VerbatimCommandKind::Program);
+    CHECK(classifyHere(core::pathToUtf8(script), nothingIsReachable).kind == VerbatimCommandKind::Program);
 
-    auto const beside = contour::classifyVerbatimCommand(core::pathToUtf8(notes), nothingIsReachable);
+    auto const beside = classifyHere(core::pathToUtf8(notes), nothingIsReachable);
     CHECK(beside.kind == VerbatimCommandKind::WorkingDirectory);
     CHECK(beside.workingDirectory == root);
 
-    auto const directory = contour::classifyVerbatimCommand(core::pathToUtf8(root), nothingIsReachable);
+    auto const directory = classifyHere(core::pathToUtf8(root), nothingIsReachable);
     CHECK(directory.kind == VerbatimCommandKind::WorkingDirectory);
     CHECK(directory.workingDirectory == root);
 }
@@ -368,7 +404,7 @@ TEST_CASE("classifyVerbatimCommand reads a path beyond ASCII as UTF-8", "[contou
     auto const directory = tempDir.path() / vtpty::testing::NonAsciiName;
     std::filesystem::create_directory(directory);
 
-    auto const opened = contour::classifyVerbatimCommand(core::pathToUtf8(directory), nothingIsReachable);
+    auto const opened = classifyHere(core::pathToUtf8(directory), nothingIsReachable);
     CHECK(opened.kind == VerbatimCommandKind::WorkingDirectory);
     CHECK(opened.workingDirectory == directory);
 }
@@ -389,7 +425,7 @@ TEST_CASE("classifyVerbatimCommand runs an executable sitting in the current dir
     // shell beside this script instead of running it.
     auto const guard = ScopedWorkingDirectory { tempDir.path() };
 
-    CHECK(contour::classifyVerbatimCommand(core::pathToUtf8(script.filename()), nothingIsReachable).kind
+    CHECK(classifyHere(core::pathToUtf8(script.filename()), nothingIsReachable).kind
           == VerbatimCommandKind::Program);
 }
 

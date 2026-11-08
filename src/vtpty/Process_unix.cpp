@@ -304,6 +304,11 @@ bool Process::isFlatpak()
     return currentSandbox().state == SandboxState::Flatpak;
 }
 
+ProgramHost Process::programHost(SandboxEscape escape)
+{
+    return programHostFor(currentSandbox().state, escape);
+}
+
 StartResult Process::start()
 {
     if (_d->origin == Private::Origin::Adopted)
@@ -320,7 +325,8 @@ StartResult Process::start()
 
     // When escaping the sandbox, flatpak-spawn is handed the variables as --env= arguments and the
     // child keeps our environment untouched.
-    auto const passesOwnEnvironment = !isFlatpak() || !_d->escapeSandbox;
+    auto const host = programHost(sandboxEscapeFromConfig(_d->escapeSandbox));
+    auto const passesOwnEnvironment = host == ProgramHost::ThisMachine;
 
     // The environment is assembled here, before the fork, so that the child can install it with a
     // single pointer store: setenv() after fork() is neither async-signal-safe nor thread-safe.
@@ -357,15 +363,15 @@ StartResult Process::start()
     auto const invocation = invocationToRun(
         _d->path,
         _d->args,
-        programsFor(isFlatpak() && _d->escapeSandbox ? ProgramHost::SandboxHost : ProgramHost::ThisMachine,
+        programsFor(host,
                     ProgramSearch { .path = searchPath,
                                     .workingDirectory = _d->cwd,
                                     .fileSystem = core::platform::NativeFileSystem::instance() }));
 
     // argv is assembled before the fork for the same reason: the flatpak variant reads the home
     // directory and formats a dozen strings, none of which the child is allowed to do.
-    auto childArgs = [stdoutFastPipe, &invocation, this]() -> vector<string> {
-        if (!isFlatpak() || !_d->escapeSandbox)
+    auto childArgs = [stdoutFastPipe, host, &invocation, this]() -> vector<string> {
+        if (host == ProgramHost::ThisMachine)
         {
             auto args = vector<string> { invocation.program };
             args.insert(args.end(), invocation.arguments.begin(), invocation.arguments.end());

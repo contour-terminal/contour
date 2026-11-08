@@ -92,6 +92,23 @@ jobs:
     - name: "Checking for open PR-related TODO items"
       run: ./scripts/check-pr-todos.sh
 
+  # What Flathub's build rejects in metainfo.xml and the .desktop files, caught here instead of after a
+  # release is tagged. The same script runs as the `check_appstream` ctest, which skips a validator it
+  # cannot find; CHECK_APPSTREAM_REQUIRE_TOOL makes a missing one a failure here, where both are installed.
+  check_appstream:
+    name: "Check AppStream and desktop files"
+    runs-on: ubuntu-24.04
+    env:
+      CHECK_APPSTREAM_REQUIRE_TOOL: 1
+    steps:
+    - uses: actions/checkout@v4
+    - name: "Install appstreamcli and desktop-file-validate"
+      run: |
+        sudo ./scripts/apt-update.sh
+        sudo apt-get install -qy appstream desktop-file-utils
+    - name: "Check AppStream and desktop files"
+      run: python3 scripts/check-appstream.py
+
   check_clang_format:
     name: "Check C++ style"
     runs-on: ubuntu-24.04

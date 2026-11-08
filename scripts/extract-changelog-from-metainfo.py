@@ -78,12 +78,12 @@ def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
         seen_summary = False
         for description in release.findall("description"):
             for element in description:
-                if element.tag == "p" and element.text is not None:
+                if element.tag == "p" and (text := inline_markdown(element)):
                     if not seen_summary:
-                        summary = normalized(element.text) + "\n"
+                        summary = normalized(text) + "\n"
                         seen_summary = True
                     else:
-                        pending_title = normalized(element.text)
+                        pending_title = normalized(text)
                 elif element.tag == "ul":
                     changes = [Change(text) for li in element.findall("li") if (text := inline_markdown(li))]
                     if len(changes) != 0:
