@@ -251,6 +251,17 @@ TEST_CASE("a state that does not fit the screen is refused", "[ScreenState]")
         refused([](ScreenState& s) { s.cursor.charsets.charsetIds[1] = static_cast<CharsetId>(99); });
     REQUIRE_FALSE(badCharset.has_value());
 
+    // A DRCS font number names one of the three soft fonts; one past them would alias font 0 or 1 once
+    // narrowed to a byte.
+    for (auto const fontNumber: { -1, 3, 256, 257 })
+    {
+        auto const badFont =
+            refused([&](ScreenState& s) { s.cursor.charsets.drcsFontNumber[0] = fontNumber; });
+        CHECK_FALSE(badFont.has_value());
+    }
+    auto const goodFont = refused([](ScreenState& s) { s.cursor.charsets.drcsFontNumber[0] = 2; });
+    CHECK(goodFont.has_value());
+
     auto const badSavedCursor =
         refused([](ScreenState& s) { s.savedCursor.position.column = ColumnOffset(-1); });
     REQUIRE_FALSE(badSavedCursor.has_value());
