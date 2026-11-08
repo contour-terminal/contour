@@ -87,6 +87,8 @@ namespace
                 if (splitByWord)
                 {
                     core::split(payload, ' ', [&](auto word) -> bool {
+                        if (word.empty())
+                            return true; // between two spaces, or after the last: no word
                         output.write(word.data(), static_cast<streamsize>(word.size()));
                         output << '\n';
                         return true;

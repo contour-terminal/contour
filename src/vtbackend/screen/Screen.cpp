@@ -4439,6 +4439,10 @@ namespace impl
 
             auto const ok =
                 core::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    // An empty field (a trailing `;`) names neither an index nor a color.
+                    if (value.empty())
+                        return true;
+
                     if (!pending.has_value())
                     {
                         auto const index = core::toInteger<10, unsigned>(value);
@@ -4498,6 +4502,10 @@ namespace impl
 
             auto const ok =
                 core::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    // An empty field (a trailing `;`) names no index to reset.
+                    if (value.empty())
+                        return true;
+
                     auto const index = core::toInteger<10, unsigned>(value);
                     if (!index.has_value())
                         return false;
@@ -4599,17 +4607,13 @@ namespace impl
 
         ApplyResult clipboard(Sequence const& seq, Terminal& terminal)
         {
-            // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store, or "?" to read the clipboard
-            // back; Pc names where (clipboard_selection::parse). Split at the one semicolon by hand:
-            // core::split drops an empty last field, and an empty Pd clears the clipboard.
-            auto const params = std::string_view { seq.intermediateCharacters() };
-            auto const separator = params.find(';');
-            if (separator == std::string_view::npos)
+            // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store (empty clears the clipboard), or
+            // "?" to read the clipboard back; Pc names where (clipboard_selection::parse).
+            auto const splits = core::split(seq.intermediateCharacters(), ';');
+            if (splits.size() != 2)
                 return ApplyResult::Invalid;
-            auto const pc = params.substr(0, separator);
-            auto const pd = params.substr(separator + 1);
-            if (pd.contains(';'))
-                return ApplyResult::Invalid;
+            auto const pc = splits[0];
+            auto const pd = splits[1];
             auto const targets = clipboard_selection::parse(pc);
             if (!targets)
                 return ApplyResult::Invalid;
@@ -9061,6 +9065,9 @@ unique_ptr<ParserExtension> Screen::hookXTGETTCAP(Sequence const& /*seq*/)
         auto const capsInHex = core::split(data, ';');
         for (auto hexCap: capsInHex)
         {
+            if (hexCap.empty())
+                continue; // a trailing `;` names no capability to answer for
+
             auto const hexCap8 = unicode::convert_to<char>(hexCap);
             if (auto const capOpt = core::fromHexString(string_view(hexCap8.data(), hexCap8.size())))
                 requestCapability(capOpt.value());
