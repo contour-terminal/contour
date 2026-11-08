@@ -1108,8 +1108,10 @@ void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
                            : std::pair<size_t, size_t> { 0, 0 };
     }();
 
-    auto pending = std::vector<RenderSoftGlyph> {};
-    pending.reserve(glyphs.size());
+    // Appended straight to the output; the map is unordered, and the rasterizer walks cells and glyphs side
+    // by side, so what this line appended is put in cell order.
+    auto& output = _output->softGlyphs;
+    auto const first = output.size();
     for (auto const& [column, ref]: glyphs)
     {
         if (column >= preeditColumns.first && column < preeditColumns.second)
@@ -1118,28 +1120,29 @@ void RenderBufferBuilder::attachSoftGlyphs(SoftGlyphMap const& glyphs)
         auto glyph = _terminal->softFonts().resolve(ref);
         if (!glyph)
             continue;
-        pending.push_back(RenderSoftGlyph {
+        output.push_back(RenderSoftGlyph {
             .position = CellLocation { .line = _baseLine + _lineNr,
                                        .column = displayColumn(ColumnOffset::cast_from(column)) },
             .glyph = std::move(glyph) });
     }
-    // The map is unordered; the rasterizer walks cells and this list side by side, so the list is in
-    // cell order.
-    std::ranges::sort(pending, {}, &RenderSoftGlyph::position);
+    auto const appended = std::span { output }.subspan(first);
+    std::ranges::sort(appended, {}, &RenderSoftGlyph::position);
 
     // A cell the line did not render has nothing to attach to. The line's cells are in column order, so
-    // one merge pass keeps the glyphs that have a cell.
+    // one merge pass keeps the glyphs that have a cell, compacting them to the front of what was appended.
     auto cell = _output->cells.begin() + static_cast<std::ptrdiff_t>(_lineFirstCell);
     auto const cellsEnd = _output->cells.end();
-    for (auto& entry: pending)
+    auto kept = first;
+    for (auto& entry: appended)
     {
         cell = std::ranges::find_if(
             cell, cellsEnd, [&](RenderCell const& c) { return c.position >= entry.position; });
         if (cell == cellsEnd)
             break;
         if (cell->position == entry.position)
-            _output->softGlyphs.push_back(std::move(entry));
+            output[kept++] = std::move(entry);
     }
+    output.resize(kept);
 }
 
 void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line, ColumnOffset column)
