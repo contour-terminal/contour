@@ -369,7 +369,7 @@ struct CreateTabRequest
 
     std::string workspace {}; ///< The workspace; empty for the primary viewer's.
     WorkspacePlacement placement = WorkspacePlacement::Existing; ///< Existing workspace or a new one.
-    std::string cwd {};                    ///< Working directory; empty for the default.
+    std::string cwd {}; ///< Working directory; empty for the calling pane's, else the default.
     std::vector<std::string> command {};   ///< Program and arguments; empty for the shell.
     std::string label {};                  ///< Label for the new tab.
     FocusPolicy focus = FocusPolicy::Take; ///< Whether the new tab takes the focus.
@@ -393,7 +393,7 @@ struct SplitRequest
     std::string pane {};                              ///< The pane to split.
     SplitDirection direction = SplitDirection::Right; ///< Where the new pane goes.
     std::optional<uint8_t> ratioPercent {};           ///< Share of the old pane the new one gets, in percent.
-    std::string cwd {};                               ///< Working directory; empty for the default.
+    std::string cwd {};                               ///< Working directory; empty for the split pane's.
     std::vector<std::string> command {};              ///< Program and arguments; empty for the shell.
     std::string label {};                             ///< Label for the new pane.
     FocusPolicy focus = FocusPolicy::Take;            ///< Whether the new pane takes the focus.

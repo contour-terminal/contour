@@ -4,7 +4,9 @@
 /// @file
 /// What the vthost tests share: a session to host, and command-block records as a host sends them.
 
+#include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/MockPty.hpp>
@@ -18,6 +20,8 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <format>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -178,6 +182,14 @@ template <typename Condition>
         std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
     }
     return true;
+}
+
+/// Makes @p terminal's shell report @p directory as its working directory, by OSC 7.
+/// @param terminal The terminal of the session whose shell reports.
+/// @param directory The directory the shell says it is in.
+inline void reportDirectory(vtbackend::Terminal& terminal, std::filesystem::path const& directory)
+{
+    terminal.writeToScreen(std::format("\033]7;{}\033\\", vtbackend::test::fileUrlOf(directory)));
 }
 
 /// Opens a tab in @p host's workspace.

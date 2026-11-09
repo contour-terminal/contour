@@ -1174,6 +1174,8 @@ struct CreateTab
     /// the first, while the workspace clicked in gained nothing. Named by session rather than by
     /// workspace id for the reason SplitPane is: workspace ids are minted per model and the two ends
     /// have their own.
+    ///
+    /// It also names the pane the new tab inherits its working directory from; 0 inherits nothing.
     uint64_t session = 0;
     /// The profile the new tab's session runs under; empty means the connection's profile.
     std::string profileName = {};

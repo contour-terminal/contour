@@ -13,6 +13,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -52,6 +53,8 @@ struct ControlHarness
     core::net::EventLoop loop { source };
     core::platform::ManualWallClock wall { std::chrono::system_clock::time_point {
         std::chrono::seconds { 1'800'000'000 } } };
+    /// The directories the host finds on disk, so an inherited one need not exist on the machine.
+    core::platform::testing::InMemoryFileSystem files;
     /// The override every spawn was given, in spawn order.
     std::vector<vtpty::Process::ExecInfo> seen;
     vthost::SessionHost host {
@@ -63,6 +66,7 @@ struct ControlHarness
         vtbackend::Settings {},
         core::defaultEnvironment(),
         vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .fileSystem = files,
                                     .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
     };
     control::ControlService service;

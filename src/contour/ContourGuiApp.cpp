@@ -461,7 +461,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                                              : std::make_unique<command::FileCommandHistoryStore>()),
     _windowPositionStore(windowPositionStore ? std::move(windowPositionStore)
                                              : std::make_unique<window::FileWindowPositionStore>()),
-    _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
+    _speechSynthesizer(std::move(speechSynthesizer)),
     _commandOutputFiles(commandOutputFiles ? std::move(commandOutputFiles)
                                            : makeCommandOutputFiles(env, _processLiveness)),
     _terminalClocks(terminalClocks),
@@ -2779,6 +2779,10 @@ int ContourGuiApp::terminalGuiAction()
     // The platform Qt runs on is known now; a test injected its own probe at construction.
     if (!_dragEndProbe)
         _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());
+    // As early as it can be: the synthesizer probes for a voice on a thread of its own from here on, so
+    // the answer is usually in before the first menu asks. A test injected its own.
+    if (!_speechSynthesizer)
+        _speechSynthesizer = platform::makeSpeechSynthesizer();
     // So that Windows Installer, replacing a running Contour, can close it and open it again as it was
     // started. Failing to register only costs that reopening, so it is logged and nothing more.
     registerForRestart();
@@ -2805,6 +2809,8 @@ int ContourGuiApp::terminalGuiAction()
 #ifdef CONTOUR_WITH_GPU_SELECTION
         _graphicsDeviceSelector.reset();
 #endif
+        // Its engine lives on a QThread; from here on speechSynthesizer() is the voice that cannot speak.
+        _speechSynthesizer.reset();
     } };
     setupQCoreApplication();
 

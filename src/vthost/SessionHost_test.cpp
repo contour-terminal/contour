@@ -1985,7 +1985,7 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
     auto loop = core::net::EventLoop { source };
 
     auto tab = vtworkspace::LayoutTab {};
-    tab.root.directory = std::filesystem::path { "/tmp/project" };
+    tab.root.directory = std::filesystem::temp_directory_path();
     // command, arguments, and profile are left unset/empty
     auto layout = vtworkspace::Layout { .tabs = { tab } };
 
@@ -2010,7 +2010,7 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
 
     REQUIRE(seen.has_value());
     CHECK(seen->program.empty()); // no command named: program/arguments stay untouched
-    CHECK(seen->workingDirectory == std::filesystem::path { "/tmp/project" });
+    CHECK(seen->workingDirectory == std::filesystem::temp_directory_path());
 }
 
 TEST_CASE("SessionHost engages no override for a startup layout pane's arguments without a command",

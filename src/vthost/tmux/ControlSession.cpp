@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/tmux/ControlSession.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <filesystem>
 #include <format>
 #include <mutex>
 #include <ranges>
+#include <span>
 #include <utility>
 
 #include <vthost/Logging.hpp>
@@ -25,51 +29,6 @@ using vtworkspace::SplitState;
 using vtworkspace::Tab;
 using vtworkspace::TabId;
 using vtworkspace::WorkspaceId;
-
-std::vector<std::string> splitCommandLine(std::string_view line)
-{
-    auto arguments = std::vector<std::string> {};
-    auto current = std::string {};
-    auto inWord = false;
-    auto quote = '\0';
-
-    for (std::size_t i = 0; i < line.size(); ++i)
-    {
-        auto const ch = line[i];
-        if (quote != '\0')
-        {
-            if (ch == quote)
-                quote = '\0';
-            else if (quote == '"' && ch == '\\' && i + 1 < line.size()
-                     && (line[i + 1] == '"' || line[i + 1] == '\\'))
-                current += line[++i];
-            else
-                current += ch;
-            continue;
-        }
-        if (ch == '\'' || ch == '"')
-        {
-            quote = ch;
-            inWord = true;
-            continue;
-        }
-        if (ch == ' ' || ch == '\t')
-        {
-            if (inWord)
-            {
-                arguments.push_back(std::move(current));
-                current.clear();
-                inWord = false;
-            }
-            continue;
-        }
-        current += ch;
-        inWord = true;
-    }
-    if (inWord)
-        arguments.push_back(std::move(current));
-    return arguments;
-}
 
 std::chrono::milliseconds pauseAfterFromSeconds(std::uint64_t seconds) noexcept
 {
@@ -133,6 +92,77 @@ namespace
             if (arguments[i] == flag)
                 values.emplace_back(arguments[++i]);
         return values;
+    }
+
+    /// One `#{...}` format variable and the text it expands to.
+    struct FormatVariable
+    {
+        std::string_view name;
+        std::string value;
+    };
+
+    /// Expands every occurrence of each of @p variables in @p text; anything else passes as it is.
+    /// @param text The format text.
+    /// @param variables The variables the format may name.
+    /// @return The expanded text.
+    [[nodiscard]] std::string expandFormat(std::string text, std::span<FormatVariable const> variables)
+    {
+        for (auto const& [name, value]: variables)
+        {
+            auto at = text.find(name);
+            while (at != std::string::npos)
+            {
+                text.replace(at, name.size(), value);
+                at = text.find(name, at + value.size());
+            }
+        }
+        return text;
+    }
+
+    /// The pane-level format variables of @p text. The directory is asked of the host only when the text
+    /// names `#{pane_current_path}`, since it can mean a query of the shell's process.
+    /// @param host The host the pane lives in.
+    /// @param pane The pane the format is expanded against; null expands the variables to nothing.
+    /// @param text The format text.
+    /// @return The variables to expand it with.
+    [[nodiscard]] std::vector<FormatVariable> paneVariables(SessionHost const& host,
+                                                            Pane const* pane,
+                                                            std::string_view text)
+    {
+        constexpr auto CurrentPath = std::string_view { "#{pane_current_path}" };
+        auto variables = std::vector<FormatVariable> {};
+        if (!text.contains(CurrentPath))
+            return variables;
+        auto const directory = pane != nullptr ? host.workingDirectoryOf(pane->session())
+                                               : std::optional<std::filesystem::path> {};
+        variables.push_back(
+            FormatVariable { CurrentPath, directory ? core::pathToUtf8(*directory) : std::string {} });
+        return variables;
+    }
+
+    /// The positional arguments of a command line: everything after the command that is neither an option
+    /// of @p valueOptions with its value, nor one of @p flags, nor the end-of-options `--`.
+    /// @param arguments The split command line.
+    /// @param valueOptions The options that take a following value (e.g. `-t`).
+    /// @param flags The boolean flags to skip (e.g. `-l`).
+    /// @return The positional arguments, in order.
+    [[nodiscard]] std::vector<std::string_view> positionalsOf(
+        std::vector<std::string> const& arguments,
+        std::initializer_list<std::string_view> valueOptions,
+        std::initializer_list<std::string_view> flags = {})
+    {
+        auto positionals = std::vector<std::string_view> {};
+        auto skipNext = false;
+        for (auto const& argument: arguments | std::views::drop(1))
+        {
+            if (std::exchange(skipNext, false))
+                continue;
+            if (std::ranges::contains(valueOptions, argument))
+                skipNext = true;
+            else if (!std::ranges::contains(flags, argument) && argument != "--")
+                positionals.emplace_back(argument);
+        }
+        return positionals;
     }
 
     /// Parses a full decimal number; anything else (partial parse included)
@@ -565,24 +595,13 @@ ControlSession::HandlerResult ControlSession::commandListWindows(std::vector<std
         }
 
         // Minimal #{...} format support: one row per known variable.
-        struct FormatVariable
-        {
-            std::string_view name;
-            std::string value;
-        };
         auto const variables = std::array {
             FormatVariable { "#{window_id}", std::format("@{}", tab->id().value) },
             FormatVariable { "#{window_index}", std::format("{}", tabIndex) },
             FormatVariable { "#{window_name}", tab->runtimeTitle().value_or("") },
             FormatVariable { "#{window_layout}", encodeLayout(*tab->rootPane(), pageSize()) },
         };
-        auto line = std::string { formats.front() };
-        for (auto const& [name, value]: variables)
-            for (auto at = line.find(name); at != std::string::npos; at = line.find(name, at))
-            {
-                line.replace(at, name.size(), value);
-                at += value.size();
-            }
+        auto line = expandFormat(std::string { formats.front() }, variables);
         lines.push_back(std::move(line));
     }
     return lines;
@@ -602,25 +621,94 @@ ControlSession::HandlerResult ControlSession::commandListPanes(std::vector<std::
     return lines;
 }
 
-ControlSession::HandlerResult ControlSession::commandNewWindow(std::vector<std::string> const& /*args*/)
+std::expected<ControlSession::SplitTarget, std::string> ControlSession::resolveSplitTarget(
+    std::vector<std::string> const& arguments) const
 {
-    auto* tab = _host.createTab();
+    auto const target = targetOf(arguments);
+    if (!target || !target->starts_with('%'))
+    {
+        auto const tab = resolveTab(arguments);
+        if (!tab)
+            return std::unexpected(tab.error());
+        return SplitTarget { .tab = *tab };
+    }
+    auto const pane = resolvePane(arguments);
+    if (!pane)
+        return std::unexpected(pane.error());
+    auto const [workspace, tab, leaf] = _host.model().findSessionLeaf((*pane)->session());
     if (tab == nullptr)
+        return std::unexpected(std::format("pane not in a window: {}", *target));
+    return SplitTarget { .tab = tab, .pane = *pane };
+}
+
+std::expected<Pane*, std::string> ControlSession::resolveFormatPane(
+    std::vector<std::string> const& arguments) const
+{
+    auto const target = targetOf(arguments);
+    if (!target || !target->starts_with('@'))
+        return resolvePane(arguments);
+    auto const tab = resolveTab(arguments);
+    if (!tab)
+        return std::unexpected(tab.error());
+    return (*tab)->activePane();
+}
+
+std::optional<std::filesystem::path> ControlSession::startDirectoryOf(
+    std::vector<std::string> const& arguments, Pane const* source) const
+{
+    auto const directories = valuesOf(arguments, "-c");
+    if (directories.empty())
+        return std::nullopt;
+    auto const directory =
+        expandFormat(std::string { directories.back() }, paneVariables(_host, source, directories.back()));
+    if (directory.empty())
+        return std::nullopt;
+    auto path = core::pathFromUtf8(directory);
+    if (!path)
+        return std::nullopt;
+    return *std::move(path);
+}
+
+ControlSession::HandlerResult ControlSession::commandNewWindow(std::vector<std::string> const& arguments)
+{
+    // tmux expands -c against the target window's active pane. Here -t only places the new window (`$0`,
+    // `main:`, `:2`) and names no window to inherit from, so such a target, like none, means the current
+    // window; a host with no window yet has no pane to inherit from.
+    auto const named = resolveTab(arguments);
+    auto const* const source = named ? *named : _host.model().workspace(_host.workspaceId())->activeTab();
+    auto request = SessionSpawnRequest {};
+    if (auto const directory =
+            startDirectoryOf(arguments, source != nullptr ? source->activePane() : nullptr))
+        startIn(request, *directory);
+    auto* created = _host.createTab(request);
+    if (created == nullptr)
         return std::unexpected("create window failed");
     return std::vector<std::string> {};
 }
 
 ControlSession::HandlerResult ControlSession::commandSplitWindow(std::vector<std::string> const& arguments)
 {
-    auto tab = resolveTab(arguments);
-    if (!tab)
-        return std::unexpected(tab.error());
+    auto const target = resolveSplitTarget(arguments);
+    if (!target)
+        return std::unexpected(target.error());
+    // A pane target is the pane to split; a window target splits that window's active pane.
+    auto const previous = target->tab->activePane();
+    if (target->pane != nullptr)
+        _host.model().setActivePane(target->tab->id(), target->pane->id());
     // tmux: -h splits left|right (our Vertical), -v (default) stacks (Horizontal).
     auto const orientation = hasFlag(arguments, "-h") ? SplitState::Vertical : SplitState::Horizontal;
-    auto const panesBefore = (*tab)->paneCount();
-    _host.splitActivePane((*tab)->id(), orientation, 0.5);
-    if ((*tab)->paneCount() == panesBefore)
+    auto request = SessionSpawnRequest {};
+    if (auto const directory = startDirectoryOf(arguments, target->tab->activePane()))
+        startIn(request, *directory);
+    auto const panesBefore = target->tab->paneCount();
+    _host.splitActivePane(target->tab->id(), orientation, 0.5, request);
+    if (target->tab->paneCount() == panesBefore)
+    {
+        // The split did not happen, so the pane the target made active must not stay so.
+        if (previous != nullptr && previous != target->tab->activePane())
+            _host.model().setActivePane(target->tab->id(), previous->id());
         return std::unexpected("split failed");
+    }
     return std::vector<std::string> {};
 }
 
@@ -677,23 +765,8 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
     auto const literal = hasFlag(arguments, "-l");
     auto const hex = hasFlag(arguments, "-H");
     auto bytes = std::string {};
-    auto skipNext = false;
-    for (auto const& argument: arguments | std::views::drop(1))
+    for (auto const argument: positionalsOf(arguments, { "-t" }, { "-l", "-H" }))
     {
-        if (skipNext)
-        {
-            skipNext = false;
-            continue;
-        }
-        if (argument == "-t")
-        {
-            skipNext = true;
-            continue;
-        }
-        if (argument == "-l" || argument == "-H")
-            continue;
-        if (argument == "--")
-            continue; // end-of-options, as tmux's argument parser accepts
         if (hex)
         {
             // -H: each argument is one byte as a hexadecimal number.
@@ -705,7 +778,10 @@ ControlSession::HandlerResult ControlSession::commandSendKeys(std::vector<std::s
             bytes += static_cast<char>(value);
             continue;
         }
-        bytes += literal ? argument : translateKey(argument);
+        if (literal)
+            bytes += argument;
+        else
+            bytes += translateKey(argument);
     }
 
     if (!bytes.empty())
@@ -779,22 +855,8 @@ ControlSession::HandlerResult ControlSession::commandRenameWindow(std::vector<st
     auto tab = resolveTab(arguments);
     if (!tab)
         return std::unexpected(tab.error());
-    auto name = std::string {};
-    auto skipNext = false;
-    for (auto const& argument: arguments | std::views::drop(1))
-    {
-        if (skipNext)
-        {
-            skipNext = false;
-            continue;
-        }
-        if (argument == "-t")
-        {
-            skipNext = true;
-            continue;
-        }
-        name = argument;
-    }
+    auto const names = positionalsOf(arguments, { "-t" });
+    auto const name = names.empty() ? std::string {} : std::string { names.back() };
     if (name.empty())
         return std::unexpected("usage: rename-window [-t @N] name");
     _host.model().setTabTitle((*tab)->id(), name);
@@ -816,16 +878,21 @@ ControlSession::HandlerResult ControlSession::commandResizePane(std::vector<std:
 
 ControlSession::HandlerResult ControlSession::commandDisplayMessage(std::vector<std::string> const& arguments)
 {
+    // -t names the pane the format is expanded against; without it the current pane, if there is one.
+    auto source = static_cast<Pane const*>(nullptr);
+    if (auto const pane = resolveFormatPane(arguments))
+        source = *pane;
+    else if (targetOf(arguments))
+        return std::unexpected(pane.error());
+
     auto message = std::string {};
-    for (auto const& argument: arguments | std::views::drop(1))
+    for (auto const argument: positionalsOf(arguments, { "-t" }, { "-p" }))
     {
-        if (argument == "-p")
-            continue;
         if (!message.empty())
             message += ' ';
         message += argument;
     }
-    return std::vector<std::string> { message };
+    return std::vector<std::string> { expandFormat(message, paneVariables(_host, source, message)) };
 }
 
 ControlSession::HandlerResult ControlSession::commandRefreshClient(std::vector<std::string> const& arguments)

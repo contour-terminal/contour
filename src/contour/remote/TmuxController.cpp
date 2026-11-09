@@ -12,9 +12,11 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include <vthost/tmux/CommandLine.hpp>
 #include <vthost/tmux/ControlModeSpawn.hpp>
 #include <vtworkspace/LayoutConvert.hpp>
 
@@ -123,7 +125,8 @@ std::string tmuxResumePaneCommand(uint64_t pane)
 std::string tmuxSplitWindowCommand(uint64_t pane, bool vertical)
 {
     // tmux: -h splits left|right (our Vertical); default stacks top|bottom (Horizontal).
-    return std::format("split-window {}-t %{}", vertical ? "-h " : "", pane);
+    // The directory is the server's to resolve (#{pane_current_path}), so a remote tmux is right too.
+    return std::format("split-window {}-t %{} -c '#{{pane_current_path}}'", vertical ? "-h " : "", pane);
 }
 
 std::string tmuxKillPaneCommand(uint64_t pane)
@@ -131,9 +134,16 @@ std::string tmuxKillPaneCommand(uint64_t pane)
     return std::format("kill-pane -t %{}", pane);
 }
 
-std::string tmuxNewWindowCommand()
+std::string tmuxPaneDirectoryQuery(uint64_t pane)
 {
-    return "new-window";
+    return std::format("display-message -p -t %{} '#{{pane_current_path}}'", pane);
+}
+
+std::string tmuxNewWindowCommand(std::optional<std::string_view> directory)
+{
+    if (!directory || directory->empty())
+        return "new-window";
+    return std::format("new-window -c {}", vthost::tmux::quoteArgument(*directory));
 }
 
 std::optional<std::string> tmuxOperationCommand(contour::session::HostedOperation operation, uint64_t pane)
@@ -598,21 +608,50 @@ bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty,
     return true;
 }
 
-bool TmuxController::requestRemoteTab(vtpty::Pty const* /*actingPty*/,
+bool TmuxController::requestRemoteTab(vtpty::Pty const* actingPty,
                                       contour::session::RemoteSpawn const& /*spawn*/)
 {
-    // The acting pane is ignored: a tmux WINDOW is a tab, and `new-window` creates it in the
-    // attached session — of which a mirror has exactly one, so there is no second window to pick.
+    // A tmux WINDOW is a tab, and `new-window` creates it in the attached session — of which a mirror has
+    // exactly one. The acting pane only names where the tab starts: tmux cannot target a pane there, so
+    // its directory is asked of the server first and the window is made in the answer.
+    auto pane = std::optional<uint64_t> {};
     {
         auto const lock = std::lock_guard { _mutex };
         if (_realizing)
             return false; // a tab realized by the reconciler is not re-authored on the server
+        // An unknown pty still authors the tab, just in the server's default directory.
+        pane = paneForPtyLocked(actingPty);
     }
     // Author a new tmux window; its %window-add + layout push realizes as a new tab through the
     // mirror. A no-op if the connection is gone (the gateway is torn down).
-    _reactor.post([this] {
-        if (_gateway != nullptr)
-            _gateway->sendCommand(tmuxNewWindowCommand());
+    _reactor.post([this, pane] {
+        if (_gateway == nullptr)
+            return;
+        auto const createWindow = [this](std::optional<std::string_view> directory) {
+            if (_gateway != nullptr)
+                _gateway->sendCommand(tmuxNewWindowCommand(directory));
+        };
+        if (!pane)
+        {
+            createWindow(std::nullopt);
+            return;
+        }
+        _gateway->sendCommand(
+            tmuxPaneDirectoryQuery(*pane), [createWindow](bool ok, std::vector<std::string> const& body) {
+                // A failed or empty answer (the pane is gone) still makes the window, in
+                // the default directory.
+                // The directory is the whole body: a name holding a newline spans several lines.
+                // Joined by hand: libc++ (macOS) has no std::views::join_with yet.
+                auto directory = std::string {};
+                for (auto const& line: body)
+                {
+                    if (&line != &body.front())
+                        directory += '\n';
+                    directory += line;
+                }
+                createWindow(ok && !body.empty() ? std::optional<std::string_view> { directory }
+                                                 : std::nullopt);
+            });
     });
     return true;
 }

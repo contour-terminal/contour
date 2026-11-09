@@ -280,8 +280,8 @@ class TestApp
     /// The NULL one, never the production synthesizer -- and this is the single place that decides
     /// so, because it is an invariant of the suite rather than a default anyone should vary. A real
     /// synthesizer connects to the machine's speech service (speech-dispatcher on Linux) as soon as
-    /// a session is asked for its context-menu state: surprising for a headless suite, audible if
-    /// the machine has a voice, and a leak inside libspeechd on every connection.
+    /// it is constructed, on a thread of its own: surprising for a headless suite, audible if the
+    /// machine has a voice, and a leak inside libspeechd on every connection.
     [[nodiscard]] static std::unique_ptr<contour::platform::SpeechSynthesizer> defaultSpeech()
     {
         return std::make_unique<contour::platform::NullSpeechSynthesizer>();

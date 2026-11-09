@@ -34,8 +34,8 @@ pane.
 | Verb | What it does |
 | --- | --- |
 | `contour ls [--workspace W]` | Lists workspaces, tabs and panes as a tree; ids are shortened to their last 8 hex digits and `*` marks the active ones. |
-| `contour new [--workspace W \| --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Opens a tab and prints its pane id. |
-| `contour split [--pane P] [--right \| --below] [--ratio PCT] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Splits a pane and prints the new pane's id. |
+| `contour new [--workspace W \| --new-workspace] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Opens a tab and prints its pane id. Without `--cwd` the shell starts in the calling pane's directory, when run from one. |
+| `contour split [--pane P] [--right \| --below] [--ratio PCT] [--cwd DIR] [--label L] [--no-focus] [-- CMD...]` | Splits a pane and prints the new pane's id. Without `--cwd` the shell starts in the split pane's directory. |
 | `contour send [--pane P] [--enter] [--wait] TEXT...\|-` | Types text into a pane. `--enter` appends a carriage return, `-` reads standard input, `--wait` waits for the command the text starts and exits with that command's own status. |
 | `contour pane capture [--pane P] [--scrollback N \| --all]` | Prints a pane's text. |
 | `contour close [--pane P \| --tab T]` | Closes a pane, or a tab with all its panes. |

@@ -217,8 +217,7 @@ TEST_CASE("a directory that is gone opens the pane in the default directory", "[
     CHECK(host->sessionCount() == 1);
     REQUIRE(h.recorded.overrides.size() == 1);
     CHECK((!h.recorded.overrides[0] || h.recorded.overrides[0]->workingDirectory.empty()));
-    CHECK(capture.contains(
-        "restore: /gone no longer exists; the pane starts in the shell's default directory"));
+    CHECK(capture.contains("/gone no longer exists; the pane starts in the shell's default directory"));
 }
 
 TEST_CASE("restored history sits above the divider and the new prompt", "[vthost][snapshot][restore]")

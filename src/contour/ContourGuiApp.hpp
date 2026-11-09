@@ -281,9 +281,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     ///                       replaced `command-history.yml`); tests pass an in-memory store to drive the
     ///                       record -> persist -> reload cycle without touching the disk.
     /// @param speechSynthesizer The voice every session in this app reads selections through. Null
-    ///                       (the default) wires the production one; tests pass a
+    ///                       (the default) wires the production one once run() has built the
+    ///                       QApplication; tests pass a
     ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
-    ///                       service (on Linux that is a speech-dispatcher connection per use).
+    ///                       service (the production one connects to it, on Linux speech-dispatcher,
+    ///                       on a worker thread as soon as it is constructed).
     /// @param commandOutputFiles Where OpenCommandOutput writes the files a pager pane shows. Null (the
     ///                       default) wires the native filesystem under $XDG_RUNTIME_DIR or the system
     ///                       temporary directory; tests pass one over an in-memory filesystem.
@@ -616,7 +618,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// One per app rather than one per session, because a machine has one voice: two sessions
     /// speaking at once is not a thing the platform can do, and with an engine each, "Stop Speaking"
     /// in one tab could not stop what another tab had started.
-    [[nodiscard]] platform::SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
+    ///
+    /// A voice that cannot speak until run() has built the QApplication, and again once it is gone.
+    [[nodiscard]] platform::SpeechSynthesizer& speechSynthesizer() noexcept
+    {
+        return _speechSynthesizer ? *_speechSynthesizer : _noSpeech;
+    }
 
     /// The private files OpenCommandOutput hands to pager panes; one per app, removed at exit.
     [[nodiscard]] session::CommandOutputFiles& commandOutputFiles() noexcept { return *_commandOutputFiles; }
@@ -1237,8 +1244,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     // Likewise: the manager holds a reference to the command-history store.
     std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     std::unique_ptr<window::WindowPositionStore> _windowPositionStore;
-    // Shared by every session, reached via _app; @see speechSynthesizer().
+    // Shared by every session, reached via _app; @see speechSynthesizer(). A test injects its own at
+    // construction; otherwise run() builds the platform's as soon as the QApplication exists and releases
+    // it with the other Qt objects. Not built here because it needs a QCoreApplication
+    // (@see platform::ThreadedSpeechSynthesizer), which is also why a CLI verb, making none, never
+    // connects to the speech service.
     std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
+    // What speechSynthesizer() answers while _speechSynthesizer is null.
+    platform::NullSpeechSynthesizer _noSpeech;
     // Declared before _commandOutputFiles, whose production instance borrows it to tell whose leftover
     // directories it may remove.
     session::NativeProcessLiveness _processLiveness;

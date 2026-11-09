@@ -1008,13 +1008,19 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// SplitPane), so a fifth cannot quietly forget the client's preference.
     /// @param verbProfile The profile the spawning verb names; empty for the connection's. Honoured only
     ///        with Capability::ProfileByName shared.
-    [[nodiscard]] SessionSpawnRequest spawnRequest(std::string_view verbProfile) const
+    /// @param directoryFrom The session the new one is opened from (a tab or split made from that pane): its
+    ///        shell starts in that pane's working directory, as an in-process tab inherits it
+    ///        (@see SessionSpawnRequest::directoryFrom).
+    [[nodiscard]] SessionSpawnRequest spawnRequest(
+        std::string_view verbProfile,
+        std::optional<vtworkspace::SessionId> directoryFrom = std::nullopt) const
     {
         auto const verbNamesProfile = !verbProfile.empty() && _negotiated.has_value()
                                       && _negotiated->shared.contains(proto::Capability::ProfileByName);
         return SessionSpawnRequest { .settings = _clientSessionSettings,
                                      .profileName =
-                                         verbNamesProfile ? std::string { verbProfile } : _profileName };
+                                         verbNamesProfile ? std::string { verbProfile } : _profileName,
+                                     .directoryFrom = directoryFrom };
     }
 
     /// What the session the attach itself creates is spawned with: @ref spawnRequest, its shell started in
@@ -1025,11 +1031,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     {
         auto request = spawnRequest({});
         if (!workingDirectory.empty())
-        {
-            // A directory-only override: an empty program keeps the profile's shell and its arguments.
-            request.commandOverride.emplace();
-            request.commandOverride->workingDirectory = workingDirectory;
-        }
+            startIn(request, workingDirectory);
         return request;
     }
 
