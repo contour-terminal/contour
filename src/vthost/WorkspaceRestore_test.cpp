@@ -585,3 +585,24 @@ TEST_CASE("SessionHost.cellPixelSize.a_corrupt_snapshot_value_is_ignored",
     CHECK_FALSE(host->learnedCellPixelSize().has_value());
     CHECK(host->cellPixelSize() == vtpty::ImageSize { vtpty::Width(10), vtpty::Height(20) });
 }
+
+TEST_CASE("a workspace put away stays Hidden across a restore, a shown one comes back Left",
+          "[vthost][snapshot][restore][visibility]")
+{
+    auto h = RestoreHarness {};
+    auto source = h.makeHost({});
+    REQUIRE(source->createTab() != nullptr);
+    auto const* const away = source->createWorkspace();
+    REQUIRE(away != nullptr);
+    source->noteWorkspaceReleased(away->id(), vthost::proto::WorkspaceRelease::SwitchedAway);
+    REQUIRE(source->visibility(away->id()) == WorkspaceVisibility::Hidden);
+
+    auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
+    auto decoded = decodeSnapshot(encodeSnapshot(captured));
+    REQUIRE(decoded.has_value());
+    auto const restored = h.restore(WorkspaceRestore { .snapshot = decoded->snapshot });
+
+    REQUIRE(restored->model().workspaceCount() == 2);
+    CHECK(restored->visibility(restored->model().workspaceAt(0)->id()) == WorkspaceVisibility::Left);
+    CHECK(restored->visibility(restored->model().workspaceAt(1)->id()) == WorkspaceVisibility::Hidden);
+}

@@ -33,6 +33,7 @@
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -59,6 +60,7 @@
 #include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
+#include <vthost/ConnectionId.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -69,6 +71,8 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/SwitchClient.hpp>
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -180,6 +184,9 @@ using SessionSignal = std::variant<CommandBlockFinishedSignal,
 /// state mutex held: it must neither block nor read terminal state (the host posts it to the loop).
 using SessionSignalCallback = std::function<void(SessionSignal)>;
 
+/// Told how a requested window switch ended, once.
+using SwitchCompletion = std::function<void(proto::SwitchReply const&)>;
+
 /// Observer of the hosted sessions' output streams. Every callback fires on the loop thread; any
 /// number of observers may subscribe concurrently, so no observer ever silences another by
 /// connecting or disconnecting.
@@ -197,6 +204,26 @@ class SessionStreamEvents
     ///         A tmux control-mode observer (tmux::ControlSession) keeps the default, so counts as a client
     ///         for repaints although it shows no indicator row.
     [[nodiscard]] virtual bool mirrorsScreens() const noexcept { return true; }
+
+    /// @param workspace A daemon workspace.
+    /// @return Whether the observer shows @p workspace: its layout and its sessions' screens. Only a client
+    ///         attached through SessionHost::noteClientAttached does, so the default says no.
+    [[nodiscard]] virtual bool follows(vtworkspace::WorkspaceId /*workspace*/) const noexcept
+    {
+        return false;
+    }
+
+    /// @return The connection this observer is. Meaningful only for an observer attached through
+    ///         SessionHost::noteClientAttached; the default is an empty id.
+    [[nodiscard]] virtual ConnectionId connectionId() const { return {}; }
+
+    /// @return Whether the observer's window can be asked to switch (SwitchRequest), as the client offered
+    ///         Capability::WorkspaceSwitch. Only an attached native client does.
+    [[nodiscard]] virtual bool canSwitch() const noexcept { return false; }
+
+    /// Asks the observer's window to switch (sends the SwitchRequest). Only called when canSwitch().
+    /// @param request What to ask.
+    virtual void requestSwitch(proto::SwitchRequest const& /*request*/) {}
 
     /// @p session processed new output — the delta/notification trigger.
     virtual void sessionScreenUpdated(vtworkspace::SessionId /*session*/) {}
@@ -1193,7 +1220,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
     /// Idempotent.
     /// @param client The connection, by its stream observer.
-    void noteClientAttached(SessionStreamEvents const* client);
+    void noteClientAttached(SessionStreamEvents* client);
 
     /// Stops counting @p client, releases its primary-viewer role, and leaves the workspaces it claimed
     /// claimed by nobody present (still not unclaimed). Idempotent, and a no-op for a client never counted.
@@ -1203,6 +1230,27 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return How many native Attach connections are handshaken. Neither a Control connection nor a tmux
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
     [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
+
+    /// Records why the last client showing @p workspace stopped: a client that releases a workspace it was
+    /// shown tells the host, which keeps the reason until some client follows the workspace again. A release
+    /// while another attached client still follows it is not the last one and forgets any reason recorded.
+    /// @param workspace The workspace released.
+    /// @param reason Why it was released.
+    void noteWorkspaceReleased(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason);
+
+    /// Forgets the release recorded for @p workspace, because a client follows it again.
+    /// @param workspace The workspace a client now shows.
+    void noteWorkspaceFollowed(vtworkspace::WorkspaceId workspace);
+
+    /// @param workspace A workspace.
+    /// @return Whether a client shows it, was shown it and switched away, or neither (@see
+    ///         visibilityOf).
+    [[nodiscard]] WorkspaceVisibility visibility(vtworkspace::WorkspaceId workspace) const;
+
+    /// @param workspace A workspace.
+    /// @return Why it was last released, nullopt when never, or when a client followed it since.
+    [[nodiscard]] std::optional<proto::WorkspaceRelease> lastRelease(
+        vtworkspace::WorkspaceId workspace) const noexcept;
 
     /// Makes @p client the primary viewer — the client whose launch took every workspace, which also follows
     /// the workspaces no client claims, created later — unless another client holds that role.
@@ -1250,6 +1298,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param bytes The input, as the client encoded it.
     void writeInput(vtworkspace::SessionId session, std::string_view bytes);
 
+    /// writeInput() for input a connected client typed: also remembers @p from as the session's last typist
+    /// (@see lastInputFrom), which is how a switch finds the window its user is looking at.
+    /// @param session The session the input is for; an unknown one drops it.
+    /// @param bytes The input, as the client encoded it.
+    /// @param from The connection the input arrived on.
+    void writeInputFrom(vtworkspace::SessionId session, std::string_view bytes, ConnectionId const& from);
+
     /// @param session The session asked about.
     /// @return The command line a restart stopped in @p session, held until its next command starts; empty
     ///         for none, or for an unknown session. Untrusted text (it came from a snapshot).
@@ -1270,6 +1325,39 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The time of the session's last writeInput(); nullopt for none or an unknown session.
     [[nodiscard]] std::optional<core::platform::SteadyTimePoint> lastInputAt(
         vtworkspace::SessionId session) const;
+
+    /// @param session The session asked about.
+    /// @return The connection that typed @p session's last input; nullopt when none did (the last input came
+    ///         from the control API, or there was none), or for an unknown session.
+    [[nodiscard]] std::optional<ConnectionId> lastInputFrom(vtworkspace::SessionId session) const;
+
+    /// @param workspace A workspace.
+    /// @return The connection that typed the most recent input into any session of @p workspace; nullopt when
+    ///         none did.
+    [[nodiscard]] std::optional<ConnectionId> lastTypistIn(vtworkspace::WorkspaceId workspace) const;
+
+    /// @param workspace A workspace.
+    /// @return The connections of the attached clients that show it, in attach order.
+    [[nodiscard]] std::vector<ConnectionId> clientsShowing(vtworkspace::WorkspaceId workspace) const;
+
+    /// Asks the window of the client on @p client that shows @p workspace to switch to @p target, and tells
+    /// @p done what came of it: the client's SwitchReply, or a Failed one when the client cannot switch, goes
+    /// away, or stays silent for SwitchAnswerTimeout. @p done runs exactly once, on the loop thread, possibly
+    /// before this returns.
+    /// @param client An attached client, by connection.
+    /// @param workspace The workspace whose window should switch.
+    /// @param target Where the window should go.
+    /// @param done Told the outcome.
+    void requestSwitch(ConnectionId const& client,
+                       vtworkspace::WorkspaceId workspace,
+                       proto::SwitchTargetWire target,
+                       SwitchCompletion done);
+
+    /// Completes the switch @p client was asked for as @p reply answers; a reply for no pending request is
+    /// ignored. Called by the connection that received the SwitchReply.
+    /// @param client The connection the reply arrived on.
+    /// @param reply The client's answer.
+    void completeSwitch(ConnectionId const& client, proto::SwitchReply const& reply);
 
     /// @param session The session asked about.
     /// @return How many bytes of a client's input @p session holds unwritten; zero for an unknown one.
@@ -1384,6 +1472,12 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
+
+    /// @return How many workspaces the host holds, as `workspace.list` lists them.
+    [[nodiscard]] std::size_t workspaceCount() const noexcept
+    {
+        return static_cast<std::size_t>(std::max(_model.workspaceCount(), 0));
+    }
 
     /// @return The id of every live hosted session, ascending.
     [[nodiscard]] std::vector<vtworkspace::SessionId> sessionIds() const;
@@ -2077,9 +2171,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
     /// @see pumpEventsInFlight()
     std::atomic<std::size_t> _pumpEventsInFlight { 0 };
+    /// When a session last got input, and from which connection (none for the control API's).
+    struct LastInput
+    {
+        core::platform::SteadyTimePoint at;
+        std::optional<ConnectionId> from;
+    };
     /// When each session last got client input, on `_loop`'s clock (@see lastInputAt). Erased with the
     /// session's `_sessions` entry, by eraseSession().
-    std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _lastInput;
+    std::unordered_map<uint64_t, LastInput> _lastInput;
     /// The light/dark preference a session's palette was last seeded under, where a client changed it from
     /// HostedColorPreference; erased with the session.
     std::unordered_map<uint64_t, vtbackend::ColorPreference> _colorPreferences;
@@ -2102,7 +2202,27 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
     /// The handshaken native Attach connections. @see connectedClients
-    std::vector<SessionStreamEvents const*> _attachedClients;
+    std::vector<SessionStreamEvents*> _attachedClients;
+    /// A switch asked of a client and not yet answered. @see requestSwitch
+    struct PendingSwitch
+    {
+        SessionHost* host;                                  ///< The host, for the timeout's callback.
+        uint32_t request;                                   ///< Its request id.
+        ConnectionId client;                                ///< Who was asked.
+        SwitchCompletion done;                              ///< Told the outcome.
+        std::optional<core::net::DeadlineTimer> timeout {}; ///< Fails the switch after SwitchAnswerTimeout.
+    };
+    uint32_t _nextSwitchRequest = 0; ///< The last SwitchRequest id handed out.
+    /// By request id. Owned by pointer: the timeout is handed the entry's address.
+    std::unordered_map<uint32_t, std::unique_ptr<PendingSwitch>> _pendingSwitches;
+
+    /// Ends the pending switch @p request with @p reply, if it is still pending.
+    void settleSwitch(uint32_t request, proto::SwitchReply reply);
+
+    /// writeInput() and writeInputFrom(): records @p from, if any, as the session's typist.
+    void writeInputAs(vtworkspace::SessionId session,
+                      std::string_view bytes,
+                      std::optional<ConnectionId> from);
     /// The client whose launch took every workspace; null while none is attached. @see claimPrimaryViewer
     SessionStreamEvents const* _primaryViewer = nullptr;
     /// What serves the extensions' control calls. @see attachExtensionControl
@@ -2110,6 +2230,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Every workspace created for a client, by workspace id: that client while it is attached, null once it
     /// left. A workspace absent here is unclaimed. @see workspaceClaim
     std::unordered_map<uint64_t, SessionStreamEvents const*> _workspaceCreators;
+    /// Why each workspace was last released by a client, until one follows it again. @see lastRelease
+    std::unordered_map<uint64_t, proto::WorkspaceRelease> _lastReleases;
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;

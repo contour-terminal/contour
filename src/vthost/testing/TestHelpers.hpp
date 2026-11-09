@@ -201,6 +201,21 @@ inline void reportDirectory(vtbackend::Terminal& terminal, std::filesystem::path
     return host.model().workspace(host.workspaceId())->activeTab()->rootPane()->session();
 }
 
+/// @param host The host a client attaches to.
+/// @param hello What the client says of itself besides which workspaces it shows.
+/// @return @p hello, stating that it shows every workspace @p host holds, by name. A plain launch of a client
+///         that finds another one showing them is given a workspace of its own, so a test of two clients
+///         sharing a session attaches the second one like this.
+[[nodiscard]] inline proto::ClientHello showingAll(SessionHost& host, proto::ClientHello hello = {})
+{
+    hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::AttachIntent));
+    hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} };
+    auto& model = host.model();
+    for (auto const index: std::views::iota(0, model.workspaceCount()))
+        hello.attachIntent.workspaces.push_back(model.workspaceAt(index)->id().value);
+    return hello;
+}
+
 /// When every record promptingWire() and its siblings build was prompted, in nanoseconds since the Unix
 /// epoch.
 constexpr auto PromptedAt = int64_t { 1'700'000'000'000'000'000 };

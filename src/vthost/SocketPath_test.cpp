@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -293,4 +294,46 @@ TEST_CASE("socketLabelOf reads an empty option as not given", "[vthost][socketpa
     CHECK(vthost::socketLabelOf("").name == vthost::DefaultSocketLabel);
     CHECK(vthost::socketLabelOf("default").origin == LabelOrigin::Explicit);
     CHECK(vthost::socketLabelOf("work").name == "work");
+}
+
+TEST_CASE("validateSocketLabel accepts what can name a socket discovery lists", "[vthost][socketpath]")
+{
+    using vthost::SocketLabelError;
+    struct Row
+    {
+        std::string label;
+        std::optional<SocketLabelError> refused;
+    };
+    auto const rows = std::to_array<Row>({
+        { .label = "work2", .refused = std::nullopt },
+        { .label = "admin_box-1.dev", .refused = std::nullopt },
+        { .label = std::string(vthost::MaxSocketLabelLength, 'a'), .refused = std::nullopt },
+        { .label = "", .refused = SocketLabelError::Empty },
+        { .label = std::string(vthost::MaxSocketLabelLength + 1, 'a'), .refused = SocketLabelError::TooLong },
+        { .label = ".", .refused = SocketLabelError::LeadingDot },
+        { .label = "..", .refused = SocketLabelError::LeadingDot },
+        { .label = ".hidden", .refused = SocketLabelError::LeadingDot },
+        { .label = "a/b", .refused = SocketLabelError::InvalidCharacter },
+        { .label = "a\\b", .refused = SocketLabelError::InvalidCharacter },
+        { .label = "with space", .refused = SocketLabelError::InvalidCharacter },
+        { .label = "tab\there", .refused = SocketLabelError::InvalidCharacter },
+        { .label = "caf\xc3\xa9", .refused = SocketLabelError::InvalidCharacter },
+        { .label = "work-native", .refused = SocketLabelError::SiblingSuffix },
+        { .label = "work-tmux", .refused = SocketLabelError::SiblingSuffix },
+        { .label = "work.log", .refused = SocketLabelError::SiblingSuffix },
+    });
+    for (auto const& row: rows)
+    {
+        INFO("label \"" << row.label << "\"");
+        auto const checked = vthost::validateSocketLabel(row.label);
+        if (!row.refused)
+            CHECK(checked.has_value());
+        else
+        {
+            REQUIRE_FALSE(checked.has_value());
+            CHECK(checked.error() == *row.refused);
+            CHECK_FALSE(vthost::describe(checked.error()).empty());
+        }
+    }
+    CHECK(vthost::describe(SocketLabelError::TooLong).contains(std::to_string(vthost::MaxSocketLabelLength)));
 }

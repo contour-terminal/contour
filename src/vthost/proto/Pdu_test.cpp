@@ -1325,14 +1325,16 @@ TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost
 {
     SECTION("ClientHello")
     {
-        auto const hello =
-            ClientHello { .versions = { 4, 9 },
-                          .capabilities = { .idents = { 1, 77 } },
-                          .token = "s3cr3t",
-                          .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
-                          .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 },
-                          // The last field this version knows, stated: a byte after it is a newer peer's.
-                          .workingDirectory = "/home/user" };
+        auto const hello = ClientHello {
+            .versions = { 4, 9 },
+            .capabilities = { .idents = { 1, 77 } },
+            .token = "s3cr3t",
+            .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+            // The last field this version knows, stated: a byte after it is a newer peer's.
+            .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 2 }, .daemonInstance = 3 },
+            .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 },
+            .workingDirectory = "/home/user"
+        };
         auto const decoded = decodePdu(withAppendedField(PduType::ClientHello, hello));
         REQUIRE(decoded.has_value());
         CHECK(decoded->pdu == DecodedPdu { hello });
@@ -1997,6 +1999,34 @@ TEST_CASE("ClientHello carries an attach intent and a profile name", "[vthost][p
     CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
 }
 
+TEST_CASE("ClientHello states which daemon run its attach intent's ids are of", "[vthost][pdu]")
+{
+    SECTION("with no working directory, and no cell size")
+    {
+        auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume,
+                                                           .workspaces = { 2 },
+                                                           .daemonInstance = 0xC0FFEE } };
+        CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    }
+    SECTION("beside a working directory")
+    {
+        auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Workspaces,
+                                                           .workspaces = { 2, 3 },
+                                                           .daemonInstance = 7 },
+                                         .workingDirectory = "/srv" };
+        CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    }
+    SECTION("a hello stating none is what it was before the field")
+    {
+        auto const hello =
+            ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 2 } } };
+        auto stated = hello;
+        stated.attachIntent.daemonInstance = 9;
+        // The stated run: an empty directory and the varint 9, after a cell size of none (0x0, two varints).
+        CHECK(bodyOf(DecodedPdu { stated }).size() == bodyOf(DecodedPdu { hello }).size() + 4);
+    }
+}
+
 TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWorkspaces and no profile",
           "[vthost][pdu]")
 {
@@ -2203,6 +2233,63 @@ TEST_CASE("PanesReprojected round-trips, and a newer peer's appended bytes do no
     body.varint(7); // a field some later version appends
     CHECK(decodeAs<PanesReprojected>(frameOf(PduType::PanesReprojected, body.view())) == PanesReprojected {});
     STATIC_CHECK(std::to_underlying(PduType::PanesReprojected) == 44);
+}
+
+TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][pdu][workspace-follow]")
+{
+    auto const follow = FollowWorkspace { .workspace = 9 };
+    CHECK(roundTrip(DecodedPdu { follow }) == DecodedPdu { follow });
+    for (auto const reason: { WorkspaceRelease::Closed, WorkspaceRelease::SwitchedAway })
+    {
+        auto const release = ReleaseWorkspace { .workspace = 3, .reason = reason };
+        CHECK(roundTrip(DecodedPdu { release }) == DecodedPdu { release });
+    }
+    for (auto const kind: { SwitchDaemonKind::Same, SwitchDaemonKind::Label, SwitchDaemonKind::Host })
+    {
+        auto const request =
+            SwitchRequest { .request = 4,
+                            .workspace = 3,
+                            .target = { .kind = kind, .daemon = "box", .workspace = "workspace:abc" } };
+        CHECK(roundTrip(DecodedPdu { request }) == DecodedPdu { request });
+    }
+    for (auto const outcome: { SwitchOutcome::Switched,
+                               SwitchOutcome::FocusedExisting,
+                               SwitchOutcome::PickerShown,
+                               SwitchOutcome::Refused,
+                               SwitchOutcome::Failed })
+    {
+        auto const reply = SwitchReply { .request = 4, .outcome = outcome, .detail = "why" };
+        CHECK(roundTrip(DecodedPdu { reply }) == DecodedPdu { reply });
+    }
+    STATIC_CHECK(std::to_underlying(PduType::FollowWorkspace) == 46);
+    STATIC_CHECK(std::to_underlying(PduType::ReleaseWorkspace) == 47);
+    STATIC_CHECK(std::to_underlying(PduType::SwitchRequest) == 48);
+    STATIC_CHECK(std::to_underlying(PduType::SwitchReply) == 49);
+}
+
+TEST_CASE("a release reason or switch outcome a newer peer sends decodes to the safe reading",
+          "[vthost][pdu][workspace-follow]")
+{
+    auto release = Writer {};
+    release.varint(3);
+    release.u8(200);
+    CHECK(decodeAs<ReleaseWorkspace>(frameOf(PduType::ReleaseWorkspace, release.view())).reason
+          == WorkspaceRelease::Closed);
+
+    auto reply = Writer {};
+    reply.u32(1);
+    reply.u8(200);
+    reply.string("");
+    CHECK(decodeAs<SwitchReply>(frameOf(PduType::SwitchReply, reply.view())).outcome
+          == SwitchOutcome::Failed);
+
+    auto request = Writer {};
+    request.u32(1);
+    request.varint(2);
+    request.u8(200);
+    request.string("");
+    request.string("");
+    CHECK_FALSE(decodePdu(frameOf(PduType::SwitchRequest, request.view())).has_value());
 }
 
 TEST_CASE("a truncated MoveNode body is a DecodeError", "[vthost][pdu][move]")
@@ -2414,6 +2501,23 @@ TEST_CASE("an older sender's Delta and SessionState decode without the OSC 30 ta
         CHECK(decodeAs<SessionState>(encodeWithoutTrailingField(DecodedPdu { state }, /*bytesToDrop=*/1))
               == state);
     }
+}
+
+TEST_CASE("DaemonStatusReply carries the workspace count, and a body from before it reads as none",
+          "[vthost][proto]")
+{
+    auto const counted = DaemonStatusReply { .releaseVersion = "0.9.0",
+                                             .sessions = 5,
+                                             .upgrade = DaemonUpgradeRecord { .generation = 1 },
+                                             .relocation = uint8_t { 0 },
+                                             .workspaces = 2 };
+    CHECK(roundTrip(DecodedPdu { counted }) == DecodedPdu { counted });
+
+    // A daemon from before the field ends its body after the relocation byte, one varint short.
+    auto legacy = counted;
+    legacy.workspaces = std::nullopt;
+    CHECK(decodeAs<DaemonStatusReply>(encodeWithoutTrailingField(DecodedPdu { counted }, /*bytesToDrop=*/1))
+          == legacy);
 }
 
 TEST_CASE("DaemonStatusReply carries the relocation request, and a body from before it reads as none",

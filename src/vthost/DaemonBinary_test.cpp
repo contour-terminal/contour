@@ -469,6 +469,39 @@ TEST_CASE("ensureDaemon spawns the image its binary source hands out", "[vthost]
     CHECK(spawner.spawned.front().front() == "contour-no-such-binary");
 }
 
+TEST_CASE("ensureDaemon spawns exit-when-idle unless told the daemon is to persist", "[vthost][daemon]")
+{
+    auto binary = CountingBinarySource {};
+    auto spawner = FakeSpawner {};
+    auto placement = vtpty::NoPlacement {};
+    auto const spawnedLifecycle = [&] {
+        REQUIRE(spawner.spawned.size() == 1);
+        auto const& argv = spawner.spawned.front();
+        auto const found = std::ranges::find_if(
+            argv, [](std::string const& arg) { return arg.starts_with("--lifecycle="); });
+        REQUIRE(found != argv.end());
+        return *found;
+    };
+
+    SECTION("by default")
+    {
+        std::ignore = vthost::ensureDaemon(
+            unboundEndpoint(), binary, spawner, placement, {}, std::chrono::seconds { 0 });
+        CHECK(spawnedLifecycle() == "--lifecycle=exit-when-idle");
+    }
+    SECTION("persistent, as one the user named")
+    {
+        std::ignore = vthost::ensureDaemon(unboundEndpoint(),
+                                           binary,
+                                           spawner,
+                                           placement,
+                                           {},
+                                           std::chrono::seconds { 0 },
+                                           vthost::DaemonLifecycle::Persistent);
+        CHECK(spawnedLifecycle() == "--lifecycle=persistent");
+    }
+}
+
 TEST_CASE("ensureDaemon keeps the image leased until the daemon serves", "[vthost][daemon]")
 {
     // Review Focus 4: between this launcher staging its image and the daemon it spawned taking its own

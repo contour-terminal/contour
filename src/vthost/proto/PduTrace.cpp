@@ -63,6 +63,41 @@ namespace
         IntentName { .kind = AttachIntentKind::Resume, .name = "resume" },
     };
 
+    /// One row of a table naming an enumerator in a trace.
+    template <typename E>
+    struct EnumName
+    {
+        E value;
+        std::string_view name;
+    };
+
+    constexpr auto ReleaseNames = std::array {
+        EnumName { .value = WorkspaceRelease::Closed, .name = "closed" },
+        EnumName { .value = WorkspaceRelease::SwitchedAway, .name = "switched-away" },
+    };
+
+    constexpr auto SwitchDaemonNames = std::array {
+        EnumName { .value = SwitchDaemonKind::Same, .name = "same" },
+        EnumName { .value = SwitchDaemonKind::Label, .name = "label" },
+        EnumName { .value = SwitchDaemonKind::Host, .name = "host" },
+    };
+
+    constexpr auto SwitchOutcomeNames = std::array {
+        EnumName { .value = SwitchOutcome::Switched, .name = "switched" },
+        EnumName { .value = SwitchOutcome::FocusedExisting, .name = "focused-existing" },
+        EnumName { .value = SwitchOutcome::PickerShown, .name = "picker-shown" },
+        EnumName { .value = SwitchOutcome::Refused, .name = "refused" },
+        EnumName { .value = SwitchOutcome::Failed, .name = "failed" },
+    };
+
+    /// @return The name @p table gives @p value, or `?` for one it does not list.
+    template <typename E, std::size_t N>
+    [[nodiscard]] std::string_view nameIn(std::array<EnumName<E>, N> const& table, E value) noexcept
+    {
+        auto const found = std::ranges::find(table, value, &EnumName<E>::value);
+        return found != table.end() ? found->name : "?";
+    }
+
     /// One row of the table naming a TabEditKind in a trace.
     struct TabEditName
     {
@@ -535,6 +570,38 @@ namespace
                                           value.session,
                                           value.generation,
                                           value.fonts.size());
+                   } },
+        TraceRow { PduType::FollowWorkspace,
+                   "FollowWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("workspace={}", std::get<FollowWorkspace>(pdu).workspace);
+                   } },
+        TraceRow { PduType::ReleaseWorkspace,
+                   "ReleaseWorkspace",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ReleaseWorkspace>(pdu);
+                       return std::format(
+                           "workspace={} reason={}", value.workspace, nameIn(ReleaseNames, value.reason));
+                   } },
+        TraceRow { PduType::SwitchRequest,
+                   "SwitchRequest",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SwitchRequest>(pdu);
+                       return std::format(R"(request={} workspace={} to={}:"{}" toWorkspace="{}")",
+                                          value.request,
+                                          value.workspace,
+                                          nameIn(SwitchDaemonNames, value.target.kind),
+                                          core::escape(value.target.daemon),
+                                          core::escape(value.target.workspace));
+                   } },
+        TraceRow { PduType::SwitchReply,
+                   "SwitchReply",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SwitchReply>(pdu);
+                       return std::format(R"(request={} outcome={} detail="{}")",
+                                          value.request,
+                                          nameIn(SwitchOutcomeNames, value.outcome),
+                                          core::escape(value.detail));
                    } },
     };
 

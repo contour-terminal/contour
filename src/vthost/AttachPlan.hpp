@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
@@ -20,6 +21,8 @@ struct WorkspaceSummary
 {
     uint64_t id = 0;  ///< The workspace's id.
     int tabCount = 0; ///< How many tabs it holds; zero for a workspace nothing has been created in yet.
+    /// Whether a client shows it, or put it away. A launch brings back only the Left ones.
+    WorkspaceVisibility visibility = WorkspaceVisibility::Left;
 };
 
 /// Whether the attaching connection's hello names the directory the session it creates starts in
@@ -34,7 +37,8 @@ enum class WorkingDirectoryStated : uint8_t
 struct AttachContext
 {
     /// How many other handshaken native `ConnectionRole::Attach` connections there are. A `Control`
-    /// connection (status probes, a control API) never counts; an absent role is `Attach`.
+    /// connection (status probes, a control API) never counts; an absent role is `Attach`. A launch does not
+    /// consult it: what other clients show is told by each workspace's visibility.
     std::size_t otherClients = 0;
     /// The workspace a first session is created in when the daemon has none to show.
     uint64_t primaryWorkspace = 0;
@@ -43,13 +47,9 @@ struct AttachContext
     /// Whether the hello names a working directory; a launch that would create nothing then opens a tab in
     /// it.
     WorkingDirectoryStated workingDirectory = WorkingDirectoryStated::No;
-};
-
-/// Which workspaces a connection follows.
-enum class FollowScope : uint8_t
-{
-    Listed = 0, ///< The plan's `follow` plus the workspaces this connection creates.
-    Every = 1,  ///< Every workspace, including those created later by other clients (the legacy behaviour).
+    /// Which run of the daemon this is (SessionHost::instance()); 0 when none was stated. An intent whose ids
+    /// are of another run names none of this one's workspaces (proto::AttachIntent::daemonInstance).
+    uint64_t instance = 0;
 };
 
 /// What attaching creates.
@@ -64,10 +64,10 @@ enum class AttachCreation : uint8_t
     TabInFirstFollowed = 3,
 };
 
-/// The decision: what to follow, and what to create.
+/// The decision: what to follow, and what to create. The connection follows `follow` and the workspaces it
+/// gains later (its own creations, the unclaimed ones for the primary viewer, FollowWorkspace).
 struct AttachPlan
 {
-    FollowScope scope = FollowScope::Listed;
     std::vector<uint64_t> follow = {}; ///< The existing workspaces to follow, ascending.
     AttachCreation creation = AttachCreation::None;
     bool operator==(AttachPlan const&) const = default;

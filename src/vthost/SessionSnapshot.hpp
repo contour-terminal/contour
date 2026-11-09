@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Primitives.hpp>
 
@@ -85,6 +86,9 @@ struct WorkspaceLayoutSnapshot
     std::optional<ObjectIdentityRecord> identity {};
     std::vector<TabSnapshot> tabs {};
     std::uint32_t activeTab = 0;
+    /// Whether a client showed it, or put it away, when it was captured. Only Hidden survives a restore: a
+    /// restart takes every client with it, so a Shown workspace comes back Left.
+    WorkspaceVisibility visibility = WorkspaceVisibility::Left;
 
     bool operator==(WorkspaceLayoutSnapshot const&) const = default;
 };

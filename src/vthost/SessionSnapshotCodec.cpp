@@ -113,6 +113,7 @@ namespace
             out.varint(workspace.tabs.size());
             for (auto const& tab: workspace.tabs)
                 writeTab(out, tab);
+            out.u8(static_cast<std::uint8_t>(workspace.visibility));
         });
     }
 
@@ -342,6 +343,18 @@ namespace
                 if (!tab)
                     return std::unexpected(tab.error());
                 workspace.tabs.push_back(*std::move(tab));
+            }
+            // Appended after the tabs: a snapshot written before it reads Left, and a byte no enumerator
+            // names reads as the weaker claim, Left, too.
+            if (in.remaining() > 0)
+            {
+                auto const visibility = checked(in.u8());
+                if (!visibility)
+                    return std::unexpected(visibility.error());
+                if (*visibility == std::to_underlying(WorkspaceVisibility::Hidden))
+                    workspace.visibility = WorkspaceVisibility::Hidden;
+                else if (*visibility == std::to_underlying(WorkspaceVisibility::Shown))
+                    workspace.visibility = WorkspaceVisibility::Shown;
             }
             return workspace;
         });

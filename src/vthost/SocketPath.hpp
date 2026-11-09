@@ -10,9 +10,12 @@
 #include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -242,6 +245,63 @@ inline constexpr auto DaemonLogSuffix = std::string_view { ".log" };
 /// Every suffix a file beside a control socket carries: what tells such a sibling from a control socket.
 inline constexpr auto SiblingSuffixes =
     std::to_array({ NativeSocketSuffix, TmuxSocketSuffix, DaemonLogSuffix });
+
+/// The longest socket label a user may name: the label is the socket's file name, and a Unix socket's whole
+/// path must fit `sun_path` (108 bytes on Linux, 104 on macOS) with the runtime directory and a sibling
+/// suffix beside it.
+inline constexpr auto MaxSocketLabelLength = std::size_t { 64 };
+
+/// Why a name cannot be a socket label a daemon is started under.
+enum class SocketLabelError : uint8_t
+{
+    Empty = 0,        ///< Nothing was named.
+    TooLong,          ///< Longer than MaxSocketLabelLength.
+    LeadingDot,       ///< Starts with a dot: `.`, `..` or a hidden file, none of which discovery lists.
+    InvalidCharacter, ///< Holds something other than ASCII letters, digits, `-`, `_` and `.`.
+    SiblingSuffix,    ///< Ends in a sibling's suffix (`-native`, `-tmux`, `.log`), which discovery skips.
+};
+
+/// @param error Why a label was refused.
+/// @return The reason, for a person: the inline error under the label field.
+[[nodiscard]] inline std::string describe(SocketLabelError error)
+{
+    switch (error)
+    {
+        case SocketLabelError::Empty: return "Type a label for the daemon.";
+        case SocketLabelError::TooLong:
+            return std::format("A label has at most {} characters.", MaxSocketLabelLength);
+        case SocketLabelError::LeadingDot: return "A label cannot start with a dot.";
+        case SocketLabelError::InvalidCharacter:
+            return R"(A label may hold only letters, digits, "-", "_" and ".".)";
+        case SocketLabelError::SiblingSuffix: return R"(A label cannot end in "-native", "-tmux" or ".log".)";
+    }
+    return "This label cannot be used.";
+}
+
+/// Checks that @p label can name a daemon of its own: its control socket is a file of that name in the
+/// runtime directory, which local discovery lists (sibling files and hidden ones skipped). socketLabelOf()
+/// reads any `--label` the user passes; a label the GUI asks the user for is held to these rules first.
+/// @param label The label asked for.
+/// @return Nothing when it can; why not otherwise.
+[[nodiscard]] constexpr std::expected<void, SocketLabelError> validateSocketLabel(std::string_view label)
+{
+    if (label.empty())
+        return std::unexpected(SocketLabelError::Empty);
+    if (label.size() > MaxSocketLabelLength)
+        return std::unexpected(SocketLabelError::TooLong);
+    if (label.front() == '.')
+        return std::unexpected(SocketLabelError::LeadingDot);
+    auto const isLabelCharacter = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
+               || c == '_' || c == '.';
+    };
+    if (!std::ranges::all_of(label, isLabelCharacter))
+        return std::unexpected(SocketLabelError::InvalidCharacter);
+    if (std::ranges::any_of(SiblingSuffixes,
+                            [label](std::string_view suffix) { return label.ends_with(suffix); }))
+        return std::unexpected(SocketLabelError::SiblingSuffix);
+    return {};
+}
 
 /// @return The native cells+deltas endpoint beside @p controlSocket.
 [[nodiscard]] inline std::filesystem::path nativeSocketPath(std::filesystem::path controlSocket)

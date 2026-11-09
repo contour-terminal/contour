@@ -2467,6 +2467,93 @@ TEST_CASE("the client states its intent and profile and learns its workspaces", 
     CHECK(h.profiles() == std::vector<std::string> { "main" }); // the attach's first session, under it
 }
 
+TEST_CASE("a client follows and releases a workspace at runtime, and resumes what it follows now",
+          "[vthost][attach][workspace-follow]")
+{
+    auto const capabilities = [] {
+        return proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                          proto::Capability::ProfileByName,
+                                          proto::Capability::TabEdits,
+                                          proto::Capability::WorkspaceFollow });
+    };
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = capabilities();
+    auto h =
+        IntentHarness { std::move(services),
+                        NativeClient::HandshakeOptions {
+                            .capabilities = capabilities(),
+                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
+                            .profileName = "main" },
+                        mainOnly() };
+    auto const first = h.host.workspaceId().value;
+    auto second = uint64_t {};
+    auto followDelivery = vthost::client::Delivery::Unsupported;
+    auto releaseDelivery = vthost::client::Delivery::Unsupported;
+    auto followedAfterFollow = std::vector<uint64_t> {};
+    auto layoutsBeforeRelease = std::size_t {};
+    h.drive([](IntentHarness* h,
+               uint64_t first,
+               uint64_t* second,
+               vthost::client::Delivery* followed,
+               vthost::client::Delivery* released,
+               std::vector<uint64_t>* followedAfterFollow,
+               std::size_t* layoutsBeforeRelease) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *second = h->host.createWorkspace()->id().value;
+        *followed = h->client->followWorkspace(*second);
+        *followedAfterFollow = h->client->followedWorkspaces();
+        co_await core::net::testing::waitUntil(&h->loop, [h, second] {
+            return std::ranges::any_of(h->layouts,
+                                       [second](auto const& layout) { return layout.workspace == *second; });
+        });
+        *released = h->client->releaseWorkspace(first, proto::WorkspaceRelease::SwitchedAway);
+        *layoutsBeforeRelease = h->layouts.size();
+        // Pushed before the daemon reads the release, which is still on its way: a layout of the released
+        // workspace is not this client's any more.
+        std::ignore = h->host.createTab();
+        co_await core::net::testing::waitUntil(&h->loop, [h, first] {
+            return h->host.visibility(vtworkspace::WorkspaceId { first })
+                   == vthost::WorkspaceVisibility::Hidden;
+        });
+        h->client->detach();
+    }(&h, first, &second, &followDelivery, &releaseDelivery, &followedAfterFollow, &layoutsBeforeRelease));
+
+    CHECK(followDelivery == vthost::client::Delivery::Sent);
+    CHECK(releaseDelivery == vthost::client::Delivery::Sent);
+    CHECK(followedAfterFollow == std::vector<uint64_t> { first, second });
+    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { second });
+    CHECK(std::ranges::none_of(h.layouts | std::views::drop(layoutsBeforeRelease),
+                               [first](auto const& layout) { return layout.workspace == first; }));
+}
+
+TEST_CASE("against a daemon without WorkspaceFollow no follow or release is written",
+          "[vthost][attach][workspace-follow][compat]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = thinClientCapabilities();
+    auto h =
+        IntentHarness { std::move(services),
+                        NativeClient::HandshakeOptions {
+                            .capabilities = thinClientCapabilities(),
+                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
+                            .profileName = "main" },
+                        mainOnly() };
+    auto followDelivery = vthost::client::Delivery::Sent;
+    auto releaseDelivery = vthost::client::Delivery::Sent;
+    h.drive([](IntentHarness* h,
+               vthost::client::Delivery* followed,
+               vthost::client::Delivery* released) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *followed = h->client->followWorkspace(0);
+        *released = h->client->releaseWorkspace(h->host.workspaceId().value, proto::WorkspaceRelease::Closed);
+        h->client->detach();
+    }(&h, &followDelivery, &releaseDelivery));
+
+    CHECK(followDelivery == vthost::client::Delivery::Unsupported);
+    CHECK(releaseDelivery == vthost::client::Delivery::Unsupported);
+    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
+}
+
 TEST_CASE("against a daemon without the capabilities nothing new is written", "[vthost][attach][compat]")
 {
     // Review focus 3: a newer client, an older daemon.

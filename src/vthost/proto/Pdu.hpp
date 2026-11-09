@@ -90,6 +90,10 @@ enum class PduType : uint8_t
     DaemonUpgrading = 43,
     PanesReprojected = 44,
     SoftFontState = 45,
+    FollowWorkspace = 46,
+    ReleaseWorkspace = 47,
+    SwitchRequest = 48,
+    SwitchReply = 49,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -241,6 +245,10 @@ struct AttachIntent
     AttachIntentKind kind = AttachIntentKind::AllWorkspaces;
     /// The daemon workspaces named; meaningful for Workspaces and Resume only.
     std::vector<uint64_t> workspaces = {};
+    /// Which run of the daemon (ServerHello::daemonInstance) @c workspaces are ids of; 0 when unstated. Ids
+    /// count from 1 in every run, so a reconnect states the run it showed them in: a daemon that restarted
+    /// meanwhile then knows they name none of its workspaces, rather than whichever of its own share an id.
+    uint64_t daemonInstance = 0;
     bool operator==(AttachIntent const&) const = default;
 };
 
@@ -1387,6 +1395,9 @@ struct DaemonStatusReply
     /// it. Appended after the upgrade record by a later version, so it is encoded only behind one: nullopt
     /// for a daemon from before it, whose body ends before it.
     std::optional<uint8_t> relocation = std::nullopt;
+    /// How many workspaces it holds. Appended after the relocation by a later version, so it is encoded only
+    /// behind one: nullopt for a daemon from before it.
+    std::optional<uint32_t> workspaces = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };
 
@@ -1564,6 +1575,79 @@ struct PanesReprojected
     bool operator==(PanesReprojected const&) const = default;
 };
 
+/// Why a client stopped showing a workspace.
+enum class WorkspaceRelease : uint8_t
+{
+    Closed = 0,       ///< The window showing it closed (or the client went away): the workspace is left.
+    SwitchedAway = 1, ///< The window moved on to another workspace or daemon: the workspace stays, hidden.
+};
+
+/// Client→server (Capability::WorkspaceFollow): show another workspace of this daemon in addition to the
+/// ones already followed. The daemon pushes that workspace's LayoutState and its sessions' screens.
+struct FollowWorkspace
+{
+    /// The daemon workspace to follow; 0 asks the daemon to create a new one, which this connection claims.
+    uint64_t workspace = 0;
+    bool operator==(FollowWorkspace const&) const = default;
+};
+
+/// Client→server (Capability::WorkspaceFollow): stop showing a workspace. The daemon remembers why, so a
+/// workspace switched away from stays hidden from later launches while a closed one is left for them.
+struct ReleaseWorkspace
+{
+    uint64_t workspace = 0;                             ///< The workspace no longer shown.
+    WorkspaceRelease reason = WorkspaceRelease::Closed; ///< Why.
+    bool operator==(ReleaseWorkspace const&) const = default;
+};
+
+/// Which daemon a switch names, relative to the one asked.
+enum class SwitchDaemonKind : uint8_t
+{
+    Same = 0, ///< The daemon the request travels on.
+    Label,    ///< A local daemon, by its label.
+    Host,     ///< A saved host, by its name.
+};
+
+/// Where a switch goes.
+struct SwitchTargetWire
+{
+    SwitchDaemonKind kind = SwitchDaemonKind::Same; ///< How `daemon` is read.
+    std::string daemon = {};                        ///< The local label or the saved host; empty for Same.
+    /// A workspace spec (uuid, label, position or suffix) the client resolves against the target daemon;
+    /// empty lets the client decide.
+    std::string workspace = {};
+    bool operator==(SwitchTargetWire const&) const = default;
+};
+
+/// Server→client (Capability::WorkspaceSwitch): switch the window showing a workspace to `target`, as the
+/// control API's `workspace.switch` asked. Answered by one SwitchReply under the same `request`.
+struct SwitchRequest
+{
+    uint32_t request = 0;       ///< Chosen by the daemon; echoed by the reply.
+    uint64_t workspace = 0;     ///< The daemon's id of the workspace whose window switches.
+    SwitchTargetWire target {}; ///< Where to go.
+    bool operator==(SwitchRequest const&) const = default;
+};
+
+/// What came of a SwitchRequest.
+enum class SwitchOutcome : uint8_t
+{
+    Switched = 0,    ///< The window now shows the target.
+    FocusedExisting, ///< The target is shown by a window already; that one was focused.
+    PickerShown,     ///< The target was ambiguous or empty; the client asked its user.
+    Refused,         ///< The client or its user declined.
+    Failed,          ///< The switch was tried and did not happen; `detail` says why.
+};
+
+/// Client→server: the outcome of a SwitchRequest.
+struct SwitchReply
+{
+    uint32_t request = 0;                            ///< The request's `request`.
+    SwitchOutcome outcome = SwitchOutcome::Switched; ///< What happened.
+    std::string detail = {};                         ///< A sentence for the user; empty on success.
+    bool operator==(SwitchReply const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1653,7 +1737,11 @@ using DecodedPdu = std::variant<Invalid,
                                 UpgradeDaemonReply,
                                 DaemonUpgrading,
                                 PanesReprojected,
-                                SoftFontState>;
+                                SoftFontState,
+                                FollowWorkspace,
+                                ReleaseWorkspace,
+                                SwitchRequest,
+                                SwitchReply>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

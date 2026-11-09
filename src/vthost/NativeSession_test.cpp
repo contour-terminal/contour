@@ -30,6 +30,7 @@
 #include <format>
 #include <functional>
 #include <future>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -1120,6 +1121,13 @@ struct NativeSessionFlushTester
     /// @return How many flush coroutines are live, superseded ones included.
     static std::size_t flushesInFlight(NativeSession const& session) { return session._flushesInFlight; }
 
+    /// @return Whether the connection keeps a mirror state for @p id: it has pushed the session to its
+    /// client.
+    static bool mirrors(NativeSession const& session, vtworkspace::SessionId id)
+    {
+        return session._followed.contains(id.value);
+    }
+
     /// Makes each flow the connection spawns -- a flush, the snapshot streamer, the waiter for send room --
     /// with its claim on @p session, and destroys it without ever resuming it, as a loop freeing a flow it
     /// never started does.
@@ -1540,8 +1548,8 @@ TEST_CASE("a client streaming input into a session that reads none is paused whi
                                                  vthost::ConnectionId { .endpoint = "other", .index = 2 },
                                                  std::move(otherPair.first),
                                                  NativeSession::DefaultWriteQueueBytes);
-    auto const otherRequest =
-        encodeRequest({ proto::ClientHello {}, proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } });
+    auto const otherRequest = encodeRequest(
+        { vthost::testing::showingAll(h.host), proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } });
     auto otherReceived = std::vector<proto::DecodedFrame> {};
 
     auto watch = BackpressureWatch { .loop = &h.loop,
@@ -4006,7 +4014,7 @@ Task<void> publishOnce(NativeHarness* h,
     auto pair = makeConnection(h.loop, std::nullopt);
     auto session = std::make_unique<NativeSession>(
         h.loop, h.host, vthost::ConnectionId { .endpoint = "test", .index = 2 }, std::move(pair.first));
-    auto const bytes = encodeRequest({ proto::ClientHello {} });
+    auto const bytes = encodeRequest({ vthost::testing::showingAll(h.host) });
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(
         core::net::testing::allOf(session->run(),
@@ -4611,7 +4619,8 @@ TEST_CASE("a permission question one client could not answer is asked of the nex
                                                    vthost::ConnectionId { .endpoint = "capable", .index = 2 },
                                                    std::move(pair.first),
                                                    NativeSession::DefaultWriteQueueBytes);
-    auto const hello = encodeRequest({ proto::ClientHello { .capabilities = answeringPermissions() } });
+    auto const hello = encodeRequest({ vthost::testing::showingAll(
+        h.host, proto::ClientHello { .capabilities = answeringPermissions() }) });
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(core::net::testing::allOf(
         capable->run(),
@@ -4890,6 +4899,15 @@ struct FlushHarness
     /// @return The client, past its attach snapshots.
     FlushClient& attach(vtworkspace::SessionId id, proto::ClientHello hello = {})
     {
+        // Every client shows the session's workspace by name: a plain launch of a second client is given a
+        // workspace of its own, which would not carry the session.
+        if (hello.attachIntent.kind == proto::AttachIntentKind::AllWorkspaces)
+        {
+            hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::AttachIntent));
+            hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces,
+                                   .workspaces = {
+                                       std::get<0>(h.host.model().findSessionLeaf(id))->id().value } };
+        }
         auto& client = connect();
         NativeSessionFlushTester::handshake(*client.session, std::move(hello));
         CHECK(turnUntil(h.loop, [&] {
@@ -5378,24 +5396,33 @@ TEST_CASE("a Workspaces intent naming an unknown workspace follows nothing",
     CHECK(imageGoneArrived(received)); // the connection stayed open and answered
 }
 
-TEST_CASE("a client without the AttachIntent capability sees every workspace, including later ones",
+TEST_CASE("a client without the AttachIntent capability attaches as a launch",
           "[vthost][native][attach-intent]")
 {
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
     // The intent is stated but not offered, so it is not honoured: this is how a client predating
-    // intents attaches.
+    // intents attaches. It is a launch: it takes the workspaces left and, as the first client, is the
+    // primary viewer, so it also sees one no client claims, created later.
     auto const legacy = encodeRequest({ proto::ClientHello {
         .attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} } } });
-    auto const creating = encodeRequest(
-        { intentHello(proto::AttachIntentKind::Workspaces), proto::DecodedPdu { proto::NewWorkspace {} } });
+    auto const launching = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto const laterWorkspaceSeen = [first](std::vector<proto::DecodedFrame> const& got) {
-        return std::ranges::any_of(layoutWorkspaces(got),
-                                   [first](uint64_t workspace) { return workspace != first; });
+    auto laterWorkspace = uint64_t { 0 };
+    auto const createUnclaimed = [](TwoClientHarness* h,
+                                    std::vector<proto::DecodedFrame> const* fromTwo,
+                                    uint64_t* laterWorkspace) -> Task<void> {
+        co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
+        auto const* workspace = h->host.createWorkspace();
+        REQUIRE(workspace != nullptr);
+        *laterWorkspace = workspace->id().value;
+    };
+    auto const oneSeesIt = [&laterWorkspace](std::vector<proto::DecodedFrame> const& got) {
+        return laterWorkspace != 0 && layoutWorkspaces(got).contains(laterWorkspace)
+               && snapshotRunCount(got) >= 2;
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
@@ -5403,17 +5430,20 @@ TEST_CASE("a client without the AttachIntent capability sees every workspace, in
         feedBytes(h.firstPair.second.get(), &legacy),
         feedOnce(&h.loop,
                  h.secondPair.second.get(),
-                 &creating,
+                 &launching,
                  &fromOne,
                  [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        collectUntil(&h.loop, h.firstPair.second.get(), laterWorkspaceSeen, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), laterWorkspaceSeen, &fromTwo)));
+        createUnclaimed(&h, &fromTwo, &laterWorkspace),
+        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
+        collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
+        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
 
     auto const* oneHello = serverHelloOf(fromOne);
     REQUIRE(oneHello != nullptr);
     CHECK(oneHello->followedWorkspaces == std::vector<uint64_t> { first });
-    CHECK(laterWorkspaceSeen(fromOne));
+    CHECK(oneSeesIt(fromOne));
     CHECK(layoutWorkspaces(fromOne).contains(first));
+    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
 }
 
 TEST_CASE("a permission question is not asked of a client that does not show its pane",
@@ -6513,8 +6543,9 @@ TEST_CASE("two clients: a MoveNode from one pushes the new layout to both", "[vt
     auto const otherWorkspace = other->id().value;
     auto const otherSession = other->tabAt(0)->rootPane()->session();
 
-    auto const hello = encodeRequest({ proto::ClientHello {} });
-    auto const moving = encodeRequest({ movingHello(), intoTabWell(draggedSession, otherSession) });
+    auto const hello = encodeRequest({ vthost::testing::showingAll(h.host) });
+    auto const moving = encodeRequest(
+        { vthost::testing::showingAll(h.host, movingHello()), intoTabWell(draggedSession, otherSession) });
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
     auto const moved = [&](std::vector<proto::DecodedFrame> const& got) {
@@ -6535,6 +6566,79 @@ TEST_CASE("two clients: a MoveNode from one pushes the new layout to both", "[vt
 
     CHECK(moved(fromOne));
     CHECK(moved(fromTwo));
+}
+
+TEST_CASE("two clients: a pane moved into the other client's workspace is mirrored there without new output",
+          "[vthost][native][move][daemon]")
+{
+    auto h = TwoClientHarness {};
+    auto const* dragged = h.host.createTab();
+    REQUIRE(dragged != nullptr);
+    auto const draggedSession = dragged->rootPane()->session();
+    auto const draggedWorkspace = h.host.model().workspaceOfTab(dragged->id()).value;
+    std::ignore = h.host.createTab({}, draggedSession); // the dragged pane's workspace outlives the move
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const otherWorkspace = other->id().value;
+    auto const otherSession = other->tabAt(0)->rootPane()->session();
+
+    // Each client shows one workspace by name, as each window's own link does.
+    auto const showing = [](uint64_t workspace, std::initializer_list<proto::Capability> capabilities) {
+        return proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of(capabilities),
+            .attachIntent = proto::AttachIntent { .kind = proto::AttachIntentKind::Workspaces,
+                                                  .workspaces = { workspace } },
+        };
+    };
+    auto const helloOne = encodeRequest({ showing(
+        draggedWorkspace,
+        { proto::Capability::MoveNode, proto::Capability::LayoutBatch, proto::Capability::AttachIntent }) });
+    auto const helloTwo = encodeRequest(
+        { showing(otherWorkspace, { proto::Capability::LayoutBatch, proto::Capability::AttachIntent }) });
+    auto const moving = encodeRequest({ intoTabWell(draggedSession, otherSession) });
+    auto fromOne = std::vector<proto::DecodedFrame> {};
+    auto fromTwo = std::vector<proto::DecodedFrame> {};
+    auto const landed = [](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
+            auto const* end = std::get_if<proto::LayoutBatchEnd>(&frame.pdu);
+            return end != nullptr && end->causeSerial != 0;
+        });
+    };
+    // Nothing is written on the moved session: what reaches the second client is owed by the move alone.
+    auto const mirrored = [&](std::vector<proto::DecodedFrame> const& got) {
+        return layoutShows(got, otherWorkspace, draggedSession)
+               && std::ranges::any_of(got, [&](proto::DecodedFrame const& frame) {
+                      auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+                      return delta != nullptr && delta->session == draggedSession.value
+                             && endsSnapshotRun(frame);
+                  });
+    };
+    auto mirroredBefore = false;
+    // The mover asks once both clients hold their attach snapshots.
+    h.loop.blockOn(core::net::testing::allOf(
+        h.serverOne->run(),
+        h.serverTwo->run(),
+        feedBytes(h.firstPair.second.get(), &helloOne),
+        feedBytes(h.secondPair.second.get(), &helloTwo),
+        feedOnce(&h.loop,
+                 h.firstPair.second.get(),
+                 &moving,
+                 &fromOne,
+                 [&](auto const& got) {
+                     auto const ready = snapshotRunCount(got) >= 2 && snapshotRunCount(fromTwo) >= 1;
+                     if (ready)
+                         mirroredBefore = NativeSessionFlushTester::mirrors(*h.serverOne, draggedSession);
+                     return ready;
+                 }),
+        collectUntil(&h.loop, h.firstPair.second.get(), landed, &fromOne),
+        collectUntil(&h.loop, h.secondPair.second.get(), mirrored, &fromTwo)));
+
+    CHECK(mirrored(fromTwo));
+    CHECK(landed(fromOne));
+    // The mover's connection shows it no longer: one that comes back is mirrored anew.
+    CHECK(mirroredBefore);
+    CHECK_FALSE(NativeSessionFlushTester::mirrors(*h.serverOne, draggedSession));
+    CHECK(h.host.terminal(draggedSession) != nullptr);
 }
 
 namespace
@@ -6565,9 +6669,18 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
     auto const anchor = root->first()->session();
     auto const workspace = h.host.model().workspaceOfTab(tab->id()).value;
 
-    auto const hello = encodeRequest({ proto::ClientHello {} });
+    // Both show the tab's workspace by name: a plain launch of a second client is given one of its own.
+    auto const showing =
+        proto::AttachIntent { .kind = proto::AttachIntentKind::Workspaces, .workspaces = { workspace } };
+    auto const capabilities =
+        proto::CapabilitySet::of({ proto::Capability::MoveNode, proto::Capability::AttachIntent });
+    auto movingTheWorkspace = movingHello();
+    movingTheWorkspace.capabilities = capabilities;
+    movingTheWorkspace.attachIntent = showing;
+    auto const hello =
+        encodeRequest({ proto::ClientHello { .capabilities = capabilities, .attachIntent = showing } });
     auto const setting = encodeRequest(
-        { movingHello(),
+        { movingTheWorkspace,
           proto::SetSplitOrientation { .anchorSession = anchor.value,
                                        .state = std::to_underlying(vtworkspace::SplitState::Horizontal) } });
     auto fromOne = std::vector<proto::DecodedFrame> {};
@@ -6885,9 +6998,9 @@ TEST_CASE("a client that cannot move is pushed the workspace another client's mo
     auto const emptiedWorkspace = emptied->id();
     auto const draggedSession = emptied->tabAt(0)->rootPane()->session();
 
-    auto const hello = encodeRequest({ proto::ClientHello {} });
-    auto const moving =
-        encodeRequest({ movingHello(), intoTabWell(draggedSession, staying->rootPane()->session()) });
+    auto const hello = encodeRequest({ vthost::testing::showingAll(h.host) });
+    auto const moving = encodeRequest({ vthost::testing::showingAll(h.host, movingHello()),
+                                        intoTabWell(draggedSession, staying->rootPane()->session()) });
     auto fromMover = std::vector<proto::DecodedFrame> {};
     auto fromWatcher = std::vector<proto::DecodedFrame> {};
     auto const moved = [&](std::vector<proto::DecodedFrame> const& got) {
@@ -7723,3 +7836,89 @@ TEST_CASE("a tab beside a pane whose directory is gone keeps the profile's, and 
     CHECK(h.spawned->back().empty());
 }
 // }}}
+
+namespace
+{
+/// @param kind What the client asks to follow.
+/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
+/// @return A hello that offers Capability::WorkspaceFollow beside the attach intent.
+[[nodiscard]] proto::ClientHello followingHello(proto::AttachIntentKind kind,
+                                                std::vector<uint64_t> workspaces = {})
+{
+    auto hello = intentHello(kind, std::move(workspaces));
+    hello.capabilities =
+        proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::WorkspaceFollow });
+    return hello;
+}
+} // namespace
+
+TEST_CASE("FollowWorkspace shows another workspace", "[vthost][native][workspace-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const second = other->id();
+    auto const secondSession = *sessionsOf(h.host, second.value).begin();
+
+    auto const received =
+        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
+                          proto::FollowWorkspace { .workspace = second.value } },
+                        [&](auto const& got) { return snapshotSessions(got).contains(secondSession); });
+
+    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { first, second.value });
+    CHECK(snapshotSessions(received).contains(secondSession));
+    CHECK_FALSE(h.host.lastRelease(second).has_value());
+}
+
+TEST_CASE("ReleaseWorkspace records why the client stopped showing a workspace",
+          "[vthost][native][workspace-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const second = other->id();
+
+    std::ignore =
+        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
+                          proto::FollowWorkspace { .workspace = second.value },
+                          proto::ReleaseWorkspace { .workspace = second.value,
+                                                    .reason = proto::WorkspaceRelease::SwitchedAway },
+                          proto::FetchImage { .imageId = 4242 } },
+                        imageGoneArrived);
+
+    CHECK(h.host.lastRelease(second) == std::optional { proto::WorkspaceRelease::SwitchedAway });
+}
+
+TEST_CASE("FollowWorkspace 0 creates a workspace this connection shows", "[vthost][native][workspace-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+
+    auto const received = h.exchangeUntil(
+        { followingHello(proto::AttachIntentKind::Workspaces, { first }), proto::FollowWorkspace {} },
+        [](auto const& got) { return layoutWorkspaces(got).size() == 2 && snapshotRunCount(got) >= 2; });
+
+    CHECK(layoutWorkspaces(received).size() == 2);
+}
+
+TEST_CASE("a peer without workspace-follow has the follow and release PDUs refused",
+          "[vthost][native][workspace-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+
+    auto const received =
+        h.exchangeUntil({ intentHello(proto::AttachIntentKind::Workspaces, { first }),
+                          proto::DecodedPdu { proto::FollowWorkspace { .workspace = first } },
+                          proto::DecodedPdu { proto::ReleaseWorkspace { .workspace = first } } },
+                        [](auto const& got) { return std::ranges::count_if(got, isUnsupported) >= 2; });
+
+    CHECK(std::ranges::count_if(received, isUnsupported) == 2);
+    CHECK_FALSE(h.host.lastRelease(vtworkspace::WorkspaceId { first }).has_value());
+}

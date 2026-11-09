@@ -706,7 +706,9 @@ namespace
                                                        proto::Capability::ColorPreference,
                                                        proto::Capability::CellPixelSize,
                                                        proto::Capability::ClipboardTargets,
-                                                       proto::Capability::SoftFonts });
+                                                       proto::Capability::SoftFonts,
+                                                       proto::Capability::WorkspaceFollow,
+                                                       proto::Capability::WorkspaceSwitch });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
@@ -1406,7 +1408,8 @@ int ensureDaemon(AttachEndpoint const& endpoint,
                  DaemonSpawner& spawner,
                  vtpty::ProcessPlacement& placement,
                  DaemonSpawnOptions const& spawnOptions,
-                 std::chrono::seconds timeout)
+                 std::chrono::seconds timeout,
+                 DaemonLifecycle lifecycle)
 {
     // TCP endpoints: no auto-spawn (can't spawn a remote daemon).
     if (std::holds_alternative<TcpEndpoint>(endpoint))
@@ -1417,12 +1420,13 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     if (spawner.probe(unixEp.socketPath) == DaemonPresence::Serving)
         return EXIT_SUCCESS; // daemon is already running
 
-    // Daemon not running — spawn it in the background. A daemon we spawn is ours, so it is started
-    // `--lifecycle=exit-when-idle` and ends once nothing needs it any more. The image is asked for only
-    // now, and held until the daemon serves: by then the daemon has leased it itself.
+    // Daemon not running — spawn it in the background. A daemon we spawn is ours, so by default it is started
+    // `--lifecycle=exit-when-idle` and ends once nothing needs it any more; one the user named is persistent.
+    // The image is asked for only now, and held until the daemon serves: by then the daemon has leased it
+    // itself.
     auto const image = binary.imageForSpawn();
-    auto const args = daemonSpawnArgs(
-        core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, DaemonLifecycle::ExitWhenIdle);
+    auto const args =
+        daemonSpawnArgs(core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, lifecycle);
     return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
 }
 
@@ -1430,9 +1434,11 @@ int ensureDaemon(AttachEndpoint const& endpoint,
                  DaemonBinarySource& binary,
                  vtpty::ProcessPlacement& placement,
                  DaemonSpawnOptions const& spawnOptions,
-                 std::chrono::seconds timeout)
+                 std::chrono::seconds timeout,
+                 DaemonLifecycle lifecycle)
 {
-    return ensureDaemon(endpoint, binary, *makeNativeDaemonSpawner(), placement, spawnOptions, timeout);
+    return ensureDaemon(
+        endpoint, binary, *makeNativeDaemonSpawner(), placement, spawnOptions, timeout, lifecycle);
 }
 
 int runDaemonDetached(std::vector<std::string> commandLine,

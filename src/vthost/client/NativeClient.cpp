@@ -404,7 +404,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            TabMergeRefusedHandler onTabMergeRefused,
                            MoveNodeRefusedHandler onMoveNodeRefused,
                            LayoutBatchEndHandler onLayoutBatchEnd,
-                           PanesReprojectedHandler onPanesReprojected):
+                           PanesReprojectedHandler onPanesReprojected,
+                           SwitchRequestHandler onSwitchRequest):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -420,6 +421,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onMoveNodeRefused(std::move(onMoveNodeRefused)),
     _onLayoutBatchEnd(std::move(onLayoutBatchEnd)),
     _onPanesReprojected(std::move(onPanesReprojected)),
+    _onSwitchRequest(std::move(onSwitchRequest)),
     _liveness(liveness)
 {
 }
@@ -675,6 +677,34 @@ Delivery NativeClient::closePane(uint64_t session)
                                                                                     : Delivery::Unsupported;
 }
 
+Delivery NativeClient::followWorkspace(uint64_t workspace)
+{
+    if (!shares(proto::Capability::WorkspaceFollow))
+        return Delivery::Unsupported;
+    if (send(proto::DecodedPdu { proto::FollowWorkspace { .workspace = workspace } }) == 0)
+        return Delivery::Unsupported;
+    // A new workspace (0) is learnt of with its layout, which names it then.
+    if (workspace != 0)
+    {
+        _releasedWorkspaces.erase(workspace);
+        if (auto const at = std::ranges::lower_bound(_followedWorkspaces, workspace);
+            at == _followedWorkspaces.end() || *at != workspace)
+            _followedWorkspaces.insert(at, workspace);
+    }
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::releaseWorkspace(uint64_t workspace, proto::WorkspaceRelease reason)
+{
+    if (!shares(proto::Capability::WorkspaceFollow))
+        return Delivery::Unsupported;
+    if (send(proto::DecodedPdu { proto::ReleaseWorkspace { .workspace = workspace, .reason = reason } }) == 0)
+        return Delivery::Unsupported;
+    std::erase(_followedWorkspaces, workspace);
+    _releasedWorkspaces.insert(workspace);
+    return Delivery::Sent;
+}
+
 void NativeClient::performOperation(proto::PerformOperation request)
 {
     send(proto::DecodedPdu { std::move(request) });
@@ -691,6 +721,16 @@ void NativeClient::answerPermission(std::string hostId, std::string digest, Gran
     send(proto::DecodedPdu { proto::PermissionReply { .hostId = std::move(hostId),
                                                       .digest = std::move(digest),
                                                       .grantState = std::to_underlying(answer) } });
+}
+
+void NativeClient::replySwitch(proto::SwitchReply reply)
+{
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::WorkspaceSwitch))
+    {
+        clientLog()("attach: not answering switch request {}: the daemon did not ask", reply.request);
+        return;
+    }
+    send(proto::DecodedPdu { std::move(reply) });
 }
 
 void NativeClient::detach()
@@ -817,22 +857,7 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* layout = std::get_if<proto::LayoutState>(&pdu))
     {
-        // A daemon sends the layouts of the workspaces a connection follows, so one it pushes later -- a
-        // workspace this connection created -- is followed too, and a reconnect resumes it with the rest.
-        if (shares(proto::Capability::AttachIntent))
-            if (auto const at = std::ranges::lower_bound(_followedWorkspaces, layout->workspace);
-                at == _followedWorkspaces.end() || *at != layout->workspace)
-                _followedWorkspaces.insert(at, layout->workspace);
-        if (!_onLayout)
-            return;
-        if (_pendingEdits.empty())
-        {
-            _onLayout(*layout);
-            return;
-        }
-        auto shown = *layout;
-        _pendingEdits.apply(shown);
-        _onLayout(shown);
+        handleLayout(*layout);
         return;
     }
     if (handleNotice(frame))
@@ -849,6 +874,29 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     // quietly missing an update is distinguishable from one that never received it.
     errorLog()(
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
+}
+
+void NativeClient::handleLayout(proto::LayoutState const& layout)
+{
+    // Pushed before the daemon read the release: the workspace is no longer this connection's to show.
+    if (_releasedWorkspaces.contains(layout.workspace))
+        return;
+    // A daemon sends the layouts of the workspaces a connection follows, so one it pushes later -- a
+    // workspace this connection created -- is followed too, and a reconnect resumes it with the rest.
+    if (shares(proto::Capability::AttachIntent))
+        if (auto const at = std::ranges::lower_bound(_followedWorkspaces, layout.workspace);
+            at == _followedWorkspaces.end() || *at != layout.workspace)
+            _followedWorkspaces.insert(at, layout.workspace);
+    if (!_onLayout)
+        return;
+    if (_pendingEdits.empty())
+    {
+        _onLayout(layout);
+        return;
+    }
+    auto shown = layout;
+    _pendingEdits.apply(shown);
+    _onLayout(shown);
 }
 
 bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
@@ -870,6 +918,17 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onPermissionRequest)
             _onPermissionRequest(*request);
+        return true;
+    }
+    if (auto const* request = std::get_if<proto::SwitchRequest>(&pdu))
+    {
+        if (_onSwitchRequest)
+            _onSwitchRequest(*request);
+        else
+            // Unanswered, the control call would wait out the daemon's timeout for nothing.
+            replySwitch(proto::SwitchReply { .request = request->request,
+                                             .outcome = proto::SwitchOutcome::Failed,
+                                             .detail = "this client does not switch windows" });
         return true;
     }
     if (auto const* refused = std::get_if<proto::TabMergeRefused>(&pdu))
