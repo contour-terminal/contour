@@ -121,9 +121,15 @@ exits 3 with the reason. To open a window on another daemon instead of re-pointi
 
 The window asks its user before it switches: a prompt names the destination in full and offers Deny or
 Switch, with **Don't ask again**, which keeps the answer for switches between the same two daemons until
-Contour exits; a remembered Deny is answered `refused` at once. A prompt left unanswered for 28 seconds is
-taken down and answered `refused` ("the user did not answer in time"), before the daemon stops waiting for
-it, so a late answer never switches the window. A destination given as an `ssh://` URL is asked every time (see [Persistent sessions](persistent-sessions.md#switching-a-window)).
+Contour exits; a remembered Deny is answered `refused` at once. The daemon tells the window how long it
+waits for the answer (30 seconds), and the prompt stays up only while an allowed switch could still land
+before then: the wait less the 10 seconds a switch may take to show its destination, less 2 seconds for the
+answer to travel back -- 18 seconds. A prompt left unanswered that long is taken down and answered `refused`
+("the user did not answer in time"). An allowed switch must then land within the wait less those 2 seconds,
+counted from the request's arrival, whatever it waits for first (the destination daemon's workspaces are
+listed before anything moves): one that could no longer start in time fails, and one still landing then gives
+up, so a window never switches after `contour switch` gave up. A daemon on another host may state a longer
+wait; the window takes at most 5 minutes of it. A destination given as an `ssh://` URL is asked every time (see [Persistent sessions](persistent-sessions.md#switching-a-window)).
 
 The reply is `{"outcome":"switched","detail":""}`. `outcome` is `switched`, `focused` (another window already
 shows the destination, and was focused), `picker` (the window asked its user which workspace), `refused` (the
