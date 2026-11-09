@@ -22,9 +22,11 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 #: The repository root, derived from this file's own location: scripts/lib/toolcache.py.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +34,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Long enough to survive a slow link on a cold cache, short enough that an unreachable host fails
 # the check rather than hanging until ctest's own timeout fires.
 _DOWNLOAD_TIMEOUT_SECONDS = 60
+
+# GitHub's release-asset CDN answers 5xx (504 for hours, once) often enough that one attempt is not a
+# download, and its bursts outlast a few seconds of retrying. The waits between attempts double:
+# 5 + 10 + 20 + 40 + 80 = 155 s of sleeping on top of the attempts themselves, which rides out a burst
+# of minutes and still keeps a hard outage well inside any job's budget.
+_DOWNLOAD_ATTEMPTS = 6
+_DOWNLOAD_BACKOFF_SECONDS = 5
+
+# 429 is the one 4xx that means "try again later"; every other 4xx (a 404 for a mistyped asset name)
+# will answer the same way next time.
+_RETRYABLE_HTTP_STATUS = 429
 
 # GitHub serves release assets without one, but some corporate proxies reject a request that has no
 # User-Agent at all.
@@ -154,16 +167,39 @@ def _extract_binary(archive: bytes, asset: str, member_name: str) -> bytes:
         raise FetchError(str(error)) from error
 
 
-def _download(url: str) -> bytes:
+def _download(
+    url: str,
+    opener: Callable[..., Any] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bytes:
+    """Fetches `url`, retrying transient failures with exponential backoff.
+
+    Transient means HTTP 5xx and 429, and anything below HTTP: unreachable host, reset connection,
+    timeout, truncated body. Any other HTTP status is final and fails at once. When every attempt
+    fails the error names each one, so the log says what the server answered every time.
+
+    `opener` and `sleep` are injectable so the retry policy is testable without a network or a clock.
+    """
+    import http.client
     import urllib.error
     import urllib.request
 
+    open_url = opener or urllib.request.urlopen
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
-            return response.read()
-    except (OSError, urllib.error.URLError) as error:
-        raise FetchError(str(error)) from error
+    failures: list[str] = []
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with open_url(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            failures.append(f"attempt {attempt}: HTTP {error.code} {error.reason}")
+            if error.code < 500 and error.code != _RETRYABLE_HTTP_STATUS:
+                raise FetchError("; ".join(failures)) from error
+        except (OSError, http.client.HTTPException) as error:
+            failures.append(f"attempt {attempt}: {error}")
+        if attempt < _DOWNLOAD_ATTEMPTS:
+            sleep(_DOWNLOAD_BACKOFF_SECONDS << (attempt - 1))
+    raise FetchError("; ".join(failures))
 
 
 def _install(binary: bytes, destination: Path) -> None:
@@ -243,3 +279,76 @@ def resolve(spec: ToolSpec) -> Path:
 def run(tool: Path, arguments: list[str]) -> int:
     """Runs the tool from the repository root and returns its exit code."""
     return subprocess.run([str(tool), *arguments], cwd=REPO_ROOT, check=False).returncode
+
+
+class _FakeResponse:
+    """Just enough of an HTTP response for `_download`: a context manager with `read`."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def download_self_test() -> list[str]:
+    """Checks `_download`'s retry policy against a scripted opener; returns the failures found."""
+    import urllib.error
+
+    url = "https://example.invalid/a"
+
+    def http_error(code: int) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(url, code, "Gateway Timeout", {}, None)  # type: ignore[arg-type]
+
+    def scripted(outcomes: list[Any]) -> tuple[Callable[..., Any], list[int]]:
+        calls: list[int] = []
+
+        def opener(_request: object, timeout: float) -> _FakeResponse:
+            outcome = outcomes[len(calls)]
+            calls.append(1)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return _FakeResponse(outcome)
+
+        return opener, calls
+
+    failures: list[str] = []
+
+    def backoff(count: int) -> list[int]:
+        return [_DOWNLOAD_BACKOFF_SECONDS << n for n in range(count)]
+
+    sleeps: list[float] = []
+    opener, calls = scripted([http_error(504), http_error(504), b"payload"])
+    if _download(url, opener, sleeps.append) != b"payload" or len(calls) != 3 or sleeps != backoff(2):
+        failures.append(f"success after two 504s: calls={len(calls)}, sleeps={sleeps}")
+
+    sleeps = []
+    opener, calls = scripted([http_error(404), b"payload"])
+    try:
+        _download(url, opener, sleeps.append)
+        failures.append("a 404 must fail")
+    except FetchError as error:
+        if len(calls) != 1 or sleeps or "HTTP 404" not in str(error):
+            failures.append(f"a 404 must fail at once: calls={len(calls)}, sleeps={sleeps}, error={error}")
+
+    sleeps = []
+    opener, calls = scripted([http_error(504)] * _DOWNLOAD_ATTEMPTS)
+    try:
+        _download(url, opener, sleeps.append)
+        failures.append("persistent 504s must fail")
+    except FetchError as error:
+        named = all(f"attempt {n}: HTTP 504" in str(error) for n in range(1, _DOWNLOAD_ATTEMPTS + 1))
+        if len(calls) != _DOWNLOAD_ATTEMPTS or sleeps != backoff(_DOWNLOAD_ATTEMPTS - 1) or not named:
+            failures.append(f"persistent 504s: calls={len(calls)}, sleeps={sleeps}, error={error}")
+
+    sleeps = []
+    opener, calls = scripted([http_error(429), TimeoutError("timed out"), b"payload"])
+    if _download(url, opener, sleeps.append) != b"payload" or len(calls) != 3:
+        failures.append(f"429 and timeout must be retried: calls={len(calls)}")
+    return failures

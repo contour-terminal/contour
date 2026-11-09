@@ -23,7 +23,7 @@ import re
 import sys
 from typing import Any
 
-from lib.toolcache import REPO_ROOT, ToolSpec, resolve, run
+from lib.toolcache import REPO_ROOT, ToolSpec, download_self_test, resolve, run
 
 # The pinned version. The bash script this replaces ran actionlint's own installer, which always
 # fetched the newest release -- so two runs a month apart could lint against different rules. That
@@ -371,11 +371,13 @@ def self_test() -> int:
         failures.append("a missing PyYAML must skip when it is not required")
     if _exit_code(0, ["finding"]) != 1 or _exit_code(0, []) != 0 or _exit_code(2, []) != 2:
         failures.append("text findings must fail the run whatever the tool did")
+    # The download retry policy lives in the shared tool cache; this is the self-test that runs it.
+    failures.extend(f"tool download: {failure}" for failure in download_self_test())
     for failure in failures:
         print(f"check-workflows self-test: FAILED: {failure}", file=sys.stderr)
     if failures:
         return 1
-    print(f"check-workflows self-test: {len(cases) + 3} cases OK.")
+    print(f"check-workflows self-test: {len(cases) + 7} cases OK.")
     return 0
 
 

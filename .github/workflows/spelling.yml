@@ -37,6 +37,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      # The downloaded typos binary, kept across runs so a run needs no release-asset download.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       - name: "Checking spelling"
         # Turn the script's offline skip into a hard failure: a gate that silently passes because
         # it could not download its tool is worse than no gate.
