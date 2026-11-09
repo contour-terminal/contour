@@ -53,6 +53,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -420,6 +421,108 @@ struct HostHarness
 }
 
 } // namespace
+
+namespace
+{
+/// A stand-in for an attached client that shows the workspaces it is given.
+class ShowingClient final: public vthost::SessionStreamEvents
+{
+  public:
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
+    {
+        return shown.contains(workspace.value);
+    }
+
+    std::set<uint64_t> shown {}; ///< The workspaces it shows.
+};
+} // namespace
+
+TEST_CASE("a workspace is Hidden after a release that switched away, and Left when a client that followed it "
+          "again drops",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto client = ShowingClient {};
+    client.shown.insert(workspace.value);
+    h.host.noteClientAttached(&client);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+
+    // Release(SwitchedAway): the client stops showing it, and the host is told why.
+    client.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+
+    // Shown again by a Follow, then the client quits without a Release: Left, not Hidden.
+    client.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+    h.host.noteClientDetached(&client);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+
+    // A close leaves it.
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::Closed);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+}
+
+TEST_CASE("a workspace another window still shows is not Hidden by one window switching away, and is Left "
+          "when that other window quits",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    auto second = ShowingClient {};
+    first.shown.insert(workspace.value);
+    second.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    // The first window switches away while the second still shows it: it stays Shown, and the release is
+    // not the last one, so it is not remembered.
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(h.host.lastRelease(workspace).has_value());
+
+    // The second window quits without a release: nobody switched away from it last, so it is Left and the
+    // next launch brings it back.
+    h.host.noteClientDetached(&second);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    h.host.noteClientDetached(&first);
+}
+
+TEST_CASE("the last window switching away from a workspace hides it, though another window released it "
+          "first by closing",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    auto second = ShowingClient {};
+    first.shown.insert(workspace.value);
+    second.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::Closed);
+    second.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    h.host.noteClientDetached(&second);
+    h.host.noteClientDetached(&first);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+}
 
 TEST_CASE("createTab seeds a backing session handed back by the allocator", "[vthost][host]")
 {
@@ -5243,3 +5346,186 @@ TEST_CASE("SessionHost.grid_resize_keeps_the_cell_size", "[vthost][host][cell]")
 }
 
 // }}}
+
+namespace
+{
+/// Whether a test client offered Capability::WorkspaceSwitch.
+enum class SwitchSupport : uint8_t
+{
+    Absent = 0,
+    Offered,
+};
+
+/// An attached client that can be asked to switch, and records what it was asked.
+class SwitchableClient final: public vthost::SessionStreamEvents
+{
+  public:
+    SwitchableClient(vthost::ConnectionId id, SwitchSupport support):
+        _id { std::move(id) }, _support { support }
+    {
+    }
+
+    [[nodiscard]] vthost::ConnectionId connectionId() const override { return _id; }
+    [[nodiscard]] bool canSwitch() const noexcept override { return _support == SwitchSupport::Offered; }
+    void requestSwitch(vthost::proto::SwitchRequest const& request) override { asked.push_back(request); }
+
+    std::set<uint64_t> shown;
+    std::vector<vthost::proto::SwitchRequest> asked;
+
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
+    {
+        return shown.contains(workspace.value);
+    }
+
+  private:
+    vthost::ConnectionId _id;
+    SwitchSupport _support;
+};
+
+vthost::ConnectionId nativeConnection(std::uint64_t index)
+{
+    return vthost::ConnectionId { .endpoint = "native", .index = index };
+}
+} // namespace
+
+TEST_CASE("the host remembers which connection typed last", "[vthost][host][switch]")
+{
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto const session = h.host.model().workspace(workspace)->tabAt(0)->rootPane()->session();
+    auto const a = nativeConnection(1);
+    auto const b = nativeConnection(2);
+
+    CHECK_FALSE(h.host.lastInputFrom(session).has_value());
+    CHECK_FALSE(h.host.lastTypistIn(workspace).has_value());
+
+    h.host.writeInputFrom(session, "a", a);
+    CHECK(h.host.lastInputFrom(session) == a);
+    h.host.writeInputFrom(session, "b", b);
+    CHECK(h.host.lastInputFrom(session) == b);
+    CHECK(h.host.lastTypistIn(workspace) == b);
+
+    // Input from nobody (the control API) leaves no typist.
+    h.host.writeInput(session, "c");
+    CHECK_FALSE(h.host.lastInputFrom(session).has_value());
+}
+
+TEST_CASE("clientsShowing lists the attached clients that follow a workspace", "[vthost][host][switch]")
+{
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = SwitchableClient { nativeConnection(1), SwitchSupport::Offered };
+    auto second = SwitchableClient { nativeConnection(2), SwitchSupport::Offered };
+    first.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    h.host.noteClientAttached(&second);
+
+    CHECK(h.host.clientsShowing(workspace) == std::vector { nativeConnection(1) });
+    second.shown.insert(workspace.value);
+    CHECK(h.host.clientsShowing(workspace) == std::vector { nativeConnection(1), nativeConnection(2) });
+    CHECK(h.host.clientsShowing(vtworkspace::WorkspaceId { 999 }).empty());
+    h.host.noteClientDetached(&first);
+    h.host.noteClientDetached(&second);
+}
+
+TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost][host][switch]")
+{
+    using vthost::proto::SwitchOutcome;
+    auto h = HostHarness {};
+    auto window = SwitchableClient { nativeConnection(1), SwitchSupport::Offered };
+    auto old = SwitchableClient { nativeConnection(2), SwitchSupport::Absent };
+    h.host.noteClientAttached(&window);
+    h.host.noteClientAttached(&old);
+    auto outcomes = std::vector<vthost::proto::SwitchReply> {};
+    auto const record = [&](vthost::proto::SwitchReply const& reply) {
+        outcomes.push_back(reply);
+    };
+    auto const target = vthost::proto::SwitchTargetWire { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                          .daemon = "admin",
+                                                          .workspace = "w2" };
+    auto const shown = vtworkspace::WorkspaceId { 4 };
+
+    SECTION("the reply completes it once")
+    {
+        h.host.requestSwitch(nativeConnection(1), shown, target, record);
+        REQUIRE(window.asked.size() == 1);
+        CHECK(window.asked.front().target == target);
+        CHECK(window.asked.front().workspace == shown.value);
+        CHECK(outcomes.empty());
+
+        // A reply from another connection is not the answer.
+        h.host.completeSwitch(
+            nativeConnection(2),
+            { .request = window.asked.front().request, .outcome = SwitchOutcome::Switched });
+        CHECK(outcomes.empty());
+
+        h.host.completeSwitch(nativeConnection(1),
+                              { .request = window.asked.front().request,
+                                .outcome = SwitchOutcome::PickerShown,
+                                .detail = "asked" });
+        REQUIRE(outcomes.size() == 1);
+        CHECK(outcomes.front().outcome == SwitchOutcome::PickerShown);
+        CHECK(outcomes.front().detail == "asked");
+
+        h.host.completeSwitch(nativeConnection(1), { .request = window.asked.front().request });
+        CHECK(outcomes.size() == 1);
+    }
+    SECTION("a client that did not offer the capability fails at once")
+    {
+        h.host.requestSwitch(nativeConnection(2), shown, target, record);
+        REQUIRE(outcomes.size() == 1);
+        CHECK(outcomes.front().outcome == SwitchOutcome::Failed);
+        CHECK(outcomes.front().detail == "the window cannot switch (client too old)");
+        CHECK(old.asked.empty());
+    }
+    SECTION("an unknown client fails at once")
+    {
+        h.host.requestSwitch(nativeConnection(9), shown, target, record);
+        REQUIRE(outcomes.size() == 1);
+        CHECK(outcomes.front().outcome == SwitchOutcome::Failed);
+    }
+    SECTION("the window going away fails it")
+    {
+        h.host.requestSwitch(nativeConnection(1), shown, target, record);
+        h.host.noteClientDetached(&window);
+        REQUIRE(outcomes.size() == 1);
+        CHECK(outcomes.front().outcome == SwitchOutcome::Failed);
+        CHECK(outcomes.front().detail == "the window went away");
+    }
+    h.host.noteClientDetached(&window);
+    h.host.noteClientDetached(&old);
+}
+
+TEST_CASE("requestSwitch fails when the window stays silent", "[vthost][host][switch]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto window = SwitchableClient { nativeConnection(1), SwitchSupport::Offered };
+    host.noteClientAttached(&window);
+    auto outcomes = std::vector<vthost::proto::SwitchReply> {};
+    host.requestSwitch(nativeConnection(1), vtworkspace::WorkspaceId { 1 }, {}, [&](auto const& reply) {
+        outcomes.push_back(reply);
+    });
+
+    clock.advance(vthost::SwitchAnswerTimeout - std::chrono::seconds { 1 });
+    std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    CHECK(outcomes.empty());
+
+    clock.advance(std::chrono::seconds { 2 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 3))
+        std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    REQUIRE(outcomes.size() == 1);
+    CHECK(outcomes.front().outcome == vthost::proto::SwitchOutcome::Failed);
+    CHECK(outcomes.front().detail == "no answer from the window");
+    host.noteClientDetached(&window);
+}

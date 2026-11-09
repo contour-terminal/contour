@@ -107,6 +107,24 @@ std::string splitCamelCase(std::string_view identifier)
     return result;
 }
 
+namespace
+{
+    /// The next direction is the default, so it keeps the plain id; previous is a command of its own.
+    [[nodiscard]] CommandArguments cycleArguments(actions::CycleDirection direction)
+    {
+        if (direction == actions::CycleDirection::Next)
+            return {};
+        return { .id = std::format("{}", direction), .title = std::format(" {}", direction) };
+    }
+
+    /// A daemon reference is part of the identity, with its kind: a label and a host may share a name.
+    [[nodiscard]] CommandArguments daemonArguments(actions::DaemonRef const& daemon)
+    {
+        auto const kind = daemon.kind == actions::DaemonRefKind::Host ? "host" : "label";
+        return { .id = std::format("{}:{}", kind, daemon.name), .title = std::format(": {}", daemon.name) };
+    }
+} // namespace
+
 CommandArguments commandArguments(actions::Action const& action)
 {
     // One visitor, both facets (see CommandArguments). Every action carrying an argument names it here;
@@ -152,6 +170,16 @@ CommandArguments commandArguments(actions::Action const& action)
             [](AttachToHost const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };
             },
+            [](SwitchToWorkspace const& a) -> CommandArguments {
+                return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
+            },
+            [](OpenWorkspace const& a) -> CommandArguments {
+                return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
+            },
+            [](CycleWorkspace const& a) -> CommandArguments { return cycleArguments(a.direction); },
+            [](CycleDaemon const& a) -> CommandArguments { return cycleArguments(a.direction); },
+            [](SwitchToDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
+            [](OpenDaemon const& a) -> CommandArguments { return daemonArguments(a.daemon); },
             [](SetTabColor const& a) -> CommandArguments {
                 // Colorless is the DEFAULT (it opens the picker), so it carries no arguments: the row
                 // keeps the plain "SetTabColor" id, and the palette can offer it straight from the

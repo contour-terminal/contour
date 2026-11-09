@@ -48,6 +48,9 @@ add_library(contour_cli STATIC
     ConfigReloadPoller.cpp ConfigReloadPoller.hpp
     ContourApp.cpp ContourApp.hpp
     ControlVerbs.cpp ControlVerbs.hpp
+    DaemonDiscovery.cpp DaemonDiscovery.hpp
+    NewDaemon.cpp NewDaemon.hpp
+    WorkspaceListing.cpp WorkspaceListing.hpp
     DaemonStart.cpp DaemonStart.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     McpCommand.cpp McpCommand.hpp
@@ -56,6 +59,7 @@ add_library(contour_cli STATIC
     McpTools.cpp McpTools.hpp McpToolsDetail.hpp
     McpWire.hpp
     ExitStatus.hpp
+    ClientAttach.hpp
     Hosting.hpp
     HostTransport.cpp HostTransport.hpp
     ShellIntegration.cpp ShellIntegration.hpp

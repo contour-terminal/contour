@@ -433,6 +433,125 @@ TEST_CASE("HostCommandSource offers one row per saved host", "[contour][palette]
     CHECK(std::get<actions::AttachToHost>(studio->action).name == "studio");
 }
 
+namespace
+{
+/// A window's daemon rows, as a test sets them.
+class FixedDaemonRows final: public DaemonRowsProvider
+{
+  public:
+    [[nodiscard]] DaemonSwitching switchingAvailability() const override { return state.switching; }
+    [[nodiscard]] DaemonRowsState daemonRows() const override { return state; }
+
+    DaemonRowsState state;
+};
+
+/// A window on the default daemon, beside `admin` (2 workspaces) and the saved host `studio`, showing
+/// workspace 1 of three.
+DaemonRowsState windowOnDefault()
+{
+    return DaemonRowsState {
+        .switching = DaemonSwitching::Available,
+        .current = actions::DaemonRef { actions::DaemonRefKind::Label, "default" },
+        .localDaemons = { { .label = "default", .workspaces = 3 }, { .label = "admin", .workspaces = 2 } },
+        .hosts = { { .name = "studio", .hint = "ssh://studio" } },
+        .workspaces = { { .position = 1, .name = "main", .role = command::WorkspaceRowRole::Current },
+                        { .position = 2, .name = "ops", .role = command::WorkspaceRowRole::Other } },
+    };
+}
+
+[[nodiscard]] std::vector<std::string> titlesOf(std::vector<Command> const& commands)
+{
+    auto titles = std::vector<std::string> {};
+    for (auto const& command: commands)
+        titles.push_back(command.title);
+    return titles;
+}
+} // namespace
+
+TEST_CASE("DaemonCommandSource lists the other daemons and workspaces, and the switching rows",
+          "[contour][palette][daemons]")
+{
+    auto rows = FixedDaemonRows {};
+    rows.state = windowOnDefault();
+    auto const titles = titlesOf(DaemonCommandSource { rows }.commands());
+
+    for (auto const* wanted: { "Switch to daemon admin",
+                               "Open daemon admin in a new window",
+                               "Switch to daemon studio · host",
+                               "Open daemon studio · host in a new window",
+                               "Switch to workspace \"ops\"",
+                               "Open workspace \"ops\" in a new window",
+                               "Switch to next daemon",
+                               "Switch to previous daemon",
+                               "Show daemon & workspace switcher…",
+                               "New daemon…" })
+    {
+        INFO("row: " << wanted);
+        CHECK(std::ranges::contains(titles, std::string { wanted }));
+    }
+
+    // The window's own daemon and workspace are not destinations.
+    CHECK_FALSE(std::ranges::contains(titles, std::string { "Switch to daemon default" }));
+    CHECK_FALSE(std::ranges::contains(titles, std::string { "Switch to workspace \"main\"" }));
+}
+
+TEST_CASE("DaemonCommandSource rows carry the action that runs them", "[contour][palette][daemons]")
+{
+    auto rows = FixedDaemonRows {};
+    rows.state = windowOnDefault();
+    auto const commands = DaemonCommandSource { rows }.commands();
+
+    auto const* admin = find(commands, "SwitchToDaemon:label:admin");
+    REQUIRE(admin != nullptr);
+    CHECK(std::get<actions::SwitchToDaemon>(admin->action).daemon
+          == actions::DaemonRef { actions::DaemonRefKind::Label, "admin" });
+    CHECK(admin->description == "2 workspaces");
+
+    auto const* studio = find(commands, "OpenDaemon:host:studio");
+    REQUIRE(studio != nullptr);
+    CHECK(studio->description == "ssh://studio");
+
+    auto const* ops = find(commands, "OpenWorkspace:2");
+    REQUIRE(ops != nullptr);
+    CHECK(std::get<actions::OpenWorkspace>(ops->action).index == 2);
+
+    auto const* previous = find(commands, "CycleDaemon:previous");
+    REQUIRE(previous != nullptr);
+    CHECK(std::get<actions::CycleDaemon>(previous->action).direction == actions::CycleDirection::Previous);
+}
+
+TEST_CASE("a window with no daemon behind it offers none of the switching rows",
+          "[contour][palette][daemons]")
+{
+    auto rows = FixedDaemonRows {};
+    rows.state = windowOnDefault();
+    rows.state.switching = DaemonSwitching::Unavailable;
+
+    CHECK(DaemonCommandSource { rows }.commands().empty());
+
+    // Nor the floor's and the bindings' bare versions of them.
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(
+        config::KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                                  .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                  .input = vtbackend::Key::F5,
+                                  .binding = { { actions::CycleDaemon {}, actions::SplitVertical {} } } });
+    auto const bound = BoundCommandSource { mappings };
+    auto const floor = ActionCommandSource {};
+    for (CommandSource const* inner:
+         { static_cast<CommandSource const*>(&bound), static_cast<CommandSource const*>(&floor) })
+    {
+        auto const gated = SwitchingGatedSource { *inner, rows }.commands();
+        CHECK(std::ranges::none_of(gated,
+                                   [](Command const& c) { return actions::isDaemonSwitching(c.action); }));
+        CHECK(hasCommand(gated, "SplitVertical"));
+    }
+
+    // With a daemon, the same source passes them.
+    rows.state.switching = DaemonSwitching::Available;
+    CHECK(hasCommand(SwitchingGatedSource { floor, rows }.commands(), "ShowSwitcher"));
+}
+
 TEST_CASE("ActionCommandSource does not offer a nameless AttachToHost", "[contour][palette][hosts]")
 {
     // "Attach to which host?" has no default; the saved hosts reach the palette through HostCommandSource.

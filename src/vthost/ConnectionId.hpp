@@ -36,6 +36,8 @@ struct ConnectionId
     /// The peer address, where the transport knows one. Empty for AF_UNIX, whose peers have
     /// no address — the filesystem permissions are the identity there.
     std::string peer {};
+
+    bool operator==(ConnectionId const&) const = default;
 };
 
 /// The endpoints whose listener is a local (Unix-socket) one: a connection accepted there came from this

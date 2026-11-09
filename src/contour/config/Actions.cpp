@@ -103,6 +103,14 @@ namespace
         return arguments + formatOwnArguments(action);
     }
 
+    /// Renders @p daemon as the `label:` or `host:` key it was parsed from.
+    /// @param daemon The reference to render.
+    /// @return E.g. ", label: 'admin'".
+    [[nodiscard]] std::string formatDaemonRef(DaemonRef const& daemon)
+    {
+        return std::format(", {}: '{}'", daemon.kind == DaemonRefKind::Host ? "host" : "label", daemon.name);
+    }
+
     /// Renders the arguments @p action carries as YAML sibling keys, e.g. ", position: 3".
     ///
     /// A FLAT sibling-key form, deliberately: a serialized binding must stay a valid YAML flow map
@@ -126,6 +134,12 @@ namespace
                 [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
                 [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
                 [](AttachToHost const& a) { return std::format(", name: '{}'", a.name); },
+                [](SwitchToWorkspace const& a) { return std::format(", index: {}", a.index); },
+                [](OpenWorkspace const& a) { return std::format(", index: {}", a.index); },
+                [](CycleWorkspace const& a) { return std::format(", direction: {}", a.direction); },
+                [](CycleDaemon const& a) { return std::format(", direction: {}", a.direction); },
+                [](SwitchToDaemon const& a) { return formatDaemonRef(a.daemon); },
+                [](OpenDaemon const& a) { return formatDaemonRef(a.daemon); },
                 [](SaveLayout const& a) {
                     // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
                     // — it has no argument to write; a named one round-trips its name.
@@ -198,6 +212,15 @@ ActionList filterRepeatableActions(ActionList const& actions)
         if (!isNonRepeatable(action))
             result.push_back(action);
     return result;
+}
+
+bool isDaemonSwitching(Action const& action) noexcept
+{
+    return std::visit(core::Overloaded {
+                          [](DaemonSwitchingActionConcept auto const&) { return true; },
+                          [](auto const&) { return false; },
+                      },
+                      action);
 }
 
 bool isParameterized(Action const& action) noexcept
@@ -405,6 +428,15 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry {
             "FocusPreviousArea", Action { FocusPreviousArea {} }, documentation::FocusPreviousArea },
         ActionCatalogEntry { "FocusToolbar", Action { FocusToolbar {} }, documentation::FocusToolbar },
+        ActionCatalogEntry {
+            "SwitchToWorkspace", Action { SwitchToWorkspace {} }, documentation::SwitchToWorkspace },
+        ActionCatalogEntry { "OpenWorkspace", Action { OpenWorkspace {} }, documentation::OpenWorkspace },
+        ActionCatalogEntry { "CycleWorkspace", Action { CycleWorkspace {} }, documentation::CycleWorkspace },
+        ActionCatalogEntry { "CycleDaemon", Action { CycleDaemon {} }, documentation::CycleDaemon },
+        ActionCatalogEntry { "SwitchToDaemon", Action { SwitchToDaemon {} }, documentation::SwitchToDaemon },
+        ActionCatalogEntry { "OpenDaemon", Action { OpenDaemon {} }, documentation::OpenDaemon },
+        ActionCatalogEntry { "ShowSwitcher", Action { ShowSwitcher {} }, documentation::ShowSwitcher },
+        ActionCatalogEntry { "NewDaemon", Action { NewDaemon {} }, documentation::NewDaemon },
     };
     static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(catalog)>>
                       == std::variant_size_v<Action::Variant>,

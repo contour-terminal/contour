@@ -29,7 +29,7 @@ bool isMethodName(std::string_view name)
 
 TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][catalog]")
 {
-    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 17);
+    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 18);
 
     auto names = std::set<std::string_view> {};
     std::apply(
@@ -53,7 +53,7 @@ TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][ca
                 ...);
         },
         vtcontrol::Methods);
-    CHECK(names.size() == 17);
+    CHECK(names.size() == 18);
 }
 
 TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][catalog]")
@@ -64,6 +64,17 @@ TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][cat
     STATIC_REQUIRE(Row.name == "daemon.upgrade");
     STATIC_REQUIRE(Row.permission == vtcontrol::Permission::Write);
     // Never an extension's: replacing the daemon's binary is a socket peer's decision.
+    STATIC_REQUIRE(Row.exposure == vtcontrol::Exposure::SocketOnly);
+}
+
+TEST_CASE("workspace.switch needs write and is for sockets only", "[vtcontrol][catalog]")
+{
+    constexpr auto Row =
+        std::get<vtcontrol::Method<vtcontrol::SwitchWorkspaceRequest, vtcontrol::SwitchWorkspaceReply>>(
+            vtcontrol::Methods);
+    STATIC_REQUIRE(Row.name == "workspace.switch");
+    STATIC_REQUIRE(Row.permission == vtcontrol::Permission::Write);
+    // Never an extension's: re-pointing a window is its user's, or a socket peer's, decision.
     STATIC_REQUIRE(Row.exposure == vtcontrol::Exposure::SocketOnly);
 }
 

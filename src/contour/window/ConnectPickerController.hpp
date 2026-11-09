@@ -44,6 +44,10 @@ struct ConnectPickerServices
     /// thread, where the configuration is read; the job it returns runs on a worker thread, so a daemon that
     /// never answers cannot freeze the picker.
     std::function<std::function<cli::LocalDaemonState()>()> daemon;
+    /// Finds the other daemons running here; its discover() runs on a worker thread, whenever the picker
+    /// opens or refreshes, so a socket that never answers cannot freeze the picker. Shared, outlives the
+    /// controller's workers.
+    std::shared_ptr<cli::IDaemonDiscovery> discovery;
     /// Prepares the check of whether a target answers, before any window is spent on it. Called on the GUI
     /// thread, where the configuration is read; the job it returns runs on a worker thread and holds all it
     /// needs. The job answers nothing for a target that cannot fail ahead of time (the daemon starts on
@@ -189,6 +193,10 @@ class ConnectPickerController: public QAbstractListModel
     /// cancellation has overtaken it.
     void probeDaemon();
 
+    /// Starts looking for the labelled daemons; the answer adds their rows unless a newer look has
+    /// overtaken it.
+    void discoverDaemons();
+
     /// Rebuilds _rows for the current filter. One model reset; keeps the selection on @p keep when given.
     void rebuild(std::optional<std::string> keep);
 
@@ -214,6 +222,8 @@ class ConnectPickerController: public QAbstractListModel
     ConnectPickerServices _services;
     std::vector<cli::ConnectRow> _rows;
     cli::LocalDaemonState _daemon;
+    std::vector<cli::DiscoveredDaemon> _labelled; //!< The daemons discovery found; empty while it looks.
+    std::uint64_t _discovery = 0;                 //!< Counts discoveries started; a stale answer is dropped.
     QString _filter;
     int _current = -1;
     bool _isBusy = false;

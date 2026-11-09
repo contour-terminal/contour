@@ -128,6 +128,11 @@ namespace
                           "The daemon to talk to: a socket path, HOST:PORT, or a host of hosts: by its name "
                           "or an ssh:// URL. Defaults to $CONTOUR_DAEMON, then the default socket.",
                           "PATH|HOST:PORT|NAME|URL" });
+        options.emplace_back(CLI::Option {
+            "label",
+            CLI::Value { ""s },
+            "The local daemon to talk to, by its label, as for contour client --label. Not with --daemon.",
+            "L" });
         options.emplace_back(CLI::Option { "token-file",
                                            CLI::Value { ""s },
                                            "Reads the token a HOST:PORT daemon expects from FILE.",
@@ -503,6 +508,69 @@ namespace
                                                                   .label = std::string { words[1] } });
     }
 
+    /// @param host What `--to-host` was given.
+    /// @return Why it cannot be a switch's destination: only a saved host's name and an `ssh://` URL can;
+    ///         a window cannot ask its user for the token or CA another URL needs. Nothing when it can.
+    [[nodiscard]] std::optional<std::string> unusableSwitchHost(std::string_view host)
+    {
+        auto const scheme = host.find("://");
+        if (scheme == std::string_view::npos || host.starts_with("ssh://"))
+            return std::nullopt;
+        return std::format("--to-host {}: only a saved host's name or an ssh:// URL can be switched to; save "
+                           "it first (the hosts: section of the configuration), then name it",
+                           host);
+    }
+
+    [[nodiscard]] Params buildSwitch(CLI::FlagStore const& flags)
+    {
+        auto const f = VerbFlags { flags, "switch" };
+        auto const& toLabel = f.text("to-label");
+        auto const& toHost = f.text("to-host");
+        auto const& toWorkspace = f.text("to-workspace");
+        if (!toLabel.empty() && !toHost.empty())
+            return std::unexpected("--to-label and --to-host exclude each other"s);
+        if (toLabel.empty() && toHost.empty() && toWorkspace.empty())
+            return std::unexpected("switch needs a destination: --to-label, --to-host or --to-workspace"s);
+        if (auto const unusable = unusableSwitchHost(toHost))
+            return std::unexpected(*unusable);
+        return vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .workspace = f.text("workspace"),
+                                                                         .toLabel = toLabel,
+                                                                         .toHost = toHost,
+                                                                         .toWorkspace = toWorkspace });
+    }
+
+    /// Prints what a switch came to: `switched`, `focused` or `picker`, then the window's note if it has
+    /// one. A refusal or failure is reported by switchExitStatus() instead.
+    void humanSwitch(std::string_view replyJson, std::ostream& out)
+    {
+        printDecoded<vtcontrol::SwitchWorkspaceReply>(replyJson, out, [&](auto const& reply) {
+            if (reply.outcome == "refused" || reply.outcome == "failed")
+                return;
+            out << reply.outcome << (reply.detail.empty() ? ""s : "  " + reply.detail) << '\n';
+        });
+    }
+
+    /// Maps the window's answer to the exit status: `refused` is 5 (the window or its user declined),
+    /// `failed` is 1, anything else 0. Says why on @p err.
+    int switchExitStatus(std::string_view replyJson, std::ostream& err)
+    {
+        auto const reply = decodeReply<vtcontrol::SwitchWorkspaceReply>(replyJson);
+        if (!reply)
+        {
+            err << "Error: the daemon's reply could not be read: " << replyJson << '\n';
+            return exitCode(ExitStatus::Failed);
+        }
+        auto status = ExitStatus::Ok;
+        if (reply->outcome == "refused")
+            status = ExitStatus::Refused;
+        else if (reply->outcome == "failed")
+            status = ExitStatus::Failed;
+        if (status != ExitStatus::Ok)
+            err << "Error: " << (reply->detail.empty() ? "the switch was "s + reply->outcome : reply->detail)
+                << '\n';
+        return exitCode(status);
+    }
+
     [[nodiscard]] Params buildApiDescribe(CLI::FlagStore const& flags)
     {
         auto const& words = VerbFlags { flags, "api.describe" }.words();
@@ -719,6 +787,40 @@ namespace
                     CLI::Verbatim { "OBJECT LABEL", "The object, e.g. pane:logs, and its new label." },
                 .buildParams = buildLabel,
                 .printHuman = humanNothing,
+            },
+            ControlVerb {
+                .path = "switch",
+                .method = "workspace.switch",
+                .usage = "switch [--workspace W] (--to-label L | --to-host H | --to-workspace W2) "
+                         "[--to-workspace W2]",
+                .summary = "Switches the window showing a workspace to another workspace or daemon.",
+                .options =
+                    [] {
+                        return withConnectionOptions({
+                            CLI::Option { "workspace",
+                                          CLI::Value { ""s },
+                                          "The workspace whose window switches. Defaults to the workspace of "
+                                          "$CONTOUR_PANE.",
+                                          "W" },
+                            CLI::Option { "to-label",
+                                          CLI::Value { ""s },
+                                          "Switches to the local daemon with this label.",
+                                          "L" },
+                            CLI::Option { "to-host",
+                                          CLI::Value { ""s },
+                                          "Switches to a saved host's daemon, or an ssh:// URL's.",
+                                          "H" },
+                            CLI::Option { "to-workspace",
+                                          CLI::Value { ""s },
+                                          "Switches to this workspace of the destination daemon (an id, a "
+                                          "label, a position); without it the window decides or asks.",
+                                          "W2" },
+                        });
+                    },
+                .verbatim = std::nullopt,
+                .buildParams = buildSwitch,
+                .printHuman = humanSwitch,
+                .replyExitStatus = switchExitStatus,
             },
             ControlVerb {
                 .path = "api.list",
@@ -1236,6 +1338,11 @@ std::expected<std::unique_ptr<ControlChannel>, ExitStatus> openControlChannel(CL
                                                                               ControlIo const& io)
 {
     auto const f = VerbFlags { flags, flagPath };
+    if (!f.text("daemon").empty() && !f.text("label").empty())
+    {
+        (void) reportBadUsage("--daemon and --label exclude each other", io.err);
+        return std::unexpected(ExitStatus::BadUsage);
+    }
     auto const token = readOptionFile(io.fs, "token-file", f.text("token-file"));
     auto const authority = readOptionFile(io.fs, "tls-ca", f.text("tls-ca"));
     if (!token || !authority)
@@ -1245,6 +1352,7 @@ std::expected<std::unique_ptr<ControlChannel>, ExitStatus> openControlChannel(CL
     }
     auto const transport = vthost::client::resolveControlEndpoint(
         vthost::client::ControlEndpointOptions { .daemon = f.text("daemon"),
+                                                 .label = f.text("label"),
                                                  .token = cleanToken(*token),
                                                  .tlsCaPem = *authority,
                                                  .resolveSavedHost = io.resolveSavedHost },

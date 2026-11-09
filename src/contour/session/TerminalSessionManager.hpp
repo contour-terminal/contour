@@ -15,7 +15,9 @@
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionRole.hpp>
+#include <contour/session/SwitchDirectory.hpp>
 #include <contour/session/WindowBinding.hpp>
+#include <contour/session/WindowSwitching.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -23,6 +25,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -211,13 +214,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param taskbarProgressSink Application-owned native progress adapter; must outlive the manager.
     /// @param secureInput The OS's secure keyboard entry, which only this manager's gate calls. Owned by the
     ///                app and declared before it, so it outlives the gate, whose destruction turns it off.
+    /// @param windowSwitching What switches a window between daemons and workspaces, and what the switching
+    ///                actions dispatch to (remote::WindowSwitcher, which sits above session/). Borrowed and
+    ///                not called during construction: it may be built on this manager, and so after it, but
+    ///                must outlive every request made through it.
+    /// @param switchDirectory What the switching actions and their palette rows list: local daemons, shown
+    ///                hosts and a window's workspaces. Borrowed like @p windowSwitching.
     TerminalSessionManager(ContourGuiApp& app,
                            SessionFactory& factory,
                            config::LayoutStore& layouts,
                            command::CommandHistoryStore& commands,
                            std::string homeDirectory,
                            platform::TaskbarProgressSink& taskbarProgressSink,
-                           platform::ISecureInput& secureInput);
+                           platform::ISecureInput& secureInput,
+                           WindowSwitching& windowSwitching,
+                           SwitchDirectory& switchDirectory);
 
     /// Out of line: the members' destructors need the complete TerminalSession and WindowController,
     /// which this header only forward-declares.
@@ -225,6 +236,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
+
+    /// @return What the switching actions dispatch to; fixed at construction.
+    [[nodiscard]] WindowSwitching& windowSwitching() const noexcept { return _windowSwitching; }
+
+    /// @return What the switching actions and their palette rows list; fixed at construction.
+    [[nodiscard]] SwitchDirectory& switchDirectory() const noexcept { return _switchDirectory; }
 
     /// The user's home directory, for shortening a path on this machine to `~/...`. Fixed at
     /// construction; empty shortens nothing.
@@ -351,6 +368,37 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Shows the Connect picker as a sheet over the window hosting @p acting (the NewWindowTo action).
     /// @param acting The session that triggered the action; the sheet opens on its hosting window's screen.
     void openConnectPicker(TerminalSession* acting);
+
+    /// The daemon and workspace switching actions. Each acts on the window hosting @p acting, asks
+    /// windowSwitching() and returns at once: the answer is logged when it comes. A window with no binding
+    /// (sessions in-process) has nothing to switch between, so each is a logged no-op there.
+    /// @{
+
+    /// Switches (or, for SwitchMode::Open, opens) @p target for the window hosting @p acting.
+    /// @param acting The session that triggered the action.
+    /// @param target Where to go.
+    /// @param mode Replace what the window shows, or show the target in a new window.
+    void requestSwitch(TerminalSession const& acting, SwitchTarget target, SwitchMode mode);
+
+    /// Shows the next or previous daemon of the ring (@see nextDaemon) in the window hosting @p acting.
+    /// @param acting The session that triggered the action.
+    /// @param direction Which way to step.
+    void cycleDaemon(TerminalSession const& acting, actions::CycleDirection direction);
+
+    /// Shows the next or previous workspace of the window's daemon, as the directory lists them.
+    /// @param acting The session that triggered the action.
+    /// @param direction Which way to step.
+    void cycleWorkspace(TerminalSession const& acting, actions::CycleDirection direction);
+
+    /// Opens the daemon and workspace switcher popup over the window hosting @p acting.
+    /// @param acting The session that triggered the action.
+    void showSwitcher(TerminalSession const& acting);
+
+    /// Asks for a label (the switcher popup's label prompt), starts a new local daemon under it, and opens a
+    /// new window on it, for the window hosting @p acting.
+    /// @param acting The session that triggered the action.
+    void newDaemon(TerminalSession const& acting);
+    /// @}
 
     /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into
     /// the app's configuration -- what the next new tab is built from -- and pushes it to every live
@@ -627,7 +675,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Why @p drag cannot be dropped at @p place in @p window: the place's own refusal, or, for a window
     /// bound to another host than the window the drag came from (@see bindWindow), that it belongs to
-    /// another host.
+    /// another host. Two windows each on a link of its own to one daemon share their host
+    /// (@see servedByOneHost).
     /// @param drag   The drag, resolved (resolveNodeDrag()).
     /// @param window The window it hovers.
     /// @param place  Where in @p window.
@@ -710,7 +759,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     {
         uint64_t request = 0;                   ///< Its number (RemoteMove::request).
         window::HostIdentity host;              ///< The daemon asked, which names @ref sessions.
-        WindowBinding const* binding = nullptr; ///< What serves that daemon's windows; null for none.
+        WindowBinding const* binding = nullptr; ///< The link it was asked through; null for none.
         std::vector<uint64_t> sessions;         ///< What moves, by the daemon's ids.
         window::DropPayload payload;            ///< What the receiving window's screen reader is told moved.
         window::MoveLanding landing;            ///< Where it lands, as the screen reader is told it.
@@ -929,6 +978,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param pty A pty, as a session factory handed it out.
     /// @return The live session @p pty backs; null if none does.
     [[nodiscard]] TerminalSession* sessionForPty(vtpty::Pty const* pty) const noexcept;
+
+    /// The session of @p window's active pane -- the one the user looks at -- else any live session of the
+    /// window.
+    /// @param window The window.
+    /// @return The session; nullptr when the window has no live pane.
+    [[nodiscard]] TerminalSession* actingSessionOfWindow(vtworkspace::WorkspaceId window) const;
 
     /// The pty backing @p window's active pane, or nullptr when the window has no live pane.
     ///
@@ -1356,6 +1411,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         window none claims, and so for every local one.
     [[nodiscard]] std::string_view hostLabelOf(vtworkspace::WorkspaceId window) const noexcept;
 
+    /// @param window A window of this manager.
+    /// @return What @p window says about the daemon it is on (WindowBinding::chromeLabel): the remote host or
+    ///         a non-default local daemon's label; empty for the default daemon and a local window.
+    [[nodiscard]] std::string_view chromeLabelOf(vtworkspace::WorkspaceId window) const noexcept;
+
+    /// @param window A window of this manager.
+    /// @return The daemon @p window is on, as a switch names it (WindowBinding::daemonTarget); none for a
+    ///         window no binding serves, whose sessions run in-process.
+    [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
+    /// @return What @p window's drift badge shows: its own daemon's drift (WindowBinding::daemonDrift); null
+    ///         for a local window.
+    [[nodiscard]] window::DaemonDriftModel* daemonDriftOf(vtworkspace::WorkspaceId window) const noexcept;
+
     /// @param session A session of this manager.
     /// @return The remote host the window holding @p session is attached to; empty for a local window, and
     ///         for a session no window holds.
@@ -1555,6 +1625,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void contextMenuRequested(TerminalSession* acting);
 
   private:
+    /// Opens the switcher popup over the window hosting @p acting, showing @p prompt; a logged no-op for a
+    /// window with no daemon behind it.
+    /// @param acting The session that triggered the action.
+    /// @param prompt The list, or the "New daemon…" label prompt.
+    /// @param what The action's name, for the log.
+    void openSwitcherOver(TerminalSession const& acting,
+                          window::SwitcherPrompt prompt,
+                          std::string_view what);
+
     /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
     void notifySecureTab(TerminalSession const& session);
 
@@ -1687,9 +1766,19 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] SessionFactory& factoryOf(TerminalSession const& session) const noexcept;
 
     /// @param host Who hosts a drag's sessions, as its payload names it.
-    /// @return The binding whose factory is that host; null for the factory this manager was constructed
-    ///         with, and for a host this process is attached to through none.
+    /// @return Every binding whose factory is that host -- a daemon serves each of its windows through a link
+    ///         of its own --, each once; none for the factory this manager was constructed with, and for a
+    ///         host this process is attached to through none.
+    [[nodiscard]] std::vector<WindowBinding*> bindingsServing(window::HostIdentity const& host) const;
+
+    /// @param host Who hosts a drag's sessions, as its payload names it.
+    /// @return One binding whose factory is that host (@see bindingsServing); null for none.
     [[nodiscard]] WindowBinding* bindingServing(window::HostIdentity const& host) const;
+
+    /// @return Whether windows @p first and @p second are served by one host that moves between them: the
+    ///         same binding (or none for both), or two links of one daemon.
+    [[nodiscard]] bool servedByOneHost(vtworkspace::WorkspaceId first,
+                                       vtworkspace::WorkspaceId second) const noexcept;
 
     /// @param host Who hosts a drag's sessions, as its payload names it.
     /// @return Whether this process shows that host's sessions: it is this process, or one it is bound to.
@@ -1963,6 +2052,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ContourGuiApp& _app;
     /// What makes the sessions of every window no binding claims. @see factoryFor
     SessionFactory& _localFactory;
+    WindowSwitching& _windowSwitching;
+    SwitchDirectory& _switchDirectory;
     /// What each bound window is bound to, keyed by its WorkspaceId. Not owned: a binding outlives the
     /// windows it serves (@see bindWindow, releaseBinding). A window absent from it is served by
     /// _localFactory.

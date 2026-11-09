@@ -1,28 +1,60 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/Actions.hpp>
 #include <contour/session/PermissionPrompt.hpp>
 
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <format>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace contour::session
 {
 
 namespace
 {
-    /// The most bytes of the session's title a prompt's title quotes, before its ellipsis.
+    /// The most bytes of program-supplied text (a title, a daemon or workspace name) a prompt quotes, before
+    /// its ellipsis.
     constexpr auto SubjectBytes = std::size_t { 64 };
+
+    /// Program-supplied @p text as a prompt quotes it: made safe, cut and quoted; empty for none.
+    [[nodiscard]] std::string quoted(std::string_view text)
+    {
+        auto const sanitized = vtbackend::sanitizeCommandLine(text, vtbackend::SanitizePurpose::Display);
+        if (sanitized.empty())
+            return {};
+        auto const shown = detail::cutAtCharacter(sanitized, SubjectBytes);
+        return std::format("“{}{}”", shown, shown.size() < sanitized.size() ? detail::Ellipsis : "");
+    }
 
     /// How a prompt's title names the session: its title, made safe, cut and quoted -- or, without one,
     /// "this terminal".
     [[nodiscard]] std::string subjectPhrase(std::string_view subject)
     {
-        auto const sanitized = vtbackend::sanitizeCommandLine(subject, vtbackend::SanitizePurpose::Display);
-        if (sanitized.empty())
-            return "this terminal";
-        auto const shown = detail::cutAtCharacter(sanitized, SubjectBytes);
-        return std::format("“{}{}”", shown, shown.size() < sanitized.size() ? detail::Ellipsis : "");
+        auto phrase = quoted(subject);
+        return phrase.empty() ? std::string { "this terminal" } : phrase;
+    }
+
+    /// How a switch's prompt names the workspace it goes to.
+    [[nodiscard]] std::string workspacePhrase(WorkspaceTarget const& workspace)
+    {
+        return std::visit(
+            [](auto const& named) -> std::string {
+                using T = std::decay_t<decltype(named)>;
+                if constexpr (std::is_same_v<T, AnyWorkspace>)
+                    return "a workspace, asking which when it has several,";
+                else if constexpr (std::is_same_v<T, NewWorkspace>)
+                    return "a new workspace";
+                else if constexpr (std::is_same_v<T, WorkspaceAt>)
+                    return std::format("workspace {}", named.position);
+                else if constexpr (std::is_same_v<T, vtcontrol::ObjectRef>)
+                    return std::format("the workspace {}",
+                                       quoted(std::string_view { vtcontrol::toString(named) }));
+                else
+                    return std::format("the workspace {}", quoted(std::string_view { named.spec }));
+            },
+            workspace);
     }
 
     /// A guarded role's prompt, with its row's buttons and default, and the session-long checkbox.
@@ -67,6 +99,22 @@ namespace
         return regular.empty() ? size : regular;
     }
 } // namespace
+
+std::string daemonPhrase(vthost::proto::SwitchDaemonKind kind,
+                         std::string_view name,
+                         std::string_view unnamed)
+{
+    auto const shown = quoted(name);
+    if (shown.empty())
+        return std::string { unnamed };
+    switch (kind)
+    {
+        case vthost::proto::SwitchDaemonKind::Host: return std::format("the host {}", shown);
+        case vthost::proto::SwitchDaemonKind::Same:
+        case vthost::proto::SwitchDaemonKind::Label: break;
+    }
+    return std::format("the daemon {}", shown);
+}
 
 config::Permission configuredPermission(config::PermissionsConfig const& permissions,
                                         GuardedRole role) noexcept
@@ -119,6 +167,39 @@ PermissionPrompt rerunPrompt(std::string_view displayedCommandLine)
         GuardedRole::RerunCommand,
         "Run this command again?",
         { verbatim(std::string { displayedCommandLine }), prose("It is typed at the prompt and entered.") });
+}
+
+PermissionPrompt switchWindowPrompt(SwitchTarget const& target,
+                                    std::string_view sourceDaemon,
+                                    SwitchRemembering remembering)
+{
+    auto const source = daemonPhrase(vthost::proto::SwitchDaemonKind::Label, sourceDaemon, "this daemon");
+    auto const destination = target.kind == vthost::proto::SwitchDaemonKind::Same
+                                 ? std::string { "the daemon it is on" }
+                                 : daemonPhrase(target.kind, target.daemon, "another daemon");
+    auto lines = std::vector<PromptLine> { prose(
+        std::format("It asks to show {} of {} in this window, in place of what it shows now.",
+                    workspacePhrase(target.workspace),
+                    destination)) };
+    if (isAdHocHost(target))
+        lines.push_back(PromptLine { .text = "Switching runs ssh to that host, with your credentials.",
+                                     .weight = PromptLineWeight::Strong,
+                                     .style = PromptLineStyle::Prose });
+    auto prompt =
+        guardedPrompt(GuardedRole::SwitchWindow, "Allow a program to switch this window?", std::move(lines));
+    switch (remembering)
+    {
+        case SwitchRemembering::Offered:
+            prompt.rememberText =
+                target.kind == vthost::proto::SwitchDaemonKind::Same
+                    ? std::format("Don't ask again for switches within {} while Contour runs", source)
+                    : std::format("Don't ask again for switches from {} to {} while Contour runs",
+                                  source,
+                                  destination);
+            break;
+        case SwitchRemembering::Withheld: prompt.rememberText.clear(); break;
+    }
+    return prompt;
 }
 
 PromptLine consentLine(std::string text, vtcontrol::ConsentWeight weight)

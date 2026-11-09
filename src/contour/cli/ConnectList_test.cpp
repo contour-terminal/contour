@@ -161,3 +161,31 @@ TEST_CASE("ConnectList.render prints text and JSON", "[contour][connect]")
              "\"detail\":\"ssh://me@starfive\",\"tag\":\"SSH\"}]\n");
     CHECK(renderTargetList({}, ListFormat::Json) == "[]\n");
 }
+
+TEST_CASE("ConnectList.discovered daemons get a labelled row under this computer", "[contour][connect]")
+{
+    auto const hosts = savedHosts();
+    auto const labelled = std::vector<contour::cli::DiscoveredDaemon> {
+        { .label = "default", .socket = "/r/default", .workspaces = 1 },
+        { .label = "admin", .socket = "/r/admin", .workspaces = 2 },
+    };
+    auto const rows = connectRows({ hosts, Running3, labelled }, "");
+    CHECK(titlesOf(rows)
+          == std::vector<std::string> {
+              "Persistent sessions", "admin", "This window only", "build-box", "starfive" });
+    CHECK(rows[1].group == ConnectGroup::ThisComputer);
+    CHECK(rows[1].detail == "admin · running · 2 workspaces");
+    CHECK(rows[1].text == "daemon:admin");
+    CHECK(rows[1].target.name == "admin");
+    CHECK(connectRows({ hosts, Running3, labelled }, "adm").size() == 1);
+}
+
+TEST_CASE("ConnectList.a discovered daemon's workspace count reads singular or is left out",
+          "[contour][connect]")
+{
+    using contour::cli::describeDiscoveredDaemon;
+    CHECK(describeDiscoveredDaemon({ .label = "a", .socket = {}, .workspaces = 1 })
+          == "a · running · 1 workspace");
+    CHECK(describeDiscoveredDaemon({ .label = "a", .socket = {}, .workspaces = std::nullopt })
+          == "a · running");
+}

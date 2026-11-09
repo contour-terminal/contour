@@ -6,6 +6,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/session/DaemonCycle.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/PaneProxy.hpp>
@@ -81,9 +82,13 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                command::CommandHistoryStore& commands,
                                                std::string homeDirectory,
                                                platform::TaskbarProgressSink& taskbarProgressSink,
-                                               platform::ISecureInput& secureInput):
+                                               platform::ISecureInput& secureInput,
+                                               WindowSwitching& windowSwitching,
+                                               SwitchDirectory& switchDirectory):
     _app { app },
     _localFactory { factory },
+    _windowSwitching { windowSwitching },
+    _switchDirectory { switchDirectory },
     _layoutStore { layouts },
     _commandHistoryStore { commands },
     _taskbarProgressSink { taskbarProgressSink },
@@ -212,25 +217,27 @@ TerminalSession* TerminalSessionManager::sessionForPty(vtpty::Pty const* pty) co
     return found != sessions.end() ? *found : nullptr;
 }
 
-vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::WorkspaceId window) const
+TerminalSession* TerminalSessionManager::actingSessionOfWindow(vtworkspace::WorkspaceId window) const
 {
     auto* win = _model->workspace(window);
     if (win == nullptr)
         return nullptr;
     // The active tab's active pane first — that is the pane the user is looking at, so it is the
-    // most faithful "this window" the remote side can be given. Any live leaf of the window would
-    // resolve to the same workspace on the daemon, so the scan below is a fallback for a window whose
-    // active pane happens to have no live session (a tab mid-teardown), not a different answer.
-    auto const ptyOf = [this](vtworkspace::SessionId id) -> vtpty::Pty const* {
-        auto* session = sessionForId(id);
-        return session != nullptr ? &session->terminal().device() : nullptr;
-    };
+    // most faithful "this window". Any live leaf of the window would resolve to the same workspace on the
+    // daemon, so the scan below is a fallback for a window whose active pane happens to have no live
+    // session (a tab mid-teardown), not a different answer.
     if (auto* tab = win->activeTab(); tab != nullptr)
         if (auto* leaf = tab->activePane(); leaf != nullptr)
-            if (auto const* pty = ptyOf(leaf->session()); pty != nullptr)
-                return pty;
+            if (auto* session = sessionForId(leaf->session()); session != nullptr)
+                return session;
     auto const sessions = sessionsOfWindow(window);
-    return sessions.empty() ? nullptr : &sessions.front()->terminal().device();
+    return sessions.empty() ? nullptr : sessions.front();
+}
+
+vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::WorkspaceId window) const
+{
+    auto* const session = actingSessionOfWindow(window);
+    return session != nullptr ? &session->terminal().device() : nullptr;
 }
 
 int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
@@ -701,6 +708,27 @@ std::string_view TerminalSessionManager::hostLabelOf(vtworkspace::WorkspaceId wi
     return binding != nullptr ? binding->hostLabel() : std::string_view {};
 }
 
+std::string_view TerminalSessionManager::chromeLabelOf(vtworkspace::WorkspaceId window) const noexcept
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->chromeLabel() : std::string_view {};
+}
+
+std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::WorkspaceId window) const
+{
+    auto const* const binding = bindingOf(window);
+    if (binding == nullptr)
+        return std::nullopt;
+    return binding->daemonTarget();
+}
+
+window::DaemonDriftModel* TerminalSessionManager::daemonDriftOf(
+    vtworkspace::WorkspaceId window) const noexcept
+{
+    auto* const binding = mutableBindingOf(window);
+    return binding != nullptr ? binding->daemonDrift() : nullptr;
+}
+
 std::string_view TerminalSessionManager::hostLabelOf(TerminalSession const& session) const noexcept
 {
     auto const* const window = hostOf(&session).window;
@@ -721,28 +749,42 @@ RemoteRouting TerminalSessionManager::requestRemoteWorkspace(TerminalSession con
 
 namespace
 {
+    /// @return The run of the daemon that hosts what @p factory makes (SessionFactory::daemonInstance); none
+    ///         for a factory no daemon is behind, or one whose daemon has not said yet.
+    [[nodiscard]] std::optional<uint64_t> daemonOf(SessionFactory const& factory) noexcept
+    {
+        return factory.hostKind() == SessionHostKind::Daemon ? factory.daemonInstance() : std::nullopt;
+    }
+
     /// @return Who hosts what @p factory makes, as a drag payload names it.
     [[nodiscard]] window::HostIdentity identityOf(SessionFactory const& factory)
     {
         // Ids a daemon hands out name the same sessions in every process attached to it: those drags are the
         // daemon's. Everything else names this process's model only.
-        if (factory.hostKind() == SessionHostKind::Daemon)
-            if (auto const instance = factory.daemonInstance())
-                return window::HostIdentity { .kind = window::HostKind::Daemon,
-                                              .id = QString::number(*instance) };
+        if (auto const instance = daemonOf(factory))
+            return window::HostIdentity { .kind = window::HostKind::Daemon,
+                                          .id = QString::number(*instance) };
         return window::HostIdentity { .kind = window::HostKind::Process, .id = window::processToken() };
     }
 } // namespace
 
-WindowBinding* TerminalSessionManager::bindingServing(window::HostIdentity const& host) const
+std::vector<WindowBinding*> TerminalSessionManager::bindingsServing(window::HostIdentity const& host) const
 {
     // This process's own factory first: a binding that names no daemon would otherwise claim its drags.
     if (identityOf(_localFactory) == host)
-        return nullptr;
-    auto const bindings = _bindingOfWindow | std::views::values;
-    auto const found = std::ranges::find_if(
-        bindings, [&host](WindowBinding* binding) { return identityOf(binding->sessions()) == host; });
-    return found != bindings.end() ? *found : nullptr;
+        return {};
+    // One daemon may serve several windows, each through a link of its own.
+    auto serving = std::vector<WindowBinding*> {};
+    for (auto* const binding: _bindingOfWindow | std::views::values)
+        if (!std::ranges::contains(serving, binding) && identityOf(binding->sessions()) == host)
+            serving.push_back(binding);
+    return serving;
+}
+
+WindowBinding* TerminalSessionManager::bindingServing(window::HostIdentity const& host) const
+{
+    auto const serving = bindingsServing(host);
+    return serving.empty() ? nullptr : serving.front();
 }
 
 bool TerminalSessionManager::isOwnHost(window::HostIdentity const& host) const
@@ -761,10 +803,24 @@ window::MoveRefusal TerminalSessionManager::moveRefusalIn(ResolvedDrag const& dr
                                                           window::MovePlace place) const
 {
     // Only the host of the window the drag came from could make the move, and it does not serve that window:
-    // two windows of this process, served by two hosts (two daemons, or one and this process itself).
-    if (place != window::MovePlace::NewWindow && drag.tab && bindingOf(drag.workspace) != bindingOf(window))
+    // two windows of this process, served by two hosts (two daemons, or one and this process itself). Two
+    // links of one daemon are one host: it moves between the workspaces they show.
+    if (place != window::MovePlace::NewWindow && drag.tab && !servedByOneHost(drag.workspace, window))
         return window::MoveRefusal::OtherHost;
     return drag.refusalAt(place);
+}
+
+bool TerminalSessionManager::servedByOneHost(vtworkspace::WorkspaceId first,
+                                             vtworkspace::WorkspaceId second) const noexcept
+{
+    auto const* const one = bindingOf(first);
+    auto const* const other = bindingOf(second);
+    if (one == other)
+        return true;
+    if (one == nullptr || other == nullptr)
+        return false;
+    auto const daemon = daemonOf(factoryFor(first));
+    return daemon.has_value() && daemon == daemonOf(factoryFor(second));
 }
 
 SessionFactory& TerminalSessionManager::factoryOfDrag(ResolvedDrag const& drag) const
@@ -1103,6 +1159,116 @@ void TerminalSessionManager::openConnectPicker(TerminalSession* acting)
     auto const* const controller = controllerHostingSession(acting);
     _app.openConnectPicker(ContourGuiApp::PickerPresentation::Sheet,
                            controller != nullptr ? controller->screen() : nullptr);
+}
+
+namespace
+{
+    /// @return Why the switching action @p what does nothing for a window that has no daemon to switch from.
+    void logNoDaemon(std::string_view what)
+    {
+        managerLog()("{}: this window's sessions run in-process, so there is no daemon to switch from.",
+                     what);
+    }
+} // namespace
+
+void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
+                                           SwitchTarget target,
+                                           SwitchMode mode)
+{
+    auto const* const window = hostOf(&acting).window;
+    if (window == nullptr || !daemonTargetOf(window->id()))
+    {
+        logNoDaemon("switch");
+        return;
+    }
+    _windowSwitching.request(window->id(),
+                             std::move(target),
+                             mode,
+                             [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                                 if (!outcome)
+                                     managerLog()("Switch failed: {}", outcome.error());
+                             });
+}
+
+void TerminalSessionManager::cycleDaemon(TerminalSession const& acting, actions::CycleDirection direction)
+{
+    auto const* const window = hostOf(&acting).window;
+    auto const current = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
+    if (!current)
+    {
+        logNoDaemon("CycleDaemon");
+        return;
+    }
+    auto const local = _switchDirectory.localDaemons();
+    auto const hosts = _switchDirectory.hostsShownHere();
+    // What is cached answers this press; the refresh is for the next one.
+    _switchDirectory.refresh();
+    if (auto next = nextDaemon(local, hosts, *current, direction))
+        requestSwitch(acting, *std::move(next), SwitchMode::Switch);
+    else
+        managerLog()("CycleDaemon: there is no other daemon to show.");
+}
+
+void TerminalSessionManager::cycleWorkspace(TerminalSession const& acting, actions::CycleDirection direction)
+{
+    auto const* const window = hostOf(&acting).window;
+    if (window == nullptr || !daemonTargetOf(window->id()))
+    {
+        logNoDaemon("CycleWorkspace");
+        return;
+    }
+    auto const workspaces = _switchDirectory.workspacesOf(window->id());
+    // What is cached answers this press; the refresh is for the next one.
+    _switchDirectory.refresh();
+    auto const here = std::ranges::find_if(
+        workspaces, [](KnownWorkspace const& workspace) { return workspace.role == WorkspaceRole::Current; });
+    if (workspaces.size() < 2 || here == workspaces.end())
+    {
+        managerLog()("CycleWorkspace: there is no other workspace to show.");
+        return;
+    }
+    auto const at = static_cast<size_t>(std::distance(workspaces.begin(), here));
+    auto const step = direction == actions::CycleDirection::Next ? 1 : workspaces.size() - 1;
+    auto const& next = workspaces[(at + step) % workspaces.size()];
+    requestSwitch(acting,
+                  { .kind = vthost::proto::SwitchDaemonKind::Same,
+                    .daemon = {},
+                    .workspace = WorkspaceAt { .position = next.position } },
+                  SwitchMode::Switch);
+}
+
+void TerminalSessionManager::showSwitcher(TerminalSession const& acting)
+{
+    openSwitcherOver(acting, window::SwitcherPrompt::Browse, "ShowSwitcher");
+}
+
+void TerminalSessionManager::newDaemon(TerminalSession const& acting)
+{
+    openSwitcherOver(acting, window::SwitcherPrompt::NewDaemon, "NewDaemon");
+}
+
+void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
+                                              window::SwitcherPrompt prompt,
+                                              std::string_view what)
+{
+    auto const* const window = hostOf(&acting).window;
+    auto const daemon = window != nullptr ? daemonTargetOf(window->id()) : std::nullopt;
+    if (!daemon)
+    {
+        logNoDaemon(what);
+        return;
+    }
+    // The palette's rows and the cycling actions read the directory; the popup asks the daemons itself.
+    _switchDirectory.refresh();
+    auto const* const controller = controllerHostingSession(&acting);
+    if (auto const shown = _app.openSwitcher(window::SwitcherOpening { .window = window->id(),
+                                                                       .windowDaemon = *daemon,
+                                                                       .mode = SwitchMode::Switch,
+                                                                       .prompt = prompt,
+                                                                       .pick = std::nullopt },
+                                             controller != nullptr ? controller->screen() : nullptr);
+        !shown)
+        managerLog()("{}: {}.", what, shown.error());
 }
 
 void TerminalSessionManager::postNotice(window::Notice notice, TerminalSession const* acting)
@@ -1602,8 +1768,13 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WorkspaceId win
         controller->deleteLater();
     // The binding is told last: its sessions are gone, and it may stop serving once it serves no window.
     if (auto const bound = _bindingOfWindow.extract(windowId.value))
-        if (forgetMember(*bound.mapped(), windowId) == BindingMembers::None)
-            bound.mapped()->lastWindowReleased();
+    {
+        auto* const binding = bound.mapped();
+        auto const left = forgetMember(*binding, windowId);
+        binding->windowClosed(windowId);
+        if (left == BindingMembers::None)
+            binding->lastWindowReleased();
+    }
 
     // Ownership must not survive the window that held it: a stale WorkspaceId would let a later model
     // event in an unrelated window re-grant focus through syncFocusForWindow. The window's sessions
@@ -2652,18 +2823,27 @@ TerminalSession* TerminalSessionManager::sessionForHostId(window::HostIdentity c
         auto* const session = sessionForId(vtworkspace::SessionId { hostSession });
         return session != nullptr && hostedThere(*session) ? session : nullptr;
     }
-    // A daemon's ids name its sessions only: the binding serving it is resolved once, and each session is
-    // judged by the binding of its window. Null for the factory this manager was constructed with.
-    auto const* const binding = bindingServing(host);
-    if (binding == nullptr && identityOf(_localFactory) != host)
+    // A daemon's ids name its sessions only, in every window a link to it serves: the bindings serving it are
+    // resolved once, and each session is judged by the binding of its window. A window bound to none is the
+    // factory this manager was constructed with.
+    auto const serving = bindingsServing(host);
+    auto const servedHere = identityOf(_localFactory) == host;
+    if (serving.empty() && !servedHere)
         return nullptr;
     auto const sessions = _sessionsById | std::views::values;
     auto const found = std::ranges::find_if(sessions, [&](TerminalSession const* session) {
         if (session == nullptr)
             return false;
-        auto const* const window = hostOf(session).window;
-        auto const* const bound = window != nullptr ? bindingOf(window->id()) : nullptr;
-        return bound == binding && hostSessionIdOf(*session) == hostSession;
+        // Only one a pane shows. A move between two windows of one daemon briefly has two sessions mirror the
+        // daemon's: the copy a reconcile closed out of its pane stays registered, in its old tab, until its
+        // end is delivered. Taken for the shown one, it would hold the move -- by whichever the registry
+        // happens to iterate first.
+        auto const where = hostOf(session);
+        if (where.window == nullptr || leafOfSession(*where.tab, *session) == nullptr)
+            return false;
+        auto const* const bound = bindingOf(where.window->id());
+        auto const served = bound != nullptr ? std::ranges::contains(serving, bound) : servedHere;
+        return served && hostSessionIdOf(*session) == hostSession;
     });
     return found != sessions.end() ? *found : nullptr;
 }

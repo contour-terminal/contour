@@ -13,11 +13,15 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/remote/SwitchingService.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/FactoryBinding.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/session/SwitchDirectory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/session/WindowBinding.hpp>
+#include <contour/session/WindowSwitching.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/LauncherFixtures.hpp>
@@ -139,6 +143,108 @@ class ScriptedDragEndProbe final: public contour::window::DragEndProbe
     int sightings = 0; ///< How often noteDragOver() was called.
     int exits = 0;     ///< How often noteDragLeft() was called.
     int forgotten = 0; ///< How often forgetDrag() was called.
+};
+
+/// A WindowSwitching that records what was asked and answers as the test set: nothing yet (the request
+/// stays pending until the test completes it), or at once.
+class RecordingWindowSwitching final: public contour::remote::SwitchingService
+{
+  public:
+    /// One request the app made.
+    struct Request
+    {
+        vtworkspace::WorkspaceId window;       ///< The window asking.
+        contour::session::SwitchTarget target; ///< Where to go.
+        contour::session::SwitchMode mode {};  ///< Switch or open.
+    };
+
+    void request(vtworkspace::WorkspaceId window,
+                 contour::session::SwitchTarget target,
+                 contour::session::SwitchMode mode,
+                 contour::session::SwitchCompletion done) override
+    {
+        requests.push_back({ .window = window, .target = target, .mode = mode });
+        if (failWith)
+            done(std::unexpected(*failWith));
+        else if (forwardTo != nullptr)
+            forwardTo->request(window, std::move(target), mode, std::move(done));
+    }
+
+    /// Lists nothing: a test of the popup's listing builds a real switcher.
+    void listWorkspaces(vtworkspace::WorkspaceId /*window*/,
+                        contour::session::SwitchTarget const& /*daemon*/,
+                        contour::remote::DaemonWorkspacesListed done) override
+    {
+        done(std::unexpected(std::string { "switching is not available" }));
+    }
+
+    std::vector<Request> requests;          ///< Every request, in order.
+    std::optional<std::string> failWith {}; ///< When set, every request fails at once with this reason.
+    /// When set (and failWith is not), every request is handed on to it: a test of a real switcher behind
+    /// the app's manager. It must outlive the requests.
+    contour::session::WindowSwitching* forwardTo = nullptr;
+};
+
+/// A SwitchDirectory a test fills.
+class FakeSwitchDirectory final: public contour::session::SwitchDirectory
+{
+  public:
+    [[nodiscard]] std::vector<contour::cli::DiscoveredDaemon> localDaemons() const override
+    {
+        return daemons;
+    }
+    [[nodiscard]] std::vector<std::string> hostsShownHere() const override { return hosts; }
+    [[nodiscard]] std::vector<contour::session::KnownWorkspace> workspacesOf(
+        vtworkspace::WorkspaceId /*window*/) const override
+    {
+        return workspaces;
+    }
+    void refresh() override { ++refreshes; }
+
+    std::vector<contour::cli::DiscoveredDaemon> daemons;      ///< What localDaemons() answers.
+    std::vector<std::string> hosts;                           ///< What hostsShownHere() answers.
+    std::vector<contour::session::KnownWorkspace> workspaces; ///< What workspacesOf() answers.
+    int refreshes = 0;                                        ///< How often refresh() was called.
+};
+
+/// A window binding that names its daemon: what a test binds a window to to make it a daemon's.
+class DaemonNamedBinding final: public contour::session::WindowBinding
+{
+  public:
+    /// @param factory What the bound windows' sessions are made by. Borrowed.
+    /// @param target The daemon the binding says it is attached to.
+    /// @param chromeLabel What chromeLabel() reports.
+    DaemonNamedBinding(contour::session::SessionFactory& factory,
+                       contour::session::SwitchTarget target,
+                       std::string chromeLabel = {}):
+        _factory(factory), _target(std::move(target)), _chromeLabel(std::move(chromeLabel))
+    {
+    }
+
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] std::string_view chromeLabel() const noexcept override { return _chromeLabel; }
+    [[nodiscard]] std::optional<contour::session::SwitchTarget> daemonTarget() const override
+    {
+        return _target;
+    }
+    [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
+    void lastWindowReleased() override {}
+
+    /// Changes the daemon the binding names, as a switch to another daemon does.
+    /// @param target The new daemon.
+    /// @param chromeLabel The new chromeLabel().
+    void renameTo(contour::session::SwitchTarget target, std::string chromeLabel)
+    {
+        _target = std::move(target);
+        _chromeLabel = std::move(chromeLabel);
+    }
+
+  private:
+    contour::session::SessionFactory& _factory;
+    contour::session::SwitchTarget _target;
+    std::string _chromeLabel;
 };
 
 /// In-memory SessionFactory: every created session is backed by a vtpty::MockPty, so the manager's
@@ -935,6 +1041,20 @@ inline void closeAllTabs(contour::window::WindowController& window)
 {
     for (auto const row: std::views::iota(0, window.count()) | std::views::reverse)
         window.closeTabAtIndex(row);
+}
+
+/// Ends each of @p sessions whose device a close closed, as its exit watcher does once it sees the closed
+/// device: no session of a test is started, so none runs one, and a closed one would otherwise stay
+/// registered for ever.
+/// @param manager  The manager the sessions are registered with.
+/// @param sessions The sessions to end, if closed; one already gone, or still open, is left alone.
+inline void endClosedSessions(contour::session::TerminalSessionManager& manager,
+                              std::span<vtworkspace::SessionId const> sessions)
+{
+    for (auto const id: sessions)
+        if (auto* session = manager.sessionForId(id);
+            session != nullptr && session->terminal().device().isClosed())
+            session->onClosed();
 }
 
 /// Tabs that each have a real (mock-PTY) session: their ids and session ids in row order.

@@ -64,9 +64,29 @@ void typeText(QWindow* window, std::string_view text)
         QTest::keyClick(window, character);
 }
 
+/// Discovery that answers one labelled daemon once its gate opens, and none when it has no gate.
+class GatedDiscovery final: public cli::IDaemonDiscovery
+{
+  public:
+    explicit GatedDiscovery(std::shared_ptr<std::atomic<bool>> gate): _gate(std::move(gate)) {}
+
+    [[nodiscard]] std::vector<cli::DiscoveredDaemon> discover() override
+    {
+        if (!_gate)
+            return {};
+        while (!_gate->load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return { { .label = "admin", .socket = "/run/contour/admin", .workspaces = 2 } };
+    }
+
+  private:
+    std::shared_ptr<std::atomic<bool>> _gate;
+};
+
 /// The picker over fake services, in a window under one chrome row.
 struct PickerFixture
 {
+    std::shared_ptr<std::atomic<bool>> discoveryGate; ///< When set, discovery waits until it holds true.
     std::shared_ptr<std::atomic<bool>> daemonGate; ///< When set, the daemon probe waits until it holds true.
     config::Config configuration;
     test::InMemoryGuiStateStore state;
@@ -83,8 +103,9 @@ struct PickerFixture
 
     explicit PickerFixture(config::ChromeStyle row = config::ChromeStyle::ContourLinux,
                            cli::QuickSelectKey quickKey = cli::QuickSelectKey::Alt,
-                           std::shared_ptr<std::atomic<bool>> daemonProbeGate = nullptr):
-        daemonGate(std::move(daemonProbeGate))
+                           std::shared_ptr<std::atomic<bool>> daemonProbeGate = nullptr,
+                           std::shared_ptr<std::atomic<bool>> discoveryProbeGate = nullptr):
+        discoveryGate(std::move(discoveryProbeGate)), daemonGate(std::move(daemonProbeGate))
     {
         auto setup = test::defaultChromeSetup();
         setup.row = row;
@@ -101,6 +122,7 @@ struct PickerFixture
                         return cli::LocalDaemonState { .run = cli::DaemonRunState::Running, .sessions = 3 };
                     };
                 },
+            .discovery = std::make_shared<GatedDiscovery>(discoveryGate),
             .check =
                 [this](config::LaunchTarget const& target) {
                     checked.push_back(config::toString(target));
@@ -386,5 +408,25 @@ TEST_CASE("ConnectPicker: a daemon that never answers does not hold the picker",
             ->property("text")
             .toString()
             .contains("running · 3 sessions");
+    });
+}
+
+TEST_CASE("ConnectPicker: discovery that never answers does not hold the picker, then adds the daemons",
+          "[contour][connect][qml][threading]")
+{
+    auto release = std::make_shared<std::atomic<bool>>(false);
+    auto fixture =
+        PickerFixture { config::ChromeStyle::ContourLinux, cli::QuickSelectKey::Alt, nullptr, release };
+    // Up at once with the rows it knows, while discovery is still asking.
+    auto const before = fixture.picker->rowCount();
+    typeText(fixture.window.get(), "star");
+    CHECK(fixture.picker->rowCount() == 1);
+    fixture.picker->setFilter("");
+    release->store(true);
+    fixture.waitFor([&] { return fixture.picker->rowCount() == before + 1; });
+    fixture.waitFor([&] {
+        return fixture.all("connectDetail").size() > 1
+               && fixture.all("connectDetail")[1]->property("text").toString()
+                      == "admin · running · 2 workspaces";
     });
 }

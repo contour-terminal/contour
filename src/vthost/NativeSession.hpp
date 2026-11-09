@@ -99,7 +99,9 @@ struct HandshakePolicy
                                                                    proto::Capability::TabEditAcks,
                                                                    proto::Capability::ColorPreference,
                                                                    proto::Capability::ClipboardTargets,
-                                                                   proto::Capability::SoftFonts });
+                                                                   proto::Capability::SoftFonts,
+                                                                   proto::Capability::WorkspaceFollow,
+                                                                   proto::Capability::WorkspaceSwitch });
 };
 
 /// When a connection sends a session's program-status set.
@@ -341,16 +343,70 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// @param workspace A daemon workspace.
     /// @return Whether this connection is shown @p workspace: its layout, its sessions' screens and events.
-    ///         Every workspace under FollowScope::Every; under Listed, the attach plan's and those it gained
-    ///         since (its own NewWorkspace, and — for the primary viewer — the workspaces no client claims).
-    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept
+    ///         The attach plan's workspaces and those it gained since (its own NewWorkspace and
+    ///         FollowWorkspace, and -- for the primary viewer -- the workspaces no client claims).
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
     {
-        return _scope == FollowScope::Every || _followedWorkspaces.contains(workspace.value);
+        return _followedWorkspaces.contains(workspace.value);
+    }
+
+    /// @return This connection's id.
+    [[nodiscard]] ConnectionId connectionId() const override { return _id; }
+
+    /// @return Whether the client offered Capability::WorkspaceSwitch, so can be sent a SwitchRequest.
+    [[nodiscard]] bool canSwitch() const noexcept override
+    {
+        return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceSwitch);
+    }
+
+    /// Sends @p request to the client. @see SessionStreamEvents::requestSwitch
+    void requestSwitch(proto::SwitchRequest const& request) override
+    {
+        send(0, proto::DecodedPdu { request });
     }
 
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
-    friend struct NativeSessionFlushTester;  ///< Test-only view of the armed flush deadline.
+
+    /// Adds @p workspace to the ones this connection shows, tells the host so, and pushes its layout and
+    /// its sessions' screens; a workspace this connection already shows, or none, changes nothing.
+    /// @param workspace The daemon workspace.
+    void followWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// Requests a snapshot of every session @p workspace shows.
+    /// @param workspace The workspace.
+    void requestWorkspaceSnapshots(vtworkspace::Workspace& workspace);
+
+    /// Sends the layout of @p workspace, a workspace this client follows, and has every session it shows
+    /// not yet mirrored to this client streamed after it (@see requestArrivedSnapshots).
+    /// @param workspace The workspace.
+    void sendFollowedLayout(vtworkspace::Workspace& workspace);
+
+    /// Requests a snapshot of every session @p workspace shows that a move brought in from a workspace
+    /// another client shows: one not yet mirrored to this client, already in the model as its last layout
+    /// batch ended, and with no snapshot pending. Its shell may say nothing more for a long time. A session
+    /// spawned since is mirrored as its first output comes, as before.
+    /// @param workspace A workspace this client follows.
+    void requestArrivedSnapshots(vtworkspace::Workspace& workspace);
+
+    /// Records every session the host's model shows now (@ref _sessionsAtLastLayout).
+    void noteModelSessions();
+
+    /// Forgets every session mirrored to this client that no workspace it follows shows any more: one a move
+    /// took to a workspace another client shows. One that comes back is then mirrored anew, from a snapshot,
+    /// and not by increments against what this client was sent before it left.
+    void forgetUnfollowedSessions();
+
+    /// Drops every per-session state this connection keeps for @p session.
+    /// @param session The session.
+    void forgetSession(vtworkspace::SessionId session);
+
+    /// Stops showing @p workspace and tells the host why.
+    /// @param workspace The daemon workspace.
+    /// @param reason Why the client stopped showing it.
+    void releaseWorkspace(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason);
+
+    friend struct NativeSessionFlushTester; ///< Test-only view of the armed flush deadline.
 
     /// A walk over a session's command-block records that a budget, a cap or a full send queue cut short;
     /// the next increment resumes it where it stopped rather than from the oldest record.
@@ -1120,10 +1176,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// The host profile this client's sessions run under, as its hello named it with
     /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
     std::string _profileName;
-    /// Whether this connection follows every workspace or a listed set; Every until the attach plan says.
-    FollowScope _scope = FollowScope::Every;
-    /// The workspaces followed under FollowScope::Listed, by id. @see follows
+    /// The workspaces this connection shows, by id: the attach plan's, and those gained since. @see follows
     std::set<uint64_t> _followedWorkspaces;
+    /// Every session the host's model showed as this connection's last layout batch ended, in any workspace:
+    /// a session of a followed workspace that is among them and is not mirrored to this client yet came in by
+    /// a move (@see requestArrivedSnapshots), and one that is not was spawned since.
+    std::unordered_set<uint64_t> _sessionsAtLastLayout;
     LayoutObserver _layoutObserver;
     /// Answers the client's unknown PDUs, and holds back the ones it said it does not know.
     proto::UnsupportedTracker _unsupported;

@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -311,6 +312,9 @@ class NativeClient final
     /// Handler invoked when the daemon asks this client to re-assert its pane sizes (proto::PanesReprojected,
     /// Capability::PanesReprojected), which only a daemon built while that was sent on departures does.
     using PanesReprojectedHandler = std::function<void()>;
+    /// Handler invoked when the daemon asks this client to switch the window showing a workspace
+    /// (proto::SwitchRequest, Capability::WorkspaceSwitch); answered with replySwitch().
+    using SwitchRequestHandler = std::function<void(proto::SwitchRequest const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -374,6 +378,8 @@ class NativeClient final
     /// @param onLayoutBatchEnd Told when a daemon sharing Capability::LayoutBatch ends a layout push.
     /// @param onPanesReprojected Told when the daemon asks for this client's pane sizes again (only a daemon
     ///        built while it asked on every departure of another client does).
+    /// @param onSwitchRequest Told when the daemon asks for a window switch; none for a client that switches
+    ///        nothing, which answers every such request Failed itself.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -387,7 +393,8 @@ class NativeClient final
                  TabMergeRefusedHandler onTabMergeRefused = {},
                  MoveNodeRefusedHandler onMoveNodeRefused = {},
                  LayoutBatchEndHandler onLayoutBatchEnd = {},
-                 PanesReprojectedHandler onPanesReprojected = {});
+                 PanesReprojectedHandler onPanesReprojected = {},
+                 SwitchRequestHandler onSwitchRequest = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -457,6 +464,24 @@ class NativeClient final
     ///         the request.
     Delivery closePane(uint64_t session);
 
+    /// Has this connection show @p workspace too (proto::FollowWorkspace): the daemon pushes its layout and
+    /// its sessions' screens from then on, and followedWorkspaces() names it.
+    /// @param workspace The daemon workspace; 0 asks the daemon for a new one, which this connection claims
+    /// and
+    ///        learns of with its layout.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    /// Capability::WorkspaceFollow.
+    Delivery followWorkspace(uint64_t workspace);
+
+    /// Has this connection stop showing @p workspace (proto::ReleaseWorkspace): followedWorkspaces() no
+    /// longer names it, and a layout of it still on its way is dropped, so that a reconnect does not resume
+    /// it.
+    /// @param workspace The daemon workspace.
+    /// @param reason Why: the daemon keeps a workspace switched away from hidden from later launches.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    /// Capability::WorkspaceFollow.
+    Delivery releaseWorkspace(uint64_t workspace, proto::WorkspaceRelease reason);
+
     /// Tells the daemon how the user changed a tab's presentation, so its model and every other client
     /// follow. Where the daemon shares Capability::TabEditAcks, an activation is kept in force over the
     /// layouts pushed before the daemon served it (@see PendingTabEdits).
@@ -520,6 +545,11 @@ class NativeClient final
     /// @param digest PermissionRequest::digest.
     /// @param answer The user's answer; Pending for a dismissed prompt, which records nothing.
     void answerPermission(std::string hostId, std::string digest, GrantState answer);
+
+    /// Answers a SwitchRequest the daemon asked: sent only to a daemon sharing Capability::WorkspaceSwitch,
+    /// which is the only one that asks.
+    /// @param reply The request's id, what came of it, and why.
+    void replySwitch(proto::SwitchReply reply);
 
     /// Restates the emulation settings to ask for the sessions this client creates from now on, when
     /// the client's configuration changed; the sessions that exist keep theirs. Sends nothing when
@@ -621,6 +651,11 @@ class NativeClient final
 
     void handlePdu(proto::DecodedFrame const& frame);
 
+    /// Applies a pushed layout: drops one for a released workspace, follows one this connection created,
+    /// and hands it on with the pending edits applied.
+    /// @param layout The layout the daemon pushed.
+    void handleLayout(proto::LayoutState const& layout);
+
     /// Hands a PDU that only reaches a handler -- a push's end, a permission request, a refusal -- to it.
     /// @return Whether @p frame was one.
     bool handleNotice(proto::DecodedFrame const& frame);
@@ -694,6 +729,7 @@ class NativeClient final
     MoveNodeRefusedHandler _onMoveNodeRefused;
     LayoutBatchEndHandler _onLayoutBatchEnd;
     PanesReprojectedHandler _onPanesReprojected;
+    SwitchRequestHandler _onSwitchRequest;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
@@ -709,8 +745,11 @@ class NativeClient final
     uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
     std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
     std::vector<uint64_t> _followedWorkspaces;        ///< @see followedWorkspaces()
-    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
+    /// The workspaces releaseWorkspace() let go of since, until followed again: a layout of one still on its
+    /// way is dropped.
+    std::set<uint64_t> _releasedWorkspaces;
+    std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason;  ///< @see lossReason()
     std::optional<std::string> _upgradingTo; ///< @see upgradingTo()

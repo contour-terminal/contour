@@ -223,6 +223,34 @@ TEST_CASE("no default chord fires twice", "[bindings]")
         }
 }
 
+TEST_CASE("the daemon and workspace switching actions are bound by no default chord", "[bindings][switch]")
+{
+    // Deliberately unbound: every plausible chord is a shell, editor or tmux key somewhere, and the
+    // palette, the title bar and the switcher reach them. A user binds the ones they want.
+    using namespace contour::actions;
+    for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())
+        for (auto const kind: AllKinds)
+        {
+            INFO("edition " << token << ", platform " << std::to_underlying(kind));
+            auto const& mappings = defaultInputMappings(edition, kind);
+            auto const switching = [](auto const& mapping) {
+                return std::ranges::any_of(mapping.binding, [](auto const& action) {
+                    return std::holds_alternative<SwitchToWorkspace>(action)
+                           || std::holds_alternative<OpenWorkspace>(action)
+                           || std::holds_alternative<CycleWorkspace>(action)
+                           || std::holds_alternative<CycleDaemon>(action)
+                           || std::holds_alternative<SwitchToDaemon>(action)
+                           || std::holds_alternative<OpenDaemon>(action)
+                           || std::holds_alternative<ShowSwitcher>(action)
+                           || std::holds_alternative<NewDaemon>(action);
+                });
+            };
+            CHECK(std::ranges::none_of(mappings.keyMappings, switching));
+            CHECK(std::ranges::none_of(mappings.charMappings, switching));
+            CHECK(std::ranges::none_of(mappings.mouseMappings, switching));
+        }
+}
+
 TEST_CASE("a bare F6 is bound in no edition", "[bindings]")
 {
     for (auto const& [edition, token, label]: configEnumValues<DefaultsEdition>())

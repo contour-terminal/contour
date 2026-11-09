@@ -77,6 +77,9 @@ enum class GuardedRole : uint8_t
     ShowHostWritableStatusLine,
     BigPaste,
     RerunCommand,
+    /// A program asks, through the control API, to switch the window to another daemon or workspace
+    /// (`workspace.switch`). The switches the user drives from the GUI itself are not guarded.
+    SwitchWindow,
 };
 
 /// The answers the user asked to stand for the rest of the session, per guarded role.
@@ -104,6 +107,7 @@ struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string
             case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
             case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
             case contour::session::GuardedRole::RerunCommand: output = "run a command again"; break;
+            case contour::session::GuardedRole::SwitchWindow: output = "switch the window"; break;
         }
         // clang-format on
         return formatter<string_view>::format(output, ctx);

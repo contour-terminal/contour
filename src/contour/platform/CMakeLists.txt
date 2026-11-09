@@ -66,6 +66,7 @@ add_library(contour_platform STATIC
     UserNotificationNotifier.cpp UserNotificationNotifier.hpp
     QtExternalLauncher.cpp QtExternalLauncher.hpp
     QuickTerminalPanel.cpp QuickTerminalPanel.hpp
+    OffThreadJobs.hpp
     QtInvoke.hpp
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp

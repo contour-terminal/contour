@@ -131,6 +131,8 @@ KitDialog {
             id: permissionRemember
             objectName: "permissionRemember"
             text: root.prompt.rememberText !== undefined ? root.prompt.rememberText : ""
+            // A question whose answer may not stand (a switch to an ad-hoc host) offers no box at all.
+            visible: text !== ""
             font: chromeStyle.type.footnote
             palette.windowText: sys.windowText
             Accessible.role: Accessible.CheckBox

@@ -3,6 +3,8 @@ add_library(vthost STATIC
     AccessFile.hpp
     AttachPlan.cpp
     AttachPlan.hpp
+    SwitchClient.hpp
+    WorkspaceVisibility.hpp
     ByteStream.cpp
     ByteStream.hpp
     CarriedDelivery.hpp
@@ -300,6 +302,8 @@ if(VTHOST_TESTING)
         HistorySeed_test.cpp
         RerunPolicy_test.cpp
         WorkspaceRestore_test.cpp
+        SwitchClient_test.cpp
+        WorkspaceVisibility_test.cpp
         SnapshotSchedule_test.cpp
         WorkspacePersistence_test.cpp
         ConnectionAcceptor_test.cpp

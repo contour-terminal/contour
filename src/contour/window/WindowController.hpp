@@ -136,6 +136,7 @@ inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSur
 class WindowController:
     public QAbstractListModel,
     public command::TabTitleProvider,
+    public command::DaemonRowsProvider,
     public display::WindowHost
 {
     Q_OBJECT
@@ -209,6 +210,9 @@ class WindowController:
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // The host of the window's own binding: it changes as the window is bound, and when its binding stops.
     Q_PROPERTY(QString hostLabel READ hostLabel NOTIFY hostLabelChanged)
+    // The window's own daemon's drift (window::DaemonDriftModel), which its drift badge shows; null for a
+    // local window. Read anew whenever the window is bound to another host.
+    Q_PROPERTY(QObject* daemonDrift READ daemonDrift NOTIFY hostLabelChanged)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
@@ -755,6 +759,13 @@ class WindowController:
     /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).
     [[nodiscard]] std::vector<std::string> tabTitles() const override;
 
+    /// Whether this window has a daemon behind it (command::DaemonRowsProvider).
+    [[nodiscard]] command::DaemonSwitching switchingAvailability() const override;
+
+    /// The daemons and workspaces the palette lists for this window (command::DaemonRowsProvider). Starts
+    /// refreshing the local daemon discovery behind it, and answers from what it knew before.
+    [[nodiscard]] command::DaemonRowsState daemonRows() const override;
+
     /// The label the strip shows for one tab, read as tabTitles() reads each row. Resolving a label
     /// takes that tab's terminal lock, so naming one tab this way waits on no other tab's parser.
     /// @param tab The tab to name.
@@ -1202,6 +1213,10 @@ class WindowController:
     /// @return The host's label; empty for a local window.
     [[nodiscard]] QString hostLabel() const;
 
+    /// What this window's drift badge shows: whether the daemon of its own link runs another release.
+    /// @return Its window::DaemonDriftModel; null for a local window.
+    [[nodiscard]] QObject* daemonDrift() const;
+
     /// What the host chip shows: the manager's host connection, folded onto the chip's three states.
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
     [[nodiscard]] int hostChipState() const noexcept;
@@ -1594,8 +1609,13 @@ class WindowController:
     command::ProfileCommandSource _profileCommands;
     command::LayoutCommandSource _layoutCommands;
     command::HostCommandSource _hostCommands;
+    command::DaemonCommandSource _daemonCommands;
     command::BoundCommandSource _boundCommands;
     command::ActionCommandSource _actionCommands;
+    // The two sources that offer actions without knowing the window, minus the switching actions a window
+    // with no daemon behind it cannot run.
+    command::SwitchingGatedSource _gatedBoundCommands;
+    command::SwitchingGatedSource _gatedActionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;
     // }}}
 

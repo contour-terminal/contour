@@ -103,6 +103,12 @@ enum class Capability : uint8_t
     /// and the soft-glyph cells beside each Delta's rows (`softGlyphCells`). Without it a client shows the
     /// cells' real characters, which the rows carry either way.
     SoftFonts = 22,
+    /// The peer follows and releases workspaces at runtime (FollowWorkspace, ReleaseWorkspace), so one
+    /// connection can move a window from one workspace to another without reconnecting.
+    WorkspaceFollow = 23,
+    /// The peer serves a daemon-initiated switch of the window showing a workspace (SwitchRequest,
+    /// SwitchReply).
+    WorkspaceSwitch = 24,
 };
 
 /// One row of the table naming a Capability.
@@ -136,6 +142,8 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::CellPixelSize, .name = "cell-pixel-size" },
     CapabilityRow { .capability = Capability::ClipboardTargets, .name = "clipboard-targets" },
     CapabilityRow { .capability = Capability::SoftFonts, .name = "soft-fonts" },
+    CapabilityRow { .capability = Capability::WorkspaceFollow, .name = "workspace-follow" },
+    CapabilityRow { .capability = Capability::WorkspaceSwitch, .name = "workspace-switch" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

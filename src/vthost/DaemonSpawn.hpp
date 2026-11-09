@@ -242,11 +242,12 @@ inline constexpr auto ClientActivationVariables = std::array<std::string_view, 2
 /// failed: by then the daemon holds its own lease, taken before it binds, so no prune of another
 /// launcher can remove the image in between.
 ///
-/// A daemon spawned here is started `--lifecycle=exit-when-idle` and therefore ends DefaultIdleExitGrace
-/// after it has no session and no client: it belongs to the clients that needed it, and "make sure one
-/// exists" does not mean "leave one behind". Note this is a property of the DAEMON, not of the spawning
-/// client — a second client attaching inherits it. An already-running daemon keeps whatever policy it
-/// was started with.
+/// A daemon spawned here is started `--lifecycle=exit-when-idle` by default and therefore ends
+/// DefaultIdleExitGrace after it has no session and no client: it belongs to the clients that needed it, and
+/// "make sure one exists" does not mean "leave one behind". A caller the user asked by name for a daemon
+/// (the GUI's "New daemon…") passes DaemonLifecycle::Persistent instead, so it lives like one `contour
+/// daemon` started. Note this is a property of the DAEMON, not of the spawning client — a second client
+/// attaching inherits it. An already-running daemon keeps whatever policy it was started with.
 /// @param endpoint Where to reach the daemon.
 /// @param binary What to start the daemon from: the `contour` binary, or a staged copy of it.
 /// @param spawner What starts the daemon and asks whether it serves.
@@ -255,13 +256,15 @@ inline constexpr auto ClientActivationVariables = std::array<std::string_view, 2
 ///        resource domain nor the tab's it was started from. POSIX only.
 /// @param spawnOptions Options forwarded to a spawned daemon's command line.
 /// @param timeout How long to wait for a spawned daemon to accept connections.
+/// @param lifecycle When a daemon spawned here ends on its own.
 /// @return EXIT_SUCCESS if a daemon is confirmed running, EXIT_FAILURE otherwise.
 [[nodiscard]] int ensureDaemon(AttachEndpoint const& endpoint,
                                DaemonBinarySource& binary,
                                DaemonSpawner& spawner,
                                vtpty::ProcessPlacement& placement,
                                DaemonSpawnOptions const& spawnOptions,
-                               std::chrono::seconds timeout);
+                               std::chrono::seconds timeout,
+                               DaemonLifecycle lifecycle = DaemonLifecycle::ExitWhenIdle);
 
 /// ensureDaemon() through the operating system's spawner (makeNativeDaemonSpawner()).
 /// @param endpoint Where to reach the daemon.
@@ -269,11 +272,13 @@ inline constexpr auto ClientActivationVariables = std::array<std::string_view, 2
 /// @param placement Places a spawned daemon before it runs. POSIX only.
 /// @param spawnOptions Options forwarded to a spawned daemon's command line.
 /// @param timeout How long to wait for a spawned daemon to accept connections.
+/// @param lifecycle When a daemon spawned here ends on its own.
 /// @return EXIT_SUCCESS if a daemon is confirmed running, EXIT_FAILURE otherwise.
 [[nodiscard]] int ensureDaemon(AttachEndpoint const& endpoint,
                                DaemonBinarySource& binary,
                                vtpty::ProcessPlacement& placement,
                                DaemonSpawnOptions const& spawnOptions = {},
-                               std::chrono::seconds timeout = std::chrono::seconds(5));
+                               std::chrono::seconds timeout = std::chrono::seconds(5),
+                               DaemonLifecycle lifecycle = DaemonLifecycle::ExitWhenIdle);
 
 } // namespace vthost

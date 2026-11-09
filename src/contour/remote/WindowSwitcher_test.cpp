@@ -1,0 +1,1280 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/display/TerminalDisplay.hpp>
+#include <contour/remote/DaemonLink.hpp>
+#include <contour/remote/SwitchGrants.hpp>
+#include <contour/remote/SwitchGuard.hpp>
+#include <contour/remote/WindowSwitcher.hpp>
+#include <contour/remote/testing/DaemonFixture.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
+#include <contour/test/DisplayPixels.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
+#include <contour/window/SwitcherController.hpp>
+#include <contour/window/WindowController.hpp>
+
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/Terminal.hpp>
+
+#include <QtCore/QCoreApplication>
+#include <QtCore/QPointer>
+#include <QtGui/QImage>
+#include <QtQuick/QQuickWindow>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include <vtcontrol/testing/FakeControlApi.hpp>
+#include <vthost/SwitchClient.hpp>
+#include <vthost/Transport.hpp>
+#include <vthost/WorkspaceVisibility.hpp>
+#include <vthost/client/ConnectionState.hpp>
+#include <vthost/control/ControlService.hpp>
+#include <vtworkspace/SessionModel.hpp>
+
+using namespace std::chrono_literals;
+using namespace contour::remote::testing;
+using contour::remote::DaemonAddress;
+using contour::remote::DaemonLink;
+using contour::remote::DaemonLinkConfig;
+using contour::session::SwitchMode;
+using contour::session::SwitchTarget;
+using vthost::WorkspaceVisibility;
+using vthost::proto::SwitchDaemonKind;
+using vthost::proto::SwitchOutcome;
+
+namespace
+{
+
+/// Daemon A, which the window starts on, by label.
+[[nodiscard]] DaemonAddress daemonA()
+{
+    return DaemonAddress { .kind = SwitchDaemonKind::Label, .name = "a" };
+}
+/// Daemon B, which a cross-daemon switch goes to, by label.
+[[nodiscard]] DaemonAddress daemonB()
+{
+    return DaemonAddress { .kind = SwitchDaemonKind::Label, .name = "b" };
+}
+/// A daemon whose socket nobody serves.
+[[nodiscard]] DaemonAddress unreachable()
+{
+    return DaemonAddress { .kind = SwitchDaemonKind::Label, .name = "down" };
+}
+
+/// @return A target on daemon @p daemon, naming @p workspace (empty to decide).
+[[nodiscard]] SwitchTarget to(DaemonAddress const& daemon, std::string_view workspace = {})
+{
+    return SwitchTarget { .kind = daemon.kind,
+                          .daemon = daemon.name,
+                          .workspace = contour::session::workspaceTargetOf(workspace) };
+}
+
+/// What a test link to @p endpoint is built with: launched, and named @p address.
+[[nodiscard]] DaemonLinkConfig linkConfig(
+    vthost::TcpEndpoint endpoint,
+    TestTimeline& timeline,
+    DaemonAddress address,
+    vthost::proto::AttachIntent intent = { .kind = vthost::proto::AttachIntentKind::Launch,
+                                           .workspaces = {} },
+    contour::remote::NativeController::SwitchRequests switchRequests =
+        contour::remote::NativeController::SwitchRequests::Answered)
+{
+    return DaemonLinkConfig {
+        .controller = controllerConfig(
+            std::move(endpoint),
+            timeline,
+            ControllerOptions { .intent = std::move(intent), .switchRequests = switchRequests }),
+        .hostLabel = {},
+        .locality = contour::window::DaemonLocality::Remote,
+        .clientRelease = "test",
+        .handOverFrom = std::nullopt,
+        .address = std::move(address),
+        .arrival = std::nullopt,
+    };
+}
+
+/// Lists a fixture's workspaces as its control API would: native id, position, uuid and visibility, read on
+/// the daemon's thread and told on the GUI thread later, as the production lister does.
+class FixtureLister final: public contour::remote::IWorkspaceLister
+{
+  public:
+    explicit FixtureLister(std::map<std::string, DaemonFixture*> daemons): _daemons(std::move(daemons)) {}
+
+    void list(contour::remote::ListTarget target, contour::remote::WorkspacesListed done) override
+    {
+        ++listings;
+        auto const found = _daemons.find(target.address.name);
+        auto listed = std::expected<std::vector<vtcontrol::WorkspaceInfo>, std::string> {};
+        if (found == _daemons.end())
+            listed = std::unexpected(std::string { "cannot connect to the daemon" });
+        else
+            listed = describe(*found->second);
+        QMetaObject::invokeMethod(
+            &_receiver,
+            [done = std::move(done), listed = std::move(listed)]() mutable { done(std::move(listed)); },
+            Qt::QueuedConnection);
+    }
+
+    int listings = 0; ///< How often a daemon was listed.
+
+  private:
+    [[nodiscard]] static std::vector<vtcontrol::WorkspaceInfo> describe(DaemonFixture& daemon)
+    {
+        return daemon.onDaemon([&daemon] {
+            auto infos = std::vector<vtcontrol::WorkspaceInfo> {};
+            auto const& model = daemon.host->model();
+            for (auto const index: std::views::iota(0, model.workspaceCount()))
+            {
+                auto const id = model.workspaceAt(index)->id();
+                auto info = vtcontrol::WorkspaceInfo {};
+                info.id = vtcontrol::toString(vtcontrol::ObjectRef {
+                    .kind = vtcontrol::ObjectKind::Workspace,
+                    .uuid = daemon.host->objects().uuidOf(id).value_or(vtcontrol::Uuid {}) });
+                info.position = static_cast<uint32_t>(index + 1);
+                info.native = std::to_string(id.value);
+                info.visibility = std::string { vthost::nameOf(daemon.host->visibility(id)) };
+                infos.push_back(std::move(info));
+            }
+            return infos;
+        });
+    }
+
+    std::map<std::string, DaemonFixture*> _daemons;
+    QObject _receiver;
+};
+
+/// The application a switch runs in: it opens windows as a spawned window's Main.qml would, owns every link
+/// it starts, and resolves the daemons a test names to their fixtures.
+class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::remote::ISwitchHost
+{
+  public:
+    FakeApp(contour::session::TerminalSessionManager& manager,
+            std::vector<std::unique_ptr<DaemonLink>>& links,
+            TestTimeline& timeline,
+            std::map<std::string, vthost::TcpEndpoint> endpoints):
+        links(links), _manager(manager), _timeline(timeline), _endpoints(std::move(endpoints))
+    {
+    }
+
+    FakeApp(FakeApp const&) = delete;
+    FakeApp& operator=(FakeApp const&) = delete;
+    FakeApp(FakeApp&&) = delete;
+    FakeApp& operator=(FakeApp&&) = delete;
+    ~FakeApp() override = default;
+
+    // IDaemonLinkHost
+    void openWindowFor(QScreen* /*screen*/) override
+    {
+        auto& window = *opened.emplace_back(std::make_unique<contour::test::ScopedController>(_manager));
+        std::ignore = _manager.consumeAttachWindow(window.controller);
+    }
+    void upgradeDaemon(DaemonLink& /*link*/) override {}
+    void restartDaemon(DaemonLink& /*link*/) override {}
+    void linkEnded() override
+    {
+        ++endings;
+        // As the application does.
+        contour::remote::passOnLaunchResume(switchableLinks());
+    }
+    void startHandOverLink(DaemonLinkConfig config) override
+    {
+        std::ignore = startSwitchLink(std::move(config));
+    }
+    void handOverSettled(contour::remote::HandOver /*handOver*/,
+                         contour::remote::HandOverOutcome /*outcome*/,
+                         std::string const& /*reason*/) override
+    {
+    }
+    [[nodiscard]] contour::remote::SwitchGrants& switchGrants() override { return grants; }
+    [[nodiscard]] contour::remote::SwitchTimer const& switchTimer() override { return questionTimer; }
+
+    // ISwitchHost
+    [[nodiscard]] std::vector<DaemonLink*> switchableLinks() override
+    {
+        return std::ranges::to<std::vector>(
+            links | std::views::transform([](auto const& link) { return link.get(); }));
+    }
+    [[nodiscard]] std::expected<DaemonLinkConfig, std::string> linkConfigFor(
+        DaemonAddress const& daemon) override
+    {
+        if (daemon == unreachable())
+            // Nothing listens on port 1.
+            return linkConfig(
+                vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} },
+                _timeline,
+                daemon);
+        auto const found = _endpoints.find(daemon.name);
+        if (found == _endpoints.end())
+            return std::unexpected(std::string { "no such daemon" });
+        return linkConfig(found->second, _timeline, daemon);
+    }
+    DaemonLink& startSwitchLink(DaemonLinkConfig config) override
+    {
+        ++started;
+        auto& link = *links.emplace_back(
+            std::make_unique<DaemonLink>(DaemonLink::Id { _nextId++ }, std::move(config), *this, _manager));
+        contour::remote::passOnLaunchResume(switchableLinks());
+        return link;
+    }
+
+    std::vector<std::unique_ptr<contour::test::ScopedController>> opened; ///< Every window opened, in order.
+    std::vector<std::unique_ptr<DaemonLink>>& links;                      ///< Every link, the launch's first.
+    int endings = 0;                                                      ///< How often a link said it ended.
+    int started = 0;                      ///< How many links a switch started.
+    contour::remote::SwitchGrants grants; ///< The answers that stand for the switches programs ask for.
+    /// What expires the switch questions; never fires unless a test says otherwise.
+    contour::remote::SwitchTimer questionTimer = [](std::chrono::milliseconds /*delay*/,
+                                                    std::function<void()> const& /*fire*/) {
+    };
+
+  private:
+    contour::session::TerminalSessionManager& _manager;
+    TestTimeline& _timeline;
+    std::map<std::string, vthost::TcpEndpoint> _endpoints;
+    uint32_t _nextId = 1;
+};
+
+/// A switch timer a test fires by hand: what is armed waits until fireAll().
+struct ManualSwitchTimer
+{
+    struct Armed
+    {
+        std::chrono::milliseconds delay;
+        std::function<void()> fire;
+    };
+    std::vector<Armed> armed; ///< What is armed and not fired, in arming order.
+
+    [[nodiscard]] contour::remote::SwitchDeadline deadline()
+    {
+        return contour::remote::SwitchDeadline {
+            .timeout = contour::remote::DefaultSwitchTimeout,
+            .timer = [this](std::chrono::milliseconds delay,
+                            std::function<void()> fire) { armed.push_back({ delay, std::move(fire) }); },
+        };
+    }
+
+    /// Fires everything armed, as the time being up would.
+    void fireAll()
+    {
+        for (auto& each: std::exchange(armed, {}))
+            each.fire();
+    }
+};
+
+/// What a switch request was told.
+struct Told
+{
+    std::optional<std::expected<SwitchOutcome, std::string>> outcome;
+
+    [[nodiscard]] contour::session::SwitchCompletion completion()
+    {
+        return [this](std::expected<SwitchOutcome, std::string> result) {
+            outcome = std::move(result);
+        };
+    }
+};
+
+/// Seeds @p daemon with @p count workspaces of one tab each.
+/// @return Their ids, ascending.
+std::vector<uint64_t> seedWorkspaces(DaemonFixture& daemon, int count)
+{
+    std::ignore = daemon.seedSession("first");
+    return daemon.onDaemon([&daemon, count] {
+        auto ids = std::vector<uint64_t> { daemon.host->workspaceId().value };
+        for ([[maybe_unused]] auto const each: std::views::iota(1, count))
+            ids.push_back(daemon.host->createWorkspace()->id().value);
+        return ids;
+    });
+}
+
+/// Has the daemon remember @p workspace as switched away from: a launch leaves it alone.
+void hide(DaemonFixture& daemon, uint64_t workspace)
+{
+    daemon.onDaemon([&daemon, workspace] {
+        daemon.host->noteWorkspaceReleased(vtworkspace::WorkspaceId { workspace },
+                                           vthost::proto::WorkspaceRelease::SwitchedAway);
+        return 0;
+    });
+}
+
+/// @return Whether @p workspace is shown, left or hidden on the daemon.
+[[nodiscard]] WorkspaceVisibility visibilityOn(DaemonFixture& daemon, uint64_t workspace)
+{
+    return daemon.onDaemon(
+        [&daemon, workspace] { return daemon.host->visibility(vtworkspace::WorkspaceId { workspace }); });
+}
+
+/// @return How many connections of the daemon show @p workspace.
+[[nodiscard]] std::size_t showing(DaemonFixture& daemon, uint64_t workspace)
+{
+    return daemon.onDaemon([&daemon, workspace] {
+        return daemon.host->clientsShowing(vtworkspace::WorkspaceId { workspace }).size();
+    });
+}
+
+/// @return How many connections the daemon has.
+[[nodiscard]] std::size_t connections(DaemonFixture& daemon)
+{
+    return daemon.onDaemon([&daemon] { return daemon.live.size(); });
+}
+
+/// Two daemons of distinct runs, A of two workspaces (the second hidden, so a launch brings back only the
+/// first) and B of two, a window on A's first, and the switcher.
+struct SwitchRig
+{
+    DaemonFixture a { {}, {}, 3 };
+    DaemonFixture b { {}, {}, 5 };
+    std::vector<uint64_t> aWorkspaces = seedWorkspaces(a, 2);
+    std::vector<uint64_t> bWorkspaces = seedWorkspaces(b, 2);
+    TestTimeline timeline;
+    /// Declared before the app: the panes the manager holds unregister from the links' controllers as they
+    /// go.
+    std::vector<std::unique_ptr<DaemonLink>> links;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    FakeApp host { app.manager(), links, timeline, { { "a", a.endpoint() }, { "b", b.endpoint() } } };
+    FixtureLister* lister = nullptr;                       ///< The switcher's.
+    std::vector<contour::remote::SwitchPickRequest> picks; ///< What the switcher popup was asked to show.
+    ManualSwitchTimer timer;                               ///< The switcher's deadlines.
+    std::unique_ptr<contour::remote::WindowSwitcher> switcher;
+    std::unique_ptr<contour::test::ScopedController> window;
+
+    SwitchRig(): SwitchRig(contour::remote::NativeController::SwitchRequests::Answered) {}
+
+    /// @param switchRequests Whether the window's client answers the daemon's switch requests.
+    explicit SwitchRig(contour::remote::NativeController::SwitchRequests switchRequests)
+    {
+        hide(a, aWorkspaces[1]);
+        auto made = std::make_unique<FixtureLister>(
+            std::map<std::string, DaemonFixture*> { { "a", &a }, { "b", &b }, { "down", &b } });
+        lister = made.get();
+        switcher = std::make_unique<contour::remote::WindowSwitcher>(
+            app.manager(),
+            host,
+            std::move(made),
+            [this](contour::remote::SwitchPickRequest pick) {
+                picks.push_back(std::move(pick));
+                return std::expected<void, std::string> {};
+            },
+            timer.deadline());
+        // A switch a program asks for reaches the manager's switching, which hands it to this switcher.
+        app.switching().forwardTo = switcher.get();
+        links.push_back(std::make_unique<DaemonLink>(
+            DaemonLink::Id { 1000 },
+            linkConfig(a.endpoint(),
+                       timeline,
+                       daemonA(),
+                       { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
+                       switchRequests),
+            host,
+            app.manager()));
+        window = std::make_unique<contour::test::ScopedController>(app.manager());
+        REQUIRE(launchLink().awaitAttached(10s).has_value());
+        REQUIRE(launchLink().bindPendingWindow(*window->controller)
+                == contour::remote::WindowAdoption::Adopted);
+        REQUIRE(waitUntil([&] { return launchLink().workspaceOf(window->id) == aWorkspaces[0]; }));
+        REQUIRE(waitUntil([&] { return !app.manager().sessionsOfWindow(window->id).empty(); }));
+        REQUIRE(visibilityOn(a, aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    }
+
+    SwitchRig(SwitchRig const&) = delete;
+    SwitchRig& operator=(SwitchRig const&) = delete;
+    SwitchRig(SwitchRig&&) = delete;
+    SwitchRig& operator=(SwitchRig&&) = delete;
+
+    ~SwitchRig()
+    {
+        app.switching().forwardTo = nullptr;
+        for (auto const& link: links)
+            link->stop();
+        host.opened.clear();
+        window.reset();
+        drainGuiEvents();
+    }
+
+    [[nodiscard]] DaemonLink& launchLink() const { return *links.front(); }
+
+    /// @return The link the window is bound to now; null for none.
+    [[nodiscard]] DaemonLink* windowLink()
+    {
+        auto const* const binding = app.manager().bindingOf(window->id);
+        auto const found = std::ranges::find_if(links, [binding](auto const& link) {
+            return static_cast<contour::session::WindowBinding const*>(link.get()) == binding;
+        });
+        return found != links.end() ? found->get() : nullptr;
+    }
+
+    /// Asks the switcher, and waits for it to tell.
+    [[nodiscard]] std::expected<SwitchOutcome, std::string> request(
+        SwitchTarget target, SwitchMode mode = SwitchMode::Switch) const
+    {
+        auto told = Told {};
+        switcher->request(window->id, std::move(target), mode, told.completion());
+        REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+        return *told.outcome;
+    }
+
+    /// @return The window's sessions, watched for their destruction.
+    [[nodiscard]] std::vector<QPointer<contour::session::TerminalSession>> windowSessions()
+    {
+        auto watched = std::vector<QPointer<contour::session::TerminalSession>> {};
+        for (auto* const session: app.manager().sessionsOfWindow(window->id))
+            watched.emplace_back(session);
+        return watched;
+    }
+
+    /// @return Whether none of @p before is among the window's sessions now.
+    [[nodiscard]] bool showsNoneOf(std::span<QPointer<contour::session::TerminalSession> const> before)
+    {
+        auto const now = app.manager().sessionsOfWindow(window->id);
+        return std::ranges::none_of(
+            before, [&](auto const& old) { return old && std::ranges::contains(now, old.data()); });
+    }
+};
+
+/// What a `workspace.switch` call answered, once it has.
+using ControlAnswer = std::optional<std::expected<vtcontrol::SwitchWorkspaceReply, vtcontrol::ControlError>>;
+
+/// A daemon's control API, as `contour switch` reaches it: the service runs on the daemon's thread, and a
+/// call is made as from a pane of the daemon.
+class ControlApi
+{
+  public:
+    explicit ControlApi(DaemonFixture& daemon): _daemon(daemon)
+    {
+        _daemon.onDaemon([this] {
+            _service = std::make_unique<vthost::control::ControlService>(
+                *_daemon.host,
+                vthost::control::ControlServiceConfig {
+                    .version = "test", .socketPath = "/run/test.sock", .clock = _wall });
+            return 0;
+        });
+    }
+    ~ControlApi()
+    {
+        _daemon.onDaemon([this] {
+            _service.reset();
+            return 0;
+        });
+    }
+    ControlApi(ControlApi const&) = delete;
+    ControlApi& operator=(ControlApi const&) = delete;
+    ControlApi(ControlApi&&) = delete;
+    ControlApi& operator=(ControlApi&&) = delete;
+
+    /// Calls `workspace.switch` from the active pane of the daemon's @p workspace, as `contour switch
+    /// --to-label …` run in it, with no workspace named: the caller's own.
+    void callFromPaneOf(uint64_t workspace, vtcontrol::SwitchWorkspaceRequest request)
+    {
+        _daemon.onDaemon([this, workspace, request = std::move(request)] {
+            auto const pane = _daemon.host->model()
+                                  .workspace(vtworkspace::WorkspaceId { workspace })
+                                  ->activeTab()
+                                  ->rootPane()
+                                  ->session();
+            _context.callerPane = vtcontrol::toString(vtcontrol::ObjectRef {
+                .kind = vtcontrol::ObjectKind::Pane, .uuid = *_daemon.host->objects().uuidOf(pane) });
+            _answer.reset();
+            _service->handle(_context, request, [this](auto reply) { _answer = std::move(reply); });
+            return 0;
+        });
+    }
+
+    /// @return What the call answered so far.
+    [[nodiscard]] ControlAnswer answer()
+    {
+        return _daemon.onDaemon([this] { return _answer; });
+    }
+
+  private:
+    DaemonFixture& _daemon;
+    core::platform::ManualWallClock _wall { std::chrono::system_clock::time_point {} };
+    std::unique_ptr<vthost::control::ControlService> _service; ///< Daemon thread only.
+    vtcontrol::testing::FakeCallContext _context;              ///< Daemon thread only.
+    ControlAnswer _answer;                                     ///< Daemon thread only.
+};
+
+/// @return The control call's answer once it came while the GUI thread runs; fails the case otherwise.
+[[nodiscard]] vtcontrol::SwitchWorkspaceReply awaitAnswer(ControlApi& api)
+{
+    REQUIRE(waitUntil([&] { return api.answer().has_value(); }, 2000));
+    auto answer = *api.answer();
+    REQUIRE(answer.has_value());
+    return *answer;
+}
+
+/// @return The session the window asks a switch's question in, once it does; fails the case otherwise.
+[[nodiscard]] contour::session::TerminalSession& awaitSwitchQuestion(SwitchRig& rig)
+{
+    auto const asked = [&] {
+        auto* const session = rig.app.manager().actingSessionOfWindow(rig.window->id);
+        return session != nullptr
+               && session->pendingPermissionAsk()
+                      == contour::session::PermissionAsk { contour::session::GuardedRole::SwitchWindow };
+    };
+    REQUIRE(waitUntil(asked, 2000));
+    return *rig.app.manager().actingSessionOfWindow(rig.window->id);
+}
+
+/// @return The first line of the question @p session shows.
+[[nodiscard]] QString questionLine(contour::session::TerminalSession const& session)
+{
+    return session.pendingPermission()
+        .value(QStringLiteral("lines"))
+        .toList()
+        .value(0)
+        .toMap()
+        .value(QStringLiteral("text"))
+        .toString();
+}
+
+/// Has the daemon's pane of @p workspace print @p text, as a program in it would.
+void printInPaneOf(DaemonFixture& daemon, uint64_t workspace, std::string text)
+{
+    daemon.onDaemon([&daemon, workspace, text = std::move(text)] {
+        auto const pane =
+            daemon.host->model().workspace(vtworkspace::WorkspaceId { workspace })->activeTab()->rootPane();
+        daemon.host->terminal(pane->session())->writeToScreen(text);
+        return 0;
+    });
+}
+
+/// @return Whether @p buffer, the grid the display drew the frame from, holds @p text.
+[[nodiscard]] bool drawsText(vtbackend::RenderBuffer const& buffer, std::string_view text)
+{
+    auto cells = std::vector<vtbackend::RenderCell const*> {};
+    for (auto const& cell: buffer.cells)
+        cells.push_back(&cell);
+    std::ranges::sort(cells, [](auto const* a, auto const* b) {
+        return std::tie(a->position.line, a->position.column)
+               < std::tie(b->position.line, b->position.column);
+    });
+    auto drawn = std::u32string {};
+    for (auto const* cell: cells)
+        drawn += cell->codepoints;
+    auto const wanted = std::u32string(text.begin(), text.end());
+    return drawn.contains(wanted);
+}
+
+} // namespace
+
+TEST_CASE("WindowSwitcher: a switch to another daemon shows its workspace, and hides the old one",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    auto const profile = before.front()->profileName();
+    auto const* const oldLink = &rig.launchLink();
+
+    auto const outcome = rig.request(to(daemonB(), "2"));
+
+    REQUIRE(outcome == SwitchOutcome::Switched);
+    auto* const now = rig.windowLink();
+    REQUIRE(now != nullptr);
+    CHECK(now != oldLink);
+    CHECK(now->address() == daemonB());
+    CHECK(now->workspaceOf(rig.window->id) == rig.bWorkspaces[1]);
+    CHECK(rig.b.waitUntilOnDaemon([&] {
+        return rig.b.host->visibility(vtworkspace::WorkspaceId { rig.bWorkspaces[1] })
+               == WorkspaceVisibility::Shown;
+    }));
+    // Detached, not killed: A's workspace stays in its daemon as hidden.
+    CHECK(rig.a.waitUntilOnDaemon([&] {
+        return rig.a.host->visibility(vtworkspace::WorkspaceId { rig.aWorkspaces[0] })
+               == WorkspaceVisibility::Hidden;
+    }));
+    CHECK(rig.a.onDaemon([&] {
+        return rig.a.host->model().workspace(vtworkspace::WorkspaceId { rig.aWorkspaces[0] }) != nullptr;
+    }));
+    // The window shows B's panes in place of A's, under its own render profile.
+    REQUIRE(waitUntil([&] { return !rig.app.manager().sessionsOfWindow(rig.window->id).empty(); }));
+    CHECK(rig.showsNoneOf(before));
+    for (auto* const session: rig.app.manager().sessionsOfWindow(rig.window->id))
+        CHECK(session->profileName() == profile);
+    // Rebinding the old link's last window ended it.
+    CHECK(waitUntil([&] { return rig.host.endings > 0; }));
+}
+
+// Review (PR 3, item 15): a switch a program asked for is answered on the old link's connection, which the
+// rebinding ends; the answer only got out because it was queued on that link's reactor ahead of the stop.
+TEST_CASE(
+    "WindowSwitcher: a switch to another daemon is told it switched while the old link still serves the "
+    "window",
+    "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto& oldLink = rig.launchLink();
+    auto toldWhileOld = std::optional<bool> {};
+    auto told = Told {};
+    auto completion = told.completion();
+    rig.switcher->request(rig.window->id,
+                          to(daemonB(), "2"),
+                          SwitchMode::Switch,
+                          [&](std::expected<SwitchOutcome, std::string> outcome) {
+                              toldWhileOld = rig.windowLink() == &oldLink && oldLink.isLive();
+                              completion(std::move(outcome));
+                          });
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    REQUIRE(*told.outcome == SwitchOutcome::Switched);
+    CHECK(toldWhileOld == true);
+    // And the window is rebound all the same.
+    REQUIRE(rig.windowLink() != nullptr);
+    CHECK(rig.windowLink() != &oldLink);
+    CHECK(rig.windowLink()->workspaceOf(rig.window->id) == rig.bWorkspaces[1]);
+}
+
+TEST_CASE("WindowSwitcher: a switch within the daemon reuses the window's connection", "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    auto const connectionsBefore = connections(rig.a);
+
+    auto const outcome = rig.request(to(daemonA(), "2"));
+
+    REQUIRE(outcome == SwitchOutcome::Switched);
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[1]);
+    CHECK(rig.host.started == 0);
+    CHECK(connections(rig.a) == connectionsBefore);
+    CHECK(rig.a.waitUntilOnDaemon([&] {
+        return rig.a.host->visibility(vtworkspace::WorkspaceId { rig.aWorkspaces[0] })
+               == WorkspaceVisibility::Hidden;
+    }));
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) == WorkspaceVisibility::Shown);
+    REQUIRE(waitUntil([&] {
+        return !rig.app.manager().sessionsOfWindow(rig.window->id).empty() && rig.showsNoneOf(before);
+    }));
+    // The daemon's own name for itself is the window's daemon too.
+    CHECK(rig.request(SwitchTarget { .kind = SwitchDaemonKind::Same,
+                                     .daemon = {},
+                                     .workspace = contour::session::WorkspaceAt { .position = 2 } })
+          == SwitchOutcome::FocusedExisting);
+}
+
+TEST_CASE("WindowSwitcher: an unreachable daemon leaves the window as it was", "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+
+    SECTION("the daemon cannot be listed")
+    {
+        auto const outcome =
+            rig.request(to(DaemonAddress { .kind = SwitchDaemonKind::Host, .name = "nowhere" }));
+        REQUIRE_FALSE(outcome.has_value());
+        CHECK(outcome.error() == "no such daemon");
+    }
+    SECTION("the daemon is listed, but its link does not connect")
+    {
+        // The listing comes from B; the connect goes where nothing listens.
+        auto const outcome = rig.request(to(unreachable(), "1"));
+        REQUIRE_FALSE(outcome.has_value());
+        CHECK(rig.host.started == 1);
+    }
+
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK(rig.app.manager().sessionsOfWindow(rig.window->id).size() == before.size());
+    CHECK_FALSE(rig.showsNoneOf(before));
+    // Said in the window.
+    CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
+}
+
+TEST_CASE("WindowSwitcher: a daemon lost after the follow and before the first frame changes nothing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    rig.b.holdNewConnectionsAtLayout();
+    auto told = Told {};
+    rig.switcher->request(rig.window->id, to(daemonB(), "2"), SwitchMode::Switch, told.completion());
+    // The new link's connection follows B's workspace, and is held before its first layout.
+    REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
+    CHECK_FALSE(told.outcome.has_value());
+
+    rig.b.refuseConnections();
+
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    CHECK_FALSE(told.outcome->has_value());
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(rig.showsNoneOf(before));
+    // The link it started gave up: served again, B's workspace is not followed by anyone.
+    rig.b.serveAgain();
+    CHECK_FALSE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) > 0; }, 100));
+    CHECK(visibilityOn(rig.b, rig.bWorkspaces[1]) != WorkspaceVisibility::Shown);
+}
+
+TEST_CASE("WindowSwitcher: a switch within the daemon lost before the first frame undoes its follow",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    // The window's connection is up; the next layout it is sent -- the new workspace's -- is held.
+    rig.a.onDaemon([&rig] {
+        for (auto* const socket: rig.a.gated)
+            socket->holdAtNextLayout();
+        return 0;
+    });
+    auto told = Told {};
+    rig.switcher->request(rig.window->id, to(daemonA(), "2"), SwitchMode::Switch, told.completion());
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 1; }));
+    CHECK_FALSE(told.outcome.has_value());
+
+    rig.a.dropConnections();
+
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    CHECK_FALSE(told.outcome->has_value());
+    // The reconnect resumes what the window shows, not the workspace it was switching to.
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[0]) == 1; }, 2000));
+    // A reconnect quicker than the GUI thread may have resumed it meanwhile; the release undoes that too.
+    CHECK(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 0; }, 2000));
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) != WorkspaceVisibility::Shown);
+    drainGuiEvents();
+    CHECK(rig.launchLink().liveController()->settledLayout(rig.aWorkspaces[1]) == nullptr);
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(rig.windowLink() == &rig.launchLink());
+}
+
+TEST_CASE(
+    "WindowSwitcher: a switch within the daemon whose target never shows times out and undoes its follow",
+    "[switch][link][timeout]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    // The window's connection is up; the next layout it is sent -- the new workspace's -- is held.
+    rig.a.onDaemon([&rig] {
+        for (auto* const socket: rig.a.gated)
+            socket->holdAtNextLayout();
+        return 0;
+    });
+    auto told = Told {};
+    rig.switcher->request(rig.window->id, to(daemonA(), "2"), SwitchMode::Switch, told.completion());
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 1; }));
+    REQUIRE(rig.timer.armed.size() == 1);
+    CHECK(rig.timer.armed.front().delay == contour::remote::DefaultSwitchTimeout);
+    CHECK_FALSE(told.outcome.has_value());
+
+    rig.timer.fireAll();
+
+    REQUIRE(told.outcome.has_value());
+    REQUIRE_FALSE(told.outcome->has_value());
+    CHECK(told.outcome->error().contains("in time"));
+    CHECK(rig.window->controller->notices().toastText().contains("Could not switch"));
+    // The follow is undone: the daemon is told, and the layout it held arrives to no switch.
+    CHECK(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 0; }, 2000));
+    rig.a.releaseHeld();
+    drainGuiEvents();
+    CHECK_FALSE(
+        waitUntil([&] { return rig.launchLink().workspaceOf(rig.window->id) != rig.aWorkspaces[0]; }, 50));
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    // Hidden before the switch, and hidden still: the undo does not bring it back on the next launch.
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) == WorkspaceVisibility::Hidden);
+    CHECK_FALSE(rig.showsNoneOf(before));
+    // The window is free for the next switch, which lands.
+    CHECK(rig.request(to(daemonA(), "2")) == SwitchOutcome::Switched);
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[1]);
+}
+
+TEST_CASE("WindowSwitcher: a timed-out switch to a new workspace hides the one the daemon made late",
+          "[switch][link][timeout]")
+{
+    auto rig = SwitchRig {};
+    rig.a.onDaemon([&rig] {
+        for (auto* const socket: rig.a.gated)
+            socket->holdAtNextLayout();
+        return 0;
+    });
+    auto told = Told {};
+    rig.switcher->request(rig.window->id,
+                          to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
+                          SwitchMode::Switch,
+                          told.completion());
+    // The daemon makes the workspace; its layout is held on the way to the window's connection.
+    REQUIRE(waitUntil(
+        [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
+    auto const made = rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceAt(2)->id().value; });
+    REQUIRE(rig.timer.armed.size() == 1);
+
+    rig.timer.fireAll();
+    REQUIRE(told.outcome.has_value());
+    REQUIRE_FALSE(told.outcome->has_value());
+
+    // The layout arrives after the switch was given up: the workspace is let go of as hidden, and no window
+    // opens for it.
+    rig.a.releaseHeld();
+    CHECK(waitUntil([&] { return visibilityOn(rig.a, made) == WorkspaceVisibility::Hidden; }, 2000));
+    CHECK(showing(rig.a, made) == 0);
+    drainGuiEvents();
+    CHECK(rig.host.opened.empty());
+    CHECK(rig.host.started == 0);
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK_FALSE(rig.launchLink().windowShowing(made).has_value());
+}
+
+TEST_CASE("WindowSwitcher: a switch to another daemon whose target never shows times out and drops its link",
+          "[switch][link][timeout]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    // B's target was switched away from before: the abandoned switch leaves it so.
+    hide(rig.b, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+    auto told = Told {};
+    rig.switcher->request(rig.window->id, to(daemonB(), "2"), SwitchMode::Switch, told.completion());
+    // The new link's connection follows B's workspace, and is held before its first layout.
+    REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
+    REQUIRE(rig.timer.armed.size() == 1);
+    CHECK_FALSE(told.outcome.has_value());
+
+    rig.timer.fireAll();
+
+    REQUIRE(told.outcome.has_value());
+    REQUIRE_FALSE(told.outcome->has_value());
+    CHECK(told.outcome->error().contains("in time"));
+    // The link it started is gone, and with it B's follow; the window never left A.
+    CHECK(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 0; }, 2000));
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK(rig.b.waitUntilOnDaemon([&] {
+        return rig.b.host->visibility(vtworkspace::WorkspaceId { rig.bWorkspaces[1] })
+               == WorkspaceVisibility::Hidden;
+    }));
+    CHECK_FALSE(rig.showsNoneOf(before));
+    CHECK(rig.host.opened.empty());
+    // The window is free for the next switch, which lands.
+    CHECK(rig.request(to(daemonB(), "2")) == SwitchOutcome::Switched);
+    CHECK(rig.windowLink()->address() == daemonB());
+}
+
+TEST_CASE("WindowSwitcher: a deadline of a switch that landed gives nothing up", "[switch][link][timeout]")
+{
+    auto rig = SwitchRig {};
+    REQUIRE(rig.request(to(daemonA(), "2")) == SwitchOutcome::Switched);
+    REQUIRE(rig.timer.armed.size() == 1);
+
+    rig.timer.fireAll();
+    drainGuiEvents();
+
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[1]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(rig.window->controller->notices().toastText().contains("Could not switch"));
+}
+
+TEST_CASE("WindowSwitcher: a daemon of several workspaces asks the user, and a cancel changes nothing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+
+    auto const outcome = rig.request(to(daemonB()));
+
+    REQUIRE(outcome == SwitchOutcome::PickerShown);
+    REQUIRE(rig.picks.size() == 1);
+    CHECK(rig.picks.front().window == rig.window->id);
+    CHECK(rig.picks.front().target == to(daemonB()));
+    CHECK(rig.picks.front().workspaces.size() == rig.bWorkspaces.size());
+    // Esc: the popup re-enters nothing.
+    drainGuiEvents();
+    CHECK(rig.host.started == 0);
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(rig.showsNoneOf(before));
+
+    // The pick re-enters the switch with the workspace picked.
+    auto const picked =
+        rig.request(to(daemonB(), vtcontrol::toString(rig.picks.front().workspaces.back().ref)));
+    CHECK(picked == SwitchOutcome::Switched);
+    CHECK(rig.windowLink() != &rig.launchLink());
+}
+
+TEST_CASE("WindowSwitcher: Open shows the target in a new window, and leaves this one alone",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+
+    auto const outcome = rig.request(to(daemonB(), "1"), SwitchMode::Open);
+
+    REQUIRE(outcome == SwitchOutcome::Switched);
+    REQUIRE(rig.host.opened.size() == 1);
+    auto const opened = rig.host.opened.front()->id;
+    auto const* const binding = rig.app.manager().bindingOf(opened);
+    REQUIRE(rig.links.size() == 2);
+    CHECK(binding == rig.links.back().get());
+    CHECK(rig.links.back()->workspaceOf(opened) == rig.bWorkspaces[0]);
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(rig.showsNoneOf(before));
+
+    // Open again: shown in this process already, so that window is focused instead.
+    CHECK(rig.request(to(daemonB(), "1"), SwitchMode::Open) == SwitchOutcome::FocusedExisting);
+    CHECK(rig.host.opened.size() == 1);
+}
+
+TEST_CASE("WindowSwitcher: of two clients showing a workspace, only the one asked switches", "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    // Another client -- another process, another machine -- shows A's first workspace too.
+    auto otherTimeline = TestTimeline {};
+    auto other = makeNativeController(
+        rig.a.endpoint(),
+        otherTimeline,
+        ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Workspaces,
+                                        .workspaces = { rig.aWorkspaces[0] } } });
+    REQUIRE(other->connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[0]) == 2; }));
+
+    REQUIRE(rig.request(to(daemonA(), "2")) == SwitchOutcome::Switched);
+
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[1]);
+    CHECK(rig.a.waitUntilOnDaemon([&] {
+        return rig.a.host->clientsShowing(vtworkspace::WorkspaceId { rig.aWorkspaces[0] }).size() == 1;
+    }));
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+    CHECK(other->settledLayout(rig.aWorkspaces[0]) != nullptr);
+    other->stop();
+}
+
+TEST_CASE("WindowSwitcher: a window with no daemon behind it switches nowhere", "[switch][link]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto links = std::vector<std::unique_ptr<DaemonLink>> {};
+    auto timeline = TestTimeline {};
+    auto host = FakeApp { app.manager(), links, timeline, {} };
+    auto switcher = contour::remote::WindowSwitcher {
+        app.manager(),
+        host,
+        std::make_unique<FixtureLister>(std::map<std::string, DaemonFixture*> {}),
+        [](contour::remote::SwitchPickRequest const&) { return std::expected<void, std::string> {}; },
+        contour::remote::SwitchDeadline {
+            .timeout = contour::remote::DefaultSwitchTimeout,
+            .timer = [](std::chrono::milliseconds, std::function<void()> const&) {} }
+    };
+    auto const local = contour::test::ScopedController { app.manager() };
+    auto told = Told {};
+
+    switcher.request(local.id, to(daemonB()), SwitchMode::Switch, told.completion());
+
+    REQUIRE(told.outcome.has_value());
+    CHECK_FALSE(told.outcome->has_value());
+    CHECK(host.started == 0);
+}
+
+TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch asked for",
+          "[switch][link][timeout][reconnect]")
+{
+    auto rig = SwitchRig {};
+    rig.a.onDaemon([&rig] {
+        for (auto* const socket: rig.a.gated)
+            socket->holdAtNextLayout();
+        return 0;
+    });
+    auto told = Told {};
+    rig.switcher->request(rig.window->id,
+                          to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
+                          SwitchMode::Switch,
+                          told.completion());
+    REQUIRE(waitUntil(
+        [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
+    REQUIRE(rig.timer.armed.size() == 1);
+    rig.timer.fireAll();
+    REQUIRE(told.outcome.has_value());
+    REQUIRE_FALSE(told.outcome->has_value());
+
+    // The connection goes before the layout of the workspace it was given up for ever arrived: the one sought
+    // next resumes only what the window shows.
+    auto const connectionIs = [&](vthost::client::ConnectionState state) {
+        auto const* const controller = rig.launchLink().liveController();
+        return controller != nullptr && controller->connectionState() == state;
+    };
+    rig.a.dropConnections();
+    REQUIRE(waitUntil([&] { return !connectionIs(vthost::client::ConnectionState::Connected); }, 2000));
+    REQUIRE(waitUntil([&] { return connectionIs(vthost::client::ConnectionState::Connected); }, 2000));
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[0]) == 1; }, 2000));
+    drainGuiEvents();
+
+    // A new workspace a later switch asks for is that switch's, not mistaken for the given-up one and hidden.
+    auto const again = rig.request(to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }));
+    INFO((again ? std::string { "switched" } : again.error()));
+    CHECK(again == SwitchOutcome::Switched);
+    auto const shown = rig.launchLink().workspaceOf(rig.window->id);
+    REQUIRE(shown.has_value());
+    CHECK(*shown != rig.aWorkspaces[0]);
+    CHECK(visibilityOn(rig.a, *shown) == WorkspaceVisibility::Shown);
+}
+
+TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and Esc changes nothing",
+          "[switch][link][switcher]")
+{
+    auto rig = SwitchRig {};
+    auto const before = rig.windowSessions();
+    REQUIRE(rig.request(to(daemonB())) == SwitchOutcome::PickerShown);
+    REQUIRE(rig.picks.size() == 1);
+    auto const& pick = rig.picks.front();
+
+    // The popup, as the application builds it for a pick: the one daemon, its rows from the switch's listing.
+    auto told = Told {};
+    auto popup = contour::window::SwitcherController { contour::window::SwitcherServices {
+        .discovery = nullptr,
+        .savedHosts = {},
+        .list = {},
+        .request =
+            [&](vtworkspace::WorkspaceId window, SwitchTarget target, SwitchMode mode) {
+                rig.switcher->request(window, std::move(target), mode, told.completion());
+            },
+        .startDaemon = {},
+    } };
+    popup.open(contour::window::SwitcherOpening {
+        .window = pick.window,
+        .windowDaemon = to(daemonA()),
+        .mode = pick.mode,
+        .prompt = contour::window::SwitcherPrompt::Browse,
+        .pick =
+            contour::window::SwitcherDaemon {
+                .address = pick.target,
+                .workspaceCount = pick.workspaces.size(),
+                .tag = {},
+                .expansion = contour::window::SwitcherExpansion::Expanded,
+                .listing = contour::window::SwitcherListing::Listed,
+                .failure = {},
+                .workspaces = contour::remote::switcherWorkspacesOf(pick.workspaces, pick.window),
+            },
+    });
+    // B's two workspaces, and a new one.
+    REQUIRE(popup.rowCount() == 3);
+
+    SECTION("Esc")
+    {
+        popup.cancel();
+        drainGuiEvents();
+        CHECK_FALSE(told.outcome.has_value());
+        CHECK(rig.host.started == 0);
+        CHECK(rig.windowLink() == &rig.launchLink());
+        CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+        CHECK_FALSE(rig.showsNoneOf(before));
+    }
+    SECTION("Return on B's second workspace")
+    {
+        popup.setCurrentIndex(1);
+        popup.activateCurrent();
+        REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+        CHECK(*told.outcome == SwitchOutcome::Switched);
+        REQUIRE(rig.windowLink() != nullptr);
+        CHECK(rig.windowLink()->address() == daemonB());
+        CHECK(rig.windowLink()->workspaceOf(rig.window->id) == rig.bWorkspaces[1]);
+    }
+}
+
+TEST_CASE("WindowSwitcher: a switch a pane asks for is asked about, and switches once allowed",
+          "[switch][link][guard]")
+{
+    using contour::session::PermissionDecision;
+    using contour::session::PermissionMemory;
+    auto rig = SwitchRig {};
+    auto api = ControlApi { rig.a };
+    auto const* const oldLink = &rig.launchLink();
+
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
+
+    auto& asking = awaitSwitchQuestion(rig);
+    CHECK(questionLine(asking).contains(QStringLiteral("the workspace “2” of the daemon “b”")));
+    CHECK(asking.pendingPermission()
+              .value(QStringLiteral("rememberText"))
+              .toString()
+              .contains(QStringLiteral("from the daemon “a” to the daemon “b”")));
+    // Nothing moves while the question is up.
+    CHECK_FALSE(api.answer().has_value());
+    CHECK(rig.windowLink() == oldLink);
+
+    contour::test::answerShown(asking, PermissionDecision::Allow, PermissionMemory::Once);
+
+    auto const reply = awaitAnswer(api);
+    CHECK(reply.outcome == "switched");
+    CHECK(reply.detail.empty());
+    auto* const now = rig.windowLink();
+    REQUIRE(now != nullptr);
+    CHECK(now->address() == daemonB());
+    CHECK(now->workspaceOf(rig.window->id) == rig.bWorkspaces[1]);
+    CHECK(rig.a.waitUntilOnDaemon([&] {
+        return rig.a.host->visibility(vtworkspace::WorkspaceId { rig.aWorkspaces[0] })
+               == WorkspaceVisibility::Hidden;
+    }));
+    // Allowed once: the next one asks again.
+    CHECK_FALSE(rig.host.grants.remembered(daemonA(), to(daemonB())).has_value());
+}
+
+// Review (PR 3, item 8): the question outlived the daemon's wait for its answer, and an Allow after that
+// switched the window while `contour switch` had already given up.
+TEST_CASE("WindowSwitcher: a switch question unanswered until shortly before the daemon gives up is refused",
+          "[switch][link][guard][timeout]")
+{
+    using contour::session::PermissionDecision;
+    using contour::session::PermissionMemory;
+    auto rig = SwitchRig {};
+    auto expiries = ManualSwitchTimer {};
+    rig.host.questionTimer = expiries.deadline().timer;
+    auto api = ControlApi { rig.a };
+    auto const* const oldLink = &rig.launchLink();
+
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
+    auto& asking = awaitSwitchQuestion(rig);
+    REQUIRE(expiries.armed.size() == 1);
+    CHECK(expiries.armed.front().delay == contour::remote::SwitchQuestionExpiry);
+    CHECK(expiries.armed.front().delay < std::chrono::milliseconds { vthost::SwitchAnswerTimeout });
+
+    expiries.fireAll();
+
+    auto const reply = awaitAnswer(api);
+    CHECK(reply.outcome == "refused");
+    // The question is gone, and the window stays where it was.
+    drainGuiEvents();
+    CHECK_FALSE(asking.pendingPermissionAsk()
+                == contour::session::PermissionAsk { contour::session::GuardedRole::SwitchWindow });
+    CHECK(rig.windowLink() == oldLink);
+    CHECK(rig.host.started == 0);
+}
+
+TEST_CASE("WindowSwitcher: a switch the user refused to have asked again is refused without a prompt",
+          "[switch][link][guard]")
+{
+    using contour::session::PermissionDecision;
+    using contour::session::PermissionMemory;
+    auto rig = SwitchRig {};
+    auto api = ControlApi { rig.a };
+    auto const before = rig.windowSessions();
+
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
+    contour::test::answerShown(awaitSwitchQuestion(rig), PermissionDecision::Deny, PermissionMemory::Session);
+    auto const first = awaitAnswer(api);
+    CHECK(first.outcome == "refused");
+    CHECK(first.detail == contour::remote::SwitchRefusedDetail);
+
+    // Another workspace of the same daemon is the same pair: refused at once, nothing asked.
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "1" });
+    auto const second = awaitAnswer(api);
+    CHECK(second.outcome == "refused");
+    auto const* const session = rig.app.manager().actingSessionOfWindow(rig.window->id);
+    REQUIRE(session != nullptr);
+    CHECK_FALSE(session->pendingPermissionAsk().has_value());
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.host.started == 0);
+    CHECK_FALSE(rig.showsNoneOf(before));
+    CHECK(visibilityOn(rig.a, rig.aWorkspaces[0]) == WorkspaceVisibility::Shown);
+}
+
+TEST_CASE("WindowSwitcher: a switch for a workspace no window here shows fails, saying so",
+          "[switch][link][guard]")
+{
+    auto rig = SwitchRig {};
+    auto replies = std::make_shared<std::vector<vthost::proto::SwitchReply>>();
+
+    // The window's connection is asked for its hidden workspace, which none of its windows shows.
+    auto const clients = rig.a.onDaemon(
+        [&rig] { return rig.a.host->clientsShowing(vtworkspace::WorkspaceId { rig.aWorkspaces[0] }); });
+    REQUIRE(clients.size() == 1);
+    rig.a.onDaemon([&rig, &clients, replies] {
+        rig.a.host->requestSwitch(
+            clients.front(),
+            vtworkspace::WorkspaceId { rig.aWorkspaces[1] },
+            vthost::proto::SwitchTargetWire {
+                .kind = SwitchDaemonKind::Label, .daemon = "b", .workspace = "2" },
+            [replies](vthost::proto::SwitchReply const& reply) { replies->push_back(reply); });
+        return 0;
+    });
+
+    REQUIRE(waitUntil([&] { return rig.a.onDaemon([&] { return !replies->empty(); }); }, 2000));
+    auto const reply = rig.a.onDaemon([&] { return replies->front(); });
+    CHECK(reply.outcome == SwitchOutcome::Failed);
+    CHECK(reply.detail == std::format("no window here shows workspace {}", rig.aWorkspaces[1]));
+    CHECK(rig.windowLink() == &rig.launchLink());
+}
+
+TEST_CASE("WindowSwitcher: a client that does not answer switch requests is still too old for one",
+          "[switch][link][guard]")
+{
+    auto rig = SwitchRig { contour::remote::NativeController::SwitchRequests::Declined };
+    auto api = ControlApi { rig.a };
+
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
+
+    auto const reply = awaitAnswer(api);
+    CHECK(reply.outcome == "failed");
+    CHECK(reply.detail == "the window cannot switch (client too old)");
+    CHECK(rig.windowLink() == &rig.launchLink());
+}
+
+TEST_CASE("WindowSwitcher: a real window shows each daemon's pane as it switches between them",
+          "[display][switch][link]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto rig = SwitchRig {};
+    printInPaneOf(rig.a, rig.aWorkspaces[0], "\r\nMARKER-FROM-ALPHA");
+    printInPaneOf(rig.b, rig.bWorkspaces[0], "\r\nMARKER-FROM-BRAVO");
+
+    // The window's display, made for the pane the window shows as the QML's Loader makes one per pane.
+    auto window = QQuickWindow {};
+    window.resize(800, 600);
+    window.show();
+    auto display = std::unique_ptr<contour::display::TerminalDisplay> {};
+    auto const showFirstPane = [&] {
+        REQUIRE(waitUntil([&] { return !rig.app.manager().sessionsOfWindow(rig.window->id).empty(); }));
+        display = std::make_unique<contour::display::TerminalDisplay>();
+        display->setParentItem(window.contentItem());
+        display->setSize(QSizeF(800, 600));
+        display->setSession(rig.app.manager().sessionsOfWindow(rig.window->id).front());
+    };
+    // Grabs frames until the display has drawn @p text, or the wait ends.
+    auto const drawn = [&](std::string_view text) {
+        return waitUntil([&] {
+            QCoreApplication::processEvents();
+            std::ignore = window.grabWindow();
+            return drawsText(display->session().terminal().renderBuffer().get(), text);
+        });
+    };
+    auto const drawsNow = [&](std::string_view text) {
+        return drawsText(display->session().terminal().renderBuffer().get(), text);
+    };
+
+    showFirstPane();
+    REQUIRE(drawn("MARKER-FROM-ALPHA"));
+    CHECK_FALSE(drawsNow("MARKER-FROM-BRAVO"));
+
+    // Switch in place to B: the display goes before the pane it shows does.
+    display.reset();
+    REQUIRE(rig.request(to(daemonB(), "1")) == SwitchOutcome::Switched);
+    showFirstPane();
+    REQUIRE(drawn("MARKER-FROM-BRAVO"));
+    CHECK_FALSE(drawsNow("MARKER-FROM-ALPHA"));
+
+    // And back: A's workspace kept running in its daemon, with what it showed.
+    display.reset();
+    REQUIRE(rig.request(to(daemonA(), "1")) == SwitchOutcome::Switched);
+    showFirstPane();
+    REQUIRE(drawn("MARKER-FROM-ALPHA"));
+    CHECK_FALSE(drawsNow("MARKER-FROM-BRAVO"));
+    display.reset();
+}

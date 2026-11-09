@@ -990,8 +990,13 @@ SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRest
         }
         realized.panes += inWorkspace.panes;
         if (inWorkspace.tabs > 0)
+        {
+            // A workspace put away stays put away; one a client showed was left by that client's end.
+            if (workspace.visibility == WorkspaceVisibility::Hidden)
+                noteWorkspaceReleased(id, proto::WorkspaceRelease::SwitchedAway);
             realized.workspaces.push_back(
                 RestoredWorkspace { .workspace = id.value, .tabs = inWorkspace.tabs });
+        }
     }
     sessionLog()("restore: {} pane(s) of a snapshot of {} workspace(s) came back",
                  realized.panes,
@@ -1278,6 +1283,7 @@ void SessionHost::discardWorkspace(WorkspaceId workspace)
     if (found == nullptr || found->tabCount() != 0)
         return;
     _workspaceCreators.erase(workspace.value);
+    _lastReleases.erase(workspace.value);
     _objects.forget(workspace);
     _model.removeWorkspace(workspace);
     // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
@@ -1296,7 +1302,27 @@ WorkspaceClaim SessionHost::workspaceClaim(WorkspaceId workspace,
                                                                    : WorkspaceClaim::Others;
 }
 
-void SessionHost::noteClientAttached(SessionStreamEvents const* client)
+void SessionHost::settleSwitch(uint32_t request, proto::SwitchReply reply)
+{
+    auto const found = _pendingSwitches.find(request);
+    if (found == _pendingSwitches.end())
+        return;
+    // Out of the map first: erasing it destroys the timeout, which may be what is running this.
+    auto const pending = std::move(found->second);
+    _pendingSwitches.erase(found);
+    reply.request = request;
+    pending->done(reply);
+}
+
+void SessionHost::completeSwitch(ConnectionId const& client, proto::SwitchReply const& reply)
+{
+    // Only the client that was asked can answer.
+    if (auto const found = _pendingSwitches.find(reply.request);
+        found != _pendingSwitches.end() && found->second->client == client)
+        settleSwitch(reply.request, reply);
+}
+
+void SessionHost::noteClientAttached(SessionStreamEvents* client)
 {
     if (!std::ranges::contains(_attachedClients, client))
         _attachedClients.push_back(client);
@@ -1306,6 +1332,16 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
 {
     if (std::erase(_attachedClients, client) == 0)
         return;
+    // A switch asked of a window that is gone will never be answered.
+    auto const gone = client->connectionId();
+    auto abandoned = std::vector<uint32_t> {};
+    for (auto const& [request, pending]: _pendingSwitches)
+        if (pending->client == gone)
+            abandoned.push_back(request);
+    for (auto const request: abandoned)
+        settleSwitch(
+            request,
+            proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
     if (_primaryViewer == client)
         _primaryViewer = nullptr;
     // Still claimed, by nobody present: a workspace a GUI left behind waits for the next launch that takes
@@ -1317,6 +1353,38 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
     for (auto& [workspace, creator]: _workspaceCreators)
         if (creator == client)
             creator = nullptr;
+}
+
+void SessionHost::noteWorkspaceReleased(WorkspaceId workspace, proto::WorkspaceRelease reason)
+{
+    // Only the last window showing it decides: while another still follows it, a window switching away
+    // does not hide it, and the other quitting later leaves it, as quitting does.
+    if (std::ranges::any_of(_attachedClients, [workspace](SessionStreamEvents const* client) {
+            return client->follows(workspace);
+        }))
+        _lastReleases.erase(workspace.value);
+    else
+        _lastReleases.insert_or_assign(workspace.value, reason);
+}
+
+void SessionHost::noteWorkspaceFollowed(WorkspaceId workspace)
+{
+    _lastReleases.erase(workspace.value);
+}
+
+WorkspaceVisibility SessionHost::visibility(WorkspaceId workspace) const
+{
+    auto const followers = static_cast<std::size_t>(
+        std::ranges::count_if(_attachedClients, [workspace](SessionStreamEvents const* client) {
+            return client->follows(workspace);
+        }));
+    return visibilityOf(followers, lastRelease(workspace));
+}
+
+std::optional<proto::WorkspaceRelease> SessionHost::lastRelease(WorkspaceId workspace) const noexcept
+{
+    auto const found = _lastReleases.find(workspace.value);
+    return found != _lastReleases.end() ? std::optional { found->second } : std::nullopt;
 }
 
 void SessionHost::claimPrimaryViewer(SessionStreamEvents const* client)
@@ -1772,9 +1840,20 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
 
 void SessionHost::writeInput(SessionId session, std::string_view bytes)
 {
+    writeInputAs(session, bytes, std::nullopt);
+}
+
+void SessionHost::writeInputFrom(SessionId session, std::string_view bytes, ConnectionId const& from)
+{
+    writeInputAs(session, bytes, from);
+}
+
+void SessionHost::writeInputAs(SessionId session, std::string_view bytes, std::optional<ConnectionId> from)
+{
     if (auto const it = _sessions.find(session.value); it != _sessions.end())
     {
-        _lastInput[session.value] = _loop.clock().now();
+        _lastInput.insert_or_assign(session.value,
+                                    LastInput { .at = _loop.clock().now(), .from = std::move(from) });
         it->second->writeInput(bytes);
     }
 }
@@ -1782,10 +1861,79 @@ void SessionHost::writeInput(SessionId session, std::string_view bytes)
 std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionId session) const
 {
     if (auto const it = _lastInput.find(session.value); it != _lastInput.end())
-        return it->second;
+        return it->second.at;
     return std::nullopt;
 }
 
+std::optional<ConnectionId> SessionHost::lastInputFrom(SessionId session) const
+{
+    if (auto const it = _lastInput.find(session.value); it != _lastInput.end())
+        return it->second.from;
+    return std::nullopt;
+}
+
+std::optional<ConnectionId> SessionHost::lastTypistIn(WorkspaceId workspace) const
+{
+    auto const* found = _model.workspace(workspace);
+    if (found == nullptr)
+        return std::nullopt;
+    auto newest = std::optional<LastInput> {};
+    for (auto const index: std::views::iota(0, found->tabCount()))
+        for (auto const session: found->tabAt(index)->leafSessions())
+        {
+            auto const input = _lastInput.find(session.value);
+            if (input != _lastInput.end() && (!newest || input->second.at > newest->at))
+                newest = input->second;
+        }
+    return newest ? newest->from : std::nullopt;
+}
+
+std::vector<ConnectionId> SessionHost::clientsShowing(WorkspaceId workspace) const
+{
+    auto showing = std::vector<ConnectionId> {};
+    for (auto const* client: _attachedClients)
+        if (client->follows(workspace))
+            showing.push_back(client->connectionId());
+    return showing;
+}
+
+void SessionHost::requestSwitch(ConnectionId const& client,
+                                vtworkspace::WorkspaceId workspace,
+                                proto::SwitchTargetWire target,
+                                SwitchCompletion done)
+{
+    auto const found = std::ranges::find_if(_attachedClients, [&](SessionStreamEvents const* attached) {
+        return attached->connectionId() == client;
+    });
+    if (found == _attachedClients.end())
+    {
+        done(
+            proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
+        return;
+    }
+    if (!(*found)->canSwitch())
+    {
+        done(proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed,
+                                  .detail = "the window cannot switch (client too old)" });
+        return;
+    }
+    auto const request = ++_nextSwitchRequest;
+    auto pending = std::make_unique<PendingSwitch>(this, request, client, std::move(done));
+    pending->timeout.emplace(
+        _loop,
+        _loop.clock().now() + SwitchAnswerTimeout,
+        [](void* state) {
+            auto const& expired = *static_cast<PendingSwitch*>(state);
+            expired.host->settleSwitch(expired.request,
+                                       proto::SwitchReply { .request = expired.request,
+                                                            .outcome = proto::SwitchOutcome::Failed,
+                                                            .detail = "no answer from the window" });
+        },
+        pending.get());
+    _pendingSwitches.insert_or_assign(request, std::move(pending));
+    (*found)->requestSwitch(proto::SwitchRequest {
+        .request = request, .workspace = workspace.value, .target = std::move(target) });
+}
 void SessionHost::eraseSession(uint64_t session)
 {
     forgetPaneRefinements(session);

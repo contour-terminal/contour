@@ -470,3 +470,29 @@ TEST_CASE("DaemonRuntime states whether its daemon may move onto its staged copy
     CHECK(statusOf(vthost::RelocationRequest::Allowed)->relocation
           == std::to_underlying(vthost::RelocationRequest::Allowed));
 }
+
+// Review (PR 3, item 5): the switcher's "N workspaces" came from the session count.
+TEST_CASE("DaemonRuntime counts the workspaces it holds, not its sessions", "[vthost][runtime]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    // Three sessions in one workspace, and a second workspace of one.
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.createWorkspace() != nullptr);
+    auto runtime = vthost::DaemonRuntime { { .releaseVersion = "0.9.0",
+                                             .processId = 1,
+                                             .socketPath = "/run/c/default",
+                                             .executablePath = "/s/bin/contour",
+                                             .logFile = {},
+                                             .lifecycle = vthost::DaemonLifecycle::Persistent,
+                                             .upgradeGeneration = 0,
+                                             .relocationRequest = vthost::RelocationRequest::Allowed },
+                                           h.host,
+                                           clock,
+                                           [](vthost::ShutdownCause) {} };
+    auto const status = runtime.status();
+    REQUIRE(status.has_value());
+    CHECK(status->workspaces == std::optional { uint32_t { 2 } });
+    CHECK(status->sessions == 4);
+}

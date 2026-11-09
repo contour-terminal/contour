@@ -96,6 +96,14 @@ struct ControllerOptions
     vthost::client::BackoffSchedule backoff = {};
     /// The directory its first hello asks the attach's session to start in; empty for the profile's.
     std::filesystem::path workingDirectory = {};
+    /// Which of the daemon's workspaces it shows; a launch of everything left by default. A test of two
+    /// clients that share a session names the workspace in each: a second plain launch is given a workspace
+    /// of its own.
+    vthost::proto::AttachIntent intent = { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                           .workspaces = {} };
+    /// Whether the daemon may ask it to switch its windows; it may, as the GUI's.
+    contour::remote::NativeController::SwitchRequests switchRequests =
+        contour::remote::NativeController::SwitchRequests::Answered;
 };
 
 /// What a controller is built with in every test here: no attach settings of its own, on the steady clock.
@@ -109,8 +117,7 @@ struct ControllerOptions
 {
     return contour::remote::NativeController::Config {
         .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
-        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                .workspaces = {} },
+        .intent = std::move(options.intent),
         .profileName = std::string {},
         .workingDirectory = std::move(options.workingDirectory),
         .attachSettings = std::move(options.attachSettings),
@@ -120,6 +127,7 @@ struct ControllerOptions
         .timeline = timeline.timeline,
         .powerMonitor = options.powerMonitor,
         .backoff = options.backoff,
+        .switchRequests = options.switchRequests,
     };
 }
 

@@ -303,6 +303,14 @@ inline constexpr auto Methods = std::tuple {
         R"({"tab":"2"})",
         R"({})",
     },
+    Method<SwitchWorkspaceRequest, SwitchWorkspaceReply> {
+        "workspace.switch",
+        "Switch the window showing a workspace to another workspace or daemon.",
+        Permission::Write,
+        Exposure::SocketOnly,
+        R"({"workspace":"","toLabel":"admin","toHost":"","toWorkspace":"build"})",
+        R"({"outcome":"switched","detail":""})",
+    },
     Method<SetLabelRequest, EmptyReply> {
         "object.setLabel",
         "Give a workspace, tab or pane a label to address it by; an empty label clears it.",

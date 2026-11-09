@@ -70,6 +70,8 @@ struct DaemonStatus
     /// Whether it may move onto its staged copy (`--in-place` refuses it). nullopt for a daemon from before
     /// it states this, or one that states a request this version does not know.
     std::optional<RelocationRequest> relocation {};
+    /// How many workspaces it holds; nullopt for a daemon from before it states them.
+    std::optional<std::size_t> workspaces {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.

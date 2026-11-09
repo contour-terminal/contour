@@ -20,6 +20,14 @@ enum class DaemonLocality : uint8_t
     Local,      ///< This machine's own daemon.
 };
 
+/// Whether this client restarts and upgrades a daemon from its drift badge: a local daemon is not enough, for
+/// a restart relaunches this process with its own arguments, which come back on the daemon it launched on.
+enum class DaemonUpkeep : uint8_t
+{
+    None = 0, ///< Not this client's to restart or upgrade: a remote daemon, or a local one a switch reached.
+    ThisClient, ///< The daemon this client launched on (and started, when none served): local by definition.
+};
+
 /// What the drift chip offers.
 enum class DriftOffer : uint8_t
 {

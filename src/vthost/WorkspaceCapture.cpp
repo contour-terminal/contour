@@ -198,7 +198,8 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
         auto captured = WorkspaceLayoutSnapshot {
             .identity = identityOf(
                 host.objects(), vtcontrol::ObjectKind::Workspace, host.objects().uuidOf(workspace->id())),
-            .activeTab = static_cast<std::uint32_t>(std::max(workspace->activeTabIndex(), 0))
+            .activeTab = static_cast<std::uint32_t>(std::max(workspace->activeTabIndex(), 0)),
+            .visibility = host.visibility(workspace->id())
         };
         for (auto const tabIndex: std::views::iota(0, workspace->tabCount()))
         {

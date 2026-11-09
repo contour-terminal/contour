@@ -7,6 +7,7 @@
 #include <contour/command/TitleBarContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/HostUrl.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
@@ -21,6 +22,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -95,15 +97,19 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _profileCommands { manager.app().config() },
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
+    _daemonCommands { *this },
     _boundCommands { manager.app().config().inputMappings.value() },
+    _gatedBoundCommands { _boundCommands, *this },
+    _gatedActionCommands { _actionCommands, *this },
     _commandPalette { std::make_unique<CommandPaletteModel>(
         manager.commandHistory(),
         std::vector<command::CommandSource const*> { &_tabCommands,
                                                      &_profileCommands,
                                                      &_layoutCommands,
                                                      &_hostCommands,
-                                                     &_boundCommands,
-                                                     &_actionCommands },
+                                                     &_daemonCommands,
+                                                     &_gatedBoundCommands,
+                                                     &_gatedActionCommands },
         command::shortcutStyleFor(manager.app().config().keyboardPlatformKind),
         this) },
     _menuPresentation { menuPresentation },
@@ -414,8 +420,13 @@ void WindowController::runSurfaceAction(MenuSurface surface,
 
 QString WindowController::hostLabel() const
 {
-    auto const label = _manager.hostLabelOf(_windowId);
+    auto const label = _manager.chromeLabelOf(_windowId);
     return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
+}
+
+QObject* WindowController::daemonDrift() const
+{
+    return _manager.daemonDriftOf(_windowId);
 }
 
 QString WindowController::shortcutText(QString const& commandName) const
@@ -440,7 +451,7 @@ QString WindowController::applicationVersion() const
 QString WindowController::windowTitle(QString const& sessionTitle) const
 {
     return QString::fromStdString(
-        remoteWindowTitle(_manager.hostLabelOf(_windowId), sessionTitle.toStdString()));
+        remoteWindowTitle(_manager.chromeLabelOf(_windowId), sessionTitle.toStdString()));
 }
 
 void WindowController::openTitleBarContextMenu()
@@ -528,6 +539,41 @@ void WindowController::runCommand(QString const& id)
     // application (Quit), and a command that quits must still be remembered as the last one used.
     _manager.recordCommand(target->id);
     session->executeAction(action);
+}
+
+command::DaemonSwitching WindowController::switchingAvailability() const
+{
+    return _manager.daemonTargetOf(_windowId) ? command::DaemonSwitching::Available
+                                              : command::DaemonSwitching::Unavailable;
+}
+
+command::DaemonRowsState WindowController::daemonRows() const
+{
+    auto state = command::DaemonRowsState {};
+    auto const target = _manager.daemonTargetOf(_windowId);
+    if (!target)
+        return state;
+    state.switching = command::DaemonSwitching::Available;
+
+    using Kind = vthost::proto::SwitchDaemonKind;
+    if (target->kind == Kind::Label)
+        state.current = actions::DaemonRef { actions::DaemonRefKind::Label, target->daemon };
+    else if (target->kind == Kind::Host)
+        state.current = actions::DaemonRef { actions::DaemonRefKind::Host, target->daemon };
+
+    auto& directory = _manager.switchDirectory();
+    directory.refresh();
+    for (auto const& daemon: directory.localDaemons())
+        state.localDaemons.push_back({ .label = daemon.label, .workspaces = daemon.workspaces });
+    for (auto const& [name, entry]: _manager.app().config().hosts.value())
+        state.hosts.push_back({ .name = name, .hint = config::toString(entry.url) });
+    for (auto const& workspace: directory.workspacesOf(_windowId))
+        state.workspaces.push_back({ .position = workspace.position,
+                                     .name = workspace.name,
+                                     .role = workspace.role == session::WorkspaceRole::Current
+                                                 ? command::WorkspaceRowRole::Current
+                                                 : command::WorkspaceRowRole::Other });
+    return state;
 }
 
 std::vector<std::string> WindowController::tabTitles() const
@@ -2253,7 +2299,7 @@ TitleBand WindowController::titleBand() const
         .mode = windowMode(),
         .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
         .position = _tabBarPosition,
-        .notice = hostNoticeOf(hostChipPresence(_manager.hostLabelOf(_windowId)),
+        .notice = hostNoticeOf(hostChipPresence(_manager.chromeLabelOf(_windowId)),
                                hostChipStateOf(_manager.hostConnection(_windowId))),
     });
 }

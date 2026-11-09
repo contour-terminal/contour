@@ -166,6 +166,62 @@ TEST_CASE("Actions: AttachToHost maps by name, and needs a host to run", "[actio
         contour::actions::Action { contour::actions::AttachToHost { .name = "home" } }));
 }
 
+TEST_CASE("Actions: the daemon and workspace switching actions are named, bare-runnable or not",
+          "[actions][switch]")
+{
+    using namespace contour::actions;
+    for (auto const* name: { "SwitchToWorkspace",
+                             "OpenWorkspace",
+                             "CycleWorkspace",
+                             "CycleDaemon",
+                             "SwitchToDaemon",
+                             "OpenDaemon",
+                             "ShowSwitcher",
+                             "NewDaemon" })
+    {
+        INFO("action: " << name);
+        auto const action = fromString(name);
+        REQUIRE(action.has_value());
+        // A held key must not bounce a window through the whole ring, or open a window per repeat.
+        CHECK(isNonRepeatable(*action));
+    }
+
+    // Naming no workspace or daemon, these are not runnable bare; cycling, the popup and the prompt are.
+    CHECK(isParameterized(Action { SwitchToWorkspace {} }));
+    CHECK(isParameterized(Action { OpenWorkspace {} }));
+    CHECK(isParameterized(Action { SwitchToDaemon {} }));
+    CHECK(isParameterized(Action { OpenDaemon {} }));
+    CHECK_FALSE(isParameterized(Action { CycleWorkspace {} }));
+    CHECK_FALSE(isParameterized(Action { CycleDaemon {} }));
+    CHECK_FALSE(isParameterized(Action { ShowSwitcher {} }));
+    CHECK_FALSE(isParameterized(Action { NewDaemon {} }));
+}
+
+TEST_CASE("Actions: isDaemonSwitching names exactly the switching actions", "[actions][switch]")
+{
+    using namespace contour::actions;
+    CHECK(isDaemonSwitching(Action { CycleDaemon {} }));
+    CHECK(isDaemonSwitching(Action { OpenWorkspace {} }));
+    CHECK(isDaemonSwitching(Action { NewDaemon {} }));
+    CHECK_FALSE(isDaemonSwitching(Action { AttachToHost {} }));
+    CHECK_FALSE(isDaemonSwitching(Action { NewWindowTo {} }));
+}
+
+TEST_CASE("Actions: the switching actions write their arguments as the keys they are read from",
+          "[actions][switch]")
+{
+    using namespace contour::actions;
+    CHECK(std::format("{}", Action { SwitchToWorkspace { 3 } }) == "SwitchToWorkspace, index: 3");
+    CHECK(std::format("{}", Action { OpenWorkspace { 4 } }) == "OpenWorkspace, index: 4");
+    CHECK(std::format("{}", Action { CycleDaemon { CycleDirection::Previous } })
+          == "CycleDaemon, direction: previous");
+    CHECK(std::format("{}", Action { CycleWorkspace {} }) == "CycleWorkspace, direction: next");
+    CHECK(std::format("{}", Action { SwitchToDaemon { { DaemonRefKind::Label, "admin" } } })
+          == "SwitchToDaemon, label: 'admin'");
+    CHECK(std::format("{}", Action { OpenDaemon { { DaemonRefKind::Host, "studio" } } })
+          == "OpenDaemon, host: 'studio'");
+}
+
 TEST_CASE("Actions: SaveLayout maps by name", "[actions][layout]")
 {
     auto const action = contour::actions::fromString("SaveLayout");

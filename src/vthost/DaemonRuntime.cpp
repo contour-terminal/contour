@@ -98,6 +98,7 @@ std::expected<proto::DaemonStatusReply, DaemonControlError> DaemonRuntime::statu
         .lifecycle = std::to_underlying(_config.lifecycle),
         .upgrade = upgradeRecordOf(_config.upgradeGeneration, _upgradeAttempts, _lastUpgradeFailure),
         .relocation = std::to_underlying(_config.relocationRequest),
+        .workspaces = wireCount(_host.workspaceCount()),
     };
 }
 

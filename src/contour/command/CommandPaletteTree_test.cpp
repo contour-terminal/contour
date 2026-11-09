@@ -135,6 +135,7 @@ TEST_CASE("paletteTree.groupsFollowTheTable", "[palettetree]")
                                                                                   "Blocks",
                                                                                   "Profiles",
                                                                                   "Hosts",
+                                                                                  "Daemons",
                                                                                   "Edit",
                                                                                   "View",
                                                                                   "Shell",

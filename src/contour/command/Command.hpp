@@ -26,6 +26,7 @@ enum class CommandCategory : std::uint8_t
     Blocks,   ///< Shell-integration command blocks and their folds.
     Profiles, ///< Configured profiles.
     Hosts,    ///< Saved remote hosts.
+    Daemons,  ///< Daemons and workspaces: switching a window between them.
     Edit,     ///< Selection, clipboard, hyperlinks and search.
     View,     ///< Font size, opacity and scrolling.
     Shell,    ///< The terminal session itself: resets, modes, screenshots, tracing.

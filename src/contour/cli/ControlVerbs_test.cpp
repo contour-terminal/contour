@@ -8,6 +8,7 @@
 #include <contour/config/HostUrl.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/async/StopToken.hpp>
 #include <core/platform/Clock.hpp>
@@ -36,6 +37,7 @@
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/Wit.hpp>
+#include <vthost/SocketPath.hpp>
 #include <vthost/StdioChild.hpp>
 
 using namespace std::string_literals;
@@ -857,4 +859,102 @@ TEST_CASE("events --json prints each event as received; Ctrl+C is 130", "[contou
     CHECK(contour::cli::runControlVerb(
               verbNamed("events"), parseFlags({ "events", "--follow" }), channel, run.io())
           == 130);
+}
+
+TEST_CASE("switch builds workspace.switch from its destination flags", "[contour][cli][control][switch]")
+{
+    auto const build = [](std::vector<std::string_view> const& args) {
+        return verbNamed("switch").buildParams(parseFlags(args));
+    };
+    CHECK(build({ "switch", "--to-label", "admin" })
+          == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .toLabel = "admin" }));
+    CHECK(build({ "switch", "--workspace", "w1", "--to-host", "box", "--to-workspace", "build" })
+          == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest {
+              .workspace = "w1", .toHost = "box", .toWorkspace = "build" }));
+    CHECK(build({ "switch", "--to-workspace", "2" })
+          == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .toWorkspace = "2" }));
+    // An ad-hoc ssh:// host is accepted, and travels as given.
+    CHECK(build({ "switch", "--to-host", "ssh://me@h" })
+          == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .toHost = "ssh://me@h" }));
+}
+
+TEST_CASE("switch refuses what cannot be a destination", "[contour][cli][control][switch]")
+{
+    auto run = Run {};
+    auto channel = ScriptedChannel { "{}"s };
+    auto const status = [&](std::vector<std::string_view> const& args) {
+        run.err.str({});
+        return contour::cli::runControlVerb(verbNamed("switch"), parseFlags(args), channel, run.io());
+    };
+
+    CHECK(status({ "switch", "--to-host", "tls://h:1" }) == 2);
+    CHECK(run.err.str().contains("save it first"));
+    CHECK(status({ "switch" }) == 2);
+    CHECK(run.err.str().contains("needs a destination"));
+    CHECK(status({ "switch", "--to-label", "a", "--to-host", "b" }) == 2);
+    CHECK(channel.calls.empty());
+}
+
+TEST_CASE("switch sends the caller's pane and exits by the window's outcome",
+          "[contour][cli][control][switch]")
+{
+    struct Row
+    {
+        std::string_view outcome;
+        int status;
+        bool hasError;
+    };
+    auto const rows = std::array {
+        Row { "switched", 0, false }, Row { "focused", 0, false }, Row { "picker", 0, false },
+        Row { "refused", 5, true },   Row { "failed", 1, true },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.outcome);
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::format(R"({{"outcome":"{}","detail":"why"}})", row.outcome) };
+        CHECK(contour::cli::runControlVerb(
+                  verbNamed("switch"), parseFlags({ "switch", "--to-label", "admin" }), channel, run.io())
+              == row.status);
+        REQUIRE(channel.calls.size() == 1);
+        CHECK(channel.calls.front().method == "workspace.switch");
+        CHECK(channel.calls.front().context == "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad");
+        CHECK(run.err.str().contains("Error: why") == row.hasError);
+        CHECK(run.out.str().contains(row.outcome) == !row.hasError);
+    }
+}
+
+TEST_CASE("switch exits 3 when no window shows the workspace, 3 again when several do",
+          "[contour][cli][control][switch]")
+{
+    for (auto const code: { vtcontrol::ControlErrorCode::NotFound, vtcontrol::ControlErrorCode::Ambiguous })
+    {
+        auto run = Run {};
+        auto channel = ScriptedChannel { std::unexpected(remoteError(code, "nobody")) };
+        CHECK(contour::cli::runControlVerb(
+                  verbNamed("switch"), parseFlags({ "switch", "--to-label", "admin" }), channel, run.io())
+              == 3);
+    }
+}
+
+TEST_CASE("--daemon and --label exclude each other, and --label names a local daemon",
+          "[contour][cli][control]")
+{
+    SECTION("both is bad usage on every verb")
+    {
+        auto run = Run {};
+        CHECK(contour::cli::runControlVerb(
+                  verbNamed("ls"), parseFlags({ "ls", "--daemon", "/x", "--label", "work" }), run.io())
+              == 2);
+        CHECK(run.err.str() == "Error: --daemon and --label exclude each other\n");
+    }
+    SECTION("a label with no daemon behind it is unreachable, naming its socket")
+    {
+        auto run = Run {};
+        CHECK(contour::cli::runControlVerb(verbNamed("ls"), parseFlags({ "ls", "--label", "work" }), run.io())
+              == 4);
+        INFO(run.err.str());
+        CHECK(run.err.str().contains(
+            core::pathToUtf8(vthost::muxSocketPath(vthost::socketLabelOf("work"), {}, run.env))));
+    }
 }

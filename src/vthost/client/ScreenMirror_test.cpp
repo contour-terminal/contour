@@ -5408,6 +5408,8 @@ struct AttachedClient
     /// @param loop The loop both ends run on.
     /// @param host The host to attach to.
     /// @param index The connection's number, for the host's log.
+    /// The client follows the host's own workspace by name, so two of them show the same sessions: a plain
+    /// launch of a second client is given a workspace of its own.
     AttachedClient(core::net::EventLoop& loop, SessionHost& host, uint64_t index):
         pair { *core::net::testing::makeSocketPair(loop) },
         server { std::make_unique<NativeSession>(
@@ -5426,7 +5428,10 @@ struct AttachedClient
         client = std::make_unique<NativeClient>(
             loop,
             std::move(pair.second),
-            NativeClient::HandshakeOptions {},
+            NativeClient::HandshakeOptions {
+                .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
+                .attachIntent = { .kind = proto::AttachIntentKind::Workspaces,
+                                  .workspaces = { host.workspaceId().value } } },
             vtbackend::CommandBlockStoreLimits {},
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {

@@ -534,6 +534,9 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
 TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");
+    // A switch still asked about is refused: its control call is answered rather than left to time out.
+    if (auto pending = std::exchange(_pendingSwitch, std::nullopt); pending && pending->answered)
+        pending->answered(PermissionDecision::Deny, PermissionMemory::Once);
     // First: a path probe that answers from now on finds nothing to hand its result to.
     _postTarget->withdraw();
     _terminating = true;
@@ -1217,13 +1220,15 @@ void TerminalSession::executeRole(GuardedRole role, PermissionDecision decision,
             break;
         case GuardedRole::BigPaste: applyPendingPaste(decision, memory); break;
         case GuardedRole::RerunCommand: applyPendingRerun(decision, memory); break;
+        case GuardedRole::SwitchWindow: applyPendingSwitch(decision, memory); break;
     }
 }
 
 void TerminalSession::concludeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
 {
-    // Persistent stands for the session too: a guarded role has nowhere persistent to keep it.
-    if (memory != PermissionMemory::Once)
+    // Persistent stands for the session too: a guarded role has nowhere persistent to keep it. A role whose
+    // asker keeps the answer was handed the memory with it.
+    if (memory != PermissionMemory::Once && guardedRoleRow(role).remembered == RememberedIn::Session)
         _rememberedPermissions[role] = decision;
 
     // Whoever answered -- the user, the configuration or a remembered answer -- this drains what the role's
@@ -1326,6 +1331,11 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
                 subject, _pendingBigPaste->text.size() * _pendingBigPaste->count, _pendingBigPaste->preview);
         case GuardedRole::RerunCommand:
             return rerunPrompt(_pendingRerun ? _pendingRerun->display() : std::string {});
+        case GuardedRole::SwitchWindow:
+            if (!_pendingSwitch)
+                return switchWindowPrompt(SwitchTarget {}, {}, SwitchRemembering::Withheld);
+            return switchWindowPrompt(
+                _pendingSwitch->target, _pendingSwitch->sourceDaemon, _pendingSwitch->remembering);
     }
     return std::nullopt;
 }
@@ -2838,6 +2848,35 @@ namespace
         return "";
     }
 } // namespace
+
+uint64_t TerminalSession::askToSwitchWindow(SwitchAsk ask)
+{
+    // The one waiting is answered first, and only then replaced: what it is told may not reach this one.
+    if (auto replaced = std::exchange(_pendingSwitch, std::nullopt); replaced && replaced->answered)
+        replaced->answered(PermissionDecision::Deny, PermissionMemory::Once);
+    _pendingSwitch = std::move(ask);
+    auto const asked = ++_switchAsks;
+    // Configured nowhere and remembered by the asker, so this asks: offered, or re-presented when shown.
+    requestPermission(configuredPermissionFor(GuardedRole::SwitchWindow), GuardedRole::SwitchWindow);
+    return asked;
+}
+
+void TerminalSession::withdrawSwitchAsk(uint64_t asked)
+{
+    if (!_pendingSwitch || asked != _switchAsks)
+        return;
+    _pendingSwitch.reset();
+    withdrawPermissionAsk(GuardedRole::SwitchWindow);
+}
+
+void TerminalSession::applyPendingSwitch(PermissionDecision decision, PermissionMemory memory)
+{
+    sessionLog()("applyPendingSwitch: {}, {}", decision, memory);
+    concludeRole(GuardedRole::SwitchWindow, decision, memory);
+    // Taken out before it is told: what it is told may switch the window, and so destroy this session.
+    if (auto pending = std::exchange(_pendingSwitch, std::nullopt); pending && pending->answered)
+        pending->answered(decision, memory);
+}
 
 void TerminalSession::applyPendingRerun(PermissionDecision decision, PermissionMemory memory)
 {
@@ -7407,6 +7446,76 @@ bool TerminalSession::operator()(actions::AttachToHost const& event)
     if (auto const started = _app.externalLauncher().runDetached(command.program, command.arguments);
         !started)
         errorLog()("Could not attach to host \"{}\": {}.", event.name, platform::describe(started.error()));
+    return true;
+}
+
+namespace
+{
+    /// @param daemon The daemon a switching action names.
+    /// @return The switch target for it, naming no workspace (the switcher decides).
+    [[nodiscard]] SwitchTarget switchTargetOf(actions::DaemonRef const& daemon)
+    {
+        return { .kind = daemon.kind == actions::DaemonRefKind::Host ? vthost::proto::SwitchDaemonKind::Host
+                                                                     : vthost::proto::SwitchDaemonKind::Label,
+                 .daemon = daemon.name,
+                 .workspace = {} };
+    }
+} // namespace
+
+bool TerminalSession::operator()(actions::SwitchToWorkspace const& event)
+{
+    // By position alone: a workspace labelled with a number is not taken for it.
+    _manager->requestSwitch(*this,
+                            { .kind = vthost::proto::SwitchDaemonKind::Same,
+                              .daemon = {},
+                              .workspace = WorkspaceAt { .position = event.index } },
+                            SwitchMode::Switch);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::OpenWorkspace const& event)
+{
+    _manager->requestSwitch(*this,
+                            { .kind = vthost::proto::SwitchDaemonKind::Same,
+                              .daemon = {},
+                              .workspace = WorkspaceAt { .position = event.index } },
+                            SwitchMode::Open);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CycleWorkspace const& event)
+{
+    _manager->cycleWorkspace(*this, event.direction);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CycleDaemon const& event)
+{
+    _manager->cycleDaemon(*this, event.direction);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SwitchToDaemon const& event)
+{
+    _manager->requestSwitch(*this, switchTargetOf(event.daemon), SwitchMode::Switch);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::OpenDaemon const& event)
+{
+    _manager->requestSwitch(*this, switchTargetOf(event.daemon), SwitchMode::Open);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ShowSwitcher)
+{
+    _manager->showSwitcher(*this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::NewDaemon)
+{
+    _manager->newDaemon(*this);
     return true;
 }
 

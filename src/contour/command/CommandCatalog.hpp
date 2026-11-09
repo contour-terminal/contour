@@ -4,6 +4,9 @@
 #include <contour/command/Command.hpp>
 #include <contour/config/Config.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -101,6 +104,109 @@ class HostCommandSource final: public CommandSource
 
   private:
     config::Config const& _config;
+};
+
+/// Whether a window has a daemon behind it to switch between.
+enum class DaemonSwitching : uint8_t
+{
+    Unavailable = 0, ///< Its sessions run in-process: every switching action is hidden and a no-op.
+    Available,       ///< A daemon hosts its sessions.
+};
+
+/// A local daemon, as the daemon rows list it.
+struct LocalDaemonRow
+{
+    std::string label;                     ///< Its socket label.
+    std::optional<std::size_t> workspaces; ///< How many workspaces it hosts, when known.
+};
+
+/// A saved host, as the daemon rows list it.
+struct HostRow
+{
+    std::string name; ///< Its name under `hosts:`.
+    std::string hint; ///< Where it is (the row's footer).
+};
+
+/// A workspace of the window's daemon, as the daemon rows list it.
+/// Whether a workspace row is the one the asking window shows.
+enum class WorkspaceRowRole : uint8_t
+{
+    Other = 0, ///< Another window shows it, or none does.
+    Current,   ///< The window shows it: no row switches to it.
+};
+
+struct WorkspaceRow
+{
+    uint32_t position = 0; ///< 1-based position among the daemon's workspaces.
+    std::string name;      ///< Label, else the active tab's title, else "workspace N".
+    WorkspaceRowRole role = WorkspaceRowRole::Other; ///< Whether the window shows it.
+};
+
+/// What the daemon rows are made of, for one window at one moment.
+struct DaemonRowsState
+{
+    DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether there is a daemon to switch.
+    std::optional<actions::DaemonRef> current; ///< The daemon the window is on; none when unknown.
+    std::vector<LocalDaemonRow> localDaemons;  ///< The running local daemons, from the cached discovery.
+    std::vector<HostRow> hosts;                ///< The saved hosts.
+    std::vector<WorkspaceRow> workspaces;      ///< The workspaces of the window's daemon.
+};
+
+/// Where the daemon rows' state comes from. An interface so DaemonCommandSource is tested without a window
+/// or a daemon; the window implements it. Never blocks: it answers from caches.
+class DaemonRowsProvider
+{
+  public:
+    DaemonRowsProvider() = default;
+    DaemonRowsProvider(DaemonRowsProvider const&) = delete;
+    DaemonRowsProvider(DaemonRowsProvider&&) = delete;
+    DaemonRowsProvider& operator=(DaemonRowsProvider const&) = delete;
+    DaemonRowsProvider& operator=(DaemonRowsProvider&&) = delete;
+    virtual ~DaemonRowsProvider() = default;
+
+    /// @return Whether the window has a daemon behind it. Cheap: no caches are refreshed.
+    [[nodiscard]] virtual DaemonSwitching switchingAvailability() const = 0;
+
+    /// @return The state now. The palette asks each time it opens, which is also when the caches behind
+    ///         it start refreshing.
+    [[nodiscard]] virtual DaemonRowsState daemonRows() const = 0;
+};
+
+/// The daemon and workspace switching rows: switch to or open every other daemon (local, then saved
+/// host) and every other workspace of this window's daemon, step to the next or previous daemon or
+/// workspace, show the switcher, and start a new daemon.
+///
+/// Empty for a window with no daemon behind it.
+class DaemonCommandSource final: public CommandSource
+{
+  public:
+    /// @param rows Where the state comes from. Must outlive this source.
+    explicit DaemonCommandSource(DaemonRowsProvider const& rows) noexcept: _rows { rows } {}
+
+    [[nodiscard]] std::vector<Command> commands() const override;
+
+  private:
+    DaemonRowsProvider const& _rows;
+};
+
+/// Passes on another source's commands, minus the daemon and workspace switching actions when the window
+/// has no daemon behind it. Wraps the sources that offer actions without knowing the window: the bound
+/// ones and the catalog's floor.
+class SwitchingGatedSource final: public CommandSource
+{
+  public:
+    /// @param inner The source to pass on. Must outlive this one.
+    /// @param rows Tells whether the window has a daemon. Must outlive this source.
+    SwitchingGatedSource(CommandSource const& inner, DaemonRowsProvider const& rows) noexcept:
+        _inner { inner }, _rows { rows }
+    {
+    }
+
+    [[nodiscard]] std::vector<Command> commands() const override;
+
+  private:
+    CommandSource const& _inner;
+    DaemonRowsProvider const& _rows;
 };
 
 /// One LaunchLayout command per saved layout.

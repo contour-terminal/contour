@@ -4768,6 +4768,30 @@ TEST_CASE("TerminalSessionManager: a new window is the host's to author from a w
     contour::test::closeAllTabs(*local);
 }
 
+TEST_CASE("TerminalSessionManager: a daemon session is found only in the pane that shows it",
+          "[manager][link][move]")
+{
+    auto links = TwoLinks {};
+    auto& manager = links.manager;
+    auto const host = manager.hostIdentity(links.windowB.id);
+    auto const right = manager.hostSessionIdOf(*links.rightB);
+    auto const left = manager.hostSessionIdOf(*links.leftB);
+    REQUIRE(right.has_value());
+    REQUIRE(left.has_value());
+    REQUIRE(manager.sessionForHostId(host, *right) == links.rightB);
+
+    // Closed out of its pane, as a reconcile closes the copy of a pane a move took to another window: its tab
+    // stays (the other pane is still in it), and the session stays registered until its end is delivered.
+    auto const closed = links.rightB->modelSessionId();
+    manager.closeActivePane(links.rightB, contour::session::SessionEnd::Detach);
+    REQUIRE(manager.sessionForId(closed) == links.rightB);
+    REQUIRE(manager.model().workspace(links.windowB.id)->tabAt(0)->paneCount() == 1);
+
+    // The daemon's session is shown nowhere here now, whatever the registry still holds; its neighbour is.
+    CHECK(manager.sessionForHostId(host, *right) == nullptr);
+    CHECK(manager.sessionForHostId(host, *left) == links.leftB);
+}
+
 TEST_CASE("TerminalSessionManager: each window names its sessions as its own host does", "[manager][link]")
 {
     auto links = TwoLinks {};
@@ -4945,8 +4969,12 @@ class ReleaseCountingBinding final: public contour::session::WindowBinding
 
     [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
     [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    void windowClosed(vtworkspace::WorkspaceId window) override { closed.push_back(window); }
     void lastWindowReleased() override { ++releases; }
 
+    /// Every window windowClosed() was told of, in order.
+    std::vector<vtworkspace::WorkspaceId> closed;
     /// How often lastWindowReleased() was told.
     int releases = 0;
 
@@ -4976,11 +5004,13 @@ TEST_CASE("TerminalSessionManager: a binding is told when its last window closes
         CHECK(windowsOf(manager, counting) == std::vector { third.id, fourth.id });
 
         manager.removeWindowController(third.id);
+        CHECK(counting.closed == std::vector { third.id });
         CHECK(counting.releases == 0);
         CHECK(windowsOf(manager, counting) == std::vector { fourth.id });
         CHECK(manager.bindingOf(third.id) == nullptr);
 
         manager.removeWindowController(fourth.id);
+        CHECK(counting.closed == std::vector { third.id, fourth.id });
         CHECK(counting.releases == 1);
         CHECK(manager.windowsBoundTo(counting).empty());
     }
@@ -5024,6 +5054,8 @@ TEST_CASE("TerminalSessionManager: a window bound anew leaves the binding it had
     CHECK(windowsOf(manager, to) == std::vector { window.id, other.id });
     CHECK(from.releases == 1);
     CHECK(to.releases == 0);
+    // A window bound elsewhere was not closed.
+    CHECK(from.closed.empty());
     manager.releaseBinding(to);
     CHECK(manager.windowsBoundTo(to).empty());
     CHECK(to.releases == 0);

@@ -133,3 +133,18 @@ TEST_CASE("the soft-fonts capability keeps its ident and name", "[vthost][negoti
     REQUIRE(row != CapabilityTable.end());
     CHECK(row->name == "soft-fonts");
 }
+
+TEST_CASE("the workspace follow and switch capabilities keep their idents and names",
+          "[vthost][negotiation][workspace-follow]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::WorkspaceFollow) == 23);
+    STATIC_CHECK(std::to_underlying(Capability::WorkspaceSwitch) == 24);
+    auto const follow =
+        std::ranges::find(CapabilityTable, Capability::WorkspaceFollow, &CapabilityRow::capability);
+    auto const change =
+        std::ranges::find(CapabilityTable, Capability::WorkspaceSwitch, &CapabilityRow::capability);
+    REQUIRE(follow != CapabilityTable.end());
+    REQUIRE(change != CapabilityTable.end());
+    CHECK(follow->name == "workspace-follow");
+    CHECK(change->name == "workspace-switch");
+}

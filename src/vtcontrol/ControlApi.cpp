@@ -32,6 +32,7 @@ namespace
         void handle(CallContext& /*context*/, CaptureRequest const& /*request*/, Completion<CaptureReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, ClosePaneRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, CloseTabRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
+        void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& /*request*/, Completion<SwitchWorkspaceReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, SetLabelRequest const& /*request*/, Completion<EmptyReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, BlockListRequest const& /*request*/, Completion<BlockListReply> done) override { refuse(done); }
         void handle(CallContext& /*context*/, BlockReadRequest const& /*request*/, Completion<BlockReadReply> done) override { refuse(done); }

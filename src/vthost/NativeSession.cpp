@@ -309,6 +309,16 @@ namespace
                 out.insert(out.end(), found->second.begin(), found->second.end());
     }
 
+    /// @return The session of every pane @p workspace shows, tab by tab.
+    [[nodiscard]] std::vector<SessionId> sessionsShownBy(vtworkspace::Workspace const& workspace)
+    {
+        auto sessions = std::vector<SessionId> {};
+        for (auto const tabIndex: std::views::iota(0, workspace.tabCount()))
+            if (auto const* tab = workspace.tabAt(tabIndex))
+                std::ranges::copy(tab->leafSessions(), std::back_inserter(sessions));
+        return sessions;
+    }
+
 } // namespace
 
 NativeSession::NativeSession(core::net::EventLoop& loop,
@@ -431,6 +441,11 @@ void NativeSession::scheduleFlush(core::platform::SteadyTimePoint deadline)
 }
 
 void NativeSession::sessionClosed(SessionId session)
+{
+    forgetSession(session);
+}
+
+void NativeSession::forgetSession(SessionId session)
 {
     _followed.erase(session.value);
     _pendingSessions.erase(session.value);
@@ -634,6 +649,7 @@ void NativeSession::pushLayout()
     if (_phase != ConnectionPhase::Viewing || _closed)
         return;
     refreshFollowedWorkspaces();
+    forgetUnfollowedSessions();
     // One LayoutState per followed daemon workspace (B4) — the client opens a GUI window for
     // each and reconciles its tabs/splits independently.
     auto& model = _host.model();
@@ -641,14 +657,22 @@ void NativeSession::pushLayout()
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto* workspace = model.workspaceAt(i); workspace != nullptr && follows(workspace->id()))
         {
-            sendLayout(serializeLayout(*workspace));
+            sendFollowedLayout(*workspace);
             pushed = true;
         }
+    noteModelSessions();
     if (pushed && batchesLayouts())
     {
         openLayoutBatch();
         _layoutBatch = LayoutBatch::Pushed;
     }
+}
+
+void NativeSession::sendFollowedLayout(vtworkspace::Workspace& workspace)
+{
+    // Asked before the layout goes out, and streamed after it: the client has the pane by then.
+    requestArrivedSnapshots(workspace);
+    sendLayout(serializeLayout(workspace));
 }
 
 void NativeSession::sendLayout(proto::LayoutState layout)
@@ -700,12 +724,13 @@ bool NativeSession::flushChangedLayouts()
                                          return model.workspace(id) == nullptr && follows(id);
                                      }));
     refreshFollowedWorkspaces();
+    forgetUnfollowedSessions();
     auto pushed = false;
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto* workspace = model.workspaceAt(i);
             workspace != nullptr && changed.contains(workspace->id().value) && follows(workspace->id()))
         {
-            sendLayout(serializeLayout(*workspace));
+            sendFollowedLayout(*workspace);
             pushed = true;
         }
     for (auto const workspace: removed)
@@ -715,6 +740,7 @@ bool NativeSession::flushChangedLayouts()
         sendLayout(std::move(emptied));
         pushed = true;
     }
+    noteModelSessions();
     return pushed;
 }
 
@@ -738,8 +764,6 @@ core::async::Task<void> NativeSession::endLayoutBatch(SpawnedFlowClaim claim)
 
 void NativeSession::refreshFollowedWorkspaces()
 {
-    if (_scope == FollowScope::Every)
-        return;
     auto& model = _host.model();
     std::erase_if(_followedWorkspaces, [&model](uint64_t workspace) {
         return model.workspace(vtworkspace::WorkspaceId { workspace }) == nullptr;
@@ -751,26 +775,77 @@ void NativeSession::refreshFollowedWorkspaces()
         if (workspace == nullptr || workspace->tabCount() == 0 || follows(workspace->id()))
             continue;
         // Index override 6: a workspace no client claims — one a control connection made — appears in the
-        // GUI whose launch took every workspace, rather than in none.
+        // GUI whose launch took every workspace, rather than in none. Not one a client let go of: a window
+        // closed leaves it for the next launch, one switched away from keeps it hidden.
         auto const claim = _host.workspaceClaim(workspace->id(), this);
-        auto const joins = claim == WorkspaceClaim::Yours
-                           || (claim == WorkspaceClaim::Unclaimed && _host.isPrimaryViewer(this));
+        auto const unclaimedHere = claim == WorkspaceClaim::Unclaimed && _host.isPrimaryViewer(this)
+                                   && !_host.lastRelease(workspace->id()).has_value();
+        auto const joins = claim == WorkspaceClaim::Yours || unclaimedHere;
         if (!joins)
             continue;
         _followedWorkspaces.insert(workspace->id().value);
-        for (auto const tabIndex: std::views::iota(0, workspace->tabCount()))
-            if (auto* tab = workspace->tabAt(tabIndex))
-                tab->rootPane()->walkTree([this](vtworkspace::Pane& pane) {
-                    if (pane.isLeaf())
-                        requestSnapshot(pane.session());
-                });
+        _host.noteWorkspaceFollowed(workspace->id());
+        requestWorkspaceSnapshots(*workspace);
     }
+}
+
+void NativeSession::requestWorkspaceSnapshots(vtworkspace::Workspace& workspace)
+{
+    for (auto const session: sessionsShownBy(workspace))
+        requestSnapshot(session);
+}
+
+void NativeSession::requestArrivedSnapshots(vtworkspace::Workspace& workspace)
+{
+    for (auto const session: sessionsShownBy(workspace))
+        if (!_followed.contains(session.value) && _sessionsAtLastLayout.contains(session.value)
+            && !snapshotPending(session))
+            requestSnapshot(session);
+}
+
+void NativeSession::noteModelSessions()
+{
+    auto& model = _host.model();
+    _sessionsAtLastLayout.clear();
+    for (auto const i: std::views::iota(0, model.workspaceCount()))
+        if (auto const* workspace = model.workspaceAt(i))
+            for (auto const session: sessionsShownBy(*workspace))
+                _sessionsAtLastLayout.insert(session.value);
+}
+
+void NativeSession::forgetUnfollowedSessions()
+{
+    auto const gone = std::ranges::to<std::vector>(
+        _followed | std::views::keys
+        | std::views::filter([this](uint64_t session) { return !followsSession(SessionId { session }); }));
+    for (auto const session: gone)
+        forgetSession(SessionId { session });
+}
+
+void NativeSession::followWorkspace(vtworkspace::WorkspaceId workspace)
+{
+    auto* found = _host.model().workspace(workspace);
+    if (found == nullptr)
+    {
+        errorLog()("{}: not following workspace {}: there is none", _id, workspace.value);
+        return;
+    }
+    if (!_followedWorkspaces.insert(workspace.value).second)
+        return;
+    _host.noteWorkspaceFollowed(workspace);
+    requestWorkspaceSnapshots(*found);
+    layoutChanged(workspace);
+}
+
+void NativeSession::releaseWorkspace(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason)
+{
+    if (_followedWorkspaces.erase(workspace.value) == 0)
+        return;
+    _host.noteWorkspaceReleased(workspace, reason);
 }
 
 bool NativeSession::followsSession(SessionId session) const
 {
-    if (_scope == FollowScope::Every)
-        return true;
     auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(session);
     return workspace != nullptr && follows(workspace->id());
 }
@@ -1714,9 +1789,10 @@ void NativeSession::handleInput(proto::Input const& input)
     }
     // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
     // PTY write while the application leaves its input unread.
-    _host.writeInput(
+    _host.writeInputFrom(
         SessionId { input.session },
-        std::string_view { reinterpret_cast<char const*>(input.data.data()), input.data.size() });
+        std::string_view { reinterpret_cast<char const*>(input.data.data()), input.data.size() },
+        _id);
     pauseReadingIfBackedUp(SessionId { input.session });
     // The program may answer the keys by turning echo back on without printing a byte: read it again at the
     // next flush, which the session's pump has written the keys by.
@@ -2001,6 +2077,39 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
                      .reason = std::to_underlying(failure.error),
                      .modelReason = failure.model ? std::to_underlying(*failure.model) : uint8_t { 0 } } });
         }
+        return TabVerb::Served;
+    }
+    if (auto const* follow = std::get_if<proto::FollowWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceFollow))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        if (follow->workspace != 0)
+            followWorkspace(vtworkspace::WorkspaceId { follow->workspace });
+        else if (auto const* created = _host.createWorkspace(spawnRequest({}), this))
+            followWorkspace(created->id());
+        else
+            errorLog()("{}: the workspace this client asked to follow could not be created", _id);
+        return TabVerb::Served;
+    }
+    if (auto const* release = std::get_if<proto::ReleaseWorkspace>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceFollow))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        releaseWorkspace(vtworkspace::WorkspaceId { release->workspace }, release->reason);
+        return TabVerb::Served;
+    }
+    if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceSwitch))
+            refuse(frame);
+        else
+            _host.completeSwitch(_id, *reply);
         return TabVerb::Served;
     }
     if (auto const* set = std::get_if<proto::SetSplitOrientation>(&frame.pdu))
@@ -2428,19 +2537,12 @@ void NativeSession::attachClient(uint64_t serial,
         _host.adoptColorPreference(*colorPreference);
 
     // After the client area, so whatever the plan spawns spawns at the size the client displays (D7). A
-    // client that cannot state an intent follows every workspace, as every client did before intents existed.
+    // client that cannot state an intent is a launch, as every client was before intents existed.
     executeAttachPlan(negotiated.shared.contains(proto::Capability::AttachIntent) ? hello.attachIntent
                                                                                   : proto::AttachIntent {},
                       workingDirectory);
 
-    // Under Every, the workspaces there are to show now; later ones follow without being named.
-    if (_scope == FollowScope::Listed)
-        reply.followedWorkspaces.assign(_followedWorkspaces.begin(), _followedWorkspaces.end());
-    else
-        for (auto const i: std::views::iota(0, _host.model().workspaceCount()))
-            if (auto* workspace = _host.model().workspaceAt(i);
-                workspace != nullptr && workspace->tabCount() > 0)
-                reply.followedWorkspaces.push_back(workspace->id().value);
+    reply.followedWorkspaces.assign(_followedWorkspaces.begin(), _followedWorkspaces.end());
     reply.daemonInstance = _host.instance();
     // Told to the first attaching client only, whichever workspaces it follows: the host forgets it with the
     // answer.
@@ -2522,27 +2624,30 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                       std::filesystem::path const& workingDirectory)
 {
     auto& model = _host.model();
-    auto context =
-        AttachContext { .otherClients = _host.connectedClients(),
-                        .primaryWorkspace = _host.workspaceId().value,
-                        .workspaces = {},
-                        .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
-                                                                     : WorkingDirectoryStated::Yes };
+    auto context = AttachContext { .otherClients = _host.connectedClients(),
+                                   .primaryWorkspace = _host.workspaceId().value,
+                                   .workspaces = {},
+                                   .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
+                                                                                : WorkingDirectoryStated::Yes,
+                                   .instance = _host.instance() };
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto const* workspace = model.workspaceAt(i))
             context.workspaces.push_back(
-                WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
+                WorkspaceSummary { .id = workspace->id().value,
+                                   .tabCount = workspace->tabCount(),
+                                   .visibility = _host.visibility(workspace->id()) });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
 
     auto const plan = planAttach(intent, context);
     _host.noteClientAttached(this);
     _services.control.get().clientAttached(std::format("{}", _id));
-    _scope = plan.scope;
     _followedWorkspaces = std::set<uint64_t>(plan.follow.begin(), plan.follow.end());
+    for (auto const workspace: _followedWorkspaces)
+        _host.noteWorkspaceFollowed(vtworkspace::WorkspaceId { workspace });
     // The first client of a fresh launch is the primary viewer: workspaces no client claims appear there.
-    auto const launched =
-        intent.kind == proto::AttachIntentKind::Launch || intent.kind == proto::AttachIntentKind::Resume;
-    if (plan.scope == FollowScope::Listed && launched && context.otherClients == 0)
+    auto const launched = intent.kind != proto::AttachIntentKind::NewWorkspace
+                          && intent.kind != proto::AttachIntentKind::Workspaces;
+    if (launched && context.otherClients == 0)
         _host.claimPrimaryViewer(this);
 
     switch (plan.creation)
@@ -2557,6 +2662,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _followedWorkspaces.insert(workspace->id().value);
+                _host.noteWorkspaceFollowed(workspace->id());
             }
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);

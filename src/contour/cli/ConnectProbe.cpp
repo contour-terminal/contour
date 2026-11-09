@@ -8,23 +8,41 @@
 namespace contour::cli
 {
 
-SessionCounter nativeSessionCounter()
+namespace
 {
-    return [](std::filesystem::path const& socket) -> std::optional<std::size_t> {
-        // No ensureDaemon: asking about a daemon never starts one.
-        auto const control =
-            vthost::client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(socket, nullptr),
-                                              vthost::client::DefaultControlTimeout);
-        auto const status = control->status();
-        if (!status)
-            return std::nullopt;
-        return status->sessions;
-    };
+    /// @return A counter that reads @p count from a running daemon's status, asked through its control
+    /// socket.
+    template <typename Count>
+    [[nodiscard]] DaemonCounter statusCounter(Count count)
+    {
+        return [count](std::filesystem::path const& socket) -> std::optional<std::size_t> {
+            // No ensureDaemon: asking about a daemon never starts one.
+            auto const control = vthost::client::makeDaemonControl(
+                std::make_shared<vthost::UnixTransportFactory>(socket, nullptr),
+                vthost::client::DefaultControlTimeout);
+            auto const status = control->status();
+            if (!status)
+                return std::nullopt;
+            return count(*status);
+        };
+    }
+} // namespace
+
+DaemonCounter nativeSessionCounter()
+{
+    return statusCounter([](vthost::client::DaemonStatus const& status) -> std::optional<std::size_t> {
+        return status.sessions;
+    });
+}
+
+DaemonCounter nativeWorkspaceCounter()
+{
+    return statusCounter([](vthost::client::DaemonStatus const& status) { return status.workspaces; });
 }
 
 LocalDaemonState probeLocalDaemon(vthost::DaemonSpawner& spawner,
                                   std::filesystem::path const& socket,
-                                  SessionCounter const& sessions)
+                                  DaemonCounter const& sessions)
 {
     if (spawner.probe(socket) != vthost::DaemonPresence::Serving)
         return LocalDaemonState { .run = DaemonRunState::NotRunning, .sessions = std::nullopt };

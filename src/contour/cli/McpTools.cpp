@@ -40,6 +40,8 @@ namespace
     }
 
     /// @return The tool table, built on first use.
+    ///
+    /// `workspace.switch` has no row on purpose: a pane agent must not re-point the window it runs in.
     std::span<ToolRow const> rows()
     {
         static auto const table = std::to_array<ToolRow>({

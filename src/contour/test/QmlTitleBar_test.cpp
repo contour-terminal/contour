@@ -237,10 +237,11 @@ struct DriftBadgeFixture
     DriftBadgeFixture()
     {
         contour::test::installChromeStyle(engine);
-        engine.rootContext()->setContextProperty("daemonDrift", &model);
         QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml")));
         REQUIRE(component.isReady());
-        object.reset(component.create());
+        // As Main.qml gives it its window's own daemon's drift.
+        object.reset(component.createWithInitialProperties(
+            { { QStringLiteral("model"), QVariant::fromValue<QObject*>(&model) } }));
         badge = qobject_cast<QQuickItem*>(object.get());
         REQUIRE(badge != nullptr);
         window.resize(400, 300);

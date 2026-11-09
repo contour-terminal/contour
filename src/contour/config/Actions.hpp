@@ -40,6 +40,31 @@ enum class Direction : uint8_t
     Down,
 };
 
+/// Which way a cycling action (CycleDaemon, CycleWorkspace) steps through its ring.
+///
+/// The `direction` key of a binding: `next` or `previous`.
+enum class CycleDirection : uint8_t
+{
+    Next = 0, ///< Forward, wrapping at the end.
+    Previous, ///< Backward, wrapping at the start.
+};
+
+/// What a DaemonRef names: a local daemon by label, or a saved host.
+enum class DaemonRefKind : uint8_t
+{
+    Label = 0, ///< A local daemon on this computer, by its label (`label:` in a binding).
+    Host,      ///< A saved host from `hosts:` (`host:` in a binding).
+};
+
+/// The daemon a switching action names. Converted from the binding's `label:` / `host:` keys at the YAML
+/// boundary, so nothing beyond the parser sees which key spelled it.
+struct DaemonRef
+{
+    DaemonRefKind kind {}; ///< Whether @c name is a local label or a saved host.
+    std::string name;      ///< The label or the host name; never empty in a parsed binding.
+    bool operator==(DaemonRef const&) const = default;
+};
+
 /// Where OpenConfiguration shows the configuration.
 ///
 /// The `in_editor` key of a binding, converted at the YAML boundary: `in_editor: true` is Editor.
@@ -150,6 +175,14 @@ struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the a
 struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
 struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
 struct AttachToHost{ std::string name; }; // open a new window attached to the saved host (hosts:)
+struct SwitchToWorkspace{ uint32_t index = 0; }; // show the Nth (1-based) workspace of this window's daemon here
+struct OpenWorkspace{ uint32_t index = 0; };    // show the Nth (1-based) workspace of this window's daemon in a new window
+struct CycleWorkspace{ CycleDirection direction = CycleDirection::Next; }; // show the next/previous workspace of this window's daemon here
+struct CycleDaemon{ CycleDirection direction = CycleDirection::Next; };    // show the next/previous daemon (local labels, then shown hosts) here
+struct SwitchToDaemon{ DaemonRef daemon; }; // show the named daemon in this window
+struct OpenDaemon{ DaemonRef daemon; };     // show the named daemon in a new window
+struct ShowSwitcher{};                      // open the daemon & workspace switcher popup
+struct NewDaemon{};                         // start a new local daemon under a label asked for, and show it here
 struct OpenContextMenu{};        // open the terminal pane's context menu (bound to the right button)
 struct SelectAll{};              // select the whole scrollback and screen
 struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keeping content and history
@@ -319,7 +352,15 @@ using ActionVariant = std::variant<CancelSelection,
                                    ZoomWindow,
                                    FocusNextArea,
                                    FocusPreviousArea,
-                                   FocusToolbar>;
+                                   FocusToolbar,
+                                   SwitchToWorkspace,
+                                   OpenWorkspace,
+                                   CycleWorkspace,
+                                   CycleDaemon,
+                                   SwitchToDaemon,
+                                   OpenDaemon,
+                                   ShowSwitcher,
+                                   NewDaemon>;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///
@@ -433,6 +474,8 @@ concept CommandBlockActionConcept = core::oneOf<T,
 /// the first press did not do. OpenCommandOutput has the splits' reason too: each fire forks a pager
 /// pane.
 /// AttachToHost joins them too: each fire starts a client process that opens a window of its own.
+/// The daemon and workspace switches join them as well: each fire detaches the window and re-attaches it
+/// elsewhere, or opens a window, and a held key would bounce through the whole ring.
 /// ZoomWindow is a toggle, and MinimizeWindow a one-shot gesture like the palette's: the window is gone
 /// from under the key by the second repeat.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
@@ -474,7 +517,32 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MoveTabToNewWindow,
                                                     ShowAbout,
                                                     MinimizeWindow,
-                                                    ZoomWindow>;
+                                                    ZoomWindow,
+                                                    SwitchToWorkspace,
+                                                    OpenWorkspace,
+                                                    CycleWorkspace,
+                                                    CycleDaemon,
+                                                    SwitchToDaemon,
+                                                    OpenDaemon,
+                                                    ShowSwitcher,
+                                                    NewDaemon>;
+
+/// The daemon and workspace switching actions: all of them need a daemon behind the window, so a window
+/// whose sessions run in-process hides them from the palette and menus, and ignores them when bound.
+template <typename T>
+concept DaemonSwitchingActionConcept = core::oneOf<T,
+                                                   SwitchToWorkspace,
+                                                   OpenWorkspace,
+                                                   CycleWorkspace,
+                                                   CycleDaemon,
+                                                   SwitchToDaemon,
+                                                   OpenDaemon,
+                                                   ShowSwitcher,
+                                                   NewDaemon>;
+
+/// @returns true if @p action is one of the daemon and workspace switching actions
+/// (DaemonSwitchingActionConcept).
+[[nodiscard]] bool isDaemonSwitching(Action const& action) noexcept;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -505,6 +573,8 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
 /// the bare form is a meaningful gesture the palette SHOULD offer from the catalog. LaunchLayout
 /// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
 /// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
+/// SwitchToWorkspace, SwitchToDaemon and OpenDaemon likewise name nothing bare; their rows come from the
+/// daemon source.
 template <typename T>
 concept ParameterizedActionConcept = core::oneOf<T,
                                                  ChangeProfile,
@@ -517,6 +587,10 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  ResizePane,
                                                  LaunchLayout,
                                                  AttachToHost,
+                                                 SwitchToWorkspace,
+                                                 OpenWorkspace,
+                                                 SwitchToDaemon,
+                                                 OpenDaemon,
                                                  ToggleFoldAt>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
@@ -805,6 +879,35 @@ namespace documentation
     constexpr inline std::string_view AttachToHost {
         "Opens a new window attached to the saved host `name` (see `hosts:`)."
     };
+    constexpr inline std::string_view SwitchToWorkspace {
+        "Shows the workspace at the 1-based position `index` of this window's daemon in this window. Hidden "
+        "workspaces are not counted. Does nothing for a window that runs its sessions in-process."
+    };
+    constexpr inline std::string_view OpenWorkspace {
+        "Shows the workspace at the 1-based position `index` of this window's daemon in a new window. Does "
+        "nothing for a window that runs its sessions in-process."
+    };
+    constexpr inline std::string_view CycleWorkspace {
+        "Shows the next (`direction: next`, the default) or previous (`direction: previous`) workspace of "
+        "this window's daemon in this window, wrapping around."
+    };
+    constexpr inline std::string_view CycleDaemon {
+        "Shows the next (`direction: next`, the default) or previous (`direction: previous`) daemon in this "
+        "window: the local daemons by label, then the saved hosts some window shows; wrapping around."
+    };
+    constexpr inline std::string_view SwitchToDaemon {
+        "Shows the daemon named by `label` (a local daemon) or `host` (a saved host, see `hosts:`) in this "
+        "window. A binding that names neither, or both, is dropped."
+    };
+    constexpr inline std::string_view OpenDaemon {
+        "Shows the daemon named by `label` (a local daemon) or `host` (a saved host, see `hosts:`) in a new "
+        "window. A binding that names neither, or both, is dropped."
+    };
+    constexpr inline std::string_view ShowSwitcher { "Opens the popup to switch this window to another "
+                                                     "daemon or workspace, or to open one in a new window." };
+    constexpr inline std::string_view NewDaemon {
+        "Asks for a label, starts a new local daemon under it and shows it in this window."
+    };
     constexpr inline std::string_view SaveLayout {
         "Saves the current window's tabs as a named layout in layouts.yml. Without a name it opens a "
         "prompt to type one in (which is how the command palette offers it)."
@@ -958,6 +1061,24 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
                 case Direction::Down: return "Down";
             }
             return "Right"; // unreachable: the switch is exhaustive over the enum
+        }();
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::actions::CycleDirection>: std::formatter<std::string_view>
+{
+    auto format(contour::actions::CycleDirection value, auto& ctx) const
+    {
+        using contour::actions::CycleDirection;
+        auto const name = [value]() -> string_view {
+            switch (value)
+            {
+                case CycleDirection::Next: return "next";
+                case CycleDirection::Previous: return "previous";
+            }
+            return "next"; // unreachable: the switch is exhaustive over the enum
         }();
         return formatter<string_view>::format(name, ctx);
     }

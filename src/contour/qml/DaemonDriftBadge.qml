@@ -7,7 +7,8 @@
 // Placed by its user: Main.qml puts it in the band's trailing area, and at the content's corner while no
 // band is shown, so a drift never goes unsaid.
 //
-// It reads the `daemonDrift` context property (window::DaemonDriftModel) and neither decides what drifts
+// It reads the drift model its host gives it -- its window's own daemon's (WindowController::daemonDrift) --
+// and neither decides what drifts
 // nor performs the upgrade or restart: it shows the model's line and forwards the user's confirmation. On the
 // Terminal row the chip is a run of cells bracketed by the chip glyph tokens.
 import QtQuick
@@ -17,9 +18,9 @@ Item {
     id: root
     objectName: "daemonDriftBadge"
 
-    // Guarded with typeof: a window hosted without a daemon (and the lightweight test harnesses) sets no
-    // such context property, and an unresolved name in a binding is a ReferenceError.
-    readonly property var model: typeof daemonDrift !== "undefined" ? daemonDrift : null
+    /// The window::DaemonDriftModel to show: the host's to set, from its window's own link; null for a window
+    /// hosted without a daemon, which shows no badge.
+    property var model: null
     // Whether a click may ask for the upgrade or restart: not while one already runs.
     readonly property bool canRestart: root.model !== null && !root.model.isRestarting && !root.model.isUpgrading
     // Whether the chip is a run of bracketed cells (the Terminal row) rather than a rounded shape.

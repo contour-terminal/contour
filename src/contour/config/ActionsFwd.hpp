@@ -2,12 +2,15 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <variant>
 #include <vector>
 
 namespace contour::actions
 {
+
+enum class CycleDirection : uint8_t; // defined in Actions.hpp
 
 // Every alternative of Action, declared and not defined: a header that only names an action, or holds a
 // list of them, includes this file and never pays for instantiating the 129-way variant. The definitions
@@ -112,6 +115,14 @@ struct ResizePane;
 struct LaunchLayout;
 struct SaveLayout;
 struct AttachToHost;
+struct SwitchToWorkspace;
+struct OpenWorkspace;
+struct CycleWorkspace;
+struct CycleDaemon;
+struct SwitchToDaemon;
+struct OpenDaemon;
+struct ShowSwitcher;
+struct NewDaemon;
 struct OpenContextMenu;
 struct SelectAll;
 struct SoftReset;

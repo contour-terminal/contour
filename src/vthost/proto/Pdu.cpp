@@ -301,6 +301,22 @@ namespace
     {
         return std::to_underlying(PduType::SoftFontState);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(FollowWorkspace const&) noexcept
+    {
+        return std::to_underlying(PduType::FollowWorkspace);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ReleaseWorkspace const&) noexcept
+    {
+        return std::to_underlying(PduType::ReleaseWorkspace);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SwitchRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::SwitchRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SwitchReply const&) noexcept
+    {
+        return std::to_underlying(PduType::SwitchReply);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -427,12 +443,16 @@ namespace
         // Only a stated directory travels, so a hello that states none is byte for byte what it was. The cell
         // size before it is omitted when absent, and would read this string as its own: stated as 0x0
         // instead, which decodeCellPixelSize reads as none.
-        if (!pdu.workingDirectory.empty())
+        // The same for the run the intent's ids are of, after the directory, which it then states empty.
+        auto const statesInstance = pdu.attachIntent.daemonInstance != 0;
+        if (!pdu.workingDirectory.empty() || statesInstance)
         {
             if (!pdu.cellPixelSize)
                 encodeCellPixelSize(fields, WireCellPixelSize { .width = 0, .height = 0 });
             fields.string(pdu.workingDirectory);
         }
+        if (statesInstance)
+            fields.varint(pdu.attachIntent.daemonInstance);
         out.blob(fields.view());
         out.u8(0);
     }
@@ -879,7 +899,12 @@ namespace
             out.string(pdu.upgrade->lastFailureDetail);
             // Behind the upgrade record, which the field was appended after: without one it has no place.
             if (pdu.relocation.has_value())
+            {
                 out.u8(*pdu.relocation);
+                // Behind the relocation, for the same reason.
+                if (pdu.workspaces.has_value())
+                    out.varint(*pdu.workspaces);
+            }
         }
     }
 
@@ -989,6 +1014,33 @@ namespace
                 encodeSoftGlyph(record, glyph);
             out.blob(record.view());
         }
+    }
+
+    void encodeBody(Writer& out, FollowWorkspace const& pdu)
+    {
+        out.varint(pdu.workspace);
+    }
+
+    void encodeBody(Writer& out, ReleaseWorkspace const& pdu)
+    {
+        out.varint(pdu.workspace);
+        out.u8(std::to_underlying(pdu.reason));
+    }
+
+    void encodeBody(Writer& out, SwitchRequest const& pdu)
+    {
+        out.u32(pdu.request);
+        out.varint(pdu.workspace);
+        out.u8(std::to_underlying(pdu.target.kind));
+        out.string(pdu.target.daemon);
+        out.string(pdu.target.workspace);
+    }
+
+    void encodeBody(Writer& out, SwitchReply const& pdu)
+    {
+        out.u32(pdu.request);
+        out.u8(std::to_underlying(pdu.outcome));
+        out.string(pdu.detail);
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1247,12 +1299,18 @@ namespace
         return assign(in.string(), pdu.workingDirectory, error);
     }
 
+    [[nodiscard]] bool decodeHelloAttachInstance(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        return assign(in.varint(), pdu.attachIntent.daemonInstance, error);
+    }
+
     /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
     /// inserted.
-    constexpr auto ClientHelloFields = std::array<ClientHelloField, 9> {
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 10> {
         decodeHelloToken,           decodeHelloSessionSettings, decodeHelloRole,
         decodeHelloClientArea,      decodeHelloAttachIntent,    decodeHelloProfileName,
         decodeHelloColorPreference, decodeHelloCellPixelSize,   decodeHelloWorkingDirectory,
+        decodeHelloAttachInstance,
     };
 
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the
@@ -1870,6 +1928,14 @@ namespace
                 if (!assign(in.u8(), relocation, error))
                     return std::unexpected(error);
                 pdu.relocation = relocation;
+                // Appended after the relocation by a later version yet.
+                if (in.remaining() != 0)
+                {
+                    auto workspaces = uint32_t {};
+                    if (!assign(in.varint(), workspaces, error))
+                        return std::unexpected(error);
+                    pdu.workspaces = workspaces;
+                }
             }
         }
         return pdu;
@@ -2049,6 +2115,62 @@ namespace
     DecodeResult decodePanesReprojected(Reader&)
     {
         return PanesReprojected {};
+    }
+
+    /// @return @p byte as the enumerator it names, or @p fallback for a byte no enumerator of @p E names (a
+    ///         newer peer's), up to and including @p last.
+    template <typename E>
+    [[nodiscard]] constexpr E enumOrElse(uint8_t byte, E last, E fallback) noexcept
+    {
+        return byte <= std::to_underlying(last) ? static_cast<E>(byte) : fallback;
+    }
+
+    DecodeResult decodeFollowWorkspace(Reader& in)
+    {
+        auto pdu = FollowWorkspace {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeReleaseWorkspace(Reader& in)
+    {
+        auto pdu = ReleaseWorkspace {};
+        auto error = DecodeError {};
+        auto reason = uint8_t { 0 };
+        if (!assign(in.varint(), pdu.workspace, error) || !assign(in.u8(), reason, error))
+            return std::unexpected(error);
+        // A reason a newer peer knows is the weaker claim: the workspace is left, not hidden.
+        pdu.reason = enumOrElse(reason, WorkspaceRelease::SwitchedAway, WorkspaceRelease::Closed);
+        return pdu;
+    }
+
+    DecodeResult decodeSwitchRequest(Reader& in)
+    {
+        auto pdu = SwitchRequest {};
+        auto error = DecodeError {};
+        auto kind = uint8_t { 0 };
+        if (!assign(in.u32(), pdu.request, error) || !assign(in.varint(), pdu.workspace, error)
+            || !assign(in.u8(), kind, error) || !assign(in.string(), pdu.target.daemon, error)
+            || !assign(in.string(), pdu.target.workspace, error))
+            return std::unexpected(error);
+        if (kind > std::to_underlying(SwitchDaemonKind::Host))
+            return std::unexpected(DecodeError::MalformedPdu);
+        pdu.target.kind = static_cast<SwitchDaemonKind>(kind);
+        return pdu;
+    }
+
+    DecodeResult decodeSwitchReply(Reader& in)
+    {
+        auto pdu = SwitchReply {};
+        auto error = DecodeError {};
+        auto outcome = uint8_t { 0 };
+        if (!assign(in.u32(), pdu.request, error) || !assign(in.u8(), outcome, error)
+            || !assign(in.string(), pdu.detail, error))
+            return std::unexpected(error);
+        pdu.outcome = enumOrElse(outcome, SwitchOutcome::Failed, SwitchOutcome::Failed);
+        return pdu;
     }
 
     DecodeResult decodeHeartbeat(Reader& in)
@@ -2262,6 +2384,10 @@ namespace
         DecodeRow { PduType::DaemonUpgrading, decodeDaemonUpgrading },
         DecodeRow { PduType::PanesReprojected, decodePanesReprojected },
         DecodeRow { PduType::SoftFontState, decodeSoftFontState },
+        DecodeRow { PduType::FollowWorkspace, decodeFollowWorkspace },
+        DecodeRow { PduType::ReleaseWorkspace, decodeReleaseWorkspace },
+        DecodeRow { PduType::SwitchRequest, decodeSwitchRequest },
+        DecodeRow { PduType::SwitchReply, decodeSwitchReply },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

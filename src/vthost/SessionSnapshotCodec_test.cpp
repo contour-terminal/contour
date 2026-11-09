@@ -238,6 +238,19 @@ TEST_CASE("a workspace round-trips through the codec", "[vthost][snapshot]")
     CHECK(pane.history->commandBlocks[0].exitCode == 2);
 }
 
+TEST_CASE("a workspace's visibility round-trips, and a snapshot without one reads Left",
+          "[vthost][snapshot][visibility]")
+{
+    auto original = sampleWorkspace();
+    original.workspaces.at(1).visibility = WorkspaceVisibility::Hidden;
+    original.workspaces.at(0).visibility = WorkspaceVisibility::Shown;
+    auto const decoded = decodeSnapshot(encodeSnapshot(original));
+    REQUIRE(decoded);
+    CHECK(decoded->snapshot.workspaces.at(1).visibility == WorkspaceVisibility::Hidden);
+    CHECK(decoded->snapshot.workspaces.at(0).visibility == WorkspaceVisibility::Shown);
+    CHECK(decoded->snapshot == original);
+}
+
 TEST_CASE("a learned cell size round-trips, and a file without one decodes to none", "[vthost][snapshot]")
 {
     auto original = sampleWorkspace();

@@ -139,6 +139,30 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },
+    MenuReachabilityExemption { .action = "SwitchToWorkspace",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "OpenWorkspace",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "CycleWorkspace",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "CycleDaemon",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "SwitchToDaemon",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "OpenDaemon",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "ShowSwitcher",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
+    MenuReachabilityExemption { .action = "NewDaemon",
+                                .reason = "reached from the palette, the switcher and key bindings; a window "
+                                          "with no daemon has nothing to switch" },
 };
 
 } // namespace contour::command

@@ -64,7 +64,10 @@ namespace vthost::testing
               .sessionSettings = proto::WireSessionSettings { .historyLineCount = 5000,
                                                               .wordDelimiters = "secret-delimiters" },
               .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
-              .attachIntent = { .kind = proto::AttachIntentKind::Resume, .workspaces = { 1, 7 } },
+              // Every field stated, the run the ids are of last of them.
+              .attachIntent = { .kind = proto::AttachIntentKind::Resume,
+                                .workspaces = { 1, 7 },
+                                .daemonInstance = 5 },
               .profileName = "work",
               .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 },
               // A path of the user's; PduTrace_test proves the trace states only its presence.
@@ -149,7 +152,8 @@ namespace vthost::testing
                                                       .attempts = 3,
                                                       .lastFailure = 10,
                                                       .lastFailureDetail = "did not settle" },
-              .relocation = uint8_t { 1 } } } },
+              .relocation = uint8_t { 1 },
+              .workspaces = 2 } } },
         { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
         { proto::PduType::EditTab,
           proto::DecodedPdu {
@@ -202,6 +206,18 @@ namespace vthost::testing
         { proto::PduType::PanesReprojected, proto::DecodedPdu { proto::PanesReprojected {} } },
         { proto::PduType::SoftFontState,
           proto::DecodedPdu { proto::SoftFontState { .session = 3, .generation = 2 } } },
+        { proto::PduType::FollowWorkspace, proto::DecodedPdu { proto::FollowWorkspace { .workspace = 2 } } },
+        { proto::PduType::ReleaseWorkspace,
+          proto::DecodedPdu {
+              proto::ReleaseWorkspace { .workspace = 2, .reason = proto::WorkspaceRelease::SwitchedAway } } },
+        { proto::PduType::SwitchRequest,
+          proto::DecodedPdu { proto::SwitchRequest {
+              .request = 7,
+              .workspace = 2,
+              .target = { .kind = proto::SwitchDaemonKind::Host, .daemon = "box", .workspace = "work" } } } },
+        { proto::PduType::SwitchReply,
+          proto::DecodedPdu { proto::SwitchReply {
+              .request = 7, .outcome = proto::SwitchOutcome::Failed, .detail = "no such host" } } },
     };
 }
 

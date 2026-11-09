@@ -2,10 +2,14 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/Logging.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
+#include <contour/cli/ClientAttach.hpp>
 #include <contour/cli/ConnectList.hpp>
 #include <contour/cli/ConnectProbe.hpp>
+#include <contour/cli/DaemonDiscovery.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
+#include <contour/cli/NewDaemon.hpp>
+#include <contour/cli/WorkspaceListing.hpp>
 #include <contour/command/LauncherEntries.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
@@ -42,9 +46,11 @@
 #include <contour/platform/QtPath.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/remote/DaemonLink.hpp>
+#include <contour/remote/DaemonSwitchDirectory.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/TmuxController.hpp>
+#include <contour/remote/WindowSwitcher.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/Permission.hpp>
 #include <contour/session/SessionFactory.hpp>
@@ -62,6 +68,7 @@
 #include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
@@ -118,6 +125,7 @@
 #include <vthost/StdioChild.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
+#include <vthost/client/ControlClient.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/client/DaemonRestart.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
@@ -221,6 +229,12 @@ namespace
     /// Worker threads every session's path probes run on: one, so that a probe blocked on a hung mount stalls
     /// only the other probes.
     constexpr auto LinkProbeThreads = std::size_t { 1 };
+
+    /// How long a window switch waits for the target daemon to list its workspaces: an ssh connect's worth.
+    constexpr auto SwitchListingTimeout = std::chrono::milliseconds { std::chrono::seconds { 15 } };
+
+    /// How long "New daemon…" waits for the daemon it started to serve, as an on-demand start does.
+    constexpr auto NamedDaemonStartTimeout = std::chrono::seconds { 5 };
 
     /// What a missing sleep/wake monitor costs, said where it is logged.
     constexpr auto NoPowerMonitorNote = std::string_view {
@@ -440,7 +454,9 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              window::SettingsWindowFactory settingsWindowFactory,
                              ShellIntegrationServices shellIntegration,
                              std::unique_ptr<window::DragEndProbe> dragEndProbe,
-                             std::unique_ptr<platform::ApplicationRestart> applicationRestart):
+                             std::unique_ptr<platform::ApplicationRestart> applicationRestart,
+                             std::unique_ptr<remote::SwitchingService> windowSwitching,
+                             std::unique_ptr<session::SwitchDirectory> switchDirectory):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
@@ -475,6 +491,19 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _captionButtons(appearanceServices.caption()),
     _framePlatform(appearanceServices.framePlatform),
     _dragEndProbe(std::move(dragEndProbe)),
+    // The real switcher unless a test injected its double. Built on the manager not yet constructed, which it
+    // does not use until a request: the cyclic wiring of the manager and what it dispatches to.
+    _windowSwitching(windowSwitching
+                         ? std::move(windowSwitching)
+                         : std::make_unique<remote::WindowSwitcher>(
+                               _sessionManager,
+                               *this,
+                               remote::makeControlWorkspaceLister(SwitchListingTimeout),
+                               // A pick is the switcher popup, scoped to the daemon; it re-enters the switch.
+                               [this](remote::SwitchPickRequest const& pick) { return showSwitchPick(pick); },
+                               remote::SwitchDeadline { .timeout = remote::DefaultSwitchTimeout,
+                                                        .timer = remote::qtSwitchTimer() })),
+    _switchDirectory(switchDirectory ? std::move(switchDirectory) : makeSwitchDirectory()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -483,7 +512,9 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_commandHistoryStore,
                     QDir::homePath().toStdString(),
                     *_taskbarProgressSink,
-                    *_secureInput),
+                    *_secureInput,
+                    *_windowSwitching,
+                    *_switchDirectory),
     _gpuInventory { display::makePlatformGpuInventory() },
     _hostPlatform(appearanceServices.hostPlatform.value_or(config::detectHostPlatform(env))),
     _shellHostPlatform(shellIntegration.host.value_or(_hostPlatform)),
@@ -951,15 +982,19 @@ std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::Daemon
     if (auto attached = link.awaitAttached(budget); !attached)
         return attached;
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
-    // can restart -- a local one, which is what _restartDaemon is set for -- is offered anything.
+    // can restart -- the local one it launched on (DaemonLinkConfig::upkeep), which is what _restartDaemon is
+    // set for -- is offered anything.
     link.offerDaemonRestartIfDrifted();
     return {};
 }
 
 remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig config)
 {
-    return *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
+    auto& link = *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
         remote::DaemonLinkId { _nextDaemonLinkId++ }, std::move(config), *this, _sessionManager));
+    // The first link to a daemon is the one to take back what it restores after a restart.
+    remote::passOnLaunchResume(switchableLinks());
+    return link;
 }
 
 remote::DaemonLink* ContourGuiApp::daemonLink(remote::DaemonLinkId id) const noexcept
@@ -970,25 +1005,133 @@ remote::DaemonLink* ContourGuiApp::daemonLink(remote::DaemonLinkId id) const noe
 
 void ContourGuiApp::linkEnded()
 {
+    // At once: another link of its daemon takes back what a restart of it restores, should the one that
+    // ended have been that link.
+    remote::passOnLaunchResume(switchableLinks());
     // Not from inside the link, which is still running the call that ended it.
     QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
+}
+
+remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost::ITransportFactory> transport,
+                                                         vthost::proto::AttachIntent intent,
+                                                         std::string hostLabel,
+                                                         window::DaemonLocality locality,
+                                                         remote::DaemonAddress address)
+{
+    // The emulation settings the daemon gives the sessions this client creates, from the configuration
+    // loaded already; every session created later takes them from the configuration in memory, exactly
+    // as a local new tab does, so a reload reaches remote and local tabs alike. A failure is a warning:
+    // hosting under the daemon's own resolved profile is a sane thing to do meanwhile.
+    auto attachSettings = std::optional<vtbackend::Settings> {};
+    if (auto resolved = currentEmulationSettings(); resolved)
+        attachSettings = *std::move(resolved);
+    else
+        errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
+    return remote::DaemonLinkConfig {
+        .controller =
+            remote::NativeController::Config {
+                .transport = std::move(transport),
+                .intent = std::move(intent),
+                .profileName = profileName(),
+                .workingDirectory = {},
+                .attachSettings = std::move(attachSettings),
+                .sessionSettings = [this] { return currentEmulationSettings(); },
+                .colorPreference = _colorPreference,
+                .clock = core::platform::defaultSteadyClock(),
+                .timeline = _startupTimeline,
+                .powerMonitor = _powerMonitor.get(),
+                .backoff = {},
+            },
+        .hostLabel = std::move(hostLabel),
+        .locality = locality,
+        .clientRelease = CONTOUR_VERSION_STRING,
+        .handOverFrom = std::nullopt,
+        .address = std::move(address),
+        .arrival = std::nullopt,
+    };
+}
+
+std::vector<remote::DaemonLink*> ContourGuiApp::switchableLinks()
+{
+    return std::ranges::to<std::vector>(_daemonLinks
+                                        | std::views::transform([](auto const& link) { return link.get(); }));
+}
+
+std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFor(
+    remote::DaemonAddress const& daemon)
+{
+    using vthost::proto::SwitchDaemonKind;
+    switch (daemon.kind)
+    {
+        case SwitchDaemonKind::Label: {
+            // A label comes from a program or another daemon as well as from the user: it is joined into a
+            // socket path only once it is one a daemon of its own could have.
+            if (auto const valid = vthost::validateSocketLabel(daemon.name); !valid)
+                return std::unexpected(
+                    std::format("\"{}\" names no daemon: {}", daemon.name, vthost::describe(valid.error())));
+            // A running daemon only: a switch starts none (New daemon… does, before it switches). Local, but
+            // not this client's to restart or upgrade from the badge -- _restartDaemon and _upgradeDaemon
+            // serve the launch's daemon alone, and a restart relaunches this process onto that one -- unless
+            // it is the launch's daemon, reached by its label.
+            auto const controlPath =
+                vthost::muxSocketPath(vthost::socketLabelOf(daemon.name),
+                                      cli::resolveSocketOption("", _config.daemon.value().socket));
+            auto config =
+                daemonLinkConfig(std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr),
+                                 {},
+                                 {},
+                                 window::DaemonLocality::Local,
+                                 daemon);
+            if (std::ranges::any_of(_daemonLinks, [&](auto const& link) {
+                    return link->address() == daemon
+                           && link->siblingConfig().upkeep == window::DaemonUpkeep::ThisClient;
+                }))
+                config.upkeep = window::DaemonUpkeep::ThisClient;
+            return config;
+        }
+        case SwitchDaemonKind::Host:
+            // Attach to Host's lookup: a saved host's name, or an ssh:// URL.
+            return openHost(core::platform::normalizePath(_config.configFile), daemon.name)
+                .transform([&](OpenedHost opened) {
+                    auto label = opened.transport.label;
+                    return daemonLinkConfig(std::move(opened.transport.factory),
+                                            {},
+                                            std::move(label),
+                                            window::DaemonLocality::Remote,
+                                            daemon);
+                });
+        case SwitchDaemonKind::Same: break;
+    }
+    return std::unexpected(std::string { "no daemon named" });
+}
+
+remote::DaemonLink& ContourGuiApp::startSwitchLink(remote::DaemonLinkConfig config)
+{
+    // Awaited by nobody: it tells the switch that started it how it landed.
+    return startDaemonLink(std::move(config));
+}
+
+void ContourGuiApp::startHandOverLink(remote::DaemonLinkConfig config)
+{
+    // Awaited by nobody: it settles as it connects, and opens its window once its connection shows the
+    // workspace.
+    std::ignore = startDaemonLink(std::move(config));
+}
+
+void ContourGuiApp::handOverSettled(remote::HandOver handOver,
+                                    remote::HandOverOutcome outcome,
+                                    std::string const& reason)
+{
+    // The link it came from may have ended meanwhile, its window closed: nothing then holds the workspace.
+    if (auto* const from = daemonLink(handOver.from))
+        from->completeHandOver(handOver.workspace, outcome, reason);
 }
 
 void ContourGuiApp::destroyEndedLinks()
 {
     // A link whose closed windows still hold a pane waits: it asks again as its last pane lets it go.
-    if (std::erase_if(_daemonLinks, [](auto const& link) { return link->isFinished(); }) != 0)
-        publishDaemonDrift();
-}
-
-void ContourGuiApp::publishDaemonDrift()
-{
-    if (!_qmlEngine)
-        return;
-    // The badge reads no model as no badge.
-    _qmlEngine->rootContext()->setContextProperty(
-        "daemonDrift",
-        _daemonLinks.empty() ? nullptr : static_cast<QObject*>(&_daemonLinks.front()->drift()));
+    // Each window's drift badge reads its own link's model (WindowController::daemonDrift).
+    std::erase_if(_daemonLinks, [](auto const& link) { return link->isFinished(); });
 }
 
 std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
@@ -1104,22 +1247,6 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
         .transform_error([](vthost::client::DaemonRestartFailure const& failure) { return failure.detail; });
 }
 
-namespace
-{
-    /// Each would be silently ignored beside `--host`: the host's entry says where and how to connect.
-    constexpr auto HostExclusions = std::array {
-        cli::OptionPresence { .name = "connect-tcp", .givenAs = cli::GivenAs::Text },
-        cli::OptionPresence { .name = "socket", .givenAs = cli::GivenAs::Text },
-        cli::OptionPresence { .name = "tmux", .givenAs = cli::GivenAs::Flag },
-        cli::OptionPresence { .name = "token", .givenAs = cli::GivenAs::Text },
-        cli::OptionPresence { .name = "token-file", .givenAs = cli::GivenAs::Text },
-        cli::OptionPresence { .name = "tls-ca", .givenAs = cli::GivenAs::Text },
-        // A host attach mirrors all of the remote daemon's workspaces; one workspace would need its own
-        // intent.
-        cli::OptionPresence { .name = "workspace", .givenAs = cli::GivenAs::Text },
-    };
-} // namespace
-
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(std::string const& configPath,
                                                                               std::string const& nameOrUrl)
 {
@@ -1170,19 +1297,8 @@ int ContourGuiApp::clientAction()
     request.connectTcp = parameters().get<string>("contour.client.connect-tcp");
     request.tlsCaPath = parameters().get<string>("contour.client.tls-ca");
     request.sizePolicy = parameters().get<string>("contour.client.size-policy");
-    if (auto const workspace = parameters().get<string>("contour.client.workspace"); !workspace.empty())
-    {
-        auto id = uint64_t {};
-        if (auto const [end, error] =
-                std::from_chars(workspace.data(), workspace.data() + workspace.size(), id);
-            error != std::errc {} || end != workspace.data() + workspace.size())
-        {
-            cerr << std::format("contour client: invalid --workspace '{}' (expected a daemon workspace id)\n",
-                                workspace);
-            return EXIT_FAILURE;
-        }
-        request.workspace = id;
-    }
+    // Resolved against the daemon's workspaces once its transport is known (resolveClientWorkspace()).
+    request.workspace = parameters().get<string>("contour.client.workspace");
     auto token = vthost::resolveToken(parameters().get<string>("contour.client.token"),
                                       parameters().get<string>("contour.client.token-file"));
     if (!token)
@@ -1193,7 +1309,7 @@ int ContourGuiApp::clientAction()
     request.token = *std::move(token);
     auto const host = parameters().get<string>("contour.client.host");
     if (!host.empty())
-        if (auto const given = firstGivenOption("contour.client", HostExclusions))
+        if (auto const given = firstGivenOption("contour.client", cli::HostExclusions))
         {
             cerr << std::format("contour client: pass either --host or --{}, not both\n", *given);
             return EXIT_FAILURE;
@@ -1337,7 +1453,7 @@ namespace
     /// @param connectTcp `--connect-tcp`: the daemon's HOST:PORT.
     /// @param token The token it is sent.
     /// @param tlsCaPath `--tls-ca`: the PEM pinning its certificate; empty to trust on first use.
-    /// @return The TLS transport to a daemon over TCP, which a client follows every window of.
+    /// @return The TLS transport to a daemon over TCP, attached as a launch is.
     [[nodiscard]] std::expected<NativeAttachTarget, std::string> tcpAttachTarget(
         std::string const& connectTcp,
         std::string const& token,
@@ -1361,9 +1477,30 @@ namespace
         }
         return NativeAttachTarget {
             .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(tcp)),
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                    .workspaces = {} },
+            .intent = cli::launchIntent(std::nullopt),
         };
+    }
+
+    /// How long resolving `--workspace` may ask the daemon for its workspaces.
+    constexpr auto ClientWorkspaceListingTimeout = std::chrono::milliseconds { std::chrono::seconds { 10 } };
+
+    /// Resolves `contour client --workspace` against the daemon @p transport reaches, through its control API
+    /// (`workspace.list`).
+    /// @param transport The daemon.
+    /// @param spec What `--workspace` named.
+    /// @return The daemon's native id of it, or why there is none.
+    [[nodiscard]] std::expected<uint64_t, std::string> resolveClientWorkspace(
+        vthost::ITransportFactory& transport, std::string const& spec)
+    {
+        auto const answer = vthost::client::runControlCall(
+            transport, "workspace.list", "{}", "", ClientWorkspaceListingTimeout);
+        if (!answer)
+            return std::unexpected(
+                std::format("cannot list the daemon's workspaces: {}", answer.error().message));
+        return cli::decodeWorkspaceList(*answer).and_then(
+            [&spec](std::vector<vtcontrol::WorkspaceInfo> const& workspaces) {
+                return cli::resolveWorkspaceSpec(spec, workspaces);
+            });
     }
 } // namespace
 
@@ -1416,16 +1553,18 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     auto hostLabel = std::string {};
     // A remote daemon is not ours to restart or upgrade; the local one is.
     auto locality = window::DaemonLocality::Remote;
+    // How a window switch names the daemon; `--connect-tcp` names none.
+    auto address = remote::DaemonAddress {};
     if (_clientRequest && _clientRequest->host)
     {
-        // A remote daemon is started by the remote relay, never from here; a client follows every window.
+        // A remote daemon is started by the remote relay, never from here; it is attached as a launch is.
         auto& host = *_clientRequest->host;
         budget = std::max(host.connectTimeout, std::chrono::milliseconds { remote::MinimumConnectAwait });
         hostLabel = host.label;
+        address = remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Host, .name = host.label };
         target = NativeAttachTarget {
             .transport = host.factory,
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                    .workspaces = {} },
+            .intent = cli::launchIntent(std::nullopt),
         };
     }
     else if (_clientRequest && !_clientRequest->connectTcp.empty())
@@ -1459,6 +1598,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             .sizePolicy = *sizePolicy,
         };
         locality = window::DaemonLocality::Local;
+        address = remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Label, .name = label };
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
         };
@@ -1494,30 +1634,25 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
                     .kind = vthost::TransportErrorKind::Unreachable, .message = started.error() });
             return {};
         };
-        // A plain launch opens one new window beside whatever the daemon already shows, or brings them all
-        // back when no other client does; `--workspace` shows exactly one.
-        auto intent =
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} };
-        if (_clientRequest && _clientRequest->workspace)
-            intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                                   .workspaces = { *_clientRequest->workspace } };
         target = NativeAttachTarget {
             .transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, std::move(ensureDaemon)),
-            .intent = std::move(intent),
+            .intent = cli::launchIntent(std::nullopt),
         };
     }
     if (!target)
         return std::unexpected(target.error());
-
-    // The emulation settings the daemon gives the sessions this client creates, from the configuration
-    // loaded already; every session created later takes them from the configuration in memory, exactly
-    // as a local new tab does, so a reload reaches remote and local tabs alike. A failure is a warning:
-    // hosting under the daemon's own resolved profile is a sane thing to do meanwhile.
-    auto attachSettings = std::optional<vtbackend::Settings> {};
-    if (auto resolved = currentEmulationSettings(); resolved)
-        attachSettings = *std::move(resolved);
-    else
-        errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
+    // `--workspace` names a workspace as the control verbs do; what a connection follows is its native id.
+    if (_clientRequest && !_clientRequest->workspace.empty())
+    {
+        auto const workspace =
+            cli::requireVerifiedForWorkspaceListing(target->transport->peerTrust()).and_then([&] {
+                return resolveClientWorkspace(*target->transport, _clientRequest->workspace);
+            });
+        if (!workspace)
+            return std::unexpected(
+                std::format("--workspace '{}': {}", _clientRequest->workspace, workspace.error()));
+        target->intent = cli::launchIntent(*workspace);
+    }
 
     // A wake has the daemon probed instead of the connection given up, which would reconnect and shrink the
     // panes to the profile's size. Without a monitor only the steady clock can tell: on macOS it counts the
@@ -1546,28 +1681,20 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
     // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
     // has already spent part of the budget, and settles the hosting there.
-    auto const id =
-        startDaemonLink(remote::DaemonLinkConfig {
-                            .controller =
-                                remote::NativeController::Config {
-                                    .transport = std::move(target->transport),
-                                    .intent = std::move(target->intent),
-                                    .profileName = profileName(),
-                                    .workingDirectory = attachWorkingDirectory(
-                                        parameters().get<string>("contour.terminal.working-directory")),
-                                    .attachSettings = std::move(attachSettings),
-                                    .sessionSettings = [this] { return currentEmulationSettings(); },
-                                    .colorPreference = _colorPreference,
-                                    .clock = core::platform::defaultSteadyClock(),
-                                    .timeline = _startupTimeline,
-                                    .powerMonitor = _powerMonitor.get(),
-                                    .backoff = {},
-                                },
-                            .hostLabel = std::move(hostLabel),
-                            .locality = locality,
-                            .clientRelease = CONTOUR_VERSION_STRING,
-                        })
-            .id();
+    // Only this link, the launch's own, states the directory contour was started in: a link a switch opens
+    // later to another daemon has no tab to open there.
+    auto config = daemonLinkConfig(std::move(target->transport),
+                                   std::move(target->intent),
+                                   std::move(hostLabel),
+                                   locality,
+                                   std::move(address));
+    config.controller.workingDirectory =
+        attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory"));
+    // The launch's daemon is this client's to restart and upgrade when it is local: _restartDaemon and
+    // _upgradeDaemon are set for it.
+    if (locality == window::DaemonLocality::Local)
+        config.upkeep = window::DaemonUpkeep::ThisClient;
+    auto const id = startDaemonLink(std::move(config)).id();
     // Attach mode adopts the daemon's workspaces into the windows once the first one booted, and on every
     // layout change after (which the link wires itself). Both find the link by its id, which no window has
     // ended before the first one opens.
@@ -1739,10 +1866,10 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "POLICY" },
                 CLI::Option { "workspace",
                               CLI::Value { ""s },
-                              "Shows only the daemon workspace with this id (see `contour daemon "
-                              "status`) instead of opening a new one; fails when the daemon has "
-                              "no such workspace.",
-                              "ID" },
+                              "Shows only this daemon workspace -- its id or an id suffix (see "
+                              "`contour ls`), its label or its 1-based position -- instead of what a "
+                              "launch brings back; fails when it names no workspace, or several.",
+                              "WORKSPACE" },
             },
         });
 
@@ -2960,9 +3087,6 @@ int ContourGuiApp::terminalGuiAction()
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
-        // The drift badge of the launch's daemon; none is set without one, which the badge reads as no badge.
-        if (!_daemonLinks.empty())
-            publishDaemonDrift();
         // The new-defaults banner's decision: "Use New" writes settings.yml through the one Settings save
         // model, which reloads; "Keep Mine" remembers the answer in the GUI state file beside contour.yml.
         _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
@@ -3724,6 +3848,50 @@ void ContourGuiApp::refreshLauncherMenu()
     _launcherMenu->set(entries);
 }
 
+std::shared_ptr<cli::IDaemonDiscovery> ContourGuiApp::localDaemonDiscovery()
+{
+    if (!_localDaemonDiscovery)
+    {
+        _daemonSpawner = vthost::makeNativeDaemonSpawner();
+        _localDaemonDiscovery =
+            cli::makeLocalDaemonDiscovery(vthost::labelSocketPath(vthost::DefaultSocketLabel).parent_path(),
+                                          *_daemonSpawner,
+                                          cli::nativeWorkspaceCounter());
+    }
+    return _localDaemonDiscovery;
+}
+
+std::unique_ptr<session::SwitchDirectory> ContourGuiApp::makeSwitchDirectory()
+{
+    return std::make_unique<remote::DaemonSwitchDirectory>(
+        localDaemonDiscovery(), remote::makeControlWorkspaceLister(SwitchListingTimeout), [this] {
+            return linkedDaemons();
+        });
+}
+
+std::vector<remote::LinkedDaemon> ContourGuiApp::linkedDaemons()
+{
+    auto daemons = std::vector<remote::LinkedDaemon> {};
+    for (auto const& link: _daemonLinks)
+    {
+        // A link still connecting, given up, stopped or ended is on no daemon a window here shows.
+        if (!link->isAttached())
+            continue;
+        auto daemon = remote::LinkedDaemon {
+            .link = link->id(),
+            .address = link->address(),
+            .transport = link->siblingConfig().controller.transport,
+            .windows = {},
+        };
+        for (auto const window: _sessionManager.windowsBoundTo(*link))
+            if (auto const workspace = link->workspaceOf(window))
+                daemon.windows.push_back(
+                    remote::WindowOnDaemon { .window = window, .workspace = *workspace });
+        daemons.push_back(std::move(daemon));
+    }
+    return daemons;
+}
+
 window::ConnectPickerServices ContourGuiApp::connectPickerServices()
 {
     return window::ConnectPickerServices {
@@ -3735,6 +3903,7 @@ window::ConnectPickerServices ContourGuiApp::connectPickerServices()
                     return probeLocalDaemon(socket);
                 };
             },
+        .discovery = localDaemonDiscovery(),
         .check = [this](config::LaunchTarget const& target) { return prepareCheck(target); },
         .launch = [this](config::LaunchTarget const& target) { return launchConnect(target); },
         .showSettingsPage = [this](std::string const& page) { openSettingsPage(page, nullptr); },
@@ -3799,6 +3968,140 @@ void ContourGuiApp::openConnectPicker(PickerPresentation presentation, QScreen* 
     _connectPickerWindow->show();
     _connectPickerWindow->raise();
     _connectPickerWindow->requestActivate();
+}
+
+window::SwitcherServices ContourGuiApp::switcherServices()
+{
+    return window::SwitcherServices {
+        .discovery = localDaemonDiscovery(),
+        .savedHosts =
+            [this] {
+                auto hosts = std::vector<window::SwitcherDaemon> {};
+                for (auto const& [name, entry]: _config.hosts.value())
+                    hosts.push_back(window::SwitcherDaemon {
+                        .address = { .kind = vthost::proto::SwitchDaemonKind::Host,
+                                     .daemon = name,
+                                     .workspace = {} },
+                        .workspaceCount = std::nullopt,
+                        .tag = cli::schemeTag(entry.url.scheme),
+                        .expansion = window::SwitcherExpansion::Collapsed,
+                        .listing = window::SwitcherListing::NotListed,
+                        .failure = {},
+                        .workspaces = {},
+                    });
+                return hosts;
+            },
+        .list =
+            [this](vtworkspace::WorkspaceId window,
+                   session::SwitchTarget const& daemon,
+                   window::SwitcherListed done) {
+                _windowSwitching->listWorkspaces(
+                    window, daemon, [window, done = std::move(done)](auto listed) {
+                        done(listed.transform([window](std::vector<remote::WorkspaceRow> const& rows) {
+                            return remote::switcherWorkspacesOf(rows, window);
+                        }));
+                    });
+            },
+        .request =
+            [this](vtworkspace::WorkspaceId window, session::SwitchTarget target, session::SwitchMode mode) {
+                _windowSwitching->request(
+                    window,
+                    std::move(target),
+                    mode,
+                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                        if (!outcome)
+                            attachLog()("switch from the switcher failed: {}", outcome.error());
+                    });
+            },
+        .startDaemon =
+            [this](std::string const& label) {
+                // Read here, on the GUI thread; the job holds copies, and a start of its own, so it outlives
+                // nothing it uses.
+                auto const socket =
+                    vthost::muxSocketPath(vthost::socketLabelOf(label),
+                                          cli::resolveSocketOption("", _config.daemon.value().socket));
+                auto options = vthost::DaemonSpawnOptions {
+                    .filter = {},
+                    .logFile = {},
+                    .configPath = core::platform::normalizePath(_config.configFile),
+                    .profileName = {},
+                    .sizePolicy = _config.daemon.value().sizePolicy,
+                };
+                return [start = std::make_shared<LocalDaemonStart>(
+                            processEnvironment(), fileSystem(), programPath(), _daemonEnvironment),
+                        placement = _processPlacement,
+                        socket,
+                        options = std::move(options)] {
+                    return cli::startNamedDaemon(socket,
+                                                 { .spawner = *start->spawner,
+                                                   .binary = *start->binary,
+                                                   .placement = *placement,
+                                                   .options = options,
+                                                   .timeout = NamedDaemonStartTimeout });
+                };
+            },
+    };
+}
+
+std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening, QScreen* anchor)
+{
+    if (!_qmlEngine)
+        return std::unexpected(std::string { "there is no window to show the switcher in" });
+    if (!_switcher)
+    {
+        _switcher = std::make_unique<window::SwitcherController>(switcherServices());
+        _switcherWindow = window::loadSwitcherWindow(*_qmlEngine, *_switcher);
+        if (!_switcherWindow)
+        {
+            _switcher.reset();
+            return std::unexpected(std::string { "the switcher popup could not be loaded" });
+        }
+        // Both a choice and a cancel close it; the choice was handed to the window switcher already.
+        connect(_switcher.get(), &window::SwitcherController::finished, this, [this] {
+            if (_switcherWindow)
+                _switcherWindow->close();
+        });
+        connect(_switcher.get(), &window::SwitcherController::cancelled, this, [this] {
+            if (_switcherWindow)
+                _switcherWindow->close();
+        });
+    }
+    _switcher->open(std::move(opening));
+    _switcherWindow->setTransientParent(QGuiApplication::focusWindow());
+    _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal
+                                                                               : Qt::NonModal);
+    if (anchor != nullptr)
+        _switcherWindow->setScreen(anchor);
+    _switcherWindow->show();
+    _switcherWindow->raise();
+    _switcherWindow->requestActivate();
+    return {};
+}
+
+std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPickRequest const& pick)
+{
+    auto const daemon = _sessionManager.daemonTargetOf(pick.window);
+    if (!daemon)
+        return std::unexpected(std::string { "the window went away" });
+    auto const* const controller = _sessionManager.controllerFor(pick.window);
+    return openSwitcher(
+        window::SwitcherOpening {
+            .window = pick.window,
+            .windowDaemon = *daemon,
+            .mode = pick.mode,
+            .prompt = window::SwitcherPrompt::Browse,
+            .pick =
+                window::SwitcherDaemon {
+                    .address = { .kind = pick.target.kind, .daemon = pick.target.daemon, .workspace = {} },
+                    .workspaceCount = pick.workspaces.size(),
+                    .tag = {},
+                    .expansion = window::SwitcherExpansion::Expanded,
+                    .listing = window::SwitcherListing::Listed,
+                    .failure = {},
+                    .workspaces = remote::switcherWorkspacesOf(pick.workspaces, pick.window),
+                },
+        },
+        controller != nullptr ? controller->screen() : nullptr);
 }
 
 void ContourGuiApp::openSettingsPage(std::string const& page, QScreen* anchor)

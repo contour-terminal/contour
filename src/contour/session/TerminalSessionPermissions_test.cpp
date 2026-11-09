@@ -2926,3 +2926,71 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
     }
 #endif
 }
+
+TEST_CASE("TerminalSession: a switch a program asks for is asked about, and its answer handed back",
+          "[contour][session][permission][switch]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+    using contour::session::SwitchAsk;
+    using vthost::proto::SwitchDaemonKind;
+
+    struct Told
+    {
+        PermissionDecision decision;
+        PermissionMemory memory;
+    };
+    auto told = std::vector<std::pair<int, Told>> {};
+    auto const ask = [&told](int which, std::string_view workspace) {
+        return SwitchAsk { .target = { .kind = SwitchDaemonKind::Label,
+                                       .daemon = "admin",
+                                       .workspace = contour::session::workspaceTargetOf(workspace) },
+                           .sourceDaemon = "default",
+                           .remembering = contour::session::SwitchRemembering::Offered,
+                           .answered = [&told, which](PermissionDecision decision, PermissionMemory memory) {
+                               told.emplace_back(which, Told { decision, memory });
+                           } };
+    };
+
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    std::ignore = session->askToSwitchWindow(ask(1, "build"));
+    REQUIRE(session->pendingPermissionAsk() == PermissionAsk { GuardedRole::SwitchWindow });
+    CHECK(session->pendingPermission()
+              .value(QStringLiteral("lines"))
+              .toList()
+              .front()
+              .toMap()
+              .value(QStringLiteral("text"))
+              .toString()
+              .contains(QStringLiteral("“build” of the daemon “admin”")));
+    auto const first = shownQuestionId(*session);
+
+    // Asked again before the answer: the first is refused once, and the click on it grants nothing.
+    std::ignore = session->askToSwitchWindow(ask(2, "other"));
+    REQUIRE(told.size() == 1);
+    CHECK(told[0].first == 1);
+    CHECK(told[0].second.decision == PermissionDecision::Deny);
+    CHECK(told[0].second.memory == PermissionMemory::Once);
+    CHECK(shownQuestionId(*session) != first);
+    session->answerPermission(first, PermissionDecision::Allow, PermissionMemory::Once);
+    CHECK(told.size() == 1);
+
+    // The answer, and how long it is to stand, go to the asker; the session keeps none of it.
+    session->applyPendingSwitch(PermissionDecision::Allow, PermissionMemory::Session);
+    REQUIRE(told.size() == 2);
+    CHECK(told[1].first == 2);
+    CHECK(told[1].second.decision == PermissionDecision::Allow);
+    CHECK(told[1].second.memory == PermissionMemory::Session);
+    CHECK_FALSE(session->rememberedDecision(GuardedRole::SwitchWindow).has_value());
+    QCoreApplication::processEvents();
+    CHECK_FALSE(session->pendingPermissionAsk().has_value());
+
+    // Asked again, it asks again; a session that goes unanswered refuses it.
+    std::ignore = session->askToSwitchWindow(ask(3, "build"));
+    CHECK(session->pendingPermissionAsk() == PermissionAsk { GuardedRole::SwitchWindow });
+    session.reset();
+    REQUIRE(told.size() == 3);
+    CHECK(told[2].first == 3);
+    CHECK(told[2].second.decision == PermissionDecision::Deny);
+}

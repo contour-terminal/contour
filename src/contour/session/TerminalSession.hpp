@@ -30,6 +30,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionRole.hpp>
 #include <contour/session/SizeIndicator.hpp>
+#include <contour/session/SwitchPermission.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/DroppedText.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -1381,6 +1382,27 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void applyPendingRerun(contour::session::permission::PermissionDecision decision,
                            contour::session::permission::PermissionMemory memory);
 
+    /// Hands the switch a program asked for its answer (SwitchAsk::answered) -- with @p memory, which the
+    /// asker keeps, not the session (GuardedRole::SwitchWindow is RememberedIn::Asker).
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer is to stand.
+    void applyPendingSwitch(contour::session::permission::PermissionDecision decision,
+                            contour::session::permission::PermissionMemory memory);
+
+    /// Asks the user whether a program may switch the window this session is in (GuardedRole::SwitchWindow):
+    /// the prompt names @p ask's target, and its answer goes to @p ask's answered. A switch asked while
+    /// another waits takes its place, and the one replaced is answered Deny for this once. Unanswered when
+    /// the session goes, it is answered so too. Always asks: what a switch remembers its asker knows, and
+    /// asks only when nothing is remembered. GUI thread.
+    /// @param ask What to ask about, and whom to tell.
+    /// @return Names this question, for withdrawSwitchAsk().
+    [[nodiscard]] uint64_t askToSwitchWindow(SwitchAsk ask);
+
+    /// Takes the switch question @p asked down, unanswered, while it is the one waiting: the program asking
+    /// stopped waiting for it. No-op once answered or replaced. GUI thread.
+    /// @param asked What askToSwitchWindow() named it.
+    void withdrawSwitchAsk(uint64_t asked);
+
     /// The answer the user asked to stand for the session for @p role, if any.
     /// @param role The guarded role.
     /// @return The remembered decision; nothing when every request still asks (or follows the configuration).
@@ -1847,6 +1869,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::LaunchLayout const& event);
     bool operator()(actions::SaveLayout const& event);
     bool operator()(actions::AttachToHost const& event);
+    bool operator()(actions::SwitchToWorkspace const& event);
+    bool operator()(actions::OpenWorkspace const& event);
+    bool operator()(actions::CycleWorkspace const& event);
+    bool operator()(actions::CycleDaemon const& event);
+    bool operator()(actions::SwitchToDaemon const& event);
+    bool operator()(actions::OpenDaemon const& event);
+    bool operator()(actions::ShowSwitcher);
+    bool operator()(actions::NewDaemon);
     bool operator()(actions::OpenContextMenu);
     bool operator()(actions::SelectAll);
     bool operator()(actions::SoftReset);
@@ -2985,6 +3015,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The command line RerunCommand asked to run, while its dialog is up. Kept, not read again when the
     /// answer comes: the block's record may have gone by then, and what runs is what was shown.
     std::optional<vtbackend::CommandLineText> _pendingRerun;
+    /// The switch a program asked for, while its dialog is up (askToSwitchWindow()). GUI thread only.
+    std::optional<SwitchAsk> _pendingSwitch;
+    /// What askToSwitchWindow() named the last question it asked; @see withdrawSwitchAsk().
+    uint64_t _switchAsks = 0;
     /// The command a restart stopped in this shell, while its footer stands (noteInterruption()). GUI
     /// thread only.
     std::optional<vtbackend::CommandLineText> _interruption;

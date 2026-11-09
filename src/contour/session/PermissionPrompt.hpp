@@ -4,6 +4,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/session/PastePreview.hpp>
 #include <contour/session/Permission.hpp>
+#include <contour/session/SwitchPermission.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 
@@ -51,6 +52,15 @@ struct PermissionPrompt
     bool operator==(PermissionPrompt const&) const = default;
 };
 
+/// Where a guarded role's "don't ask again" is kept.
+enum class RememberedIn : uint8_t
+{
+    Session = 0, ///< The session's own memory (TerminalSession::rememberedDecision()).
+    /// Whoever asked, who is handed the answer's memory with it: the answer must outlive the session, as a
+    /// switch tears the session down.
+    Asker,
+};
+
 /// What each guarded role's prompt offers, and which setting of the configuration answers it.
 struct GuardedRoleRow
 {
@@ -62,6 +72,7 @@ struct GuardedRoleRow
     /// The button Return takes: Deny for what a program asks and for a rerun, whose command line any
     /// program can forge; Allow for a paste, which the user just asked for.
     PermissionDecision defaultDecision;
+    RememberedIn remembered; ///< Where a "don't ask again" is kept.
 };
 
 /// One row per guarded role, in enumerator order.
@@ -70,30 +81,43 @@ inline constexpr auto GuardedRoleRows = std::array {
                      .setting = &config::PermissionsConfig::changeFont,
                      .denyText = "Deny",
                      .allowText = "Change Font",
-                     .defaultDecision = PermissionDecision::Deny },
+                     .defaultDecision = PermissionDecision::Deny,
+                     .remembered = RememberedIn::Session },
     GuardedRoleRow { .role = GuardedRole::CaptureBuffer,
                      .setting = &config::PermissionsConfig::captureBuffer,
                      .denyText = "Deny",
                      .allowText = "Allow",
-                     .defaultDecision = PermissionDecision::Deny },
+                     .defaultDecision = PermissionDecision::Deny,
+                     .remembered = RememberedIn::Session },
     GuardedRoleRow { .role = GuardedRole::ShowHostWritableStatusLine,
                      .setting = &config::PermissionsConfig::displayHostWritableStatusLine,
                      .denyText = "Deny",
                      .allowText = "Show",
-                     .defaultDecision = PermissionDecision::Deny },
+                     .defaultDecision = PermissionDecision::Deny,
+                     .remembered = RememberedIn::Session },
     // Gated on the paste's size, not on the configuration.
     GuardedRoleRow { .role = GuardedRole::BigPaste,
                      .setting = nullptr,
                      .denyText = "Cancel",
                      .allowText = "Paste",
-                     .defaultDecision = PermissionDecision::Allow },
+                     .defaultDecision = PermissionDecision::Allow,
+                     .remembered = RememberedIn::Session },
     // Asked every time unless the user said otherwise for the session: the line is the shell's report,
     // which any program writing to the terminal can forge, so it runs only once it has been read.
     GuardedRoleRow { .role = GuardedRole::RerunCommand,
                      .setting = nullptr,
                      .denyText = "Cancel",
                      .allowText = "Run",
-                     .defaultDecision = PermissionDecision::Deny },
+                     .defaultDecision = PermissionDecision::Deny,
+                     .remembered = RememberedIn::Session },
+    // Asked of a program's control call: Deny by default. Remembered per pair of daemons for the process
+    // (the asker's SwitchGrants), never for an ad-hoc host, and configured nowhere.
+    GuardedRoleRow { .role = GuardedRole::SwitchWindow,
+                     .setting = nullptr,
+                     .denyText = "Deny",
+                     .allowText = "Switch",
+                     .defaultDecision = PermissionDecision::Deny,
+                     .remembered = RememberedIn::Asker },
 };
 
 static_assert(
@@ -104,7 +128,7 @@ static_assert(
         return true;
     }(),
     "GuardedRoleRows must list every guarded role in enumerator order");
-static_assert(GuardedRoleRows.size() == std::to_underlying(GuardedRole::RerunCommand) + 1U,
+static_assert(GuardedRoleRows.size() == std::to_underlying(GuardedRole::SwitchWindow) + 1U,
               "GuardedRoleRows must have a row for every guarded role");
 
 /// The row of @p role.
@@ -148,6 +172,26 @@ inline constexpr std::string_view SessionRememberText = "Don't ask again in this
 /// The prompt asking whether a command runs again.
 /// @param displayedCommandLine The command line, already made safe to show.
 [[nodiscard]] PermissionPrompt rerunPrompt(std::string_view displayedCommandLine);
+
+/// How a daemon is named to the user, in a switch's prompt or in a notice about one: "the daemon “admin”",
+/// "the host “home”". The name is program-supplied as often as not, so it is made safe and cut first.
+/// @param kind How @p name is read.
+/// @param name The label or host name.
+/// @param unnamed What is said for a daemon with no name to show.
+/// @return The phrase.
+[[nodiscard]] std::string daemonPhrase(vthost::proto::SwitchDaemonKind kind,
+                                       std::string_view name,
+                                       std::string_view unnamed);
+
+/// The prompt asking whether a program may switch this window to @p target. It names the target in full --
+/// the daemon by kind and name, and the workspace -- and, for an ad-hoc host, that ssh runs with the user's
+/// credentials. Its box remembers for the process, for switches from @p sourceDaemon to the target's daemon.
+/// @param target Where to, as the program named it (made safe here).
+/// @param sourceDaemon The daemon the window is on, as the user knows it; empty for one unnamed.
+/// @param remembering Whether the box is offered: Withheld leaves its text empty, which hides it.
+[[nodiscard]] PermissionPrompt switchWindowPrompt(SwitchTarget const& target,
+                                                  std::string_view sourceDaemon,
+                                                  SwitchRemembering remembering);
 
 /// The checkbox an extension's consent prompt offers: an extension's grant can only be recorded.
 inline constexpr std::string_view ExtensionRememberText = "Remember for this extension";

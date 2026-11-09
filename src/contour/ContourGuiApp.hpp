@@ -25,6 +25,9 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
 #include <contour/remote/RemoteLayout.hpp>
+#include <contour/remote/SwitchGrants.hpp>
+#include <contour/remote/SwitchHost.hpp>
+#include <contour/remote/SwitchingService.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/RestoreSummaryPolicy.hpp>
@@ -80,9 +83,11 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/Transport.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
+#include <vthost/proto/Pdu.hpp>
 
 class QQmlContext;
 class QQuickWindow;
@@ -116,8 +121,9 @@ namespace contour
 
 namespace cli
 {
+    class IDaemonDiscovery;
     struct LocalDaemonState;
-}
+} // namespace cli
 
 namespace config
 {
@@ -149,8 +155,11 @@ namespace platform
 
 namespace remote
 {
+    struct DaemonAddress;
     class DaemonLink;
     struct DaemonLinkConfig;
+    struct LinkedDaemon;
+    struct SwitchPickRequest;
     class NativeController;
     class TmuxController;
 } // namespace remote
@@ -170,6 +179,9 @@ namespace window
     class NewDefaultsNotice;
     class QuickTerminalController;
     class SettingsController;
+    class SwitcherController;
+    struct SwitcherOpening;
+    struct SwitcherServices;
     class WindowControlStyleProvider;
     class WindowController;
 } // namespace window
@@ -259,7 +271,11 @@ using ProgramReachablePredicate = bool (*)(std::string_view);
                                                       vtpty::ProgramHost host);
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDaemonLinkHost
+class ContourGuiApp:
+    public QObject,
+    public cli::ContourApp,
+    public remote::IDaemonLinkHost,
+    public remote::ISwitchHost
 {
     Q_OBJECT
 
@@ -319,6 +335,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     ///                     is none; tests pass one over an offscreen engine of their own.
     /// @param shellIntegration What the offer to install shell integration reads and writes; see
     ///                     ShellIntegrationServices. Tests pass a recording editor and an in-memory state.
+    /// @param windowSwitching What the switching actions dispatch to. Null (the default) builds the
+    ///                     remote::WindowSwitcher; tests pass a recording double.
+    /// @param switchDirectory What the switching actions and their palette rows list. Null (the default)
+    ///                     builds the application's own; tests pass a fake.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -339,7 +359,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
         window::SettingsWindowFactory settingsWindowFactory = nullptr,
         ShellIntegrationServices shellIntegration = {},
         std::unique_ptr<window::DragEndProbe> dragEndProbe = nullptr,
-        std::unique_ptr<platform::ApplicationRestart> applicationRestart = nullptr);
+        std::unique_ptr<platform::ApplicationRestart> applicationRestart = nullptr,
+        std::unique_ptr<remote::SwitchingService> windowSwitching = nullptr,
+        std::unique_ptr<session::SwitchDirectory> switchDirectory = nullptr);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -458,6 +480,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// @param presentation What choosing a target and cancelling do.
     /// @param anchor The screen of the window that asked; null for the primary screen.
     void openConnectPicker(PickerPresentation presentation, QScreen* anchor);
+
+    /// Shows the daemon and workspace switcher popup over a window -- built on first use, opened afresh
+    /// (filter cleared, the window's own daemon listed, the local daemons looked for) on every later one --
+    /// and focuses its field. Modal over the focused window; a choice asks the window switcher, Esc changes
+    /// nothing.
+    /// @param opening Over which window, and what to show: everything, a pick, or the "New daemon…" prompt.
+    /// @param anchor The screen of the window that asked; null for the primary screen.
+    /// @return Nothing once shown; why it cannot be (no QML engine, or Switcher.qml did not load).
+    [[nodiscard]] std::expected<void, std::string> openSwitcher(window::SwitcherOpening opening,
+                                                                QScreen* anchor);
 
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes
@@ -663,6 +695,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     void upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
     void linkEnded() override;
+    void startHandOverLink(remote::DaemonLinkConfig config) override;
+    void handOverSettled(remote::HandOver handOver,
+                         remote::HandOverOutcome outcome,
+                         std::string const& reason) override;
+    [[nodiscard]] remote::SwitchGrants& switchGrants() override { return _switchGrants; }
+    [[nodiscard]] remote::SwitchTimer const& switchTimer() override { return _switchTimer; }
+
+    // remote::ISwitchHost
+    [[nodiscard]] std::vector<remote::DaemonLink*> switchableLinks() override;
+    [[nodiscard]] std::expected<remote::DaemonLinkConfig, std::string> linkConfigFor(
+        remote::DaemonAddress const& daemon) override;
+    remote::DaemonLink& startSwitchLink(remote::DaemonLinkConfig config) override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }
@@ -989,18 +1033,19 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     struct ClientRequest
     {
         ClientEngine engine = ClientEngine::Native;
-        std::string tmuxSocket;            ///< `--tmux-socket`.
-        std::string socket;                ///< `--socket`; empty for `daemon.socket`.
-        std::string label;                 ///< `--label`; empty when not given.
-        std::string profile;               ///< `--profile`.
-        std::string config;                ///< `--config`.
-        std::string connectTcp;            ///< `--connect-tcp`; empty for the local socket.
-        std::string tlsCaPath;             ///< `--tls-ca`.
-        std::string token;                 ///< `--token` or `--token-file`, resolved.
-        std::string sizePolicy;            ///< `--size-policy`; empty for `daemon.size_policy`.
-        std::string logFilter;             ///< `--log`, forwarded to a daemon it starts.
-        std::string logFile;               ///< `--log-file`, likewise.
-        std::optional<uint64_t> workspace; ///< `--workspace`: the one daemon workspace to show.
+        std::string tmuxSocket; ///< `--tmux-socket`.
+        std::string socket;     ///< `--socket`; empty for `daemon.socket`.
+        std::string label;      ///< `--label`; empty when not given.
+        std::string profile;    ///< `--profile`.
+        std::string config;     ///< `--config`.
+        std::string connectTcp; ///< `--connect-tcp`; empty for the local socket.
+        std::string tlsCaPath;  ///< `--tls-ca`.
+        std::string token;      ///< `--token` or `--token-file`, resolved.
+        std::string sizePolicy; ///< `--size-policy`; empty for `daemon.size_policy`.
+        std::string logFilter;  ///< `--log`, forwarded to a daemon it starts.
+        std::string logFile;    ///< `--log-file`, likewise.
+        /// `--workspace`: the one daemon workspace to show, as the control verbs name one; empty for none.
+        std::string workspace;
         std::optional<cli::HostTransport>
             host; ///< `--host`, resolved: a remote daemon instead of the local one.
     };
@@ -1065,6 +1110,27 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// What the Connect picker reaches the app through.
     [[nodiscard]] window::ConnectPickerServices connectPickerServices();
 
+    /// What the switcher popup reaches the app through: discovery, the saved hosts, the window switcher's
+    /// listing and request, and the start of a named daemon ("New daemon…").
+    [[nodiscard]] window::SwitcherServices switcherServices();
+
+    /// Shows the switcher popup for a pick the window switcher asks for (remote::SwitchPicker).
+    /// @param pick The window, its target daemon and that daemon's workspaces.
+    /// @return Nothing once shown; why it cannot be.
+    [[nodiscard]] std::expected<void, std::string> showSwitchPick(remote::SwitchPickRequest const& pick);
+
+    /// @return The discovery of the local daemons, made on first use.
+    [[nodiscard]] std::shared_ptr<cli::IDaemonDiscovery> localDaemonDiscovery();
+
+    /// @return The production switch directory: the local discovery, a control-API workspace lister, and
+    ///         the links' windows (linkedDaemons()). Built in the member-initializer list, before the session
+    ///         manager it reads through linkedDaemons() later -- never while either is constructed.
+    [[nodiscard]] std::unique_ptr<session::SwitchDirectory> makeSwitchDirectory();
+
+    /// @return The daemons the windows here are on, one entry per attached link, with the windows each serves
+    ///         and the daemon workspace each shows. GUI thread.
+    [[nodiscard]] std::vector<remote::LinkedDaemon> linkedDaemons();
+
     /// @return What this launch opens first: the Connect picker for `contour connect` without a target, or
     /// for a
     ///         plain launch while `connect_picker_on_start` is on; else a terminal window.
@@ -1117,17 +1183,29 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(remote::DaemonLink& link,
                                                                      std::chrono::milliseconds budget);
 
+    /// What a link to a daemon is built with: this client's profile and emulation settings stated, on the
+    /// app's clock, timeline and power monitor. The one place a link's configuration is made, for a launch's
+    /// link and for one a window switch makes.
+    /// @param transport How to reach the daemon.
+    /// @param intent What the link's first connection follows.
+    /// @param hostLabel The remote host, as named; empty for a local daemon and `--connect-tcp`.
+    /// @param locality Whether the daemon runs on this machine. Not whether it is this client's to restart
+    ///        and upgrade: DaemonLinkConfig::upkeep says that, None here.
+    /// @param address The daemon as a window switch names it.
+    /// @return The configuration.
+    [[nodiscard]] remote::DaemonLinkConfig daemonLinkConfig(
+        std::shared_ptr<vthost::ITransportFactory> transport,
+        vthost::proto::AttachIntent intent,
+        std::string hostLabel,
+        window::DaemonLocality locality,
+        remote::DaemonAddress address);
+
     /// @param id A link's id.
     /// @return The link of that id; null once it was destroyed.
     [[nodiscard]] remote::DaemonLink* daemonLink(remote::DaemonLinkId id) const noexcept;
 
-    /// Destroys every link that ended and whose controller binds no pane any more (@see linkEnded), and has
-    /// the drift badge read the first remaining link's model.
+    /// Destroys every link that ended and whose controller binds no pane any more (@see linkEnded).
     void destroyEndedLinks();
-
-    /// Sets the `daemonDrift` QML context property to the first link's drift model, or to none. No-op
-    /// before the QML engine exists.
-    void publishDaemonDrift();
 
     /// Upgrades the local daemon in place to this release, keeping every hosted program running. Runs off the
     /// GUI thread.
@@ -1164,6 +1242,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     std::unique_ptr<core::platform::ISystemPowerMonitor> _powerMonitor;
     /// Why _powerMonitor could not be created, so a failed creation is logged once and not retried.
     std::optional<core::platform::PlatformError> _powerMonitorFailure;
+
+    /// The answers that stand for the switches programs ask for (IDaemonLinkHost::switchGrants()), for the
+    /// process's lifetime. Declared before the links, and so before every session whose question names it.
+    remote::SwitchGrants _switchGrants;
+    /// What expires the switch questions the links ask (IDaemonLinkHost::switchTimer()).
+    remote::SwitchTimer _switchTimer = remote::qtSwitchTimer();
 
     /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
     /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
@@ -1298,6 +1382,17 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     platform::FramePlatform _framePlatform = platform::currentFramePlatform();
     // Declared before _sessionManager, whose window controllers report their drag events to it.
     std::unique_ptr<window::DragEndProbe> _dragEndProbe;
+    /// What the local daemon discovery probes with; declared before the discovery it serves.
+    std::unique_ptr<vthost::DaemonSpawner> _daemonSpawner;
+    /// Finds the daemons running here, for the Connect picker and the switch directory; made on first use.
+    /// Declared before _switchDirectory, which the constructor builds on it.
+    std::shared_ptr<cli::IDaemonDiscovery> _localDaemonDiscovery;
+    // What the switching actions dispatch to and list; both declared before _sessionManager, which holds
+    // them by reference. The first is a remote::WindowSwitcher unless a test injected a double; it is built
+    // on the manager not yet constructed, which it does not use until a request -- the cyclic wiring of the
+    // manager and what it dispatches to.
+    std::unique_ptr<remote::SwitchingService> _windowSwitching;
+    std::unique_ptr<session::SwitchDirectory> _switchDirectory;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
@@ -1489,6 +1584,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     std::unique_ptr<QQuickWindow> _connectPickerWindow;
     /// How the picker was last shown, which decides what a started connection does to the app.
     PickerPresentation _connectPickerPresentation = PickerPresentation::Launcher;
+    /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
+    std::unique_ptr<window::SwitcherController> _switcher;
+    std::unique_ptr<QQuickWindow> _switcherWindow;
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the
