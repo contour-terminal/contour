@@ -427,8 +427,8 @@ namespace
     [[noreturn]] void runTrampoline()
     {
 #ifdef __linux__
-        // Named as its argv[0] says rather than "exe", the name of the /proc/self/exe it was spawned from,
-        // so that ps, top and the OOM killer's report say what the parked process is.
+        // Named as its argv[0] says rather than the number of the /proc/self/fd entry it was spawned from, so
+        // that ps, top and the OOM killer's report say what the parked process is.
         auto const name = std::string { TrampolineProgramName };
         ::prctl(PR_SET_NAME, name.c_str());
 #endif
@@ -473,9 +473,28 @@ std::expected<pid_t, std::error_code> spawnTrampoline(SpawnSpec spec,
                                                       std::span<InheritedFd const> fds,
                                                       TrampolineEnvironment environment)
 {
-    return selfExecutablePath().and_then([&](std::string const& self) {
-        return spawnTrampolineImage(self, std::move(spec), fds, environment);
-    });
+    return selfExecutablePath().and_then(
+        [&](std::string const& self) -> std::expected<pid_t, std::error_code> {
+#ifdef __linux__
+            // Through a descriptor of the running image rather than the /proc/self/exe link itself: the same
+            // file, replaced or removed on disk or not. valgrind runs this process from its own tool, which
+            // an exec of the link starts ("You cannot run 'contour-spawn' directly"), but it opens the link
+            // onto the image it runs. O_PATH, as an image may be executable without being readable; kept open
+            // until posix_spawn() returns, by which time the trampoline's exec has resolved it. Numbered
+            // above every slot, as the copies are: opened on the lowest free number, it may be a slot's,
+            // which the spawn dup2()s the slot onto before the exec reads the path.
+            auto const opened = OwnedFd { ::open(self.c_str(), O_PATH | O_CLOEXEC) };
+            if (!opened.isOpen())
+                return std::unexpected(util::lastError());
+            auto const image = OwnedFd { ::fcntl(opened.get(), F_DUPFD_CLOEXEC, FirstTemporaryFd) };
+            if (!image.isOpen())
+                return std::unexpected(util::lastError());
+            return spawnTrampolineImage(
+                std::format("/proc/self/fd/{}", image.get()), std::move(spec), fds, environment);
+#else
+            return spawnTrampolineImage(self, std::move(spec), fds, environment);
+#endif
+        });
 }
 
 std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& image,
