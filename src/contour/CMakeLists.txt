@@ -1261,6 +1261,13 @@ if(CONTOUR_FRONTEND_GUI)
                 ENVIRONMENT
                     "CONTOUR_TEST_CONTROLS_STYLE=ContourTui;QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
 
+        # A budget of their own, over the presets' 10-minute default: on the Windows runner these four run
+        # in parallel and each takes 8 to 10 minutes, so the slowest crossed 600 s on a busy runner and ctest
+        # killed it mid-case -- a different "hung" case every time, though nothing hung. 20 minutes still
+        # fails a real hang well inside the Test step's 30.
+        set_tests_properties(contour_gui_test contour_gui_test_fluent contour_gui_test_contourlinux
+                             contour_gui_test_contourtui PROPERTIES TIMEOUT 1200)
+
         if(WIN32)
             # Native HWND geometry cannot be exercised through the offscreen platform. Keep the
             # regular suite headless, and run the native cases separately on the Windows desktop.
