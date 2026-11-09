@@ -438,21 +438,20 @@ void DaemonLink::followLayout()
     if (auto const* const handOver = handOverRole();
         handOver && isLive() && _controller->settledLayout(handOver->from.workspace) != nullptr)
         reportHandOver(HandOverOutcome::Settled, {});
-    // A window switching to another workspace of this daemon is brought to it once its first layout is here.
+    // A window switching to another workspace of this daemon is brought to it once its layout holds a tab.
     if (_switch && isLive())
     {
         auto const layouts = _controller->settledLayouts();
         auto const keys = layouts | std::views::keys;
-        if (auto const target =
-                std::ranges::find_if(keys, [this](uint64_t id) { return isSwitchTarget(id); });
+        if (auto const target = std::ranges::find_if(
+                keys, [this](uint64_t id) { return isSwitchTarget(id) && holdsTab(id); });
             target != keys.end())
             finishSwitch(*target);
     }
     // Last: a link a switch started tells it once its connection shows the workspace, and may be handed the
-    // window that asked right then.
+    // window that asked right then. Not before the workspace holds a tab: the window would be emptied.
     if (arrivalDue() && isLive())
-        if (auto const workspace = arrivalWorkspace();
-            workspace && _controller->settledLayout(*workspace) != nullptr)
+        if (auto const workspace = arrivalWorkspace(); workspace && holdsTab(*workspace))
             reportArrival(*workspace);
 }
 
@@ -486,6 +485,12 @@ bool DaemonLink::isSwitchTarget(uint64_t daemonWorkspace) const
         return daemonWorkspace == _switch->to;
     // One the daemon made: pushed since the follow, and shown by no window yet.
     return !_switch->before.contains(daemonWorkspace) && !_attachWindowMap.contains(daemonWorkspace);
+}
+
+bool DaemonLink::holdsTab(uint64_t daemonWorkspace) const
+{
+    auto const layout = _controller->settledLayout(daemonWorkspace);
+    return layout != nullptr && !layout->tabs.empty();
 }
 
 std::optional<uint64_t> DaemonLink::workspaceOf(vtworkspace::WorkspaceId window) const
@@ -622,6 +627,8 @@ std::expected<void, std::string> DaemonLink::canAdoptWindow(vtworkspace::Workspa
     auto const workspace = isLive() ? arrivalWorkspace() : std::nullopt;
     if (!workspace || _controller->settledLayout(*workspace) == nullptr)
         return std::unexpected(std::string { "the connection to the daemon shows no workspace yet" });
+    if (!holdsTab(*workspace))
+        return std::unexpected(std::string { "the daemon's workspace holds no tab" });
     if (_sessions.model().workspace(window) == nullptr)
         return std::unexpected(std::string { "the window is gone" });
     return {};
