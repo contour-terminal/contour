@@ -556,11 +556,23 @@ TEST_CASE("OSC 52: the selection parameter names where a write lands", "[screen]
         CHECK(mock.clipboardData.empty());
     }
 
-    SECTION("a Pd that is not base64 is refused, not taken for a clear")
+    SECTION("a Pd that carries no byte is refused, not taken for a clear")
     {
         mock.writeToScreen("\033]52;c;aGk=\033\\");
         REQUIRE(mock.clipboardData == "hi");
         mock.writeToScreen("\033]52;c;!!!\033\\");
+        CHECK(mock.clipboardData == "hi");
+        // One digit is six bits, less than a byte.
+        mock.writeToScreen("\033]52;c;a\033\\");
+        CHECK(mock.clipboardData == "hi");
+    }
+
+    SECTION("a byte that is not a base64 digit is skipped, as xterm skips it")
+    {
+        // esctest's own Pd: Python's repr of the encoded bytes with only the leading "b'" cut off.
+        mock.writeToScreen("\033]52;;dGVzdGluZyAxMjM='\033\\");
+        CHECK(mock.clipboardData == "testing 123");
+        mock.writeToScreen("\033]52;c;aG k=\033\\");
         CHECK(mock.clipboardData == "hi");
     }
 
