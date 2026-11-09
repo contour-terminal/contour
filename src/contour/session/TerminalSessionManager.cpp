@@ -3188,8 +3188,8 @@ void TerminalSessionManager::announceMove(vtworkspace::MoveResult const& moved,
     auto* const controller = controllerFor(moved.workspace);
     if (controller == nullptr)
         return;
-    controller->announceMove(
-        window::toQString(window::moveAnnouncementOf(payload, landing)).arg(moved.workspace.value));
+    controller->announceMove(QString::fromStdString(
+        window::moveAnnouncement(payload, landing, std::to_string(moved.workspace.value))));
 }
 
 std::expected<void, MoveFailure> TerminalSessionManager::moveTabLegacy(ResolvedDrag const& drag,
