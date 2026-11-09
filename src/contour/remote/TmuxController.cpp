@@ -550,7 +550,7 @@ void TmuxController::unbindPane(uint64_t pane)
         // already realized.
         if (auto const moved = _movedPanes.find(pane); moved != _movedPanes.end())
         {
-            if (!_stopped)
+            if (_stopPhase == StopPhase::Running)
             {
                 _pending.push_back(moved->second);
                 rediscovered = true;

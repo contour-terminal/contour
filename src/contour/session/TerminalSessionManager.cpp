@@ -1184,6 +1184,7 @@ void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
     _windowSwitching.request(window->id(),
                              std::move(target),
                              mode,
+                             NoLandingDeadline,
                              [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
                                  if (!outcome)
                                      managerLog()("Switch failed: {}", outcome.error());

@@ -204,7 +204,10 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
     {
     }
     [[nodiscard]] contour::remote::SwitchGrants& switchGrants() override { return grants; }
-    [[nodiscard]] contour::remote::SwitchTimer const& switchTimer() override { return questionTimer; }
+    [[nodiscard]] contour::remote::SwitchDeadline const& switchDeadline() override
+    {
+        return questionDeadline;
+    }
 
     // ISwitchHost
     [[nodiscard]] std::vector<DaemonLink*> switchableLinks() override
@@ -240,9 +243,13 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
     int endings = 0;                                                      ///< How often a link said it ended.
     int started = 0;                      ///< How many links a switch started.
     contour::remote::SwitchGrants grants; ///< The answers that stand for the switches programs ask for.
+    /// What every switch's time is read from; moves only when a test says so.
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + std::chrono::hours { 1 } };
     /// What expires the switch questions; never fires unless a test says otherwise.
-    contour::remote::SwitchTimer questionTimer = [](std::chrono::milliseconds /*delay*/,
-                                                    std::function<void()> const& /*fire*/) {
+    contour::remote::SwitchDeadline questionDeadline {
+        .timeout = contour::remote::DefaultSwitchTimeout,
+        .timer = [](std::chrono::milliseconds /*delay*/, std::function<void()> const& /*fire*/) {},
+        .clock = clock,
     };
 
   private:
@@ -262,12 +269,14 @@ struct ManualSwitchTimer
     };
     std::vector<Armed> armed; ///< What is armed and not fired, in arming order.
 
-    [[nodiscard]] contour::remote::SwitchDeadline deadline()
+    /// @param clock What the switch's time is read from.
+    [[nodiscard]] contour::remote::SwitchDeadline deadline(core::platform::IClock const& clock)
     {
         return contour::remote::SwitchDeadline {
             .timeout = contour::remote::DefaultSwitchTimeout,
             .timer = [this](std::chrono::milliseconds delay,
                             std::function<void()> fire) { armed.push_back({ delay, std::move(fire) }); },
+            .clock = clock,
         };
     }
 
@@ -373,7 +382,7 @@ struct SwitchRig
                 picks.push_back(std::move(pick));
                 return std::expected<void, std::string> {};
             },
-            timer.deadline());
+            timer.deadline(host.clock));
         // A switch a program asks for reaches the manager's switching, which hands it to this switcher.
         app.switching().forwardTo = switcher.get();
         links.push_back(std::make_unique<DaemonLink>(
@@ -426,7 +435,8 @@ struct SwitchRig
         SwitchTarget target, SwitchMode mode = SwitchMode::Switch) const
     {
         auto told = Told {};
-        switcher->request(window->id, std::move(target), mode, told.completion());
+        switcher->request(
+            window->id, std::move(target), mode, contour::session::NoLandingDeadline, told.completion());
         REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
         return *told.outcome;
     }
@@ -627,6 +637,7 @@ TEST_CASE(
     rig.switcher->request(rig.window->id,
                           to(daemonB(), "2"),
                           SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
                           [&](std::expected<SwitchOutcome, std::string> outcome) {
                               toldWhileOld = rig.windowLink() == &oldLink && oldLink.isLive();
                               completion(std::move(outcome));
@@ -702,9 +713,15 @@ TEST_CASE("WindowSwitcher: a daemon lost after the follow and before the first f
 {
     auto rig = SwitchRig {};
     auto const before = rig.windowSessions();
+    // B's target was switched away from before: a switch that never showed it leaves it so.
+    hide(rig.b, rig.bWorkspaces[1]);
     rig.b.holdNewConnectionsAtLayout();
     auto told = Told {};
-    rig.switcher->request(rig.window->id, to(daemonB(), "2"), SwitchMode::Switch, told.completion());
+    rig.switcher->request(rig.window->id,
+                          to(daemonB(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
     // The new link's connection follows B's workspace, and is held before its first layout.
     REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
     CHECK_FALSE(told.outcome.has_value());
@@ -720,7 +737,8 @@ TEST_CASE("WindowSwitcher: a daemon lost after the follow and before the first f
     // The link it started gave up: served again, B's workspace is not followed by anyone.
     rig.b.serveAgain();
     CHECK_FALSE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) > 0; }, 100));
-    CHECK(visibilityOn(rig.b, rig.bWorkspaces[1]) != WorkspaceVisibility::Shown);
+    // The connection went before it confirmed the layout: B gives the workspace back its record.
+    CHECK(visibilityOn(rig.b, rig.bWorkspaces[1]) == WorkspaceVisibility::Hidden);
 }
 
 TEST_CASE("WindowSwitcher: a switch within the daemon lost before the first frame undoes its follow",
@@ -735,7 +753,11 @@ TEST_CASE("WindowSwitcher: a switch within the daemon lost before the first fram
         return 0;
     });
     auto told = Told {};
-    rig.switcher->request(rig.window->id, to(daemonA(), "2"), SwitchMode::Switch, told.completion());
+    rig.switcher->request(rig.window->id,
+                          to(daemonA(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
     REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 1; }));
     CHECK_FALSE(told.outcome.has_value());
 
@@ -747,7 +769,10 @@ TEST_CASE("WindowSwitcher: a switch within the daemon lost before the first fram
     REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[0]) == 1; }, 2000));
     // A reconnect quicker than the GUI thread may have resumed it meanwhile; the release undoes that too.
     CHECK(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 0; }, 2000));
-    CHECK(visibilityOn(rig.a, rig.aWorkspaces[1]) != WorkspaceVisibility::Shown);
+    // Hidden before the switch, and hidden still: the lost connection never confirmed the follow, so the
+    // daemon gives it back its record, though the client's undo has no connection to travel on.
+    CHECK(waitUntil([&] { return visibilityOn(rig.a, rig.aWorkspaces[1]) == WorkspaceVisibility::Hidden; },
+                    2000));
     drainGuiEvents();
     CHECK(rig.launchLink().liveController()->settledLayout(rig.aWorkspaces[1]) == nullptr);
     CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
@@ -767,7 +792,11 @@ TEST_CASE(
         return 0;
     });
     auto told = Told {};
-    rig.switcher->request(rig.window->id, to(daemonA(), "2"), SwitchMode::Switch, told.completion());
+    rig.switcher->request(rig.window->id,
+                          to(daemonA(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
     REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[1]) == 1; }));
     REQUIRE(rig.timer.armed.size() == 1);
     CHECK(rig.timer.armed.front().delay == contour::remote::DefaultSwitchTimeout);
@@ -807,6 +836,7 @@ TEST_CASE("WindowSwitcher: a timed-out switch to a new workspace hides the one t
     rig.switcher->request(rig.window->id,
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
                           told.completion());
     // The daemon makes the workspace; its layout is held on the way to the window's connection.
     REQUIRE(waitUntil(
@@ -839,7 +869,11 @@ TEST_CASE("WindowSwitcher: a switch to another daemon whose target never shows t
     hide(rig.b, rig.bWorkspaces[1]);
     rig.b.holdNewConnectionsAtLayout();
     auto told = Told {};
-    rig.switcher->request(rig.window->id, to(daemonB(), "2"), SwitchMode::Switch, told.completion());
+    rig.switcher->request(rig.window->id,
+                          to(daemonB(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
     // The new link's connection follows B's workspace, and is held before its first layout.
     REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
     REQUIRE(rig.timer.armed.size() == 1);
@@ -866,6 +900,44 @@ TEST_CASE("WindowSwitcher: a switch to another daemon whose target never shows t
     // The window is free for the next switch, which lands.
     CHECK(rig.request(to(daemonB(), "2")) == SwitchOutcome::Switched);
     CHECK(rig.windowLink()->address() == daemonB());
+}
+
+TEST_CASE(
+    "WindowSwitcher: a timed-out switch to a new workspace on another daemon leaves the one it made hidden",
+    "[switch][link][timeout]")
+{
+    auto rig = SwitchRig {};
+    auto const workspacesOnB = rig.b.onDaemon([&rig] { return rig.b.host->model().workspaceCount(); });
+    rig.b.holdNewConnectionsAtLayout();
+    auto told = Told {};
+    rig.switcher->request(rig.window->id,
+                          to(daemonB(), std::string { contour::remote::NewWorkspaceSpec }),
+                          SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
+                          told.completion());
+    // B makes the workspace for the new link's connection, whose first layout is held.
+    REQUIRE(waitUntil([&] {
+        return rig.b.onDaemon([&rig] { return rig.b.host->model().workspaceCount(); }) == workspacesOnB + 1;
+    }));
+    auto const made = rig.b.onDaemon(
+        [&rig, workspacesOnB] { return rig.b.host->model().workspaceAt(workspacesOnB)->id().value; });
+    REQUIRE(rig.timer.armed.size() == 1);
+
+    rig.timer.fireAll();
+    REQUIRE(told.outcome.has_value());
+    REQUIRE_FALSE(told.outcome->has_value());
+
+    // The link it started is gone before the window saw the workspace: put away, as the same daemon's
+    // given-up switch leaves it, not left for the next launch to bring back.
+    CHECK(waitUntil([&] { return showing(rig.b, made) == 0; }, 2000));
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    CHECK(rig.b.waitUntilOnDaemon([&] {
+        return rig.b.host->visibility(vtworkspace::WorkspaceId { made }) == WorkspaceVisibility::Hidden;
+    }));
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.window->id) == rig.aWorkspaces[0]);
+    CHECK(rig.host.opened.empty());
 }
 
 TEST_CASE("WindowSwitcher: a deadline of a switch that landed gives nothing up", "[switch][link][timeout]")
@@ -972,12 +1044,14 @@ TEST_CASE("WindowSwitcher: a window with no daemon behind it switches nowhere", 
         [](contour::remote::SwitchPickRequest const&) { return std::expected<void, std::string> {}; },
         contour::remote::SwitchDeadline {
             .timeout = contour::remote::DefaultSwitchTimeout,
-            .timer = [](std::chrono::milliseconds, std::function<void()> const&) {} }
+            .timer = [](std::chrono::milliseconds, std::function<void()> const&) {},
+            .clock = host.clock }
     };
     auto const local = contour::test::ScopedController { app.manager() };
     auto told = Told {};
 
-    switcher.request(local.id, to(daemonB()), SwitchMode::Switch, told.completion());
+    switcher.request(
+        local.id, to(daemonB()), SwitchMode::Switch, contour::session::NoLandingDeadline, told.completion());
 
     REQUIRE(told.outcome.has_value());
     CHECK_FALSE(told.outcome->has_value());
@@ -997,6 +1071,7 @@ TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch 
     rig.switcher->request(rig.window->id,
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
+                          contour::session::NoLandingDeadline,
                           told.completion());
     REQUIRE(waitUntil(
         [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
@@ -1044,7 +1119,8 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
         .list = {},
         .request =
             [&](vtworkspace::WorkspaceId window, SwitchTarget target, SwitchMode mode) {
-                rig.switcher->request(window, std::move(target), mode, told.completion());
+                rig.switcher->request(
+                    window, std::move(target), mode, contour::session::NoLandingDeadline, told.completion());
             },
         .startDaemon = {},
     } };
@@ -1136,14 +1212,16 @@ TEST_CASE("WindowSwitcher: a switch question unanswered until shortly before the
     using contour::session::PermissionMemory;
     auto rig = SwitchRig {};
     auto expiries = ManualSwitchTimer {};
-    rig.host.questionTimer = expiries.deadline().timer;
+    rig.host.questionDeadline.timer = expiries.deadline(rig.host.clock).timer;
     auto api = ControlApi { rig.a };
     auto const* const oldLink = &rig.launchLink();
 
     api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
     auto& asking = awaitSwitchQuestion(rig);
     REQUIRE(expiries.armed.size() == 1);
-    CHECK(expiries.armed.front().delay == contour::remote::SwitchQuestionExpiry);
+    CHECK(expiries.armed.front().delay
+          == contour::remote::switchQuestionExpiry(std::chrono::milliseconds { vthost::SwitchAnswerTimeout },
+                                                   contour::remote::DefaultSwitchTimeout));
     CHECK(expiries.armed.front().delay < std::chrono::milliseconds { vthost::SwitchAnswerTimeout });
 
     expiries.fireAll();
@@ -1156,6 +1234,48 @@ TEST_CASE("WindowSwitcher: a switch question unanswered until shortly before the
                 == contour::session::PermissionAsk { contour::session::GuardedRole::SwitchWindow });
     CHECK(rig.windowLink() == oldLink);
     CHECK(rig.host.started == 0);
+}
+
+// Review (PR 4, I1): the question's expiry left the switch its own deadline, but the switch lists the target
+// daemon's workspaces before it follows anything, so an Allow near the expiry could land after the daemon
+// replied Failed. The switch now carries when it must land by, counted from the request's arrival.
+TEST_CASE("WindowSwitcher: an allowed switch lands before the daemon gives up, whatever the listing took",
+          "[switch][link][guard][timeout]")
+{
+    using contour::session::PermissionDecision;
+    using contour::session::PermissionMemory;
+    auto rig = SwitchRig {};
+    auto api = ControlApi { rig.a };
+    auto const* const oldLink = &rig.launchLink();
+    // When the daemon stops waiting, less the reply's trip back.
+    auto const landingWindow =
+        std::chrono::milliseconds { vthost::SwitchAnswerTimeout } - contour::remote::SwitchReplyMargin;
+
+    api.callFromPaneOf(rig.aWorkspaces[0], { .toLabel = "b", .toWorkspace = "2" });
+    auto& asking = awaitSwitchQuestion(rig);
+    contour::test::answerShown(asking, PermissionDecision::Allow, PermissionMemory::Once);
+
+    SECTION("a listing done after that time starts nothing")
+    {
+        // The listing is told after the time the switch had to land by.
+        rig.host.clock.advance(landingWindow);
+
+        auto const reply = awaitAnswer(api);
+        CHECK(reply.outcome == "failed");
+        CHECK(reply.detail.contains("stopped waiting"));
+        CHECK(rig.host.started == 0);
+        CHECK(rig.timer.armed.empty());
+        CHECK(rig.windowLink() == oldLink);
+        CHECK(showing(rig.b, rig.bWorkspaces[1]) == 0);
+    }
+    SECTION("a listing done shortly before it gives the switch only what is left")
+    {
+        rig.host.clock.advance(landingWindow - 3s);
+
+        REQUIRE(waitUntil([&] { return rig.host.started == 1; }));
+        REQUIRE(rig.timer.armed.size() == 1);
+        CHECK(rig.timer.armed.front().delay == 3s);
+    }
 }
 
 TEST_CASE("WindowSwitcher: a switch the user refused to have asked again is refused without a prompt",

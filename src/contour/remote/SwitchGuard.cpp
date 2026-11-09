@@ -16,13 +16,17 @@ namespace
         return daemon.kind == vthost::proto::SwitchDaemonKind::Same ? std::string {} : daemon.name;
     }
 
-    /// Has @p switching perform the allowed @p request, and tells @p done its outcome.
-    void perform(GuardedSwitch const& request, session::WindowSwitching& switching, GuardedSwitchDone done)
+    /// Has @p switching perform the allowed @p request, landing by @p landBy, and tells @p done its outcome.
+    void perform(GuardedSwitch const& request,
+                 core::platform::SteadyTimePoint landBy,
+                 session::WindowSwitching& switching,
+                 GuardedSwitchDone done)
     {
         switching.request(
             request.window,
             request.target,
             session::SwitchMode::Switch,
+            landBy,
             [done = std::move(done)](std::expected<vthost::proto::SwitchOutcome, std::string> outcome) {
                 if (outcome)
                     done(*outcome, {});
@@ -36,9 +40,16 @@ void runGuardedSwitch(GuardedSwitch const& request,
                       SwitchGrants& grants,
                       SwitchAsker const& ask,
                       session::WindowSwitching& switching,
-                      SwitchTimer const& timer,
+                      SwitchDeadline const& deadline,
                       GuardedSwitchDone done)
 {
+    auto const landBy = switchLandingTime(deadline.clock.now(), request.answerWithin);
+    auto const expiry = switchQuestionExpiry(request.answerWithin, deadline.timeout);
+    if (expiry <= std::chrono::milliseconds::zero())
+    {
+        done(vthost::proto::SwitchOutcome::Refused, std::string { SwitchTooLateDetail });
+        return;
+    }
     if (auto const remembered = grants.remembered(request.source, request.target))
     {
         switch (*remembered)
@@ -46,7 +57,9 @@ void runGuardedSwitch(GuardedSwitch const& request,
             case session::PermissionDecision::Deny:
                 done(vthost::proto::SwitchOutcome::Refused, std::string { SwitchRefusedDetail });
                 return;
-            case session::PermissionDecision::Allow: perform(request, switching, std::move(done)); return;
+            case session::PermissionDecision::Allow:
+                perform(request, landBy, switching, std::move(done));
+                return;
         }
     }
 
@@ -58,8 +71,8 @@ void runGuardedSwitch(GuardedSwitch const& request,
         .sourceDaemon = nameOf(request.source),
         .remembering = rememberingFor(request.target),
         .answered =
-            [request, grants = &grants, switching = &switching, shared](session::PermissionDecision decision,
-                                                                        session::PermissionMemory memory) {
+            [request, landBy, grants = &grants, switching = &switching, shared](
+                session::PermissionDecision decision, session::PermissionMemory memory) {
                 if (!*shared)
                     return;
                 auto told = std::exchange(*shared, {});
@@ -71,7 +84,7 @@ void runGuardedSwitch(GuardedSwitch const& request,
                         told(vthost::proto::SwitchOutcome::Refused, std::string { SwitchRefusedDetail });
                         return;
                     case session::PermissionDecision::Allow:
-                        perform(request, *switching, std::move(told));
+                        perform(request, landBy, *switching, std::move(told));
                         return;
                 }
             },
@@ -83,8 +96,9 @@ void runGuardedSwitch(GuardedSwitch const& request,
             std::exchange(*shared, {})(vthost::proto::SwitchOutcome::Failed, std::move(asked.error()));
         return;
     }
-    // Before the daemon gives up waiting: an answer after that would switch a window nobody waits for.
-    timer(SwitchQuestionExpiry, [shared, withdraw = *std::move(asked)] {
+    // While an Allow can still land before the daemon gives up waiting: one after that would switch a
+    // window nobody waits for any more, so the question goes, and with it the answer it could still get.
+    deadline.timer(expiry, [shared, withdraw = *std::move(asked)] {
         if (!*shared)
             return;
         auto told = std::exchange(*shared, {});

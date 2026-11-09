@@ -49,17 +49,6 @@ struct SwitchPickRequest
 /// @return Nothing once shown; why it cannot be.
 using SwitchPicker = std::function<std::expected<void, std::string>(SwitchPickRequest)>;
 
-/// How long a switch waits for its target workspace's first layout before it gives up.
-inline constexpr auto DefaultSwitchTimeout = std::chrono::milliseconds { std::chrono::seconds { 10 } };
-
-/// What a switch that never lands is bounded by.
-struct SwitchDeadline
-{
-    /// How long after its follow is sent, or its link started, a switch waits for the first layout.
-    std::chrono::milliseconds timeout = DefaultSwitchTimeout;
-    SwitchTimer timer; ///< What tells it the time is up.
-};
-
 /// Switches windows between daemons and workspaces (spec §Behaviour, Switch and Open).
 ///
 /// Resolve first: the target daemon's workspaces are listed and the target resolved to one of them
@@ -69,7 +58,9 @@ struct SwitchDeadline
 /// workspace released (proto::WorkspaceRelease::SwitchedAway) and the window rebound, which ends the old link
 /// when the window was its last. Anything failing before that leaves the window as it was, undoes a follow
 /// already sent, and is said in the window -- as does a target whose first layout does not arrive within the
-/// deadline (SwitchDeadline), which leaves the window free for the next switch. GUI thread only; nothing it
+/// deadline (SwitchDeadline), which leaves the window free for the next switch. A switch that must land by a
+/// time (session::SwitchLandBy) is refused when that time passed before it followed or connected anything,
+/// and gives up at that time at the latest. GUI thread only; nothing it
 /// does waits.
 class WindowSwitcher final: public SwitchingService
 {
@@ -95,6 +86,7 @@ class WindowSwitcher final: public SwitchingService
     void request(vtworkspace::WorkspaceId window,
                  session::SwitchTarget target,
                  session::SwitchMode mode,
+                 session::SwitchLandBy landBy,
                  session::SwitchCompletion done) override;
 
     /// Reaches the daemon the way the switch would (a host not yet connected is connected to for this),
@@ -121,6 +113,7 @@ class WindowSwitcher final: public SwitchingService
         vtworkspace::WorkspaceId window;
         session::SwitchTarget target;
         session::SwitchMode mode;
+        session::SwitchLandBy landBy; ///< When it must have landed by, if it must.
         session::SwitchCompletion done;
         SameDaemon sameDaemon = SameDaemon::No;
         uint64_t serial = 0;                    ///< Which request of its window this is (@see _busy).
@@ -138,9 +131,13 @@ class WindowSwitcher final: public SwitchingService
     void resolve(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces);
     /// Shows the workspace @p to names: over the window's own connection, or a link of its own.
     void land(Request request, SwitchTo const& to);
-    /// Gives @p window's switch @p serial up once the deadline passed, unless it ended before.
+    /// Gives @p window's switch @p serial up once the deadline passed -- the switch's own, or its landing
+    /// time @p landBy when that comes first -- unless it ended before.
     /// @param expire Undoes what the switch started and ends it as failed.
-    void armDeadline(vtworkspace::WorkspaceId window, uint64_t serial, std::function<void()> expire);
+    void armDeadline(vtworkspace::WorkspaceId window,
+                     uint64_t serial,
+                     session::SwitchLandBy landBy,
+                     std::function<void()> expire);
     /// The cross-daemon switch's last step: the new link's connection shows @p workspace.
     void handOver(Request const& request, DaemonLinkId to);
     /// Ends @p request with its outcome.

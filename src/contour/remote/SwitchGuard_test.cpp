@@ -2,12 +2,16 @@
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchGuard.hpp>
 
+#include <core/platform/Clock.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <format>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,14 +56,16 @@ class RecordingSwitching final: public contour::session::WindowSwitching
         vtworkspace::WorkspaceId window;
         SwitchTarget target;
         contour::session::SwitchMode mode {};
+        contour::session::SwitchLandBy landBy; ///< When it must have landed by.
     };
 
     void request(vtworkspace::WorkspaceId window,
                  SwitchTarget target,
                  contour::session::SwitchMode mode,
+                 contour::session::SwitchLandBy landBy,
                  contour::session::SwitchCompletion done) override
     {
-        requests.push_back({ .window = window, .target = std::move(target), .mode = mode });
+        requests.push_back({ .window = window, .target = std::move(target), .mode = mode, .landBy = landBy });
         done(outcome);
     }
 
@@ -75,21 +81,33 @@ struct GuardRig
     std::vector<contour::session::SwitchAsk> asked;
     std::optional<std::string> askFailure; ///< When set, asking fails with this reason.
     std::optional<std::pair<SwitchOutcome, std::string>> told;
-    std::vector<std::function<void()>> expiries; ///< The questions' expiries, armed and not fired.
-    int withdrawn = 0;                           ///< How many questions were taken down unanswered.
-    contour::remote::SwitchTimer timer = [this](std::chrono::milliseconds delay, std::function<void()> fire) {
-        CHECK(delay == contour::remote::SwitchQuestionExpiry);
-        expiries.push_back(std::move(fire));
+    std::vector<std::function<void()>> expiries;   ///< The questions' expiries, armed and not fired.
+    std::vector<std::chrono::milliseconds> delays; ///< Each expiry's delay, in arming order.
+    int withdrawn = 0;                             ///< How many questions were taken down unanswered.
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + std::chrono::hours { 1 } };
+    contour::remote::SwitchDeadline deadline {
+        .timeout = contour::remote::DefaultSwitchTimeout,
+        .timer =
+            [this](std::chrono::milliseconds delay, std::function<void()> fire) {
+                delays.push_back(delay);
+                expiries.push_back(std::move(fire));
+            },
+        .clock = clock,
     };
 
     /// Runs a switch of window 7, from @p source to @p target, through the guard.
-    void run(DaemonAddress source, SwitchTarget target)
+    /// @param answerWithin How long the daemon says it waits for the reply.
+    void run(DaemonAddress source,
+             SwitchTarget target,
+             std::chrono::milliseconds answerWithin = std::chrono::milliseconds {
+                 vthost::SwitchAnswerTimeout })
     {
         told.reset();
         contour::remote::runGuardedSwitch(
             contour::remote::GuardedSwitch { .window = vtworkspace::WorkspaceId { 7 },
                                              .source = std::move(source),
-                                             .target = std::move(target) },
+                                             .target = std::move(target),
+                                             .answerWithin = answerWithin },
             grants,
             [this](vtworkspace::WorkspaceId /*window*/, contour::session::SwitchAsk ask)
                 -> std::expected<contour::remote::SwitchWithdraw, std::string> {
@@ -99,7 +117,7 @@ struct GuardRig
                 return contour::remote::SwitchWithdraw { [this] { ++withdrawn; } };
             },
             switching,
-            timer,
+            deadline,
             [this](SwitchOutcome outcome, std::string detail) { told.emplace(outcome, std::move(detail)); });
     }
 
@@ -251,6 +269,9 @@ TEST_CASE("runGuardedSwitch refuses a question left unanswered, and takes it dow
     rig.run(label("default"), toLabel("admin"));
     REQUIRE(rig.asked.size() == 1);
     REQUIRE(rig.expiries.size() == 1);
+    CHECK(rig.delays.front()
+          == contour::remote::switchQuestionExpiry(std::chrono::milliseconds { vthost::SwitchAnswerTimeout },
+                                                   contour::remote::DefaultSwitchTimeout));
     CHECK_FALSE(rig.told.has_value());
 
     rig.expiries.front()();
@@ -273,4 +294,85 @@ TEST_CASE("runGuardedSwitch refuses a question left unanswered, and takes it dow
         CHECK(rig.told->first == SwitchOutcome::Switched);
         CHECK(rig.withdrawn == 1);
     }
+}
+
+TEST_CASE(
+    "runGuardedSwitch takes the question down while an Allow can still land before the daemon's deadline",
+    "[switch][guard]")
+{
+    using namespace std::chrono_literals;
+    // The deadline the daemon carries, less the switch's own landing time and the reply's margin.
+    STATIC_CHECK(contour::remote::switchQuestionExpiry(30s, contour::remote::DefaultSwitchTimeout)
+                 == 30s - contour::remote::DefaultSwitchTimeout - contour::remote::SwitchReplyMargin);
+    auto rig = GuardRig {};
+    rig.run(label("default"), toLabel("admin"), 20s);
+    REQUIRE(rig.asked.size() == 1);
+    REQUIRE(rig.delays.size() == 1);
+    CHECK(rig.delays.front()
+          == contour::remote::switchQuestionExpiry(20s, contour::remote::DefaultSwitchTimeout));
+    // An Allow arriving after the last moment it could land is refused: the question is gone.
+    rig.expiries.front()();
+    rig.answer(PermissionDecision::Allow, PermissionMemory::Once);
+    REQUIRE(rig.told.has_value());
+    CHECK(rig.told->first == SwitchOutcome::Refused);
+    CHECK(rig.switching.requests.empty());
+}
+
+TEST_CASE("runGuardedSwitch refuses at once a switch the daemon would stop waiting for before it could land",
+          "[switch][guard]")
+{
+    using namespace std::chrono_literals;
+    auto rig = GuardRig {};
+    auto const tooShort = contour::remote::DefaultSwitchTimeout + contour::remote::SwitchReplyMargin;
+
+    SECTION("asked: nothing is asked")
+    {
+        rig.run(label("default"), toLabel("admin"), tooShort);
+    }
+    SECTION("allowed to stand: nothing switches")
+    {
+        rig.grants.remember(label("default"), toLabel("admin"), PermissionDecision::Allow);
+        rig.run(label("default"), toLabel("admin"), tooShort);
+    }
+    REQUIRE(rig.told.has_value());
+    CHECK(rig.told->first == SwitchOutcome::Refused);
+    CHECK(rig.told->second == contour::remote::SwitchTooLateDetail);
+    CHECK(rig.asked.empty());
+    CHECK(rig.expiries.empty());
+    CHECK(rig.switching.requests.empty());
+}
+
+// Review (PR 4, I1): the question's expiry left the switch its own 10 s, but the switch lists the target
+// daemon's workspaces first, so an Allow near the expiry could land after the daemon gave up. The switch now
+// carries when it must land by, counted from the request's arrival, and the landing bound is the switcher's.
+TEST_CASE("runGuardedSwitch has an allowed switch land before the daemon gives up, counted from its arrival",
+          "[switch][guard][timeout]")
+{
+    using namespace std::chrono_literals;
+    auto rig = GuardRig {};
+    rig.deadline.timeout = 4s;
+    auto const arrival = rig.clock.now();
+    rig.run(label("default"), toLabel("admin"), 20s);
+    // The landing bound is the one the switcher is built with, not the default.
+    REQUIRE(rig.delays.size() == 1);
+    CHECK(rig.delays.front() == 20s - 4s - contour::remote::SwitchReplyMargin);
+
+    // Answered late, the switch still lands by the time counted from the arrival.
+    rig.clock.advance(9s);
+    rig.answer(PermissionDecision::Allow, PermissionMemory::Once);
+
+    REQUIRE(rig.switching.requests.size() == 1);
+    CHECK(rig.switching.requests.front().landBy == arrival + 20s - contour::remote::SwitchReplyMargin);
+}
+
+// Review (PR 4, M7): the wait a daemon states was taken as it came, up to 49 days from another host.
+TEST_CASE("the wait a daemon states for a switch's answer is bounded", "[switch][guard][timeout]")
+{
+    using namespace std::chrono_literals;
+    STATIC_CHECK(contour::remote::switchAnswerWindowOf(0)
+                 == std::chrono::milliseconds { vthost::SwitchAnswerTimeout });
+    STATIC_CHECK(contour::remote::switchAnswerWindowOf(20'000) == 20s);
+    CHECK(contour::remote::switchAnswerWindowOf(std::numeric_limits<uint32_t>::max())
+          == contour::remote::MaxSwitchAnswerWindow);
+    STATIC_CHECK(contour::remote::MaxSwitchAnswerWindow == 5min);
 }

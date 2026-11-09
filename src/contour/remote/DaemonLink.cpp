@@ -16,6 +16,7 @@
 #include <QtCore/QThread>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <ranges>
 #include <set>
@@ -24,6 +25,7 @@
 
 #include <vthost/RestoredCounts.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/SwitchClient.hpp>
 #include <vthost/client/ReleaseDrift.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -102,6 +104,8 @@ DaemonLink::DaemonLink(Id id,
 
 DaemonLink::~DaemonLink()
 {
+    // Before the controller's destructor waits for a stop end() began, which tells this link when done.
+    _postTarget->withdraw();
     if (!isStopped())
         _sessions.releaseBinding(*this);
 }
@@ -160,7 +164,7 @@ bool DaemonLink::bindsPanes() const
 
 bool DaemonLink::isFinished() const
 {
-    return _state == AttachState::Ended && !bindsPanes();
+    return _state == AttachState::Ended && !anyController().isWindingDown() && !bindsPanes();
 }
 
 void DaemonLink::lastWindowReleased()
@@ -173,13 +177,18 @@ void DaemonLink::end()
 {
     if (isStopped())
         return;
-    // stop(), less the controller's stop, which waits up to DefaultDetachBound for the daemon to see this
-    // client detach: not inside the window close that got here, while the application lives on (the quick
-    // terminal, a local window). Posted to the receiver, ahead of the destruction linkEnded() asks for, so
-    // it runs first; a link destroyed before it stops its controller in the controller's destructor.
+    // stop(), with the controller's stop off the GUI thread: it waits up to DefaultDetachBound for the daemon
+    // to see this client detach, which a daemon that stopped reading makes it wait in full, and the
+    // application lives on meanwhile (the quick terminal, a local window). The link is not finished until
+    // the controller has wound down, so it outlives the stop, and is told when that is.
     _state = AttachState::Ended;
     _sessions.releaseBinding(*this);
-    QMetaObject::invokeMethod(&_receiver, [this] { stop(); }, Qt::QueuedConnection);
+    anyController().stopInBackground([target = _postTarget, this] {
+        target->post([this] {
+            if (isFinished())
+                _host.linkEnded();
+        });
+    });
     // From now on only: the panes of its closed windows let its controller go one by one, and the last one
     // has the link destroyed.
     QObject::connect(
@@ -1052,7 +1061,8 @@ void DaemonLink::answerSwitchRequests()
         runGuardedSwitch(
             GuardedSwitch { .window = *window,
                             .source = address(),
-                            .target = session::switchTargetOf(std::move(request.target)) },
+                            .target = session::switchTargetOf(std::move(request.target)),
+                            .answerWithin = switchAnswerWindowOf(request.answerWithinMs) },
             _host.switchGrants(),
             [this](vtworkspace::WorkspaceId asking,
                    session::SwitchAsk ask) -> std::expected<SwitchWithdraw, std::string> {
@@ -1066,7 +1076,7 @@ void DaemonLink::answerSwitchRequests()
                 } };
             },
             _sessions.windowSwitching(),
-            _host.switchTimer(),
+            _host.switchDeadline(),
             std::move(reply));
     }
 }

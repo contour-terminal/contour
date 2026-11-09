@@ -115,7 +115,7 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     }
     [[nodiscard]] contour::remote::SwitchGrants& switchGrants() override { return grants; }
     /// Never fires: no question of these tests expires.
-    [[nodiscard]] contour::remote::SwitchTimer const& switchTimer() override { return _timer; }
+    [[nodiscard]] contour::remote::SwitchDeadline const& switchDeadline() override { return _deadline; }
 
     /// @return The launch's link, then those this host started, in the order they were made.
     [[nodiscard]] std::vector<contour::remote::DaemonLink*> links() const
@@ -145,8 +145,10 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
   private:
     contour::session::TerminalSessionManager& _manager;
     uint32_t _nextId = 100;
-    contour::remote::SwitchTimer _timer = [](std::chrono::milliseconds /*delay*/,
-                                             std::function<void()> const& /*fire*/) {
+    contour::remote::SwitchDeadline _deadline {
+        .timeout = contour::remote::DefaultSwitchTimeout,
+        .timer = [](std::chrono::milliseconds /*delay*/, std::function<void()> const& /*fire*/) {},
+        .clock = core::platform::defaultSteadyClock(),
     };
 };
 
@@ -909,11 +911,12 @@ TEST_CASE("DaemonLink: closing its last window stops and releases the link", "[a
     CHECK_FALSE(link.isAttached());
     CHECK(link.hostLabel().empty());
     CHECK(rig.app.manager().bindingOf(boot.id) == nullptr);
-    // Its controller's stop, which may wait for the daemon, is not made inside the window close but from the
-    // event loop; then the daemon sees this client go.
-    CHECK(controller->connectionState() == vthost::client::ConnectionState::Connected);
-    drainGuiEvents();
-    CHECK(controller->connectionState() != vthost::client::ConnectionState::Connected);
+    // Its controller's stop, which may wait for the daemon, is made off the GUI thread; the daemon sees
+    // this client go.
+    CHECK(waitUntil([&] {
+        drainGuiEvents();
+        return controller->connectionState() != vthost::client::ConnectionState::Connected;
+    }));
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
     // Not destroyed yet: the closed window's pane still holds its pty.
     drainGuiEvents();
@@ -926,6 +929,38 @@ TEST_CASE("DaemonLink: closing its last window stops and releases the link", "[a
         return link.isFinished();
     }));
     CHECK(rig.host.endings >= 2);
+}
+
+// Review (PR 4, M4): closing the last window hands its controller's stop to the background; once the
+// closed window's panes let go, the link ends and the controller has stopped. (That the close itself returns
+// before the stop finishes is pinned deterministically by RemoteController_test's stalled controller.)
+TEST_CASE("DaemonLink: closing its last window ends the link and stops its controller",
+          "[attach][link][threading]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint(), "home" };
+    auto& link = *rig.link;
+    auto const local = contour::test::ScopedController { rig.app.manager() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(link.awaitAttached(10s).has_value());
+    REQUIRE(link.bindPendingWindow(*boot.controller) == contour::remote::WindowAdoption::Adopted);
+    REQUIRE(waitUntil([&] { return !sessionsOf(rig.app.manager(), boot.id).empty(); }));
+    auto const panes = watchedSessionsOf(rig.app.manager(), boot.id);
+    auto const* const controller = link.liveController();
+    REQUIRE(controller != nullptr);
+
+    boot.controller->closeWindow();
+
+    CHECK(waitUntil([&] {
+        drainGuiEvents();
+        return !controller->isWindingDown();
+    }));
+    endClosedSessions(panes);
+    CHECK(waitUntil([&] {
+        drainGuiEvents();
+        return link.isFinished();
+    }));
 }
 
 // What the application's teardown relies on: a link whose last window just went has only posted its

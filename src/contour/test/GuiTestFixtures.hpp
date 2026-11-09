@@ -161,13 +161,14 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
     void request(vtworkspace::WorkspaceId window,
                  contour::session::SwitchTarget target,
                  contour::session::SwitchMode mode,
+                 contour::session::SwitchLandBy landBy,
                  contour::session::SwitchCompletion done) override
     {
         requests.push_back({ .window = window, .target = target, .mode = mode });
         if (failWith)
             done(std::unexpected(*failWith));
         else if (forwardTo != nullptr)
-            forwardTo->request(window, std::move(target), mode, std::move(done));
+            forwardTo->request(window, std::move(target), mode, landBy, std::move(done));
     }
 
     /// Lists nothing: a test of the popup's listing builds a real switcher.

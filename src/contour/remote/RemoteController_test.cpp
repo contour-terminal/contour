@@ -122,7 +122,7 @@ TEST_CASE("SelfUnbindingChannelPty runs its on-destroy callback exactly once", "
 TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop", "[mux][controller]")
 {
     auto mutex = std::mutex {};
-    auto stopped = false;
+    auto phase = contour::remote::StopPhase::Running;
     auto reactor = contour::remote::ReactorThread {};
 
     // A root task that parks forever, so only requestStop can end it.
@@ -138,13 +138,13 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
 
     // First stop: performs the teardown (posts the detach, cancels, joins).
     // The root task ignores the detach, so the stop comes after the bound.
-    CHECK(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach, std::chrono::milliseconds { 50 }));
-    CHECK(stopped);
+    CHECK(contour::remote::stopMuxReactor(mutex, phase, reactor, detach, std::chrono::milliseconds { 50 }));
+    CHECK(phase == contour::remote::StopPhase::Stopped);
     CHECK(detaches.load(std::memory_order_relaxed) == 1);
     CHECK(reactor.wasCancelled());
 
     // Second stop: already stopped, so it neither re-posts nor re-joins.
-    CHECK_FALSE(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach));
+    CHECK_FALSE(contour::remote::stopMuxReactor(mutex, phase, reactor, detach));
     CHECK(detaches.load(std::memory_order_relaxed) == 1);
 }
 
@@ -349,7 +349,7 @@ class ConnectingController final: public contour::remote::RemoteController
     [[nodiscard]] bool stopped() const
     {
         auto const lock = std::lock_guard { _mutex };
-        return _stopped;
+        return _stopPhase != contour::remote::StopPhase::Running;
     }
 
   protected:
@@ -394,6 +394,118 @@ class ConnectingController final: public contour::remote::RemoteController
 }
 
 } // namespace
+
+namespace
+{
+
+/// A connected controller whose client never ends its connection on a detach, as against a daemon that
+/// stopped reading: a stop waits out the whole detach bound before it cancels the loop.
+class StalledController final: public contour::remote::RemoteController
+{
+  public:
+    /// @param detachBound How long a stop waits for the detach.
+    explicit StalledController(std::chrono::milliseconds detachBound):
+        RemoteController(core::platform::defaultSteadyClock(), detachBound)
+    {
+    }
+    StalledController(StalledController const&) = delete;
+    StalledController& operator=(StalledController const&) = delete;
+    StalledController(StalledController&&) = delete;
+    StalledController& operator=(StalledController&&) = delete;
+    ~StalledController() { stop(); }
+
+    std::atomic<int> bindingsClosed = 0; ///< How often closeReactorBindings() ran.
+
+  protected:
+    [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override
+    {
+        while (true)
+            co_await loop->delay(1h);
+    }
+    [[nodiscard]] bool detachOnReactor() override { return true; }
+    void closeReactorBindings() override { ++bindingsClosed; }
+    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
+};
+
+/// How long the stalled controller's stop waits: long enough to tell from a call that does not wait.
+constexpr auto StalledBound = 1500ms;
+
+} // namespace
+
+TEST_CASE("a stop of a connection whose detach never ends waits out the detach bound", "[mux][controller]")
+{
+    // What stopInBackground() keeps off the GUI thread.
+    auto controller = StalledController { StalledBound };
+    controller.startConnecting();
+    auto const started = std::chrono::steady_clock::now();
+    controller.stop();
+    CHECK(std::chrono::steady_clock::now() - started >= StalledBound);
+    CHECK(controller.bindingsClosed == 1);
+}
+
+TEST_CASE("a stop in the background returns at once, and ends the run off the calling thread",
+          "[mux][controller][threading]")
+{
+    auto controller = StalledController { StalledBound };
+    controller.startConnecting();
+    auto ended = std::atomic<bool> { false };
+    auto const started = std::chrono::steady_clock::now();
+    controller.stopInBackground([&ended] { ended.store(true); });
+    CHECK(std::chrono::steady_clock::now() - started < StalledBound / 4);
+    CHECK(controller.isWindingDown());
+    CHECK_FALSE(ended.load());
+
+    // The run ends by the bound, the bindings close once, and a later stop waits for nothing more.
+    auto const deadline = std::chrono::steady_clock::now() + 4 * StalledBound;
+    while (!ended.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(10ms);
+    CHECK(ended.load());
+    CHECK_FALSE(controller.isWindingDown());
+    controller.stop();
+    CHECK(controller.bindingsClosed == 1);
+
+    SECTION("a stop that had ended the run already is told at once")
+    {
+        auto again = false;
+        controller.stopInBackground([&again] { again = true; });
+        CHECK(again);
+    }
+}
+
+// Review (PR 4, M3): a second stop in the background after the first had ended, but before anything joined
+// its thread, returned without telling its caller -- which then waited for an end it would never hear of.
+TEST_CASE("a stop in the background after one that ended is told, though nothing joined the first",
+          "[mux][controller][threading]")
+{
+    auto controller = StalledController { StalledBound };
+    controller.startConnecting();
+    auto ended = std::atomic<bool> { false };
+    controller.stopInBackground([&ended] { ended.store(true); });
+    auto const deadline = std::chrono::steady_clock::now() + 4 * StalledBound;
+    while (controller.isWindingDown() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(10ms);
+    REQUIRE_FALSE(controller.isWindingDown());
+
+    auto again = false;
+    controller.stopInBackground([&again] { again = true; });
+
+    CHECK(again);
+    CHECK(ended.load());
+    CHECK(controller.bindingsClosed == 1);
+}
+
+TEST_CASE("a stop waits for a stop in the background, so the controller outlives it",
+          "[mux][controller][threading]")
+{
+    auto controller = StalledController { StalledBound };
+    controller.startConnecting();
+    auto ended = std::atomic<bool> { false };
+    controller.stopInBackground([&ended] { ended.store(true); });
+    controller.stop();
+    CHECK(ended.load());
+    CHECK(controller.bindingsClosed == 1);
+}
 
 TEST_CASE("a stop during connect does not wait out the detach bound", "[mux][controller]")
 {

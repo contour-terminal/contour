@@ -9,6 +9,7 @@
 #include <QtCore/QTimer>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <utility>
 #include <variant>
@@ -23,6 +24,10 @@ namespace
 
     /// Why a switch whose target did not show within its deadline failed.
     constexpr auto SwitchTimedOut = std::string_view { "it did not show the workspace in time" };
+
+    /// Why a switch that must land by a time (session::SwitchLandBy) was not started.
+    constexpr auto SwitchTooLateText =
+        std::string_view { "too little time was left before the program that asked for it stopped waiting" };
 
     /// @return What a link's first connection follows to show @p workspace: it, or a new one for 0.
     [[nodiscard]] vthost::proto::AttachIntent intentFor(uint64_t workspace)
@@ -102,6 +107,7 @@ std::optional<vtworkspace::WorkspaceId> WindowSwitcher::shownHere(SameDaemon sam
 void WindowSwitcher::request(vtworkspace::WorkspaceId window,
                              session::SwitchTarget target,
                              session::SwitchMode mode,
+                             session::SwitchLandBy landBy,
                              session::SwitchCompletion done)
 {
     auto* const own = linkOf(window);
@@ -122,6 +128,7 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         .window = window,
         .target = std::move(target),
         .mode = mode,
+        .landBy = landBy,
         .done = std::move(done),
         .sameDaemon = destination.sameDaemon,
         .serial = _nextSerial++,
@@ -264,6 +271,14 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
     auto const mode = request.mode;
     auto const sameDaemon = request.sameDaemon;
     auto const serial = request.serial;
+    auto const landBy = request.landBy;
+    // Listing the target daemon's workspaces may have taken until the switch must have landed: one started
+    // now would move a window nobody waits for any more.
+    if (landBy && _deadline.clock.now() >= *landBy)
+    {
+        fail(request, std::string { SwitchTooLateText });
+        return;
+    }
     // One callback for each outcome, whichever tells it first -- a link, or the deadline: the request moves
     // into it, and the others find it taken.
     auto pending = std::make_shared<std::optional<Request>>(std::move(request));
@@ -296,7 +311,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
         }
         // Undone as a lost connection undoes it: the follow is released, and the link tells the callback
         // above, which fails the request.
-        armDeadline(window, serial, [this, window, take] {
+        armDeadline(window, serial, landBy, [this, window, take] {
             if (auto* const link = linkOf(window))
                 link->cancelSwitch(window, std::string { SwitchTimedOut });
             if (auto taken = take())
@@ -330,7 +345,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
     };
     *madeAs = _host.startSwitchLink(std::move(config)).id();
     // The link is not wanted any more: its connection releases what it follows, and it ends, telling nothing.
-    armDeadline(window, serial, [this, madeAs, take] {
+    armDeadline(window, serial, landBy, [this, madeAs, take] {
         auto const links = _host.switchableLinks();
         if (auto const found = std::ranges::find(links, *madeAs, &DaemonLink::id); found != links.end())
             (*found)->abandon();
@@ -341,20 +356,25 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
 
 void WindowSwitcher::armDeadline(vtworkspace::WorkspaceId window,
                                  uint64_t serial,
+                                 session::SwitchLandBy landBy,
                                  std::function<void()> expire)
 {
-    _deadline.timer(
-        _deadline.timeout, [alive = std::weak_ptr { _alive }, window, serial, expire = std::move(expire)] {
-            auto const self = alive.lock();
-            if (!self)
-                return;
-            // Ended meanwhile, and maybe followed by another request of the same window.
-            auto const busy = (*self)->_busy.find(window.value);
-            if (busy == (*self)->_busy.end() || busy->second != serial)
-                return;
-            attachLog()("switch: window {} gave up waiting for its target to show.", window.value);
-            expire();
-        });
+    auto const timeout =
+        landBy ? std::clamp(std::chrono::ceil<std::chrono::milliseconds>(*landBy - _deadline.clock.now()),
+                            std::chrono::milliseconds::zero(),
+                            _deadline.timeout)
+               : _deadline.timeout;
+    _deadline.timer(timeout, [alive = std::weak_ptr { _alive }, window, serial, expire = std::move(expire)] {
+        auto const self = alive.lock();
+        if (!self)
+            return;
+        // Ended meanwhile, and maybe followed by another request of the same window.
+        auto const busy = (*self)->_busy.find(window.value);
+        if (busy == (*self)->_busy.end() || busy->second != serial)
+            return;
+        attachLog()("switch: window {} gave up waiting for its target to show.", window.value);
+        expire();
+    });
 }
 
 void WindowSwitcher::handOver(Request const& request, DaemonLinkId to)

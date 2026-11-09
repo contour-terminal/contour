@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/Clock.hpp>
+
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -90,6 +93,14 @@ struct SwitchTarget
                           .workspace = workspaceTargetOf(wire.workspace) };
 }
 
+/// When a switch must have landed by, if it must: a program that asked for it waits for the answer only so
+/// long (proto::SwitchRequest), and a switch landing after that would move a window nobody waits for any
+/// more.
+using SwitchLandBy = std::optional<core::platform::SteadyTimePoint>;
+
+/// No time a switch must land by: one the user drives from the GUI waits for nobody.
+inline constexpr auto NoLandingDeadline = SwitchLandBy {};
+
 /// Called once when a switch request finished, or failed with the reason.
 using SwitchCompletion = std::function<void(std::expected<vthost::proto::SwitchOutcome, std::string>)>;
 
@@ -108,10 +119,13 @@ class WindowSwitching
     /// @param window The window asking.
     /// @param target Where to go.
     /// @param mode Replace this window's workspace or open a new window.
+    /// @param landBy When it must have landed by: one that cannot start before is refused, and one that has
+    ///        not landed by then gives up.
     /// @param done Runs once on the GUI thread with the outcome or the failure reason.
     virtual void request(vtworkspace::WorkspaceId window,
                          SwitchTarget target,
                          SwitchMode mode,
+                         SwitchLandBy landBy,
                          SwitchCompletion done) = 0;
 };
 
