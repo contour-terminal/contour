@@ -1542,6 +1542,10 @@ if(CONTOUR_TESTING)
         cli/DaemonVerbs_test.cpp
         cli/ConnectList_test.cpp
         cli/ConnectProbe_test.cpp
+        cli/DaemonDiscovery_test.cpp
+        cli/NewDaemon_test.cpp
+        cli/WorkspaceListing_test.cpp
+        cli/ClientAttach_test.cpp
         cli/Hosting_test.cpp
         command/LauncherEntries_test.cpp
         cli/HostTransport_test.cpp

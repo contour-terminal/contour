@@ -307,6 +307,16 @@ TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
     CHECK(describe({ .daemon = "/run/user/1000/x:1" }, empty) == "unix:/run/user/1000/x:1");
     CHECK(describe({ .daemon = "./x:1" }, empty) == "unix:./x:1");
 
+    SECTION("a label names the local daemon of that label, over the environment")
+    {
+        auto const labelled = [&](std::string_view label) {
+            return std::format(
+                "unix:{}", core::pathToUtf8(vthost::muxSocketPath(vthost::socketLabelOf(label), {}, empty)));
+        };
+        CHECK(describe({ .label = "work" }, empty) == labelled("work"));
+        CHECK(describe({ .label = "work" }, withDaemon) == labelled("work"));
+        CHECK(describe({ .label = "work" }, empty) != describe({}, empty));
+    }
     SECTION("a TCP endpoint carries the CA, and so is verified")
     {
         auto const pinned = vthost::client::resolveControlEndpoint(

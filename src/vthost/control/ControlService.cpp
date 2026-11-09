@@ -6,6 +6,7 @@
 #include <core/Overloaded.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <limits>
 #include <memory>
@@ -19,6 +20,8 @@
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/ObjectRef.hpp>
+#include <vthost/SwitchClient.hpp>
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -165,6 +168,12 @@ ControlService::ControlService(SessionHost& host, ControlServiceConfig config):
     _modelSubscription(makeScopedModelSubscription(host, *this)),
     _extensionControl(makeScopedExtensionControl(host, *this))
 {
+}
+
+ControlService::~ControlService()
+{
+    // Completions the host still holds must find nothing to answer.
+    _switchCalls->waiting.clear();
 }
 
 // {{{ Target resolution
@@ -352,6 +361,9 @@ vtcontrol::WorkspaceInfo ControlService::workspaceInfoOf(vtworkspace::Workspace 
     info.id = vtcontrol::toString(workspaceRef);
     info.label = std::string { _host.objects().labelOf(workspaceRef) };
     info.position = position;
+    info.native = std::to_string(workspace.id().value);
+    info.visibility = std::string { nameOf(_host.visibility(workspace.id())) };
+    info.clients = static_cast<uint32_t>(_host.clientsShowing(workspace.id()).size());
 
     auto const titleOf = [&](SessionId session) -> std::string {
         auto const* terminal = _host.terminal(session);
@@ -726,6 +738,100 @@ void ControlService::handle(vtcontrol::CallContext& context,
     }));
 }
 
+namespace
+{
+    /// How the control API names a window's answer to a switch.
+    struct SwitchOutcomeName
+    {
+        proto::SwitchOutcome outcome;
+        std::string_view name;
+    };
+
+    constexpr auto SwitchOutcomeNames = std::array {
+        SwitchOutcomeName { proto::SwitchOutcome::Switched, "switched" },
+        SwitchOutcomeName { proto::SwitchOutcome::FocusedExisting, "focused" },
+        SwitchOutcomeName { proto::SwitchOutcome::PickerShown, "picker" },
+        SwitchOutcomeName { proto::SwitchOutcome::Refused, "refused" },
+        SwitchOutcomeName { proto::SwitchOutcome::Failed, "failed" },
+    };
+
+    /// @param reply A window's answer.
+    /// @return The reply the control API gives for it.
+    [[nodiscard]] vtcontrol::SwitchWorkspaceReply switchReplyOf(proto::SwitchReply const& reply)
+    {
+        auto const named = std::ranges::find(SwitchOutcomeNames, reply.outcome, &SwitchOutcomeName::outcome);
+        return vtcontrol::SwitchWorkspaceReply {
+            .outcome = std::string { named != SwitchOutcomeNames.end() ? named->name : "failed" },
+            .detail = reply.detail
+        };
+    }
+
+    /// @param request A switch request.
+    /// @return Where it asks the window to go.
+    [[nodiscard]] proto::SwitchTargetWire switchTargetOf(vtcontrol::SwitchWorkspaceRequest const& request)
+    {
+        auto target = proto::SwitchTargetWire { .workspace = request.toWorkspace };
+        if (!request.toLabel.empty())
+            target = proto::SwitchTargetWire { .kind = proto::SwitchDaemonKind::Label,
+                                               .daemon = request.toLabel,
+                                               .workspace = request.toWorkspace };
+        else if (!request.toHost.empty())
+            target = proto::SwitchTargetWire { .kind = proto::SwitchDaemonKind::Host,
+                                               .daemon = request.toHost,
+                                               .workspace = request.toWorkspace };
+        return target;
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::SwitchWorkspaceRequest const& request,
+                            vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done)
+{
+    if (!request.toLabel.empty() && !request.toHost.empty())
+    {
+        done(std::unexpected(ControlError { .code = ControlErrorCode::BadRequest,
+                                            .message = "name either toLabel or toHost, not both",
+                                            .candidates = {} }));
+        return;
+    }
+    auto const workspace = resolveWorkspace(context, request.workspace);
+    if (!workspace)
+    {
+        done(std::unexpected(workspace.error()));
+        return;
+    }
+    auto const choice = chooseSwitchClient(_host.clientsShowing(*workspace), _host.lastTypistIn(*workspace));
+    if (!choice.chosen)
+    {
+        auto error = ControlError { .code = ControlErrorCode::NotFound, .message = {}, .candidates = {} };
+        if (choice.chosen.error() == SwitchClientError::NoClient)
+            error.message = std::format("no client shows workspace '{}'",
+                                        request.workspace.empty() ? "of the caller" : request.workspace);
+        else
+        {
+            error.code = ControlErrorCode::Ambiguous;
+            for (auto const& candidate: choice.candidates)
+                error.candidates.push_back(std::format("{}", candidate));
+            error.message = "several clients show the workspace and none typed last:";
+            for (auto const& candidate: error.candidates)
+                error.message += std::format(" {}", candidate);
+        }
+        done(std::unexpected(std::move(error)));
+        return;
+    }
+
+    auto const ticket = ++_switchCalls->lastTicket;
+    _switchCalls->waiting.emplace(ticket, &context.events());
+    _host.requestSwitch(
+        *choice.chosen,
+        *workspace,
+        switchTargetOf(request),
+        [calls = _switchCalls, ticket, done = std::move(done)](proto::SwitchReply const& reply) {
+            if (calls->waiting.erase(ticket) != 0)
+                done(switchReplyOf(reply));
+        });
+}
+
 void ControlService::closePane(SessionId session)
 {
     // The one place the API ends a session: a requested close, so the pane is not restored.
@@ -1008,6 +1114,7 @@ void ControlService::sinkClosed(vtcontrol::EventSink& sink)
 {
     _hub.forget(sink);
     _waiters.forget(sink);
+    std::erase_if(_switchCalls->waiting, [&sink](auto const& call) { return call.second == &sink; });
 }
 
 vtcontrol::EventOrigin ControlService::originOf(SessionId session) const

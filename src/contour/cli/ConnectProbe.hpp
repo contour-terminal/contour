@@ -6,6 +6,7 @@
 /// does a host answer. Each takes its collaborator, so a test hands it a fake.
 
 #include <contour/cli/ConnectList.hpp>
+#include <contour/cli/DaemonDiscovery.hpp>
 
 #include <chrono>
 #include <expected>
@@ -29,11 +30,13 @@ class DaemonControlPort;
 namespace contour::cli
 {
 
-/// Asks the daemon at a socket how many sessions it hosts; none when it could not say.
-using SessionCounter = std::function<std::optional<std::size_t>(std::filesystem::path const& socket)>;
+/// @return A counter of the sessions a running daemon hosts, asked through its control socket; never starts
+///         one.
+[[nodiscard]] DaemonCounter nativeSessionCounter();
 
-/// @return A counter that asks a running daemon through its control socket, and never starts one.
-[[nodiscard]] SessionCounter nativeSessionCounter();
+/// @return A counter of the workspaces a running daemon holds, asked through its control socket; never starts
+///         one. None from a daemon too old to say.
+[[nodiscard]] DaemonCounter nativeWorkspaceCounter();
 
 /// Probes the local daemon.
 /// @param spawner Asks whether a daemon accepts connections at @p socket.
@@ -42,7 +45,7 @@ using SessionCounter = std::function<std::optional<std::size_t>(std::filesystem:
 /// @return Not running when nothing accepts; else running, with the count when it was had.
 [[nodiscard]] LocalDaemonState probeLocalDaemon(vthost::DaemonSpawner& spawner,
                                                 std::filesystem::path const& socket,
-                                                SessionCounter const& sessions);
+                                                DaemonCounter const& sessions);
 
 /// Whether a host answers: connects, handshakes and asks for its status. A daemon that is too old to
 /// answer a status is reachable all the same.

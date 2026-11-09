@@ -6,6 +6,7 @@
 /// model, `contour connect --list` and the launchers' menus (the Dock menu, the jump list) all read one
 /// list and the decisions are tested without a window or a daemon.
 
+#include <contour/cli/DaemonDiscovery.hpp>
 #include <contour/config/LaunchTarget.hpp>
 
 #include <cstddef>
@@ -74,6 +75,9 @@ struct ConnectListInputs
 {
     std::map<std::string, config::HostEntry> const& hosts; ///< The saved hosts; borrowed.
     LocalDaemonState daemon;                               ///< The local daemon, as probed.
+    /// The daemons discovery found; the `default` one is the local daemon's row already. Empty while it
+    /// still looks.
+    std::vector<DiscoveredDaemon> labelled {};
 };
 
 /// The rows to show for what has been typed.
@@ -114,5 +118,19 @@ enum class ListFormat : uint8_t
 /// @return What its row says: `Local daemon · running · 3 sessions`, `Local daemon · not running · starts on
 ///         connect`.
 [[nodiscard]] std::string describeLocalDaemon(LocalDaemonState const& state, std::string_view label);
+
+/// @param daemon A labelled daemon discovery found.
+/// @return What its row says: `admin · running · 2 workspaces`.
+[[nodiscard]] std::string describeDiscoveredDaemon(DiscoveredDaemon const& daemon);
+
+/// @param scheme A saved host's transport.
+/// @return The tag its row carries: `SSH`, `TLS`.
+[[nodiscard]] std::string schemeTag(config::HostScheme scheme);
+
+/// What the pickers' filter field matches with.
+/// @param haystack The row's text.
+/// @param filter What the user typed.
+/// @return Whether every word of @p filter occurs in @p haystack, ignoring case.
+[[nodiscard]] bool matchesFilter(std::string_view haystack, std::string_view filter);
 
 } // namespace contour::cli

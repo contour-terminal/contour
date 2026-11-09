@@ -11,9 +11,11 @@
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <vtcontrol/Catalog.hpp>
@@ -90,7 +92,7 @@ class ControlService final:
     ControlService(ControlService&&) = delete;
     ControlService& operator=(ControlService const&) = delete;
     ControlService& operator=(ControlService&&) = delete;
-    ~ControlService() override = default;
+    ~ControlService() override;
 
     // clang-format off
     void handle(vtcontrol::CallContext& context, vtcontrol::DaemonInfoRequest const& request, vtcontrol::Completion<vtcontrol::DaemonInfoReply> done) override;
@@ -102,6 +104,7 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::CaptureRequest const& request, vtcontrol::Completion<vtcontrol::CaptureReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::ClosePaneRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::CloseTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SetLabelRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::BlockListRequest const& request, vtcontrol::Completion<vtcontrol::BlockListReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::BlockReadRequest const& request, vtcontrol::Completion<vtcontrol::BlockReadReply> done) override;
@@ -283,8 +286,18 @@ class ControlService final:
                      std::string_view text,
                      vtcontrol::Completion<vtcontrol::SendReply> done);
 
+    /// The `workspace.switch` calls still waiting for their window, by ticket, and the connection that made
+    /// each. Shared with the completions handed to the host, so a call whose connection closed (sinkClosed)
+    /// or whose service is gone finds its ticket missing and is dropped unanswered.
+    struct SwitchCalls
+    {
+        uint64_t lastTicket = 0;
+        std::unordered_map<uint64_t, vtcontrol::EventSink const*> waiting;
+    };
+
     SessionHost& _host;
     ControlServiceConfig _config;
+    std::shared_ptr<SwitchCalls> _switchCalls = std::make_shared<SwitchCalls>();
     std::chrono::system_clock::time_point _startedAt; ///< When the service started: the daemon's uptime.
     EventHub _hub;                                    ///< Who takes which events.
     BlockWaiters _waiters;                            ///< Who waits for which block.

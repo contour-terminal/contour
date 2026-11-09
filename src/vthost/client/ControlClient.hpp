@@ -122,7 +122,10 @@ using SavedHostResolver =
 /// What a control client is told about where its daemon is.
 struct ControlEndpointOptions
 {
-    std::string daemon {};   ///< `--daemon`: a socket path, `HOST:PORT`, or a saved host; empty for none.
+    std::string daemon {}; ///< `--daemon`: a socket path, `HOST:PORT`, or a saved host; empty for none.
+    /// `--label`: a local daemon by its socket label, as `contour client --label` reads it; empty for none.
+    /// It names the endpoint, so it wins over `$CONTOUR_DAEMON`, and is not combined with @ref daemon.
+    std::string label {};
     std::string token {};    ///< The token a TCP endpoint is sent.
     std::string tlsCaPem {}; ///< The CA certificate (PEM) a TCP endpoint is verified against; empty for none.
     /// Resolves a spec that names a saved host (one holding `://`, or a bare word); empty for no saved hosts,
@@ -132,10 +135,11 @@ struct ControlEndpointOptions
 
 /// Picks the daemon a control client talks to.
 ///
-/// The spec is the first non-empty of `options.daemon`, `$CONTOUR_DAEMON`, and the default socket. A
-/// spec starting with `/` or `.` is a socket path even with a colon in it; a `HOST:PORT` spec is TCP+TLS with
-/// the options' token and CA; one holding `://`, or a bare word, goes to the saved-host resolver when there
-/// is one; anything else is a socket path. A socket path never starts a daemon.
+/// An `options.label` names the local daemon of that label (vthost::muxSocketPath) and nothing else is read.
+/// Otherwise the spec is the first non-empty of `options.daemon`, `$CONTOUR_DAEMON`, and the default socket.
+/// A spec starting with `/` or `.` is a socket path even with a colon in it; a `HOST:PORT` spec is TCP+TLS
+/// with the options' token and CA; one holding `://`, or a bare word, goes to the saved-host resolver when
+/// there is one; anything else is a socket path. A socket path never starts a daemon.
 /// @param options What the user said.
 /// @param env Where `$CONTOUR_DAEMON` (and the default socket's inputs) are read from.
 /// @return The transport, or ControlFailure::Unreachable with the resolver's message.

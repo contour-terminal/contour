@@ -1249,3 +1249,228 @@ TEST_CASE("a block finished on another thread reaches the subscriber on the loop
     CHECK((*waiting->result)->block->exitCode == 4);
     CHECK(delivered<vtcontrol::BlockFinishedEvent>(h.context.sink).size() == 1);
 }
+
+namespace
+{
+
+/// Whether a test window offered Capability::WorkspaceSwitch.
+enum class SwitchSupport : uint8_t
+{
+    Absent = 0,
+    Offered,
+};
+
+/// An attached window that shows the workspaces it is given, can (or cannot) be asked to switch, and
+/// records what it was asked.
+class FakeWindow final: public vthost::SessionStreamEvents
+{
+  public:
+    FakeWindow(std::uint64_t index, SwitchSupport support):
+        _id { .endpoint = "native", .index = index }, _support { support }
+    {
+    }
+
+    [[nodiscard]] vthost::ConnectionId connectionId() const override { return _id; }
+    [[nodiscard]] bool canSwitch() const noexcept override { return _support == SwitchSupport::Offered; }
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
+    {
+        return workspace == shown;
+    }
+    void requestSwitch(vthost::proto::SwitchRequest const& request) override { asked.push_back(request); }
+
+    vtworkspace::WorkspaceId shown {};
+    std::vector<vthost::proto::SwitchRequest> asked;
+
+  private:
+    vthost::ConnectionId _id;
+    SwitchSupport _support;
+};
+
+/// What a `workspace.switch` call answered with, once it has.
+using SwitchAnswer = std::optional<std::expected<vtcontrol::SwitchWorkspaceReply, ControlError>>;
+
+void callSwitch(ControlHarness& h, vtcontrol::SwitchWorkspaceRequest const& request, SwitchAnswer& answer)
+{
+    h.service.handle(
+        h.context, request, [&answer](std::expected<vtcontrol::SwitchWorkspaceReply, ControlError> reply) {
+            answer = std::move(reply);
+        });
+}
+
+} // namespace
+
+TEST_CASE("workspace.list reports a workspace's visibility, clients and native id",
+          "[vthost][control][switch]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const workspace = h.host.workspaceId();
+    auto window = FakeWindow { 1, SwitchSupport::Offered };
+    h.host.noteClientAttached(&window);
+
+    auto list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    REQUIRE(list->workspaces.size() == 1);
+    CHECK(list->workspaces[0].native == std::to_string(workspace.value));
+    CHECK(list->workspaces[0].visibility == "left");
+    CHECK(list->workspaces[0].clients == 0);
+
+    window.shown = workspace;
+    list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    CHECK(list->workspaces[0].visibility == "shown");
+    CHECK(list->workspaces[0].clients == 1);
+
+    window.shown = {};
+    h.host.noteWorkspaceReleased(workspace, vthost::proto::WorkspaceRelease::SwitchedAway);
+    list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    CHECK(list->workspaces[0].visibility == "hidden");
+    h.host.noteClientDetached(&window);
+}
+
+TEST_CASE("workspace.switch asks the window showing the workspace and relays its answer",
+          "[vthost][control][switch]")
+{
+    using vthost::proto::SwitchOutcome;
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto window = FakeWindow { 1, SwitchSupport::Offered };
+    window.shown = h.host.workspaceId();
+    h.host.noteClientAttached(&window);
+    auto answer = SwitchAnswer {};
+
+    callSwitch(h, { .toLabel = "admin", .toWorkspace = "build" }, answer);
+    REQUIRE(window.asked.size() == 1);
+    CHECK(window.asked.front().target.kind == vthost::proto::SwitchDaemonKind::Label);
+    CHECK(window.asked.front().target.daemon == "admin");
+    CHECK(window.asked.front().target.workspace == "build");
+    CHECK(window.asked.front().workspace == h.host.workspaceId().value);
+    CHECK_FALSE(answer.has_value());
+
+    h.host.completeSwitch({ .endpoint = "native", .index = 1 },
+                          { .request = window.asked.front().request, .outcome = SwitchOutcome::Switched });
+    REQUIRE(answer.has_value());
+    REQUIRE(answer->has_value());
+    CHECK((*answer)->outcome == "switched");
+
+    // Every outcome has its name; a host target is read as one.
+    struct Row
+    {
+        SwitchOutcome outcome;
+        std::string_view name;
+    };
+    for (auto const& [outcome, name]: {
+             Row { SwitchOutcome::FocusedExisting, "focused" },
+             Row { SwitchOutcome::PickerShown, "picker" },
+             Row { SwitchOutcome::Refused, "refused" },
+             Row { SwitchOutcome::Failed, "failed" },
+         })
+    {
+        answer.reset();
+        callSwitch(h, { .toHost = "ssh://me@box" }, answer);
+        REQUIRE(window.asked.back().target.kind == vthost::proto::SwitchDaemonKind::Host);
+        CHECK(window.asked.back().target.daemon == "ssh://me@box");
+        h.host.completeSwitch(
+            { .endpoint = "native", .index = 1 },
+            { .request = window.asked.back().request, .outcome = outcome, .detail = "why" });
+        REQUIRE(answer.has_value());
+        REQUIRE(answer->has_value());
+        CHECK((*answer)->outcome == name);
+        CHECK((*answer)->detail == "why");
+    }
+    h.host.noteClientDetached(&window);
+}
+
+TEST_CASE("workspace.switch fails for a window that did not offer the capability",
+          "[vthost][control][switch]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto window = FakeWindow { 1, SwitchSupport::Absent };
+    window.shown = h.host.workspaceId();
+    h.host.noteClientAttached(&window);
+    auto answer = SwitchAnswer {};
+
+    callSwitch(h, { .toLabel = "admin" }, answer);
+
+    REQUIRE(answer.has_value());
+    REQUIRE(answer->has_value());
+    CHECK((*answer)->outcome == "failed");
+    CHECK((*answer)->detail == "the window cannot switch (client too old)");
+    CHECK(window.asked.empty());
+    h.host.noteClientDetached(&window);
+}
+
+TEST_CASE("workspace.switch errors: no window, several windows, both targets", "[vthost][control][switch]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    auto const workspace = h.host.workspaceId();
+    auto answer = SwitchAnswer {};
+
+    SECTION("no client shows the workspace")
+    {
+        callSwitch(h, { .toLabel = "admin" }, answer);
+        REQUIRE(answer.has_value());
+        REQUIRE_FALSE(answer->has_value());
+        CHECK((*answer).error().code == ControlErrorCode::NotFound);
+        CHECK((*answer).error().message.starts_with("no client shows workspace"));
+    }
+    SECTION("several windows and no typist are ambiguous, listing them")
+    {
+        auto first = FakeWindow { 1, SwitchSupport::Offered };
+        auto second = FakeWindow { 2, SwitchSupport::Offered };
+        first.shown = workspace;
+        second.shown = workspace;
+        h.host.noteClientAttached(&first);
+        h.host.noteClientAttached(&second);
+
+        callSwitch(h, { .toLabel = "admin" }, answer);
+        REQUIRE(answer.has_value());
+        REQUIRE_FALSE(answer->has_value());
+        CHECK((*answer).error().code == ControlErrorCode::Ambiguous);
+        CHECK((*answer).error().candidates == std::vector<std::string> { "native#1", "native#2" });
+        CHECK(first.asked.empty());
+        CHECK(second.asked.empty());
+
+        // The one that typed last is the one asked.
+        h.host.writeInputFrom(session, "x", { .endpoint = "native", .index = 2 });
+        answer.reset();
+        callSwitch(h, { .toLabel = "admin" }, answer);
+        CHECK(first.asked.empty());
+        CHECK(second.asked.size() == 1);
+        h.host.noteClientDetached(&first);
+        h.host.noteClientDetached(&second);
+    }
+    SECTION("a label and a host together are a bad request")
+    {
+        callSwitch(h, { .toLabel = "admin", .toHost = "box" }, answer);
+        REQUIRE(answer.has_value());
+        REQUIRE_FALSE(answer->has_value());
+        CHECK((*answer).error().code == ControlErrorCode::BadRequest);
+    }
+    SECTION("an unknown workspace is not found")
+    {
+        callSwitch(h, { .workspace = "nope", .toLabel = "admin" }, answer);
+        REQUIRE(answer.has_value());
+        REQUIRE_FALSE(answer->has_value());
+        CHECK((*answer).error().code == ControlErrorCode::NotFound);
+    }
+}
+
+TEST_CASE("workspace.switch drops the answer of a connection that closed", "[vthost][control][switch]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto window = FakeWindow { 1, SwitchSupport::Offered };
+    window.shown = h.host.workspaceId();
+    h.host.noteClientAttached(&window);
+    auto answer = SwitchAnswer {};
+    callSwitch(h, { .toLabel = "admin" }, answer);
+    REQUIRE(window.asked.size() == 1);
+
+    h.service.sinkClosed(h.context.events());
+    h.host.completeSwitch({ .endpoint = "native", .index = 1 }, { .request = window.asked.front().request });
+
+    CHECK_FALSE(answer.has_value());
+    h.host.noteClientDetached(&window);
+}

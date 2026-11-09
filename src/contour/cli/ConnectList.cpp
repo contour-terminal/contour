@@ -9,6 +9,7 @@
 #include <ranges>
 
 #include <vtcontrol/Json.hpp>
+#include <vthost/SocketPath.hpp>
 
 namespace contour::cli
 {
@@ -39,22 +40,21 @@ namespace
         return *std::ranges::find(KindRows, kind, &KindRow::kind);
     }
 
-    [[nodiscard]] std::string schemeTag(config::HostScheme scheme)
-    {
-        return core::toUpper(config::hostSchemeName(scheme));
-    }
-
-    /// Whether every word of @p filter occurs in @p haystack.
-    [[nodiscard]] bool matches(std::string_view haystack, std::string_view filter)
-    {
-        auto const text = core::toLower(haystack);
-        return std::ranges::all_of(
-            std::string_view { core::toLower(filter) } | std::views::split(' ')
-                | std::views::transform(
-                    [](auto word) { return std::string_view { word.begin(), word.end() }; }),
-            [&](std::string_view word) { return word.empty() || text.contains(word); });
-    }
 } // namespace
+
+std::string schemeTag(config::HostScheme scheme)
+{
+    return core::toUpper(config::hostSchemeName(scheme));
+}
+
+bool matchesFilter(std::string_view haystack, std::string_view filter)
+{
+    auto const text = core::toLower(haystack);
+    return std::ranges::all_of(
+        std::string_view { core::toLower(filter) } | std::views::split(' ')
+            | std::views::transform([](auto word) { return std::string_view { word.begin(), word.end() }; }),
+        [&](std::string_view word) { return word.empty() || text.contains(word); });
+}
 
 std::string quickSelectLabel(QuickSelectKey key, std::size_t digit)
 {
@@ -72,6 +72,16 @@ std::string describeLocalDaemon(LocalDaemonState const& state, std::string_view 
         return std::format("{} · running", name);
     return std::format(
         "{} · running · {} {}", name, *state.sessions, *state.sessions == 1 ? "session" : "sessions");
+}
+
+std::string describeDiscoveredDaemon(DiscoveredDaemon const& daemon)
+{
+    if (!daemon.workspaces)
+        return std::format("{} · running", daemon.label);
+    return std::format("{} · running · {} {}",
+                       daemon.label,
+                       *daemon.workspaces,
+                       *daemon.workspaces == 1 ? "workspace" : "workspaces");
 }
 
 std::vector<ConnectRow> connectRows(ConnectListInputs const& inputs, std::string_view filter)
@@ -97,7 +107,7 @@ std::vector<ConnectRow> connectRows(ConnectListInputs const& inputs, std::string
     auto const offer = [&](ConnectRow row, std::string_view address) {
         auto const haystack =
             std::format("{} {} {} {}", row.title, address, row.text, kindRow(row.target.kind).keywords);
-        if (matches(haystack, filter))
+        if (matchesFilter(haystack, filter))
             rows.push_back(std::move(row));
     };
     offer(ConnectRow { .target = local,
@@ -108,6 +118,22 @@ std::vector<ConnectRow> connectRows(ConnectListInputs const& inputs, std::string
                        .text = config::toString(local),
                        .quick = std::nullopt },
           {});
+    // The other daemons running here, by label; the default one is the row above.
+    for (auto const& daemon: inputs.labelled)
+    {
+        if (daemon.label == vthost::DefaultSocketLabel)
+            continue;
+        auto const target =
+            config::LaunchTarget { .kind = config::LaunchTargetKind::LocalDaemon, .name = daemon.label };
+        offer(ConnectRow { .target = target,
+                           .group = ConnectGroup::ThisComputer,
+                           .title = daemon.label,
+                           .detail = describeDiscoveredDaemon(daemon),
+                           .tag = {},
+                           .text = config::toString(target),
+                           .quick = std::nullopt },
+              {});
+    }
     offer(ConnectRow { .target = process,
                        .group = ConnectGroup::ThisComputer,
                        .title = "This window only",

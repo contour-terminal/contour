@@ -76,6 +76,9 @@ interface types {
         id: string,
         label: string,
         position: u32,
+        native: string,
+        visibility: string,
+        clients: u32,
         tabs: list<tab-info>,
     }
 

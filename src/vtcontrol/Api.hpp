@@ -275,9 +275,16 @@ struct WorkspaceInfo
 {
     using ApiRecordTag = void;
 
-    std::string id {};            ///< `workspace:<uuid>`.
-    std::string label {};         ///< The label, or empty.
-    uint32_t position = 0;        ///< 1-based position among the daemon's workspaces.
+    std::string id {};     ///< `workspace:<uuid>`.
+    std::string label {};  ///< The label, or empty.
+    uint32_t position = 0; ///< 1-based position among the daemon's workspaces.
+    /// The daemon's native protocol id, which a window follows it by, in decimal: the extension vocabulary
+    /// has no 64-bit integers.
+    std::string native {};
+    /// `shown` (a window shows it), `left` (no window does, and a launch brings it back) or `hidden` (a
+    /// window switched away from it; a launch leaves it alone).
+    std::string visibility {};
+    uint32_t clients = 0;         ///< How many windows show it now.
     std::vector<TabInfo> tabs {}; ///< Its tabs.
 };
 
@@ -462,6 +469,28 @@ struct CloseTabRequest
     using ApiRecordTag = void;
 
     std::string tab {}; ///< The tab to close.
+};
+
+/// `workspace.switch` request: where the window showing a workspace should go.
+struct SwitchWorkspaceRequest
+{
+    using ApiRecordTag = void;
+
+    std::string workspace {};   ///< The workspace whose window switches; empty for the caller's.
+    std::string toLabel {};     ///< A local daemon, by label.
+    std::string toHost {};      ///< A saved host or `ssh://` URL.
+    std::string toWorkspace {}; ///< A workspace spec the window resolves against the target daemon.
+};
+
+/// `workspace.switch` reply.
+struct SwitchWorkspaceReply
+{
+    using ApiRecordTag = void;
+
+    /// `switched`, `focused` (another window already shows the target), `picker` (the window asked its
+    /// user), `refused` (the window or its user declined) or `failed`.
+    std::string outcome {};
+    std::string detail {}; ///< A sentence for the user; empty on success.
 };
 
 /// `label.set` request.

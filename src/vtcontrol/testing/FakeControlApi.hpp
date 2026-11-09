@@ -58,6 +58,7 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, CaptureRequest const& request, Completion<CaptureReply> done) override { lastCapture = request; done(captureReply); }
     void handle(CallContext& /*context*/, ClosePaneRequest const& request, Completion<EmptyReply> done) override { lastClosePane = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, CloseTabRequest const& request, Completion<EmptyReply> done) override { lastCloseTab = request; if (closeTabFailure) done(std::unexpected(*closeTabFailure)); else done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) override { lastSwitchWorkspace = request; if (switchWorkspaceFailure) done(std::unexpected(*switchWorkspaceFailure)); else done(switchWorkspaceReply); }
     void handle(CallContext& /*context*/, SetLabelRequest const& request, Completion<EmptyReply> done) override { lastSetLabel = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, BlockListRequest const& request, Completion<BlockListReply> done) override { lastBlockList = request; done(blockListReply); }
     void handle(CallContext& /*context*/, BlockReadRequest const& request, Completion<BlockReadReply> done) override { lastBlockRead = request; done(blockReadReply); }
@@ -84,6 +85,8 @@ struct FakeControlApi final: public ControlApi
     WaitReply waitReply;
     SubscribeReply subscribeReply;
     std::optional<ControlError> closeTabFailure; ///< When set, `tab.close` fails with it.
+    SwitchWorkspaceReply switchWorkspaceReply;
+    std::optional<ControlError> switchWorkspaceFailure; ///< When set, `workspace.switch` fails with it.
 
     std::optional<DaemonInfoRequest> lastDaemonInfo;
     std::optional<DaemonUpgradeRequest> lastDaemonUpgrade;
@@ -94,6 +97,7 @@ struct FakeControlApi final: public ControlApi
     std::optional<CaptureRequest> lastCapture;
     std::optional<ClosePaneRequest> lastClosePane;
     std::optional<CloseTabRequest> lastCloseTab;
+    std::optional<SwitchWorkspaceRequest> lastSwitchWorkspace;
     std::optional<SetLabelRequest> lastSetLabel;
     std::optional<BlockListRequest> lastBlockList;
     std::optional<BlockReadRequest> lastBlockRead;
