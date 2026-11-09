@@ -1054,6 +1054,16 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # The pinned lint tools (actionlint, typos) that `check_workflows` and `check_spelling` download from
+      # GitHub release assets on first use, kept between runs: a release-asset outage (HTTP 504 for hours,
+      # once) used to fail every job that runs the lint ctest, since CHECK_WORKFLOWS_REQUIRE_TOOL turns the
+      # skipped download into a failure. The key is the files that pin the versions, so a hit needs no
+      # download and a bump fetches once. scripts/lib/toolcache.py also retries a download that does miss.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       - name: set variables
         id: set_vars
         run: |
@@ -1529,6 +1539,16 @@ jobs:
       VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The pinned lint tools (actionlint, typos) that `check_workflows` and `check_spelling` download from
+      # GitHub release assets on first use, kept between runs: a release-asset outage (HTTP 504 for hours,
+      # once) used to fail every job that runs the lint ctest, since CHECK_WORKFLOWS_REQUIRE_TOOL turns the
+      # skipped download into a failure. The key is the files that pin the versions, so a hit needs no
+      # download and a bump fetches once. scripts/lib/toolcache.py also retries a download that does miss.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       # ccache, not sccache: cmake/CompileCache.cmake picks the ccache on PATH, and with it forces
       # /Z7 (debug info inside the .obj) in place of /Zi, which no launcher can cache. The action
       # installs ccache 4.9 and sets compiler_check=content on Windows, where the compiler's mtime
@@ -2082,6 +2102,16 @@ jobs:
       id: "${{ matrix.runner }} ${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
       - uses: actions/checkout@v4
+      # The pinned lint tools (actionlint, typos) that `check_workflows` and `check_spelling` download from
+      # GitHub release assets on first use, kept between runs: a release-asset outage (HTTP 504 for hours,
+      # once) used to fail every job that runs the lint ctest, since CHECK_WORKFLOWS_REQUIRE_TOOL turns the
+      # skipped download into a failure. The key is the files that pin the versions, so a hit needs no
+      # download and a bump fetches once. scripts/lib/toolcache.py also retries a download that does miss.
+      - name: "Lint tools"
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: out/.tools
+          key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
