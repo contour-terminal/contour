@@ -37,6 +37,10 @@ TEST_CASE("judgeProbe names the column a timed-out probe waited for", "[vthost][
     REQUIRE_FALSE(prompt.has_value());
     CHECK(prompt.error() == "probe timed out waiting for cursor column 2 (the prompt)");
 
+    auto const focus = judgeProbe(settledAs(ProbePhase::FocusTimedOut, 3));
+    REQUIRE_FALSE(focus.has_value());
+    CHECK(focus.error() == "probe timed out waiting for the keyboard focus to type towards cursor column 3");
+
     CHECK_FALSE(judgeProbe(settledAs(ProbePhase::AwaitingEcho)).has_value());
 }
 
@@ -45,6 +49,7 @@ TEST_CASE("only a probe that has said all it will is settled", "[vthost][latency
     CHECK(isSettled(ProbePhase::Finished));
     CHECK(isSettled(ProbePhase::PromptTimedOut));
     CHECK(isSettled(ProbePhase::EchoTimedOut));
+    CHECK(isSettled(ProbePhase::FocusTimedOut));
     CHECK_FALSE(isSettled(ProbePhase::AwaitingPrompt));
     CHECK_FALSE(isSettled(ProbePhase::Pausing));
     CHECK_FALSE(isSettled(ProbePhase::AwaitingEcho));

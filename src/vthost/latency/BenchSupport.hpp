@@ -97,11 +97,11 @@ class BenchProcess
 
 /// Whether a probe has said all it will.
 /// @param phase The probe's phase.
-/// @return True for Finished and both timeouts.
+/// @return True for Finished and every timeout.
 [[nodiscard]] constexpr bool isSettled(ProbePhase phase) noexcept
 {
     return phase == ProbePhase::Finished || phase == ProbePhase::PromptTimedOut
-           || phase == ProbePhase::EchoTimedOut;
+           || phase == ProbePhase::EchoTimedOut || phase == ProbePhase::FocusTimedOut;
 }
 
 /// @param result A settled probe.

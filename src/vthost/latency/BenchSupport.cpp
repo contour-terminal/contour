@@ -128,6 +128,10 @@ std::expected<void, std::string> judgeProbe(ProbeResult const& result)
         case ProbePhase::EchoTimedOut:
             return std::unexpected(
                 std::format("probe timed out waiting for cursor column {}", result.awaitedColumn));
+        case ProbePhase::FocusTimedOut:
+            return std::unexpected(
+                std::format("probe timed out waiting for the keyboard focus to type towards cursor column {}",
+                            result.awaitedColumn));
         case ProbePhase::AwaitingPrompt:
         case ProbePhase::Pausing:
         case ProbePhase::AwaitingEcho: break;

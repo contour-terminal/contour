@@ -28,6 +28,7 @@ namespace
         PhaseRow { .phase = ProbePhase::Finished, .name = "finished" },
         PhaseRow { .phase = ProbePhase::PromptTimedOut, .name = "prompt-timed-out" },
         PhaseRow { .phase = ProbePhase::EchoTimedOut, .name = "echo-timed-out" },
+        PhaseRow { .phase = ProbePhase::FocusTimedOut, .name = "focus-timed-out" },
     };
 
     struct VerdictRow

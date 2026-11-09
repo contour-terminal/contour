@@ -35,6 +35,8 @@ struct ProbePlan
     core::platform::SteadyDuration promptTimeout = std::chrono::seconds { 10 };
     /// How long an echo may take to show, counted from its key.
     core::platform::SteadyDuration echoTimeout = std::chrono::seconds { 2 };
+    /// How long a due key may wait for the keyboard focus, counted from when it fell due.
+    core::platform::SteadyDuration focusTimeout = std::chrono::seconds { 10 };
     uint32_t seed = 42; ///< Seeds the gap draw, so a run's key schedule repeats.
 };
 
@@ -47,6 +49,15 @@ enum class ProbePhase : uint8_t
     Finished,
     PromptTimedOut,
     EchoTimedOut,
+    FocusTimedOut,
+};
+
+/// Whether a key typed now reaches the terminal. A window the system has not activated yet drops it: Qt Quick
+/// gives no item the active focus there, so a key would be lost and its echo awaited until the echo timeout.
+enum class KeyboardFocus : uint8_t
+{
+    Absent = 0,
+    Present,
 };
 
 /// What a probe has measured so far.
@@ -75,9 +86,10 @@ class KeystrokeProbe
     ///        drew none.
     void frameSwapped(std::optional<int> drawnCursorColumn);
 
-    /// @return The key to type now, if its pause has elapsed; nullopt otherwise. Also settles the
-    ///         timeouts.
-    [[nodiscard]] std::optional<char> takeDueKey();
+    /// @param focus Whether a key typed now reaches the terminal. A due key is held while it does not.
+    /// @return The key to type now, if its pause has elapsed and @p focus is present; nullopt otherwise. Also
+    ///         settles the timeouts.
+    [[nodiscard]] std::optional<char> takeDueKey(KeyboardFocus focus);
 
     /// @return The phase the probe is in.
     [[nodiscard]] ProbePhase phase() const;

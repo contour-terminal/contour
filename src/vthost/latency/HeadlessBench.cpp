@@ -213,7 +213,7 @@ namespace
             loop.blockOn(repeatUntil(
                 &loop,
                 [&] {
-                    if (auto const key = probe.takeDueKey(); key && feed.session())
+                    if (auto const key = probe.takeDueKey(KeyboardFocus::Present); key && feed.session())
                         host.writeInput(*feed.session(), oneByte(*key));
                     return isSettled(probe.phase());
                 },
@@ -281,7 +281,7 @@ namespace
             co_await repeatUntil(
                 &loop,
                 [&] {
-                    if (auto const key = probe.takeDueKey(); key && sessionOf())
+                    if (auto const key = probe.takeDueKey(KeyboardFocus::Present); key && sessionOf())
                         client.sendInput(*sessionOf(), oneByte(*key));
                     return isSettled(probe.phase());
                 },

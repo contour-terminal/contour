@@ -724,7 +724,7 @@ void ContourGuiApp::armLatencyProbe()
     if (!window)
     {
         // Nothing is due while the prompt is awaited; asking settles the prompt timeout.
-        std::ignore = _keystrokeProbe->takeDueKey();
+        std::ignore = _keystrokeProbe->takeDueKey(vthost::latency::KeyboardFocus::Absent);
         if (_keystrokeProbe->phase() == vthost::latency::ProbePhase::PromptTimedOut)
             finishLatencyProbe();
         else

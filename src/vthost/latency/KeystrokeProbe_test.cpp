@@ -25,9 +25,9 @@ TEST_CASE("the probe measures from key to the first frame drawing its echo", "[v
     CHECK(probe.result().firstPrompt == core::platform::SteadyTimePoint {} + 5ms);
     for (auto const i: std::views::iota(std::size_t { 0 }, std::size_t { 3 }))
     {
-        CHECK_FALSE(probe.takeDueKey().has_value()); // gap not elapsed
+        CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Present).has_value()); // gap not elapsed
         clock.advance(30ms);
-        CHECK(probe.takeDueKey() == keyFor(i));
+        CHECK(probe.takeDueKey(KeyboardFocus::Present) == keyFor(i));
         clock.advance(4ms);
         probe.frameSwapped(expectedCursorColumn(i) - 1); // stale frame: ignored
         clock.advance(3ms);
@@ -56,7 +56,7 @@ TEST_CASE("the gaps stay in range and repeat for a seed", "[vthost][latency]")
         for (auto const i: std::views::iota(std::size_t { 0 }, std::size_t { 20 }))
         {
             auto waited = core::platform::SteadyDuration {};
-            while (!probe.takeDueKey())
+            while (!probe.takeDueKey(KeyboardFocus::Present))
             {
                 clock.advance(1ms);
                 waited += 1ms;
@@ -80,9 +80,9 @@ TEST_CASE("a probe whose echo never shows times out naming the awaited column", 
     auto clock = core::platform::ManualClock {};
     auto probe = KeystrokeProbe { clock, ProbePlan { .minGap = 0ms, .maxGap = 0ms } };
     probe.frameSwapped(PromptColumns);
-    REQUIRE(probe.takeDueKey() == keyFor(0));
+    REQUIRE(probe.takeDueKey(KeyboardFocus::Present) == keyFor(0));
     clock.advance(2001ms);
-    CHECK_FALSE(probe.takeDueKey().has_value());
+    CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Present).has_value());
     CHECK(probe.phase() == ProbePhase::EchoTimedOut);
     CHECK(probe.result().awaitedColumn == 3);
 }
@@ -92,7 +92,37 @@ TEST_CASE("a probe whose prompt never shows times out", "[vthost][latency]")
     auto clock = core::platform::ManualClock {};
     auto probe = KeystrokeProbe { clock, ProbePlan {} };
     clock.advance(10001ms);
-    CHECK_FALSE(probe.takeDueKey().has_value());
+    CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Present).has_value());
     CHECK(probe.phase() == ProbePhase::PromptTimedOut);
     CHECK(probe.result().awaitedColumn == PromptColumns);
+}
+
+TEST_CASE("a due key waits for the keyboard focus and is timed from when it is typed", "[vthost][latency]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto probe = KeystrokeProbe { clock, ProbePlan { .warmupKeys = 0, .minGap = 0ms, .maxGap = 0ms } };
+    probe.frameSwapped(PromptColumns);
+    // Longer than the echo timeout: a held key has not been typed, so no echo is awaited yet.
+    clock.advance(3s);
+    CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Absent).has_value());
+    CHECK(probe.phase() == ProbePhase::Pausing);
+    REQUIRE(probe.takeDueKey(KeyboardFocus::Present) == keyFor(0));
+    clock.advance(4ms);
+    probe.frameSwapped(expectedCursorColumn(0));
+    REQUIRE(probe.result().keystrokes.size() == 1);
+    CHECK(probe.result().keystrokes.front() == 4ms);
+}
+
+TEST_CASE("a probe whose keyboard focus never comes times out", "[vthost][latency]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto probe = KeystrokeProbe { clock, ProbePlan { .minGap = 0ms, .maxGap = 0ms } };
+    probe.frameSwapped(PromptColumns);
+    clock.advance(10s);
+    CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Absent).has_value());
+    CHECK(probe.phase() == ProbePhase::Pausing);
+    clock.advance(1ms);
+    CHECK_FALSE(probe.takeDueKey(KeyboardFocus::Absent).has_value());
+    CHECK(probe.phase() == ProbePhase::FocusTimedOut);
+    CHECK(probe.result().awaitedColumn == 3);
 }
