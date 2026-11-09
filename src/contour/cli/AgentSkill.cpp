@@ -110,8 +110,10 @@ std::string renderAgentSkill(std::string_view version)
     for (auto const& verb: controlVerbs())
         line(std::format("- `contour {}`: {}", verb.usage, verb.summary));
     line();
-    line("Put `--` before the text a verb types or runs: without it, text that starts with an option's name "
-         "is read as that option (`contour send --enter wait` waits, and types nothing).");
+    line(
+        "Put `--` before the text a verb types or runs: without it, text that starts with an option's name "
+        "is read as that option (`contour send --enter wait` waits, and types nothing), and text that starts "
+        "with any other dash word is refused (`contour send -x` types nothing).");
     line();
     line("## MCP");
     line();

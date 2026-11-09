@@ -378,42 +378,9 @@ namespace
             vtcontrol::ListRequest { .workspace = VerbFlags { flags, "ls" }.text("workspace") });
     }
 
-    /// A spelling this daemon vocabulary dropped, and the one that replaces it.
-    struct RemovedFlag
-    {
-        std::string_view removed;
-        std::string_view replacement;
-    };
-
-    /// `new` takes its trailing words as the command, so an unknown option lands there instead of being
-    /// refused; these are the flags that used to name a daemon workspace, caught before they are run as one.
-    /// `removed` is the bare option name, matched however the parser would accept it (see removedNewFlag).
-    constexpr auto RemovedNewFlags = std::array {
-        RemovedFlag { .removed = "window", .replacement = "--workspace" },
-        RemovedFlag { .removed = "new-window", .replacement = "--new-workspace" },
-    };
-
-    /// Finds the removed flag a leading word spells, in any form the CLI parser accepts for an option:
-    /// `--NAME`, `--NAME=VALUE`, `-NAME` and the dashless `NAME`.
-    /// @param word The first trailing word of `new`.
-    /// @return The removed flag, or nullptr when the word is no such spelling.
-    [[nodiscard]] RemovedFlag const* removedNewFlag(std::string_view word) noexcept
-    {
-        word = word.substr(0, word.find('='));
-        if (word.starts_with("--"sv))
-            word.remove_prefix(2);
-        else if (word.starts_with('-'))
-            word.remove_prefix(1);
-        auto const found = std::ranges::find(RemovedNewFlags, word, &RemovedFlag::removed);
-        return found != RemovedNewFlags.end() ? &*found : nullptr;
-    }
-
     [[nodiscard]] Params buildNew(CLI::FlagStore const& flags)
     {
         auto const f = VerbFlags { flags, "new" };
-        if (auto const& words = f.words(); !words.empty())
-            if (auto const* const found = removedNewFlag(words.front()); found != nullptr)
-                return std::unexpected(std::format("--{} is now {}"sv, found->removed, found->replacement));
         if (!f.text("workspace").empty() && f.isSet("new-workspace"))
             return std::unexpected("--workspace and --new-workspace exclude each other"s);
         return vtcontrol::encodeJson(vtcontrol::CreateTabRequest {
@@ -733,7 +700,8 @@ namespace
                     },
                 .verbatim = CLI::Verbatim { "TEXT",
                                             "The words to type, joined by spaces; - reads standard input. "
-                                            "Put -- before text that starts with an option's name." },
+                                            "Put -- before text that starts with an option's name or a "
+                                            "dash: a dash word no option has is refused." },
                 .buildParams = buildSend,
                 .printHuman = humanNothing,
                 .input = InputExpansion::Stdin,

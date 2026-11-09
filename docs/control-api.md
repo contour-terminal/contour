@@ -53,8 +53,10 @@ pane.
 `contour pane capture` is spelled that way because `contour capture` is the older verb that captures the
 screen of the terminal it runs in.
 
-Options that look like words (`--pane`, but also the bare `pane`) can be mistaken for typed text: put `--`
-before text that starts with the name of an option, as in `contour send --enter -- wait`.
+Options that look like words (`--pane`, but also the bare `pane`) can be mistaken for typed text, and a word
+that starts with a dash but names no option is refused rather than typed: put `--` before text that starts
+with the name of an option or with a dash, as in `contour send --enter -- wait` or
+`contour send -- -x`.
 
 ### Connection options
 
