@@ -185,9 +185,11 @@ contour --daemon-mode required     # this launch only: fail rather than fall bac
 
 ### What a launch opens
 
-An attaching launch opens one new window beside whatever the daemon already shows. When no other
-window is attached to the daemon, it instead brings every workspace the daemon holds back, so reopening
-Contour after closing its last window finds your sessions where you left them.
+A launch brings back the workspaces of the daemon that nobody shows, one window each. A workspace that
+another window already shows is not mirrored: a second machine attaching to a daemon gets the
+workspaces the first one left, not a copy of what the first one is looking at. When every workspace is
+shown or hidden (see below), the launch opens one new workspace in one new window. A fresh daemon gets its
+first tab in the first window, as before.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
 under `auto`; under `required` it ends before any window, since a daemon session runs the host's profile.
@@ -200,18 +202,73 @@ connection gone half-open — a laptop that changed networks — is noticed by a
 15 s instead of whenever TCP gives up. Input typed while disconnected is dropped rather than replayed
 into whatever shell answers next. A launch that falls back to `in_process` has no connection to lose.
 
+## Switching a window
+
+A window shows one workspace of one daemon, over a connection of its own: each window has exactly one
+connection, so a window on a remote host does not tie up, or depend on, the other windows. You can point a
+window somewhere else without closing it, and its panes are swapped in place:
+
+- **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`.
+- **To another daemon**: a local one by its label (`contour daemon --label`), or a saved
+  [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
+  daemon's only workspace, on a new one when it has none, and asks which when it has several.
+- **From the switcher popup** (`ShowSwitcher`), which lists every local daemon and saved host with their
+  workspaces; **New daemon…** there (or `NewDaemon`) starts a local daemon under a label you give and opens
+  a window on it.
+- **From a shell**, with [`contour switch`](control-api.md#switching-a-window), which also works from a
+  pane of the window being switched. The window asks first (see below).
+
+The `Open…` variants (`OpenWorkspace`, `OpenDaemon`) open a new window on the destination instead. If a
+window already shows the destination workspace, that window is focused and nothing else changes. The
+actions and their palette rows are listed in [Key Mapping](configuration/key-mapping.md#switching-daemons-and-workspaces);
+none is bound to a key by default.
+
+A switch that cannot finish leaves the window as it was and says why in a notice: the destination is not
+reachable, it has no such workspace, or it did not show the workspace within 10 seconds.
+
+A switch asked for through the control API (`contour switch`, or any program calling `workspace.switch`) is
+a program pointing your window somewhere, so the window asks before it switches: a prompt in the window
+names the destination in full, the daemon by label or host and the workspace, and offers Deny or Switch.
+Ticking **Don't ask again** keeps the answer, Deny or Switch, for every later switch between the same two
+daemons (from the daemon the window is on to the destination's), whatever the workspace, until Contour
+exits; it is never written down. A remembered Deny answers `refused` without asking. A destination named by
+URL (`ssh://…`) asks every time and offers nothing to remember, since allowing it runs ssh with your
+credentials. The switches you make yourself, by key, palette or the switcher popup, never ask. The GUI
+cannot tell a script outside any pane from you typing `contour switch`, so that asks too.
+
+!!! note
+
+    Windows of the in-process mode have no daemon behind them and cannot switch.
+
+### Shown, hidden and left workspaces
+
+The daemon keeps one of three states per workspace:
+
+| State | Meaning | Does a launch bring it back? |
+| --- | --- | --- |
+| `shown` | A window shows it right now. | No: that window already has it. |
+| `left` | No window shows it: its window was closed, or its machine went away. | Yes. |
+| `hidden` | A window was switched away from it, and none shows it since. | No. |
+
+Closing a window, or losing its connection, leaves the workspace `left`, so reopening Contour finds your
+sessions where you left them. Switching a window away from a workspace hides it instead: you moved on
+on purpose, so the next launch does not drag it back. A hidden workspace keeps running and keeps its state,
+also across a daemon restart and a [live upgrade](#live-upgrade); show it again by switching to it
+(`contour ls --json` reports each workspace's state as `visibility`, see the
+[control API](control-api.md#switching-a-window)).
+
 ## `contour client` options
 
 | Option | What it does |
 | --- | --- |
 | `--socket PATH`, `--label NAME` | Which daemon to attach to; same resolution as above, `daemon.socket` of the client's configuration included. |
-| `--workspace ID` | Show only the daemon workspace `ID` instead of opening a new one; fails, naming it, when the daemon has no such workspace. |
+| `--workspace WORKSPACE` | Show only that daemon workspace instead of what a launch brings back, named as every control verb names one: its id or an id suffix (as `contour ls` prints it), its label, or its 1-based position. Fails, saying why, when it names no workspace or several. It also works with `--host`. |
 | `--size-policy POLICY` | The policy a daemon this client auto-starts runs with; defaults to `daemon.size_policy`. |
 | `--tmux` | Attach to a **real tmux server** instead of a Contour daemon. See [tmux interoperability](#tmux-interoperability). |
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |
 | `--profile NAME` | Config profile the window renders remote sessions with. |
 | `--config FILE` | Configuration file to load. |
-| `--host NAME\|URL` | Attach to a remote host: a name saved under [`hosts:`](configuration/hosts.md), or an ad-hoc `ssh://[USER@]HOST[:PORT]` (a `tls://` host needs its token, so it must be saved). The remote daemon is started there when none runs; every one of its windows is shown, and the window title and the tab strip name the host. A host's `profile:` is used unless `--profile` names one. Cannot be combined with `--socket`, `--connect-tcp`, `--token`, `--token-file`, `--tls-ca` or `--tmux`. See [Remote hosts](remote-hosts.md). |
+| `--host NAME\|URL` | Attach to a remote host: a name saved under [`hosts:`](configuration/hosts.md), or an ad-hoc `ssh://[USER@]HOST[:PORT]` (a `tls://` host needs its token, so it must be saved). The remote daemon is started there when none runs; the window title and the tab strip name the host. A host's `profile:` is used unless `--profile` names one. Cannot be combined with `--socket`, `--connect-tcp`, `--token`, `--token-file`, `--tls-ca` or `--tmux`. See [Remote hosts](remote-hosts.md). |
 | `--connect-tcp HOST:PORT` | Connect to a remote daemon over TLS instead of a local socket. |
 | `--token TOKEN`, `--token-file FILE` | The preshared token to present, inline or read from a file. |
 | `--tls-ca FILE` | PEM trust anchor pinning the daemon's certificate. Omitted means encrypt-but-do-not-verify. |

@@ -48,6 +48,23 @@ Then attach in any of these ways:
 
   An ad-hoc `tls://` URL is refused: a TLS host needs its `token_file`, so save it first.
 
+Attaching to a host works like launching Contour against that daemon: the window brings back the
+workspaces nobody there shows, and a workspace someone switched away from stays hidden (see
+[shown, hidden and left workspaces](persistent-sessions.md#shown-hidden-and-left-workspaces)). Attaching from
+a second machine therefore gets the workspaces the first one left, not a mirror of what the first one shows.
+To look at one particular workspace, name it:
+
+```sh
+contour client --host home --workspace 018f3c2a   # only that workspace of home
+```
+
+Naming a workspace asks the daemon for its list, which is never sent over a link whose certificate is not
+pinned: `contour client --connect-tcp HOST:PORT --workspace W` needs `--tls-ca FILE` (or a saved host with
+`tls_ca`). Without `--workspace`, a first-use link attaches as before.
+
+A window can also move to another host, or back to a local daemon, without closing: see
+[Switching a window](persistent-sessions.md#switching-a-window).
+
 A window attached to a remote host says so in its chrome, so it is never mistaken for a local one: its
 title reads `home — <session title>`, and the tab strip starts with the host's name.
 
