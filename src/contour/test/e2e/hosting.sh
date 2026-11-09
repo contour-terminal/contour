@@ -102,7 +102,8 @@ done
 timeout 60 "$CONTOUR" client --socket "$OUT/run/sock" --workspace 99 > "$OUT/workspace.log" 2>&1
 status=$?
 [ "$status" -eq 1 ] || fail "--workspace: expected exit status 1, got $status" "$OUT/workspace.log"
-grep -q "^contour client: the daemon has no workspace 99$" "$OUT/workspace.log" \
+# 99 is read as the control verbs read it -- a position here -- and the daemon has no 99th workspace.
+grep -q "^contour client: --workspace '99': no workspace matches '99'$" "$OUT/workspace.log" \
     || fail "--workspace: the client did not name the missing workspace" "$OUT/workspace.log"
 
 # Nothing Qt reports at teardown follows any of the launches.

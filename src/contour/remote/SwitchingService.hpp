@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// What the application's switching actions and its switcher popup reach: switches, and the listings a
+/// switch decides on.
+
+#include <contour/remote/SwitchPlan.hpp>
+#include <contour/session/WindowSwitching.hpp>
+
+#include <expected>
+#include <functional>
+#include <string>
+#include <vector>
+
+#include <vtworkspace/Primitives.hpp>
+
+namespace contour::remote
+{
+
+/// Told once, on the GUI thread, a daemon's workspaces as a switch would decide on them, or why it could not
+/// list them.
+using DaemonWorkspacesListed = std::function<void(std::expected<std::vector<WorkspaceRow>, std::string>)>;
+
+/// Switches windows (session::WindowSwitching), and lists a daemon's workspaces for the switcher popup as a
+/// switch of the window would see them. WindowSwitcher is the one the application builds; a test injects a
+/// double.
+class SwitchingService: public session::WindowSwitching
+{
+  public:
+    /// Lists @p daemon's workspaces for the popup over @p window; never blocks.
+    /// @param window The window the popup is over.
+    /// @param daemon The daemon; its workspace spec is not read.
+    /// @param done Told the rows, in the daemon's order, or why there are none; on the GUI thread, unless the
+    ///        service is gone first.
+    virtual void listWorkspaces(vtworkspace::WorkspaceId window,
+                                session::SwitchTarget const& daemon,
+                                DaemonWorkspacesListed done) = 0;
+};
+
+} // namespace contour::remote

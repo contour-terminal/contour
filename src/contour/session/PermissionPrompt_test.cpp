@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/Actions.hpp>
 #include <contour/session/PastePreview.hpp>
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/PermissionQueue.hpp>
@@ -10,6 +11,8 @@
 #include <ranges>
 #include <string>
 #include <utility>
+
+#include <vthost/proto/Pdu.hpp>
 
 using contour::session::GuardedRole;
 using contour::session::GuardedRoleRows;
@@ -55,7 +58,7 @@ TEST_CASE("PermissionPrompt: the rows cover every guarded role, in enumerator or
 {
     for (auto const index: std::views::iota(std::size_t { 0 }, GuardedRoleRows.size()))
         CHECK(std::to_underlying(GuardedRoleRows[index].role) == index);
-    CHECK(GuardedRoleRows.back().role == GuardedRole::RerunCommand);
+    CHECK(GuardedRoleRows.back().role == GuardedRole::SwitchWindow);
 }
 
 TEST_CASE("PermissionPrompt: configuredPermission reads each role's own setting",
@@ -237,4 +240,73 @@ TEST_CASE("PermissionPrompt: an extension's consent is remembered, and what can 
     REQUIRE(prompt.lines.size() == 2);
     CHECK(prompt.lines[0].weight == PromptLineWeight::Regular);
     CHECK(prompt.lines[1].weight == PromptLineWeight::Strong);
+}
+
+TEST_CASE("PermissionPrompt: a switch's prompt names the full target",
+          "[contour][permission][prompt][switch]")
+{
+    using namespace contour::session;
+    using vthost::proto::SwitchDaemonKind;
+
+    struct Row
+    {
+        SwitchTarget target;
+        std::string_view line;
+        std::string_view remember;
+    };
+    for (auto const& row: {
+             Row { { .kind = SwitchDaemonKind::Label,
+                     .daemon = "admin",
+                     .workspace = contour::session::workspaceTargetOf("build") },
+                   "It asks to show the workspace “build” of the daemon “admin” in this window, in place of "
+                   "what it shows now.",
+                   "Don't ask again for switches from the daemon “default” to the daemon “admin” while "
+                   "Contour runs" },
+             Row {
+                 { .kind = SwitchDaemonKind::Host, .daemon = "home", .workspace = {} },
+                 "It asks to show a workspace, asking which when it has several, of the host “home” in this "
+                 "window, in place of what it shows now.",
+                 "Don't ask again for switches from the daemon “default” to the host “home” while Contour "
+                 "runs" },
+             Row {
+                 { .kind = SwitchDaemonKind::Same,
+                   .daemon = {},
+                   .workspace = contour::session::NewWorkspace {} },
+                 "It asks to show a new workspace of the daemon it is on in this window, in place of what it "
+                 "shows now.",
+                 "Don't ask again for switches within the daemon “default” while Contour runs" },
+         })
+    {
+        auto const prompt = switchWindowPrompt(row.target, "default", SwitchRemembering::Offered);
+        CHECK(faceOf(prompt)
+              == PromptFace {
+                  "Allow a program to switch this window?", "Deny", "Switch", PermissionDecision::Deny });
+        REQUIRE(prompt.lines.size() == 1);
+        CHECK(prompt.lines.front().text == row.line);
+        CHECK(prompt.rememberText == row.remember);
+        CHECK(prompt.rememberScope == PermissionMemory::Session);
+        CHECK(prompt.initialMemory == PermissionMemory::Once);
+    }
+
+    // An ad-hoc host says ssh runs, and offers nothing to remember.
+    auto const adHoc = switchWindowPrompt({ .kind = SwitchDaemonKind::Host,
+                                            .daemon = "ssh://me@box",
+                                            .workspace = contour::session::workspaceTargetOf("2") },
+                                          {},
+                                          SwitchRemembering::Withheld);
+    REQUIRE(adHoc.lines.size() == 2);
+    CHECK(adHoc.lines[0].text.contains("“ssh://me@box”"));
+    CHECK(adHoc.lines[0].text.contains("the workspace “2”"));
+    CHECK(adHoc.lines[1].weight == contour::session::PromptLineWeight::Strong);
+    CHECK(adHoc.rememberText.empty());
+
+    // What a program named is shown, never obeyed: no escape reaches the dialog.
+    auto const forged = switchWindowPrompt({ .kind = SwitchDaemonKind::Label,
+                                             .daemon = "a\x1b[2Jb",
+                                             .workspace = contour::session::workspaceTargetOf("w\nx") },
+                                           {},
+                                           SwitchRemembering::Offered);
+    CHECK_FALSE(forged.lines.front().text.contains('\x1b'));
+    CHECK_FALSE(forged.lines.front().text.contains('\n'));
+    CHECK(forged.rememberText.contains("from this daemon to"));
 }

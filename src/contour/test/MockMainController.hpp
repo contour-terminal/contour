@@ -122,6 +122,9 @@ class MockMainController: public MainWindowControllerMock
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
+    // Mirrors WindowController's: the window's own daemon's drift, which its badge shows; none unless the
+    // scene drifted.
+    Q_PROPERTY(QObject* daemonDrift READ daemonDriftObject CONSTANT)
     // Writable here so a test can let multimedia become ready after the window loaded, as it does in
     // production once the background probe finishes.
     Q_PROPERTY(bool multimediaReady READ multimediaReady NOTIFY multimediaReadyChanged)
@@ -219,8 +222,11 @@ class MockMainController: public MainWindowControllerMock
     /// @return Whether the scene's daemon drifted, so Main.qml is given the drift model.
     [[nodiscard]] bool hasDrift() const noexcept { return _scene.drift == snapshot::SnapshotDrift::Shown; }
 
-    /// @return The drift model Main.qml reads as `daemonDrift` when the scene drifted.
+    /// @return The drift model Main.qml's badge shows when the scene drifted.
     [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
+
+    /// @return The drift model when the scene drifted, as WindowController::daemonDrift; null otherwise.
+    [[nodiscard]] QObject* daemonDriftObject() noexcept { return hasDrift() ? &_drift : nullptr; }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return rowOf(_activeTabId); }
     /// @return The focused window::ChromeArea as its underlying value.
@@ -879,8 +885,6 @@ class MockMainController: public MainWindowControllerMock
     // as the production manager pins its controllers.
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    if (controller.hasDrift())
-        engine.rootContext()->setContextProperty("daemonDrift", &controller.daemonDrift());
 
     installChromeStyle(engine, chrome);
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml")));

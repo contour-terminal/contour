@@ -50,7 +50,9 @@ void ConnectPickerController::refresh()
     _failedTarget.clear();
     _daemon = cli::LocalDaemonState { .run = cli::DaemonRunState::Probing, .sessions = std::nullopt };
     rebuild(_services.state.load().value_or(config::GuiState {}).lastConnectTarget);
+    _labelled.clear();
     probeDaemon();
+    discoverDaemons();
     emit filterChanged();
     if (hadFailure)
         emit failureChanged();
@@ -76,11 +78,28 @@ void ConnectPickerController::probeDaemon()
     });
 }
 
+void ConnectPickerController::discoverDaemons()
+{
+    // Like probeDaemon(): the worker never touches this object, and its answer is posted back.
+    auto const discovery = ++_discovery;
+    _workers.emplace_back([this, discovery, finder = _services.discovery] {
+        auto found = finder->discover();
+        platform::postToObject(this, [this, discovery, found = std::move(found)]() mutable {
+            if (discovery != _discovery)
+                return;
+            _labelled = std::move(found);
+            rebuild(_current >= 0 ? std::optional { _rows[static_cast<std::size_t>(_current)].text }
+                                  : std::nullopt);
+        });
+    });
+}
+
 void ConnectPickerController::rebuild(std::optional<std::string> keep)
 {
     beginResetModel();
-    _rows = cli::connectRows({ .hosts = _services.config().hosts.value(), .daemon = _daemon },
-                             _filter.toStdString());
+    _rows = cli::connectRows(
+        { .hosts = _services.config().hosts.value(), .daemon = _daemon, .labelled = _labelled },
+        _filter.toStdString());
     endResetModel();
     auto const index = keep ? static_cast<int>(cli::initialSelection(_rows, *keep)) : 0;
     _current = _rows.empty() ? -1 : index;

@@ -40,8 +40,8 @@ if grep -qiE "QApplication|destroyed while|still in use|QObject::|ASSERT" "$OUT/
     exit 1
 fi
 
-# `--host` names the daemon, the way to it and what is mirrored, so an option naming another of these is
-# refused, not ignored. $1 is the option, $2 its value.
+# `--host` names the daemon and the way to it, so an option naming another of these is refused, not ignored.
+# $1 is the option, $2 its value.
 expectRefusedBesideHost() {
     status=0
     timeout 30 "$CONTOUR" client --host ssh://127.0.0.1:1 "--$1" "$2" >"$OUT/host-both.log" 2>&1 \
@@ -53,7 +53,16 @@ expectRefusedBesideHost() {
     fi
 }
 expectRefusedBesideHost connect-tcp 127.0.0.1:1
-expectRefusedBesideHost workspace 3
+
+# `--workspace` names what to show there, as it does locally: taken, and the attach is tried.
+status=0
+timeout 30 "$CONTOUR" client --host ssh://127.0.0.1:1 --workspace 3 >"$OUT/host-workspace.log" 2>&1 || status=$?
+if grep -q "pass either --host or --workspace" "$OUT/host-workspace.log" \
+    || ! grep -q "ssh could not reach ssh://127.0.0.1:1" "$OUT/host-workspace.log"; then
+    echo "error: --host beside --workspace did not attempt the attach (exit $status)" >&2
+    cat "$OUT/host-workspace.log" >&2
+    exit 1
+fi
 
 # An ssh host nothing answers for fails the same way, its reason naming the host once, from ssh's own words.
 if command -v ssh >/dev/null 2>&1; then

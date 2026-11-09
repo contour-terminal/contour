@@ -45,6 +45,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -421,6 +422,68 @@ input_mapping:
         return attach != nullptr && attach->name == "home";
     });
     CHECK(home);
+}
+
+TEST_CASE("Config: the daemon and workspace switching bindings parse their arguments, and drop a bad one",
+          "[config][switch]")
+{
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F1, action: SwitchToDaemon, label: admin }
+    - { mods: [Control, Shift], key: F2, action: OpenDaemon, host: studio }
+    - { mods: [Control, Shift], key: F3, action: SwitchToDaemon }
+    - { mods: [Control, Shift], key: F4, action: SwitchToDaemon, label: admin, host: studio }
+    - { mods: [Control, Shift], key: F5, action: CycleDaemon, direction: previous }
+    - { mods: [Control, Shift], key: F7, action: CycleWorkspace }
+    - { mods: [Control, Shift], key: F8, action: CycleWorkspace, direction: sideways }
+    - { mods: [Control, Shift], key: F9, action: SwitchToWorkspace, index: 2 }
+    - { mods: [Control, Shift], key: F10, action: SwitchToWorkspace }
+    - { mods: [Control, Shift], key: F11, action: SwitchToWorkspace, index: 0 }
+    - { mods: [Control, Shift], key: F12, action: ShowSwitcher }
+    - { mods: [Control, Alt], key: F1, action: OpenWorkspace, index: 3 }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const actionsBound = [&] {
+        auto result = std::vector<Action> {};
+        for (auto const& mapping: mappings)
+            result.push_back(mapping.binding.at(0));
+        return result;
+    }();
+    auto const find = [&]<typename T>(std::type_identity<T>) -> T const* {
+        for (auto const& action: actionsBound)
+            if (auto const* found = std::get_if<T>(&action))
+                return found;
+        return nullptr;
+    };
+    auto const* const switchTo = find(std::type_identity<SwitchToDaemon> {});
+    REQUIRE(switchTo != nullptr);
+    CHECK(switchTo->daemon == DaemonRef { DaemonRefKind::Label, "admin" });
+    auto const* const open = find(std::type_identity<OpenDaemon> {});
+    REQUIRE(open != nullptr);
+    CHECK(open->daemon == DaemonRef { DaemonRefKind::Host, "studio" });
+    auto const* const cycleDaemon = find(std::type_identity<CycleDaemon> {});
+    REQUIRE(cycleDaemon != nullptr);
+    CHECK(cycleDaemon->direction == CycleDirection::Previous);
+    auto const* const cycleWorkspace = find(std::type_identity<CycleWorkspace> {});
+    REQUIRE(cycleWorkspace != nullptr);
+    CHECK(cycleWorkspace->direction == CycleDirection::Next);
+    auto const* const workspace = find(std::type_identity<SwitchToWorkspace> {});
+    REQUIRE(workspace != nullptr);
+    CHECK(workspace->index == 2);
+    CHECK(find(std::type_identity<ShowSwitcher> {}) != nullptr);
+    auto const* const openWorkspace = find(std::type_identity<OpenWorkspace> {});
+    REQUIRE(openWorkspace != nullptr);
+    CHECK(openWorkspace->index == 3);
+    // Neither or both of label/host, an unknown direction, and a missing or zero index drop the binding.
+    CHECK(mappings.size() == 7);
 }
 
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")

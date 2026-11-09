@@ -49,6 +49,7 @@ namespace
 {
 
 using contour::test::createSessionTabs;
+using contour::test::endClosedSessions;
 using contour::test::nodeTitled;
 using contour::test::runMenuBarRow;
 using contour::test::ScopedController;
@@ -207,22 +208,17 @@ TEST_CASE("runTabAction by TabId resolves the row, and ignores a tab that has go
     // Closing a tab ends its sessions, so these tabs have real (mock-PTY) ones.
     TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     ScopedController const window { app.manager() };
-    auto ids = std::vector<vtworkspace::TabId> {};
-    for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
-    {
-        window->createNewTab();
-        auto const* tab = app.manager().model().workspace(window.id)->activeTab();
-        REQUIRE(tab != nullptr);
-        ids.push_back(tab->id());
-    }
+    auto const made = createSessionTabs(app.manager(), *window, 3);
+    auto const& ids = made.tabs;
     REQUIRE(window->count() == 3);
 
-    // A session ends on its own thread, so the tab goes a moment after the action returns.
+    // The action closes the tab's session; the tab goes once that session has ended.
     window->runTabAction(ids[2], actions::Action { actions::CloseTab {} });
-    QTRY_COMPARE_WITH_TIMEOUT(window->count(), 2, 5000);
+    endClosedSessions(app.manager(), made.sessions);
+    REQUIRE(window->count() == 2);
 
     window->runTabAction(ids[2], actions::Action { actions::CloseTab {} });
-    QTest::qWait(100);
+    endClosedSessions(app.manager(), made.sessions);
     CHECK(window->count() == 2);
 
     contour::test::closeAllTabs(*window);
@@ -248,10 +244,11 @@ TEST_CASE("CloseOtherTabs ends the other tabs' sessions and keeps the anchor's",
     REQUIRE(window->count() == 3);
 
     window->runTabAction(1, actions::Action { actions::CloseOtherTabs {} });
+    endClosedSessions(app.manager(), made.sessions);
 
-    QTRY_COMPARE_WITH_TIMEOUT(window->count(), 1, 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[0]) == nullptr, 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[2]) == nullptr, 5000);
+    CHECK(window->count() == 1);
+    CHECK(app.manager().sessionForId(made.sessions[0]) == nullptr);
+    CHECK(app.manager().sessionForId(made.sessions[2]) == nullptr);
     CHECK(app.manager().sessionForId(made.sessions[1]) != nullptr);
     CHECK(app.manager().model().findTab(made.tabs[1]) != nullptr);
 
@@ -270,10 +267,11 @@ TEST_CASE("CloseOtherTabs keeps the anchor when it is not the active tab",
     REQUIRE(app.manager().model().workspace(window.id)->activeTab()->id() == made.tabs[2]);
 
     window->runTabAction(0, actions::Action { actions::CloseOtherTabs {} });
+    endClosedSessions(app.manager(), made.sessions);
 
-    QTRY_COMPARE_WITH_TIMEOUT(window->count(), 1, 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[2]) == nullptr, 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[1]) == nullptr, 5000);
+    CHECK(window->count() == 1);
+    CHECK(app.manager().sessionForId(made.sessions[2]) == nullptr);
+    CHECK(app.manager().sessionForId(made.sessions[1]) == nullptr);
     CHECK(app.manager().sessionForId(made.sessions[0]) != nullptr);
     CHECK(app.manager().model().findTab(made.tabs[0]) != nullptr);
 

@@ -147,6 +147,14 @@ namespace
         ActionCategory { .name = "FocusNextArea", .category = CommandCategory::Window },
         ActionCategory { .name = "FocusPreviousArea", .category = CommandCategory::Window },
         ActionCategory { .name = "FocusToolbar", .category = CommandCategory::Window },
+        ActionCategory { .name = "SwitchToWorkspace", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "OpenWorkspace", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "CycleWorkspace", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "CycleDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "SwitchToDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "OpenDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "ShowSwitcher", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "NewDaemon", .category = CommandCategory::Daemons },
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.
@@ -294,6 +302,98 @@ std::vector<Command> HostCommandSource::commands() const
         result.push_back(std::move(command));
     }
 
+    return result;
+}
+
+namespace
+{
+    /// @param workspaces How many workspaces a daemon hosts, when known.
+    /// @return The row's footer: "2 workspaces", or the generic description when unknown.
+    [[nodiscard]] std::string workspaceCountHint(std::optional<std::size_t> workspaces, std::string fallback)
+    {
+        if (!workspaces)
+            return fallback;
+        return std::format("{} workspace{}", *workspaces, *workspaces == 1 ? "" : "s");
+    }
+
+    /// Builds the command for @p action with @p title and @p description in place of the derived ones.
+    [[nodiscard]] Command titledCommand(actions::Action action,
+                                        std::string title,
+                                        std::string description,
+                                        std::string argument = {})
+    {
+        auto command = makeCommand(std::move(action));
+        command.title = std::move(title);
+        if (!argument.empty())
+            command.argument = std::move(argument);
+        if (!description.empty())
+            command.description = std::move(description);
+        return command;
+    }
+} // namespace
+
+std::vector<Command> DaemonCommandSource::commands() const
+{
+    auto const state = _rows.daemonRows();
+    auto result = std::vector<Command> {};
+    if (state.switching == DaemonSwitching::Unavailable)
+        return result;
+
+    auto const isCurrent = [&](actions::DaemonRef const& daemon) {
+        return state.current && *state.current == daemon;
+    };
+    auto const addDaemon = [&](actions::DaemonRef const& daemon,
+                               std::string const& name,
+                               std::string const& hint) {
+        if (isCurrent(daemon))
+            return;
+        result.push_back(titledCommand(
+            actions::SwitchToDaemon { daemon }, std::format("Switch to daemon {}", name), hint, name));
+        result.push_back(titledCommand(
+            actions::OpenDaemon { daemon }, std::format("Open daemon {} in a new window", name), hint, name));
+    };
+
+    for (auto const& local: state.localDaemons)
+        addDaemon({ actions::DaemonRefKind::Label, local.label },
+                  local.label,
+                  workspaceCountHint(local.workspaces, "A daemon on this computer."));
+    for (auto const& host: state.hosts)
+        addDaemon(
+            { actions::DaemonRefKind::Host, host.name }, std::format("{} · host", host.name), host.hint);
+
+    for (auto const& workspace: state.workspaces)
+    {
+        if (workspace.role == WorkspaceRowRole::Current)
+            continue;
+        result.push_back(titledCommand(actions::SwitchToWorkspace { workspace.position },
+                                       std::format("Switch to workspace \"{}\"", workspace.name),
+                                       {},
+                                       workspace.name));
+        result.push_back(titledCommand(actions::OpenWorkspace { workspace.position },
+                                       std::format("Open workspace \"{}\" in a new window", workspace.name),
+                                       {},
+                                       workspace.name));
+    }
+
+    result.push_back(
+        titledCommand(actions::CycleDaemon { actions::CycleDirection::Next }, "Switch to next daemon", {}));
+    result.push_back(titledCommand(
+        actions::CycleDaemon { actions::CycleDirection::Previous }, "Switch to previous daemon", {}));
+    result.push_back(titledCommand(
+        actions::CycleWorkspace { actions::CycleDirection::Next }, "Switch to next workspace", {}));
+    result.push_back(titledCommand(
+        actions::CycleWorkspace { actions::CycleDirection::Previous }, "Switch to previous workspace", {}));
+    result.push_back(titledCommand(actions::ShowSwitcher {}, "Show daemon & workspace switcher…", {}));
+    result.push_back(titledCommand(actions::NewDaemon {}, "New daemon…", {}));
+    return result;
+}
+
+std::vector<Command> SwitchingGatedSource::commands() const
+{
+    auto result = _inner.commands();
+    if (_rows.switchingAvailability() == DaemonSwitching::Available)
+        return result;
+    std::erase_if(result, [](Command const& command) { return actions::isDaemonSwitching(command.action); });
     return result;
 }
 

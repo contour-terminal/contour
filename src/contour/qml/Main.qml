@@ -386,7 +386,7 @@ ThemedWindow
         }
 
         // Offers the newest defaults to a configuration that predates them (window::NewDefaultsNotice).
-        // Guarded with typeof, as DaemonDriftBadge is: the test harnesses set no such context property.
+        // Guarded with typeof: the test harnesses set no such context property.
         Banner {
             id: newDefaultsBanner
             objectName: "newDefaultsBanner" // so offscreen tests can findChild() it
@@ -500,6 +500,8 @@ ThemedWindow
         id: driftChip
         readonly property bool inBand: titleBar.presence !== "hidden"
         controller: appWindow.win
+        // This window's own daemon's drift; `!== undefined` for a lightweight mock `win` without it.
+        model: appWindow.win && appWindow.win.daemonDrift !== undefined ? appWindow.win.daemonDrift : null
         focusRingShown: activeFocus && appWindow.toolbarHasFocus
         parent: inBand ? titleBar.driftSlot : content
         x: inBand ? 0 : parent.width - width - chromeStyle.space.s4

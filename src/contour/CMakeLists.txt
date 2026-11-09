@@ -245,6 +245,8 @@ set(_header_files
     session/RestoreSummaryPolicy.hpp
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
+    session/SwitchPermission.hpp
+    session/WindowSwitching.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
     window/DragEndPolicy.hpp
@@ -313,6 +315,8 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsPreview.hpp
         window/SettingsBackdrop.hpp
         window/ConnectPickerController.hpp
+        window/SwitcherController.hpp
+        window/SwitcherRows.hpp
         window/SettingsWindowHost.hpp
         session/PreviewTranscript.hpp
         session/PastePreview.hpp
@@ -362,7 +366,13 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
+        remote/SwitchGrants.hpp
+        remote/SwitchGuard.hpp
+        remote/SwitchHost.hpp
+        remote/SwitchPlan.hpp
+        remote/SwitchingService.hpp
         remote/TmuxController.hpp
+        remote/WindowSwitcher.hpp
     )
     list(APPEND _core_source_files
         window/AppMenuBar.cpp
@@ -379,6 +389,8 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsFields.cpp
         window/SettingsPreview.cpp
         window/ConnectPickerController.cpp
+        window/SwitcherController.cpp
+        window/SwitcherRows.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
@@ -409,10 +421,15 @@ if(CONTOUR_FRONTEND_GUI)
         session/FontControl.cpp
         session/SpawnCommand.cpp
         remote/DaemonLink.cpp
+        remote/DaemonSwitchDirectory.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
+        remote/SwitchGuard.cpp
+        remote/SwitchPlan.cpp
         remote/TmuxController.cpp
+        remote/WindowSwitcher.cpp
+        remote/WorkspaceLister.cpp
     )
     if(WIN32)
         list(APPEND _core_source_files display/DxgiGpuInventory.cpp)
@@ -504,6 +521,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsWindow.qml
         qml/ConnectPicker.qml
         qml/ConnectPickerWindow.qml
+        qml/Switcher.qml
         qml/ConfirmDialog.qml
         qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
@@ -913,6 +931,9 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             remote/RemoteController_test.cpp
+            remote/DaemonSwitchDirectory_test.cpp
+            remote/SwitchGuard_test.cpp
+            remote/SwitchPlan_test.cpp
             platform/AppearanceSources_test.cpp
             platform/WindowsAppearanceSources_test.cpp
             platform/WindowsSettings_test.cpp
@@ -935,11 +956,15 @@ if(CONTOUR_FRONTEND_GUI)
             config/GpuSelector_test.cpp
             test/Accessibility_qml_test.cpp
             test/ConnectPickerQml_test.cpp
+            test/SwitcherQml_test.cpp
+            window/SwitcherRows_test.cpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
+            session/WindowSwitching_test.cpp
             session/ShellIntegrationCard_test.cpp
+            session/WindowSwitchingActions_test.cpp
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
@@ -985,6 +1010,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/ContextMenuModel_test.cpp
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
+            platform/OffThreadJobs_test.cpp
             platform/QtInvoke_test.cpp
             platform/ExecutionPolicySource_test.cpp
             platform/Clipboard_test.cpp
@@ -1106,6 +1132,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/SettingsPreviewRendering_test.cpp
             remote/DaemonLink_test.cpp
             remote/NativeController_test.cpp
+            remote/WindowSwitcher_test.cpp
             session/TerminalSessionBlocks_test.cpp
             session/TerminalSessionManager_test.cpp
             session/TerminalSessionPane_test.cpp
@@ -1492,6 +1519,7 @@ if(CONTOUR_TESTING)
         config/Actions_test.cpp
         config/BindingCollisions_test.cpp
         config/ChordParity_test.cpp
+        session/DaemonCycle_test.cpp
         config/ChromeTokenGroups_test.cpp
         config/ControlsStyle_test.cpp
         config/ShellKind_test.cpp

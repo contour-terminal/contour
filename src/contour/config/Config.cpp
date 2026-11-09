@@ -5122,6 +5122,57 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             return std::nullopt;
         }
 
+        if (holds_alternative<actions::SwitchToWorkspace>(action)
+            || holds_alternative<actions::OpenWorkspace>(action))
+        {
+            // Like SwitchToTab: "which workspace?" has no default, and positions count from 1.
+            if (auto index = node["index"]; index && index.IsScalar())
+                if (auto const value = index.as<uint32_t>(); value >= 1)
+                {
+                    if (holds_alternative<actions::SwitchToWorkspace>(action))
+                        return actions::SwitchToWorkspace { value };
+                    return actions::OpenWorkspace { value };
+                }
+            return std::nullopt;
+        }
+
+        if (holds_alternative<actions::CycleWorkspace>(action)
+            || holds_alternative<actions::CycleDaemon>(action))
+        {
+            // `direction` is optional (next); a value that is neither next nor previous drops the binding.
+            auto direction = actions::CycleDirection::Next;
+            if (auto node2 = node["direction"]; node2 && node2.IsScalar())
+            {
+                auto const token = core::toLower(node2.as<std::string>());
+                if (token == "previous")
+                    direction = actions::CycleDirection::Previous;
+                else if (token != "next")
+                    return std::nullopt;
+            }
+            if (holds_alternative<actions::CycleWorkspace>(action))
+                return actions::CycleWorkspace { direction };
+            return actions::CycleDaemon { direction };
+        }
+
+        if (holds_alternative<actions::SwitchToDaemon>(action)
+            || holds_alternative<actions::OpenDaemon>(action))
+        {
+            // Exactly one of `label:` (a local daemon) and `host:` (a saved host); neither or both has no
+            // meaning, so the binding is dropped. The two keys become a DaemonRef here and nowhere else.
+            auto const label = node["label"];
+            auto const host = node["host"];
+            auto const hasLabel = label && label.IsScalar() && !label.as<std::string>().empty();
+            auto const hasHost = host && host.IsScalar() && !host.as<std::string>().empty();
+            if (hasLabel == hasHost)
+                return std::nullopt;
+            auto daemon = hasLabel
+                              ? actions::DaemonRef { actions::DaemonRefKind::Label, label.as<std::string>() }
+                              : actions::DaemonRef { actions::DaemonRefKind::Host, host.as<std::string>() };
+            if (holds_alternative<actions::SwitchToDaemon>(action))
+                return actions::SwitchToDaemon { std::move(daemon) };
+            return actions::OpenDaemon { std::move(daemon) };
+        }
+
         if (holds_alternative<actions::SaveLayout>(action))
         {
             // The name is OPTIONAL, unlike LaunchLayout above: with one, SaveLayout saves straight to it;

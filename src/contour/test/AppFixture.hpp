@@ -87,7 +87,10 @@ class TestApp
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
              shellIntegrationServices(std::move(shellRcEditor), shellHost),
-             scriptedDragEndProbe())
+             scriptedDragEndProbe(),
+             nullptr,
+             recordingWindowSwitching(),
+             fakeSwitchDirectory())
     {
         parseTerminalVerb();
     }
@@ -122,7 +125,10 @@ class TestApp
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
              shellIntegrationServices(),
-             scriptedDragEndProbe())
+             scriptedDragEndProbe(),
+             nullptr,
+             recordingWindowSwitching(),
+             fakeSwitchDirectory())
     {
         parseTerminalVerb();
     }
@@ -174,7 +180,10 @@ class TestApp
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
              shellIntegrationServices(),
-             scriptedDragEndProbe())
+             scriptedDragEndProbe(),
+             nullptr,
+             recordingWindowSwitching(),
+             fakeSwitchDirectory())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -194,6 +203,10 @@ class TestApp
     {
         return _app.sessionsManager();
     }
+    /// What the app's switching actions asked for, and how a test answers: see RecordingWindowSwitching.
+    [[nodiscard]] RecordingWindowSwitching& switching() noexcept { return *_switching; }
+    /// What the app's switching actions and palette rows list: a test fills it.
+    [[nodiscard]] FakeSwitchDirectory& switchDirectory() noexcept { return *_directory; }
     /// The drag-end probe wired into this app: a test says through it where a drag no window took ended.
     [[nodiscard]] ScriptedDragEndProbe& dragEndProbe() noexcept { return *_dragEndProbe; }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
@@ -351,6 +364,23 @@ class TestApp
                                                    .host = shellHost };
     }
 
+    /// The switching the app dispatches the daemon and workspace actions to. Runs in the member-initializer
+    /// list, so the raw pointer is set before _app is constructed.
+    [[nodiscard]] std::unique_ptr<contour::remote::SwitchingService> recordingWindowSwitching()
+    {
+        auto switching = std::make_unique<RecordingWindowSwitching>();
+        _switching = switching.get();
+        return switching;
+    }
+
+    /// The directory the app lists local daemons and workspaces from; see recordingWindowSwitching().
+    [[nodiscard]] std::unique_ptr<contour::session::SwitchDirectory> fakeSwitchDirectory()
+    {
+        auto directory = std::make_unique<FakeSwitchDirectory>();
+        _directory = directory.get();
+        return directory;
+    }
+
     /// The probe the app decides drag ends with. Runs in the member-initializer list, so the raw pointer is
     /// set before _app is constructed.
     [[nodiscard]] std::unique_ptr<contour::window::DragEndProbe> scriptedDragEndProbe()
@@ -381,6 +411,8 @@ class TestApp
     RecordingExternalLauncher* _launcher = nullptr;
     RecordingShellRcEditor* _shellRcEditor = nullptr;
     ScriptedDragEndProbe* _dragEndProbe = nullptr;
+    RecordingWindowSwitching* _switching = nullptr;
+    FakeSwitchDirectory* _directory = nullptr;
     std::shared_ptr<InMemoryGuiStateStore> _guiState = std::make_shared<InMemoryGuiStateStore>();
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,

@@ -186,7 +186,6 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
     // The drift chip names itself by the model's line, so it is given one that drifted.
     auto drift = contour::window::DaemonDriftModel {};
     drift.show(vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
-    engine.rootContext()->setContextProperty(QStringLiteral("daemonDrift"), &drift);
 
     struct Case
     {
@@ -261,7 +260,7 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                .name = QStringLiteral("New tab"),
                .role = QAccessible::Button },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml"),
-               .initialProperties = {},
+               .initialProperties = { { QStringLiteral("model"), QVariant::fromValue<QObject*>(&drift) } },
                .swatches = 0,
                .name = QStringLiteral("daemon 0.8.1 is older than this client"),
                .role = QAccessible::Button },

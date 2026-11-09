@@ -5,7 +5,10 @@
 /// What a remote::DaemonLink needs from the application; light, so that the composition root can implement
 /// it without including the link.
 
+#include <chrono>
 #include <cstdint>
+#include <functional>
+#include <string>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -15,6 +18,8 @@ namespace contour::remote
 {
 
 class DaemonLink;
+struct DaemonLinkConfig;
+class SwitchGrants;
 
 namespace detail::tags
 {
@@ -25,6 +30,30 @@ namespace detail::tags
 
 /// Names a link among the application's.
 using DaemonLinkId = boxed::boxed<uint32_t, detail::tags::DaemonLinkId>;
+
+/// A daemon workspace a link hands to a link of its own: one OS window, one link (@see
+/// DaemonLinkConfig::handOverFrom).
+struct HandOver
+{
+    DaemonLinkId from; ///< The link that followed the workspace, and lets it go once the new one shows it.
+    uint64_t workspace = 0; ///< The daemon workspace handed over.
+};
+
+/// Runs @p fire once, on the GUI thread, @p delay from now: the time source of a switch's deadline and of a
+/// switch question's expiry, injected so that a test fires it by hand. Nothing cancels a fire: one for a
+/// switch that ended meanwhile finds nothing to give up.
+using SwitchTimer = std::function<void(std::chrono::milliseconds delay, std::function<void()> fire)>;
+
+/// The production switch timer: a single-shot QTimer on the GUI thread.
+/// @return The timer.
+[[nodiscard]] SwitchTimer qtSwitchTimer();
+
+/// How a hand-over ended.
+enum class HandOverOutcome : uint8_t
+{
+    Settled = 0, ///< The new link's connection follows the workspace and has its layout: the old one lets go.
+    Failed,      ///< The new link did not connect, or the daemon has no such workspace: the old one keeps it.
+};
 
 /// What a link needs from the application: OS windows opened, and the local daemon restarted or upgraded by
 /// the process resources the application owns. What the link does with its windows once they are open it
@@ -62,6 +91,28 @@ class IDaemonLinkHost
     /// ptys of the closed windows' sessions unregister from it as they go (DaemonLink::isFinished). Told
     /// again as each of those panes goes.
     virtual void linkEnded() = 0;
+
+    /// Starts a link of its own for a further daemon workspace a link was pushed -- a launch brings back
+    /// several, a new window asks for one -- for each OS window has a connection of its own. The new link
+    /// opens its window once its connection shows the workspace, and reports to handOverSettled().
+    /// @param config What the new link is built with: its intent names the workspace, and its
+    ///        DaemonLinkConfig::handOverFrom the link it takes it from.
+    virtual void startHandOverLink(DaemonLinkConfig config) = 0;
+
+    /// A link started by startHandOverLink() reports how the hand-over went, for the application to tell the
+    /// link it took the workspace from (DaemonLink::completeHandOver), if that one still exists.
+    /// @param handOver What was handed over, and by which link.
+    /// @param outcome How it went.
+    /// @param reason Why it failed; empty when it settled.
+    virtual void handOverSettled(HandOver handOver, HandOverOutcome outcome, std::string const& reason) = 0;
+
+    /// @return The answers that stand for the switches programs ask for, one memory for every link of the
+    ///         process and for its lifetime (spec §Safety): a link asks it before prompting.
+    [[nodiscard]] virtual SwitchGrants& switchGrants() = 0;
+
+    /// @return What times out the questions a link asks about the switches programs ask for
+    ///         (SwitchQuestionExpiry), one for every link of the process.
+    [[nodiscard]] virtual SwitchTimer const& switchTimer() = 0;
 };
 
 } // namespace contour::remote

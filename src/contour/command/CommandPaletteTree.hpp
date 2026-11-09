@@ -32,6 +32,7 @@ inline constexpr auto PaletteGroups = std::array {
     PaletteGroupRow { .category = CommandCategory::Blocks, .title = "Blocks" },
     PaletteGroupRow { .category = CommandCategory::Profiles, .title = "Profiles" },
     PaletteGroupRow { .category = CommandCategory::Hosts, .title = "Hosts" },
+    PaletteGroupRow { .category = CommandCategory::Daemons, .title = "Daemons" },
     PaletteGroupRow { .category = CommandCategory::Edit, .title = "Edit" },
     PaletteGroupRow { .category = CommandCategory::View, .title = "View" },
     PaletteGroupRow { .category = CommandCategory::Shell, .title = "Shell" },

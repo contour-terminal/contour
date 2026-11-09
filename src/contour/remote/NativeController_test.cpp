@@ -1701,6 +1701,10 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
         ac->stop();
     }
 
+    // A launch is given a workspace of its own while a client still shows the tab: wait for the daemon to
+    // have let the first one go.
+    REQUIRE(waitUntil([&] { return daemon.onDaemon([&] { return daemon.host->connectedClients() == 0; }); }));
+
     // A brand-new client, with nothing claimed: applyRemoteLayout realizes the WHOLE tab from the
     // daemon's layout — the path that used to hand back an even split.
     auto timeline = TestTimeline {};
@@ -1736,8 +1740,16 @@ struct AttachedGui
     contour::test::TestApp app;
     contour::test::ScopedController window;
 
-    explicit AttachedGui(DaemonFixture const& daemon):
-        AttachedGui { makeNativeController(daemon.endpoint(), timeline) }
+    /// @param daemon The daemon, whose own workspace the GUI shows by name: two GUIs on one daemon share it,
+    ///        where a second plain launch would be given a workspace of its own.
+    explicit AttachedGui(DaemonFixture& daemon):
+        AttachedGui { makeNativeController(
+            daemon.endpoint(),
+            timeline,
+            ControllerOptions {
+                .intent = vthost::proto::AttachIntent {
+                    .kind = vthost::proto::AttachIntentKind::Workspaces,
+                    .workspaces = { daemon.onDaemon([&] { return daemon.host->workspaceId().value; }) } } }) }
     {
     }
 
@@ -4449,6 +4461,98 @@ TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][contro
     controller.stop();
     pane.terminal.reset();
 }
+// Review focus 2 (PR 3): what a reconnect or a live upgrade resumes is what the window shows now -- not
+// the workspace of the launch, which a switch released. A reconnect also states it as Resume, so a daemon
+// that still counts the lost connection's follow does not give the window a workspace of its own instead.
+TEST_CASE(
+    "after a follow and a release, a reconnect and a live upgrade come back on what the window shows now",
+    "[attach][controller][reconnect][upgrade][workspace-follow]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::client::ConnectionState;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    std::ignore = daemon.seedSession("first");
+    auto const [first, second] = daemon.onDaemon([&daemon] {
+        return std::pair { daemon.host->workspaceId().value, daemon.host->createWorkspace()->id().value };
+    });
+    auto const visibility = [&daemon](uint64_t workspace) {
+        return daemon.onDaemon(
+            [&daemon, workspace] { return daemon.host->visibility(vtworkspace::WorkspaceId { workspace }); });
+    };
+    auto const showing = [&daemon](uint64_t workspace) {
+        return daemon.host->clientsShowing(vtworkspace::WorkspaceId { workspace }).size();
+    };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(),
+        timeline,
+        ControllerOptions {
+            .intent = { .kind = vthost::proto::AttachIntentKind::Workspaces, .workspaces = { first } } });
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.workspaceIds() == std::vector { first }; }));
+
+    REQUIRE(controller.follow(second).has_value());
+    REQUIRE(waitUntil([&] { return controller.settledLayout(second) != nullptr; }));
+    REQUIRE(controller.release(first, vthost::proto::WorkspaceRelease::SwitchedAway).has_value());
+    CHECK(controller.workspaceIds() == std::vector { second });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return showing(first) == 0 && showing(second) == 1; }));
+    REQUIRE(visibility(first) == WorkspaceVisibility::Hidden);
+
+    SECTION("a lost connection")
+    {
+        daemon.dropConnections();
+        REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    }
+    SECTION("a live upgrade")
+    {
+        daemon.onDaemon([&control] {
+            control.announceUpgrade("9.9.10");
+            control.closeObservers();
+            return 0;
+        });
+        REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+        CHECK(log.count(ConnectionState::Upgrading) == 1);
+    }
+
+    // Back on the workspace shown now; the one switched away from stays hidden, and nothing new was made.
+    CHECK(daemon.waitUntilOnDaemon([&] { return showing(first) == 0 && showing(second) == 1; }));
+    CHECK(visibility(first) == WorkspaceVisibility::Hidden);
+    CHECK(daemon.onDaemon([&daemon] { return daemon.host->model().workspaceCount(); }) == 2);
+    CHECK(waitUntil([&] { return controller.workspaceIds() == std::vector { second }; }));
+    CHECK(log.workspacesLost().empty());
+    controller.stop();
+}
+
+TEST_CASE("a daemon without workspace-follow refuses follow and release with a reason",
+          "[attach][controller][workspace-follow][compat]")
+{
+    auto services = vthost::NativeSessionServices {};
+    std::erase(services.handshake.capabilities.idents,
+               std::to_underlying(vthost::proto::Capability::WorkspaceFollow));
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    std::ignore = daemon.seedSession("first");
+    auto timeline = TestTimeline {};
+    auto const controller = makeNativeController(daemon.endpoint(), timeline);
+    // Not yet connected: nothing to ask.
+    CHECK_FALSE(controller->follow(1).has_value());
+    requireConnected(*controller);
+
+    auto const followed = controller->follow(1);
+    auto const released = controller->release(1, vthost::proto::WorkspaceRelease::Closed);
+    REQUIRE_FALSE(followed.has_value());
+    REQUIRE_FALSE(released.has_value());
+    CHECK(followed.error().contains("workspace-follow"));
+    CHECK(released.error().contains("workspace-follow"));
+    controller->stop();
+}
 
 TEST_CASE("a remote controller's windows say the daemon is upgrading, and reassess its drift after",
           "[attach][controller][reconnect][upgrade]")
@@ -5046,11 +5150,12 @@ TEST_CASE("workspaces the daemon no longer has are reported lost", "[attach][con
     pane.terminal.reset();
 }
 
-TEST_CASE("a client following every workspace still gets new workspaces after a reconnect",
+TEST_CASE("a launching client still gets a new unclaimed workspace after a reconnect",
           "[attach][controller][reconnect]")
 {
     // A reconnect must not narrow the view: AllWorkspaces comes back as AllWorkspaces, not as Resume of the
-    // workspaces it had, so a workspace another client creates afterwards still reaches it.
+    // workspaces it had, so it is the primary viewer again and a workspace no client claims, created
+    // afterwards, still reaches it.
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
@@ -5066,10 +5171,9 @@ TEST_CASE("a client following every workspace still gets new workspaces after a 
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
     REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 1; }));
 
-    // Claimed by another client: a client following only listed windows would never see it.
-    auto const otherClient = vthost::SessionStreamEvents {};
-    auto const created =
-        daemon.onDaemon([&] { return daemon.host->createWorkspace({}, &otherClient)->id().value; });
+    // Claimed by no client, as a control connection's is: a client following only listed windows would never
+    // see it.
+    auto const created = daemon.onDaemon([&] { return daemon.host->createWorkspace()->id().value; });
     CHECK(waitUntil([&] { return std::ranges::contains(controller.workspaceIds(), created); }));
     CHECK(log.workspacesLost().empty());
 

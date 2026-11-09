@@ -42,6 +42,8 @@ enum class NoticeKind : uint8_t
     ShellIntegrationAdded,  ///< Install Shell Integration added its line to the shell's startup file.
     ShellIntegrationFailed, ///< It could not.
     HotkeyUnavailable,      ///< The quick terminal's hotkey could not be registered.
+    WindowLinkFailed,       ///< A daemon workspace's window could not get a connection of its own.
+    SwitchFailed,           ///< A window switch did not get there; the window shows what it showed.
 };
 
 /// Where a notice is shown.
@@ -131,6 +133,18 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::WindowLinkFailed,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
+    NoticeRow { .kind = NoticeKind::SwitchFailed,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -141,7 +155,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::HotkeyUnavailable) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::SwitchFailed) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.

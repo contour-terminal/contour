@@ -46,6 +46,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -114,6 +115,25 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Called on the GUI thread.
     using SessionSettingsSource = std::function<std::expected<vtbackend::Settings, std::string>()>;
 
+    /// What a reconnect follows when none of the workspaces it resumes survived.
+    enum class ResumeFallback : uint8_t
+    {
+        Launch = 0, ///< What a launch follows (proto::AttachIntentKind::Resume): the launch's link.
+        /// Nothing: its window's workspace is gone, and the window closes
+        /// (proto::AttachIntentKind::Workspaces). A link that took its workspace over from another, which
+        /// must not take what other windows resume.
+        Nothing,
+    };
+
+    /// Whether this client answers the daemon's requests to switch a window (proto::SwitchRequest).
+    enum class SwitchRequests : uint8_t
+    {
+        /// Capability::WorkspaceSwitch is not offered, as by a client that predates it: the daemon fails
+        /// every `workspace.switch` for this client's windows itself.
+        Declined = 0,
+        Answered, ///< Offered; each request is handed to the GUI (switchRequested()).
+    };
+
     /// Everything a controller is built with.
     struct Config
     {
@@ -153,6 +173,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         core::platform::ISystemPowerMonitor* powerMonitor = nullptr;
         /// How long each reconnect waits after a loss; a seam for tests, the production schedule by default.
         vthost::client::BackoffSchedule backoff {};
+        /// What a reconnect follows when none of the workspaces it resumes survived.
+        ResumeFallback resumeFallback = ResumeFallback::Launch;
+        /// Whether the daemon may ask this client to switch its windows.
+        SwitchRequests switchRequests = SwitchRequests::Answered;
     };
 
     /// @param config What the controller is built with.
@@ -256,6 +280,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param answer The user's answer.
     void answerPermission(std::string hostId, std::string digest, vthost::GrantState answer);
 
+    /// Takes the switch requests switchRequested() announced, oldest first. GUI thread.
+    /// @return The requests, as the daemon sent them.
+    [[nodiscard]] std::vector<vthost::proto::SwitchRequest> takeSwitchRequests();
+
+    /// Answers a request takeSwitchRequests() handed out, on the connection up now: one that came after the
+    /// request's own was lost is not the one the daemon waits on, and ignores it. A no-op once detached.
+    /// @param reply The request's id, what came of it, and why.
+    void replySwitch(vthost::proto::SwitchReply reply);
+
     /// @return The daemon workspace ids currently known, ascending. The daemon starts
     ///         with one workspace and grows via NewWorkspace; the GUI maps one OS window to
     ///         each (B4). A thread-safe snapshot.
@@ -305,11 +338,41 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// (never the client area), even though no display geometry changed. No-op otherwise.
     void reassertGeometryAfterReconcile();
 
+    /// GUI thread. Has every later reconnect follow what a launch would when none of the workspaces it
+    /// resumes survived (ResumeFallback::Launch), as the link that did so for this daemon ended and this one
+    /// takes its place (@see passOnLaunchResume). Configured at construction otherwise; changed live because
+    /// which of a daemon's links is its launch's outlives the link that was.
+    void resumeAsLaunch();
+
+    /// @return What a reconnect follows when none of the workspaces it resumes survived.
+    [[nodiscard]] ResumeFallback resumeFallback() const;
+
     /// GUI thread. Resolves the session settings anew -- after a configuration reload -- and states them:
     /// to the daemon at once, for the sessions this connection creates from now on, and in the hello of
     /// every later connection. Keeps the settings last stated when they cannot be resolved; no-op without
     /// a session settings source.
     void restateSessionSettings();
+
+    /// GUI thread. Has the connection show @p workspace as well (proto::FollowWorkspace), and every later
+    /// connection resume it: its layout arrives as any other, through layoutChanged(). While the connection
+    /// is sought again the PDU is not sent, and the reconnect resumes the workspace instead.
+    /// @param workspace The daemon workspace; 0 asks the daemon for a new one, which this connection claims.
+    /// @return Nothing once asked; why not when the daemon does not share Capability::WorkspaceFollow, or no
+    ///         connection was accepted yet.
+    [[nodiscard]] std::expected<void, std::string> follow(uint64_t workspace);
+
+    /// GUI thread. Has the connection stop showing @p workspace (proto::ReleaseWorkspace): its layout is
+    /// forgotten at once, one still on its way is dropped, and no later connection -- a reconnect, the return
+    /// from a live upgrade -- resumes it. While the connection is sought again the PDU is not sent; the
+    /// daemon then learns the workspace went with the connection that showed it, which leaves it left, never
+    /// hidden.
+    /// @param workspace The daemon workspace.
+    /// @param reason Why: Closed for a window closed, SwitchedAway for one that moved on.
+    /// @return Nothing once released; why not when the daemon does not share Capability::WorkspaceFollow, or
+    /// no
+    ///         connection was accepted yet.
+    [[nodiscard]] std::expected<void, std::string> release(uint64_t workspace,
+                                                           vthost::proto::WorkspaceRelease reason);
 
     /// @return Whether any pty this controller made is still alive, bound to a remote session or detached
     ///         from one: the controller must outlive it, as the pty calls back into it until its destruction
@@ -561,6 +624,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
 
+    /// The daemon asks this client to switch the window showing one of its workspaces (fires on the reactor
+    /// thread; connect queued). The GUI takes the requests with takeSwitchRequests().
+    void switchRequested();
+
     /// The daemon refused a tab merge this client asked for, and changed nothing (fires on the reactor
     /// thread; connect queued). The GUI tells the user.
     void tabMergeRefused();
@@ -717,6 +784,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
 
+    /// Reactor-side: keeps a daemon's switch request for the GUI, and tells it.
+    void onSwitchRequest(vthost::proto::SwitchRequest const& request);
+
     /// Reactor-side: builds the mirror of a binding whose terminal arrived, judging once whether the
     /// daemon runs on the terminal's machine, and feeds it its full replay if the session's screen is
     /// already known.
@@ -788,7 +858,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in RemoteController; the registry below is attach-specific.
     std::shared_ptr<vthost::ITransportFactory> _transport;
-    vthost::proto::AttachIntent _intent;     ///< What the first connection follows.
+    vthost::proto::AttachIntent _intent; ///< What the first connection follows.
+    /// @see Config::resumeFallback. Under _mutex: read on the reactor as a reconnect is made, and changed by
+    /// resumeAsLaunch() on the GUI thread.
+    ResumeFallback _resumeFallback;
+    SwitchRequests _switchRequests;          ///< @see Config::switchRequests
     std::string _profileName;                ///< Stated in every ClientHello.
     std::filesystem::path _workingDirectory; ///< Stated in the first connection's ClientHello only.
     /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
@@ -869,6 +943,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<uint64_t> _unsentCloses;
     /// The daemon extensions' questions the GUI has not taken yet, oldest first. Guarded by _mutex.
     std::vector<vthost::proto::PermissionRequest> _permissionRequests;
+    /// The daemon's switch requests the GUI has not taken yet, oldest first. Guarded by _mutex.
+    std::vector<vthost::proto::SwitchRequest> _switchRequestQueue;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:
@@ -940,6 +1016,20 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The workspaces the last reconnect lost, announced with the first layout that came instead. Under
     /// _mutex.
     std::vector<uint64_t> _lostWorkspaces;
+    /// What follow() and release() changed since the first connection: every later one resumes the
+    /// workspaces followed since and not the ones released (makeClient()), and a layout of a released one
+    /// is dropped. Forgotten for a restarted daemon, whose ids name other workspaces. Under _mutex.
+    struct FollowChanges
+    {
+        std::set<uint64_t> followed; ///< Asked to be shown since; possibly not pushed yet.
+        /// Asked to be shown no more since, each with why: a release a reconnect raced is sent again on it.
+        std::map<uint64_t, vthost::proto::WorkspaceRelease> released;
+    };
+    FollowChanges _followChanges;
+    /// ResumeFallback::Nothing: the workspaces a reconnect resumed whose first layout is still to come. One
+    /// that comes with no tab is lost, as Resume would have judged it: its session ended meanwhile. Under
+    /// _mutex.
+    std::set<uint64_t> _resumedAwaitingLayout;
     uint64_t _nextBindingSerial = 1; ///< @see Binding::serial. Under _mutex.
     /// The ptys createPty() bound that are not destroyed yet, still bound or detached: each captures this
     /// controller in its sinks and its destructor's callback, so the controller must outlive every one (@see
