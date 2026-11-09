@@ -211,7 +211,9 @@ window somewhere else without closing it, and its panes are swapped in place:
 - **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`.
 - **To another daemon**: a local one by its label (`contour daemon --label`), or a saved
   [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
-  daemon's only workspace, on a new one when it has none, and asks which when it has several.
+  daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace
+  that holds no tab -- a daemon no window has attached to yet keeps one -- counts as none: there is nothing
+  in it to show.
 - **From the switcher popup** (`ShowSwitcher`), which lists every local daemon and saved host with their
   workspaces; **New daemon…** there (or `NewDaemon`) starts a local daemon under a label you give and opens
   a window on it.
