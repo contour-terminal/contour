@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Environment.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <charconv>
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/CommandRunner.hpp>
@@ -68,6 +72,32 @@ TEST_CASE("a native runner given an environment runs under it, and looks its pro
 }
 
     #ifdef __linux__
+namespace
+{
+/// glibc's internal signals 32 and 33, as bits of /proc's signal masks. Under valgrind a program
+/// posix_spawn() starts finds them ignored with no Contour code in the way: a plain C posix_spawn() of the
+/// same grep shows "SigIgn: 0000000180000000" there, and nothing natively.
+constexpr auto GlibcInternalSignals = std::uint64_t { 0x1'8000'0000 };
+
+/// @return Whether this process runs under valgrind, which preloads its core into the program it runs.
+[[nodiscard]] bool underValgrind()
+{
+    auto const preload = core::defaultEnvironment().get("LD_PRELOAD");
+    return preload && preload->contains("vgpreload");
+}
+
+/// @return The mask on the line of /proc/PID/status that @p field names, as /proc prints it in hex.
+[[nodiscard]] std::uint64_t maskOf(std::string_view status, std::string_view field)
+{
+    auto const at = status.find(field);
+    REQUIRE(at != std::string_view::npos);
+    auto const digits = status.substr(at + field.size());
+    auto mask = std::uint64_t {};
+    REQUIRE(std::from_chars(digits.data(), digits.data() + digits.size(), mask, 16).ec == std::errc {});
+    return mask;
+}
+} // namespace
+
 TEST_CASE("a command starts with no signal blocked or ignored", "[vthost][service][command]")
 {
     // The daemon's threads block SIGTERM and SIGINT, and the GUI ignores SIGPIPE; neither carries over.
@@ -85,7 +115,9 @@ TEST_CASE("a command starts with no signal blocked or ignored", "[vthost][servic
     ::signal(SIGUSR1, previousUsr1);
     ::pthread_sigmask(SIG_SETMASK, &previousMask, nullptr);
     REQUIRE(status.has_value());
-    CHECK(status->standardOutput == "SigBlk:\t0000000000000000\nSigIgn:\t0000000000000000\n");
+    CHECK(maskOf(status->standardOutput, "SigBlk:\t") == 0);
+    auto const valgrinds = underValgrind() ? GlibcInternalSignals : std::uint64_t { 0 };
+    CHECK((maskOf(status->standardOutput, "SigIgn:\t") & ~valgrinds) == 0);
 }
     #endif
 
