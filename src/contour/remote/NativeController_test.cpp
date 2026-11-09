@@ -1321,6 +1321,12 @@ TEST_CASE("NativeController.sends_a_cell_size_change_with_an_unchanged_grid",
         return !f.daemon.clientFrames.requestCells().empty()
                && f.daemon.clientFrames.requestCells().back().has_value();
     }));
+    // Settle before counting: the first resize sends more than the report waited for above, and a ResizePane
+    // still in flight would land after the baseline and be counted against the zoom. Input written now
+    // arrives behind everything that resize sent.
+    auto const remote = f.daemon.onDaemon([&] { return f.daemon.host->sessionIds().front(); });
+    std::ignore = f.session->terminal().device().write("settled");
+    REQUIRE(waitUntil([&] { return f.daemon.ptyInput(remote).contains("settled"); }));
     auto const before = f.daemon.clientFrames.requestCells().size();
     auto const panesBefore = f.daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
 
@@ -1334,7 +1340,6 @@ TEST_CASE("NativeController.sends_a_cell_size_change_with_an_unchanged_grid",
 
     // Everything the client sent with that report has landed once input written after it has: the report was
     // the one ResizeRequest, and no pane was re-asserted, as the area did not move.
-    auto const remote = f.daemon.onDaemon([&] { return f.daemon.host->sessionIds().front(); });
     std::ignore = f.session->terminal().device().write("cell-only");
     REQUIRE(waitUntil([&] { return f.daemon.ptyInput(remote).contains("cell-only"); }));
     CHECK(f.daemon.clientFrames.requestCells().size() == before + 1);
