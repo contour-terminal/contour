@@ -32,6 +32,7 @@
 #include <vthost/TappingPty.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/testing/ControlHarness.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -518,6 +519,7 @@ TEST_CASE("pane.split passes command and cwd to the factory", "[vthost][control]
 {
     auto h = ControlHarness {};
     std::ignore = h.openTab();
+    h.files.addDirectory("/tmp");
     auto const split = callSync<vtcontrol::SplitReply>(
         h.service, h.context, vtcontrol::SplitRequest { .cwd = "/tmp", .command = { "htop", "-d", "10" } });
     REQUIRE(split.has_value());
@@ -527,6 +529,114 @@ TEST_CASE("pane.split passes command and cwd to the factory", "[vthost][control]
     CHECK(h.seen.back().workingDirectory == "/tmp");
     // The pane's ids still reach its shell.
     CHECK(h.seen.back().env.at("CONTOUR_PANE") == split->pane);
+}
+
+TEST_CASE("pane.split without cwd starts in the anchor's directory", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+    auto const split = callSync<vtcontrol::SplitReply>(h.service, h.context, vtcontrol::SplitRequest {});
+    REQUIRE(split.has_value());
+    REQUIRE(h.seen.size() == 2);
+    CHECK(h.seen.back().workingDirectory == "/srv/app");
+}
+
+TEST_CASE("pane.split keeps the command and inherits the directory when only cwd is absent",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+    auto const split = callSync<vtcontrol::SplitReply>(
+        h.service, h.context, vtcontrol::SplitRequest { .command = { "htop" } });
+    REQUIRE(split.has_value());
+    CHECK(h.seen.back().program == "htop");
+    CHECK(h.seen.back().workingDirectory == "/srv/app");
+}
+
+TEST_CASE("pane.split with cwd keeps the requested directory", "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    h.files.addDirectory("/tmp");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+    auto const split =
+        callSync<vtcontrol::SplitReply>(h.service, h.context, vtcontrol::SplitRequest { .cwd = "/tmp" });
+    REQUIRE(split.has_value());
+    CHECK(h.seen.back().workingDirectory == "/tmp");
+}
+
+TEST_CASE("tab.create from a pane starts in that pane's directory; from outside, in the default",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+
+    auto const outside =
+        callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
+    REQUIRE(outside.has_value());
+    CHECK(h.seen.back().workingDirectory.empty());
+
+    h.context.callerPane = h.paneId(session);
+    auto const inside =
+        callSync<vtcontrol::CreateTabReply>(h.service, h.context, vtcontrol::CreateTabRequest {});
+    REQUIRE(inside.has_value());
+    CHECK(h.seen.back().workingDirectory == "/srv/app");
+
+    h.files.addDirectory("/tmp");
+    auto const explicitCwd = callSync<vtcontrol::CreateTabReply>(
+        h.service, h.context, vtcontrol::CreateTabRequest { .cwd = "/tmp" });
+    REQUIRE(explicitCwd.has_value());
+    CHECK(h.seen.back().workingDirectory == "/tmp");
+}
+
+TEST_CASE("pane.split with a cwd that does not exist still splits, in the profile's directory",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    auto const split =
+        callSync<vtcontrol::SplitReply>(h.service, h.context, vtcontrol::SplitRequest { .cwd = "/gone" });
+    REQUIRE(split.has_value());
+    REQUIRE(h.seen.size() == 2);
+    CHECK(h.seen.back().workingDirectory.empty());
+}
+
+TEST_CASE("pane.split below a pane whose directory is gone keeps the profile's, and still splits",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+    REQUIRE(h.files.remove("/srv/app").value_or(false));
+    auto const split = callSync<vtcontrol::SplitReply>(h.service, h.context, vtcontrol::SplitRequest {});
+    REQUIRE(split.has_value());
+    REQUIRE(h.seen.size() == 2);
+    CHECK(h.seen.back().workingDirectory.empty());
+}
+
+TEST_CASE("tab.create into a new workspace does not inherit the caller's directory",
+          "[vthost][control][write]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.files.addDirectory("/srv/app");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv/app");
+    h.context.callerPane = h.paneId(session);
+
+    auto const created = callSync<vtcontrol::CreateTabReply>(
+        h.service,
+        h.context,
+        vtcontrol::CreateTabRequest { .placement = vtcontrol::WorkspacePlacement::New });
+    REQUIRE(created.has_value());
+    CHECK(h.seen.back().workingDirectory.empty());
 }
 
 TEST_CASE("pane.send writes to the pane's PTY", "[vthost][control][write]")
@@ -751,7 +861,7 @@ TEST_CASE("the layout and the working directory are events", "[vthost][control][
     REQUIRE(delivered<vtcontrol::PaneCreatedEvent>(h.context.sink).size() == 2);
     CHECK(h.context.sink.deliveries.back().event.origin.pane == split->pane);
 
-    h.terminal(session).writeToScreen("\033]7;file:///srv\033\\");
+    vthost::testing::reportDirectory(h.terminal(session), "/srv");
     h.drain();
     REQUIRE(delivered<vtcontrol::CwdChangedEvent>(h.context.sink).size() == 1);
     CHECK(delivered<vtcontrol::CwdChangedEvent>(h.context.sink)[0].cwd == "/srv");

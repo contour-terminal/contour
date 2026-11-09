@@ -9,6 +9,7 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,6 +29,7 @@
 
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -197,6 +199,13 @@ class FailingReadSocket final: public core::net::ISocket
     bool _closed = false;
 };
 
+/// Whether the PTY factory of a harness starts a shell.
+enum class SpawnOutcome : uint8_t
+{
+    Fail,
+    Succeed,
+};
+
 /// Drives a ControlSession over an in-memory socket pair: the test writes
 /// command lines into one end and reads the protocol replies from it, while the
 /// session runs on the other end.
@@ -204,6 +213,13 @@ struct ControlHarness
 {
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
     core::net::EventLoop loop { *source };
+    /// What every shell spawn asked for, in order.
+    std::shared_ptr<std::vector<std::optional<vtpty::Process::ExecInfo>>> spawns =
+        std::make_shared<std::vector<std::optional<vtpty::Process::ExecInfo>>>();
+    /// Whether the PTY factory starts a shell; a test flips it to see a spawn fail.
+    std::shared_ptr<SpawnOutcome> outcome = std::make_shared<SpawnOutcome>(SpawnOutcome::Succeed);
+    /// The directories the host finds on disk, so a start directory need not exist on the machine.
+    core::platform::testing::InMemoryFileSystem files;
     SessionHost host;
     core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> session;
@@ -215,12 +231,17 @@ struct ControlHarness
                             vtbackend::Settings settings = {},
                             std::unique_ptr<core::net::ISocket> connection = nullptr):
         host { loop,
-               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+               [spawns = spawns, outcome = outcome](
+                   vtbackend::PageSize size,
+                   std::optional<vtpty::Process::ExecInfo> const& exec) -> std::unique_ptr<vtpty::Pty> {
+                   spawns->push_back(exec);
+                   if (*outcome == SpawnOutcome::Fail)
+                       return nullptr;
                    return std::make_unique<vtpty::MockPty>(size);
                },
                std::move(settings),
                core::defaultEnvironment(),
-               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } }
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual, .fileSystem = files } }
     {
         // A fixed clock so guard timestamps are deterministic.
         session = std::make_unique<ControlSession>(
@@ -353,6 +374,206 @@ TEST_CASE("split-window adds a pane and re-emits the layout", "[vthost][control]
     CHECK(tab->paneCount() == 2);
     // The second %layout-change carries a side-by-side container.
     CHECK(std::ranges::count_if(lines, [](auto const& l) { return l.contains("%layout-change"); }) >= 2);
+}
+
+TEST_CASE("new-window -c starts the shell in a literal directory", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.files.addDirectory("/srv/www");
+    std::ignore = h.exchange({ "new-window -c /srv/www" });
+
+    REQUIRE(h.spawns->size() == 1);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory == "/srv/www");
+    CHECK(h.spawns->back()->program.empty()); // the profile's shell stays
+}
+
+TEST_CASE("new-window without -c leaves the directory to the profile", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.exchange({ "new-window" });
+
+    REQUIRE(h.spawns->size() == 1);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory.empty()); // the host default, no override
+}
+
+TEST_CASE("new-window -c '#{pane_current_path}' follows the window's active pane", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.files.addDirectory("/srv/app");
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    vthost::testing::reportDirectory(*h.host.terminal(tab->activePane()->session()), "/srv/app");
+
+    std::ignore = h.exchange({ "new-window -c '#{pane_current_path}'" });
+
+    REQUIRE(h.spawns->size() == 2);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory == "/srv/app");
+}
+
+TEST_CASE("display-message -p -t %N answers that pane's directory", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    vthost::testing::reportDirectory(*h.host.terminal(tab->activePane()->session()), "/srv/my app");
+
+    auto const lines = h.exchange(
+        { std::format("display-message -p -t %{} '#{{pane_current_path}}'", tab->activePane()->id().value) });
+
+    CHECK(contains(lines, "/srv/my app"));
+    CHECK_FALSE(contains(lines, "pane_current_path"));
+}
+
+TEST_CASE("display-message -p -t %N for an unknown pane is an error", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    auto const lines = h.exchange({ "display-message -p -t %99 '#{pane_current_path}'" });
+    CHECK(contains(lines, "%error"));
+}
+
+TEST_CASE("new-window -c of a directory that is gone still creates the window in the profile's",
+          "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.exchange({ "new-window -c /gone" });
+
+    REQUIRE(h.spawns->size() == 1);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory.empty());
+}
+
+TEST_CASE("new-window -t with a placement target still creates the window", "[vthost][control]")
+{
+    for (auto const* const target: { "'$0'", "main:", ":2" })
+    {
+        DYNAMIC_SECTION("target " << target)
+        {
+            auto h = ControlHarness {};
+            h.files.addDirectory("/srv/app");
+            h.host.createTab();
+            auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+            vthost::testing::reportDirectory(*h.host.terminal(tab->activePane()->session()), "/srv/app");
+
+            auto const lines =
+                h.exchange({ std::format("new-window -t {} -c '#{{pane_current_path}}'", target) });
+
+            CHECK_FALSE(contains(lines, "%error"));
+            REQUIRE(h.spawns->size() == 2);
+            REQUIRE(h.spawns->back().has_value());
+            CHECK(h.spawns->back()->workingDirectory == "/srv/app");
+        }
+    }
+}
+
+TEST_CASE("display-message -p -t @N answers the window's active pane", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    vthost::testing::reportDirectory(*h.host.terminal(tab->activePane()->session()), "/srv/app");
+
+    auto const lines =
+        h.exchange({ std::format("display-message -p -t @{} '#{{pane_current_path}}'", tab->id().value) });
+
+    CHECK_FALSE(contains(lines, "%error"));
+    CHECK(contains(lines, "/srv/app"));
+}
+
+TEST_CASE("display-message -p -t @N for an unknown window is an error", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    CHECK(contains(h.exchange({ "display-message -p -t @99 '#{pane_current_path}'" }), "%error"));
+}
+
+TEST_CASE("display-message -p -t with a valid target expands #{window_id}", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+
+    auto const lines = h.exchange(
+        { std::format("display-message -p -t %{} '#{{window_id}}'", tab->activePane()->id().value) });
+
+    CHECK_FALSE(contains(lines, "%error"));
+    CHECK(contains(lines, std::format("@{}", tab->id().value)));
+}
+
+TEST_CASE("a failed split-window leaves the active pane where it was", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Horizontal, 0.5);
+    REQUIRE(tab->paneCount() == 2);
+    auto const active = tab->activePane()->id();
+    auto const sessions = tab->leafSessions();
+    auto const [workspace, ownerTab, firstLeaf] = h.host.model().findSessionLeaf(sessions.front());
+    auto const [workspace2, ownerTab2, secondLeaf] = h.host.model().findSessionLeaf(sessions.back());
+    auto const* const other = firstLeaf->id() == active ? secondLeaf : firstLeaf;
+
+    *h.outcome = SpawnOutcome::Fail;
+    auto const lines = h.exchange({ std::format("split-window -t %{}", other->id().value) });
+
+    CHECK(contains(lines, "%error"));
+    CHECK(tab->paneCount() == 2);
+    CHECK(tab->activePane()->id() == active);
+}
+
+TEST_CASE("splitCommandLine reads quotes the way tmux does", "[vthost][control]")
+{
+    CHECK(splitCommandLine("new-window -c '/tmp/a b'")
+          == std::vector<std::string> { "new-window", "-c", "/tmp/a b" });
+    // 'it' + \' + 's': a quote closed, escaped, reopened.
+    CHECK(splitCommandLine(R"(new-window -c '/tmp/it'\''s')")
+          == std::vector<std::string> { "new-window", "-c", "/tmp/it's" });
+    // A backslash is literal inside single quotes.
+    CHECK(splitCommandLine(R"(new-window -c '/tmp/x\y')")
+          == std::vector<std::string> { "new-window", "-c", R"(/tmp/x\y)" });
+}
+
+TEST_CASE("quoteArgument survives splitCommandLine", "[vthost][control]")
+{
+    for (auto const argument: { std::string_view { "/tmp/a b" },
+                                std::string_view { "/tmp/it's" },
+                                std::string_view { R"(/tmp/x\y)" } })
+        CHECK(splitCommandLine(std::format("new-window -c {}", vthost::tmux::quoteArgument(argument)))
+              == std::vector<std::string> { "new-window", "-c", std::string { argument } });
+}
+
+TEST_CASE("split-window -c '#{pane_current_path}' -t %N splits and inherits the target pane's directory",
+          "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.files.addDirectory("/srv/app");
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    auto const target = tab->activePane();
+    vthost::testing::reportDirectory(*h.host.terminal(target->session()), "/srv/app");
+
+    std::ignore =
+        h.exchange({ std::format("split-window -h -t %{} -c '#{{pane_current_path}}'", target->id().value) });
+
+    CHECK(tab->paneCount() == 2);
+    REQUIRE(h.spawns->size() == 2);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory == "/srv/app");
+}
+
+TEST_CASE("split-window without -c starts no override", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* tab = h.host.model().workspace(h.host.workspaceId())->activeTab();
+    std::ignore = h.exchange({ std::format("split-window -t %{}", tab->activePane()->id().value) });
+
+    CHECK(tab->paneCount() == 2);
+    REQUIRE(h.spawns->size() == 2);
+    REQUIRE(h.spawns->back().has_value());
+    CHECK(h.spawns->back()->workingDirectory.empty()); // the host default, no override
 }
 
 TEST_CASE("an unknown command yields an %error guard", "[vthost][control]")

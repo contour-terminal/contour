@@ -24,25 +24,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/tmux/CommandLine.hpp>
 #include <vthost/tmux/ControlOutput.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 
 namespace vthost::tmux
 {
-
-/// Splits a command line into arguments, honouring single and double quotes
-/// (double quotes keep backslash escapes for `\"` and `\\`).
-/// @param line The raw command line.
-/// @return The argument vector (possibly empty).
-[[nodiscard]] std::vector<std::string> splitCommandLine(std::string_view line);
 
 /// Converts a client-supplied `pause-after` value in SECONDS to a millisecond
 /// threshold, clamped so a value large enough to overflow the signed rep cannot
@@ -193,6 +190,35 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
         std::vector<std::string> const& arguments) const;
     [[nodiscard]] std::expected<vtworkspace::Pane*, std::string> resolvePane(
         std::vector<std::string> const& arguments) const;
+
+    /// What a `-t` target of split-window names: tmux accepts a window or a pane.
+    struct SplitTarget
+    {
+        vtworkspace::Tab* tab = nullptr;   ///< The window to split in.
+        vtworkspace::Pane* pane = nullptr; ///< The pane to split; null for a window target or none.
+    };
+
+    /// Resolves a `-t` target that is either a window (`@N`) or a pane (`%N`, the window holding it).
+    /// Without `-t` it is the current window.
+    /// @param arguments The split command line.
+    /// @return The window and, for a pane target, the pane; or why there is none.
+    [[nodiscard]] std::expected<SplitTarget, std::string> resolveSplitTarget(
+        std::vector<std::string> const& arguments) const;
+
+    /// Resolves the pane a format is expanded against: a pane (`%N`), or a window (`@N`) meaning its active
+    /// pane. Without `-t` it is the current window's active pane.
+    /// @param arguments The split command line.
+    /// @return The pane, or why there is none.
+    [[nodiscard]] std::expected<vtworkspace::Pane*, std::string> resolveFormatPane(
+        std::vector<std::string> const& arguments) const;
+
+    /// Reads the `-c <start-directory>` of a new-window or split-window. tmux expands it as a format, so
+    /// `#{pane_current_path}` becomes the directory of @p source and a literal passes as it is.
+    /// @param arguments The split command line.
+    /// @param source The pane whose directory the format names; null when there is none.
+    /// @return The directory to start in; nullopt without `-c`, or when it expands to nothing.
+    [[nodiscard]] std::optional<std::filesystem::path> startDirectoryOf(
+        std::vector<std::string> const& arguments, vtworkspace::Pane const* source) const;
 
     /// @return The page size used for layout projection (the host's settings).
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept;

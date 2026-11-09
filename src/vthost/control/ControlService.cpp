@@ -735,7 +735,7 @@ void ControlService::closePane(SessionId session)
 std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab(
     vtcontrol::CallContext const& context, vtcontrol::CreateTabRequest const& request)
 {
-    auto const spawn = spawnRequestOf(request.command, request.cwd);
+    auto spawn = spawnRequestOf(request.command, request.cwd);
     auto* tab = static_cast<vtworkspace::Tab*>(nullptr);
     if (request.placement == vtcontrol::WorkspacePlacement::New)
     {
@@ -753,6 +753,10 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
             return std::unexpected(workspaceId.error());
         auto* workspace = _host.model().workspace(*workspaceId);
         auto const* previous = workspace->activeTab();
+        // A caller inside a pane opens its tab where that pane is; a new workspace inherits nothing.
+        if (!context.caller().empty())
+            if (auto const caller = resolvePane(context, {}))
+                spawn.directoryFrom = caller->session;
         // The host names a workspace by a session it holds.
         auto beside = std::optional<SessionId> {};
         if (previous != nullptr)
@@ -797,13 +801,16 @@ std::expected<vtcontrol::SplitReply, ControlError> ControlService::split(
     auto const previous = tab->activePane()->id();
     auto const paneCount = tab->paneCount();
     _host.model().setActivePane(tab->id(), leaf->id());
+    // The new pane starts where its anchor is, unless the caller named a directory itself.
+    auto spawn = spawnRequestOf(request.command, request.cwd);
+    spawn.directoryFrom = anchor->session;
     // The ratio is the first child's share, and the new pane is the second.
     _host.splitActivePane(tab->id(),
                           request.direction == vtcontrol::SplitDirection::Right
                               ? vtworkspace::SplitState::Vertical
                               : vtworkspace::SplitState::Horizontal,
                           1.0 - (static_cast<double>(percent) / 100.0),
-                          spawnRequestOf(request.command, request.cwd));
+                          spawn);
     if (tab->paneCount() == paneCount)
         return std::unexpected(failed("the new pane's shell could not be started"));
 

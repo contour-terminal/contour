@@ -215,6 +215,8 @@ add_library(vthost STATIC
     proto/Unsupported.hpp
     proto/Wire.cpp
     proto/Wire.hpp
+    tmux/CommandLine.cpp
+    tmux/CommandLine.hpp
     tmux/ControlModeParser.cpp
     tmux/ControlModeParser.hpp
     tmux/ControlModeSpawn.cpp
