@@ -93,10 +93,12 @@ TEST_CASE("tmux resume-pane command matches the server's refresh-client format (
 // (ControlSession::commandSplitWindow maps -h -> Vertical; default -> Horizontal).
 TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[attach][tmux]")
 {
-    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/true) == "split-window -h -t %3");
-    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/false) == "split-window -t %3");
+    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/true)
+          == "split-window -h -t %3 -c '#{pane_current_path}'");
+    CHECK(contour::remote::tmuxSplitWindowCommand(3, /*vertical=*/false)
+          == "split-window -t %3 -c '#{pane_current_path}'");
     CHECK(contour::remote::tmuxKillPaneCommand(7) == "kill-pane -t %7");
-    CHECK(contour::remote::tmuxNewWindowCommand() == "new-window");
+    CHECK(contour::remote::tmuxNewWindowCommand(std::nullopt) == "new-window");
 }
 
 TEST_CASE("a hosted operation's tmux command is its row's", "[attach][tmux][operations]")
@@ -565,3 +567,20 @@ TEST_CASE("tmux controller mirrors a real tmux session", "[attach][tmux][oracle]
 }
 
 #endif // !_WIN32
+
+// The new-window directory is asked of the SERVER first (display-message), then passed back as a literal.
+TEST_CASE("tmux new-window in the acting pane's directory asks the server, then quotes the answer",
+          "[attach][tmux]")
+{
+    using namespace contour::remote;
+    CHECK(tmuxPaneDirectoryQuery(5) == "display-message -p -t %5 '#{pane_current_path}'");
+    CHECK(tmuxNewWindowCommand("/srv/app") == "new-window -c '/srv/app'");
+    // A space needs no escape inside single quotes; a single quote is closed, escaped and reopened, which
+    // tmux's command parser reads back as the one character (verified against tmux 3.8).
+    CHECK(tmuxNewWindowCommand("/tmp/a b") == "new-window -c '/tmp/a b'");
+    CHECK(tmuxNewWindowCommand("/tmp/it's") == R"(new-window -c '/tmp/it'\''s')");
+    // A backslash is literal inside single quotes.
+    CHECK(tmuxNewWindowCommand(R"(/tmp/x\y)") == R"(new-window -c '/tmp/x\y')");
+    // An unknown or empty directory leaves the server's default in force.
+    CHECK(tmuxNewWindowCommand("") == "new-window");
+}

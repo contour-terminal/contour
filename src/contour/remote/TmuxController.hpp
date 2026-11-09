@@ -66,7 +66,8 @@ namespace contour::remote
 /// Pure so the wire format the server parser consumes is unit-testable.
 /// @param pane The tmux pane id to split.
 /// @param vertical Whether to split left|right (`-h`) rather than top|bottom.
-/// @return The control-mode command line.
+/// @return The control-mode command line. The new pane starts in `-c '#{pane_current_path}'`, which the tmux
+///         SERVER expands against @p pane, so it is right even when tmux runs on another host.
 [[nodiscard]] std::string tmuxSplitWindowCommand(uint64_t pane, bool vertical);
 
 /// The tmux control-mode command that closes pane @p pane (`kill-pane -t %N`).
@@ -74,11 +75,21 @@ namespace contour::remote
 /// @return The control-mode command line.
 [[nodiscard]] std::string tmuxKillPaneCommand(uint64_t pane);
 
+/// The tmux control-mode command that asks the SERVER for pane @p pane's current directory
+/// (`display-message -p -t %N '#{pane_current_path}'`); the reply body is the directory. tmux has no
+/// pane-targeted `new-window`, so a new window's directory is fetched first and passed back as a literal.
+/// @param pane The tmux pane id to ask about.
+/// @return The control-mode command line.
+[[nodiscard]] std::string tmuxPaneDirectoryQuery(uint64_t pane);
+
 /// The tmux control-mode command that creates a new window (`new-window`) — a new TAB in Contour's
 /// model. tmux emits %window-add plus a layout for it, which the mirror realizes as a fresh tab.
 /// Pure so the wire string the server parser consumes is unit-testable.
+/// @param directory The directory the window starts in, as tmuxPaneDirectoryQuery answered it; quoted for
+///        tmux's command parser (single quotes, a quote inside as `'\''`). Nullopt or empty leaves the
+///        server's default.
 /// @return The control-mode command line.
-[[nodiscard]] std::string tmuxNewWindowCommand();
+[[nodiscard]] std::string tmuxNewWindowCommand(std::optional<std::string_view> directory);
 
 /// The tmux control-mode command that performs @p operation's server half on pane @p pane, if tmux has
 /// one: the operation's row names it (contour::session::HostedOperationRow::tmuxCommand). Only
