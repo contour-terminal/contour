@@ -644,6 +644,24 @@ void SessionHost::reapOrphan(SessionId session)
     _objects.forget(session);
 }
 
+void SessionHost::settleStartDirectory(SessionSpawnRequest& request) const
+{
+    auto& exec = *request.commandOverride;
+    // A pane made from another starts where that one is, unless the request named a directory itself.
+    if (exec.workingDirectory.empty() && request.directoryFrom)
+    {
+        if (auto const inherited = workingDirectoryOf(*request.directoryFrom))
+            exec.workingDirectory = *inherited;
+    }
+    if (exec.workingDirectory.empty() || _fileSystem.isDirectory(exec.workingDirectory))
+        return;
+    // A directory deleted or unmounted since, or never there, is no reason to lose the pane: it starts
+    // where the profile says, running what the request asked.
+    sessionLog()("{} no longer exists; the pane starts in the shell's default directory",
+                 core::pathToUtf8(exec.workingDirectory));
+    exec.workingDirectory.clear();
+}
+
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& incoming, SpawnIds const& ids)
 {
     auto const id = SessionId { _nextSessionId++ };
@@ -656,6 +674,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         request.commandOverride.emplace();
     for (auto const& [name, value]: paneEnvironment(ids.workspace, ids.tab, ids.pane))
         request.commandOverride->env.insert_or_assign(name, value);
+    settleStartDirectory(request);
 
     auto spawn = resolveSpawn(request, id);
     auto& requestedSettings = spawn.settings;
@@ -996,19 +1015,9 @@ SessionHost::RealizedWorkspace SessionHost::realizeRestoredWorkspace(WorkspaceId
         auto const seeder = [&](vtworkspace::LayoutPane const& leaf) -> bool {
             auto const& pane = *restored->panes.at(&leaf);
             auto request = SessionSpawnRequest { .profileName = pane.profile.value_or(std::string {}) };
+            // The host checks it still exists when the pane is seeded.
             if (pane.workingDirectory)
-            {
-                // A directory deleted or unmounted since is no reason to lose the pane.
-                if (_fileSystem.isDirectory(*pane.workingDirectory))
-                {
-                    request.commandOverride = vtpty::Process::ExecInfo {};
-                    request.commandOverride->workingDirectory = *pane.workingDirectory;
-                }
-                else
-                    sessionLog()(
-                        "restore: {} no longer exists; the pane starts in the shell's default directory",
-                        core::pathToUtf8(*pane.workingDirectory));
-            }
+                startIn(request, *pane.workingDirectory);
             // Every restored pane gets the divider, one without history on its first row.
             request.restoredHistory =
                 std::make_shared<proto::Delta const>(pane.history.value_or(proto::Delta {}));
@@ -2092,28 +2101,35 @@ void SessionHost::closeSession(SessionId session)
     endSession(session, SessionEnd::Requested);
 }
 
+std::optional<std::filesystem::path> SessionHost::workingDirectoryOf(SessionId session) const
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return std::nullopt;
+    auto& hosted = *it->second;
+    {
+        auto const guard = std::lock_guard { hosted.terminal() };
+        if (auto const resolved = hosted.terminal().resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn))
+            if (auto path = core::pathFromUtf8(resolved->path))
+                return *std::move(path);
+    }
+    if (auto const* const child = hosted.process())
+        // "." is the lookup's failure value.
+        if (auto const directory = child->workingDirectory(); !directory.empty() && directory != ".")
+            if (auto path = core::pathFromUtf8(directory))
+                return *std::move(path);
+    return std::nullopt;
+}
+
 PaneRuntime SessionHost::paneRuntime(SessionId session) const
 {
     auto const it = _sessions.find(session.value);
     if (it == _sessions.end())
         return {};
     auto& hosted = *it->second;
-    auto runtime = PaneRuntime {};
-    {
-        auto const guard = std::lock_guard { hosted.terminal() };
-        if (auto const resolved = hosted.terminal().resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn))
-            if (auto path = core::pathFromUtf8(resolved->path))
-                runtime.workingDirectory = *std::move(path);
-    }
+    auto runtime = PaneRuntime { .workingDirectory = workingDirectoryOf(session) };
     if (auto const* const child = hosted.process())
-    {
-        // "." is the lookup's failure value.
-        if (auto const directory = child->workingDirectory();
-            !runtime.workingDirectory && !directory.empty() && directory != ".")
-            if (auto path = core::pathFromUtf8(directory))
-                runtime.workingDirectory = *std::move(path);
         runtime.foregroundProcess = child->foregroundProcessName();
-    }
     if (!hosted.profileName().empty())
         runtime.profile = hosted.profileName();
     return runtime;

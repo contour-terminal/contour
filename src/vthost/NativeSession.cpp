@@ -1842,7 +1842,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         // clicked in a second daemon workspace into the first one.
         auto const beside =
             createTab->session != 0 ? std::optional { SessionId { createTab->session } } : std::nullopt;
-        std::ignore = _host.createTab(spawnRequest(createTab->profileName), beside);
+        std::ignore = _host.createTab(spawnRequest(createTab->profileName, beside), beside);
         return;
     }
     if (auto const* newWorkspace = std::get_if<proto::NewWorkspace>(&frame.pdu))
@@ -1867,7 +1867,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             _host.splitActivePane(tab->id(),
                                   static_cast<vtworkspace::SplitState>(split->orientation),
                                   proto::fromWireRatio(split->ratio),
-                                  spawnRequest(split->profileName));
+                                  spawnRequest(split->profileName, SessionId { split->session }));
         }
         return;
     }

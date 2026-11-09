@@ -15,6 +15,7 @@
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -399,6 +400,8 @@ struct NativeHarness
     core::net::EventLoop loop { *source,
                                 options.clock != nullptr ? *options.clock
                                                          : core::platform::defaultSteadyClock() };
+    /// The directories the host finds on disk, so an inherited one need not exist on the machine.
+    core::platform::testing::InMemoryFileSystem files;
     SessionHost host { loop,
                        options.ptyFactory
                            ? options.ptyFactory
@@ -410,6 +413,7 @@ struct NativeHarness
                                                    .sizePolicy = vthost::ClientSizePolicy::Latest,
                                                    .startupLayout = options.startupLayout,
                                                    .identity = options.identity,
+                                                   .fileSystem = files,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
                                                    .profiles = options.profiles } };
@@ -7524,7 +7528,8 @@ using SpawnedDirectories = std::shared_ptr<std::vector<std::filesystem::path>>;
     return options;
 }
 
-/// @return An absolute directory on every platform; it need not exist, as no shell is started in it.
+/// @return An absolute directory on every platform; a test makes the harness's file system hold it, as the
+///         host starts no shell in a directory it does not find.
 [[nodiscard]] std::filesystem::path statedDirectory()
 {
     return std::filesystem::temp_directory_path() / "contour-attach-cwd";
@@ -7550,6 +7555,7 @@ TEST_CASE("the first session of an attach starts in the directory its hello stat
 {
     auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
     auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    h.files.addDirectory(statedDirectory());
 
     std::ignore = h.exchangeUntil(
         { directoryHello(proto::AttachIntentKind::Launch, core::pathToUtf8(statedDirectory())) },
@@ -7575,6 +7581,7 @@ TEST_CASE("a launch stating a directory opens a tab in it beside the workspaces 
 {
     auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
     auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    h.files.addDirectory(statedDirectory());
     REQUIRE(h.host.createTab() != nullptr);
     auto const workspace = h.host.workspaceId().value;
     spawned->clear();
@@ -7623,3 +7630,96 @@ TEST_CASE("an attach to named workspaces stating a directory adds nothing to the
     CHECK(spawned->empty());
     CHECK(sessionsOf(h.host, workspace).size() == 1);
 }
+
+// {{{ A tab or split opens in the directory of the pane it was made from
+namespace
+{
+
+/// Where the shell the tests start reports itself to be; the harness's file system holds it.
+constexpr auto WorkDirectory = std::string_view { "/tmp/work" };
+
+/// A harness whose first tab's shell reports a directory the host finds on disk, and the recording of the
+/// directories the sessions spawned after it ask for.
+struct ReportingHarness
+{
+    /// @param directory The directory the first tab's shell is in.
+    explicit ReportingHarness(std::filesystem::path const& directory):
+        harness { recordingSpawnDirectories(spawned) }
+    {
+        harness.files.addDirectory(directory);
+        auto* tab = harness.host.createTab();
+        REQUIRE(tab != nullptr);
+        session = tab->rootPane()->session();
+        vthost::testing::reportDirectory(*harness.host.terminal(session), directory);
+        spawned->clear();
+    }
+
+    std::shared_ptr<std::vector<std::filesystem::path>> spawned =
+        std::make_shared<std::vector<std::filesystem::path>>();
+    NativeHarness harness;
+    vtworkspace::SessionId session {};
+};
+
+} // namespace
+
+TEST_CASE("a CreateTab beside a session starts in that session's working directory", "[vthost][native][cwd]")
+{
+    auto h = ReportingHarness { WorkDirectory };
+
+    std::ignore =
+        h.harness.exchange({ proto::DecodedPdu { proto::ClientHello {} },
+                             proto::DecodedPdu { proto::CreateTab { .session = h.session.value } } },
+                           4);
+
+    REQUIRE_FALSE(h.spawned->empty());
+    CHECK(h.spawned->back() == std::filesystem::path { WorkDirectory });
+}
+
+TEST_CASE("a SplitPane starts in the split pane's working directory", "[vthost][native][cwd]")
+{
+    auto h = ReportingHarness { WorkDirectory };
+    auto const sessions = h.harness.host.sessionCount();
+
+    std::ignore =
+        h.harness.exchange({ proto::DecodedPdu { proto::ClientHello {} },
+                             proto::DecodedPdu { proto::SplitPane { .session = h.session.value } } },
+                           4);
+
+    REQUIRE(h.harness.host.sessionCount() == sessions + 1);
+    CHECK(h.spawned->back() == std::filesystem::path { WorkDirectory });
+}
+
+TEST_CASE("a tab or split beside a pane with no known directory keeps the profile's", "[vthost][native][cwd]")
+{
+    auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
+    auto h = NativeHarness { recordingSpawnDirectories(spawned) };
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    spawned->clear();
+
+    std::ignore = h.exchange({ proto::DecodedPdu { proto::ClientHello {} },
+                               proto::DecodedPdu { proto::CreateTab { .session = session.value } },
+                               proto::DecodedPdu { proto::SplitPane { .session = session.value } } },
+                             6);
+
+    REQUIRE(spawned->size() == 2);
+    CHECK(*spawned == std::vector { std::filesystem::path {}, std::filesystem::path {} });
+}
+
+TEST_CASE("a tab beside a pane whose directory is gone keeps the profile's, and still opens",
+          "[vthost][native][cwd]")
+{
+    auto h = ReportingHarness { WorkDirectory };
+    REQUIRE(h.harness.files.remove(std::filesystem::path { WorkDirectory }).value_or(false));
+    auto const sessions = h.harness.host.sessionCount();
+
+    std::ignore =
+        h.harness.exchange({ proto::DecodedPdu { proto::ClientHello {} },
+                             proto::DecodedPdu { proto::CreateTab { .session = h.session.value } } },
+                           4);
+
+    REQUIRE(h.harness.host.sessionCount() == sessions + 1);
+    CHECK(h.spawned->back().empty());
+}
+// }}}

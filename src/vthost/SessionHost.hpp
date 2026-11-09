@@ -804,7 +804,25 @@ struct SessionSpawnRequest
     /// The UUIDs and labels the objects this spawn creates come back with, instead of fresh ones: a restored
     /// workspace keeps its ids. Nullopt mints them all.
     std::optional<PresetObjectIds> presetIds {};
+
+    /// The pane whose working directory the new shell starts in, when @ref commandOverride names no
+    /// directory of its own: a tab or split made from a pane opens where that pane is. Resolved once, by
+    /// the host, when the session is seeded (@see SessionHost::workingDirectoryOf); a pane whose directory
+    /// is unknown, or no longer exists, leaves the profile's directory in force. Nullopt inherits nothing.
+    std::optional<vtworkspace::SessionId> directoryFrom {};
 };
+
+/// Starts @p request's shell in @p directory by a directory-only override: an empty program keeps the
+/// profile's shell and its arguments, and a program or arguments the request already overrides stay.
+/// Shared by every path that opens a pane beside another, so each inherits a directory the same way.
+/// @param request The request to amend.
+/// @param directory The directory the shell starts in.
+inline void startIn(SessionSpawnRequest& request, std::filesystem::path const& directory)
+{
+    if (!request.commandOverride)
+        request.commandOverride.emplace();
+    request.commandOverride->workingDirectory = directory;
+}
 
 /// How long a restored session waits for its shell's first OSC 133 `A` before typing initialInput anyway
 /// (a shell without prompt marks). Measured on the loop's injected clock.
@@ -1454,6 +1472,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return What the pane is doing now; every field empty for an unknown session.
     [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
 
+    /// @param session A hosted session.
+    /// @return The directory the pane's shell is in: the one it reported by OSC 3008 / OSC 7 when that is
+    ///         this machine's, else the process's. Nullopt for an unknown session or an unknown directory.
+    [[nodiscard]] std::optional<std::filesystem::path> workingDirectoryOf(
+        vtworkspace::SessionId session) const;
+
     // vtworkspace::ModelEvents — every completed change fans out to subscribers.
     void tabAdded(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
     void tabClosed(vtworkspace::WorkspaceId workspace, vtworkspace::TabId tab, int index) override;
@@ -1614,6 +1638,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Its PTY, through the profile PTY factory when a profile was resolved and one is set; null when
     ///         the factory failed.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> makePty(ResolvedSpawn const& spawn) const;
+
+    /// Settles the directory @p request's shell starts in, for every way a spawn names one: the directory
+    /// of @ref SessionSpawnRequest::directoryFrom when the request names none, then a check that the
+    /// directory exists. One that does not (a pane's directory deleted since, a stale path, a typo) is
+    /// logged and dropped, leaving the profile's directory in force and the program and arguments alone.
+    /// @param request A request whose commandOverride is engaged.
+    void settleStartDirectory(SessionSpawnRequest& request) const;
 
     /// Destroys session @p session and forgets everything kept beside it, so no erase site can leave a
     /// stale entry behind.
