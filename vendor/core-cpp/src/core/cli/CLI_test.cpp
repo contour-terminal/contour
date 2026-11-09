@@ -406,6 +406,17 @@ TEST_CASE("CLI.parse.failure-modes")
         CHECK(error.message.contains("bogus"));
     }
 
+    SECTION("an option-looking token that names no option")
+    {
+        for (auto const token: { "--bogus"sv, "--bogus=1"sv, "-b"sv })
+        {
+            auto const error = refusal({ "contour", "profile", "p", token });
+            CHECK(error.kind == cli::ParseErrorKind::UnknownOption);
+            CHECK(error.tokenIndex == 3);
+            CHECK(error.message.contains(token));
+        }
+    }
+
     SECTION("a missing required option")
     {
         auto const error = refusal({ "contour", "count", "1" });
@@ -423,6 +434,81 @@ TEST_CASE("CLI.parse.failure-modes")
         CHECK(flags->get<double>("contour.ratio") == 0.25);
         CHECK_FALSE(flags->get<bool>("contour.verbose"));
         CHECK(flags->get<std::string>("contour.profile") == "p");
+    }
+}
+
+// A command that takes verbatim input took an unknown option as the first verbatim word:
+// `contour new --window 1` ran `--window 1` as the new tab's command instead of being refused.
+// Before verbatim input starts, a token that looks like an option must name one; verbatim input
+// starts at the first token that does not look like an option, or after `--`.
+TEST_CASE("CLI.parse.verbatim")
+{
+    auto const cmd = cli::Command {
+        .name = "tool",
+        .children =
+            cli::CommandList {
+                cli::Command {
+                    .name = "new",
+                    .options =
+                        cli::OptionList {
+                            cli::Option { .name = { 'c', "cwd" }, .v = cli::Value { ""s } },
+                            cli::Option { .name = "focus"sv, .v = cli::Value { false } },
+                        },
+                    .verbatim = cli::Verbatim { "CMD", "The command to run." },
+                },
+            },
+    };
+
+    auto const verbatimOf = [&cmd](cli::StringViewList const& args) {
+        auto result = cli::parse(cmd, args);
+        REQUIRE(result.has_value());
+        return result->verbatim;
+    };
+
+    SECTION("an unknown option before the verbatim input is refused")
+    {
+        for (auto const token: { "--window"sv, "--window=1"sv, "-w"sv, "-window"sv })
+        {
+            auto const result = cli::parse(cmd, { "tool", "new", "--focus", token, "1" });
+            REQUIRE_FALSE(result.has_value());
+            CHECK(result.error().kind == cli::ParseErrorKind::UnknownOption);
+            CHECK(result.error().tokenIndex == 3);
+            CHECK(result.error().message.contains(token));
+        }
+    }
+
+    SECTION("dash tokens after -- are verbatim")
+    {
+        CHECK(verbatimOf({ "tool", "new", "--", "--window", "1", "-" })
+              == cli::StringViewList { "--window", "1", "-" });
+    }
+
+    SECTION("dash tokens after the first verbatim word are verbatim")
+    {
+        CHECK(verbatimOf({ "tool", "new", "ls", "-la", "--color=auto", "--" })
+              == cli::StringViewList { "ls", "-la", "--color=auto", "--" });
+    }
+
+    SECTION("known options before the verbatim input are read as options")
+    {
+        auto const flags =
+            cli::parse(cmd, { "tool", "new", "-c", "/tmp", "--focus", "--", "htop", "-d", "5" });
+        REQUIRE(flags.has_value());
+        CHECK(flags->get<std::string>("tool.new.cwd") == "/tmp");
+        CHECK(flags->get<bool>("tool.new.focus"));
+        CHECK(flags->verbatim == cli::StringViewList { "htop", "-d", "5" });
+    }
+
+    SECTION("a bare - starts the verbatim input")
+    {
+        // The conventional name for standard input is an operand, not an option.
+        CHECK(verbatimOf({ "tool", "new", "-", "-x" }) == cli::StringViewList { "-", "-x" });
+    }
+
+    SECTION("no verbatim input at all")
+    {
+        CHECK(verbatimOf({ "tool", "new", "--focus" }).empty());
+        CHECK(verbatimOf({ "tool", "new", "--" }).empty());
     }
 }
 
@@ -473,5 +559,65 @@ TEST_CASE("CLI.helpText.space-before-linefeed")
     {
         // Nothing to emit, and the renderer still has to finish.
         CHECK(!render("  \n  \n \n"sv).empty());
+    }
+}
+
+// xterm's `-e PROGRAM ARGS...`: the program's own options (`sh -c`) must not be read as the command's.
+TEST_CASE("CLI.parse.verbatim-after-option")
+{
+    auto const makeCommand = [](cli::VerbatimStart start) {
+        return cli::Command {
+            .name = "tool",
+            .options =
+                cli::OptionList {
+                    cli::Option {
+                        .name = { 'e', "execute" }, .v = cli::Value { ""s }, .verbatimStart = start },
+                    cli::Option { .name = { 'd', "cwd" }, .v = cli::Value { ""s } },
+                },
+            .verbatim = cli::Verbatim { "PROGRAM ARGS...", "The program to run." },
+        };
+    };
+    auto const cmd = makeCommand(cli::VerbatimStart::AfterValue);
+
+    SECTION("-e VALUE starts the verbatim input right after its value")
+    {
+        auto const result = cli::parse(cmd, { "tool", "-e", "sh", "-c", "exit 0" });
+        REQUIRE(result.has_value());
+        CHECK(result->str("tool.execute") == "sh");
+        CHECK(result->verbatim == cli::StringViewList { "-c", "exit 0" });
+    }
+
+    SECTION("--execute=VALUE does too, and later tokens stay verbatim, options included")
+    {
+        auto const result = cli::parse(cmd, { "tool", "--execute=sh", "-c", "x", "--cwd", "/tmp", "--" });
+        REQUIRE(result.has_value());
+        CHECK(result->str("tool.execute") == "sh");
+        CHECK(result->str("tool.cwd").empty());
+        CHECK(result->verbatim == cli::StringViewList { "-c", "x", "--cwd", "/tmp", "--" });
+    }
+
+    SECTION("options before the marker option are still parsed")
+    {
+        auto const result = cli::parse(cmd, { "tool", "--cwd", "/tmp", "-e", "sh", "-c", "x" });
+        REQUIRE(result.has_value());
+        CHECK(result->str("tool.cwd") == "/tmp");
+        CHECK(result->str("tool.execute") == "sh");
+        CHECK(result->verbatim == cli::StringViewList { "-c", "x" });
+    }
+
+    SECTION("no words after the value leave the verbatim input empty")
+    {
+        auto const result = cli::parse(cmd, { "tool", "-e", "sh" });
+        REQUIRE(result.has_value());
+        CHECK(result->str("tool.execute") == "sh");
+        CHECK(result->verbatim.empty());
+    }
+
+    SECTION("without the marker the unknown option after the value is still refused")
+    {
+        auto const plain = makeCommand(cli::VerbatimStart::Normal);
+        auto const result = cli::parse(plain, { "tool", "-e", "sh", "-c", "exit 0" });
+        REQUIRE(!result.has_value());
+        CHECK(result.error().kind == cli::ParseErrorKind::UnknownOption);
     }
 }
