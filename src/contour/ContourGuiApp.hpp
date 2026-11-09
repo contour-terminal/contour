@@ -258,13 +258,6 @@ using ProgramReachablePredicate = bool (*)(std::string_view);
                                                       ProgramReachablePredicate isReachable,
                                                       vtpty::ProgramHost host);
 
-/// Whether a local daemon may be spawned yet. @see ContourGuiApp::_daemonSpawnGate
-enum class DaemonSpawnGate : std::uint8_t
-{
-    Closed = 0, ///< The GUI is still constructing its QApplication.
-    Open,       ///< Spawning is safe.
-};
-
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDaemonLinkHost
 {
@@ -1085,12 +1078,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
     [[nodiscard]] std::expected<void, std::string> establishHosting();
 
-    /// Undoes what establishHosting() set up, on every return of the GUI verb: lets a held spawn go, drops
-    /// the launch hooks, unroutes session creation, and stops every link and the tmux attach.
+    /// Undoes what establishHosting() set up, on every return of the GUI verb: drops the launch hooks,
+    /// unroutes session creation, and stops every link and the tmux attach.
     void releaseHosting();
-
-    /// Lets a daemon spawned on demand fork. @see _daemonSpawnGate
-    void openDaemonSpawnGate() noexcept;
     /// Tells the operating system how to start this application again after an installer closed it. A failure
     /// is logged: all it costs is the reopening.
     void registerForRestart();
@@ -1190,6 +1180,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     ConnectLaunch _connectLaunch = ConnectLaunch::Targeted;
     /// The `daemon.mode` this launch runs under, as establishHosting() resolved it.
     config::DaemonMode _daemonMode = config::DaemonMode::InProcess;
+    /// What a daemon this launch spawns on demand, and the service commands (systemctl, launchctl) that find
+    /// or start its unit, run under ("NAME=VALUE"): this process's environment as it started, snapshotted on
+    /// the main thread before the attach starts, and before the boot edits it -- less what those edits remove
+    /// (the GPU fallback request, a parent Contour's GPU choice: display::bootRemovedGpuVariables()) and the
+    /// desktop's activation tokens (vthost::daemonEnvironment()). What the boot sets for its own rendering
+    /// (#_selfOnlyEnvironment) was unset before it, so the snapshot never holds it. They run on the attach's
+    /// worker, where the live environment may be changing.
+    std::vector<std::string> _daemonEnvironment;
     /// What the first window tells the user when the daemon this launch wanted could not be had and its
     /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
     std::string _hostingNotice;
@@ -1378,12 +1376,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp, public remote::IDae
     std::function<std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>(
         std::stop_token)>
         _upgradeDaemon;
-    /// Whether a daemon spawned on demand may fork yet. The local attach starts beside the boot, but Apple's
-    /// libc deadlocks a fork() made while another thread is inside setlocale(), which QApplication's
-    /// construction calls: its at-fork handler and setlocale() take the locale and malloc locks in opposite
-    /// orders. So the attach's worker waits, before it spawns, until the QApplication is built.
-    std::shared_ptr<std::atomic<DaemonSpawnGate>> _daemonSpawnGate =
-        std::make_shared<std::atomic<DaemonSpawnGate>>(DaemonSpawnGate::Closed);
     /// The thread running @ref _restartDaemon; declared after what it reaches so it is joined first.
     std::jthread _daemonRestartThread;
     ExitStatus _exitStatus;

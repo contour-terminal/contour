@@ -172,7 +172,7 @@ class ConfirmPrompt
 /// argv[0]: a shell starts a program found on the PATH with the name it was typed under, and absolute() of
 /// that is a file in the current directory.
 /// @param running The running executable as the operating system reports it
-/// (vthost::currentExecutablePath()),
+/// (vtpty::currentExecutablePath()),
 ///        which also resolves an AppImage to the image.
 /// @param argv0 The program name the process was started with, the fallback where @p running is not known.
 /// @return @p running when known, else @p argv0 made absolute.

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 
@@ -192,6 +194,9 @@ class ConformanceApp: public core::cli::App
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     auto app = ConformanceApp { core::defaultEnvironment() };
     return app.run(argc, argv);
 }

@@ -10,6 +10,8 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/TestEnvironment.hpp>
 
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/Environment.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
@@ -118,6 +120,9 @@ CATCH_REGISTER_LISTENER(SessionBusWitness)
 
 int main(int argc, char* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     core::testing::suppressWindowsDialogs();
 
     /// Default to the headless "offscreen" platform (CI-safe, no display server). The Qt Quick scene

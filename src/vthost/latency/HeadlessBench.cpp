@@ -5,6 +5,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/testing/Workloads.hpp>
 
+#include <vtpty/ExecutablePath.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
@@ -428,7 +429,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
     }
 
-    auto const self = currentExecutablePath();
+    auto const self = vtpty::currentExecutablePath();
     if (!self)
     {
         err << "bench-latency: cannot find its own executable\n";

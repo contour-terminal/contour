@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/ExecutablePath.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/Environment.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
@@ -161,7 +164,7 @@ class BenchLatency final: public core::cli::App
 
     int serve()
     {
-        auto const self = vthost::currentExecutablePath();
+        auto const self = vtpty::currentExecutablePath();
         if (!self)
         {
             std::cerr << "bench-latency: cannot find its own executable\n";
@@ -223,6 +226,9 @@ class BenchLatency final: public core::cli::App
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     auto app = BenchLatency { core::defaultEnvironment() };
     return app.run(argc, argv);
 }

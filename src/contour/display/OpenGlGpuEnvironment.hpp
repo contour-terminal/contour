@@ -11,7 +11,9 @@
 #include <array>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -107,6 +109,27 @@ inline constexpr std::string_view SelfSetEnvironmentMarker = "CONTOUR_SELF_SET_E
 /// the automatic GPU. Its value is the failed GPU's title; the restarted Contour reports the fallback,
 /// uses `auto` for that run and removes the variable, so it is never inherited further.
 inline constexpr std::string_view GpuFallbackEnvironmentName = "CONTOUR_GPU_FALLBACK";
+
+/// The variables Contour's boot removes from its own environment for its GPU: the fallback request
+/// (#GpuFallbackEnvironmentName), and, where it chooses its OpenGL GPU through the environment, the choice a
+/// parent Contour made -- the names #SelfSetEnvironmentMarker lists, and the marker. What the boot sets in
+/// their place was not set before (openGlSelectionEnvironment() and the multimedia probe variables only fill
+/// what is unset), so an environment snapshotted before the boot, less these, equals one snapshotted after
+/// it, less what Contour set for itself.
+/// @param parentSelfSet The value of #SelfSetEnvironmentMarker the process started with, where the platform
+///        takes a parent's choice back (Linux); std::nullopt where it is unset, or on another platform.
+/// @return The names.
+[[nodiscard]] inline std::vector<std::string> bootRemovedGpuVariables(
+    std::optional<std::string_view> parentSelfSet)
+{
+    auto names = std::vector<std::string> { std::string(GpuFallbackEnvironmentName) };
+    if (parentSelfSet)
+    {
+        names.emplace_back(SelfSetEnvironmentMarker);
+        std::ranges::move(selfSetNamesFrom(*parentSelfSet), std::back_inserter(names));
+    }
+    return names;
+}
 
 /// The environment for restarting Contour on the automatic GPU, after the OpenGL GPU chosen through the
 /// driver's variables could not render.

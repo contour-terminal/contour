@@ -2,7 +2,6 @@
 #include <vtpty/UnixPty.hpp>
 
 #include <vtpty/InheritedPty.hpp>
-#include <vtpty/Process.hpp>
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -156,60 +155,7 @@ bool UnixPty::Slave::isClosed() const noexcept
 
 bool UnixPty::Slave::configure() noexcept
 {
-    auto const tio = util::constructTerminalSettings(_slaveFd);
-    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
-        tcflush(_slaveFd, TCIOFLUSH);
-    return true;
-}
-
-bool UnixPty::Slave::login()
-{
-    if (_slaveFd < 0)
-        return false;
-
-    if (!configure())
-        return false;
-
-    // This is doing what login_tty() is doing, too.
-    // But doing it ourselves allows for a little more flexibility.
-    // return login_tty(_slaveFd) == 0;
-
-    sigset_t signals;
-    sigemptyset(&signals);
-    pthread_sigmask(SIG_SETMASK, &signals, nullptr);
-
-    // clang-format off
-    struct sigaction act {};
-    act.sa_handler = SIG_DFL;
-    // clang-format on
-
-    for (auto const signo: { SIGCHLD, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGALRM })
-        sigaction(signo, &act, nullptr);
-
-    setsid();
-
-#ifdef TIOCSCTTY
-    // Set the controlling terminal, unless we are running inside a flatpak.
-    // Because flatpak does not allow setting the controlling terminal.
-    // - https://github.com/flatpak/flatpak/issues/3697
-    // - https://github.com/flatpak/flatpak/issues/3285
-    if (!Process::isFlatpak())
-    {
-        if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
-            return false;
-    }
-#endif
-
-    for (int const fd: { 0, 1, 2 })
-    {
-        if (_slaveFd != fd)
-            ::close(fd);
-        util::saveDup2(_slaveFd, fd);
-    }
-
-    if (_slaveFd > 2)
-        _slaveFd.close();
-
+    util::configureTerminal(_slaveFd);
     return true;
 }
 
@@ -270,6 +216,24 @@ StartResult UnixPty::start()
 UnixPty::~UnixPty()
 {
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
+}
+
+std::optional<Pty::SpawnDescriptors> UnixPty::spawnDescriptors() const noexcept
+{
+    assert(started());
+    auto const terminal = unbox<int>(_slave->handle());
+    if (terminal == -1)
+        return std::nullopt;
+    auto const writer = _stdoutFastPipe.writer();
+    return SpawnDescriptors { .terminal = terminal,
+                              .stdoutFastPipeWriter =
+                                  writer != -1 ? std::optional { writer } : std::nullopt };
+}
+
+void UnixPty::closeSpawnDescriptors()
+{
+    _slave->close();
+    _stdoutFastPipe.closeWriter();
 }
 
 PtySlave& UnixPty::slave() noexcept

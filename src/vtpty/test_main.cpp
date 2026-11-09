@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #define CATCH_CONFIG_RUNNER
@@ -7,6 +9,9 @@
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     core::testing::suppressWindowsDialogs();
 
     int const result = Catch::Session().run(argc, argv);

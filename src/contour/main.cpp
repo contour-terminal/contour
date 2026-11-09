@@ -17,6 +17,8 @@
     #include <contour/cli/ContourApp.hpp>
 #endif
 
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/Environment.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
@@ -242,6 +244,9 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
 #ifdef CONTOUR_FRONTEND_GUI
     // The origin of the startup timeline: sampled before anything else runs.
     auto const processStart = core::platform::defaultSteadyClock().now();

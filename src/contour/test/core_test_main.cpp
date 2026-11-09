@@ -7,6 +7,8 @@
 // configured with CONTOUR_FRONTEND_GUI=OFF has no Qt to give them -- which is why that
 // configuration had no unit tests at all before this binary existed.
 
+#include <vtpty/SpawnTrampoline.hpp>
+
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #define CATCH_CONFIG_RUNNER
@@ -14,6 +16,9 @@
 
 int main(int argc, char* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     core::testing::suppressWindowsDialogs();
     return Catch::Session().run(argc, argv);
 }

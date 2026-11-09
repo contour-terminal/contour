@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/DaemonBinary.hpp>
 
+#include <vtpty/ExecutablePath.hpp>
+
 #include <core/Utf8Path.hpp>
 #include <core/log/LogStore.hpp>
 
@@ -167,7 +169,7 @@ std::expected<std::unique_ptr<NativeDaemonImages>, std::error_code> NativeDaemon
     std::string releaseVersion,
     vtpty::CrossingHandle inheritedLease)
 {
-    return currentExecutablePath().transform([&](fs::path executable) {
+    return vtpty::currentExecutablePath().transform([&](fs::path executable) {
         auto config = ownImageStoreConfig(env,
                                           OwnProcess { .executable = std::move(executable),
                                                        .sandbox = vtpty::currentSandbox().state,

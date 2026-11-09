@@ -2,6 +2,11 @@
 #include <vthost/tmux/ControlModeSpawn.hpp>
 
 #include <vtpty/ProgramLookup.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
+
+#ifndef _WIN32
+    #include <vtpty/UnixUtils.hpp>
+#endif
 
 #include <core/net/Sockets.hpp>
 
@@ -11,18 +16,11 @@
     #include <sys/wait.h>
 
     #include <algorithm>
-    #include <cerrno>
     #include <csignal>
     #include <ranges>
+    #include <tuple>
     #include <vector>
 
-    #ifdef __APPLE__
-        #include <util.h>
-    #elif defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
-        #include <libutil.h>
-    #else
-        #include <pty.h>
-    #endif
     #include <unistd.h>
 #endif
 
@@ -48,51 +46,42 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::Event
                                                                 vtpty::ProgramSearch const& search,
                                                                 vtpty::ProcessPlacement& placement)
 {
-    // Everything the child uses is made here. Between forkpty() and exec() a child of this multi-threaded
-    // process may only call async-signal-safe functions: no allocation, and no PATH walk, which execvp()
-    // does.
+    // The program's image and arguments are resolved here; the trampoline, single-threaded, does the rest of
+    // the child-side setup that a forked child of this multi-threaded process could not do safely.
     auto const image = vtpty::findProgram("tmux", search);
     if (!image)
         return std::unexpected(std::format("tmux was not found on PATH ({})", search.path));
-    auto arguments = controlModeArguments(tmuxSocket);
-    auto argv = std::vector<char*> {};
-    argv.reserve(arguments.size() + 1);
-    for (auto& argument: arguments)
-        argv.push_back(argument.data());
-    argv.push_back(nullptr);
 
     // Parked on a gate, as a session's shell is, until the placement has moved it into a scope of its own.
-    auto gate = vtpty::makeGate();
-    if (!gate)
-        return std::unexpected(
-            std::format("could not make the tmux client's gate: {}", gate.error().message()));
+    auto spawned = vtpty::spawnOnNewTerminal(
+        vtpty::SpawnSpec {
+            .image = *image,
+            .argv = controlModeArguments(tmuxSocket),
+            .lookup = vtpty::ExecLookup::ExactPath,
+            .launch =
+                vtpty::TerminalLaunch {
+                    .controllingTerminal = vtpty::ControllingTerminal::Acquire,
+                    .terminalSettings = vtpty::TerminalSettings::Keep,
+                    .failureReport = vtpty::FailureReport::Silent,
+                    .failureExit = vtpty::FailureExit::NotFound,
+                },
+        },
+        placement,
+        vtpty::ProcessRole::TmuxClient);
+    if (!spawned)
+        return std::unexpected(std::format("could not spawn the tmux client: {}", spawned.error().message()));
+    auto const pid = spawned->pid;
 
-    auto master = -1;
-    auto const pid = ::forkpty(&master, nullptr, nullptr, nullptr);
-    if (pid < 0)
-        return std::unexpected(std::format("forkpty failed: errno {}", errno));
-    if (pid == 0)
-    {
-        ::close(gate->parentEnd.get());
-        vtpty::awaitGateRelease(gate->childEnd.get());
-        ::close(gate->childEnd.get());
-        ::execv(image->c_str(), argv.data());
-        ::_exit(127);
-    }
-    gate->childEnd.reset();
-    placement.placeThenRelease(vtpty::ParkedChild {
-        pid, vtpty::openPidFd(pid), std::move(gate->parentEnd), vtpty::ProcessRole::TmuxClient });
-
-    auto transport = core::net::adoptFd(loop, master);
+    auto transport = core::net::adoptFd(loop, spawned->master.get());
     if (!transport)
     {
-        ::close(master);
+        spawned->master.reset();
         reapControlMode(pid);
         return std::unexpected("could not adopt the tmux pty: " + transport.error().toString());
     }
+    std::ignore = spawned->master.release(); // the transport's now
     return SpawnedControlMode { .pid = pid, .transport = std::move(*transport) };
 }
-
 void reapControlMode(int pid)
 {
     if (pid <= 0)
@@ -112,8 +101,7 @@ void reapControlMode(int pid)
         return;
     ::kill(pid, SIGKILL);
     // Waited for until reaped: a signal that interrupts the wait would leave it a zombie.
-    while (::waitpid(pid, &status, 0) == -1 && errno == EINTR)
-        ;
+    std::ignore = vtpty::util::waitForExit(pid);
 }
 
 #else

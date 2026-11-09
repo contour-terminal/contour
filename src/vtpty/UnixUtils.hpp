@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/ControllingTerminal.hpp>
 #include <vtpty/InputEcho.hpp>
 
 #include <gsl/pointers>
@@ -9,6 +10,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <expected>
+#include <string_view>
 #include <system_error>
 
 #ifdef __APPLE__
@@ -25,7 +27,17 @@ namespace vtpty::util
 
 termios getTerminalSettings(int fd) noexcept;
 termios constructTerminalSettings(int fd) noexcept;
-bool applyTerminalSettings(int fd, termios const& tio);
+
+/// Applies @p tio to the terminal on @p fd at once, and flushes its queues once it applies. A terminal that
+/// refuses the settings is left as it is.
+/// @param fd The terminal's descriptor.
+/// @param tio The settings.
+void applyTerminalSettings(int fd, termios const& tio) noexcept;
+
+/// Gives the terminal on @p fd the settings a session's program starts with: applyTerminalSettings() of
+/// constructTerminalSettings().
+/// @param fd The terminal's slave descriptor.
+void configureTerminal(int fd) noexcept;
 
 /// Decides what the terminal does with typed text from its local flags. Echo wins; without it, line editing
 /// still on is a password prompt (Hidden), and both off is a program drawing its own echo (Raw).
@@ -59,6 +71,41 @@ bool applyTerminalSettings(int fd, termios const& tio);
 ///         refuses one.
 [[nodiscard]] std::expected<void, std::error_code> applyCreationFlags(int fd, unsigned flags) noexcept;
 
+/// Makes @p slaveFd the calling process's controlling terminal and standard streams: what login_tty() does,
+/// with the signal mask emptied and the dispositions a shell expects reset to default first.
+/// @param slaveFd The terminal's slave descriptor; left open, also where it is above 2.
+/// @param ctty Whether the terminal becomes the controlling terminal (TIOCSCTTY); a sandbox such as
+///        flatpak forbids it.
+/// @return Nothing; or why the terminal could not be made the controlling one. The standard streams are
+///         on the terminal either way: it is the program's terminal even where it cannot control it.
+[[nodiscard]] std::expected<void, std::error_code> loginTerminal(int slaveFd,
+                                                                 ControllingTerminal ctty) noexcept;
+
+/// What a descriptor written by writeAll() is, as its caller knows it: said rather than asked of the kernel
+/// on every write.
+enum class DescriptorKind : std::uint8_t
+{
+    /// A pipe, a terminal or a file: written with write().
+    Stream,
+    /// A socket: written with send(), so that a peer gone away is an error rather than a SIGPIPE --
+    /// MSG_NOSIGNAL where send() takes it, the socket's own SO_NOSIGPIPE (makeGate()) elsewhere.
+    Socket,
+};
+
+/// Writes @p bytes to @p fd in full, retrying on short writes and EINTR.
+/// @param fd The descriptor.
+/// @param kind What @p fd is, which decides how it is written.
+/// @param bytes What to write.
+/// @return Nothing; or why not everything could be written -- broken_pipe where the descriptor took nothing.
+[[nodiscard]] std::expected<void, std::error_code> writeAll(int fd,
+                                                            DescriptorKind kind,
+                                                            std::string_view bytes) noexcept;
+
+/// Waits for the child @p pid to end, and reaps it, retrying on EINTR.
+/// @param pid The child.
+/// @return Its wait status; or why it could not be waited for (ECHILD: not a child, or reaped already).
+[[nodiscard]] std::expected<int, std::error_code> waitForExit(pid_t pid) noexcept;
+
 void saveClose(gsl::not_null<int*> fd) noexcept;
 void saveDup2(int a, int b) noexcept;
 
@@ -71,14 +118,17 @@ enum class DescriptorSweep : std::uint8_t
 };
 
 /// @return One above the highest descriptor this process may open: sysconf(_SC_OPEN_MAX), or 1024 where it
-///         is indeterminate. Read before a fork(): POSIX.1-2008 took sysconf() off the async-signal-safe
-///         list.
+///         is indeterminate. Not async-signal-safe -- POSIX.1-2008 took sysconf() off that list -- so read in
+///         a single-threaded process, as the spawn trampoline is, or before a fork().
 [[nodiscard]] int openDescriptorLimit() noexcept;
 
-/// Closes every descriptor above @p keepFd, for a child between fork() and exec().
+/// Closes every descriptor above @p keepFd, before an exec(): the spawn trampoline's, ahead of its program's,
+/// and the daemon's own on a live upgrade.
 ///
-/// Async-signal-safe -- no allocation and no exception: after a fork() in a multi-threaded process the child
-/// may call only async-signal-safe functions (fork(2) NOTES; POSIX XSH fork()). It calls close(), open() and
+/// Async-signal-safe -- no allocation and no exception -- so that it stays fit for a child forked from a
+/// multi-threaded process, which may call only async-signal-safe functions (fork(2) NOTES; POSIX XSH
+/// fork()), although the trampoline that calls it is single-threaded: Contour's threaded processes spawn
+/// through it rather than fork (@see SpawnTrampoline.hpp). It calls close(), open() and
 /// lseek() of POSIX's async-signal-safe list; close_range() -- the C library's wrapper, or syscall(), which
 /// is not POSIX, where the library has none -- and getdents64 through syscall(): system calls that touch no
 /// library state but errno. A way that is not there -- close_range() before Linux 5.9, /proc/self/fd off
@@ -96,11 +146,10 @@ inline termios getTerminalSettings(int fd) noexcept
     return tio;
 }
 
-inline bool applyTerminalSettings(int fd, termios const& tio)
+inline void applyTerminalSettings(int fd, termios const& tio) noexcept
 {
     if (tcsetattr(fd, TCSANOW, &tio) == 0)
         tcflush(fd, TCIOFLUSH);
-    return true;
 }
 
 inline termios constructTerminalSettings(int fd) noexcept

@@ -133,11 +133,13 @@ std::expected<Gate, std::error_code> makeGate()
     return gate;
 }
 
-void awaitGateRelease(int fd) noexcept
+GateRelease awaitGateRelease(int fd) noexcept
 {
     auto byte = char {};
-    while (::read(fd, &byte, 1) < 0 && errno == EINTR)
+    auto got = ssize_t {};
+    while ((got = ::read(fd, &byte, 1)) < 0 && errno == EINTR)
         ;
+    return got == 1 ? GateRelease::Released : GateRelease::Abandoned;
 }
 #endif
 

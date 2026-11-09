@@ -45,7 +45,6 @@ class UnixPty final: public Pty
         void close() override;
         [[nodiscard]] bool isClosed() const noexcept override;
         bool configure() noexcept override;
-        bool login() override;
         int write(std::string_view) noexcept override;
     };
 
@@ -56,6 +55,10 @@ class UnixPty final: public Pty
     PtySlave& slave() noexcept override;
 
     [[nodiscard]] PtyMasterHandle handle() const noexcept;
+
+    /// @return The slave and the fast pipe's writer, while this process holds them. Only after start().
+    [[nodiscard]] std::optional<SpawnDescriptors> spawnDescriptors() const noexcept override;
+    void closeSpawnDescriptors() override;
     [[nodiscard]] StartResult start() override;
     void close() override;
     void waitForClosed() override;

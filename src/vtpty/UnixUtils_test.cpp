@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/OwnedFd.hpp>
+#include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/UnixUtils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +10,9 @@
 
 #include <algorithm>
 #include <array>
+#include <csignal>
+#include <string>
+#include <system_error>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -77,6 +82,32 @@ TEST_CASE("UnixUtils.closeDescriptorsAbove closes what is above the cut, whichev
     auto const sweep = GENERATE(DescriptorSweep::Kernel, DescriptorSweep::Listing, DescriptorSweep::Bounded);
     INFO("first: " << static_cast<int>(sweep));
     CHECK(closeInChild(sweep) == 0);
+}
+
+TEST_CASE("UnixUtils.writeAll writes a stream in full", "[process]")
+{
+    auto fds = std::array<int, 2> { -1, -1 };
+    REQUIRE(::pipe(fds.data()) == 0);
+    auto const readEnd = vtpty::OwnedFd { fds[0] };
+    auto const writeEnd = vtpty::OwnedFd { fds[1] };
+    REQUIRE(vtpty::util::writeAll(writeEnd.get(), vtpty::util::DescriptorKind::Stream, "spec").has_value());
+    auto received = std::string(4, '\0');
+    REQUIRE(::read(readEnd.get(), received.data(), received.size()) == 4);
+    CHECK(received == "spec");
+}
+
+TEST_CASE("UnixUtils.writeAll to a socket whose peer is gone fails without SIGPIPE", "[process]")
+{
+    // Under the default disposition a SIGPIPE would end this test process; the send() must not raise one.
+    auto* const previous = ::signal(SIGPIPE, SIG_DFL);
+    auto gate = vtpty::makeGate();
+    REQUIRE(gate.has_value());
+    gate->childEnd.reset();
+    auto const written =
+        vtpty::util::writeAll(gate->parentEnd.get(), vtpty::util::DescriptorKind::Socket, "x");
+    ::signal(SIGPIPE, previous);
+    REQUIRE_FALSE(written.has_value());
+    CHECK(written.error() == std::errc::broken_pipe);
 }
 
 TEST_CASE("inputEchoOf.decidesFromEchoAndCanonical", "[vtpty][inputecho]")

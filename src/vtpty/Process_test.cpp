@@ -6,6 +6,7 @@
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
 
+#include <core/Environment.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -537,6 +538,26 @@ TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
     (void) hangUp(process);
 }
 
+    #ifdef __linux__
+TEST_CASE("Process.theShellStartsWithNoSignalBlocked", "[process]")
+{
+    // A thread that blocks a signal must not hand that mask to the sessions it starts: the child is spawned
+    // with an empty one.
+    auto blocked = sigset_t {};
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGINT);
+    auto previous = sigset_t {};
+    REQUIRE(pthread_sigmask(SIG_BLOCK, &blocked, &previous) == 0);
+
+    auto process = running("/bin/sh", { "-c", "grep SigBlk /proc/$$/status" });
+    auto const started = process.start();
+    REQUIRE(pthread_sigmask(SIG_SETMASK, &previous, nullptr) == 0);
+    REQUIRE(started.has_value());
+    CHECK(printed(process, "SigBlk:\t0000000000000000"));
+    (void) hangUp(process);
+}
+    #endif
+
 namespace
 {
 
@@ -578,7 +599,8 @@ vtpty::DetachedCommand shellScript(std::string_view script, std::filesystem::pat
                                     .argv = { "sh", "-c", std::string { script }, target.string() },
                                     .standardInput = {},
                                     .output = vtpty::DetachedOutput::Inherited,
-                                    .role = vtpty::ProcessRole::Program };
+                                    .role = vtpty::ProcessRole::Program,
+                                    .environment = {} };
 }
 
 } // namespace
@@ -613,7 +635,8 @@ TEST_CASE("startDetached.detached from this process", "[process][placement]")
                                                                    .argv = { "sh", "-c", "exit 0" },
                                                                    .standardInput = {},
                                                                    .output = {},
-                                                                   .role = vtpty::ProcessRole::Program },
+                                                                   .role = vtpty::ProcessRole::Program,
+                                                                   .environment = {} },
                                           placement);
     REQUIRE(pid.has_value());
 
@@ -623,6 +646,25 @@ TEST_CASE("startDetached.detached from this process", "[process][placement]")
     #ifdef __linux__
     CHECK(::getsid(*pid) != ::getsid(0));
     #endif
+}
+
+TEST_CASE("startDetached.runs under the environment it is given", "[process][placement]")
+{
+    // A snapshot handed in is the program's whole environment, not this process's live one: a caller spawning
+    // from a thread of its own must not read an environment another thread may be changing.
+    constexpr auto Name = std::string_view { "CONTOUR_DETACHED_SNAPSHOT_ONLY" };
+    REQUIRE_FALSE(core::LiveEnvironment {}.get(Name).has_value());
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const target = directory.path() / "environment.txt";
+    auto command =
+        shellScript(R"(printf '%s|%s\n' "$CONTOUR_DETACHED_SNAPSHOT_ONLY" "${HOME-unset}" > "$0.part"; )"
+                    R"(mv "$0.part" "$0")",
+                    target);
+    command.environment = std::vector { std::format("{}=from-snapshot", Name) };
+    auto placement = vtpty::NoPlacement {};
+
+    REQUIRE(vtpty::startDetached(command, placement).has_value());
+    CHECK(eventuallyReads(target, "from-snapshot|unset\n") == "from-snapshot|unset\n");
 }
 
     #ifdef __linux__

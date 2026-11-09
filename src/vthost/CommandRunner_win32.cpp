@@ -25,6 +25,11 @@ std::unique_ptr<CommandRunner> makeNativeCommandRunner()
     return std::make_unique<UnsupportedCommandRunner>();
 }
 
+std::unique_ptr<CommandRunner> makeNativeCommandRunner(std::vector<std::string> /*environment*/)
+{
+    return std::make_unique<UnsupportedCommandRunner>();
+}
+
 } // namespace vthost
 
 #endif // _WIN32

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/ExecutablePath.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 
 #include <core/Utf8Path.hpp>
@@ -535,7 +536,7 @@ TEST_CASE("ensureDaemon keeps the image leased until the daemon serves", "[vthos
 
 TEST_CASE("this process names its own executable", "[vthost][relocate]")
 {
-    auto const executable = vthost::currentExecutablePath();
+    auto const executable = vtpty::currentExecutablePath();
 #if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
     REQUIRE(executable.has_value());
     CHECK(executable->is_absolute());

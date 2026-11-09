@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/testing/ScopedTempDir.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <csignal>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -37,6 +43,51 @@ TEST_CASE("the native runner reports a command killed by a signal as 128 plus th
     REQUIRE(result.has_value());
     CHECK(result->exitCode == 128 + 15);
 }
+
+TEST_CASE("a native runner given an environment runs under it, and looks its program up on its PATH",
+          "[vthost][service][command]")
+{
+    // The GUI runs systemctl on the attach's worker while its main thread still changes the environment:
+    // the command is found on the snapshot's PATH, and runs under the snapshot alone.
+    auto const directory = core::testing::ScopedTempDir { "contour-runner" };
+    auto const probe = directory.path() / "contour-runner-probe";
+    std::ofstream { probe } << "#!/bin/sh\nprintf '%s|%s' \"$ONLY_GIVEN\" \"${HOME-unset}\"\n";
+    std::filesystem::permissions(probe, std::filesystem::perms::owner_all);
+    auto const runner = vthost::makeNativeCommandRunner(
+        std::vector<std::string> { std::format("PATH={}", directory.path().string()), "ONLY_GIVEN=yes" });
+
+    auto const printed = runner->run(std::vector<std::string> { "contour-runner-probe" });
+    REQUIRE(printed.has_value());
+    CHECK(printed->exitCode == 0);
+    CHECK(printed->standardOutput == "yes|unset");
+
+    // Not on the given PATH, though it is on this process's.
+    auto const missing = runner->run(std::vector<std::string> { "sh", "-c", "exit 0" });
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error() == std::errc::no_such_file_or_directory);
+}
+
+    #ifdef __linux__
+TEST_CASE("a command starts with no signal blocked or ignored", "[vthost][service][command]")
+{
+    // The daemon's threads block SIGTERM and SIGINT, and the GUI ignores SIGPIPE; neither carries over.
+    auto blocked = sigset_t {};
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGTERM);
+    auto previousMask = sigset_t {};
+    REQUIRE(::pthread_sigmask(SIG_BLOCK, &blocked, &previousMask) == 0);
+    auto* const previousUsr1 = ::signal(SIGUSR1, SIG_IGN);
+
+    auto const runner = vthost::makeNativeCommandRunner();
+    auto const status =
+        runner->run(std::vector<std::string> { "grep", "-E", "^Sig(Blk|Ign):", "/proc/self/status" });
+
+    ::signal(SIGUSR1, previousUsr1);
+    ::pthread_sigmask(SIG_SETMASK, &previousMask, nullptr);
+    REQUIRE(status.has_value());
+    CHECK(status->standardOutput == "SigBlk:\t0000000000000000\nSigIgn:\t0000000000000000\n");
+}
+    #endif
 
 TEST_CASE("the native runner refuses an empty command", "[vthost][service][command]")
 {

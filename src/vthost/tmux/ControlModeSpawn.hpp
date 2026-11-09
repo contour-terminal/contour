@@ -33,16 +33,16 @@ struct SpawnedControlMode
 /// @return The argument vector of a control-mode client: `tmux -C [-S <socket>] attach-session`.
 [[nodiscard]] std::vector<std::string> controlModeArguments(std::string_view tmuxSocket);
 
-/// Forks `tmux -C attach-session` (against @p tmuxSocket via -S when
-/// non-empty) on a fresh PTY. tmux is looked up as @p search says and its
-/// argument vector built before the fork, so the child calls only
-/// async-signal-safe functions until it execs.
+/// Spawns `tmux -C attach-session` (against @p tmuxSocket via -S when
+/// non-empty) on a fresh PTY, through the spawn trampoline (vtpty::spawnOnNewTerminal()).
+/// tmux is looked up here, as @p search says, and its argument vector built here: the
+/// trampoline only execs what it is handed.
 /// @param loop The reactor that will drive the transport.
 /// @param tmuxSocket Optional tmux server socket path (-S).
 /// @param search Where tmux is looked for: the PATH (@see vtpty::execSearchPath()), and the files of
 ///        this machine.
 /// @param placement Places the client before it runs, as a session's shell is placed: parked on a gate
-///        after the fork, it execs once released.
+///        in the trampoline, it execs once released.
 /// @return The child and its adopted transport, or a reason on failure -- tmux not
 ///         found among them (POSIX only; unsupported on Windows).
 [[nodiscard]] std::expected<SpawnedControlMode, std::string> spawnControlMode(

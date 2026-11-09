@@ -8,6 +8,7 @@
     #include <cstdint>
     #include <expected>
     #include <filesystem>
+    #include <optional>
     #include <string>
     #include <system_error>
     #include <vector>
@@ -39,6 +40,12 @@ struct DetachedCommand
 
     /// What the program is to Contour, as the placement's log and its scope tell.
     ProcessRole role = ProcessRole::Program;
+
+    /// The environment it runs under, as "NAME=value" entries; std::nullopt for this process's own, as it
+    /// stands when the trampoline is spawned. Given, it is the trampoline's environment too, so the spawn
+    /// reads nothing of this process's: a caller on a thread of its own passes a snapshot taken where the
+    /// environment cannot be changing, rather than racing whatever thread changes it.
+    std::optional<std::vector<std::string>> environment {};
 };
 
 /// Starts @p command detached, placed by @p placement before it runs -- as a session's shell is, so
@@ -51,13 +58,14 @@ struct DetachedCommand
 /// therefore not reported here: it exits with status 127 once released, which nothing here sees, unlike
 /// QProcess::startDetached(), which waits for the exec. A caller checks that the program is there first.
 ///
-/// Implemented in Process_unix.cpp, beside Process::start(), whose async-signal-safe child helpers it
-/// shares.
+/// Implemented in Process_unix.cpp, beside Process::start(). Like it, spawned through the spawn
+/// trampoline (spawnPlaced()) rather than forked.
 ///
 /// @param command   What to run.
 /// @param placement Places the process before it runs, and releases it.
 /// @return The process's id; or why it could not be handed to @p placement -- the input file could not
-///         be opened, a fork failed, or the program's pid never arrived. In that last case a program
+///         be opened, the trampoline could not be spawned (protocol_not_supported or bad_message where it
+///         refused its spec), or the program's pid never arrived. In that last case a program
 ///         already forked may run regardless, unplaced, once its gate closes.
 [[nodiscard]] std::expected<int, std::error_code> startDetached(DetachedCommand const& command,
                                                                 ProcessPlacement& placement);

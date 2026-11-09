@@ -19,6 +19,7 @@
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -139,6 +140,25 @@ TEST_CASE("the readiness poll starts at 5 ms and doubles to a 1 s cap", "[vthost
     CHECK(vthost::nextProbeDelay(1s) == 1s);
 }
 
+TEST_CASE("daemonEnvironment: withholds the client's own variables and its activation tokens",
+          "[vthost][daemon]")
+{
+    auto const inherited = std::vector<std::string_view> {
+        "HOME=/home/u",
+        "DESKTOP_STARTUP_ID=contour-1",
+        "XDG_ACTIVATION_TOKEN=t",
+        "__NV_PRIME_RENDER_OFFLOAD=1",
+        "QT_FFMPEG_DECODING_HW_DEVICE_TYPES=",
+        "LANG=C.UTF-8",
+    };
+    auto const clientOnly =
+        std::vector<std::string> { "__NV_PRIME_RENDER_OFFLOAD", "QT_FFMPEG_DECODING_HW_DEVICE_TYPES" };
+
+    auto environment = vthost::daemonEnvironment(inherited, clientOnly);
+    std::ranges::sort(environment);
+    CHECK(environment == std::vector<std::string> { "HOME=/home/u", "LANG=C.UTF-8" });
+}
+
 TEST_CASE("ensureDaemon: a TCP endpoint is a no-op", "[vthost][daemon]")
 {
     // A remote daemon cannot be auto-spawned, so this short-circuits before any
@@ -190,6 +210,30 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
 }
 
 #ifndef _WIN32
+TEST_CASE("daemonDetachedCommand: runs under the environment it is given", "[vthost][daemon]")
+{
+    // The GUI spawns its daemon from the attach's worker while the main thread still changes its environment:
+    // the daemon's whole environment is the snapshot, and argv[0] is looked up on the snapshot's PATH.
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addExecutable("/snapshot/bin/contour");
+    files.addExecutable("/live/bin/contour");
+    auto const live = core::testing::FakeEnvironment { { { "PATH", "/live/bin" } } };
+    auto const argv = std::vector<std::string> { "contour", "daemon" };
+    auto const snapshot = std::vector<std::string> { "PATH=/snapshot/bin", "ONLY_IN_SNAPSHOT=1" };
+
+    auto const given = vthost::daemonDetachedCommand(argv, snapshot, live, files);
+    CHECK(given.environment == snapshot);
+    CHECK(given.image == "/snapshot/bin/contour");
+    CHECK(given.argv == argv);
+    CHECK(given.standardInput == "/dev/null");
+    CHECK(given.output == vtpty::DetachedOutput::Discarded);
+    CHECK(given.role == vtpty::ProcessRole::Daemon);
+
+    auto const inherited = vthost::daemonDetachedCommand(argv, std::nullopt, live, files);
+    CHECK_FALSE(inherited.environment.has_value());
+    CHECK(inherited.image == "/live/bin/contour");
+}
+
 TEST_CASE("ensureDaemon: the daemon it spawns is placed as a session is", "[vthost][daemon]")
 {
     // The daemon holds the scrollback of every session it hosts. Spawned into the client's own systemd

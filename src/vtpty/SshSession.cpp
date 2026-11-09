@@ -283,7 +283,6 @@ namespace
         void close() override {}
         [[nodiscard]] bool isClosed() const noexcept override { return false; }
         bool configure() noexcept override { return true; }
-        bool login() override { return true; }
         int write(std::string_view) noexcept override { return 0; }
     };
 } // namespace

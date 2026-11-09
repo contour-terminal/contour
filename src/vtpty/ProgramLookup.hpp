@@ -42,8 +42,9 @@ inline constexpr char PathListSeparator =
 /// @p fileSystem wins -- the filesystem's own answer, which on Windows counts an App Execution Alias
 /// (a Store-installed pwsh.exe or winget) that is no regular file.
 ///
-/// Resolution happens in the PARENT, before fork: between fork and exec only async-signal-safe
-/// calls are allowed, and a PATH walk allocates.
+/// Resolution happens in the PARENT, before the spawn: the spawn trampoline execs the path it is
+/// handed and searches for nothing, and a detached program's trampoline forks it, after which only
+/// async-signal-safe calls are allowed -- a PATH walk allocates.
 /// @param program The binary as named by the caller (typically argv[0]).
 /// @param searchPath The PATH value to search, @ref PathListSeparator separated.
 /// @param fileSystem Where the candidates are looked for.
@@ -56,7 +57,7 @@ inline constexpr char PathListSeparator =
 /// where the environment has none, that library's own default -- confstr(_CS_PATH) on glibc, whose
 /// execvpe() searches CS_PATH ("/bin:/usr/bin" upstream, "/usr/bin" on Fedora); <paths.h>'s _PATH_DEFPATH
 /// on FreeBSD, Darwin and musl, whose execvp() searches it. For a spawn that runs execv() on a path it looked
-/// up before the fork: read in the parent, as confstr() is not async-signal-safe.
+/// up before the spawn: read in the parent, which looks the path up.
 /// @param environmentPath The environment's PATH; std::nullopt where it is unset.
 /// @return The PATH to search; empty where the environment has none and the platform has no default.
 [[nodiscard]] std::string execSearchPath(std::optional<std::string> environmentPath);

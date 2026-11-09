@@ -207,16 +207,18 @@ class [[nodiscard]] Process: public Pty
     enum class SpawnProgress : uint8_t
     {
         Settled = 0, ///< No start in flight: the child has set its terminal up, or there is no child.
-        InProgress, ///< Forked, but its terminal not yet set up: input written now is discarded by its flush.
+        InProgress,  ///< Spawned, but its terminal not yet set up: input written now is discarded by its
+                     ///< flush.
     };
 
-    /// Whether the child has yet to set its terminal up. On POSIX the child flushes its terminal's queues as
-    /// it takes the terminal on, between fork() and exec() -- and a placement can park it before that for
-    /// as long as placing it takes -- so input written to the PTY before then is lost, and a capture of the
-    /// session taken then cannot promise to carry it. Settles for good once observed settled.
-    /// @return InProgress from fork() until the child signalled settling (one byte), right after the
-    ///         flush (or as it exits); Settled before start(), for an adopted child, and on Windows, where
-    ///         the console is the child's from CreateProcess() on.
+    /// Whether the child has yet to set its terminal up. On POSIX the child -- still the spawn trampoline --
+    /// flushes its terminal's queues as it takes the terminal on, before it execs the program -- and a
+    /// placement can park it before that for as long as placing it takes -- so input written to the PTY
+    /// before then is lost, and a capture of the session taken then cannot promise to carry it. Settles for
+    /// good once observed settled.
+    /// @return InProgress from the trampoline's spawn until it signalled settling (one byte), right after
+    ///         the flush (or as it exits); Settled before start(), for an adopted child, and on Windows,
+    ///         where the console is the child's from CreateProcess() on.
     [[nodiscard]] SpawnProgress spawnProgress() const;
 
     /// @return The child's exit status once it has exited; nullopt while it runs, or when there is none.
@@ -268,6 +270,8 @@ class [[nodiscard]] Process: public Pty
     /// Gives up the PTY's handover (Pty::releaseHandover()); the child stays this Process's, to give up with
     /// releaseChild() -- first, on Windows, whose exit watcher closes the pseudoconsole.
     [[nodiscard]] std::expected<InheritedPty, AdoptError> releaseHandover() override { return pty().releaseHandover(); }
+    [[nodiscard]] std::optional<SpawnDescriptors> spawnDescriptors() const noexcept override { return pty().spawnDescriptors(); }
+    void closeSpawnDescriptors() override { pty().closeSpawnDescriptors(); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     [[nodiscard]] InputEcho inputEcho() const noexcept override { return pty().inputEcho(); }

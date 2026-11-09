@@ -22,6 +22,7 @@ set(vtpty_SOURCES
     CommandCaptureStop.hpp # private: shared by the platform implementations only
     CommandLine.cpp
     EnvironmentBlock.cpp
+    ExecutablePath.cpp
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
@@ -32,6 +33,8 @@ set(vtpty_SOURCES
     PtyAdoption.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
+    SpawnSpec.cpp
+    SpawnTrampoline${PLATFORM_SUFFIX}.cpp
     SshFailureMessage.cpp
     WindowsCommandLine.cpp
 )
@@ -40,10 +43,12 @@ set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
     CommandLine.hpp
+    ControllingTerminal.hpp
     CrossingHandle.hpp
     DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
     EnvironmentBlock.hpp
     ErrnoText.hpp
+    ExecutablePath.hpp
     ImageSize.hpp
     InputEcho.hpp
     MockPty.hpp
@@ -59,6 +64,8 @@ set(vtpty_HEADERS
     SandboxInfo.hpp
     ScopeBus.hpp
     SpawnLadder.hpp
+    SpawnSpec.hpp
+    SpawnTrampoline.hpp
     SshFailureMessage.hpp
     WindowsCommandLine.hpp
     Win32Handle.hpp
@@ -111,7 +118,7 @@ if(UNIX)
 
     list(APPEND vtpty_LIBRARIES util)
     list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
-    list(APPEND vtpty_SOURCES ProcessCgroup.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
+    list(APPEND vtpty_SOURCES ProcessCgroup.hpp PosixSpawn.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp)
     list(APPEND vtpty_HEADERS ConPty.hpp)
@@ -165,6 +172,8 @@ if(VTPTY_TESTING)
         PtyAdoption_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
+        SpawnSpec_test.cpp
+        SpawnTrampoline_test.cpp
         WindowsCommandLine_test.cpp
         test/PtyReading_test.cpp
     )

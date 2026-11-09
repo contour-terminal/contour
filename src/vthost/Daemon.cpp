@@ -15,6 +15,7 @@
 #include <vtbackend/core/TerminalContext.hpp>
 
 #include <vtpty/DetachedProcess.hpp>
+#include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
 
@@ -43,6 +44,7 @@
 #include <format>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -767,45 +769,25 @@ namespace
     /// Takes the argv prebuilt (see daemonSpawnArgs) rather than composing it here. It gives the flag
     /// list ONE spelling for both platforms.
     /// @param args The full argv; args[0] is the binary to exec.
+    /// @param environment What the daemon runs under ("NAME=VALUE"); std::nullopt for this process's own.
     /// @param placement Places the daemon before it runs, as a session's shell is placed. POSIX only.
     /// @return Nothing, or why the process could not be started.
     [[nodiscard]] std::expected<void, std::string> spawnDetachedDaemon(
-        std::span<std::string const> args, [[maybe_unused]] vtpty::ProcessPlacement& placement)
+        std::span<std::string const> args,
+        std::optional<std::vector<std::string>> const& environment,
+        [[maybe_unused]] vtpty::ProcessPlacement& placement)
     {
         if (args.empty())
             return std::unexpected("no program to start");
 #ifndef _WIN32
-        // Resolved here, not in the child, which may only call async-signal-safe functions before it
-        // execs: a PATH walk is not one. argv[0] itself stays as the caller named it -- that is what
-        // the daemon's `ps` line and its own commandLine() replay should show.
-        // core::Environment, not getenv: this runs on a client that already has a live reactor
-        // thread, and the snapshot exists precisely so an environment read is not racing it.
-        auto image = vtpty::resolveExecutablePath(args[0],
-                                                  core::defaultEnvironment().get("PATH").value_or(""),
-                                                  core::platform::NativeFileSystem::instance());
-
-        // Detached means detached from the SESSION, not merely from the parent's lifetime -- this is
-        // the POSIX half of what Windows gets from DETACHED_PROCESS below. Without it the daemon stays
-        // in the invoking shell's session and foreground process group, so Ctrl-C in that terminal
-        // delivers SIGINT to the whole group and the daemon's own handler shuts down every hosted
-        // session it exists to keep alive; closing the terminal is worse, because SIGHUP is not among
-        // the signals runDaemon blocks and its default action kills the process outright, leaving the
-        // socket file behind unbound. startDetached() gives it a session of its own.
-        //
-        // Its standard streams are /dev/null: holding the shell's terminal open would keep it from
-        // being released, and let the daemon write into a terminal that has moved on. Its
-        // diagnostics go to --log-file, which the backgrounding path always supplies.
-        //
         // Placed, as a session's shell is: the daemon holds the scrollback of every session it hosts,
         // and an out-of-memory kill elsewhere in the client's unit, or in the tab it was typed into,
         // must not end it.
-        return vtpty::startDetached(
-                   vtpty::DetachedCommand { .image = std::move(image),
-                                            .argv = std::vector<std::string>(args.begin(), args.end()),
-                                            .standardInput = "/dev/null",
-                                            .output = vtpty::DetachedOutput::Discarded,
-                                            .role = vtpty::ProcessRole::Daemon },
-                   placement)
+        return vtpty::startDetached(daemonDetachedCommand(args,
+                                                          environment,
+                                                          core::defaultEnvironment(),
+                                                          core::platform::NativeFileSystem::instance()),
+                                    placement)
             .transform([](int) {})
             .transform_error([](std::error_code const& error) { return error.message(); });
 #else
@@ -818,13 +800,24 @@ namespace
         auto startupInfo = STARTUPINFOW {};
         startupInfo.cb = sizeof(startupInfo);
         auto processInfo = PROCESS_INFORMATION {};
+        // A given environment goes as a block of its own; none inherits this process's.
+        auto block = std::optional<std::wstring> {};
+        if (environment)
+        {
+            block = vtpty::windowsEnvironmentBlock(*environment);
+            if (!block)
+                return std::unexpected("the environment is not valid UTF-8");
+        }
+        auto creationFlags = DWORD { DETACHED_PROCESS | CREATE_NO_WINDOW };
+        if (block)
+            creationFlags |= CREATE_UNICODE_ENVIRONMENT;
         if (!::CreateProcessW(nullptr,
                               commandLine->data(),
                               nullptr,
                               nullptr,
                               FALSE,
-                              DETACHED_PROCESS | CREATE_NO_WINDOW,
-                              nullptr,
+                              creationFlags,
+                              block ? block->data() : nullptr,
                               nullptr,
                               &startupInfo,
                               &processInfo))
@@ -839,12 +832,18 @@ namespace
     class NativeDaemonSpawner final: public DaemonSpawner
     {
       public:
-        NativeDaemonSpawner(): _source { core::net::makeDefaultBackend() }, _loop { *_source } {}
+        /// @param environment What every daemon it spawns runs under; std::nullopt for this process's own.
+        explicit NativeDaemonSpawner(std::optional<std::vector<std::string>> environment):
+            _environment { std::move(environment) },
+            _source { core::net::makeDefaultBackend() },
+            _loop { *_source }
+        {
+        }
 
         [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const> argv,
                                                              vtpty::ProcessPlacement& placement) override
         {
-            return spawnDetachedDaemon(argv, placement);
+            return spawnDetachedDaemon(argv, _environment, placement);
         }
 
         [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
@@ -855,6 +854,7 @@ namespace
         }
 
       private:
+        std::optional<std::vector<std::string>> _environment;
         std::unique_ptr<core::net::IoBackend> _source;
         core::net::EventLoop _loop;
     };
@@ -1344,8 +1344,62 @@ DaemonPresence awaitDaemon(DaemonSpawner& spawner,
 
 std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner()
 {
-    return std::make_unique<NativeDaemonSpawner>();
+    return std::make_unique<NativeDaemonSpawner>(std::nullopt);
 }
+
+std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner(std::vector<std::string> environment)
+{
+    return std::make_unique<NativeDaemonSpawner>(std::move(environment));
+}
+
+std::vector<std::string> daemonEnvironment(std::span<std::string_view const> inherited,
+                                           std::span<std::string const> clientOnly)
+{
+    auto withheld = std::vector<std::string>(clientOnly.begin(), clientOnly.end());
+    std::ranges::transform(ClientActivationVariables, std::back_inserter(withheld), [](auto name) {
+        return std::string { name };
+    });
+    return vtpty::buildEnvironmentBlock(inherited, {}, withheld, vtpty::PlatformEnvironmentNames);
+}
+
+#ifndef _WIN32
+vtpty::DetachedCommand daemonDetachedCommand(std::span<std::string const> argv,
+                                             std::optional<std::vector<std::string>> environment,
+                                             core::Environment const& processEnvironment,
+                                             core::platform::FileSystem const& fileSystem)
+{
+    Require(!argv.empty());
+    // Resolved here, not in the child, which may only call async-signal-safe functions before it
+    // execs: a PATH walk is not one. argv[0] itself stays as the caller named it -- that is what
+    // the daemon's `ps` line and its own commandLine() replay should show. Looked up on the PATH the
+    // daemon runs under: the given environment's, else this process's through core::Environment, not
+    // getenv -- this runs on a client that already has a live reactor thread.
+    auto const searchPath =
+        environment ? std::string { vtpty::environmentValue(
+                                        *environment, "PATH", vtpty::EnvironmentNames::CaseSensitive)
+                                        .value_or(std::string_view {}) }
+                    : processEnvironment.get("PATH").value_or("");
+    auto image = vtpty::resolveExecutablePath(argv.front(), searchPath, fileSystem);
+
+    // Detached means detached from the SESSION, not merely from the parent's lifetime -- this is
+    // the POSIX half of what Windows gets from DETACHED_PROCESS. Without it the daemon stays
+    // in the invoking shell's session and foreground process group, so Ctrl-C in that terminal
+    // delivers SIGINT to the whole group and the daemon's own handler shuts down every hosted
+    // session it exists to keep alive; closing the terminal is worse, because SIGHUP is not among
+    // the signals runDaemon blocks and its default action kills the process outright, leaving the
+    // socket file behind unbound. startDetached() gives it a session of its own.
+    //
+    // Its standard streams are /dev/null: holding the shell's terminal open would keep it from
+    // being released, and let the daemon write into a terminal that has moved on. Its
+    // diagnostics go to --log-file, which the backgrounding path always supplies.
+    return vtpty::DetachedCommand { .image = std::move(image),
+                                    .argv = std::vector<std::string>(argv.begin(), argv.end()),
+                                    .standardInput = "/dev/null",
+                                    .output = vtpty::DetachedOutput::Discarded,
+                                    .role = vtpty::ProcessRole::Daemon,
+                                    .environment = std::move(environment) };
+}
+#endif
 
 int ensureDaemon(AttachEndpoint const& endpoint,
                  DaemonBinarySource& binary,

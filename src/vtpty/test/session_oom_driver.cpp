@@ -20,7 +20,9 @@
 #include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SdBusScopeBus.hpp>
+#include <vtpty/SpawnTrampoline.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
+#include <vtpty/UnixUtils.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
 
@@ -204,7 +206,8 @@ int driveDetached(std::string_view placementName)
                                                                    .argv = { self, "--hog" },
                                                                    .standardInput = {},
                                                                    .output = vtpty::DetachedOutput::Inherited,
-                                                                   .role = vtpty::ProcessRole::Program },
+                                                                   .role = vtpty::ProcessRole::Program,
+                                                                   .environment = {} },
                                           *placement);
     if (!pid)
     {
@@ -214,9 +217,8 @@ int driveDetached(std::string_view placementName)
 
     auto const cgroup = cgroupOnceRunning(*pid, "--hog");
     std::println("hog cgroup: {}", cgroup);
-    auto status = 0;
-    while (::waitpid(*pid, &status, 0) < 0 && errno == EINTR)
-        ;
+    // A status that cannot be had reads as an exit with 0: not the SIGKILL the test waits for.
+    auto const status = vtpty::util::waitForExit(*pid).value_or(0);
     if (WIFEXITED(status))
     {
         std::println(stderr, "the hog exited with {} instead of being killed", WEXITSTATUS(status));
@@ -370,6 +372,9 @@ int reportPlacements(std::string_view unitPrefix)
 
 int main(int argc, char const* argv[])
 {
+    // First of all: a trampoline invocation runs as nothing but the trampoline. @see SpawnTrampoline.hpp.
+    vtpty::runSpawnTrampolineIfRequested(argc, argv);
+
     auto const arguments = std::span { argv, static_cast<std::size_t>(argc) };
     if (arguments.size() != 2)
         return ExitUsage;

@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace vthost
 {
@@ -44,5 +45,12 @@ class CommandRunner
 /// @return A runner that starts real processes: `posix_spawnp` with standard output captured through a
 ///         pipe and standard error discarded. On Windows every run fails with `errc::not_supported`.
 [[nodiscard]] std::unique_ptr<CommandRunner> makeNativeCommandRunner();
+
+/// A native runner for a caller whose other threads may change the environment while it runs a command:
+/// every command runs under @p environment, its program looked up on that environment's PATH, and running
+/// one reads nothing of this process's environment.
+/// @param environment What every command runs under ("NAME=VALUE").
+/// @return The runner. On Windows every run fails with `errc::not_supported`.
+[[nodiscard]] std::unique_ptr<CommandRunner> makeNativeCommandRunner(std::vector<std::string> environment);
 
 } // namespace vthost

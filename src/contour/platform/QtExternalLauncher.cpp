@@ -95,7 +95,8 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetached(QString const& p
                                                 .argv = std::move(argv),
                                                 .standardInput = {},
                                                 .output = vtpty::DetachedOutput::Inherited,
-                                                .role = vtpty::ProcessRole::Program },
+                                                .role = vtpty::ProcessRole::Program,
+                                                .environment = {} },
                        *_placement);
 #endif
 }
@@ -140,7 +141,8 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
                                                 .argv = std::move(argv),
                                                 .standardInput = inputFile,
                                                 .output = vtpty::DetachedOutput::Discarded,
-                                                .role = vtpty::ProcessRole::Program },
+                                                .role = vtpty::ProcessRole::Program,
+                                                .environment = {} },
                        *_placement);
 #endif
 }
