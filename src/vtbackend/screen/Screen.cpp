@@ -4649,13 +4649,18 @@ namespace impl
                 return ApplyResult::Invalid;
 
             if (pd == "?")
+            {
                 terminal.requestClipboardRead(pc, *targets); // gated by Settings::allowClipboardRead
-            else if (!isValidBase64(pd))
-                // The decoder stops at the first stray byte, so garbage would arrive as an empty copy:
-                // the clear an empty Pd asks for, of whatever the user had copied.
+                return ApplyResult::Ok;
+            }
+            // A byte that is not a base64 digit is skipped, as xterm skips it -- esctest's own Pd ends in a
+            // stray quote. Here Contour departs from xterm: a Pd that is not empty yet carries no byte is
+            // refused, where xterm clears the selection with it. It would arrive as an empty copy, the clear
+            // only an empty Pd asks for, of whatever the user had copied.
+            auto const data = core::base64::decode(base64DigitsOf(pd));
+            if (data.empty() && !pd.empty())
                 return ApplyResult::Invalid;
-            else
-                terminal.copyToClipboard(core::base64::decode(pd), ClipboardWriter::Program, *targets);
+            terminal.copyToClipboard(data, ClipboardWriter::Program, *targets);
             return ApplyResult::Ok;
         }
 

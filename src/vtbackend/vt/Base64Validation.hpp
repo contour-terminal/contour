@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace vtbackend
@@ -38,6 +40,19 @@ inline constexpr auto Base64Digits =
 [[nodiscard]] inline bool isValidBase64(std::string_view text) noexcept
 {
     return base64DigitCount(text).has_value();
+}
+
+/// Drops every byte of @p text that is not a base64 digit: padding, whitespace and any stray byte. That is
+/// how xterm reads OSC 52's _Pd_ (button.c, AppendToSelectionBuffer), skipping such a byte where
+/// core::base64::decode stops at it.
+/// @param text The candidate base64 text.
+/// @return The digits of @p text, in order, which core::base64::decode reads whole.
+[[nodiscard]] inline std::string base64DigitsOf(std::string_view text)
+{
+    auto digits = std::string {};
+    digits.reserve(text.size());
+    std::ranges::copy_if(text, std::back_inserter(digits), [](char ch) { return Base64Digits.contains(ch); });
+    return digits;
 }
 
 } // namespace vtbackend

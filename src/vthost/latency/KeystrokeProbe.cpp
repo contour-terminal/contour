@@ -60,11 +60,12 @@ void KeystrokeProbe::frameSwapped(std::optional<int> drawnCursorColumn)
         case ProbePhase::Pausing:
         case ProbePhase::Finished:
         case ProbePhase::PromptTimedOut:
-        case ProbePhase::EchoTimedOut: return;
+        case ProbePhase::EchoTimedOut:
+        case ProbePhase::FocusTimedOut: return;
     }
 }
 
-std::optional<char> KeystrokeProbe::takeDueKey()
+std::optional<char> KeystrokeProbe::takeDueKey(KeyboardFocus focus)
 {
     auto const now = _clock.now();
     auto const lock = std::scoped_lock { _mutex };
@@ -80,6 +81,15 @@ std::optional<char> KeystrokeProbe::takeDueKey()
         case ProbePhase::Pausing:
             if (now < _dueAt)
                 return std::nullopt;
+            if (focus == KeyboardFocus::Absent)
+            {
+                if (now - _dueAt > _plan.focusTimeout)
+                {
+                    _result.phase = ProbePhase::FocusTimedOut;
+                    _result.awaitedColumn = expectedCursorColumn(_keyIndex);
+                }
+                return std::nullopt;
+            }
             _keyTypedAt = now;
             _result.phase = ProbePhase::AwaitingEcho;
             return keyFor(_keyIndex);
@@ -92,7 +102,8 @@ std::optional<char> KeystrokeProbe::takeDueKey()
             return std::nullopt;
         case ProbePhase::Finished:
         case ProbePhase::PromptTimedOut:
-        case ProbePhase::EchoTimedOut: return std::nullopt;
+        case ProbePhase::EchoTimedOut:
+        case ProbePhase::FocusTimedOut: return std::nullopt;
     }
     return std::nullopt;
 }

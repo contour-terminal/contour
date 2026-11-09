@@ -978,6 +978,10 @@ jobs:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
           copyback: false
+          # The action's default is 6 GB, which two of contour_gui_test_heavy's sources (3 to 4 GB each) compiling
+          # side by side exceeded: the VM's kernel killed the compiler and make stopped with error code 137. The
+          # runner has 16 GB; 12 GB leaves the host its share.
+          mem: 12288
           prepare: pkg install -y wget curl
           run: |
             set -ex
@@ -990,7 +994,10 @@ jobs:
             # rustup installs into ~/.cargo of this one shell session's user, so PATH is extended here.
             ./scripts/install-rust-wasm.sh
             export PATH="$HOME/.cargo/bin:$PATH"
-            cmake -S . -B build -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
+            # Ninja, which install-deps.sh installs, rather than the Makefiles CMake defaults to here: the job
+            # pools the top-level CMakeLists.txt sets up -- contour_heavy_compile_pool, one compile of the
+            # heaviest test sources at a time, and contour_link_pool -- exist only under a Ninja generator.
+            cmake -S . -B build -G Ninja -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             # ctest, not a hand-written list: that list predated src/coro, src/net, src/vthost and
             # src/vtworkspace, so those suites were built in this VM and thrown away -- and a BSD

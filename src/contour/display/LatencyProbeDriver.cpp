@@ -32,8 +32,11 @@ LatencyProbeDriver::LatencyProbeDriver(QQuickWindow& window,
                                        TerminalDisplay& display,
                                        vthost::latency::KeystrokeProbe& probe,
                                        std::function<void()> onFinished):
-    _window { &window }, _probe { probe }, _onFinished { std::move(onFinished) }
+    _window { &window }, _display { &display }, _probe { probe }, _onFinished { std::move(onFinished) }
 {
+    // A window launched from a process that is not the frontmost application is activated by the system in
+    // its own time, on macOS often well after its first frame; tick() holds every key until then.
+    window.requestActivate();
     display.forceActiveFocus();
     // The render thread swaps the frame, so the handler runs there: that is the instant the probe stamps.
     // It holds the display's cursor-column cell, never the display, which the GUI thread may destroy
@@ -53,13 +56,16 @@ LatencyProbeDriver::LatencyProbeDriver(QQuickWindow& window,
 void LatencyProbeDriver::tick()
 {
     using vthost::latency::ProbePhase;
-    if (auto const key = _probe.takeDueKey())
+    auto const focus = _display && _display->hasActiveFocus() ? vthost::latency::KeyboardFocus::Present
+                                                              : vthost::latency::KeyboardFocus::Absent;
+    if (auto const key = _probe.takeDueKey(focus))
         typeKey(*key);
     switch (_probe.phase())
     {
         case ProbePhase::Finished:
         case ProbePhase::PromptTimedOut:
-        case ProbePhase::EchoTimedOut: finish(); return;
+        case ProbePhase::EchoTimedOut:
+        case ProbePhase::FocusTimedOut: finish(); return;
         case ProbePhase::AwaitingPrompt:
         case ProbePhase::Pausing:
         case ProbePhase::AwaitingEcho: return;

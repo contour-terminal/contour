@@ -33,8 +33,9 @@ class LatencyProbeDriver final: public QObject
     /// Starts driving at once.
     /// @param window The window the keys are delivered to and whose frames are watched.
     /// @param display The terminal display whose last drawn cursor column each frame reports. Given
-    ///        keyboard focus. Touched only here: frames read its shared cursor-column cell, so the display
-    ///        may be destroyed before the driver (its frames then stop advancing the probe).
+    ///        keyboard focus, and no key is typed while it lacks the active focus. Frames read only its
+    ///        shared cursor-column cell, so the display may be destroyed before the driver (its frames then
+    ///        stop advancing the probe).
     /// @param probe The probe to feed and to ask for keys. Borrowed: it must outlive the driver.
     /// @param onFinished Called once, on the GUI thread, after the probe reached a terminal phase and
     ///        the quit byte was sent.
@@ -50,6 +51,8 @@ class LatencyProbeDriver final: public QObject
 
     /// Null once the window is gone: the driver then types nothing, and the probe's timeouts end the run.
     QPointer<QQuickWindow> _window;
+    /// Null once the display is gone: it then has no focus, and the probe's timeouts end the run.
+    QPointer<TerminalDisplay> _display;
     vthost::latency::KeystrokeProbe& _probe;
     std::function<void()> _onFinished;
     QTimer _timer;

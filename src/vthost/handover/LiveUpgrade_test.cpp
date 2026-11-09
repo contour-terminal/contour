@@ -231,13 +231,28 @@ TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][han
 
 TEST_CASE("live upgrade loses no output from a flooding program", "[vthost][handover][upgrade][threading]")
 {
-    // Enough output that the switch falls in the middle of it, at the PTY's backpressure.
-    static constexpr auto FloodBytes = std::size_t { 50 } << 20;
+    // A flood in two halves, held apart by a gate byte that only the new image sends: the switch falls inside
+    // the flood whatever the machine's speed, and the first half is large enough that the switch finds it
+    // still pouring out at the PTY's backpressure. The gate is read raw and unechoed, so it adds nothing to
+    // the output. The old image reads some 12 KB before the switch (measured on Linux), and a PTY buffers a
+    // few times that: a first half of 1 MB is still flowing when the switch comes, and the second keeps the
+    // test short under valgrind, which reads some 100 KB a second here.
+    static constexpr auto BeforeGate = std::size_t { 1 } << 20;
+    static constexpr auto AfterGate = std::size_t { 256 } << 10;
+    static constexpr auto FloodBytes = BeforeGate + AfterGate;
+    // How long the output may stand still before a byte counts as lost. A bound on a pause rather than on the
+    // whole flood, which is slow under valgrind but never stops advancing.
+    static constexpr auto StallLimit = 30s;
     auto oldCount = ByteCounter {};
     auto newCount = ByteCounter {};
     auto u = Upgrade { [](vtpty::PageSize size) {
         return vthost::testing::shellProcess(
-            size, std::format("stty raw -echo; head -c {} /dev/zero | tr '\\0' x; exec cat", FloodBytes));
+            size,
+            std::format(
+                "stty raw -echo; head -c {} /dev/zero | tr '\\0' x; dd bs=1 count=1 of=/dev/null 2>/dev/null;"
+                " head -c {} /dev/zero | tr '\\0' x; exec cat",
+                BeforeGate,
+                AfterGate));
     } };
     u.live->host.subscribeStream(&oldCount);
     REQUIRE(u.live->host.createTab() != nullptr);
@@ -265,17 +280,29 @@ TEST_CASE("live upgrade loses no output from a flooding program", "[vthost][hand
     u.acceptor.reset();
     u.live.reset();
 
-    // The switch fell inside the flood, and every byte arrived exactly once, through one host or the other.
-    CHECK(countAtExec < FloodBytes);
+    // The switch fell inside the first half, while it was still pouring out; the second waits for the new
+    // image to open the gate.
+    INFO("bytes read before the exec: " << countAtExec);
+    CHECK(countAtExec < BeforeGate);
     REQUIRE(next != nullptr);
-    auto const deadline = std::chrono::steady_clock::now() + 120s;
-    while (oldCount.count + newCount.count < FloodBytes && std::chrono::steady_clock::now() < deadline)
+    next->host.writeInput(id, "g");
+    auto lastProgress = std::chrono::steady_clock::now();
+    auto lastTotal = oldCount.count + newCount.count;
+    while (lastTotal < FloodBytes && std::chrono::steady_clock::now() - lastProgress < StallLimit)
+    {
         std::ignore = next->loop.runOnce(10ms);
+        if (auto const total = oldCount.count + newCount.count; total != lastTotal)
+        {
+            lastTotal = total;
+            lastProgress = std::chrono::steady_clock::now();
+        }
+    }
     // A moment longer, for a byte that would arrive twice.
     for ([[maybe_unused]] auto const turn: std::views::iota(0, 30))
         std::ignore = next->loop.runOnce(10ms);
+    // Every byte arrived exactly once, through one host or the other.
     CHECK(oldCount.count == countAtExec);
-    CHECK(newCount.count > 0);
+    CHECK(newCount.count >= AfterGate);
     CHECK(oldCount.count + newCount.count == FloodBytes);
     CHECK(childOf(next->host, id) == child);
     next->host.unsubscribeStream(&newCount);
