@@ -111,6 +111,10 @@ namespace
     image.defaultColorPreference = vtbackend::ColorPreference::Dark;
     image.upgradeGeneration = 4;
     image.cellPixelSize = vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) };
+    image.releases = {
+        HandoverRelease { .workspace = 3, .release = vthost::proto::WorkspaceRelease::SwitchedAway },
+        HandoverRelease { .workspace = 5, .release = vthost::proto::WorkspaceRelease::Closed }
+    };
     return image;
 }
 
@@ -148,6 +152,12 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.objects.labels.at(0).ref == expected.objects.labels.at(0).ref);
     CHECK(actual.defaultColorPreference == expected.defaultColorPreference);
     CHECK(actual.cellPixelSize == expected.cellPixelSize);
+    REQUIRE(actual.releases.size() == expected.releases.size());
+    for (auto const& [got, want]: std::views::zip(actual.releases, expected.releases))
+    {
+        CHECK(got.workspace == want.workspace);
+        CHECK(got.release == want.release);
+    }
     CHECK(actual.listeners.size() == 2);
     CHECK(actual.listeners.at(1).name == "native-tcp");
     CHECK(actual.listeners.at(1).handle == vtpty::CrossingHandle { 21 });

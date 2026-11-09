@@ -39,6 +39,7 @@
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -705,6 +706,72 @@ TEST_CASE("a session served on its PTY alone crosses every later handover so, an
     REQUIRE(::write(slave, "-again", 6) == 6);
     CHECK(next->eventually([&] { return next->pageText(id).contains("ready-again"); }));
     ::close(slave);
+}
+
+// Review (PR 4, I2): the image carried no release, so after `contour daemon upgrade` every workspace switched
+// away from came back at the next launch, as one whose window closed does.
+TEST_CASE("a workspace switched away from stays hidden across a handover, and one closed stays left",
+          "[vthost][handover][threading]")
+{
+    auto old = oneSession();
+    auto const hidden = old->host.model().workspaceAt(0)->id();
+    auto const* const second = old->host.createWorkspace();
+    REQUIRE(second != nullptr);
+    auto const left = second->id();
+    REQUIRE(old->eventually([&] { return old->host.sessionCount() == 2; }));
+    old->host.noteWorkspaceReleased(hidden, proto::WorkspaceRelease::SwitchedAway);
+    old->host.noteWorkspaceReleased(left, proto::WorkspaceRelease::Closed);
+    REQUIRE(old->host.visibility(hidden) == WorkspaceVisibility::Hidden);
+
+    auto image = handOver(std::move(old));
+    CHECK(image.releases.size() == 2);
+    auto const live = takeOver(std::move(image));
+
+    CHECK(live->host.visibility(hidden) == WorkspaceVisibility::Hidden);
+    CHECK(live->host.visibility(left) == WorkspaceVisibility::Left);
+    CHECK(live->host.lastRelease(left) == proto::WorkspaceRelease::Closed);
+}
+
+namespace
+{
+/// A stand-in for an attached client that shows the workspaces it is given.
+struct FollowingClient final: vthost::SessionStreamEvents
+{
+    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
+    {
+        return shown.contains(workspace.value);
+    }
+
+    std::set<uint64_t> shown {}; ///< The workspaces it shows.
+};
+} // namespace
+
+// Review (PR 4): a client following a hidden workspace, its first layout not yet confirmed, holds the release
+// aside; the capture happens after that client went, so the release is back and crosses.
+TEST_CASE("a hidden workspace followed but not yet shown when a live upgrade starts stays hidden",
+          "[vthost][handover][threading]")
+{
+    auto old = oneSession();
+    auto const hidden = old->host.model().workspaceAt(0)->id();
+    old->host.noteWorkspaceReleased(hidden, proto::WorkspaceRelease::SwitchedAway);
+    REQUIRE(old->host.visibility(hidden) == WorkspaceVisibility::Hidden);
+
+    auto client = FollowingClient {};
+    old->host.noteClientAttached(&client);
+    client.shown.insert(hidden.value);
+    old->host.noteWorkspaceFollowed(hidden, &client);
+    REQUIRE(old->host.lastRelease(hidden) == std::nullopt);
+
+    // The upgrade closes the client before it confirmed WorkspaceShown.
+    client.shown.clear();
+    old->host.noteClientDetached(&client);
+
+    auto image = handOver(std::move(old));
+    CHECK(image.releases.size() == 1);
+    auto const live = takeOver(std::move(image));
+
+    CHECK(live->host.visibility(hidden) == WorkspaceVisibility::Hidden);
+    CHECK(live->host.lastRelease(hidden) == proto::WorkspaceRelease::SwitchedAway);
 }
 #endif
 

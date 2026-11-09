@@ -1174,9 +1174,9 @@ A workspace made for the connection (`NewWorkspace`, `FollowWorkspace 0`) and ne
 the same way, so a switch to `+new` on another daemon that gave up before the first layout leaves the
 workspace it made put away -- as the same daemon's given-up switch does -- not left for the next launch. A
 launch brings back the left workspaces only: a second machine attaching gets the ones nobody shows, and a
-workspace a user switched away from stays away. The state rides in the workspace snapshot, so a hidden
-workspace is still hidden after a restart or a live upgrade; one that was shown comes back left, its clients
-having gone with the daemon. The primary viewer
+workspace a user switched away from stays away. The state rides in the workspace snapshot, and in the live
+upgrade's handover image (`HandoverImage::releases`), so a hidden workspace is still hidden after a restart or a
+live upgrade; one that was shown comes back left, its clients having gone with the daemon. The primary viewer
 takes up no unclaimed workspace another connection follows, so a workspace another window switched to shows
 there only.
 

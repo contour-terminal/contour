@@ -101,6 +101,13 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
     for (auto& session: image.sessions)
         adoptHandoverSession(session);
 
+    // No client is attached yet: each release recorded is what the workspace's visibility is until one
+    // follows it, as it was -- a workspace switched away from stays hidden rather than coming back at the
+    // next launch.
+    for (auto const& [workspace, release]: image.releases)
+        if (_model.workspace(vtworkspace::WorkspaceId { workspace }) != nullptr)
+            noteWorkspaceReleased(vtworkspace::WorkspaceId { workspace }, release);
+
     // A leaf whose session could not be adopted shows nothing, and nothing would ever close it.
     for (auto const session: leafSessionsOf(image.tree))
         if (!_sessions.contains(session.value))
