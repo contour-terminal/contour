@@ -1331,9 +1331,10 @@ jobs:
         # runs once per Quick Controls style (Fusion, Fluent, ContourLinux, ContourTui), each 4-7 minutes
         # on this runner, and the fourth was cut off at 15 with every earlier test passing.
         #
-        # A hang fails one test, not the step: the preset gives every test 10 minutes (the longest GUI
-        # run takes 7), vthost_test its own 5, and ctest shows a timed-out test's output. The trace
-        # names each Catch2 case on stderr as it starts, so that output ends with the case that hung.
+        # A hang fails one test, not the step: the preset gives every test 10 minutes, the GUI suite's
+        # four runs their own 20 (each takes 8-10 here), vthost_test its own 5, and ctest shows a
+        # timed-out test's output. The trace names each Catch2 case on stderr as it starts, so that
+        # output ends with the case that hung.
         timeout-minutes: 30
         env:
           CONTOUR_TEST_TRACE: "1"
@@ -1681,9 +1682,10 @@ jobs:
           ccache --show-config | Select-String -Pattern 'cache_dir|max_size|compiler_check|sloppiness|base_dir'
           ccache -s
       - name: "Test"
-        # A hang fails one test, not the step: the preset gives every test 10 minutes (the longest GUI
-        # run takes 7), vthost_test its own 5, and ctest shows a timed-out test's output. The trace
-        # names each Catch2 case on stderr as it starts, so that output ends with the case that hung.
+        # A hang fails one test, not the step: the preset gives every test 10 minutes, the GUI suite's
+        # four runs their own 20 (each takes 8-10 here), vthost_test its own 5, and ctest shows a
+        # timed-out test's output. The trace names each Catch2 case on stderr as it starts, so that
+        # output ends with the case that hung.
         shell: pwsh
         timeout-minutes: 30
         env:
