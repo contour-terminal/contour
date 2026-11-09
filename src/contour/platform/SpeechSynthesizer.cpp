@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+
+#include <QtCore/QObject>
+#include <QtCore/QString>
+#include <QtCore/QThread>
 
 #ifdef CONTOUR_WITH_TTS
     #include <QtTextToSpeech/QTextToSpeech>
@@ -64,18 +69,71 @@ std::string speakableText(std::string_view text, size_t maxChars)
     return cut;
 }
 
+ThreadedSpeechSynthesizer::ThreadedSpeechSynthesizer(EngineFactory factory):
+    _thread { std::make_unique<QThread>() }, _receiver { std::make_unique<QObject>() }
+{
+    _thread->setObjectName(QStringLiteral("speech"));
+    _receiver->moveToThread(_thread.get());
+
+    // The engine goes on the thread it was built on, once that thread's loop has ended. Driven by the
+    // thread finishing rather than by a call queued to it, because an owner may outlive its application,
+    // after which queued calls are never delivered.
+    QObject::connect(
+        _thread.get(), &QThread::finished, _thread.get(), [this] { _engine.reset(); }, Qt::DirectConnection);
+    _thread->start();
+
+    // The first thing the worker does, so everything queued after it finds the engine already built.
+    postToObject(_receiver.get(), [this, factory = std::move(factory)] {
+        _engine = factory();
+        if (_engine && _engine->available())
+            _isAvailable.store(true, std::memory_order_release);
+        else
+            _engine.reset(); // it cannot speak: release its plugin and service connection
+    });
+}
+
+ThreadedSpeechSynthesizer::~ThreadedSpeechSynthesizer()
+{
+    // Not queued: with no QCoreApplication left a queued call would never run, and this would wait for
+    // it forever. A call in progress (the probe included) finishes first; what is still queued is
+    // dropped, which at shutdown is what stopping the speech would have done anyway.
+    _thread->quit();
+    _thread->wait();
+    // _receiver's thread has finished, so it may now be destroyed from here.
+}
+
+bool ThreadedSpeechSynthesizer::available() const
+{
+    return _isAvailable.load(std::memory_order_acquire);
+}
+
+void ThreadedSpeechSynthesizer::say(std::string_view text)
+{
+    postToObject(_receiver.get(), [this, text = std::string { text }] {
+        if (_engine)
+            _engine->say(text);
+    });
+}
+
+void ThreadedSpeechSynthesizer::stop()
+{
+    postToObject(_receiver.get(), [this] {
+        if (_engine)
+            _engine->stop();
+    });
+}
+
 #ifdef CONTOUR_WITH_TTS
 
 namespace
 {
     /// Speaks through Qt's TextToSpeech module.
     ///
-    /// The engine is built on first use rather than with this object. Constructing a QTextToSpeech
-    /// loads the platform's speech plugin and opens a connection to its service — speech-dispatcher on
-    /// Linux — to enumerate the installed voices, and that connection leaks its voice-list reply
-    /// inside libspeechd. A contour nobody ever asks to read anything aloud should pay none of that,
-    /// so holding this object stays free and the engine appears only when something is actually said
-    /// or asked about.
+    /// Constructing it loads the platform's speech plugin and connects to its service --
+    /// speech-dispatcher on Linux -- which enumerates the installed voices; with espeak-ng that is
+    /// thousands of them and takes a second or more. It is therefore only ever built, used and
+    /// destroyed on a ThreadedSpeechSynthesizer's worker, and built as soon as the application starts: an
+    /// early answer paid for off the GUI thread is worth more than the connection it costs.
     class QtSpeechSynthesizer final: public SpeechSynthesizer
     {
       public:
@@ -84,48 +142,28 @@ namespace
             // Built in, but a platform with no engine or no installed voice still cannot speak; on Linux
             // that is a machine without speech-dispatcher or flite. Asked rather than assumed, so the
             // menu row does not offer silence.
-            auto const& speech = engine();
-            return speech.state() != QTextToSpeech::Error && !speech.availableVoices().isEmpty();
+            return _speech.state() != QTextToSpeech::Error && !_speech.availableVoices().isEmpty();
         }
 
         void say(std::string_view text) override
         {
             // say() already replaces what is being spoken; stopping first makes that explicit and is
             // what makes a second invocation feel like "read THIS" rather than "queue this up".
-            auto& speech = engine();
-            speech.stop();
-            speech.say(QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size())));
+            _speech.stop();
+            _speech.say(QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size())));
         }
 
-        void stop() override
-        {
-            // Deliberately does NOT build the engine: nothing has been spoken through one that does not
-            // exist, so there is nothing to stop, and constructing it here to stop it immediately would
-            // undo the deferral this class exists for.
-            if (_speech)
-                _speech->stop();
-        }
+        void stop() override { _speech.stop(); }
 
       private:
-        /// The engine, constructed on the first call. @see the class description for why it waits.
-        /// @return The engine, which from here on outlives every use of it.
-        [[nodiscard]] QTextToSpeech& engine() const
-        {
-            if (!_speech)
-                _speech = std::make_unique<QTextToSpeech>();
-            return *_speech;
-        }
-
-        /// Mutable because asking whether speech is possible is a const question whose answer only the
-        /// engine knows. Deferring construction is an implementation detail; it must not force the call
-        /// sites into a non-const path, nor into sequencing a setup call of their own.
-        mutable std::unique_ptr<QTextToSpeech> _speech;
+        QTextToSpeech _speech;
     };
 } // namespace
 
 std::unique_ptr<SpeechSynthesizer> makeSpeechSynthesizer()
 {
-    return std::make_unique<QtSpeechSynthesizer>();
+    return std::make_unique<ThreadedSpeechSynthesizer>(
+        []() -> std::unique_ptr<SpeechSynthesizer> { return std::make_unique<QtSpeechSynthesizer>(); });
 }
 
 #else

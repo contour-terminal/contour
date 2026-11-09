@@ -112,6 +112,10 @@ speech.
     feature is simply not offered: the menu row does not appear and the shortcut does nothing, rather
     than appearing and staying silent.
 
+    Whether a voice is available is checked once, in the background, as soon as Contour starts, so
+    opening a menu never waits for the speech engine. Until that check has answered — usually well
+    under a few seconds — the menu row is not offered yet.
+
     A build that omitted it says so in its own build log, so a packager can see it without having to
     run the application.
 
