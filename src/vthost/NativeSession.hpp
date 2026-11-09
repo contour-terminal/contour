@@ -101,7 +101,8 @@ struct HandshakePolicy
                                                                    proto::Capability::ClipboardTargets,
                                                                    proto::Capability::SoftFonts,
                                                                    proto::Capability::WorkspaceFollow,
-                                                                   proto::Capability::WorkspaceSwitch });
+                                                                   proto::Capability::WorkspaceSwitch,
+                                                                   proto::Capability::WorkspaceShown });
 };
 
 /// When a connection sends a session's program-status set.
@@ -606,6 +607,19 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a verb.
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
+
+    /// Serves @p frame if it is a FollowWorkspace or ReleaseWorkspace (gated on Capability::WorkspaceFollow),
+    /// a WorkspaceShown (Capability::WorkspaceShown) or a SwitchReply (Capability::WorkspaceSwitch), refusing
+    /// it when the capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
+    /// @param frame The frame read.
+    /// @return Served when it was one of them.
+    [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
+
+    /// @return Whether the client confirms each followed workspace's first layout (WorkspaceShown).
+    [[nodiscard]] bool confirmsShownWorkspaces() const noexcept
+    {
+        return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceShown);
+    }
 
     /// What requireGrant() decided.
     enum class GrantCheck : uint8_t

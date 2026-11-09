@@ -109,6 +109,10 @@ enum class Capability : uint8_t
     /// The peer serves a daemon-initiated switch of the window showing a workspace (SwitchRequest,
     /// SwitchReply).
     WorkspaceSwitch = 24,
+    /// The peer confirms each followed workspace's first layout (WorkspaceShown). A daemon sharing it treats
+    /// a follow as provisional until then, and gives the workspace back its hidden or left record when the
+    /// connection ends first; without it a follow counts as shown once its layout is sent.
+    WorkspaceShown = 25,
 };
 
 /// One row of the table naming a Capability.
@@ -144,6 +148,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::SoftFonts, .name = "soft-fonts" },
     CapabilityRow { .capability = Capability::WorkspaceFollow, .name = "workspace-follow" },
     CapabilityRow { .capability = Capability::WorkspaceSwitch, .name = "workspace-switch" },
+    CapabilityRow { .capability = Capability::WorkspaceShown, .name = "workspace-shown" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

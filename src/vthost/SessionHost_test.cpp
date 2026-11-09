@@ -76,6 +76,7 @@
 #include <vthost/HostedShell.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SwitchClient.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
@@ -456,9 +457,11 @@ TEST_CASE("a workspace is Hidden after a release that switched away, and Left wh
     h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
 
-    // Shown again by a Follow, then the client quits without a Release: Left, not Hidden.
+    // Shown again by a Follow whose layout went out, then the client quits without a Release: Left, not
+    // Hidden.
     client.shown.insert(workspace.value);
-    h.host.noteWorkspaceFollowed(workspace);
+    h.host.noteWorkspaceFollowed(workspace, &client);
+    h.host.noteWorkspaceShown(workspace);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
     h.host.noteClientDetached(&client);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
@@ -522,6 +525,153 @@ TEST_CASE("the last window switching away from a workspace hides it, though anot
     h.host.noteClientDetached(&second);
     h.host.noteClientDetached(&first);
     CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+}
+
+TEST_CASE("a hidden workspace followed by a window that drops before it was shown stays Hidden",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    first.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+    h.host.noteClientDetached(&first);
+    REQUIRE(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+
+    // A switch's new connection follows it, and is lost before its first layout went out.
+    auto arrival = ShowingClient {};
+    h.host.noteClientAttached(&arrival);
+    arrival.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace, &arrival);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+    CHECK_FALSE(h.host.lastRelease(workspace).has_value());
+    h.host.noteClientDetached(&arrival);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    CHECK(h.host.lastRelease(workspace) == WorkspaceRelease::SwitchedAway);
+}
+
+TEST_CASE("a follow never shown gives back nothing a newer release or another window decides",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    first.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+
+    auto arrival = ShowingClient {};
+    h.host.noteClientAttached(&arrival);
+    arrival.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace, &arrival);
+
+    SECTION("another window shows it when the follower drops: Shown, and Left once that one quits")
+    {
+        auto other = ShowingClient {};
+        other.shown.insert(workspace.value);
+        h.host.noteClientAttached(&other);
+        h.host.noteWorkspaceFollowed(workspace, &other);
+        h.host.noteWorkspaceShown(workspace);
+        h.host.noteClientDetached(&arrival);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+        h.host.noteClientDetached(&other);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    }
+    SECTION("the follower released it since, by closing: that release stands")
+    {
+        arrival.shown.clear();
+        h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::Closed);
+        h.host.noteClientDetached(&arrival);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+        CHECK(h.host.lastRelease(workspace) == WorkspaceRelease::Closed);
+    }
+    SECTION("the follower was shown it: its drop leaves it")
+    {
+        h.host.noteWorkspaceShown(workspace);
+        h.host.noteClientDetached(&arrival);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    }
+    h.host.noteClientDetached(&first);
+}
+
+// Review (PR 4, M1): with two windows following a hidden workspace unshown, the record went with whichever
+// held it, and stayed held by one that the other's showing should have dissolved.
+TEST_CASE("two windows following a hidden workspace unshown: the last to go puts it back, a showing ends it",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    using vthost::proto::WorkspaceRelease;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const workspace = h.host.workspaceId();
+    auto first = ShowingClient {};
+    first.shown.insert(workspace.value);
+    h.host.noteClientAttached(&first);
+    first.shown.clear();
+    h.host.noteWorkspaceReleased(workspace, WorkspaceRelease::SwitchedAway);
+    h.host.noteClientDetached(&first);
+    REQUIRE(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+
+    auto a = ShowingClient {};
+    auto b = ShowingClient {};
+    h.host.noteClientAttached(&a);
+    h.host.noteClientAttached(&b);
+    a.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace, &a);
+    b.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace, &b);
+
+    SECTION("both drop unshown, the one that took the record first: Hidden")
+    {
+        h.host.noteClientDetached(&a);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+        h.host.noteClientDetached(&b);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    }
+    SECTION("the second is shown it and quits, then the first drops unshown: Left, as it was seen")
+    {
+        h.host.noteWorkspaceShown(workspace);
+        h.host.noteClientDetached(&b);
+        h.host.noteClientDetached(&a);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    }
+}
+
+TEST_CASE("a workspace made for a window that drops before it was shown is hidden, and left once shown",
+          "[vthost][host][visibility]")
+{
+    using vthost::WorkspaceVisibility;
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto arrival = ShowingClient {};
+    h.host.noteClientAttached(&arrival);
+    auto const* made = h.host.createWorkspace({}, &arrival);
+    REQUIRE(made != nullptr);
+    auto const workspace = made->id();
+    arrival.shown.insert(workspace.value);
+    h.host.noteWorkspaceFollowed(workspace, &arrival);
+    CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Shown);
+
+    SECTION("dropped before its first layout: nobody saw it, so a launch does not bring it back")
+    {
+        h.host.noteClientDetached(&arrival);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Hidden);
+    }
+    SECTION("dropped after it was shown: left, as any window's quit leaves its workspace")
+    {
+        h.host.noteWorkspaceShown(workspace);
+        h.host.noteClientDetached(&arrival);
+        CHECK(h.host.visibility(workspace) == WorkspaceVisibility::Left);
+    }
 }
 
 TEST_CASE("createTab seeds a backing session handed back by the allocator", "[vthost][host]")
@@ -5453,6 +5603,9 @@ TEST_CASE("requestSwitch completes with the client's reply, or fails", "[vthost]
         REQUIRE(window.asked.size() == 1);
         CHECK(window.asked.front().target == target);
         CHECK(window.asked.front().workspace == shown.value);
+        // It says how long it waits, so the window refuses what it could not do in time.
+        CHECK(std::chrono::milliseconds { window.asked.front().answerWithinMs }
+              == std::chrono::milliseconds { vthost::SwitchAnswerTimeout });
         CHECK(outcomes.empty());
 
         // A reply from another connection is not the answer.

@@ -2526,6 +2526,47 @@ TEST_CASE("a client follows and releases a workspace at runtime, and resumes wha
                                [first](auto const& layout) { return layout.workspace == first; }));
 }
 
+TEST_CASE(
+    "a client confirms the first layout of a workspace it follows, so its daemon keeps it shown-then-left",
+    "[vthost][attach][workspace-follow][visibility]")
+{
+    auto const capabilities = [] {
+        return proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                          proto::Capability::ProfileByName,
+                                          proto::Capability::WorkspaceFollow,
+                                          proto::Capability::WorkspaceShown });
+    };
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = capabilities();
+    auto h =
+        IntentHarness { std::move(services),
+                        NativeClient::HandshakeOptions {
+                            .capabilities = capabilities(),
+                            .attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} },
+                            .profileName = "main" },
+                        mainOnly() };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const* hidden = h.host.createWorkspace();
+    REQUIRE(hidden != nullptr);
+    auto const workspace = hidden->id();
+    h.host.noteWorkspaceReleased(workspace, proto::WorkspaceRelease::SwitchedAway);
+    REQUIRE(h.host.visibility(workspace) == vthost::WorkspaceVisibility::Hidden);
+
+    h.drive([](IntentHarness* h, uint64_t workspace) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        std::ignore = h->client->followWorkspace(workspace);
+        co_await core::net::testing::waitUntil(&h->loop, [h, workspace] {
+            return std::ranges::any_of(
+                h->layouts, [workspace](auto const& layout) { return layout.workspace == workspace; });
+        });
+        // Read in order: the daemon has the confirmation before it sees the connection end.
+        h->client->detach();
+    }(&h, workspace.value));
+    h.server.reset();
+
+    CHECK(h.host.visibility(workspace) == vthost::WorkspaceVisibility::Left);
+}
+
 TEST_CASE("against a daemon without WorkspaceFollow no follow or release is written",
           "[vthost][attach][workspace-follow][compat]")
 {

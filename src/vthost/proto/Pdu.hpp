@@ -94,6 +94,7 @@ enum class PduType : uint8_t
     ReleaseWorkspace = 47,
     SwitchRequest = 48,
     SwitchReply = 49,
+    WorkspaceShown = 50,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1600,6 +1601,16 @@ struct ReleaseWorkspace
     bool operator==(ReleaseWorkspace const&) const = default;
 };
 
+/// Client→server (Capability::WorkspaceShown): the first layout of a workspace this connection follows
+/// reached it. Until then the daemon keeps aside the release the follow forgot, and gives it back should
+/// the connection end first -- so a switch whose new connection drops before it showed its target leaves a
+/// hidden target hidden. Sent once per follow; a release and a later follow ask for it again.
+struct WorkspaceShown
+{
+    uint64_t workspace = 0; ///< The followed workspace whose layout arrived.
+    bool operator==(WorkspaceShown const&) const = default;
+};
+
 /// Which daemon a switch names, relative to the one asked.
 enum class SwitchDaemonKind : uint8_t
 {
@@ -1626,6 +1637,10 @@ struct SwitchRequest
     uint32_t request = 0;       ///< Chosen by the daemon; echoed by the reply.
     uint64_t workspace = 0;     ///< The daemon's id of the workspace whose window switches.
     SwitchTargetWire target {}; ///< Where to go.
+    /// How long, in milliseconds from its arrival, the daemon waits for the reply before the program that
+    /// asked is told the switch failed: a client refuses what it could not do in time. 0 when not stated
+    /// (absent from an older daemon's body), read as vthost::SwitchAnswerTimeout.
+    uint32_t answerWithinMs = 0;
     bool operator==(SwitchRequest const&) const = default;
 };
 
@@ -1741,7 +1756,8 @@ using DecodedPdu = std::variant<Invalid,
                                 FollowWorkspace,
                                 ReleaseWorkspace,
                                 SwitchRequest,
-                                SwitchReply>;
+                                SwitchReply,
+                                WorkspaceShown>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

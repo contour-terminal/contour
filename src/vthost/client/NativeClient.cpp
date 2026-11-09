@@ -701,6 +701,7 @@ Delivery NativeClient::releaseWorkspace(uint64_t workspace, proto::WorkspaceRele
     if (send(proto::DecodedPdu { proto::ReleaseWorkspace { .workspace = workspace, .reason = reason } }) == 0)
         return Delivery::Unsupported;
     std::erase(_followedWorkspaces, workspace);
+    _shownWorkspaces.erase(workspace);
     _releasedWorkspaces.insert(workspace);
     return Delivery::Sent;
 }
@@ -887,16 +888,25 @@ void NativeClient::handleLayout(proto::LayoutState const& layout)
         if (auto const at = std::ranges::lower_bound(_followedWorkspaces, layout.workspace);
             at == _followedWorkspaces.end() || *at != layout.workspace)
             _followedWorkspaces.insert(at, layout.workspace);
-    if (!_onLayout)
-        return;
-    if (_pendingEdits.empty())
-    {
+    if (_onLayout && _pendingEdits.empty())
         _onLayout(layout);
-        return;
+    else if (_onLayout)
+    {
+        auto shown = layout;
+        _pendingEdits.apply(shown);
+        _onLayout(shown);
     }
-    auto shown = layout;
-    _pendingEdits.apply(shown);
-    _onLayout(shown);
+    // Confirmed once handed on: the daemon now takes a lost connection for a window going away.
+    confirmShown(layout.workspace);
+}
+
+void NativeClient::confirmShown(uint64_t workspace)
+{
+    if (!shares(proto::Capability::WorkspaceShown)
+        || !std::ranges::binary_search(_followedWorkspaces, workspace))
+        return;
+    if (_shownWorkspaces.insert(workspace).second)
+        send(proto::DecodedPdu { proto::WorkspaceShown { .workspace = workspace } });
 }
 
 bool NativeClient::handleNotice(proto::DecodedFrame const& frame)

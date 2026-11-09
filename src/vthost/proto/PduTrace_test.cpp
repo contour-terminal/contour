@@ -322,15 +322,18 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(summarize(
               DecodedPdu { ReleaseWorkspace { .workspace = 2, .reason = WorkspaceRelease::SwitchedAway } })
           == "workspace=2 reason=switched-away");
-    CHECK(summarize(DecodedPdu { SwitchRequest {
-              .request = 7,
-              .workspace = 2,
-              .target = { .kind = SwitchDaemonKind::Host, .daemon = "box", .workspace = "w" } } })
-          == "request=7 workspace=2 to=host:\"box\" toWorkspace=\"w\"");
+    CHECK(summarize(DecodedPdu {
+              SwitchRequest { .request = 7,
+                              .workspace = 2,
+                              .target = { .kind = SwitchDaemonKind::Host, .daemon = "box", .workspace = "w" },
+                              .answerWithinMs = 30000 } })
+          == "request=7 workspace=2 to=host:\"box\" toWorkspace=\"w\" within=30000ms");
     CHECK(summarize(
               DecodedPdu { SwitchReply { .request = 7, .outcome = SwitchOutcome::Failed, .detail = "x" } })
           == "request=7 outcome=failed detail=\"x\"");
     CHECK(toString(PduType::SwitchReply) == "SwitchReply");
+    CHECK(summarize(DecodedPdu { WorkspaceShown { .workspace = 2 } }) == "workspace=2");
+    CHECK(toString(PduType::WorkspaceShown) == "WorkspaceShown");
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
     CHECK(summarize(DecodedPdu { NewWorkspace { .profileName = "y" } }) == "profile=\"y\"");

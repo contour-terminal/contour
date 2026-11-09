@@ -165,6 +165,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: a client re-sends every pane's size when asked. The daemon no longer offers it (it restores the survivors' pane sizes itself, see "One grid, several clients"); the client keeps offering and answering it for daemons built while it was sent |
 | `WorkspaceFollow` | 23 | `workspace-follow` | `FollowWorkspace` / `ReleaseWorkspace`: a connection starts or stops showing a workspace at runtime, so a window moves from one workspace to another without reconnecting. The daemon records why a workspace was released, which decides whether later launches bring it back (see [workspace follow](#workspace-follow-and-switch)) |
 | `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks the client showing a workspace to switch that window to another daemon or workspace, and the client answers with the outcome |
+| `WorkspaceShown` | 25 | `workspace-shown` | `WorkspaceShown`: the client confirms each followed workspace's first layout, and until then the daemon keeps the workspace's hidden or left record aside, giving it back if the connection ends first. Without it a follow counts as shown once its layout is sent |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -387,7 +388,7 @@ pushed the layout in the same batch machinery a move uses; there is no reply PDU
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
 
 <a id="workspace-follow-and-switch"></a>
-**Workspace follow and switch** (tags 46 to 49). `FollowWorkspace` (tag 46, client→server, gated on
+**Workspace follow and switch** (tags 46 to 50). `FollowWorkspace` (tag 46, client→server, gated on
 `Capability::WorkspaceFollow`) names a daemon workspace to show in addition to the ones already followed; `0`
 asks the daemon to create a new workspace, which the connection claims. The daemon pushes that workspace's
 `LayoutState` and its sessions' screens. `ReleaseWorkspace` (tag 47, same gate) stops showing one and states
@@ -396,11 +397,19 @@ window moved on; the workspace stays hidden). The daemon keeps the last reason p
 follows it again. `SwitchRequest` (tag 48, server→client, gated on `Capability::WorkspaceSwitch`) asks the
 client to switch the window showing a workspace, named by its id, to a `SwitchTargetWire`: a daemon (`Same`, a
 local `Label`, or a saved `Host`) and a workspace spec the client resolves against the target daemon, empty to
-let it decide. The client asks its user first (the `SwitchWindow` guarded role), and answers `Failed` when no
-window of its own shows that workspace.
+let it decide; appended after it, `answerWithinMs` says how long the daemon waits for the reply
+(`SwitchAnswerTimeout`, 30 s; `0`, as from a daemon that predates it, reads as that; the client takes at most
+5 minutes of it). The client asks its user first (the `SwitchWindow` guarded role) -- only while an allowed
+switch could still land before that deadline, and refusing the request at once when it no longer could -- and
+the switch it allows carries that deadline, counted from the request's arrival, through the listing of the
+destination's workspaces to its landing: it does not start once past it, and gives up at it. The client
+answers `Failed` when no window of its own shows that workspace.
 `SwitchReply` (tag 49, client→server) answers under the same `request` with a `SwitchOutcome` (`Switched`,
 `FocusedExisting`, `PickerShown`, `Refused`, `Failed`) and a sentence. A peer that did not negotiate the
 capability has the PDU refused as one this daemon does not know (`Unsupported`).
+`WorkspaceShown` (tag 50, client→server, gated on `Capability::WorkspaceShown`) confirms that the first
+`LayoutState` of a workspace the connection follows arrived; it is sent once per follow, again after a release
+and a new follow.
 
 The GUI keeps one connection per window: the launch connection follows every left workspace, and for each one
 beyond the first the process starts a link of its own that follows only that workspace and opens its own window,
@@ -1151,11 +1160,25 @@ reconnect's survivors never adds one.
 Every workspace is *shown* (a connection follows it), *hidden* (the last client to show it switched away,
 `ReleaseWorkspace(SwitchedAway)`, and none shows it since) or *left* (neither: its client closed it or went
 away without a word). `vthost::visibilityOf` decides, and `SessionHost` keeps the last release per workspace
-until a follow clears it, so a hidden workspace shown again and then dropped by a quit is left, not hidden. A
+until a follow clears it, so a hidden workspace shown again and then dropped by a quit is left, not hidden.
+A follow clears it only provisionally, though: until the follower is shown the workspace -- it confirms the
+first layout (`WorkspaceShown`), or, for a client without that capability, the layout is sent -- the record is
+kept aside for that connection, and it comes back should the connection end first, unless another client
+follows the workspace or released it since. Two connections following it unshown both hold the record, so the
+last of them to go puts it back, and the workspace shown to either drops it for both. A switch whose new
+connection is lost before its first layout therefore leaves a hidden target hidden, although the client's own
+undo had no connection to travel on. A connection that goes half-open after the layout reached its window but
+before the confirmation came back counts as never shown: a `--new-workspace` its user saw is then hidden, found
+again in the switcher or by a Resume.
+A workspace made for the connection (`NewWorkspace`, `FollowWorkspace 0`) and never shown to it is hidden
+the same way, so a switch to `+new` on another daemon that gave up before the first layout leaves the
+workspace it made put away -- as the same daemon's given-up switch does -- not left for the next launch. A
 launch brings back the left workspaces only: a second machine attaching gets the ones nobody shows, and a
 workspace a user switched away from stays away. The state rides in the workspace snapshot, so a hidden
 workspace is still hidden after a restart or a live upgrade; one that was shown comes back left, its clients
-having gone with the daemon.
+having gone with the daemon. The primary viewer
+takes up no unclaimed workspace another connection follows, so a workspace another window switched to shows
+there only.
 
 "Another client" for the primary viewer and the first-launch rule is `SessionHost::connectedClients()`:
 handshaken native `Attach` connections, counted after the plan (so a connection never counts against itself)

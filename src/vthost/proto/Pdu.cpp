@@ -317,6 +317,10 @@ namespace
     {
         return std::to_underlying(PduType::SwitchReply);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(WorkspaceShown const&) noexcept
+    {
+        return std::to_underlying(PduType::WorkspaceShown);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -1021,6 +1025,11 @@ namespace
         out.varint(pdu.workspace);
     }
 
+    void encodeBody(Writer& out, WorkspaceShown const& pdu)
+    {
+        out.varint(pdu.workspace);
+    }
+
     void encodeBody(Writer& out, ReleaseWorkspace const& pdu)
     {
         out.varint(pdu.workspace);
@@ -1034,6 +1043,7 @@ namespace
         out.u8(std::to_underlying(pdu.target.kind));
         out.string(pdu.target.daemon);
         out.string(pdu.target.workspace);
+        out.u32(pdu.answerWithinMs);
     }
 
     void encodeBody(Writer& out, SwitchReply const& pdu)
@@ -2134,6 +2144,15 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeWorkspaceShown(Reader& in)
+    {
+        auto pdu = WorkspaceShown {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.workspace, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeReleaseWorkspace(Reader& in)
     {
         auto pdu = ReleaseWorkspace {};
@@ -2154,6 +2173,8 @@ namespace
         if (!assign(in.u32(), pdu.request, error) || !assign(in.varint(), pdu.workspace, error)
             || !assign(in.u8(), kind, error) || !assign(in.string(), pdu.target.daemon, error)
             || !assign(in.string(), pdu.target.workspace, error))
+            return std::unexpected(error);
+        if (in.remaining() != 0 && !assign(in.u32(), pdu.answerWithinMs, error))
             return std::unexpected(error);
         if (kind > std::to_underlying(SwitchDaemonKind::Host))
             return std::unexpected(DecodeError::MalformedPdu);
@@ -2388,6 +2409,7 @@ namespace
         DecodeRow { PduType::ReleaseWorkspace, decodeReleaseWorkspace },
         DecodeRow { PduType::SwitchRequest, decodeSwitchRequest },
         DecodeRow { PduType::SwitchReply, decodeSwitchReply },
+        DecodeRow { PduType::WorkspaceShown, decodeWorkspaceShown },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

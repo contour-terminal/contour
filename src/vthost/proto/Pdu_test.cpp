@@ -2249,7 +2249,8 @@ TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][
         auto const request =
             SwitchRequest { .request = 4,
                             .workspace = 3,
-                            .target = { .kind = kind, .daemon = "box", .workspace = "workspace:abc" } };
+                            .target = { .kind = kind, .daemon = "box", .workspace = "workspace:abc" },
+                            .answerWithinMs = 30000 };
         CHECK(roundTrip(DecodedPdu { request }) == DecodedPdu { request });
     }
     for (auto const outcome: { SwitchOutcome::Switched,
@@ -2265,6 +2266,23 @@ TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][
     STATIC_CHECK(std::to_underlying(PduType::ReleaseWorkspace) == 47);
     STATIC_CHECK(std::to_underlying(PduType::SwitchRequest) == 48);
     STATIC_CHECK(std::to_underlying(PduType::SwitchReply) == 49);
+    auto const shown = WorkspaceShown { .workspace = 5 };
+    CHECK(roundTrip(DecodedPdu { shown }) == DecodedPdu { shown });
+    STATIC_CHECK(std::to_underlying(PduType::WorkspaceShown) == 50);
+}
+
+TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as stating none",
+          "[vthost][pdu][workspace-follow]")
+{
+    auto request = Writer {};
+    request.u32(1);
+    request.varint(2);
+    request.u8(std::to_underlying(SwitchDaemonKind::Label));
+    request.string("work");
+    request.string("");
+    auto const decoded = decodeAs<SwitchRequest>(frameOf(PduType::SwitchRequest, request.view()));
+    CHECK(decoded.target.daemon == "work");
+    CHECK(decoded.answerWithinMs == 0);
 }
 
 TEST_CASE("a release reason or switch outcome a newer peer sends decodes to the safe reading",

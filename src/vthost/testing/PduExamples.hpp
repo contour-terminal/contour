@@ -214,10 +214,12 @@ namespace vthost::testing
           proto::DecodedPdu { proto::SwitchRequest {
               .request = 7,
               .workspace = 2,
-              .target = { .kind = proto::SwitchDaemonKind::Host, .daemon = "box", .workspace = "work" } } } },
+              .target = { .kind = proto::SwitchDaemonKind::Host, .daemon = "box", .workspace = "work" },
+              .answerWithinMs = 30000 } } },
         { proto::PduType::SwitchReply,
           proto::DecodedPdu { proto::SwitchReply {
               .request = 7, .outcome = proto::SwitchOutcome::Failed, .detail = "no such host" } } },
+        { proto::PduType::WorkspaceShown, proto::DecodedPdu { proto::WorkspaceShown { .workspace = 2 } } },
     };
 }
 
