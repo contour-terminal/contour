@@ -65,6 +65,8 @@ struct ContextMenuState
     /// one. Captured at click time and carried by the block rows, because the pointer leaves the block
     /// for the menu the moment the user reaches for a row.
     std::optional<BlockMenuState> blockUnderCursor {};
+    /// Group the clicked command's details and actions under a submenu.
+    bool compactContextMenu = false;
     /// Whether the last finished block's command line is known, which is what "Copy Last Command" copies.
     CommandLinePresence lastCommandLine = CommandLinePresence::Absent;
 

@@ -560,6 +560,10 @@ constexpr StringLiteral CommandBlocksConfig {
     "    {comment} Whether that pager renders colours: sgr keeps them in the file it is given, plain\n"
     "    {comment} writes text only. A binding's own format: wins; a binding's own program: gets sgr.\n"
     "    pager_format: {}\n"
+    "    {comment} Include the clicked command's details and actions in the pane's context menu.\n"
+    "    show_in_context_menu: {}\n"
+    "    {comment} Put the clicked command's details and actions in a Command Block submenu.\n"
+    "    compact_context_menu: {}\n"
     "\n"
 
 };
@@ -2921,7 +2925,12 @@ constexpr StringLiteral CommandBlocksWeb {
     "  max_records: 1000\n"
     "  pager: less -R\n"
     "  pager_format: sgr\n"
+    "  show_in_context_menu: true\n"
+    "  compact_context_menu: false\n"
     "```\n"
+    "Set `show_in_context_menu` to false to omit the clicked command's details and actions from the "
+    "pane's context menu. The rail's block menu is still available.\n"
+    "Set `compact_context_menu` to true to group the command's details and actions under Command Block.\n"
     "A command block is one prompt and the output of the command run at it, delimited by the OSC 133 "
     "marks a shell with shell integration emits -- or, without one, by systemd's OSC 3008 contexts. For "
     "each block the terminal keeps its command line, exit status, duration, start time and working "

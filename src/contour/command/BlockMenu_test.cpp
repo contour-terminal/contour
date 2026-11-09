@@ -101,11 +101,12 @@ TEST_CASE("blockMenu.rowsArePinned", "[blockmenu]")
 
 TEST_CASE("blockMenu.availability", "[blockmenu]")
 {
-    auto const enabled = [](BlockMenuState const& state, std::string const& title) {
+    auto const offered = [](BlockMenuState const& state, std::string const& title) {
         auto const rows = rowsOf(buildBlockMenu(state));
         auto const* row = rowTitled(rows, title);
-        REQUIRE(row != nullptr);
-        return row->availability == RowAvailability::Enabled;
+        if (row)
+            CHECK(row->availability == RowAvailability::Enabled);
+        return row != nullptr;
     };
 
     SECTION("everything there: every row can be picked")
@@ -114,7 +115,7 @@ TEST_CASE("blockMenu.availability", "[blockmenu]")
              { "Copy Output", "Copy Command", "Rerun…", "Open in Pager", "Collapse Output" })
         {
             INFO(title);
-            CHECK(enabled(fullState(), title));
+            CHECK(offered(fullState(), title));
         }
     }
 
@@ -123,27 +124,27 @@ TEST_CASE("blockMenu.availability", "[blockmenu]")
         auto state = fullState();
         state.output = OutputPresence::Absent;
         state.fold = FoldPresence::None;
-        CHECK_FALSE(enabled(state, "Copy Output"));
-        CHECK_FALSE(enabled(state, "Open in Pager"));
-        CHECK_FALSE(enabled(state, "Collapse Output"));
-        CHECK(enabled(state, "Copy Command"));
+        CHECK_FALSE(offered(state, "Copy Output"));
+        CHECK_FALSE(offered(state, "Open in Pager"));
+        CHECK_FALSE(offered(state, "Collapse Output"));
+        CHECK(offered(state, "Copy Command"));
     }
 
     SECTION("no command line: nothing to copy or rerun")
     {
         auto state = fullState();
         state.commandLine = CommandLinePresence::Absent;
-        CHECK_FALSE(enabled(state, "Copy Command"));
-        CHECK_FALSE(enabled(state, "Rerun…"));
-        CHECK(enabled(state, "Copy Output"));
+        CHECK_FALSE(offered(state, "Copy Command"));
+        CHECK_FALSE(offered(state, "Rerun…"));
+        CHECK(offered(state, "Copy Output"));
     }
 
     SECTION("no live prompt: typed while a command runs, a rerun would be its input")
     {
         auto state = fullState();
         state.livePrompt = PromptPresence::Absent;
-        CHECK_FALSE(enabled(state, "Rerun…"));
-        CHECK(enabled(state, "Copy Command"));
+        CHECK_FALSE(offered(state, "Rerun…"));
+        CHECK(offered(state, "Copy Command"));
     }
 
     SECTION("a collapsed fold offers to expand")
@@ -153,6 +154,14 @@ TEST_CASE("blockMenu.availability", "[blockmenu]")
         auto const rows = rowsOf(buildBlockMenu(state));
         CHECK(rowTitled(rows, "Collapse Output") == nullptr);
         REQUIRE(rows.size() == BlockMenuRowCount);
-        CHECK(enabled(state, "Expand Output"));
+        CHECK(offered(state, "Expand Output"));
+    }
+
+    SECTION("a block with no actions has only its header")
+    {
+        auto const state = BlockMenuState { .header = { "Started 14:02:11" } };
+        auto const menu = buildBlockMenu(state);
+        REQUIRE(menu.size() == 1);
+        CHECK(menu.front().kind == ContextMenuEntryKind::Header);
     }
 }

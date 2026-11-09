@@ -3341,6 +3341,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     where.maxRecords = static_cast<size_t>(std::clamp<int64_t>(requested, 1, MaxCommandBlockRecords));
     loadGuarded(child, "pager", where.pager);
     loadGuarded(child, "pager_format", where.pagerFormat);
+    loadGuarded(child, "show_in_context_menu", where.showInContextMenu);
+    loadGuarded(child, "compact_context_menu", where.compactContextMenu);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where)

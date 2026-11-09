@@ -5660,8 +5660,9 @@ command::ContextMenuState TerminalSession::contextMenuState()
         }();
 
         // ...with what its rows may act on.
-        auto const blockUnderCursor =
-            block != nullptr ? std::optional { blockMenuStateLocked(*block) } : std::nullopt;
+        auto const blockUnderCursor = block != nullptr && _config.commandBlocks.value().showInContextMenu
+                                          ? std::optional { blockMenuStateLocked(*block) }
+                                          : std::nullopt;
 
         return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),
@@ -5692,6 +5693,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
             .blockUnderCursor = blockUnderCursor,
+            .compactContextMenu = _config.commandBlocks.value().compactContextMenu,
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
