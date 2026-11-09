@@ -29,6 +29,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 
 namespace core::net
 {
@@ -126,11 +127,19 @@ struct MuxConnectOutcome
 /// A budget shorter than this is waited in full and no longer.
 inline constexpr auto MinimumConnectAwait = std::chrono::milliseconds { 2000 };
 
+/// Where a controller's run is in being stopped.
+enum class StopPhase : uint8_t
+{
+    Running = 0, ///< Not stopped: connecting, up, or lost and being sought again.
+    WindingDown, ///< Stopped, by a stop in the background whose thread is still waiting for the reactor.
+    Stopped,     ///< Stopped, and the reactor joined.
+};
+
 /// How long stopMuxReactor lets a detached client end its connection before it cancels the loop:
 /// the graceful close's own deadline plus room for the turns around it.
 inline constexpr auto DefaultDetachBound = std::chrono::milliseconds { 3000 };
 
-/// The reactor teardown both controllers share: flips @p stopped exactly once
+/// The reactor teardown both controllers share: moves @p phase from Running to Stopped exactly once
 /// (guarded by @p mutex), posts @p detach onto the reactor so a live client
 /// detaches cleanly, and waits up to @p detachBound for the root task to end by
 /// itself -- so the connection closes in order, with close_notify over TLS, rather
@@ -138,18 +147,24 @@ inline constexpr auto DefaultDetachBound = std::chrono::milliseconds { 3000 };
 /// still parked in connect has no client to detach, so @p detach itself should
 /// request the stop there (RemoteController::stop does); the wait then ends as soon
 /// as the task has unwound rather than at the bound.
-/// @param mutex Guards @p stopped (locked internally).
-/// @param stopped The controller's one-shot stop flag.
+/// @param mutex Guards @p phase (locked internally).
+/// @param phase The controller's stop phase.
 /// @param reactor The controller's reactor thread.
 /// @param detach Posted onto the reactor to detach the live client/gateway.
 /// @param detachBound How long the detach may take before the loop is cancelled.
 /// @return True when this call performed the teardown; false when it was already
-///         stopped — so the caller closes its own bindings only on the first stop.
+///         stopped, or being stopped — so the caller closes its own bindings only on the first stop.
 [[nodiscard]] bool stopMuxReactor(std::mutex& mutex,
-                                  bool& stopped,
+                                  StopPhase& phase,
                                   ReactorThread& reactor,
                                   std::function<void()> detach,
                                   std::chrono::milliseconds detachBound = DefaultDetachBound);
+
+/// The second half of stopMuxReactor: waits up to @p detachBound for the root task a detach was posted to
+/// to end by itself, cancels the loop if it did not, and joins the reactor thread.
+/// @param reactor The controller's reactor thread.
+/// @param detachBound How long the detach may take before the loop is cancelled.
+void joinDetachedReactor(ReactorThread& reactor, std::chrono::milliseconds detachBound);
 
 /// The connect state machine both GUI mux controllers share: the reactor thread plus the
 /// connection-phase handshake, with `startConnecting()` / `awaitConnected()` / `stop()` implemented ONCE on
@@ -196,13 +211,35 @@ class RemoteController
     void restartConnecting();
 
     /// Detaches the live client (`detachOnReactor`, posted onto the reactor) and joins the reactor
-    /// thread. Idempotent; `closeReactorBindings()` runs once, on the first stop.
+    /// thread. Idempotent; `closeReactorBindings()` runs once, on the first stop. Waits for a stop that
+    /// stopInBackground() began, so it is what the destructor of a derived controller calls either way.
     void stop();
+
+    /// Told once a stop that stopInBackground() began has ended: the reactor joined, the bindings closed.
+    using Stopped = std::function<void()>;
+
+    /// stop() without waiting for it: the detach is posted at once, and the wait for the daemon to see it
+    /// -- up to the detach bound for one that stopped reading -- the join and `closeReactorBindings()` run
+    /// on a thread of their own, for a caller (the GUI thread) that a stop must not hold up. The controller
+    /// must live until then: stop(), the destructor's included, and restartConnecting() wait for it.
+    /// @param stopped Told when the stop has ended, on the stopping thread; on this one, once that thread is
+    ///        joined, when a stop had ended the run already; never for a second call while a background stop
+    ///        is under way.
+    void stopInBackground(Stopped stopped);
+
+    /// @return Whether a stop that stopInBackground() began is still under way. Safe from any thread.
+    [[nodiscard]] bool isWindingDown() const;
 
   protected:
     /// @param clock What awaitConnected() measures the budget spent since startConnecting() on.
     ///        Borrowed: it must outlive the controller.
-    explicit RemoteController(core::platform::IClock const& clock): _clock(clock) {}
+    /// @param detachBound How long a stop lets a detached client end its connection in order before it
+    ///        cancels the loop.
+    explicit RemoteController(core::platform::IClock const& clock,
+                              std::chrono::milliseconds detachBound = DefaultDetachBound):
+        _clock(clock), _detachBound(detachBound)
+    {
+    }
     ~RemoteController() = default;
 
     /// The reactor's whole lifetime (connect, serve, notify); runs on the reactor thread.
@@ -256,7 +293,17 @@ class RemoteController
     std::condition_variable _connected; ///< Notified by the reactor on every phase transition.
     State _state = State::Connecting;
     std::string _failure;
-    bool _stopped = false;
+    StopPhase _stopPhase = StopPhase::Running; ///< Guarded by _mutex.
+
+  private:
+    /// @return What a stop posts onto the reactor: the client's detach, or a cancel when there is none.
+    [[nodiscard]] std::function<void()> detachOrCancel();
+
+    /// Waits for a background stop's thread, if one was started. GUI thread.
+    void awaitBackgroundStop();
+
+    std::chrono::milliseconds _detachBound; ///< @see RemoteController()
+    std::jthread _stopper; ///< The thread a background stop runs on. Declared last: joined first.
 };
 
 } // namespace contour::remote

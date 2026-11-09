@@ -84,6 +84,7 @@ namespace
             vthost::proto::Capability::ClipboardTargets,
             vthost::proto::Capability::SoftFonts,
             vthost::proto::Capability::WorkspaceFollow,
+            vthost::proto::Capability::WorkspaceShown,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -1728,7 +1729,7 @@ void NativeController::forgetBinding(uint64_t session, uint64_t serial)
     // connection alike — so the close is authored by the caller that knows, through
     // SessionFactory::requestRemoteClose. Inferring it from this destructor is what made closing a
     // window destroy the user's shells.
-    if (!_stopped)
+    if (_stopPhase == StopPhase::Running)
         _closedSessions.insert(session);
 }
 

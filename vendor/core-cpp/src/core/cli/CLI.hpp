@@ -53,6 +53,13 @@ struct Deprecated
     std::string_view message;
 };
 
+/// Where a command's verbatim input starts, as far as one of its options is concerned.
+enum class VerbatimStart : uint8_t
+{
+    Normal,     ///< The option is an ordinary option; the verbatim input starts where the command says.
+    AfterValue, ///< Every token after this option's value is verbatim input, as if a `--` followed it.
+};
+
 struct Option
 {
     OptionName name;
@@ -61,6 +68,13 @@ struct Option
     std::string_view placeholder = {}; // TODO: move right below `Value value{};`
     cli::Presence presence = Presence::Optional;
     std::optional<cli::Deprecated> deprecated = std::nullopt;
+
+    /// With @c VerbatimStart::AfterValue, the verbatim input of the command owning this option starts
+    /// right after the option's value, so `-e sh -c x` reads `sh` as the value and `-c`, `x` as verbatim
+    /// input (xterm's `-e PROGRAM ARGS...`). The value stays the option's value; it is not repeated in
+    /// `FlagStore::verbatim`, and the caller combines the two. Ignored by a command without a
+    /// @c Verbatim section.
+    VerbatimStart verbatimStart = VerbatimStart::Normal;
 };
 
 using OptionList = std::vector<Option>;
@@ -105,6 +119,7 @@ enum class ParseErrorKind : std::uint8_t
     EmptyValue,            ///< `--name=` for an option whose type is not a string.
     UnexpectedToken,       ///< A token that is neither an option, a sub-command nor verbatim input.
     MissingRequiredOption, ///< An option marked @c Presence::Required was not given.
+    UnknownOption,         ///< A token spelled like an option (`-x`, `--name`, `--name=value`) names none.
 };
 
 /// What was wrong with a command line, and where.

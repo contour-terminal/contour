@@ -587,12 +587,14 @@ namespace
                    "SwitchRequest",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SwitchRequest>(pdu);
-                       return std::format(R"(request={} workspace={} to={}:"{}" toWorkspace="{}")",
-                                          value.request,
-                                          value.workspace,
-                                          nameIn(SwitchDaemonNames, value.target.kind),
-                                          core::escape(value.target.daemon),
-                                          core::escape(value.target.workspace));
+                       return std::format(
+                           R"(request={} workspace={} to={}:"{}" toWorkspace="{}" within={}ms)",
+                           value.request,
+                           value.workspace,
+                           nameIn(SwitchDaemonNames, value.target.kind),
+                           core::escape(value.target.daemon),
+                           core::escape(value.target.workspace),
+                           value.answerWithinMs);
                    } },
         TraceRow { PduType::SwitchReply,
                    "SwitchReply",
@@ -602,6 +604,11 @@ namespace
                                           value.request,
                                           nameIn(SwitchOutcomeNames, value.outcome),
                                           core::escape(value.detail));
+                   } },
+        TraceRow { PduType::WorkspaceShown,
+                   "WorkspaceShown",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("workspace={}", std::get<WorkspaceShown>(pdu).workspace);
                    } },
     };
 

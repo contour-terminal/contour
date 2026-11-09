@@ -215,28 +215,34 @@ TEST_CASE("ControlVerbs: the old --window flag is an unknown option", "[contour]
     }
 }
 
-TEST_CASE("ControlVerbs: new refuses the removed window flags, naming the new ones",
+TEST_CASE("ControlVerbs: new refuses an unknown option instead of running it", "[contour][cli][control]")
+{
+    // The parser refuses what is spelled like an option before the command starts, so the removed
+    // --window / --new-window flags can no longer be run as a command by accident.
+    for (auto const& args: std::array<std::vector<std::string_view>, 3> {
+             std::vector<std::string_view> { "new", "--window", "1" },
+             std::vector<std::string_view> { "new", "--window=W" },
+             std::vector<std::string_view> { "new", "-window", "W" } })
+    {
+        auto const parsed = tryParse(args);
+        REQUIRE_FALSE(parsed.has_value());
+        CHECK(parsed.error().kind == core::cli::ParseErrorKind::UnknownOption);
+        CHECK(parsed.error().message.contains(args[1]));
+    }
+}
+
+TEST_CASE("ControlVerbs: new still runs a command that looks like an option after --",
           "[contour][cli][control]")
 {
-    // `new` keeps unknown options as its command, so the parser cannot refuse these.
-    auto run = Run {};
-    auto channel = ScriptedChannel { "{}"s };
-    auto const status = [&](std::vector<std::string_view> const& args) {
-        return contour::cli::runControlVerb(verbNamed("new"), parseFlags(args), channel, run.io());
+    auto const commandOf = [](std::vector<std::string_view> const& args) {
+        auto const params = verbNamed("new").buildParams(parseFlags(args));
+        REQUIRE(params.has_value());
+        auto const request = vtcontrol::decodeJson<vtcontrol::CreateTabRequest>(*params);
+        REQUIRE(request.has_value());
+        return request->command;
     };
-
-    CHECK(status({ "new", "--window", "1" }) == 2);
-    CHECK(run.err.str().contains("--window is now --workspace"));
-    CHECK(status({ "new", "--new-window" }) == 2);
-    CHECK(run.err.str().contains("--new-window is now --new-workspace"));
-    // Every other spelling the parser accepts for an option name.
-    for (auto const word: std::array<std::string_view, 4> { "--window=W", "-window", "window", "new-window" })
-    {
-        run.err.str({});
-        CHECK(status({ "new", word, "daemon", "sh" }) == 2);
-        CHECK(run.err.str().contains(" is now --"));
-    }
-    CHECK(channel.calls.empty());
+    CHECK(commandOf({ "new", "--", "--window", "1" }) == std::vector<std::string> { "--window", "1" });
+    CHECK(commandOf({ "new", "ls", "-la" }) == std::vector<std::string> { "ls", "-la" });
 }
 
 TEST_CASE("contradictory or malformed flags are bad usage", "[contour][cli][control]")

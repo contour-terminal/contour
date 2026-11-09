@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 namespace contour::remote
 {
@@ -33,40 +34,51 @@ std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::Page
 }
 
 bool stopMuxReactor(std::mutex& mutex,
-                    bool& stopped,
+                    StopPhase& phase,
                     ReactorThread& reactor,
                     std::function<void()> detach,
                     std::chrono::milliseconds detachBound)
 {
     {
         auto const lock = std::lock_guard { mutex };
-        if (stopped)
+        if (phase != StopPhase::Running)
             return false;
-        stopped = true;
+        phase = StopPhase::Stopped;
     }
     reactor.post(std::move(detach));
+    joinDetachedReactor(reactor, detachBound);
+    return true;
+}
+
+void joinDetachedReactor(ReactorThread& reactor, std::chrono::milliseconds detachBound)
+{
     if (!reactor.waitForExit(detachBound))
         reactor.requestStop();
     reactor.join();
-    return true;
 }
 
 bool RemoteController::isConnected() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return _state == State::Ready && !_stopped;
+    return _state == State::Ready && _stopPhase == StopPhase::Running;
 }
 
 bool RemoteController::isStopped() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return _stopped;
+    return _stopPhase != StopPhase::Running;
+}
+
+bool RemoteController::isWindingDown() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _stopPhase == StopPhase::WindingDown;
 }
 
 bool RemoteController::isConnecting() const
 {
     auto const lock = std::lock_guard { _mutex };
-    return !_stopped
+    return _stopPhase == StopPhase::Running
            && (_state == State::Connecting || _state == State::Ready || _state == State::Reconnecting);
 }
 
@@ -96,9 +108,10 @@ void RemoteController::startConnecting()
 
 void RemoteController::restartConnecting()
 {
+    awaitBackgroundStop();
     {
         auto const lock = std::lock_guard { _mutex };
-        _stopped = false;
+        _stopPhase = StopPhase::Running;
         _state = State::Connecting;
         _failure.clear();
     }
@@ -130,14 +143,59 @@ std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::m
     return awaitConnected(timeout);
 }
 
-void RemoteController::stop()
+std::function<void()> RemoteController::detachOrCancel()
 {
-    auto const detach = [this] {
+    return [this] {
         if (!detachOnReactor())
             _reactor.requestStop();
     };
-    if (stopMuxReactor(_mutex, _stopped, _reactor, detach))
+}
+
+void RemoteController::awaitBackgroundStop()
+{
+    if (_stopper.joinable())
+        _stopper.join();
+}
+
+void RemoteController::stop()
+{
+    awaitBackgroundStop();
+    if (stopMuxReactor(_mutex, _stopPhase, _reactor, detachOrCancel(), _detachBound))
         closeReactorBindings();
+}
+
+void RemoteController::stopInBackground(Stopped stopped)
+{
+    auto phase = StopPhase::Running;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        phase = _stopPhase;
+        if (phase == StopPhase::Running)
+            _stopPhase = StopPhase::WindingDown;
+    }
+    switch (phase)
+    {
+        case StopPhase::WindingDown: return;
+        case StopPhase::Stopped:
+            // A stop in the background that ended may still be telling its caller: joined first, so that
+            // this caller is told after it.
+            awaitBackgroundStop();
+            stopped();
+            return;
+        case StopPhase::Running: break;
+    }
+    // Stopped from here on, as stop() would leave it; only the wait for the detach, and what follows it,
+    // move to the thread, which alone joins the reactor until it is joined itself.
+    _reactor.post(detachOrCancel());
+    _stopper = std::jthread { [this, stopped = std::move(stopped)] {
+        joinDetachedReactor(_reactor, _detachBound);
+        closeReactorBindings();
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _stopPhase = StopPhase::Stopped;
+        }
+        stopped();
+    } };
 }
 
 } // namespace contour::remote

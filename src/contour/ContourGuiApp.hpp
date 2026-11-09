@@ -700,7 +700,7 @@ class ContourGuiApp:
                          remote::HandOverOutcome outcome,
                          std::string const& reason) override;
     [[nodiscard]] remote::SwitchGrants& switchGrants() override { return _switchGrants; }
-    [[nodiscard]] remote::SwitchTimer const& switchTimer() override { return _switchTimer; }
+    [[nodiscard]] remote::SwitchDeadline const& switchDeadline() override { return _switchDeadline; }
 
     // remote::ISwitchHost
     [[nodiscard]] std::vector<remote::DaemonLink*> switchableLinks() override;
@@ -1246,8 +1246,11 @@ class ContourGuiApp:
     /// The answers that stand for the switches programs ask for (IDaemonLinkHost::switchGrants()), for the
     /// process's lifetime. Declared before the links, and so before every session whose question names it.
     remote::SwitchGrants _switchGrants;
-    /// What expires the switch questions the links ask (IDaemonLinkHost::switchTimer()).
-    remote::SwitchTimer _switchTimer = remote::qtSwitchTimer();
+    /// What bounds every switch: the questions the links ask (IDaemonLinkHost::switchDeadline()), and the
+    /// switcher's landings. Declared before _windowSwitching, which is built with it.
+    remote::SwitchDeadline _switchDeadline { .timeout = remote::DefaultSwitchTimeout,
+                                             .timer = remote::qtSwitchTimer(),
+                                             .clock = core::platform::defaultSteadyClock() };
 
     /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
     /// unregister from their controllers on destruction. A launch that attaches creates exactly one.

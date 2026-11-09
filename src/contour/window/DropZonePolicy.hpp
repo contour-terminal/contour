@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include <vtworkspace/Primitives.hpp>
@@ -242,6 +243,22 @@ static_assert(MoveAnnouncementRows.size() == static_cast<size_t>(MoveLanding::Ne
         case DropPayload::Text: break;
     }
     return {};
+}
+
+/// The announcement for @p payload landing at @p landing, with the window it landed in named where
+/// the text has a place for it.
+/// @param payload What moved: a Pane, or a Tab of several panes.
+/// @param landing Where it landed.
+/// @param windowName The name of the window it landed in.
+/// @return The text to say; empty for a payload that is no pane or tab.
+[[nodiscard]] inline std::string moveAnnouncement(DropPayload payload,
+                                                  MoveLanding landing,
+                                                  std::string_view windowName)
+{
+    auto text = std::string(moveAnnouncementOf(payload, landing));
+    if (auto const at = text.find("%1"); at != std::string::npos)
+        text.replace(at, 2, windowName);
+    return text;
 }
 
 /// What a drop over a pane does.

@@ -290,6 +290,17 @@ TEST_CASE("dropZone.moveAnnouncements", "[dropzone]")
         CHECK(moveAnnouncementOf(payload, MoveLanding::Beside).empty());
 }
 
+TEST_CASE("dropZone.moveAnnouncementNamesTheWindowOnlyWhereItsTextHasAPlace", "[dropzone]")
+{
+    using contour::window::moveAnnouncement;
+    using contour::window::MoveLanding;
+    CHECK(moveAnnouncement(DropPayload::Pane, MoveLanding::BesideInOtherWindow, "2")
+          == "Pane moved to window 2");
+    CHECK(moveAnnouncement(DropPayload::Tab, MoveLanding::BesideInOtherWindow, "2") == "Tab moved");
+    CHECK(moveAnnouncement(DropPayload::Pane, MoveLanding::NewTab, "2") == "Pane moved to new tab");
+    CHECK(moveAnnouncement(DropPayload::Text, MoveLanding::Beside, "2").empty());
+}
+
 TEST_CASE("dropZone.moveRouteTable", "[dropzone]")
 {
     using contour::window::HostMoves;

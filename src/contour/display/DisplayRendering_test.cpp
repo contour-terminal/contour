@@ -61,6 +61,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -78,7 +79,9 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 
 #include <QtTest/QTest>
 #include <vthost/latency/EchoProtocol.hpp>
@@ -2454,6 +2457,93 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     second->terminate();
     QCoreApplication::processEvents();
     second.reset();
+}
+
+namespace
+{
+/// How a display reaches the second session in the rebind tests.
+enum class Rebind : uint8_t
+{
+    Direct = 0,  ///< setSession(second) straight from the first.
+    ThroughNull, ///< setSession(nullptr) first, as a collapsing split's binding does.
+};
+
+/// When the second session of a rebind test gets its output.
+enum class OutputAt : uint8_t
+{
+    AfterBind = 0, ///< Once the display shows it: its own output asks for the redraw.
+    BeforeBind,    ///< Before the display ever showed it, as a background tab's: only the bind can.
+};
+
+/// A wall of inverse X's, then a status request whose answer says it was all parsed.
+constexpr auto WallOfX = std::string_view { "\033[2J\033[H\033[7m"
+                                            "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\r\n"
+                                            "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\r\n"
+                                            "\033[0m\033[5n" };
+
+/// Writes WallOfX into @p pty and waits until its terminal parsed all of it.
+void writeWallOfX(vtpty::ChannelPty& pty)
+{
+    pty.feed(WallOfX);
+    REQUIRE(QTest::qWaitFor([&] { return pty.stdinSnapshot().contains("\033[0n"); }));
+}
+
+/// Binds a second session onto the harness's (blank) display as @p how says, with WallOfX written into it
+/// at @p when.
+/// @return The frame before the bind, and the one showing the second session's output.
+[[nodiscard]] std::pair<QImage, QImage> framesOfRebound(DisplayHarness& h, Rebind how, OutputAt when)
+{
+    auto secondPty = std::make_unique<vtpty::ChannelPty>(
+        vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
+    auto* const pty = secondPty.get();
+    auto second = contour::test::makeTestSession(
+        &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
+    second->start();
+    if (when == OutputAt::BeforeBind)
+        writeWallOfX(*pty);
+    auto before = h.pump();
+    if (how == Rebind::ThroughNull)
+    {
+        h.display->setSession(nullptr);
+        std::ignore = h.pump();
+    }
+    h.display->setSession(second.get());
+    std::ignore = h.pump();
+    if (when == OutputAt::AfterBind)
+        writeWallOfX(*pty);
+    auto drawn = h.pump();
+
+    // Back to the harness's own session for its teardown; the second is wound down before it goes.
+    h.display->setSession(h.session.get());
+    std::ignore = h.pump();
+    second->terminate();
+    QCoreApplication::processEvents();
+    second.reset();
+    return { std::move(before), std::move(drawn) };
+}
+} // namespace
+
+TEST_CASE("display: a display rebound to another session renders that session's output",
+          "[display][session][render]")
+{
+    // TerminalDisplay::setSession() is the documented rebinding seam (a session moving between displays);
+    // the app's QML builds a display per pane, so this pins the seam itself, through a null as well.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    std::ignore = h.pump();
+    auto const how = GENERATE(Rebind::Direct, Rebind::ThroughNull);
+    auto const when = GENERATE(OutputAt::AfterBind, OutputAt::BeforeBind);
+    CAPTURE(std::to_underlying(how), std::to_underlying(when));
+    auto const [before, drawn] = framesOfRebound(h, how, when);
+    REQUIRE_FALSE(before.isNull());
+    REQUIRE_FALSE(drawn.isNull());
+    // The wall itself, not merely a frame that differs: a cursor or status line repainting differs too,
+    // over a display whose render buffer stayed empty.
+    auto const metrics = h.display->gridMetrics();
+    auto const wall = changedBounds(before, drawn, pageArea(h, drawn));
+    CAPTURE(wall.width(), wall.height());
+    CHECK(wall.width() >= 40 * unbox<int>(metrics.cellSize.width));
+    CHECK(wall.height() >= 2 * unbox<int>(metrics.cellSize.height));
 }
 
 TEST_CASE("display: attaching a display to an already-closed session does not resize its dead PTY",

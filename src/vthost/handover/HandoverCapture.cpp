@@ -11,10 +11,12 @@
 #include <array>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <vthost/Logging.hpp>
 #include <vthost/SessionHost.hpp>
@@ -137,6 +139,20 @@ namespace
             .device = crossing.device,
         };
     }
+
+    /// @return Why each workspace of @p host was last released, for those released since a client followed.
+    [[nodiscard]] std::vector<HandoverRelease> releasesOf(SessionHost& host)
+    {
+        auto releases = std::vector<HandoverRelease> {};
+        auto const& model = host.model();
+        for (auto const index: std::views::iota(0, model.workspaceCount()))
+        {
+            auto const id = model.workspaceAt(index)->id();
+            if (auto const release = host.lastRelease(id))
+                releases.push_back(HandoverRelease { .workspace = id.value, .release = *release });
+        }
+        return releases;
+    }
 } // namespace
 
 std::expected<void, HandoverError> checkCapturable(SessionHost& host)
@@ -199,6 +215,7 @@ std::expected<HandoverImage, HandoverError> captureHandover(SessionHost& host,
             .lease = lease,
             .defaultColorPreference = host.defaultColorPreference(),
             .cellPixelSize = host.learnedCellPixelSize(),
+            .releases = releasesOf(host),
         };
         // A session that ended meanwhile is not among the quiesced ones: its crossing is dropped.
         for (auto& session: quiesced.sessions)

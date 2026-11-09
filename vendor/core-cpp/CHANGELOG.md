@@ -7,6 +7,42 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.18.1] - 2026-11-09
+
+### Fixed
+
+- **`core::cli::parse` no longer breaks xterm's `-e PROGRAM ARGS...` convention.** 0.18.0 refused the option-like
+  token after `-e`'s value, so `contour -e sh -c "exit 0"` failed with `Unknown option "-c"`. An option can now
+  declare that the verbatim input starts right after its value (see `Option::verbatimStart` below).
+
+### Added
+
+- **`core::cli::Option::verbatimStart`** (`core::cli::VerbatimStart::{Normal, AfterValue}`, default `Normal`):
+  with `AfterValue`, once the option has consumed its value every remaining token is verbatim input, as if a `--`
+  followed, `-` tokens included. The value stays the option's value and is not repeated in
+  `FlagStore::verbatim`; the caller combines the two. Ignored on a command without a `Verbatim` section.
+
+## [0.18.0] - 2026-11-09
+
+### Breaking
+
+- **`core::cli::parse` refuses an unknown option in front of a command's verbatim input.** A command with a
+  `Verbatim` section took the first token its options did not know as the start of that input, so
+  `contour new --window 1` -- `--window` being no option of `new` -- ran `--window 1` as the new tab's command
+  instead of failing, and `--window=1` and `-w` went the same way. Before the verbatim input starts, a token
+  spelled like an option (`-x`, `-name`, `--name`, `--name=value`) must now name one of the command's options,
+  or `parse()` returns `ParseErrorKind::UnknownOption` naming it. The verbatim input starts after a `--`, or at
+  the first token that is not spelled like an option -- so `cmd -- --window 1` and `cmd ls -la` read as before,
+  and every token after the first verbatim word, `-` or not, stays verbatim. A bare `-`, by convention standard
+  input, is an operand and starts the verbatim input. Migration: a caller that relied on a leading dash token
+  reaching the verbatim words passes `--` in front of it.
+
+### Added
+
+- **`core::cli::ParseErrorKind::UnknownOption`**: a token spelled like an option names none. A command without
+  verbatim input refused such a token as `UnexpectedToken` and now refuses it with this kind; `-`, `--` and any
+  other leftover token are still `UnexpectedToken`.
+
 ## [0.17.0] - 2026-11-08
 
 ### Breaking

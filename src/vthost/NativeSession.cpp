@@ -673,6 +673,11 @@ void NativeSession::sendFollowedLayout(vtworkspace::Workspace& workspace)
     // Asked before the layout goes out, and streamed after it: the client has the pane by then.
     requestArrivedSnapshots(workspace);
     sendLayout(serializeLayout(workspace));
+    // A client that confirms what it was shown does so itself (WorkspaceShown); for any other the follow is
+    // confirmed once its layout is on its way. A drop from then on is the window going away, not a switch
+    // failing to land.
+    if (!_closed && !confirmsShownWorkspaces())
+        _host.noteWorkspaceShown(workspace.id());
 }
 
 void NativeSession::sendLayout(proto::LayoutState layout)
@@ -776,15 +781,18 @@ void NativeSession::refreshFollowedWorkspaces()
             continue;
         // Index override 6: a workspace no client claims — one a control connection made — appears in the
         // GUI whose launch took every workspace, rather than in none. Not one a client let go of: a window
-        // closed leaves it for the next launch, one switched away from keeps it hidden.
+        // closed leaves it for the next launch, one switched away from keeps it hidden. Nor one another
+        // window shows: a follow clears the release, and a workspace another client switched to is shown
+        // there.
         auto const claim = _host.workspaceClaim(workspace->id(), this);
         auto const unclaimedHere = claim == WorkspaceClaim::Unclaimed && _host.isPrimaryViewer(this)
-                                   && !_host.lastRelease(workspace->id()).has_value();
+                                   && !_host.lastRelease(workspace->id()).has_value()
+                                   && !_host.followedByAttachedClient(workspace->id());
         auto const joins = claim == WorkspaceClaim::Yours || unclaimedHere;
         if (!joins)
             continue;
         _followedWorkspaces.insert(workspace->id().value);
-        _host.noteWorkspaceFollowed(workspace->id());
+        _host.noteWorkspaceFollowed(workspace->id(), this);
         requestWorkspaceSnapshots(*workspace);
     }
 }
@@ -832,7 +840,7 @@ void NativeSession::followWorkspace(vtworkspace::WorkspaceId workspace)
     }
     if (!_followedWorkspaces.insert(workspace.value).second)
         return;
-    _host.noteWorkspaceFollowed(workspace);
+    _host.noteWorkspaceFollowed(workspace, this);
     requestWorkspaceSnapshots(*found);
     layoutChanged(workspace);
 }
@@ -1988,7 +1996,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         pauseReadingIfBackedUp(SessionId { request->session });
         return;
     }
-    if (serveTabVerb(frame) == TabVerb::Served)
+    if (serveTabVerb(frame) == TabVerb::Served || serveWorkspaceVerb(frame) == TabVerb::Served)
         return;
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
@@ -2079,6 +2087,28 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         }
         return TabVerb::Served;
     }
+    if (auto const* set = std::get_if<proto::SetSplitOrientation>(&frame.pdu))
+    {
+        // The same feature family as MoveNode, so the same gate.
+        if (!_negotiated->shared.contains(proto::Capability::MoveNode))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Read, never cast: a byte no axis names changes nothing. Applied to the model, so the layout push
+        // that reaches every client, this one included, is the answer; a stale session is a logged no-op.
+        auto const axis = static_cast<vtworkspace::SplitState>(set->state);
+        if (auto const applied =
+                _host.model().setSplitOrientation(vtworkspace::SessionId { set->anchorSession }, axis);
+            !applied)
+            errorLog()("{}: ignoring {}", _id, proto::describe(frame.pdu));
+        return TabVerb::Served;
+    }
+    return TabVerb::None;
+}
+
+NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame const& frame)
+{
     if (auto const* follow = std::get_if<proto::FollowWorkspace>(&frame.pdu))
     {
         if (!_negotiated->shared.contains(proto::Capability::WorkspaceFollow))
@@ -2104,29 +2134,20 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         releaseWorkspace(vtworkspace::WorkspaceId { release->workspace }, release->reason);
         return TabVerb::Served;
     }
+    if (auto const* shown = std::get_if<proto::WorkspaceShown>(&frame.pdu))
+    {
+        if (!_negotiated->shared.contains(proto::Capability::WorkspaceShown))
+            refuse(frame);
+        else if (follows(vtworkspace::WorkspaceId { shown->workspace }))
+            _host.noteWorkspaceShown(vtworkspace::WorkspaceId { shown->workspace });
+        return TabVerb::Served;
+    }
     if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))
     {
         if (!_negotiated->shared.contains(proto::Capability::WorkspaceSwitch))
             refuse(frame);
         else
             _host.completeSwitch(_id, *reply);
-        return TabVerb::Served;
-    }
-    if (auto const* set = std::get_if<proto::SetSplitOrientation>(&frame.pdu))
-    {
-        // The same feature family as MoveNode, so the same gate.
-        if (!_negotiated->shared.contains(proto::Capability::MoveNode))
-        {
-            refuse(frame);
-            return TabVerb::Served;
-        }
-        // Read, never cast: a byte no axis names changes nothing. Applied to the model, so the layout push
-        // that reaches every client, this one included, is the answer; a stale session is a logged no-op.
-        auto const axis = static_cast<vtworkspace::SplitState>(set->state);
-        if (auto const applied =
-                _host.model().setSplitOrientation(vtworkspace::SessionId { set->anchorSession }, axis);
-            !applied)
-            errorLog()("{}: ignoring {}", _id, proto::describe(frame.pdu));
         return TabVerb::Served;
     }
     return TabVerb::None;
@@ -2643,7 +2664,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
     _services.control.get().clientAttached(std::format("{}", _id));
     _followedWorkspaces = std::set<uint64_t>(plan.follow.begin(), plan.follow.end());
     for (auto const workspace: _followedWorkspaces)
-        _host.noteWorkspaceFollowed(vtworkspace::WorkspaceId { workspace });
+        _host.noteWorkspaceFollowed(vtworkspace::WorkspaceId { workspace }, this);
     // The first client of a fresh launch is the primary viewer: workspaces no client claims appear there.
     auto const launched = intent.kind != proto::AttachIntentKind::NewWorkspace
                           && intent.kind != proto::AttachIntentKind::Workspaces;
@@ -2662,7 +2683,7 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
                 _followedWorkspaces.insert(workspace->id().value);
-                _host.noteWorkspaceFollowed(workspace->id());
+                _host.noteWorkspaceFollowed(workspace->id(), this);
             }
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);

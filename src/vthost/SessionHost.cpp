@@ -1284,6 +1284,8 @@ void SessionHost::discardWorkspace(WorkspaceId workspace)
         return;
     _workspaceCreators.erase(workspace.value);
     _lastReleases.erase(workspace.value);
+    std::erase_if(_unshownFollows,
+                  [workspace](UnshownFollow const& follow) { return follow.workspace == workspace.value; });
     _objects.forget(workspace);
     _model.removeWorkspace(workspace);
     // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
@@ -1330,7 +1332,9 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
 
 void SessionHost::noteClientDetached(SessionStreamEvents const* client)
 {
-    if (std::erase(_attachedClients, client) == 0)
+    auto const counted = std::erase(_attachedClients, client) != 0;
+    restoreUnshownFollows(client);
+    if (!counted)
         return;
     // A switch asked of a window that is gone will never be answered.
     auto const gone = client->connectionId();
@@ -1355,21 +1359,78 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
             creator = nullptr;
 }
 
+void SessionHost::restoreUnshownFollows(SessionStreamEvents const* client)
+{
+    auto const isClients = [client](UnshownFollow const& follow) {
+        return follow.follower == client;
+    };
+    for (auto const& follow: _unshownFollows | std::views::filter(isClients))
+    {
+        // A newer release, a workspace gone or one another window shows is what stands now.
+        auto const workspace = WorkspaceId { follow.workspace };
+        if (_model.workspace(workspace) != nullptr && !followedByAttachedClient(workspace))
+            _lastReleases.try_emplace(follow.workspace, follow.release);
+    }
+    std::erase_if(_unshownFollows, isClients);
+}
+
+bool SessionHost::followedByAttachedClient(WorkspaceId workspace) const
+{
+    return std::ranges::any_of(_attachedClients, [workspace](SessionStreamEvents const* client) {
+        return client->follows(workspace);
+    });
+}
+
 void SessionHost::noteWorkspaceReleased(WorkspaceId workspace, proto::WorkspaceRelease reason)
 {
+    // A follow the releasing window had not been shown yet ends with this release, which is newer.
+    std::erase_if(_unshownFollows, [workspace](UnshownFollow const& follow) {
+        return follow.workspace == workspace.value && !follow.follower->follows(workspace);
+    });
     // Only the last window showing it decides: while another still follows it, a window switching away
     // does not hide it, and the other quitting later leaves it, as quitting does.
-    if (std::ranges::any_of(_attachedClients, [workspace](SessionStreamEvents const* client) {
-            return client->follows(workspace);
-        }))
+    if (followedByAttachedClient(workspace))
         _lastReleases.erase(workspace.value);
     else
         _lastReleases.insert_or_assign(workspace.value, reason);
 }
 
-void SessionHost::noteWorkspaceFollowed(WorkspaceId workspace)
+std::optional<proto::WorkspaceRelease> SessionHost::releaseUntilShown(
+    WorkspaceId workspace, SessionStreamEvents const* follower) const
 {
+    if (auto const recorded = lastRelease(workspace))
+        return recorded;
+    // Made for this follower, which never saw it: put away, as a switch that gave up on it leaves it, rather
+    // than left for the next launch to bring back.
+    if (workspaceClaim(workspace, follower) == WorkspaceClaim::Yours)
+        return proto::WorkspaceRelease::SwitchedAway;
+    return std::nullopt;
+}
+
+void SessionHost::noteWorkspaceFollowed(WorkspaceId workspace, SessionStreamEvents const* follower)
+{
+    auto const release = releaseUntilShown(workspace, follower).or_else([&] {
+        // Another unshown follow took the record first: this follower holds it as well, so that whichever of
+        // them goes last, unshown, puts it back.
+        auto const held = std::ranges::find(_unshownFollows, workspace.value, &UnshownFollow::workspace);
+        return held != _unshownFollows.end() ? std::optional { held->release } : std::nullopt;
+    });
     _lastReleases.erase(workspace.value);
+    if (!release)
+        return;
+    auto const isThisFollow = [&](UnshownFollow const& follow) {
+        return follow.follower == follower && follow.workspace == workspace.value;
+    };
+    if (!std::ranges::any_of(_unshownFollows, isThisFollow))
+        _unshownFollows.push_back(
+            UnshownFollow { .follower = follower, .workspace = workspace.value, .release = *release });
+}
+
+void SessionHost::noteWorkspaceShown(WorkspaceId workspace)
+{
+    // Shown to one window, it is no longer hidden for any: every follow still unshown forgets the record.
+    std::erase_if(_unshownFollows,
+                  [&](UnshownFollow const& follow) { return follow.workspace == workspace.value; });
 }
 
 WorkspaceVisibility SessionHost::visibility(WorkspaceId workspace) const
@@ -1932,7 +1993,10 @@ void SessionHost::requestSwitch(ConnectionId const& client,
         pending.get());
     _pendingSwitches.insert_or_assign(request, std::move(pending));
     (*found)->requestSwitch(proto::SwitchRequest {
-        .request = request, .workspace = workspace.value, .target = std::move(target) });
+        .request = request,
+        .workspace = workspace.value,
+        .target = std::move(target),
+        .answerWithinMs = static_cast<uint32_t>(std::chrono::milliseconds { SwitchAnswerTimeout }.count()) });
 }
 void SessionHost::eraseSession(uint64_t session)
 {

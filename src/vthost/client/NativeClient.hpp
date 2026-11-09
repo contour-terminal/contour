@@ -652,9 +652,14 @@ class NativeClient final
     void handlePdu(proto::DecodedFrame const& frame);
 
     /// Applies a pushed layout: drops one for a released workspace, follows one this connection created,
-    /// and hands it on with the pending edits applied.
+    /// hands it on with the pending edits applied, and confirms a followed workspace's first one.
     /// @param layout The layout the daemon pushed.
     void handleLayout(proto::LayoutState const& layout);
+
+    /// Tells a daemon sharing Capability::WorkspaceShown that @p workspace's first layout arrived, once per
+    /// follow.
+    /// @param workspace The workspace a layout was handed on for.
+    void confirmShown(uint64_t workspace);
 
     /// Hands a PDU that only reaches a handler -- a push's end, a permission request, a refusal -- to it.
     /// @return Whether @p frame was one.
@@ -748,6 +753,9 @@ class NativeClient final
     /// The workspaces releaseWorkspace() let go of since, until followed again: a layout of one still on its
     /// way is dropped.
     std::set<uint64_t> _releasedWorkspaces;
+    /// The followed workspaces whose first layout this connection confirmed (proto::WorkspaceShown), until
+    /// released.
+    std::set<uint64_t> _shownWorkspaces;
     std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
     std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.

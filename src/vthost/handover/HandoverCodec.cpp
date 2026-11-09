@@ -95,6 +95,15 @@ struct StateEnumWire<vtcontrol::ObjectKind>
     };
 };
 
+template <>
+struct StateEnumWire<vthost::proto::WorkspaceRelease>
+{
+    static constexpr auto Values = std::array {
+        vthost::proto::WorkspaceRelease::Closed,
+        vthost::proto::WorkspaceRelease::SwitchedAway,
+    };
+};
+
 // }}}
 
 namespace

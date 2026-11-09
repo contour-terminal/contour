@@ -109,6 +109,24 @@ TEST_CASE("contour client takes --workspace and refuses --window", "[contour][ap
     CHECK_FALSE(parse("--window").has_value());
 }
 
+TEST_CASE("contour terminal -e and execute start the program's arguments", "[contour][app][cli]")
+{
+    TestApp app;
+    auto const syntax = app.app().parameterDefinition();
+
+    auto const expectProgram = [&](core::cli::StringViewList const& line) {
+        auto const flags = core::cli::parse(syntax, line);
+        REQUIRE(flags.has_value());
+        CHECK(flags->get<std::string>("contour.terminal.execute") == "sh");
+        REQUIRE(flags->verbatim.size() == 2);
+        CHECK(flags->verbatim[0] == "-c");
+    };
+
+    expectProgram({ "contour", "terminal", "-e", "sh", "-c", "exit 0" });
+    expectProgram({ "contour", "-e", "sh", "-c", "exit 0" });
+    expectProgram({ "contour", "execute", "sh", "-c", "x" });
+}
+
 TEST_CASE("ContourGuiApp early-exit threshold falls back to the documented default", "[contour][app]")
 {
     TestApp app;

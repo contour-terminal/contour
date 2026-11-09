@@ -501,8 +501,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                                remote::makeControlWorkspaceLister(SwitchListingTimeout),
                                // A pick is the switcher popup, scoped to the daemon; it re-enters the switch.
                                [this](remote::SwitchPickRequest const& pick) { return showSwitchPick(pick); },
-                               remote::SwitchDeadline { .timeout = remote::DefaultSwitchTimeout,
-                                                        .timer = remote::qtSwitchTimer() })),
+                               _switchDeadline)),
     _switchDirectory(switchDirectory ? std::move(switchDirectory) : makeSwitchDirectory()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
@@ -1990,7 +1989,8 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                     "DEPRECATED: Program to execute instead of running the shell as configured.",
                     "PROGRAM",
                     CLI::Presence::Optional,
-                    CLI::Deprecated { "Only supported for compatibility with very old KDE desktops." } },
+                    CLI::Deprecated { "Only supported for compatibility with very old KDE desktops." },
+                    CLI::VerbatimStart::AfterValue },
             },
             CLI::CommandList {},
             CLI::CommandSelect::Implicit,
@@ -4008,6 +4008,7 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                     window,
                     std::move(target),
                     mode,
+                    session::NoLandingDeadline,
                     [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
                         if (!outcome)
                             attachLog()("switch from the switcher failed: {}", outcome.error());

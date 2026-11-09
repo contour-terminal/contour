@@ -708,7 +708,8 @@ namespace
                                                        proto::Capability::ClipboardTargets,
                                                        proto::Capability::SoftFonts,
                                                        proto::Capability::WorkspaceFollow,
-                                                       proto::Capability::WorkspaceSwitch });
+                                                       proto::Capability::WorkspaceSwitch,
+                                                       proto::Capability::WorkspaceShown });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));

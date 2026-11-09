@@ -5,6 +5,8 @@
 /// What a remote::DaemonLink needs from the application; light, so that the composition root can implement
 /// it without including the link.
 
+#include <core/platform/Clock.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -44,9 +46,22 @@ struct HandOver
 /// switch that ended meanwhile finds nothing to give up.
 using SwitchTimer = std::function<void(std::chrono::milliseconds delay, std::function<void()> fire)>;
 
+/// How long a switch waits for its target workspace's first layout before it gives up.
+inline constexpr auto DefaultSwitchTimeout = std::chrono::milliseconds { std::chrono::seconds { 10 } };
+
 /// The production switch timer: a single-shot QTimer on the GUI thread.
 /// @return The timer.
 [[nodiscard]] SwitchTimer qtSwitchTimer();
+
+/// What a switch that never lands is bounded by: one for every switch of the process, so that a switch
+/// question (switchQuestionExpiry()) leaves the switch it allows the time this gives it.
+struct SwitchDeadline
+{
+    /// How long after its follow is sent, or its link started, a switch waits for the first layout.
+    std::chrono::milliseconds timeout = DefaultSwitchTimeout;
+    SwitchTimer timer;                   ///< What tells it the time is up.
+    core::platform::IClock const& clock; ///< What tells how much time a switch with a landing time has left.
+};
 
 /// How a hand-over ended.
 enum class HandOverOutcome : uint8_t
@@ -110,9 +125,10 @@ class IDaemonLinkHost
     ///         process and for its lifetime (spec §Safety): a link asks it before prompting.
     [[nodiscard]] virtual SwitchGrants& switchGrants() = 0;
 
-    /// @return What times out the questions a link asks about the switches programs ask for
-    ///         (SwitchQuestionExpiry), one for every link of the process.
-    [[nodiscard]] virtual SwitchTimer const& switchTimer() = 0;
+    /// @return What bounds the switches of the process: what times out the questions a link asks about the
+    ///         switches programs ask for (switchQuestionExpiry()), and the landing time those leave the
+    ///         switch. The one the application's switcher is built with.
+    [[nodiscard]] virtual SwitchDeadline const& switchDeadline() = 0;
 };
 
 } // namespace contour::remote

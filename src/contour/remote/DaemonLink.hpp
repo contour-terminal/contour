@@ -4,6 +4,7 @@
 /// @file
 /// One daemon connection and the windows it serves.
 
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -182,8 +183,9 @@ class DaemonLink final: public session::WindowBinding
     /// workspaces survived (NativeController::resumeAsLaunch). No-op once given up or stopped.
     void resumeAsLaunch();
 
-    /// @return Whether the link stopped because its last window went (@see lastWindowReleased), and its
-    ///         controller binds no pane any more: nothing needs it, and it may be destroyed.
+    /// @return Whether the link stopped because its last window went (@see lastWindowReleased), its
+    ///         controller has wound down and binds no pane any more: nothing needs it, and it may be
+    ///         destroyed.
     [[nodiscard]] bool isFinished() const;
 
     /// @return The controller as the factory of the link's sessions; the given-up one after awaitAttached()
@@ -516,9 +518,12 @@ class DaemonLink final: public session::WindowBinding
     /// The daemon release the drift badge was last assessed for, to notice a daemon that came back changed.
     std::string _shownDaemonRelease;
 
-    /// The receiver of every controller connection the link makes; declared last, so that it is destroyed
-    /// first and no queued signal reaches a link being torn down.
+    /// The receiver of every controller connection the link makes; declared last but for its post target,
+    /// so that it is destroyed first and no queued signal reaches a link being torn down.
     QObject _receiver;
+    /// What the controller's background stop (@see end) tells the link through, from its own thread;
+    /// withdrawn as the link is destroyed, before the controller.
+    std::shared_ptr<platform::PostTarget> _postTarget = std::make_shared<platform::PostTarget>(_receiver);
 };
 
 /// Sees to it that every daemon the application is linked to has one live link whose reconnect follows what a

@@ -5548,6 +5548,58 @@ TEST_CASE("a workspace created by a control connection appears in the primary vi
     CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
 }
 
+// Review (PR 4, M2): another connection's follow clears a hidden workspace's release, so the primary viewer
+// took up a workspace another window had just switched to, and it showed in two windows.
+TEST_CASE("a hidden workspace another client switches to does not also appear in the primary viewer",
+          "[vthost][native][attach-intent][visibility]")
+{
+    auto h = TwoClientHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* hiddenWorkspace = h.host.createWorkspace();
+    REQUIRE(hiddenWorkspace != nullptr);
+    auto const hidden = hiddenWorkspace->id().value;
+    h.host.noteWorkspaceReleased(vtworkspace::WorkspaceId { hidden }, proto::WorkspaceRelease::SwitchedAway);
+    auto const launching = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
+    auto const switching = encodeRequest({ intentHello(proto::AttachIntentKind::Workspaces, { hidden }) });
+
+    auto fromOne = std::vector<proto::DecodedFrame> {};
+    auto fromTwo = std::vector<proto::DecodedFrame> {};
+    auto laterWorkspace = uint64_t { 0 };
+    // A workspace no client claims, made once the second client follows the hidden one: the primary viewer
+    // takes it up, and with it looks at every other workspace again.
+    auto const createUnclaimed = [](TwoClientHarness* h,
+                                    std::vector<proto::DecodedFrame> const* fromTwo,
+                                    uint64_t* laterWorkspace) -> Task<void> {
+        co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
+        auto const* workspace = h->host.createWorkspace();
+        REQUIRE(workspace != nullptr);
+        *laterWorkspace = workspace->id().value;
+    };
+    auto const oneSeesIt = [&laterWorkspace](std::vector<proto::DecodedFrame> const& got) {
+        return laterWorkspace != 0 && layoutWorkspaces(got).contains(laterWorkspace)
+               && snapshotRunCount(got) >= 2;
+    };
+    h.loop.blockOn(core::net::testing::allOf(
+        h.serverOne->run(),
+        h.serverTwo->run(),
+        feedBytes(h.firstPair.second.get(), &launching),
+        feedOnce(&h.loop,
+                 h.secondPair.second.get(),
+                 &switching,
+                 &fromOne,
+                 [](auto const& got) { return snapshotRunCount(got) >= 1; }),
+        createUnclaimed(&h, &fromTwo, &laterWorkspace),
+        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
+        collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
+        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
+
+    REQUIRE(oneSeesIt(fromOne));
+    CHECK(layoutWorkspaces(fromOne).contains(first));
+    CHECK(layoutWorkspaces(fromTwo).contains(hidden));
+    CHECK_FALSE(layoutWorkspaces(fromOne).contains(hidden));
+}
+
 TEST_CASE("the host counts an Attach connection as a client beside the census",
           "[vthost][native][attach-intent]")
 {
@@ -7904,6 +7956,88 @@ TEST_CASE("FollowWorkspace 0 creates a workspace this connection shows", "[vthos
         [](auto const& got) { return layoutWorkspaces(got).size() == 2 && snapshotRunCount(got) >= 2; });
 
     CHECK(layoutWorkspaces(received).size() == 2);
+}
+
+namespace
+{
+/// @param workspaces The workspaces the hello names.
+/// @return A following hello that also offers Capability::WorkspaceShown.
+[[nodiscard]] proto::ClientHello confirmingHello(std::vector<uint64_t> workspaces)
+{
+    auto hello = followingHello(proto::AttachIntentKind::Workspaces, std::move(workspaces));
+    hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceShown));
+    return hello;
+}
+
+/// @param host The daemon's host.
+/// @return A second workspace, with a tab, that a window switched away from: Hidden.
+[[nodiscard]] vtworkspace::WorkspaceId hiddenWorkspace(SessionHost& host)
+{
+    auto const* other = host.createWorkspace();
+    REQUIRE(other != nullptr);
+    host.noteWorkspaceReleased(other->id(), proto::WorkspaceRelease::SwitchedAway);
+    REQUIRE(host.visibility(other->id()) == vthost::WorkspaceVisibility::Hidden);
+    return other->id();
+}
+} // namespace
+
+TEST_CASE("a hidden workspace a connection followed but never confirmed is hidden again when it ends",
+          "[vthost][native][workspace-follow][visibility]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const hidden = hiddenWorkspace(h.host);
+
+    // Its layout went out, but the client never said it arrived: the connection is lost first.
+    auto const received = h.exchangeUntil({ confirmingHello({ hidden.value }) },
+                                          [&](auto const& got) { return !layoutWorkspaces(got).empty(); });
+    REQUIRE(layoutWorkspaces(received) == std::set<uint64_t> { hidden.value });
+    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Shown);
+    h.session.reset();
+    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Hidden);
+}
+
+TEST_CASE("a hidden workspace a connection confirmed it was shown is left when it ends",
+          "[vthost][native][workspace-follow][visibility]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const hidden = hiddenWorkspace(h.host);
+
+    std::ignore = h.exchangeUntil({ confirmingHello({ hidden.value }),
+                                    proto::WorkspaceShown { .workspace = hidden.value },
+                                    proto::FetchImage { .imageId = 4242 } },
+                                  imageGoneArrived);
+    h.session.reset();
+    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Left);
+}
+
+TEST_CASE(
+    "a connection that does not confirm what it was shown counts a follow shown once its layout is sent",
+    "[vthost][native][workspace-follow][visibility]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const hidden = hiddenWorkspace(h.host);
+
+    std::ignore = h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { hidden.value }) },
+                                  [&](auto const& got) { return !layoutWorkspaces(got).empty(); });
+    h.session.reset();
+    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Left);
+}
+
+TEST_CASE("a peer without workspace-shown has WorkspaceShown refused", "[vthost][native][workspace-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+
+    auto const received =
+        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
+                          proto::DecodedPdu { proto::WorkspaceShown { .workspace = first } } },
+                        [](auto const& got) { return std::ranges::count_if(got, isUnsupported) >= 1; });
+
+    CHECK(std::ranges::count_if(received, isUnsupported) == 1);
 }
 
 TEST_CASE("a peer without workspace-follow has the follow and release PDUs refused",
