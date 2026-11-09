@@ -930,6 +930,9 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config, vtbackend::Blo
         .hoverStroke =
             gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
         .blockColumnForm = form,
+        .successRailMark = gutter.exitStatus && gutter.railThickness == 0
+                               ? vtbackend::SuccessRailMark::Always
+                               : vtbackend::SuccessRailMark::OnAttention,
     };
 }
 
@@ -3289,6 +3292,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                        width,
                        kept);
     }
+
+    if (auto const thickness = child["rail_thickness"]; thickness && !thickness.IsNull())
+    {
+        auto value = -1;
+        loadGuarded(child, "rail_thickness", value);
+        if (value >= 0 && value <= 8)
+            where.railThickness = value;
+        else
+            errorLog()("gutter.rail_thickness must be between 0 and 8; keeping the previous setting.");
+    }
+    else if (thickness)
+        where.railThickness.reset();
 
     if (child["timestamp_format"])
     {

@@ -178,13 +178,13 @@ static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMa
 /// @param cell The rail cell.
 /// @param metrics The grid's metrics.
 /// @param smoothScrollOffset The rows' sub-cell scroll offset, in device pixels.
-/// @return The rectangles; none for a row with no segment.
+/// @return The rectangles; none for a row with no segment or a hidden rail line.
 [[nodiscard]] inline RailRects railRects(vtbackend::RenderGutterCell const& cell,
                                          GridMetrics const& metrics,
                                          int smoothScrollOffset)
 {
     using vtbackend::RailSegment;
-    if (cell.rail == RailSegment::None)
+    if (cell.rail == RailSegment::None || metrics.rail.bar == 0)
         return {};
 
     auto const& rail = metrics.rail;

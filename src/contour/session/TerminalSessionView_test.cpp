@@ -2226,6 +2226,7 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     CHECK(session->blockActionsAnchor().width()
           == Catch::Approx(extent.rail / surface.devicePixelRatioValue));
     CHECK(session->blockActionsAnchor().contains(overTheStrip));
+    CHECK(session->blockActionsStatusGlyph() == QStringLiteral("✗"));
 
     // Over the line numbers, left of the strip, the block is not hovered.
     auto const overTheNumbers = QPointF { extent.leadIn + (extent.columns / 2.0), 4.0 };
@@ -2233,6 +2234,7 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     contour::session::sendMouseMoveEvent(&numbers, *session);
     CHECK(spy.count() == 2);
     CHECK(session->blockActionsAnchor().isEmpty());
+    CHECK(session->blockActionsStatusGlyph().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, and only then",

@@ -258,6 +258,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // display's item-local logical pixels. Empty with no block under the pointer, on the alternate screen,
     // and with nothing to anchor to.
     Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
+    Q_PROPERTY(QString blockActionsStatusGlyph READ blockActionsStatusGlyph NOTIFY blockActionsAnchorChanged)
     // The block the keyboard focuses (⌘↑ / ⌘↓), as its id; 0 while none is. What a focus ring binds to.
     Q_PROPERTY(qulonglong focusedCommandBlock READ focusedCommandBlock NOTIFY focusedCommandBlockChanged)
     // The block the pointer is over, as its id; 0 while none is. The block blockActionsAnchor belongs to.
@@ -533,6 +534,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// logical coordinates; empty while none is (@see blockActionsAnchor above). Under the glyph column of
     /// the Terminal row it is the one cell at the block column's head.
     [[nodiscard]] QRectF blockActionsAnchor() const noexcept { return _blockActionsAnchor; }
+
+    /// The hovered command's status glyph, or empty when status marks are disabled.
+    [[nodiscard]] QString blockActionsStatusGlyph() const { return _blockActionsStatusGlyph; }
 
     /// @return The id of the block under the pointer; 0 while none is. GUI thread.
     [[nodiscard]] qulonglong hoveredCommandBlock() const noexcept
@@ -2684,7 +2688,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The screen row the block hover was decided at; nullopt while the pointer is over no block. GUI thread.
     std::optional<vtbackend::LineOffset> _blockHoverRow {};
 
-    QRectF _blockActionsAnchor {}; ///< @see blockActionsAnchor
+    QRectF _blockActionsAnchor {};       ///< @see blockActionsAnchor
+    QString _blockActionsStatusGlyph {}; ///< @see blockActionsStatusGlyph
 
     /// The block the keyboard focuses, as the terminal last told (@see focusedCommandBlock). GUI thread.
     std::optional<vtbackend::CommandBlockId> _focusedBlock {};

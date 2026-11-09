@@ -914,6 +914,7 @@ struct Writer
                       v.exitStatus,
                       v.userMarks,
                       v.blockColumnWidth,
+                      v.railThickness ? std::to_string(*v.railThickness) : "null",
                       v.boldOnHover,
                       v.lineNumbers,
                       v.lineNumberWidth,

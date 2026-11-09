@@ -420,7 +420,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                                  : app.keyboardPlatformFactory() },
     _keyboardPlatform { _keyboardPlatformFactory(input::keyboardPolicyOf(_profile)) },
     _currentColorPreference { app.colorPreference() },
-    _gutterChrome { gutterChromeFor(app.chromeStyle()) },
+    _gutterChrome { gutterChromeFor(app.chromeStyle(), _config.gutter.value().railThickness) },
     _systemScrollBars { app.platformAppearance().scrollBars },
     _localIdentity { app.hostIdentity() },
     _accumulatedPixelScroll {},
@@ -5032,12 +5032,26 @@ void TerminalSession::updateCommandBlockHover(std::optional<vtbackend::CommandBl
                                               vtbackend::LineOffset screenRow)
 {
     _blockHoverRow = screenRow;
-    _hoveredBlock = block;
+    auto const blockChanged = std::exchange(_hoveredBlock, block) != block;
 
-    auto const anchor = block && _display != nullptr
-                            ? core::locked(_terminal, [&] { return blockActionsAnchorLocked(*block); })
-                            : QRectF {};
-    if (std::exchange(_blockActionsAnchor, anchor) != anchor)
+    auto const [anchor, glyph] =
+        block && _display != nullptr
+            ? core::locked(_terminal,
+                           [&]() -> std::pair<QRectF, QString> {
+                               auto const rect = blockActionsAnchorLocked(*block);
+                               auto const* record = _terminal.commandBlocks().find(*block);
+                               if (rect.isEmpty() || !_terminal.settings().gutter.exitStatus
+                                   || record == nullptr)
+                                   return { rect, {} };
+                               auto const outcome = vtbackend::outcomeOf(*record);
+                               auto const& status =
+                                   window::StickyHeaderGlyphRows.at(static_cast<std::size_t>(outcome));
+                               return { rect, QString::fromUtf8(status.glyph) };
+                           })
+            : std::pair<QRectF, QString> {};
+    auto const anchorChanged = std::exchange(_blockActionsAnchor, anchor) != anchor;
+    auto const glyphChanged = std::exchange(_blockActionsStatusGlyph, glyph) != glyph;
+    if (blockChanged || anchorChanged || glyphChanged)
         emit blockActionsAnchorChanged();
 }
 

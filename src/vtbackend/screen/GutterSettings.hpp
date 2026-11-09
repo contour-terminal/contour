@@ -148,6 +148,13 @@ enum class FoldHoverStroke : uint8_t
     Bolder,        ///< The hovered fold's line, its head and its end are drawn one stroke heavier.
 };
 
+/// When the native command-block rail shows a success mark.
+enum class SuccessRailMark : uint8_t
+{
+    OnAttention,
+    Always,
+};
+
 /// What the gutter shows: which segments it has and what each draws.
 ///
 /// The bools mirror the YAML keys they come from one to one -- `folding.show_markers`,
@@ -191,6 +198,9 @@ struct GutterSettings
     /// How the block column is drawn: in cells, or as the rail's pixel strip after them. From the chrome row,
     /// not the YAML: @c blockColumnWidth applies to the glyph cells only.
     BlockColumnForm blockColumnForm = BlockColumnForm::Glyphs;
+
+    /// Keep the success mark visible when it is the block's only status indicator.
+    SuccessRailMark successRailMark = SuccessRailMark::OnAttention;
 
     bool operator==(GutterSettings const&) const = default;
 };

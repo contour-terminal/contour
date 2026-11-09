@@ -2251,6 +2251,7 @@ default_profile: main
 gutter:
     exit_status: false
     user_marks: false
+    rail_thickness: 5
     bold_on_hover: false
     line_numbers: hybrid
     line_number_width: 8
@@ -2264,6 +2265,7 @@ profiles:
     auto const& gutter = config.gutter.value();
     CHECK(gutter.exitStatus == false);
     CHECK(gutter.userMarks == false);
+    CHECK(gutter.railThickness == 5);
     CHECK(gutter.boldOnHover == false);
     CHECK(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).hoverStroke
           == vtbackend::FoldHoverStroke::Unchanged);
@@ -2280,6 +2282,7 @@ TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[conf
     CHECK(gutter.exitStatus);
     CHECK(gutter.userMarks);
     CHECK(gutter.blockColumnWidth == 2);
+    CHECK_FALSE(gutter.railThickness.has_value());
     CHECK(gutter.boldOnHover);
     CHECK(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).hoverStroke
           == vtbackend::FoldHoverStroke::Bolder);

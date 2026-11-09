@@ -4341,6 +4341,9 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                            .attention = record ? attentionOf(record->id) : BlockAttention::Rest };
         row.rail = railSegmentOf(facts);
         row.railMark = railMarkOf(facts, row.rail);
+        if (gutter.successRailMark == SuccessRailMark::Always && facts.outcome == CommandBlockOutcome::Success
+            && (row.rail == RailSegment::Head || row.rail == RailSegment::Single))
+            row.railMark = RailMark::Check;
         if (record != nullptr)
         {
             row.outcome = facts.outcome;

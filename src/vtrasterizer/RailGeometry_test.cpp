@@ -82,6 +82,10 @@ TEST_CASE("RailGeometry.aHeadIsRoundedAtTheTop", "[renderer][rail]")
               .empty());
     CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Head, RailMark::Cross), metrics, 0))
               .empty());
+
+    auto hidden = metrics;
+    hidden.rail.bar = 0;
+    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Body), hidden, 0).all().empty());
 }
 
 TEST_CASE("RailGeometry.theCellsMoveLeftOfTheStrip", "[renderer][rail]")
