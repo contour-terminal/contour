@@ -19,7 +19,8 @@ namespace vtpty
 /// Why selfExecutablePath() cannot name the running executable, in selfExecutableCategory().
 enum class SelfExecutableError : std::uint8_t
 {
-    /// Linux without /proc mounted: the executable is spawned as /proc/self/exe.
+    /// Linux without /proc mounted: the executable is reached through /proc/self/exe and spawned through
+    /// /proc/self/fd.
     NoProcFileSystem = 1,
     /// A platform with no way to name the running executable, OpenBSD among them.
     NoWayToName,
@@ -32,10 +33,12 @@ enum class SelfExecutableError : std::uint8_t
 /// @return @p error as an error code of selfExecutableCategory().
 [[nodiscard]] std::error_code makeErrorCode(SelfExecutableError error) noexcept;
 
-/// @return The file to spawn to run this process's own executable again: "/proc/self/exe" on Linux, which
-///         names the running image even once a package upgrade replaced it on disk; `KERN_PROC_PATHNAME`
-///         on FreeBSD and NetBSD; elsewhere currentExecutablePath(); looked up once outside Linux. Or why
-///         there is none: a SelfExecutableError where what is missing is known (/proc, or any way at all).
+/// @return The file that runs this process's own executable again: "/proc/self/exe" on Linux, which names
+///         the running image even once a package upgrade replaced it on disk, and which spawnTrampoline()
+///         opens and spawns through the descriptor (/proc/self/fd/N) rather than as itself;
+///         `KERN_PROC_PATHNAME` on FreeBSD and NetBSD; elsewhere currentExecutablePath(); looked up once
+///         outside Linux. Or why there is none: a SelfExecutableError where what is missing is known (/proc,
+///         or any way at all).
 [[nodiscard]] std::expected<std::string, std::error_code> selfExecutablePath();
 
 } // namespace vtpty

@@ -46,7 +46,7 @@ namespace
             switch (static_cast<SelfExecutableError>(value))
             {
                 case SelfExecutableError::NoProcFileSystem:
-                    return "/proc is not mounted, and programs are started through /proc/self/exe";
+                    return "/proc is not mounted, and programs are started through it";
                 case SelfExecutableError::NoWayToName:
                     return "this platform has no way to name the running executable, through which "
                            "programs are started";

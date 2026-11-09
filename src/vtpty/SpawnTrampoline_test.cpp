@@ -7,6 +7,7 @@
     #include <vtpty/OwnedFd.hpp>
     #include <vtpty/PosixSpawn.hpp>
     #include <vtpty/ProcessPlacement.hpp>
+    #include <vtpty/SpawnSpec.hpp>
     #include <vtpty/UnixUtils.hpp>
     #include <vtpty/test/ProcessTesting.hpp>
 
@@ -253,6 +254,51 @@ TEST_CASE("spawnTrampoline.terminal mode runs the program on the terminal", "[vt
     CHECK(output.contains("ok"));
     CHECK(output.contains(name));
     CHECK(exitedWith(waitFor(child.pid), 0));
+}
+
+TEST_CASE("spawnTrampoline.spawns while the lowest free descriptor is a slot's number", "[vtpty][trampoline]")
+{
+    // What the spawn opens for itself lands on the lowest free number -- on Linux the descriptor of the image
+    // it execs. Where that is a number the spawn dup2()s a slot (or the spec) onto, the dup2() replaces it
+    // before the exec reads the path, unless it is kept above them, as the copies are. A runner that starts
+    // the suite with few descriptors open is such a case. Here the test's own descriptors are moved out of
+    // the way, the lowest such number left free and every number below it taken.
+    static constexpr auto Raised = 64;
+    auto const raise = [](vtpty::OwnedFd& fd) {
+        fd = vtpty::OwnedFd { ::fcntl(fd.get(), F_DUPFD_CLOEXEC, Raised) };
+    };
+    auto terminal = openTerminal();
+    auto parking = gate();
+    raise(terminal.master);
+    raise(terminal.slave);
+    raise(parking.parentEnd);
+    raise(parking.childEnd);
+    auto const targets = std::array { vtpty::SpawnSpecFd,
+                                      vtpty::trampolineFd(vtpty::TrampolineSlot::Gate),
+                                      vtpty::trampolineFd(vtpty::TrampolineSlot::Terminal) };
+    auto const target = std::ranges::find_if(targets, [](int fd) { return !isOpen(fd); });
+    if (target == targets.end())
+        SKIP("every descriptor the spawn maps onto is taken in this process");
+    auto fillers = std::vector<vtpty::OwnedFd> {};
+    for (auto const fd: std::views::iota(0, *target))
+        if (!isOpen(fd))
+            fillers.emplace_back(::open("/dev/null", O_RDONLY | O_CLOEXEC));
+    auto const fds = std::array {
+        vtpty::InheritedFd { .slot = vtpty::TrampolineSlot::Gate, .fd = parking.childEnd.get() },
+        vtpty::InheritedFd { .slot = vtpty::TrampolineSlot::Terminal, .fd = terminal.slave.get() },
+    };
+    auto const pid = vtpty::spawnTrampoline(
+        terminalSpec({ "/bin/sh", "-c", "printf ok" }), fds, vtpty::TrampolineEnvironment::Inherited);
+    fillers.clear();
+    REQUIRE(pid.has_value());
+    parking.childEnd.reset();
+    terminal.slave.reset();
+    release(parking);
+
+    auto const output =
+        readUntil(terminal.master.get(), [](std::string_view text) { return text.contains("ok"); });
+    CHECK(output.contains("ok"));
+    CHECK(exitedWith(waitFor(*pid), 0));
 }
 
 TEST_CASE("spawnTrampoline.parks until the gate is released", "[vtpty][trampoline]")
