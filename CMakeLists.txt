@@ -337,6 +337,11 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_no_threaded_fork check-no-threaded-fork.py)
         contour_add_lint_gate(check_no_threaded_fork_selftest check-no-threaded-fork.py --self-test)
 
+        # The PTY keeper includes nothing of the terminal engine: no vtbackend, vtparser or vtworkspace header,
+        # and of vthost only its own and proto/Wire.hpp. The self-test keeps the scanner itself honest.
+        contour_add_lint_gate(check_keeper_includes check-keeper-includes.py)
+        contour_add_lint_gate(check_keeper_includes_selftest check-keeper-includes.py --self-test)
+
         # The chrome QML takes every colour from the palette or from chromeStyle. This gate fails on a hex
         # literal or an all-numeric Qt.rgba( in src/contour/qml and src/contour/styles, so a hardcoded
         # colour cannot return; the self-test keeps the scanner itself honest.

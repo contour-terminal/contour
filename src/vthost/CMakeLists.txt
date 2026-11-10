@@ -9,6 +9,8 @@ target_include_directories(vthost_wire PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 
+add_subdirectory(keeper)
+
 add_library(vthost STATIC
     AccessFile.cpp
     AccessFile.hpp
