@@ -85,8 +85,8 @@ struct ControllerOptions
 {
     /// Asked before each session the controller creates; empty to keep none.
     contour::remote::NativeController::SessionSettingsSource sessionSettings = {};
-    /// The light/dark preference its first hello states; none states none.
-    std::optional<vtbackend::ColorPreference> colorPreference = std::nullopt;
+    /// Asked as each hello is built for the light/dark preference it states; empty states none.
+    contour::remote::NativeController::ColorPreferenceSource colorPreference = {};
     /// The emulation settings its hello states, the profile page size among them; none states none, and so
     /// no client area.
     std::optional<vtbackend::Settings> attachSettings = std::nullopt;
@@ -122,7 +122,7 @@ struct ControllerOptions
         .workingDirectory = std::move(options.workingDirectory),
         .attachSettings = std::move(options.attachSettings),
         .sessionSettings = std::move(options.sessionSettings),
-        .colorPreference = options.colorPreference,
+        .colorPreference = std::move(options.colorPreference),
         .clock = core::platform::defaultSteadyClock(),
         .timeline = timeline.timeline,
         .powerMonitor = options.powerMonitor,

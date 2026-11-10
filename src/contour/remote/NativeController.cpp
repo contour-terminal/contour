@@ -114,11 +114,10 @@ NativeController::NativeController(Config config):
     _workingDirectory(std::move(config.workingDirectory)),
     _attachSettings(std::move(config.attachSettings)),
     _sessionSettings(std::move(config.sessionSettings)),
+    _colorPreference(std::move(config.colorPreference)),
     _timeline(config.timeline),
     _backoff(config.backoff)
 {
-    if (config.colorPreference)
-        _statedColors = wireOf(*config.colorPreference);
     // On the monitor's platform thread: only marshaled from there, as its contract asks.
     if (config.powerMonitor != nullptr)
         _powerSubscription = config.powerMonitor->subscribe([this](core::platform::SystemPowerEvent event) {
@@ -311,7 +310,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             }),
             .attachIntent = std::move(intent),
             .profileName = _profileName,
-            .colorPreference = _statedColors.load(),
+            .colorPreference = shownColors(),
             .cellPixelSize = toWireCell(helloCell),
             // The first connection's alone: it is the one whose attach creates the session the directory was
             // asked for. A reconnect resumes the windows it lost and creates nothing of its own.
@@ -1503,9 +1502,18 @@ std::optional<vtpty::PageSize> NativeController::composedClientArea() const
     return vthost::client::composeAnchoredClientArea(roots, _geometryAnchor, resolve);
 }
 
+vthost::proto::WireColorPreference NativeController::shownColors() const
+{
+    // Read, never stored back: a reactor that wrote what it read could overwrite a newer statement the GUI
+    // thread made meanwhile, which requestHostedOperation() keeps only in _statedColors when unreachable.
+    if (auto const shown = _colorPreference ? _colorPreference() : std::nullopt)
+        return wireOf(*shown);
+    return _statedColors.load();
+}
+
 void NativeController::stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const
 {
-    auto const stated = _statedColors.load();
+    auto const stated = shownColors();
     if (stated == vthost::proto::WireColorPreference::Unstated)
         return;
     client.performOperation(vthost::proto::PerformOperation {

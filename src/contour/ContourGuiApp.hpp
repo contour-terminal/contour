@@ -1496,6 +1496,10 @@ class ContourGuiApp:
 
     /// What the terminal's palette follows: @c _osColorPreference unless the GUI theme pins one.
     vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
+    /// @c _colorPreference once the OS's scheme has been read, for the daemon links' reactors to state in
+    /// their hellos; nullopt before, when the default above is no one's preference. Written on the GUI thread
+    /// only.
+    std::atomic<std::optional<vtbackend::ColorPreference>> _shownColorPreference {};
     /// What the OS last said, whatever the GUI theme makes of it.
     vtbackend::ColorPreference _osColorPreference = vtbackend::ColorPreference::Dark;
     /// The GUI theme applyGuiTheme() last applied, after the contrast-theme override.
