@@ -6,6 +6,7 @@
 #include <core/net/WithTimeout.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <format>
@@ -41,6 +42,8 @@ namespace
         /// A std::format string over: {0} the target, {1} the command to run once, {2} the host as
         /// known_hosts names it, {3} the detail, {4} the exit code.
         std::string_view format;
+        /// The words when Contour answered ssh's prompts; empty: @c format serves both modes.
+        std::string_view askpassFormat = {};
     };
 
     /// What a login that needs a prompt batch mode cannot give says.
@@ -49,18 +52,27 @@ namespace
         "host key). Run this once in a terminal, then attach again:\n    {1}"
     };
 
+    /// Appended to a Batch-mode failure when the local ssh is too old to be asked for passwords: {0} the
+    /// version found.
+    constexpr auto OldSshAdvice = std::string_view {
+        "\nContour can only ask for passwords with OpenSSH 8.4 or newer (found {0}); on Windows install the "
+        "current Win32-OpenSSH release."
+    };
+
     /// Every SshFailure's kind and words, one row each.
     constexpr auto SshFailureMessages = std::to_array<SshFailureMessage>({
         { .failure = SshFailure::HostKeyUnknown,
           .kind = TransportErrorKind::HostKeyUnknown,
-          .format = PromptNeeded },
+          .format = PromptNeeded,
+          .askpassFormat = "The host key of {0} was not accepted: {3}" },
         { .failure = SshFailure::HostKeyChanged,
           .kind = TransportErrorKind::HostKeyUnknown,
           .format = "The host key of {0} has changed. If you expected that, remove the old key with "
                     "`ssh-keygen -R {2}` and run `{1}` once in a terminal." },
         { .failure = SshFailure::AuthenticationRequired,
           .kind = TransportErrorKind::AuthenticationRequired,
-          .format = PromptNeeded },
+          .format = PromptNeeded,
+          .askpassFormat = "ssh could not log in to {0}: {3}" },
         { .failure = SshFailure::HostUnreachable,
           .kind = TransportErrorKind::Unreachable,
           .format = "ssh could not reach {0}: {3}" },
@@ -85,6 +97,9 @@ namespace
         { .failure = SshFailure::NoPreamble,
           .kind = TransportErrorKind::Unreachable,
           .format = "ssh to {0} ended before Contour answered (exit code {4}): {3}" },
+        { .failure = SshFailure::Cancelled,
+          .kind = TransportErrorKind::Cancelled,
+          .format = "The ssh login to {0} was cancelled." },
     });
 
     /// @return @p host in brackets when it is an IPv6 address, as a URL spells it.
@@ -165,15 +180,50 @@ std::string describeSshTarget(SshTarget const& target)
     return std::format("ssh://{}{}{}", user, bracketed(target.host), port);
 }
 
-std::vector<std::string> sshArguments(SshTarget const& target)
+std::optional<OpenSshVersion> parseOpenSshVersion(std::string_view sshDashV)
 {
-    auto argv = std::vector<std::string> {
-        "ssh", "-T",
-        "-o",  "BatchMode=yes",
-        "-o",  "ConnectTimeout=10",
-        "-o",  "ServerAliveInterval=15",
-        "-o",  "ServerAliveCountMax=3",
+    constexpr auto Marker = "OpenSSH_"sv;
+    auto const at = sshDashV.find(Marker);
+    if (at == std::string_view::npos)
+        return std::nullopt;
+    auto rest = sshDashV.substr(at + Marker.size());
+    // The Windows build says "OpenSSH_for_Windows_8.1p1".
+    constexpr auto WindowsInfix = "for_Windows_"sv;
+    if (rest.starts_with(WindowsInfix))
+        rest.remove_prefix(WindowsInfix.size());
+    auto const number = [&rest]() -> std::optional<int> {
+        auto value = 0;
+        auto const [end, error] = std::from_chars(rest.data(), rest.data() + rest.size(), value);
+        if (error != std::errc {} || end == rest.data())
+            return std::nullopt;
+        rest.remove_prefix(static_cast<std::size_t>(end - rest.data()));
+        return value;
     };
+    auto const major = number();
+    if (!major || !rest.starts_with('.'))
+        return std::nullopt;
+    rest.remove_prefix(1);
+    auto const minor = number();
+    if (!minor)
+        return std::nullopt;
+    return OpenSshVersion { .major = *major, .minor = *minor };
+}
+
+SshPromptMode promptModeFor(std::optional<OpenSshVersion> found)
+{
+    return found && *found >= AskpassMinimumOpenSsh ? SshPromptMode::Askpass : SshPromptMode::Batch;
+}
+
+std::vector<std::string> sshArguments(SshTarget const& target, SshPromptMode mode)
+{
+    auto argv = std::vector<std::string> { "ssh", "-T" };
+    switch (mode)
+    {
+        case SshPromptMode::Batch: argv.insert(argv.end(), { "-o", "BatchMode=yes" }); break;
+        case SshPromptMode::Askpass: argv.insert(argv.end(), { "-o", "NumberOfPasswordPrompts=3" }); break;
+    }
+    argv.insert(argv.end(),
+                { "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3" });
     if (target.port)
     {
         argv.emplace_back("-p");
@@ -202,11 +252,9 @@ SshFailure classifySshFailure(std::string_view stderrTail, std::optional<int> ex
     return SshFailure::NoPreamble;
 }
 
-TransportError sshTransportError(SshFailure failure,
-                                 SshTarget const& target,
-                                 std::string_view detail,
-                                 std::optional<int> exitCode)
+TransportError sshTransportError(SshFailure failure, SshFailureContext const& context)
 {
+    auto const& target = context.target;
     auto const row = std::ranges::find(SshFailureMessages, failure, &SshFailureMessage::failure);
     // Every SshFailure has a row; a missing one is a programming error the table test catches.
     if (row == SshFailureMessages.end())
@@ -215,13 +263,20 @@ TransportError sshTransportError(SshFailure failure,
     auto const described = describeSshTarget(target);
     auto const command = interactiveSshCommand(target);
     auto const knownHost = knownHostsName(target);
-    auto const code =
-        exitCode && *exitCode != ExitStatusLost ? std::to_string(*exitCode) : std::string { "unknown" };
-    return TransportError {
-        .kind = row->kind,
-        .message =
-            std::vformat(row->format, std::make_format_args(described, command, knownHost, detail, code))
-    };
+    auto const code = context.exitCode && *context.exitCode != ExitStatusLost
+                          ? std::to_string(*context.exitCode)
+                          : std::string { "unknown" };
+    auto const useAskpassWords = context.mode == SshPromptMode::Askpass && !row->askpassFormat.empty();
+    auto message = std::vformat(useAskpassWords ? row->askpassFormat : row->format,
+                                std::make_format_args(described, command, knownHost, context.detail, code));
+    auto const oldSsh = context.mode == SshPromptMode::Batch && context.foundVersion
+                        && *context.foundVersion < AskpassMinimumOpenSsh;
+    if (oldSsh && !row->askpassFormat.empty())
+    {
+        auto const found = std::format("{}.{}", context.foundVersion->major, context.foundVersion->minor);
+        message += std::vformat(OldSshAdvice, std::make_format_args(found));
+    }
+    return TransportError { .kind = row->kind, .message = std::move(message) };
 }
 
 SshTransportFactory::SshTransportFactory(SshTarget target,
@@ -240,7 +295,7 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
 core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> SshTransportFactory::connectOn(
     core::net::EventLoop* loop)
 {
-    auto const argv = sshArguments(_target);
+    auto const argv = sshArguments(_target, SshPromptMode::Batch);
     auto spawned = _spawner->spawn(*loop, argv);
     if (!spawned)
     {
@@ -283,14 +338,17 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
                 return failWith(
                     *child,
                     sshTransportError(
-                        classifySshFailure(tail, exitCode), _target, lastNonEmptyLine(tail), exitCode));
+                        classifySshFailure(tail, exitCode),
+                        { .target = _target, .detail = lastNonEmptyLine(tail), .exitCode = exitCode }));
             },
             [&](PreambleRefused const& refused) -> ConnectResult {
                 return failWith(*child,
-                                sshTransportError(SshFailure::RemoteRelayError, _target, refused.message));
+                                sshTransportError(SshFailure::RemoteRelayError,
+                                                  { .target = _target, .detail = refused.message }));
             },
             [&](PreambleOverflow const&) -> ConnectResult {
-                return failWith(*child, sshTransportError(SshFailure::RemoteShellNoise, _target, {}));
+                return failWith(*child,
+                                sshTransportError(SshFailure::RemoteShellNoise, { .target = _target }));
             },
             [&](PreambleTrailing const&) -> ConnectResult {
                 return failWith(

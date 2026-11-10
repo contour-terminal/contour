@@ -49,13 +49,43 @@ struct SshTarget
 /// @return `ssh://[user@]host[:port]`, an IPv6 address in brackets; what logs and messages name.
 [[nodiscard]] std::string describeSshTarget(SshTarget const& target);
 
+/// Who answers ssh's prompts (password, passphrase, second factor, host-key confirmation).
+enum class SshPromptMode : std::uint8_t
+{
+    Batch = 0, ///< Nobody: `BatchMode=yes`, so a login that needs a prompt fails.
+    Askpass,   ///< Contour, through the askpass helper ssh is told to run.
+};
+
+/// An OpenSSH release, as `ssh -V` reports it.
+struct OpenSshVersion
+{
+    int major; ///< The major number.
+    int minor; ///< The minor number.
+
+    /// Orders by major, then minor.
+    [[nodiscard]] auto operator<=>(OpenSshVersion const&) const = default;
+};
+
+/// The first OpenSSH that honours `SSH_ASKPASS_REQUIRE=force`; older ones only fall back to batch mode.
+inline constexpr auto AskpassMinimumOpenSsh = OpenSshVersion { .major = 8, .minor = 4 };
+
+/// @param sshDashV The text `ssh -V` prints, e.g. `OpenSSH_9.6p1 Ubuntu-3ubuntu13, OpenSSL 3.0.13` or
+///        `OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2`.
+/// @return The version it names; nullopt when the text is no OpenSSH banner.
+[[nodiscard]] std::optional<OpenSshVersion> parseOpenSshVersion(std::string_view sshDashV);
+
+/// @param found The version of the local ssh; nullopt when unknown.
+/// @return Askpass when @p found reaches AskpassMinimumOpenSsh, else Batch.
+[[nodiscard]] SshPromptMode promptModeFor(std::optional<OpenSshVersion> found);
+
 /// The argv of one attempt:
-/// `ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
-/// [-p PORT] -- [USER@]HOST REMOTE_COMMAND`. The `--` keeps a destination that begins with `-` from ever
-/// being read as an option.
+/// `ssh -T [-o BatchMode=yes | -o NumberOfPasswordPrompts=3] -o ConnectTimeout=10 -o ServerAliveInterval=15
+/// -o ServerAliveCountMax=3 [-p PORT] -- [USER@]HOST REMOTE_COMMAND`. The `--` keeps a destination that
+/// begins with `-` from ever being read as an option.
 /// @param target Where to attach.
+/// @param mode Batch forbids every prompt; Askpass lets ssh ask, a few tries for a password.
 /// @return The program and its arguments.
-[[nodiscard]] std::vector<std::string> sshArguments(SshTarget const& target);
+[[nodiscard]] std::vector<std::string> sshArguments(SshTarget const& target, SshPromptMode mode);
 
 /// What the user runs once in a terminal to answer what batch mode cannot: `ssh [-p PORT] [USER@]HOST`.
 /// @param target Where to attach.
@@ -74,6 +104,7 @@ enum class SshFailure : std::uint8_t
     RemoteRelayError,       ///< The relay answered with an error preamble.
     RemoteShellNoise,       ///< The remote login printed too much before the preamble.
     NoPreamble,             ///< ssh ended without the relay answering, for no reason recognized.
+    Cancelled,              ///< The user dismissed a prompt, or the attempt was cancelled.
 };
 
 /// One row of the stderr classification: a text ssh or the remote shell prints, and what it means.
@@ -114,16 +145,23 @@ inline constexpr int ShellCommandNotFound = 127;
 ///         127; else NoPreamble.
 [[nodiscard]] SshFailure classifySshFailure(std::string_view stderrTail, std::optional<int> exitCode);
 
+/// What the words of an ssh failure are made from.
+struct SshFailureContext
+{
+    SshTarget target;             ///< Where the attempt was going.
+    std::string_view detail = {}; ///< The error preamble's text, or the stderr tail's last line.
+    std::optional<int> exitCode =
+        std::nullopt;                          ///< ssh's exit code, which NoPreamble names; nullopt: unknown.
+    SshPromptMode mode = SshPromptMode::Batch; ///< How the attempt ran.
+    std::optional<OpenSshVersion> foundVersion =
+        std::nullopt; ///< The local ssh's version, when it was probed.
+};
+
 /// The user-facing error for @p failure.
 /// @param failure Why the attempt failed.
-/// @param target Where it was going.
-/// @param detail The error preamble's text, or the stderr tail's last non-empty line.
-/// @param exitCode ssh's exit code, which NoPreamble's message names; nullopt when unknown.
+/// @param context The target, the detail and how the attempt ran.
 /// @return The transport error: its kind decides whether a reconnect retries (retryOf).
-[[nodiscard]] TransportError sshTransportError(SshFailure failure,
-                                               SshTarget const& target,
-                                               std::string_view detail,
-                                               std::optional<int> exitCode = std::nullopt);
+[[nodiscard]] TransportError sshTransportError(SshFailure failure, SshFailureContext const& context);
 
 /// Opens connections to a daemon over ssh: one fresh ssh child per attempt, reaped with the connection
 /// it carries.

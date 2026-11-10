@@ -36,6 +36,7 @@
 #include <vthost/client/NativeClient.hpp>
 
 using vthost::SshFailure;
+using vthost::SshPromptMode;
 using vthost::SshTarget;
 using vthost::TransportErrorKind;
 using vthost::TransportRetry;
@@ -184,7 +185,7 @@ struct SshFixture
 [[nodiscard]] auto allSshFailures()
 {
     return std::views::iota(std::uint8_t { 0 },
-                            static_cast<std::uint8_t>(std::to_underlying(SshFailure::NoPreamble) + 1))
+                            static_cast<std::uint8_t>(std::to_underlying(SshFailure::Cancelled) + 1))
            | std::views::transform([](std::uint8_t value) { return static_cast<SshFailure>(value); });
 }
 
@@ -205,21 +206,22 @@ TEST_CASE("sshArguments spells batch mode and ends options before the destinatio
         return argv;
     };
 
-    CHECK(vthost::sshArguments({ .user = "me", .host = "homepc", .port = std::nullopt })
+    CHECK(vthost::sshArguments({ .user = "me", .host = "homepc", .port = std::nullopt }, SshPromptMode::Batch)
           == expect({ "--", "me@homepc", "contour daemon --stdio" }));
-    CHECK(vthost::sshArguments({ .user = "", .host = "homepc", .port = 2222 })
+    CHECK(vthost::sshArguments({ .user = "", .host = "homepc", .port = 2222 }, SshPromptMode::Batch)
           == expect({ "-p", "2222", "--", "homepc", "contour daemon --stdio" }));
-    CHECK(vthost::sshArguments({ .user = "", .host = "fe80::1", .port = std::nullopt })
+    CHECK(vthost::sshArguments({ .user = "", .host = "fe80::1", .port = std::nullopt }, SshPromptMode::Batch)
           == expect({ "--", "fe80::1", "contour daemon --stdio" }));
     CHECK(vthost::sshArguments({ .user = "",
                                  .host = "homepc",
                                  .port = std::nullopt,
-                                 .remoteCommand = "/opt/contour/bin/contour daemon --stdio" })
+                                 .remoteCommand = "/opt/contour/bin/contour daemon --stdio" },
+                               SshPromptMode::Batch)
               .back()
           == "/opt/contour/bin/contour daemon --stdio");
     // A destination that looks like an option still comes after the "--".
-    auto const optionLike =
-        vthost::sshArguments({ .user = "", .host = "-oProxyCommand=evil", .port = std::nullopt });
+    auto const optionLike = vthost::sshArguments(
+        { .user = "", .host = "-oProxyCommand=evil", .port = std::nullopt }, SshPromptMode::Batch);
     CHECK(optionLike.at(optionLike.size() - 3) == "--");
 }
 
@@ -306,18 +308,87 @@ TEST_CASE("every ssh failure has a message naming the host", "[vthost][ssh]")
     for (auto const failure: allSshFailures())
     {
         INFO(static_cast<int>(failure));
-        auto const error = vthost::sshTransportError(failure, target, "x");
+        auto const error = vthost::sshTransportError(failure, { .target = target, .detail = "x" });
         CHECK(error.message.contains("homepc"));
         if (failure == SshFailure::HostKeyUnknown || failure == SshFailure::AuthenticationRequired)
             CHECK(error.message.contains(vthost::interactiveSshCommand(target)));
     }
-    CHECK(vthost::sshTransportError(SshFailure::NoPreamble, target, "gone", 255).message
+    CHECK(vthost::sshTransportError(SshFailure::NoPreamble,
+                                    { .target = target, .detail = "gone", .exitCode = 255 })
+              .message
           == "ssh to ssh://me@homepc ended before Contour answered (exit code 255): gone");
-    CHECK(vthost::sshTransportError(SshFailure::NoPreamble, target, "gone", vthost::ExitStatusLost).message
-          == "ssh to ssh://me@homepc ended before Contour answered (exit code unknown): gone");
-    CHECK(vthost::sshTransportError(
-              SshFailure::HostKeyChanged, { .user = "", .host = "homepc", .port = 2222 }, "x")
-              .message.contains("ssh-keygen -R '[homepc]:2222'"));
+    CHECK(
+        vthost::sshTransportError(SshFailure::NoPreamble,
+                                  { .target = target, .detail = "gone", .exitCode = vthost::ExitStatusLost })
+            .message
+        == "ssh to ssh://me@homepc ended before Contour answered (exit code unknown): gone");
+    CHECK(
+        vthost::sshTransportError(SshFailure::HostKeyChanged,
+                                  { .target = { .user = "", .host = "homepc", .port = 2222 }, .detail = "x" })
+            .message.contains("ssh-keygen -R '[homepc]:2222'"));
+}
+
+TEST_CASE("sshArguments in askpass mode drops batch mode", "[vthost][ssh]")
+{
+    auto const target = SshTarget { .user = "me", .host = "homepc", .port = std::nullopt };
+    auto const batch = vthost::sshArguments(target, SshPromptMode::Batch);
+    auto const askpass = vthost::sshArguments(target, SshPromptMode::Askpass);
+    CHECK(std::ranges::contains(batch, "BatchMode=yes"));
+    CHECK_FALSE(std::ranges::contains(askpass, "BatchMode=yes"));
+    CHECK(std::ranges::contains(askpass, "NumberOfPasswordPrompts=3"));
+    CHECK(std::ranges::contains(askpass, "ConnectTimeout=10"));
+    CHECK(askpass.back() == "contour daemon --stdio");
+}
+
+TEST_CASE("parseOpenSshVersion reads ssh -V", "[vthost][ssh]")
+{
+    using vthost::OpenSshVersion;
+    CHECK(vthost::parseOpenSshVersion("OpenSSH_9.6p1 Ubuntu-3ubuntu13.5, OpenSSL 3.0.13 30 Jan 2024")
+          == OpenSshVersion { 9, 6 });
+    CHECK(vthost::parseOpenSshVersion("OpenSSH_8.4p1 Debian-5+deb11u3, OpenSSL 1.1.1w  11 Sep 2023")
+          == OpenSshVersion { 8, 4 });
+    CHECK(vthost::parseOpenSshVersion("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2\r\n")
+          == OpenSshVersion { 8, 1 });
+    CHECK(vthost::parseOpenSshVersion("OpenSSH_10.0p2, OpenSSL 3.5.1 1 Jul 2025")
+          == OpenSshVersion { 10, 0 });
+    CHECK_FALSE(vthost::parseOpenSshVersion("dropbear v2022.83").has_value());
+    CHECK_FALSE(vthost::parseOpenSshVersion("OpenSSH_garbage").has_value());
+    CHECK_FALSE(vthost::parseOpenSshVersion("").has_value());
+}
+
+TEST_CASE("promptModeFor needs OpenSSH 8.4", "[vthost][ssh]")
+{
+    using vthost::OpenSshVersion;
+    CHECK(vthost::promptModeFor(OpenSshVersion { 8, 1 }) == SshPromptMode::Batch);
+    CHECK(vthost::promptModeFor(OpenSshVersion { 8, 3 }) == SshPromptMode::Batch);
+    CHECK(vthost::promptModeFor(OpenSshVersion { 8, 4 }) == SshPromptMode::Askpass);
+    CHECK(vthost::promptModeFor(OpenSshVersion { 9, 0 }) == SshPromptMode::Askpass);
+    CHECK(vthost::promptModeFor(std::nullopt) == SshPromptMode::Batch);
+}
+
+TEST_CASE("ssh failure messages follow the prompt mode", "[vthost][ssh]")
+{
+    auto const target = SshTarget { .user = "me", .host = "homepc", .port = std::nullopt };
+    for (auto const failure: { SshFailure::HostKeyUnknown, SshFailure::AuthenticationRequired })
+    {
+        auto const askpass = vthost::sshTransportError(
+            failure, { .target = target, .detail = "denied", .mode = SshPromptMode::Askpass });
+        CHECK_FALSE(askpass.message.contains("ssh -T"));
+        CHECK_FALSE(askpass.message.contains("Run this once"));
+        CHECK(askpass.message.contains("denied"));
+        auto const old = vthost::sshTransportError(failure,
+                                                   { .target = target,
+                                                     .detail = "denied",
+                                                     .mode = SshPromptMode::Batch,
+                                                     .foundVersion = vthost::OpenSshVersion { 8, 1 } });
+        CHECK(old.message.contains("Run this once"));
+        CHECK(old.message.contains("8.1"));
+        CHECK(old.message.contains("Win32-OpenSSH"));
+        auto const plain = vthost::sshTransportError(failure, { .target = target, .detail = "denied" });
+        CHECK_FALSE(plain.message.contains("Win32-OpenSSH"));
+    }
+    CHECK(vthost::sshTransportError(SshFailure::Cancelled, { .target = target }).kind
+          == TransportErrorKind::Cancelled);
 }
 
 TEST_CASE("ssh failures retry only when retrying can help", "[vthost][ssh]")
@@ -329,7 +400,7 @@ TEST_CASE("ssh failures retry only when retrying can help", "[vthost][ssh]")
         auto const expected = failure == SshFailure::HostUnreachable || failure == SshFailure::NoPreamble
                                   ? TransportRetry::Transient
                                   : TransportRetry::Permanent;
-        auto const kind = vthost::sshTransportError(failure, target, "x").kind;
+        auto const kind = vthost::sshTransportError(failure, { .target = target, .detail = "x" }).kind;
         CHECK(vthost::retryOf(kind) == expected);
         // The remote relay starts its daemon itself: an absent one is never this transport's answer.
         CHECK(kind != TransportErrorKind::DaemonAbsent);
@@ -350,7 +421,7 @@ TEST_CASE("ssh connect succeeds after login noise", "[vthost][ssh]")
     CHECK((*connection)->socket != nullptr);
     CHECK(state->terminated == 0);
     REQUIRE(fixture.spawner->spawned.size() == 1);
-    CHECK(fixture.spawner->spawned.front() == vthost::sshArguments(fixture.target));
+    CHECK(fixture.spawner->spawned.front() == vthost::sshArguments(fixture.target, SshPromptMode::Batch));
     CHECK(factory.describe() == "ssh://me@homepc");
     // ssh verifies the host key, so a control client may send this transport its token.
     CHECK(factory.peerTrust() == vthost::PeerTrust::Verified);
