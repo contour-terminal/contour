@@ -5674,7 +5674,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
         }();
 
         // ...with what its rows may act on.
-        auto const blockUnderCursor = block != nullptr && _config.commandBlocks.value().showInContextMenu
+        auto const& commandBlocks = _config.commandBlocks.value();
+        auto const blockUnderCursor = block != nullptr && commandBlocks.showInContextMenu
                                           ? std::optional { blockMenuStateLocked(*block) }
                                           : std::nullopt;
 
@@ -5707,7 +5708,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
             .blockUnderCursor = blockUnderCursor,
-            .compactContextMenu = _config.commandBlocks.value().compactContextMenu,
+            .blockMenuPlacement = commandBlocks.compactContextMenu ? command::MenuChildPlacement::Nested
+                                                                   : command::MenuChildPlacement::Spliced,
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
@@ -7915,6 +7917,10 @@ void TerminalSession::configureTerminal()
         _app.accessibilityPreferences().motion);
     // Where the sticky header lives is the pane card's, not the profile's: a reload keeps it.
     configured.stickyHeader.presentation = window::presentationOf(_stickyHeaderHost);
+    // Rail thickness belongs to the session's construction-time chrome, even after a config reload.
+    if (_gutterChrome.form == vtbackend::BlockColumnForm::Rail && _gutterChrome.barPoints == 0
+        && configured.gutter.exitStatus)
+        configured.gutter.successRailMark = vtbackend::SuccessRailMark::Always;
 
     // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding
     // the palette with mode 2031 set. See ViNormalMode.

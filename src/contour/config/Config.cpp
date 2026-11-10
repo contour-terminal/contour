@@ -930,9 +930,6 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config, vtbackend::Blo
         .hoverStroke =
             gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
         .blockColumnForm = form,
-        .successRailMark = gutter.exitStatus && gutter.railThickness == 0
-                               ? vtbackend::SuccessRailMark::Always
-                               : vtbackend::SuccessRailMark::OnAttention,
     };
 }
 

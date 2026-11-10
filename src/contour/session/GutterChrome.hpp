@@ -50,7 +50,7 @@ struct GutterChrome
     return GutterChrome { .form = row.layout.blockColumn,
                           .stripPoints = row.space.blockGutter,
                           .barPoints = barPoints,
-                          .barInsetPoints = row.space.railInset + (row.size.rail - barPoints) / 2,
+                          .barInsetPoints = row.space.railInset + ((row.size.rail - barPoints) / 2),
                           .barRadiusPoints = row.radii.rail,
                           .markPoints = row.size.railMark,
                           .barEndPoints = row.space.railEnd,

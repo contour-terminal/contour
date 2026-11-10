@@ -481,7 +481,7 @@ TEST_CASE("ContextMenu.blockRows.noBlockNoBlockMenu", "[contextmenu][semanticblo
 TEST_CASE("ContextMenu.blockRows.compactModeGroupsBlockActions", "[contextmenu][semanticblocks]")
 {
     auto state = fullyEnabledState();
-    state.compactContextMenu = true;
+    state.blockMenuPlacement = MenuChildPlacement::Nested;
     auto const menu = buildContextMenu(state);
     REQUIRE_FALSE(menu.empty());
     CHECK(menu.front().kind == ContextMenuEntryKind::Submenu);

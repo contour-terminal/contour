@@ -196,7 +196,7 @@ std::vector<ContextMenuEntry> buildContextMenu(ContextMenuState const& state)
     if (state.blockUnderCursor)
     {
         auto blockEntries = buildBlockMenu(*state.blockUnderCursor);
-        if (state.compactContextMenu && !blockEntries.empty())
+        if (state.blockMenuPlacement == MenuChildPlacement::Nested && !blockEntries.empty())
             entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
                                                  .title = "Command Block",
                                                  .children = std::move(blockEntries) });

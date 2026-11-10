@@ -1122,6 +1122,28 @@ TEST_CASE("TerminalSession: the terminal draws the gutter the configuration asks
     CHECK(session->terminal().settings().gutter.lineNumbers == vtbackend::LineNumberMode::Absolute);
 }
 
+TEST_CASE("TerminalSession: a config reload keeps success marks in sync with the rail",
+          "[contour][session][gutter]")
+{
+    auto const initialThickness = GENERATE(0, 3);
+    auto const expectedMark =
+        initialThickness == 0 ? vtbackend::SuccessRailMark::Always : vtbackend::SuccessRailMark::OnAttention;
+    TestApp testApp;
+    auto& config = testApp.app().config();
+    config.gutter.value().railThickness = initialThickness;
+    config.gutter.value().exitStatus = true;
+    auto session = makeDisplaylessSession(testApp.app());
+    REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
+    REQUIRE(session->terminal().settings().gutter.successRailMark == expectedMark);
+
+    auto reloaded = config;
+    reloaded.gutter.value().railThickness = initialThickness == 0 ? 3 : 0;
+    session->applyReloadedConfig(reloaded, reloaded.defaultProfileName.value());
+
+    CHECK(session->gutterChrome().barPoints == initialThickness);
+    CHECK(session->terminal().settings().gutter.successRailMark == expectedMark);
+}
+
 TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the terminal",
           "[contour][session][stickyheader]")
 {

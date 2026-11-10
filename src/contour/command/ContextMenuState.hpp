@@ -7,12 +7,20 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace contour::command
 {
+
+/// Where a group of menu rows appears.
+enum class MenuChildPlacement : std::uint8_t
+{
+    Nested,  ///< Under a submenu's title.
+    Spliced, ///< Directly in the parent menu.
+};
 
 /// The world, as the terminal pane's context menu needs to see it.
 ///
@@ -58,15 +66,14 @@ struct ContextMenuState
     /// answer about a line nobody clicked.
     std::optional<vtbackend::LineOffset> foldLine;
 
-    /// The command block whose row was right-clicked; nullopt when the click was on no block's row. Its
-    /// rows and header head the menu (buildBlockMenu()).
+    /// The right-clicked command block, when its details and actions are included in the pane menu.
     ///
     /// One optional rather than an id with a zero sentinel beside its facts, for the reason foldLine is
     /// one. Captured at click time and carried by the block rows, because the pointer leaves the block
     /// for the menu the moment the user reaches for a row.
     std::optional<BlockMenuState> blockUnderCursor {};
-    /// Group the clicked command's details and actions under a submenu.
-    bool compactContextMenu = false;
+    /// Where to put the details and actions if blockUnderCursor has a value.
+    MenuChildPlacement blockMenuPlacement = MenuChildPlacement::Spliced;
     /// Whether the last finished block's command line is known, which is what "Copy Last Command" copies.
     CommandLinePresence lastCommandLine = CommandLinePresence::Absent;
 
