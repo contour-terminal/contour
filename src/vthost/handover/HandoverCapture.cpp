@@ -80,12 +80,24 @@ namespace
                     return SessionCrossing { .pty = std::move(pty),
                                              .child = {},
                                              .device = SessionDevice::PtyOnly };
-                auto child = process->handoverChild();
-                if (!child)
-                    return std::unexpected(HandoverError::UnsupportedSession);
-                return SessionCrossing { .pty = std::move(pty),
-                                         .child = *std::move(child),
-                                         .device = SessionDevice::ChildOnPty };
+                auto crossing = process->crossing();
+                switch (crossing.kind)
+                {
+                    case vtpty::CrossingKind::Adoptable:
+                        if (!crossing.child)
+                            return std::unexpected(HandoverError::UnsupportedSession);
+                        return SessionCrossing { .pty = std::move(pty),
+                                                 .child = *std::move(crossing.child),
+                                                 .device = SessionDevice::ChildOnPty };
+                    case vtpty::CrossingKind::None:
+                        return SessionCrossing { .pty = std::move(pty),
+                                                 .child = {},
+                                                 .device = SessionDevice::PtyOnly };
+                    case vtpty::CrossingKind::Keeper:
+                        // A keeper-held child crosses by name, which a later change teaches the capture.
+                        return std::unexpected(HandoverError::UnsupportedSession);
+                }
+                return std::unexpected(HandoverError::UnsupportedSession);
             });
     }
 

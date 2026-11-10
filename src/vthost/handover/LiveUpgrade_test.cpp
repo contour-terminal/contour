@@ -117,7 +117,7 @@ class ByteCounter final: public SessionStreamEvents
 {
     auto const* const process = host.hostedSession(session)->process();
     REQUIRE(process != nullptr);
-    auto const child = process->handoverChild();
+    auto const child = process->crossing().child;
     REQUIRE(child.has_value());
     return child->pid;
 }

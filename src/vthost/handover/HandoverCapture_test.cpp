@@ -173,11 +173,11 @@ TEST_CASE("capture holds every session with its pty descriptors and ids", "[vtho
         CHECK(captured.uuid == h.host.objects().uuidOf(id));
         auto const& process = *h.host.hostedSession(id)->process();
         // Read, not released: the host still owns them, and they are open.
-        auto const handedOver = process.handover();
+        auto const handedOver = h.host.hostedSession(id)->pty().handover();
         REQUIRE(handedOver.has_value());
         CHECK(captured.pty.masterFd == handedOver->masterFd);
         CHECK(vtpty::testing::isOpen(captured.pty.masterFd));
-        CHECK(captured.child.pid == process.handoverChild()->pid);
+        CHECK(captured.child.pid == process.crossing().child->pid);
         CHECK(::kill(static_cast<pid_t>(captured.child.pid), 0) == 0);
         CHECK(captured.child.executable == "/bin/sh");
         CHECK_FALSE(captured.terminalState.empty());

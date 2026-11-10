@@ -150,14 +150,14 @@ namespace
     }
 } // namespace
 
-vtpty::Process const* HostedSession::process() const noexcept
+vtpty::ChildProcess const* HostedSession::process() const noexcept
 {
-    return dynamic_cast<vtpty::Process const*>(untapped(&_terminal.device()));
+    return dynamic_cast<vtpty::ChildProcess const*>(untapped(&_terminal.device()));
 }
 
-vtpty::Process* HostedSession::process() noexcept
+vtpty::ChildProcess* HostedSession::process() noexcept
 {
-    return dynamic_cast<vtpty::Process*>(untapped(&_terminal.device()));
+    return dynamic_cast<vtpty::ChildProcess*>(untapped(&_terminal.device()));
 }
 
 void HostedSession::pollForegroundProcess()
@@ -417,7 +417,7 @@ std::expected<void, QuiesceError> HostedSession::stopForCapture()
     // Refused before anything stops: a child that has not flushed its terminal yet would lose what is
     // written to it in between, which a capture taken now would claim to carry.
     if (auto const* const child = process();
-        child != nullptr && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress)
+        child != nullptr && child->spawnProgress() == vtpty::SpawnProgress::InProgress)
         return std::unexpected(QuiesceError::SpawnInProgress);
 
     // Restarted on a refusal below only when this call stopped it: a session quiesced already stays so.
@@ -2295,8 +2295,7 @@ bool SessionHost::isAnySessionStarting() const
     return !_initialInputs.empty()
            || std::ranges::any_of(_sessions | std::views::values, [](auto const& session) {
                   auto const* const child = session->process();
-                  return child != nullptr
-                         && child->spawnProgress() == vtpty::Process::SpawnProgress::InProgress;
+                  return child != nullptr && child->spawnProgress() == vtpty::SpawnProgress::InProgress;
               });
 }
 

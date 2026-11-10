@@ -280,7 +280,7 @@ TEST_CASE("a handover keeps every program, its input, its output and its screen"
         // The very child, still running.
         auto const* const process = host.hostedSession(id)->process();
         REQUIRE(process != nullptr);
-        CHECK(process->handoverChild()->pid == children.at(id.value));
+        CHECK(process->crossing().child->pid == children.at(id.value));
         CHECK(::kill(static_cast<pid_t>(children.at(id.value)), 0) == 0);
     }
     CHECK(host.takeUnrestoredScreens([](SessionId) { return true; }).empty());

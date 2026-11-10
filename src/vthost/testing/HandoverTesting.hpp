@@ -83,7 +83,7 @@ inline void releaseForAdoption(SessionHost& host)
     {
         auto& session = *host.hostedSession(id);
         // The child first: on Windows its exit watcher closes the pseudoconsole, and stops with it.
-        if (auto* const process = session.process(); process != nullptr)
+        if (auto* const process = dynamic_cast<vtpty::Process*>(session.process()); process != nullptr)
             std::ignore = process->releaseChild();
         std::ignore = session.terminal().device().releaseHandover();
     }

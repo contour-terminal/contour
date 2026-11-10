@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/AdoptedChild.hpp>
+#include <vtpty/ChildProcess.hpp>
 #include <vtpty/InheritedPty.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/ProgramLookup.hpp>
@@ -8,71 +10,32 @@
 
 #include <crispy/BufferObject.hpp>
 
-#include <core/Overloaded.hpp>
-#include <core/platform/Clock.hpp>
-
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
-#include <variant>
 #include <vector>
 
 namespace vtpty
 {
 
-/// How long Process::close() gives a child that the closing terminal hung up to end, before it kills
-/// the child; on POSIX only, as on Windows closing the pseudoconsole ends the child outright.
-///
-/// Nothing tells the grace that the child has ended -- nobody need be waiting for it -- so it asks:
-/// whether the child has ended, by waitpid(), and whether the grace has passed, by @ref clock, about
-/// every 10 ms. It ends at whichever comes first.
-struct HangupGrace
-{
-    /// wezterm's grace for the same hangup.
-    static constexpr auto Default = std::chrono::milliseconds { 200 };
-
-    std::chrono::milliseconds duration = Default; ///< How long the child is given.
-
-    /// The clock the grace is measured on. It must outlive the Process.
-    std::reference_wrapper<core::platform::IClock const> clock = core::platform::defaultSteadyClock();
-};
-
-/// A running child process a previous image of this process left behind across an exec (live upgrade), or
-/// the daemon a Windows successor takes over from left it.
-///
-/// Plain data, compiled on every platform so a handover image can carry it anywhere; only
-/// Process::adopt() turns it back into a Process. On POSIX the child stays a child of this process across
-/// exec (the process id is kept), so waiting for it works as for a spawned one; on Windows the successor
-/// inherits a handle to it (processHandle), which is what it waits on.
-struct AdoptedChild
-{
-    std::int64_t pid = -1;            ///< The child's process id.
-    std::string executable {};        ///< The program it runs, as spawned.
-    std::vector<std::string> args {}; ///< Its arguments, as spawned.
-    std::filesystem::path cwd {};     ///< Its working directory, as spawned.
-    HangupGrace hangupGrace {};       ///< The grace close() gives it.
-    CrossingHandle processHandle {};  ///< On Windows, the handle to the process that crosses; none elsewhere.
-};
-
 /**
  * Spawns and manages a child process with a pseudo terminal attached to it.
  */
-class [[nodiscard]] Process: public Pty
+class [[nodiscard]] Process: public Pty, public ChildProcess
 {
   public:
-    // clang-format off
-    struct NormalExit { int exitCode; };
-    struct SignalExit { int signum; };
-    // clang-format on
-
-    using ExitStatus = std::variant<NormalExit, SignalExit>;
+    // Member aliases of the types ChildProcess speaks, so that callers of Process keep naming them here.
+    using NormalExit = vtpty::NormalExit;
+    using SignalExit = vtpty::SignalExit;
+    using ExitStatus = vtpty::ExitStatus;
+    using SpawnProgress = vtpty::SpawnProgress;
+    using TerminationHint = vtpty::TerminationHint;
     using Environment = std::map<std::string, std::string>;
 
     struct ExecInfo
@@ -186,6 +149,15 @@ class [[nodiscard]] Process: public Pty
     /// @return The child, or nullopt where there is none running.
     [[nodiscard]] std::optional<AdoptedChild> releaseChild();
 
+    /// @return CrossingKind::Adoptable with handoverChild()'s value: no child in it where there is none to
+    ///         give, which a handover cannot carry.
+    [[nodiscard]] ChildCrossing crossing() const override
+    {
+        return ChildCrossing { .kind = CrossingKind::Adoptable,
+                               .child = handoverChild(),
+                               .keeperSession = 0 };
+    }
+
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();
 
@@ -203,14 +175,6 @@ class [[nodiscard]] Process: public Pty
     /// @return Whether the child is running: false before start() spawned one, and after it exited.
     [[nodiscard]] bool alive() const noexcept;
 
-    /// How far start() has brought the child towards running its program.
-    enum class SpawnProgress : uint8_t
-    {
-        Settled = 0, ///< No start in flight: the child has set its terminal up, or there is no child.
-        InProgress,  ///< Spawned, but its terminal not yet set up: input written now is discarded by its
-                     ///< flush.
-    };
-
     /// Whether the child has yet to set its terminal up. On POSIX the child -- still the spawn trampoline --
     /// flushes its terminal's queues as it takes the terminal on, before it execs the program -- and a
     /// placement can park it before that for as long as placing it takes -- so input written to the PTY
@@ -220,10 +184,10 @@ class [[nodiscard]] Process: public Pty
     ///         the flush and the change into the working directory (or as it exits); Settled before start(),
     ///         for an adopted child, and on Windows, where the console is the child's from CreateProcess()
     ///         on.
-    [[nodiscard]] SpawnProgress spawnProgress() const;
+    [[nodiscard]] SpawnProgress spawnProgress() const override;
 
     /// @return The child's exit status once it has exited; nullopt while it runs, or when there is none.
-    [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
+    [[nodiscard]] std::optional<ExitStatus> checkStatus() const override;
 
     /// Waits for the child to exit.
     /// @return Its exit status, or nullopt when start() never spawned a child to wait for.
@@ -232,7 +196,7 @@ class [[nodiscard]] Process: public Pty
     /// @return The directory the child is in: the one it was started in while its spawn is in progress (it
     ///         has not entered it yet, and is still in this process's), else as the system tells it;
     ///         "." where there is no child, or the system cannot tell.
-    [[nodiscard]] std::string workingDirectory() const;
+    [[nodiscard]] std::string workingDirectory() const override;
 
     /// The name of the program leading the terminal's foreground process group: the shell at its prompt,
     /// the program it runs otherwise. Linux and macOS only.
@@ -240,17 +204,10 @@ class [[nodiscard]] Process: public Pty
     ///         on a Pty that is not a UnixPty.
     [[nodiscard]] std::optional<std::string> foregroundProcessName() const override;
 
-    /// How terminate() asks the child to end.
-    enum class TerminationHint : uint8_t
-    {
-        Normal, ///< An ordinary termination (SIGTERM), which the child may catch or ignore.
-        Hangup, ///< As a closed terminal would (SIGHUP), which the child may catch or ignore.
-        Kill,   ///< Outright (SIGKILL), which no child can refuse.
-    };
     /// Asks the child to end, or does nothing when there is no child running. On Windows, which has no
     /// signals, every hint ends it outright.
     /// @param terminationHint How to ask.
-    void terminate(TerminationHint terminationHint);
+    void terminate(TerminationHint terminationHint) override;
 
     [[nodiscard]] Pty& pty() noexcept;
     [[nodiscard]] Pty const& pty() const noexcept;
@@ -287,28 +244,3 @@ class [[nodiscard]] Process: public Pty
 };
 
 } // namespace vtpty
-
-template <>
-struct std::formatter<vtpty::Process::ExitStatus>: std::formatter<std::string>
-{
-    auto format(vtpty::Process::ExitStatus const& status, auto& ctx) const
-    {
-        auto const text =
-            std::visit(core::Overloaded { [&](vtpty::Process::NormalExit exit) {
-                                             return std::format("{} (normal exit)", exit.exitCode);
-                                         },
-                                          [&](vtpty::Process::SignalExit exit) {
-                                              char buf[256];
-#ifdef _WIN32
-                                              strerror_s(buf, sizeof(buf), errno);
-                                              return std::format("{} (signal number {})", buf, exit.signum);
-#else
-                                              return std::format("{} (signal number {})",
-                                                                 strerror_r(errno, buf, sizeof(buf)),
-                                                                 exit.signum);
-#endif
-                                          } },
-                       status);
-        return std::formatter<std::string>::format(text, ctx);
-    }
-};

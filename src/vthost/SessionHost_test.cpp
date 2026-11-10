@@ -4529,7 +4529,7 @@ TEST_CASE("quiesce leaves the child alive and the pty open", "[vthost][host][upg
     CHECK_FALSE(quiesced->terminal.pages.empty());
     auto const* const child = session->process();
     REQUIRE(child != nullptr);
-    CHECK(child->alive());
+    CHECK_FALSE(child->checkStatus().has_value());
     CHECK_FALSE(session->terminal().device().isClosed());
     CHECK(closes.load() == 0);
 
