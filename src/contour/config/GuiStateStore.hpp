@@ -5,6 +5,8 @@
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/ShellKind.hpp>
 
+#include <vtbackend/core/ColorPalette.hpp>
+
 #include <core/platform/FileSystem.hpp>
 
 #include <array>
@@ -43,6 +45,21 @@ constexpr std::span<ConfigEnumInfo<WindowShowState> const> configEnumValues() no
     return detail::WindowShowStateTable;
 }
 
+namespace detail
+{
+    /// The light/dark preferences as the GUI state file spells them. Once shipped, a token is fixed.
+    inline constexpr auto ColorPreferenceTable = std::array {
+        ConfigEnumInfo<vtbackend::ColorPreference> { vtbackend::ColorPreference::Dark, "dark", "Dark" },
+        ConfigEnumInfo<vtbackend::ColorPreference> { vtbackend::ColorPreference::Light, "light", "Light" },
+    };
+} // namespace detail
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::ColorPreference> const> configEnumValues() noexcept
+{
+    return detail::ColorPreferenceTable;
+}
+
 /// Where the Settings window was, and what it showed, when it last closed (`settings_window:`).
 struct SettingsWindowState
 {
@@ -76,6 +93,9 @@ struct GuiState
     /// The Connect picker's last choice, as `contour connect` spells a target (`starfive`, `daemon`,
     /// `local`); empty before any. Where the picker's selection starts.
     std::string lastConnectTarget {};
+    /// The light/dark preference the terminals last showed; none before any. What the GUI states to a daemon
+    /// before it has read the OS's scheme, which it can only once Qt is up -- after its first connection.
+    std::optional<vtbackend::ColorPreference> lastColorPreference {};
 
     [[nodiscard]] bool operator==(GuiState const&) const = default;
 };
@@ -145,7 +165,7 @@ inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 ///
 /// The file reads `dismissed_new_defaults: [existing_config]`, `dismissed_shell_integration: [zsh]` and
 /// `settings_window: { x, y, width, height, screen, show: normal|maximized, page }` and
-/// `last_connect_target: starfive`. A token no offer or
+/// `last_connect_target: starfive` and `last_color_preference: light|dark`. A token no offer or
 /// shell answers to is skipped, so a file written by a newer release still loads, and a save keeps those
 /// tokens and any other keys. A `settings_window` that is not a map is no state; an unknown `show` word is
 /// `normal`.

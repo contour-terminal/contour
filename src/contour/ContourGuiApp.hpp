@@ -968,6 +968,11 @@ class ContourGuiApp:
     /// as the OS's own flip does. GUI thread only.
     void refreshColorPreference();
 
+    /// Remembers @p preference in the GUI state for the next launch's first hello, which goes out before the
+    /// OS's scheme can be read. Called only when it changed.
+    /// @param preference The preference the terminals show now.
+    void rememberColorPreference(vtbackend::ColorPreference preference);
+
     /// The accessibility source, built on the first call that the injected services can build it on. GUI
     /// thread only.
     /// @return The source, or null while the services cannot build it yet (asked again on the next call).
@@ -1496,9 +1501,10 @@ class ContourGuiApp:
 
     /// What the terminal's palette follows: @c _osColorPreference unless the GUI theme pins one.
     vtbackend::ColorPreference _colorPreference = vtbackend::ColorPreference::Dark;
-    /// @c _colorPreference once the OS's scheme has been read, for the daemon links' reactors to state in
-    /// their hellos; nullopt before, when the default above is no one's preference. Written on the GUI thread
-    /// only.
+    /// What the daemon links' reactors state in their hellos: @c _colorPreference once the OS's scheme has
+    /// been read, before that what the GUI state remembered from the last launch,
+    /// and nullopt when it remembered none -- the default above is no one's preference. Written on the GUI
+    /// thread only.
     std::atomic<std::optional<vtbackend::ColorPreference>> _shownColorPreference {};
     /// What the OS last said, whatever the GUI theme makes of it.
     vtbackend::ColorPreference _osColorPreference = vtbackend::ColorPreference::Dark;
