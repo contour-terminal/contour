@@ -74,6 +74,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -1260,6 +1261,9 @@ class ContourGuiApp:
     /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
     /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
     std::vector<std::unique_ptr<remote::DaemonLink>> _daemonLinks;
+    /// The saved hosts a link was started to since this application began, so the switcher says "not
+    /// connected" of one it reached before rather than "not yet connected".
+    std::set<std::string> _hostsReached;
     /// The id the next link is given.
     uint32_t _nextDaemonLinkId = 1;
     std::unique_ptr<remote::TmuxController> _tmuxController;
@@ -1612,6 +1616,21 @@ class ContourGuiApp:
     /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
     std::unique_ptr<window::SwitcherController> _switcher;
     std::unique_ptr<QQuickWindow> _switcherWindow;
+
+    /// The window a transient popup was opened over, so closing the popup can hand the keyboard back to it.
+    struct FocusReturn
+    {
+        QPointer<QWindow> window;                          ///< The OS window that was focused.
+        std::optional<vtworkspace::WorkspaceId> workspace; ///< Its terminal window, when it is one.
+    };
+    /// @return Where the keyboard goes back to when a popup opened now closes.
+    [[nodiscard]] FocusReturn focusReturnPoint() const;
+    /// Activates the window @p target names and focuses its active pane's display: without a window manager
+    /// (and with some) closing a popup leaves no window holding the keyboard, so keys would go nowhere until
+    /// a click.
+    void returnFocusTo(FocusReturn const& target);
+    FocusReturn _connectPickerReturn; ///< Where the connect picker's close gives focus back to.
+    FocusReturn _switcherReturn;      ///< Where the switcher's close gives focus back to.
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the

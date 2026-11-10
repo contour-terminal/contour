@@ -389,6 +389,24 @@ TEST_CASE("Switcher: expanding a daemon lists its workspaces; a saved host conne
           == "studio");
 }
 
+TEST_CASE("Switcher: it opens on the first daemon that is not the window's own", "[contour][switcher][qml]")
+{
+    auto fixture = SwitcherFixture {};
+    fixture.open();
+
+    REQUIRE(fixture.switcher->currentIndex() >= 0);
+    auto const& selected =
+        fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())];
+    CHECK(selected.kind == window::SwitcherRowKind::Daemon);
+    CHECK(selected.title == "admin");
+
+    // Moving the selection is the user's: nothing the list does afterwards takes it back.
+    QTest::keyClick(fixture.window.get(), Qt::Key_Up);
+    auto const moved = fixture.switcher->currentIndex();
+    fixture.switcher->setFilter(QString {});
+    CHECK(fixture.switcher->currentIndex() == moved);
+}
+
 TEST_CASE("Switcher: Return switches, Shift+Return opens, Esc changes nothing", "[contour][switcher][qml]")
 {
     auto fixture = SwitcherFixture {};
@@ -413,8 +431,17 @@ TEST_CASE("Switcher: Return switches, Shift+Return opens, Esc changes nothing", 
         CHECK(fixture.requested[0].target == labelled("default", session::NewWorkspace {}));
         CHECK(fixture.requested[0].mode == SwitchMode::Open);
     }
+    SECTION("Return on an untouched popup switches to the first other daemon")
+    {
+        QTest::keyClick(fixture.window.get(), Qt::Key_Return);
+        REQUIRE(fixture.requested.size() == 1);
+        CHECK(fixture.requested[0].target == labelled("admin"));
+        CHECK(fixture.requested[0].mode == SwitchMode::Switch);
+    }
     SECTION("a daemon row, arrived at with the arrows")
     {
+        // The popup opens on the first daemon but the window's own; the list's top is the way to count from.
+        fixture.switcher->setCurrentIndex(0);
         QTest::keyClick(fixture.window.get(), Qt::Key_Down);
         QTest::keyClick(fixture.window.get(), Qt::Key_Down);
         QTest::keyClick(fixture.window.get(), Qt::Key_Down);

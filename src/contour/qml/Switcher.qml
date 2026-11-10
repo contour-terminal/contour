@@ -282,9 +282,23 @@ ThemedWindow {
                         }
                     }
 
-                    // Moving the pointer over a row selects it; a tap chooses it.
+                    // Moving the pointer over a row selects it; a tap chooses it. Only a MOVE counts: a popup that
+                    // opens, or a list that scrolls, under a pointer at rest must not take the selection from the
+                    // row the popup chose (Return would then act on whatever lay under the pointer).
                     HoverHandler {
-                        onHoveredChanged: if (hovered && root.switcher) root.switcher.currentIndex = row.index
+                        id: rowHover
+                        property real enteredX: -1
+                        property real enteredY: -1
+                        onHoveredChanged: {
+                            rowHover.enteredX = rowHover.point.scenePosition.x
+                            rowHover.enteredY = rowHover.point.scenePosition.y
+                        }
+                        onPointChanged: {
+                            if (rowHover.hovered && root.switcher
+                                    && (rowHover.point.scenePosition.x !== rowHover.enteredX
+                                        || rowHover.point.scenePosition.y !== rowHover.enteredY))
+                                root.switcher.currentIndex = row.index
+                        }
                     }
                     TapHandler {
                         onTapped: {

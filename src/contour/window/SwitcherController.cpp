@@ -73,6 +73,7 @@ void SwitcherController::open(SwitcherOpening opening)
     ++_openings;
     _opening = std::move(opening);
     _filter.clear();
+    _selectionOrigin = SwitcherSelectionOrigin::Opening;
     _localDaemons.clear();
     _daemons.clear();
     setBusy(false);
@@ -213,7 +214,15 @@ void SwitcherController::rebuild(std::optional<session::SwitchTarget> const& kee
                              .scope = _opening.pick ? SwitcherScope::OneDaemon : SwitcherScope::Everything },
                            _filter.toStdString());
     endResetModel();
-    _current = _rows.empty() ? -1 : static_cast<int>(switcherSelection(_rows, keep));
+    // Until the user takes the selection, it is the popup's: it goes to the first daemon that is not this
+    // window's, again each time discovery fills the list in.
+    auto const untouched = _selectionOrigin == SwitcherSelectionOrigin::Opening && _filter.isEmpty();
+    if (_rows.empty())
+        _current = -1;
+    else if (untouched)
+        _current = static_cast<int>(switcherInitialSelection(_rows, _opening.windowDaemon));
+    else
+        _current = static_cast<int>(switcherSelection(_rows, keep));
     emit currentIndexChanged();
 }
 
@@ -229,6 +238,7 @@ void SwitcherController::setFilter(QString const& filter)
     if (_filter == filter)
         return;
     _filter = filter;
+    _selectionOrigin = SwitcherSelectionOrigin::User;
     rebuild(std::nullopt);
     emit filterChanged();
 }
@@ -236,6 +246,7 @@ void SwitcherController::setFilter(QString const& filter)
 void SwitcherController::setCurrentIndex(int index)
 {
     auto const clamped = _rows.empty() ? -1 : std::clamp(index, 0, static_cast<int>(_rows.size()) - 1);
+    _selectionOrigin = SwitcherSelectionOrigin::User;
     if (_current == clamped)
         return;
     _current = clamped;

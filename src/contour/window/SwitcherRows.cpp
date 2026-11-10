@@ -3,7 +3,9 @@
 #include <contour/window/SwitcherRows.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
+#include <iterator>
 #include <ranges>
 
 namespace contour::window
@@ -47,6 +49,11 @@ namespace
         return address.kind == inputs.windowDaemon.kind && address.daemon == inputs.windowDaemon.daemon;
     }
 
+    /// What a saved host's row says while it is not listed, per SwitcherHostLink.
+    constexpr auto HostLinkTexts = std::array<std::string_view, 2> { "not yet connected", "not connected" };
+    static_assert(HostLinkTexts.size() == static_cast<std::size_t>(SwitcherHostLink::Disconnected) + 1,
+                  "every SwitcherHostLink needs its text");
+
     /// @return Whether a daemon runs (a local one) or is reached (a saved host).
     [[nodiscard]] std::string_view reachOf(SwitcherInputs const& inputs, SwitcherDaemon const& daemon)
     {
@@ -55,7 +62,7 @@ namespace
         if (isWindowDaemon(inputs, daemon.address))
             return "connected";
         if (daemon.listing == SwitcherListing::NotListed)
-            return "not yet connected";
+            return HostLinkTexts[static_cast<std::size_t>(daemon.link)];
         return {};
     }
 
@@ -207,6 +214,26 @@ std::size_t switcherSelection(std::span<SwitcherRow const> rows,
         return 0;
     auto const found = std::ranges::find(rows, *keep, &SwitcherRow::target);
     return found != rows.end() ? static_cast<std::size_t>(std::distance(rows.begin(), found)) : 0;
+}
+
+std::size_t switcherInitialSelection(std::span<SwitcherRow const> rows,
+                                     session::SwitchTarget const& windowDaemon)
+{
+    auto const isDaemonRow = [](SwitcherRow const& row) {
+        return row.kind == SwitcherRowKind::Daemon;
+    };
+    auto const isOther = [&](SwitcherRow const& row) {
+        return isDaemonRow(row)
+               && (row.target.kind != windowDaemon.kind || row.target.daemon != windowDaemon.daemon);
+    };
+    auto const index = [&](auto found) {
+        return static_cast<std::size_t>(std::distance(rows.begin(), found));
+    };
+    if (auto const other = std::ranges::find_if(rows, isOther); other != rows.end())
+        return index(other);
+    if (auto const own = std::ranges::find_if(rows, isDaemonRow); own != rows.end())
+        return index(own);
+    return 0;
 }
 
 } // namespace contour::window

@@ -989,6 +989,8 @@ std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::Daemon
 
 remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig config)
 {
+    if (config.address.kind == vthost::proto::SwitchDaemonKind::Host)
+        _hostsReached.insert(config.address.name);
     auto& link = *_daemonLinks.emplace_back(std::make_unique<remote::DaemonLink>(
         remote::DaemonLinkId { _nextDaemonLinkId++ }, std::move(config), *this, _sessionManager));
     // The first link to a daemon is the one to take back what it restores after a restart.
@@ -3984,11 +3986,16 @@ void ContourGuiApp::openConnectPicker(PickerPresentation presentation, QScreen* 
             else if (_connectPickerWindow)
                 _connectPickerWindow->close();
         });
+        connect(_connectPickerWindow.get(), &QWindow::visibleChanged, this, [this](bool isVisible) {
+            if (!isVisible)
+                returnFocusTo(_connectPickerReturn);
+        });
     }
     else
         _connectPicker->refresh();
 
     _connectPickerPresentation = presentation;
+    _connectPickerReturn = focusReturnPoint();
     switch (presentation)
     {
         case PickerPresentation::Launcher:
@@ -4026,6 +4033,8 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                         .listing = window::SwitcherListing::NotListed,
                         .failure = {},
                         .workspaces = {},
+                        .link = _hostsReached.contains(name) ? window::SwitcherHostLink::Disconnected
+                                                             : window::SwitcherHostLink::NeverConnected,
                     });
                 return hosts;
             },
@@ -4082,6 +4091,22 @@ window::SwitcherServices ContourGuiApp::switcherServices()
     };
 }
 
+ContourGuiApp::FocusReturn ContourGuiApp::focusReturnPoint() const
+{
+    return FocusReturn { .window = QGuiApplication::focusWindow(),
+                         .workspace = _sessionManager.focusedWindow() };
+}
+
+void ContourGuiApp::returnFocusTo(FocusReturn const& target)
+{
+    if (target.window)
+        target.window->requestActivate();
+    if (!target.workspace)
+        return;
+    if (auto* const controller = _sessionManager.controllerFor(*target.workspace))
+        controller->restoreTerminalFocus();
+}
+
 std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening, QScreen* anchor)
 {
     if (!_qmlEngine)
@@ -4104,7 +4129,12 @@ std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpe
             if (_switcherWindow)
                 _switcherWindow->close();
         });
+        connect(_switcherWindow.get(), &QWindow::visibleChanged, this, [this](bool isVisible) {
+            if (!isVisible)
+                returnFocusTo(_switcherReturn);
+        });
     }
+    _switcherReturn = focusReturnPoint();
     _switcher->open(std::move(opening));
     _switcherWindow->setTransientParent(QGuiApplication::focusWindow());
     _switcherWindow->setModality(_switcherWindow->transientParent() != nullptr ? Qt::WindowModal

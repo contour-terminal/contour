@@ -71,6 +71,13 @@ enum class SwitcherListing : uint8_t
     Failed,        ///< The daemon could not be listed.
 };
 
+/// How a saved host's link stands, as far as this session knows, while its workspaces are not listed.
+enum class SwitcherHostLink : uint8_t
+{
+    NeverConnected = 0, ///< No window or listing has reached it since this application started.
+    Disconnected,       ///< Reached before; nothing holds a connection to it now.
+};
+
 /// One daemon the popup lists, with what is known of its workspaces.
 struct SwitcherDaemon
 {
@@ -82,6 +89,9 @@ struct SwitcherDaemon
     SwitcherListing listing = SwitcherListing::NotListed;       ///< How far its workspaces are known.
     std::string failure;                       ///< Why it could not be listed; empty unless Failed.
     std::vector<SwitcherWorkspace> workspaces; ///< Its workspaces, in its order, once Listed.
+    /// A saved host's link before its workspaces are listed; NeverConnected on a local daemon, which is
+    /// running, not connected to.
+    SwitcherHostLink link = SwitcherHostLink::NeverConnected;
 };
 
 /// Whether the popup lists every daemon or picks a workspace of one.
@@ -159,5 +169,14 @@ struct SwitcherOpening
 /// @return The row choosing @p keep goes to, else the first; 0 for none.
 [[nodiscard]] std::size_t switcherSelection(std::span<SwitcherRow const> rows,
                                             std::optional<session::SwitchTarget> const& keep);
+
+/// Where the selection starts when the popup opens: the first daemon row that is not the window's own, so
+/// Return on an untouched popup moves the window somewhere (never to "New daemon…", which starts one). The
+/// window's own daemon row when it is the only daemon, else the first row.
+/// @param rows The popup's rows.
+/// @param windowDaemon The daemon the window the popup is over is on.
+/// @return The row to select; 0 for none.
+[[nodiscard]] std::size_t switcherInitialSelection(std::span<SwitcherRow const> rows,
+                                                   session::SwitchTarget const& windowDaemon);
 
 } // namespace contour::window

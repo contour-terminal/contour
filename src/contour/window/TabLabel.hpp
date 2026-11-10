@@ -41,4 +41,14 @@ struct TabLabelContext
 /// @return The expanded label.
 [[nodiscard]] std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx);
 
+/// What a tab that resolved to no label at all is named: the pane's foreground process when it is known, else
+/// the shell the pane was started with. A remote-hosted pane's foreground program is the host's to name and
+/// never reaches the client, so its blank tab shows the profile's shell instead of staying empty.
+/// @param foregroundProcess The pane's foreground process name; empty when it cannot be known.
+/// @param shellProgram The profile's shell program: a path or a name, possibly with arguments ("bash -l").
+/// @return The process name as given, else the shell's base name (a login shell's leading '-' removed);
+///         empty when neither names anything.
+[[nodiscard]] std::string blankTabLabelFallback(std::string_view foregroundProcess,
+                                                std::string_view shellProgram);
+
 } // namespace contour::window

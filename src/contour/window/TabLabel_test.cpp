@@ -117,3 +117,16 @@ TEST_CASE("expandTabLabel: {TabName} is substituted beside the other placeholder
     CHECK(expandTabLabel("{TabPosition}: {TabName}", ctx) == "2: Tab Title");
     CHECK(expandTabLabel("{WindowTitle}", ctx) == "Window Title");
 }
+
+TEST_CASE("blankTabLabelFallback: a known process names the tab, else the shell does", "[contour][tablabel]")
+{
+    using contour::window::blankTabLabelFallback;
+
+    CHECK(blankTabLabelFallback("vim", "/bin/bash") == "vim");
+    // A remote-hosted pane's process is unknown: the profile's shell names it.
+    CHECK(blankTabLabelFallback("", "/bin/bash") == "bash");
+    CHECK(blankTabLabelFallback("", "bash -l") == "bash");
+    CHECK(blankTabLabelFallback("", "-zsh") == "zsh");
+    CHECK(blankTabLabelFallback("", "C:\\Windows\\System32\\cmd.exe") == "cmd.exe");
+    CHECK(blankTabLabelFallback("", "").empty());
+}

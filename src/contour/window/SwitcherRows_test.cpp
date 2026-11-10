@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -14,6 +15,8 @@ using contour::session::SwitchTarget;
 using contour::window::SwitcherDaemon;
 using contour::window::SwitcherExpansion;
 using contour::window::SwitcherGroup;
+using contour::window::SwitcherHostLink;
+using contour::window::switcherInitialSelection;
 using contour::window::SwitcherInputs;
 using contour::window::SwitcherListing;
 using contour::window::SwitcherRow;
@@ -213,4 +216,64 @@ TEST_CASE("switcherSelection keeps the row it was on", "[switcher]")
     CHECK(switcherSelection(rows, std::nullopt) == 0);
     CHECK(switcherSelection(rows, label("admin")) == 4);
     CHECK(switcherSelection(rows, label("gone")) == 0);
+}
+
+TEST_CASE("switcherInitialSelection starts on the first daemon that is not the window's own", "[switcher]")
+{
+    auto const daemons = mockup();
+    auto const everything = [&](SwitchTarget const& own) {
+        return switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = own }, "");
+    };
+
+    SECTION("a window on the first daemon opens on the next one, not on New daemon")
+    {
+        auto const rows = everything(label("default"));
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon != "default");
+    }
+
+    SECTION("a window on another daemon opens on the first one")
+    {
+        auto const rows = everything(label("admin"));
+        auto const at = switcherInitialSelection(rows, label("admin"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon != "admin");
+    }
+
+    SECTION("the window's own daemon is the fallback when it is the only one")
+    {
+        auto const only = std::vector<SwitcherDaemon> { mockup()[0] };
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = only, .windowDaemon = label("default") }, "");
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon == "default");
+    }
+
+    SECTION("without daemon rows it is the first row")
+    {
+        CHECK(switcherInitialSelection({}, label("default")) == 0);
+    }
+}
+
+TEST_CASE("a saved host reached before says it is not connected, not that it was never connected",
+          "[switcher]")
+{
+    auto daemons = mockup();
+    auto const detailOfStudio = [&] {
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
+        auto const studio = std::ranges::find(rows, "studio-admin", &SwitcherRow::title);
+        REQUIRE(studio != rows.end());
+        return studio->detail;
+    };
+
+    REQUIRE(daemons.back().address.kind == SwitchDaemonKind::Host);
+    CHECK(detailOfStudio() == "not yet connected");
+    daemons.back().link = SwitcherHostLink::Disconnected;
+    CHECK(detailOfStudio() == "not connected");
 }

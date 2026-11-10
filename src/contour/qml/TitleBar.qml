@@ -378,6 +378,9 @@ Item {
                 hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
                 connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
                 focusRingShown: activeFocus && root.toolbarHasFocus
+                // Opens the switcher, as the ShowSwitcher action does. The chip sits beside the drag
+                // region, not in it, so the window-drag handlers never see its press.
+                onClicked: if (root.controller && root.controller.showSwitcher) root.controller.showSwitcher()
             }
         }
 

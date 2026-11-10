@@ -503,7 +503,16 @@ command::MenuBarState WindowController::menuBarState() const
         state.mouseForwarding = pane.mouseForwarding;
         state.activeProfile = session->profileName();
     }
+
+    state.switching = switchingAvailability();
+    state.daemonSwitches = command::DaemonCommandSource { *this }.commands();
     return state;
+}
+
+void WindowController::showSwitcher() const
+{
+    if (auto* session = activeSession())
+        session->executeAction(actions::ShowSwitcher {});
 }
 
 void WindowController::runMenuBarAction(actions::Action const& action) const
@@ -824,10 +833,12 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
 
     auto expanded = expandTabLabel(
         templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle, .tabName = tabName });
-    // A blank tab names nothing: a label that came out empty falls back to the process's name. Asked only
-    // then, since the name costs a query of the process table.
+    // A blank tab names nothing: a label that came out empty falls back to the process's name, else the
+    // shell's (a remote-hosted pane's program never reaches this client). Asked only then, since the name
+    // costs a query of the process table.
     if (expanded.empty() && session != nullptr)
-        expanded = cachedProcessName(*session);
+        expanded =
+            blankTabLabelFallback(cachedProcessName(*session), session->profile().shell.value().program);
     return QString::fromStdString(expanded);
 }
 
@@ -1451,6 +1462,13 @@ bool WindowController::dropChromeFocus()
 void WindowController::leaveChrome()
 {
     if (dropChromeFocus() && _activeDisplay != nullptr)
+        _activeDisplay->forceActiveFocus();
+}
+
+void WindowController::restoreTerminalFocus()
+{
+    std::ignore = dropChromeFocus(); // the display takes the keyboard either way
+    if (_activeDisplay != nullptr)
         _activeDisplay->forceActiveFocus();
 }
 

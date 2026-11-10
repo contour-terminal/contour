@@ -3,9 +3,10 @@
 // connection stands -- a status dot, the host, and the state's text ("Reconnecting…", "Disconnected";
 // nothing while connected). What each state looks like is UiStyleProvider::hostChipLook's table.
 //
-// Not interactive: it names where the tabs are, it is not one of them, so it reads as static text; keyboard
-// focus can still rest on it (the toolbar's cycle), and it then wears the focus ring. A local
-// window has no host and the chip takes no room. On the Terminal row the chip is a run of cells,
+// A button: a click, a tap, or Space/Return while it holds the toolbar's keyboard focus opens the daemon &
+// workspace switcher (`clicked`, which the title bar wires to the ShowSwitcher action), since the host it
+// names is the thing the switcher changes. Rest, hover and pressed follow the toolbar button's kit fills,
+// and keyboard focus wears the focus ring. A local window has no host and the chip takes no room. On the Terminal row the chip is a run of cells,
 // bracketed by the chip glyph tokens: `[● host status]`.
 import QtQuick
 
@@ -13,13 +14,16 @@ Item {
     id: root
     objectName: "hostChip"
 
+    /// A click, a tap, the accessibility press action, or Space/Return while focused.
+    signal clicked()
+
     /// The attached host; empty for a local window.
     required property string hostLabel
     /// The connection's state, a window::HostChipState as its underlying value. Not `state`, which every
     /// Item already has (the States machinery's name).
     required property int connection
     /// Whether keyboard focus is on the chip and the chrome says so: the host's to set. The chip is static
-    /// text, but it is the toolbar's first item in visual order, so the focus cycle visits it.
+    /// button, and it is the toolbar's first item in visual order, so the focus cycle visits it.
     property bool focusRingShown: false
 
     // How the state looks -- { dot, status, accessibleState } -- re-read on a palette change, since the
@@ -31,10 +35,21 @@ Item {
     // The room between the dot, the host and the state: one cell on the Terminal row.
     readonly property real gap: root.bracketed ? chromeStyle.cellWidth : chromeStyle.space.s3
 
-    Accessible.role: Accessible.StaticText
+    Accessible.role: Accessible.Button
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
-    Accessible.name: qsTr("Attached to %1, %2").arg(root.hostLabel).arg(root.look.accessibleState ?? "")
+    // The connection's state is named only while it is not the ordinary one: "(on work)", "(on work, reconnecting)".
+    Accessible.name: root.statusText === ""
+                         ? qsTr("Switch daemon or workspace (on %1)").arg(root.hostLabel)
+                         : qsTr("Switch daemon or workspace (on %1, %2)").arg(root.hostLabel).arg(root.look.accessibleState ?? "")
+    Accessible.onPressAction: root.clicked()
+
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.clicked()
+            event.accepted = true
+        }
+    }
 
     visible: chromeStyle.isHostChipShown(root.hostLabel)
     implicitWidth: root.visible ? row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5) : 0
@@ -42,11 +57,26 @@ Item {
     width: root.implicitWidth
     height: root.implicitHeight
 
+    HoverHandler {
+        id: hover
+        cursorShape: Qt.PointingHandCursor
+    }
+
+    TapHandler {
+        id: primary
+        acceptedButtons: Qt.LeftButton
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: root.clicked()
+    }
+
     Rectangle {
         objectName: "hostChipBackground"
         anchors.fill: parent
         radius: chromeStyle.radii.hostChip
-        color: chromeStyle.colors.chipFill
+        // The toolbar buttons' fills (ToolbarButton.qml), so the chip answers the pointer as they do.
+        color: primary.pressed ? chromeStyle.colors.controlPressedFill
+             : hover.hovered || root.activeFocus ? chromeStyle.colors.tabHoverFill
+             : chromeStyle.colors.chipFill
     }
 
     FocusRing {

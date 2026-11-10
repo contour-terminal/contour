@@ -516,6 +516,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
+
+    /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
+    /// popup over this window closes, which leaves no window holding the keyboard.
+    void restoreTerminalFocus();
     /// Closes the tab the user confirmed closing, as closeTabConfirmationRequested() asked. A tab that is
     /// already gone closes nothing: its row may now hold another tab.
     /// @param tab The tab's vtworkspace::TabId value.
@@ -639,6 +643,10 @@ class WindowController:
     /// used. Unknown ids are ignored (a row can go stale between a refresh and a click).
     /// @param id The command id (CommandPaletteModel's `commandId` role).
     Q_INVOKABLE void runCommand(QString const& id);
+
+    /// Opens the daemon and workspace switcher over this window: what the ShowSwitcher action does, for
+    /// the host chip's click.
+    Q_INVOKABLE void showSwitcher() const;
     // }}}
 
     // {{{ Terminal context menu

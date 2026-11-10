@@ -216,7 +216,14 @@ window somewhere else without closing it, and its panes are swapped in place:
   in it to show.
 - **From the switcher popup** (`ShowSwitcher`), which lists every local daemon and saved host with their
   workspaces; **New daemon…** there (or `NewDaemon`) starts a local daemon under a label you give and opens
-  a window on it.
+  a window on it. It opens on the first daemon that is not the window's own, so Return alone moves the
+  window. A daemon's workspace count is the number of workspaces that hold a tab, the same ones its
+  expansion lists, and a saved host the window left says *not connected* (*not yet connected* until a
+  window or listing reached it).
+- **By mouse**: click the host chip in the title band of a window on a daemon (Space or Return when it has
+  keyboard focus) to open the switcher, or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
+  from the Window submenu of the main menu (☰). **Switch To Daemon** lists the same daemons as the command
+  palette's *Switch to daemon* rows.
 - **From a shell**, with [`contour switch`](control-api.md#switching-a-window), which also works from a
   pane of the window being switched. The window asks first (see below).
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/command/CommandCatalog.hpp>
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -97,10 +98,15 @@ struct MenuBarState
     std::vector<std::string> tabTitles {}; ///< One per tab, in order.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
-    std::string activeProfile {};             ///< The active pane's profile.
-    std::vector<std::string> profileNames {}; ///< Configured profiles, sorted.
-    std::vector<std::string> hostNames {};    ///< Saved hosts, sorted.
-    std::vector<std::string> layoutNames {};  ///< Saved layouts, sorted.
+    std::string activeProfile {};                             ///< The active pane's profile.
+    std::vector<std::string> profileNames {};                 ///< Configured profiles, sorted.
+    std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
+    std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
+    DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
+    /// The palette's "Switch to daemon" commands for this window, as DaemonCommandSource offers them: every
+    /// other local daemon and saved host. One source, so the menu and the palette cannot list different
+    /// daemons.
+    std::vector<Command> daemonSwitches {};
 };
 
 /// The part of the state that the configuration decides: profiles, hosts and layouts, each sorted.
@@ -151,13 +157,7 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "CycleDaemon",
                                 .reason = "reached from the palette, the switcher and key bindings; a window "
                                           "with no daemon has nothing to switch" },
-    MenuReachabilityExemption { .action = "SwitchToDaemon",
-                                .reason = "reached from the palette, the switcher and key bindings; a window "
-                                          "with no daemon has nothing to switch" },
     MenuReachabilityExemption { .action = "OpenDaemon",
-                                .reason = "reached from the palette, the switcher and key bindings; a window "
-                                          "with no daemon has nothing to switch" },
-    MenuReachabilityExemption { .action = "ShowSwitcher",
                                 .reason = "reached from the palette, the switcher and key bindings; a window "
                                           "with no daemon has nothing to switch" },
     MenuReachabilityExemption { .action = "NewDaemon",

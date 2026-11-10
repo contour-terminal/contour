@@ -8,6 +8,7 @@
 #include <array>
 #include <ranges>
 #include <span>
+#include <variant>
 
 namespace contour::command
 {
@@ -56,6 +57,11 @@ namespace
     bool hasMultiplePanes(MenuBarState const& state) noexcept
     {
         return state.paneCount > 1;
+    }
+
+    bool canSwitchDaemon(MenuBarState const& state) noexcept
+    {
+        return state.switching == DaemonSwitching::Available;
     }
     // }}}
 
@@ -106,6 +112,19 @@ namespace
                                                       actions::SwitchToTab { .position = index + 1 },
                                                       index == state.activeTab ? RowCheck::Checked
                                                                                : RowCheck::Unchecked);
+                                              }));
+    }
+
+    /// One row per daemon this window can switch to, titled as the palette's drill-in lists it.
+    [[nodiscard]] std::vector<ContextMenuEntry> switchToDaemonRows(MenuBarState const& state)
+    {
+        auto const isSwitch = [](Command const& command) {
+            return std::holds_alternative<actions::SwitchToDaemon>(command.action);
+        };
+        return std::ranges::to<std::vector>(state.daemonSwitches | std::views::filter(isSwitch)
+                                            | std::views::transform([](auto const& command) {
+                                                  return detail::commandEntry(command.argument,
+                                                                              command.action);
                                               }));
     }
 
@@ -365,6 +384,10 @@ namespace
             Table::separator(),
             Table::submenu("Pane", rowsOf<paneTemplate>).enabledWhen(hasMultiplePanes),
             Table::separator(),
+            // Switching a window between daemons; both rows exist only for a window with a daemon behind it.
+            Table::submenu("Switch To Daemon", switchToDaemonRows).shownWhen(canSwitchDaemon),
+            windowCommand(ShowSwitcher {}, "Daemon & Workspace Switcher…").shownWhen(canSwitchDaemon),
+            Table::separator().shownWhen(canSwitchDaemon),
             Table::rows(tabListRows),
         };
         return rows;
