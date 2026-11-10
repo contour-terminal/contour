@@ -156,7 +156,7 @@ namespace
             else if constexpr (ListsOwnFields<EnumChecker, T const>)
                 value.visitFields(*this);
             else
-                visitStateFields(*this, value);
+                visitForeignFields(*this, value);
         }
 
       private:

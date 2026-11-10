@@ -45,7 +45,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, Margin::Vertical>
-    void visitStateFields(Visitor& visitor, T& margin)
+    void visitForeignFields(Visitor& visitor, T& margin)
     {
         visitor(1, margin.from);
         visitor(2, margin.to);
@@ -53,7 +53,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, Margin::Horizontal>
-    void visitStateFields(Visitor& visitor, T& margin)
+    void visitForeignFields(Visitor& visitor, T& margin)
     {
         visitor(1, margin.from);
         visitor(2, margin.to);
@@ -61,7 +61,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, Margin>
-    void visitStateFields(Visitor& visitor, T& margin)
+    void visitForeignFields(Visitor& visitor, T& margin)
     {
         visitor(1, margin.vertical);
         visitor(2, margin.horizontal);
@@ -69,7 +69,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, SavedTitles>
-    void visitStateFields(Visitor& visitor, T& titles)
+    void visitForeignFields(Visitor& visitor, T& titles)
     {
         visitor(1, titles.icon);
         visitor(2, titles.window);
@@ -77,7 +77,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, UserPreferredSupplementalSet>
-    void visitStateFields(Visitor& visitor, T& set)
+    void visitForeignFields(Visitor& visitor, T& set)
     {
         visitor(1, set.intermediate);
         visitor(2, set.final);
@@ -88,7 +88,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, FileUrl>
-    void visitStateFields(Visitor& visitor, T& url)
+    void visitForeignFields(Visitor& visitor, T& url)
     {
         visitor(1, url.url);
         visitor(2, url.host);
@@ -97,7 +97,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, Progress>
-    void visitStateFields(Visitor& visitor, T& progress)
+    void visitForeignFields(Visitor& visitor, T& progress)
     {
         visitor(1, progress.state);
         visitor(2, progress.percentage);
@@ -105,7 +105,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, ProgramStatusRecord>
-    void visitStateFields(Visitor& visitor, T& record)
+    void visitForeignFields(Visitor& visitor, T& record)
     {
         visitor(1, record.id);
         visitor(2, record.state);
@@ -121,7 +121,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, RGBColorPair>
-    void visitStateFields(Visitor& visitor, T& pair)
+    void visitForeignFields(Visitor& visitor, T& pair)
     {
         visitor(1, pair.foreground);
         visitor(2, pair.background);
@@ -129,7 +129,7 @@ namespace detail
 
     template <typename Visitor, typename T>
         requires std::same_as<std::remove_const_t<T>, CursorColor>
-    void visitStateFields(Visitor& visitor, T& cursor)
+    void visitForeignFields(Visitor& visitor, T& cursor)
     {
         visitor(1, cursor.color);
         visitor(2, cursor.textOverrideColor);

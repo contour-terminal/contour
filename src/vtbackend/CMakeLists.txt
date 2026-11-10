@@ -316,6 +316,7 @@ target_link_libraries(vtbackend PUBLIC
     core::async
     core::base
     core::cli
+    core::codec
     core::log
     core::platform
     crispy::core

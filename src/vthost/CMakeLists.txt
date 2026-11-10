@@ -1,3 +1,14 @@
+# The native protocol's byte level on its own: the varints and the frame, which link nothing, so a process
+# that must not depend on the rest of vthost (the PTY keeper) can speak them.
+add_library(vthost_wire STATIC
+    proto/Wire.cpp
+    proto/Wire.hpp
+)
+target_include_directories(vthost_wire PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
+
 add_library(vthost STATIC
     AccessFile.cpp
     AccessFile.hpp
@@ -230,8 +241,6 @@ add_library(vthost STATIC
     proto/ReleasedVersions.hpp
     proto/Unsupported.cpp
     proto/Unsupported.hpp
-    proto/Wire.cpp
-    proto/Wire.hpp
     tmux/CommandLine.cpp
     tmux/CommandLine.hpp
     tmux/ControlModeParser.cpp
@@ -253,6 +262,7 @@ add_library(vthost STATIC
     tmux/TmuxGateway.hpp
 )
 target_link_libraries(vthost PUBLIC
+    vthost_wire
     vtcontrol
     core::async
     core::base
