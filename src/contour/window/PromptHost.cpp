@@ -91,17 +91,21 @@ void PromptHost::answerPrompt(int promptId, int outcome, QString const& answer)
         return;
     auto reply = std::move(found->reply);
     _open.erase(found);
-    auto text = answer.toStdString();
-    answer.clear();
     auto given =
         askpass::AskpassReply { .outcome = outcome == static_cast<int>(askpass::AskpassOutcome::Answered)
                                                ? askpass::AskpassOutcome::Answered
                                                : askpass::AskpassOutcome::Cancelled,
                                 .answer = {} };
     if (given.outcome == askpass::AskpassOutcome::Answered)
-        given.answer = std::move(text);
-    else
-        askpass::wipe(text);
+    {
+        // Straight from the field's text into a Secret; the intermediate encoding is wiped as it goes.
+        auto utf8 = answer.toUtf8();
+        given.answer =
+            askpass::Secret { std::string_view { utf8.constData(), static_cast<std::size_t>(utf8.size()) } };
+        utf8.fill('\0');
+    }
+    // What the QString held, as far as this copy of it goes.
+    answer.fill(QChar { u'\0' });
     emit pendingPromptChanged();
     if (reply)
         reply(std::move(given));

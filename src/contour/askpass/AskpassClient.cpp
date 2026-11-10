@@ -2,6 +2,7 @@
 #include <contour/askpass/AskpassClient.hpp>
 #include <contour/askpass/AskpassProtocol.hpp>
 
+#include <core/Utils.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -33,7 +34,7 @@ namespace contour::askpass
 
 namespace
 {
-    using Bytes = std::expected<std::string, std::string>;
+    using Bytes = std::expected<Secret, std::string>;
 
 #ifdef _WIN32
     /// The exchange over a named pipe, which is what QLocalServer listens on under Windows. Blocking, and as
@@ -50,7 +51,14 @@ namespace
         while (true)
         {
             pipe = CreateFileW(
-                wide->c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+                wide->c_str(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                nullptr,
+                OPEN_EXISTING,
+                // The server may learn who this is, and nothing more: it cannot act as this process.
+                SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                nullptr);
             if (pipe != INVALID_HANDLE_VALUE)
                 break;
             auto const error = GetLastError();
@@ -67,12 +75,12 @@ namespace
             result = std::unexpected { std::string { "cannot send the prompt" } };
         else
         {
-            auto received = std::string {};
-            auto chunk = std::array<char, 4096> {};
-            result = std::string {};
+            auto received = Secret {};
+            auto chunk = std::array<std::byte, 4096> {};
+            result = Secret {};
             while (true)
             {
-                auto const size = askpassFrameSize(received);
+                auto const size = askpassFrameSize(received.view());
                 if (!size)
                 {
                     result = std::unexpected { size.error() };
@@ -80,7 +88,7 @@ namespace
                 }
                 if (size->has_value() && received.size() >= **size)
                 {
-                    result = received.substr(0, **size);
+                    result = Secret { received.view().substr(0, **size) };
                     break;
                 }
                 auto count = DWORD { 0 };
@@ -90,9 +98,9 @@ namespace
                     result = std::unexpected { std::string { "the prompt was closed without an answer" } };
                     break;
                 }
-                received.append(chunk.data(), count);
+                received.append(std::string_view { reinterpret_cast<char const*>(chunk.data()), count });
             }
-            wipe(received);
+            wipeBytes(chunk);
         }
         CloseHandle(pipe);
         return result;
@@ -121,26 +129,24 @@ namespace
         if (auto const sent = co_await socket->write(bytes); !sent)
             co_return std::unexpected { std::format("cannot send the prompt: {}", sent.error().toString()) };
 
-        auto received = std::string {};
+        auto received = Secret {};
         auto chunk = std::array<std::byte, 4096> {};
+        // What the answer passed through, whichever way this ends.
+        auto const wipeChunk = core::Finally { [&chunk] { wipeBytes(chunk); } };
         while (true)
         {
-            auto const size = askpassFrameSize(received);
+            auto const size = askpassFrameSize(received.view());
             if (!size)
                 co_return std::unexpected { size.error() };
             if (size->has_value() && received.size() >= **size)
-            {
-                auto whole = received.substr(0, **size);
-                wipe(received);
-                co_return whole;
-            }
+                co_return Secret { received.view().substr(0, **size) };
             auto const count = co_await socket->read(chunk);
             if (!count)
                 co_return std::unexpected { std::format("cannot read the answer: {}",
                                                         count.error().toString()) };
             if (*count == 0)
                 co_return std::unexpected { std::string { "the prompt was closed without an answer" } };
-            received.append(reinterpret_cast<char const*>(chunk.data()), *count);
+            received.append(std::string_view { reinterpret_cast<char const*>(chunk.data()), *count });
         }
     }
 
@@ -186,16 +192,14 @@ std::optional<int> runAskpassIfRequested(core::Environment const& environment,
     auto received = exchange(*endpoint, frame, connectBudget);
     if (!received)
         return fail(err, received.error());
-    auto reply = decodeAskpassReply(*received);
-    wipe(*received);
+    auto reply = decodeAskpassReply(received->view());
     if (!reply)
         return fail(err, reply.error());
     if (reply->outcome != AskpassOutcome::Answered)
         return 1;
 
-    out << reply->answer << '\n';
+    out << reply->answer.view() << '\n';
     out.flush();
-    wipe(reply->answer);
     return 0;
 }
 

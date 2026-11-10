@@ -118,8 +118,7 @@ NativeController::NativeController(Config config):
     _sessionSettings(std::move(config.sessionSettings)),
     _colorPreference(std::move(config.colorPreference)),
     _timeline(config.timeline),
-    _backoff(config.backoff),
-    _attention(std::move(config.attention))
+    _backoff(config.backoff)
 {
     // On the monitor's platform thread: only marshaled from there, as its contract asks.
     if (config.powerMonitor != nullptr)
@@ -364,8 +363,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         _backoff,
         [this](vthost::client::ConnectionState state, std::string const& reason) {
             onConnectionState(state, reason);
-        },
-        _attention
+        }
     };
     {
         auto const lock = std::lock_guard { _mutex };
@@ -418,6 +416,14 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         if (isEnding(_connection))
             return;
         _connection = state;
+        // A prompt of this attach waits for the user to be looking: that is what the connection says, until
+        // it is shown.
+        if (_userAttention == UserAttention::Needed
+            && (state == ConnectionState::Reconnecting || state == ConnectionState::Connecting))
+        {
+            _stateUnderAttention = state;
+            _connection = ConnectionState::NeedsAttention;
+        }
         switch (state)
         {
             case ConnectionState::Connecting: break;
@@ -650,6 +656,26 @@ vthost::client::ConnectionState NativeController::connectionState() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _connection;
+}
+
+void NativeController::setUserAttention(UserAttention attention)
+{
+    using vthost::client::ConnectionState;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _userAttention = attention;
+        if (attention == UserAttention::Needed
+            && (_connection == ConnectionState::Reconnecting || _connection == ConnectionState::Connecting))
+        {
+            _stateUnderAttention = _connection;
+            _connection = ConnectionState::NeedsAttention;
+        }
+        else if (attention == UserAttention::NotNeeded && _connection == ConnectionState::NeedsAttention)
+            _connection = _stateUnderAttention;
+        else
+            return;
+    }
+    emit connectionStateChanged();
 }
 
 void NativeController::captureHandshake()

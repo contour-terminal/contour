@@ -47,7 +47,9 @@ struct Replies
     {
         return [this, name = std::move(name)](AskpassReply given) {
             told.push_back(name
-                           + (given.outcome == AskpassOutcome::Answered ? ":" + given.answer : ":cancelled"));
+                           + (given.outcome == AskpassOutcome::Answered
+                                  ? ":" + std::string { given.answer.view() }
+                                  : ":cancelled"));
         };
     }
 };
@@ -123,14 +125,14 @@ TEST_CASE("an answer reaches the broker once, and a late one is dropped", "[askp
     auto replies = Replies {};
     ask(router, 1, 10, replies);
 
-    window.asks.front().reply(AskpassReply { AskpassOutcome::Answered, "secret" });
-    window.asks.front().reply(AskpassReply { AskpassOutcome::Answered, "again" });
+    window.asks.front().reply(answeredReply("secret"));
+    window.asks.front().reply(answeredReply("again"));
     CHECK(replies.told == std::vector<std::string> { "10:secret" });
 
     ask(router, 1, 11, replies);
     router.withdraw(11);
     CHECK(window.withdrawn == std::vector<AskpassPromptId> { 11 });
-    window.asks.back().reply(AskpassReply { AskpassOutcome::Answered, "late" });
+    window.asks.back().reply(answeredReply("late"));
     CHECK(replies.told.size() == 1);
 }
 
@@ -163,7 +165,7 @@ TEST_CASE("a window that goes cancels what it was asked", "[askpass][router]")
 
     CHECK(replies.told == std::vector<std::string> { "11:cancelled" });
     // A reply from the closed window's sink afterwards is dropped.
-    closing.asks.front().reply(AskpassReply { AskpassOutcome::Answered, "late" });
+    closing.asks.front().reply(answeredReply("late"));
     CHECK(replies.told.size() == 1);
 }
 
@@ -236,4 +238,94 @@ TEST_CASE("a prompt is open from when it is asked until it ends, whoever shows i
     CHECK(router.hasOpenPrompt());
     window.asks.front().reply(AskpassReply { AskpassOutcome::Cancelled, {} });
     CHECK_FALSE(router.hasOpenPrompt());
+}
+
+TEST_CASE("a prompt for the route of a closed window is cancelled, never shown in another",
+          "[askpass][router]")
+{
+    auto router = AskpassPromptRouter {};
+    auto kept = RecordingSink {};
+    auto closing = RecordingSink {};
+    router.attach(1, kept);
+    router.attach(2, closing);
+    router.detach(2);
+    auto replies = Replies {};
+
+    // The window the attach was started from is gone: its later prompts are no's.
+    ask(router, 2, 10, replies);
+    CHECK(replies.told == std::vector<std::string> { "10:cancelled" });
+    CHECK(kept.asks.empty());
+    CHECK(router.waitingCount() == 0);
+
+    // A window that never existed, or no window at all, still goes to the first one.
+    ask(router, 99, 11, replies);
+    ask(router, AnyWindow, 12, replies);
+    CHECK(kept.asks.size() == 2);
+}
+
+TEST_CASE("a prompt for a window that is not on screen is held until it is", "[askpass][router][exposure]")
+{
+    auto held = 0;
+    auto router = AskpassPromptRouter { {}, {}, [&held] { ++held; } };
+    auto first = RecordingSink {};
+    auto second = RecordingSink {};
+    router.attach(1, first);
+    router.attach(2, second);
+    auto replies = Replies {};
+    using State = SinkExposure::State;
+    router.updateExposure(
+        { { .route = 1, .state = State::Hidden }, { .route = 2, .state = State::OnScreen } });
+
+    ask(router, 1, 10, replies);
+    ask(router, 2, 11, replies);
+    // Its own window is on screen: shown at once. The other window's prompt waits, though a window is on
+    // screen.
+    CHECK(second.asks.size() == 1);
+    CHECK(first.asks.empty());
+    CHECK(router.isHolding(1));
+    CHECK_FALSE(router.isHolding(2));
+    CHECK(router.waitingCount() == 1);
+    CHECK(held >= 1);
+
+    // No window's own: the first window shows it, and that one is hidden.
+    ask(router, AnyWindow, 12, replies);
+    CHECK(router.isHolding(AnyWindow));
+
+    // Shown once the window is on screen.
+    router.updateExposure(
+        { { .route = 1, .state = State::OnScreen }, { .route = 2, .state = State::OnScreen } });
+    CHECK(first.asks.size() == 2);
+    CHECK(router.waitingCount() == 0);
+    CHECK_FALSE(router.isHolding(1));
+}
+
+TEST_CASE("a window that is closed while its prompt is held cancels it", "[askpass][router][exposure]")
+{
+    auto router = AskpassPromptRouter {};
+    auto window = RecordingSink {};
+    router.attach(1, window);
+    auto replies = Replies {};
+    router.updateExposure({ { .route = 1, .state = SinkExposure::State::Hidden } });
+    ask(router, 1, 10, replies);
+    REQUIRE(router.isHolding(1));
+
+    router.detach(1);
+    CHECK(replies.told == std::vector<std::string> { "10:cancelled" });
+    CHECK_FALSE(router.isHolding(1));
+    CHECK(window.asks.empty());
+}
+
+TEST_CASE("only a prompt with no window at all brings up the stand-in", "[askpass][router][exposure]")
+{
+    auto waited = 0;
+    auto router = AskpassPromptRouter { [&waited] { ++waited; } };
+    auto window = RecordingSink {};
+    router.attach(1, window);
+    router.updateExposure({ { .route = 1, .state = SinkExposure::State::Hidden } });
+    auto replies = Replies {};
+    ask(router, 1, 10, replies);
+    CHECK(waited == 0);
+    router.detach(1);
+    ask(router, AnyWindow, 11, replies);
+    CHECK(waited == 1);
 }

@@ -36,7 +36,7 @@ TEST_CASE("the prompt kind rows are in the order of the kinds", "[askpass][promp
 {
     for (auto const index: std::views::iota(std::size_t { 0 }, PromptKindRows.size()))
         CHECK(static_cast<std::size_t>(PromptKindRows[index].kind) == index);
-    CHECK(PromptKindRows.size() == 4);
+    CHECK(PromptKindRows.size() == 7);
 }
 
 TEST_CASE("a window's host publishes the prompt it holds", "[askpass][prompthost]")

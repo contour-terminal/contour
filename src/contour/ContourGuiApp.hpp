@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/askpass/AskpassAttention.hpp>
 #include <contour/askpass/AskpassBroker.hpp>
 #include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/cli/ContourApp.hpp>
@@ -654,16 +653,13 @@ class ContourGuiApp:
     /// engine, which exists once the application runs, nothing is shown and the prompt waits. GUI thread.
     void showBootstrapPrompt();
 
-    /// Looks anew at which of the windows that show ssh's prompts are on screen for the user, which is what a
-    /// reconnect that would prompt waits for (NativeController::Config::attention). GUI thread.
+    /// Looks anew at which of the windows that show ssh's prompts are on screen for the user: a prompt for a
+    /// window that is not is held until it is (askpass::AskpassPromptRouter::updateExposure()). GUI thread.
     void refreshWindowAttention();
 
-    /// @return Which of the windows that show ssh's prompts are on screen, as a reconnect that would prompt
-    ///         reads it.
-    [[nodiscard]] askpass::AskpassAttention const& askpassAttention() const noexcept
-    {
-        return *_askpassAttention;
-    }
+    /// Tells every link whether a prompt of its attach is held, so that its connection says it needs
+    /// attention while it is. GUI thread.
+    void refreshAttachAttention();
 
     /// @return The router that sends each ssh prompt to the window that started the attach; every window's
     ///         PromptHost attaches to it. Exists from construction; GUI thread only.
@@ -1104,14 +1100,6 @@ class ContourGuiApp:
     int launchClient(ClientRequest request, std::string const& host);
 
   public:
-    /// Whether the ssh transport of a host may put questions to the user.
-    enum class SshPromptPolicy : uint8_t
-    {
-        Batch = 0, ///< Never: ssh runs in batch mode and fails where it would ask. For a check, which must
-                   ///< not make the user answer twice.
-        Askpass,   ///< Through Contour's own askpass, in the window that started the attach.
-    };
-
     /// A host and the transport that reaches its daemon.
     struct OpenedHost
     {
@@ -1129,7 +1117,7 @@ class ContourGuiApp:
         std::string const& configPath,
         std::string const& nameOrUrl,
         askpass::AskpassRouteId route = askpass::AnyWindow,
-        SshPromptPolicy prompting = SshPromptPolicy::Askpass);
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
 
     /// Maps an already resolved host onto its transport.
     /// @param nameOrUrl What named the host: its saved name, or its URL; the window's label.
@@ -1141,7 +1129,7 @@ class ContourGuiApp:
         std::string const& nameOrUrl,
         config::HostEntry host,
         askpass::AskpassRouteId route = askpass::AnyWindow,
-        SshPromptPolicy prompting = SshPromptPolicy::Askpass);
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
 
   private:
     /// Prepares the Connect picker's check of whether @p target answers, before it spends a window on it.
@@ -1345,24 +1333,22 @@ class ContourGuiApp:
     /// both before _daemonLinks: a link's reconnect may still be inside the broker's open() until the link
     /// stops, so they must outlive every link and session. The windows' PromptHosts share it too, so none of
     /// them has to outlive the others.
-    /// Which windows that have a prompt sink are on screen for the user; read on the reactor threads by a
-    /// reconnect that would prompt. Declared before the router, whose hooks publish it.
-    std::shared_ptr<askpass::AskpassAttention> _askpassAttention =
-        std::make_shared<askpass::AskpassAttention>();
     std::shared_ptr<askpass::AskpassPromptRouter> _askpassRouter =
         std::make_shared<askpass::AskpassPromptRouter>([this] { showBootstrapPrompt(); },
-                                                       [this] { refreshWindowAttention(); });
+                                                       [this] { refreshWindowAttention(); },
+                                                       [this] { refreshAttachAttention(); });
     /// Answers the ssh prompts of every ssh host this app opens; made by askpassBroker() on first use.
     std::shared_ptr<askpass::AskpassBroker> _askpassBroker;
     /// The stand-in window for ssh's prompts, while no terminal window shows them, and the host it shows. The
-    /// host is declared after the router it attaches to, so it is gone before it, and before the QML engine
-    /// (declared later still), which owns the window and so ends it first.
+    /// host is declared after the router it attaches to, so it is gone before the router; the QML engine is
+    /// declared later still, so it is destroyed first, and takes the window with it before this host goes.
     std::unique_ptr<window::BootstrapPrompt> _bootstrapPrompt;
     /// The thread the broker is made and asked on: the GUI thread (askpassBroker() asserts it).
     std::thread::id _guiThread = std::this_thread::get_id();
 
-    /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
-    /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
+    /// The daemon links, declared after the askpass members above (which must outlive them) and before
+    /// everything that holds a session, so they are destroyed after those: remote-backed sessions hold ptys
+    /// that unregister from their controllers on destruction. A launch that attaches creates exactly one.
     std::vector<std::unique_ptr<remote::DaemonLink>> _daemonLinks;
     /// The saved hosts a link was started to since this application began, so the switcher says "not
     /// connected" of one it reached before rather than "not yet connected".

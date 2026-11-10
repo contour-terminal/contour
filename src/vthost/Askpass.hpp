@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -32,6 +33,12 @@ class IAskpassSession
     /// @return The total time prompts of this attempt have been open so far; the connect deadline does
     ///         not run while the user is answering.
     [[nodiscard]] virtual std::chrono::milliseconds promptTime() const noexcept = 0;
+
+    /// Has @p wake called as soon as the user dismisses a prompt of this attempt, so that the transport ends
+    /// ssh at once: left to its own devices ssh would ask again, or go on waiting for a key. Called at once,
+    /// from here, if one was dismissed already. One handler per session; a later one replaces the earlier.
+    /// @param wake Called from any thread, once at most.
+    virtual void onCancelled(std::function<void()> wake) = 0;
 };
 
 /// Opens an IAskpassSession for each ssh attempt.

@@ -184,9 +184,6 @@ class NativeController final: public QObject, public contour::session::SessionFa
         ResumeFallback resumeFallback = ResumeFallback::Launch;
         /// Whether the daemon may ask this client to switch its windows.
         SwitchRequests switchRequests = SwitchRequests::Answered;
-        /// Holds a reconnect that may prompt (ssh) until a window of the user's is exposed, so a prompt is
-        /// never put to nobody; the connection then says it needs attention. Empty: nothing is held.
-        vthost::client::AttentionGate attention {};
     };
 
     /// @param config What the controller is built with.
@@ -215,6 +212,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return Where the connection to the daemon stands: Reconnecting while a lost one is sought again, its
     ///         bindings and ptys kept meanwhile. Safe from any thread.
     [[nodiscard]] vthost::client::ConnectionState connectionState() const;
+
+    /// Whether a prompt of this controller's attach waits for the user to be looking at a window.
+    enum class UserAttention : uint8_t
+    {
+        NotNeeded = 0,
+        Needed, ///< The connection says it needs attention (vthost::client::ConnectionState::NeedsAttention).
+    };
+
+    /// Says whether a prompt of this attach is held until its window is on screen. While it is, a connection
+    /// that is being sought again reports NeedsAttention; the reconnect itself goes on, as it never waits for
+    /// anyone. GUI thread.
+    /// @param attention Whether a prompt waits.
+    void setUserAttention(UserAttention attention);
 
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
@@ -903,7 +913,6 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ColorPreferenceSource _colorPreference;
     vthost::latency::StartupTimeline& _timeline;
     vthost::client::BackoffSchedule _backoff;
-    vthost::client::AttentionGate _attention;
     /// Filled, under _mutex, by the first callback after each accepted connection's ServerHello. @see
     /// negotiated()
     std::optional<vthost::proto::Negotiated> _negotiated;
@@ -1032,6 +1041,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// goes through it, so nothing is written to a connection still in its handshake, or to none.
     /// Reactor-owned; set and cleared under _mutex.
     vthost::client::NativeClient* _client = nullptr;
+    UserAttention _userAttention = UserAttention::NotNeeded; ///< Under _mutex.
+    /// What the connection was before it said NeedsAttention; under _mutex.
+    vthost::client::ConnectionState _stateUnderAttention = vthost::client::ConnectionState::Reconnecting;
     vthost::client::ConnectionState _connection =
         vthost::client::ConnectionState::Connecting; ///< Under _mutex.
     /// Which run of the daemon the last accepted connection reached; 0 for unknown. Under _mutex.

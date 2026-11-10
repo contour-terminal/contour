@@ -137,6 +137,15 @@ struct FakeAskpassState
 {
     bool wasCancelled = false;
     std::chrono::milliseconds promptTime { 0 };
+    std::function<void()> wake; ///< What the transport asked to be told when a prompt is dismissed.
+
+    /// The user dismisses a prompt: the attempt is cancelled, and the transport is told.
+    void cancel()
+    {
+        wasCancelled = true;
+        if (wake)
+            std::exchange(wake, nullptr)();
+    }
 };
 
 /// A session reporting what its state scripts.
@@ -148,6 +157,13 @@ class FakeAskpassSession final: public vthost::IAskpassSession
     [[nodiscard]] vthost::SpawnEnvironment environment() const override
     {
         return { .set = { { "SSH_ASKPASS_REQUIRE", "force" } } };
+    }
+    void onCancelled(std::function<void()> wake) override
+    {
+        if (_state->wasCancelled)
+            wake();
+        else
+            _state->wake = std::move(wake);
     }
     [[nodiscard]] bool wasCancelled() const noexcept override { return _state->wasCancelled; }
     [[nodiscard]] std::chrono::milliseconds promptTime() const noexcept override
@@ -500,6 +516,9 @@ TEST_CASE("ssh failure messages follow the prompt mode", "[vthost][ssh]")
         CHECK(old.message.contains("Run this once"));
         CHECK(old.message.contains("8.1"));
         CHECK(old.message.contains("Win32-OpenSSH"));
+        auto const unknown = vthost::sshTransportError(
+            failure, { .target = target, .detail = "denied", .probed = vthost::SshVersionProbed::Yes });
+        CHECK(unknown.message.contains("could not tell which ssh"));
         auto const plain = vthost::sshTransportError(failure, { .target = target, .detail = "denied" });
         CHECK_FALSE(plain.message.contains("Win32-OpenSSH"));
     }
@@ -934,6 +953,38 @@ TEST_CASE("the connect deadline stands still while a prompt is open", "[vthost][
     REQUIRE(fixture.result.has_value());
     REQUIRE_FALSE(fixture.result->has_value());
     CHECK(fixture.result->error().kind == TransportErrorKind::Unreachable);
+    CHECK(fixture.child->terminated == 1);
+}
+
+TEST_CASE("ssh is ended as soon as the user dismisses a prompt, not when its own clock runs out",
+          "[vthost][ssh][askpass]")
+{
+    auto fixture = PausedDeadlineFixture {};
+    fixture.answerVersionProbe();
+    fixture.start();
+    fixture.loop.drain();
+    REQUIRE_FALSE(fixture.result.has_value());
+    CHECK(fixture.child->terminated == 0);
+
+    // A prompt is dismissed: no time passes, and ssh goes, so that it asks nothing further.
+    fixture.broker->state->cancel();
+    fixture.loop.drain();
+    REQUIRE(fixture.result.has_value());
+    REQUIRE_FALSE(fixture.result->has_value());
+    CHECK(fixture.result->error().kind == TransportErrorKind::Cancelled);
+    CHECK(fixture.child->terminated == 1);
+}
+
+TEST_CASE("a prompt dismissed before the transport listens ends the attempt too", "[vthost][ssh][askpass]")
+{
+    auto fixture = PausedDeadlineFixture {};
+    fixture.answerVersionProbe();
+    fixture.broker->state->wasCancelled = true;
+    fixture.start();
+    fixture.loop.drain();
+    REQUIRE(fixture.result.has_value());
+    REQUIRE_FALSE(fixture.result->has_value());
+    CHECK(fixture.result->error().kind == TransportErrorKind::Cancelled);
     CHECK(fixture.child->terminated == 1);
 }
 

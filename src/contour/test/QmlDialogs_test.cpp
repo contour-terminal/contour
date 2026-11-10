@@ -3085,6 +3085,32 @@ TEST_CASE("AskpassDialog: a host key is shown verbatim, selectable, and defaults
     }
 }
 
+TEST_CASE(
+    "AskpassDialog: a question arriving over a notice starts on No, not on the Yes under the old Cancel "
+    "(offscreen)",
+    "[contour][gui][qml][askpass]")
+{
+    auto host = AskpassHost {};
+    host.ask(1, AskpassPromptKind::Notice, QStringLiteral("Confirm user presence for key ED25519-SK"));
+    REQUIRE(host.waitOpened(true));
+    // The notice is up, its Cancel in the accept place, when a question comes: the host shows the question.
+    host.ask(2,
+             AskpassPromptKind::HostKey,
+             QStringLiteral("The authenticity of host 'h' can't be established.\n"
+                            "Are you sure you want to continue connecting (yes/no/[fingerprint])? "));
+    REQUIRE(QTest::qWaitFor(
+        [&] { return host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "Yes"; },
+        2000));
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.dialog->property("defaultButton").toInt() == 1);
+    CHECK(host.part(QStringLiteral("kitDialogReject"))->hasActiveFocus());
+    CHECK_FALSE(host.part(QStringLiteral("kitDialogAccept"))->hasActiveFocus());
+    QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
+    REQUIRE(QTest::qWaitFor([&] { return !host.replies.empty(); }, 2000));
+    CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
+    CHECK(host.replies.front().answer == "no");
+}
+
 TEST_CASE("AskpassDialog: a confirmation is Yes or No, and No cancels the login (offscreen)",
           "[contour][gui][qml][askpass]")
 {
@@ -3116,6 +3142,9 @@ TEST_CASE("AskpassDialog: a notice has one button, Cancel, and goes when its hel
         host.click(QStringLiteral("kitDialogAccept"));
         REQUIRE(host.replies.size() == 1);
         CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+        // What Cancelled does to the attempt -- the helper exits 1 and the transport ends ssh -- is the
+        // broker's: see "a window's Cancel on a notice ends the attempt, end to end" in AskpassBroker_test.
+        REQUIRE(host.waitOpened(false));
     }
 
     SECTION("withdraw takes it down")

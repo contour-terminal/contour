@@ -139,12 +139,13 @@ class ITransportFactory
     /// @return Where this factory connects to, for log lines and failure messages.
     [[nodiscard]] virtual std::string describe() const = 0;
 
-    /// @return Whether a connect may put a question to the user (an ssh login's password, say). A reconnect
-    ///         of such a transport is held until someone can see it (client::AttentionGate); the others never
-    ///         wait for anyone.
+    /// @return Whether a connect may put a question to the user (an ssh login's password, say): false for a
+    ///         transport that runs without prompts. What a prompt waits for is the window it is shown in, not
+    ///         the reconnect.
     [[nodiscard]] virtual bool mayPrompt() const noexcept { return false; }
 
-    /// @return Whether the peer is authenticated, known before connecting: a control client refuses an
+    /// @return How far the peer is trusted, known before connecting: Local for this machine's socket,
+    ///         Verified for an authenticated peer, Unverified otherwise. A control client refuses an
     ///         Unverified transport, as an active man-in-the-middle would take its token.
     [[nodiscard]] virtual PeerTrust peerTrust() const noexcept = 0;
 

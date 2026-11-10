@@ -2,6 +2,7 @@
 #include <contour/askpass/AskpassBroker.hpp>
 #include <contour/askpass/AskpassClient.hpp>
 #include <contour/remote/RemoteController.hpp>
+#include <contour/window/PromptHost.hpp>
 
 #include <core/log/LogSink.hpp>
 #include <core/platform/Clock.hpp>
@@ -60,8 +61,8 @@ class FakeSink final: public IAskpassPromptSink
              std::function<void(AskpassReply)> reply) override
     {
         asks.push_back(Ask { promptId, kind, std::move(target), std::move(prompt) });
-        if (auto const given = answer ? answer(asks.back()) : std::nullopt)
-            reply(*given);
+        if (auto given = answer ? answer(asks.back()) : std::nullopt)
+            reply(std::move(*given));
         else
             held = std::move(reply);
     }
@@ -171,7 +172,7 @@ TEST_CASE("a secret prompt is answered through the sink and printed", "[askpass]
     auto const capture = core::log::ScopedCapture {};
     auto sink = FakeSink {};
     sink.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "hunter2" };
+        return answeredReply("hunter2");
     };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
@@ -196,7 +197,7 @@ TEST_CASE("the kind ssh's environment names reaches the sink", "[askpass][broker
 {
     auto sink = FakeSink {};
     sink.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "yes" };
+        return answeredReply("yes");
     };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
@@ -212,7 +213,7 @@ TEST_CASE("a cancelled prompt exits 1 and marks the session cancelled", "[askpas
 {
     auto sink = FakeSink {};
     sink.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Cancelled, "leaked?" };
+        return AskpassReply { .outcome = AskpassOutcome::Cancelled, .answer = Secret { "leaked?" } };
     };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
@@ -220,6 +221,88 @@ TEST_CASE("a cancelled prompt exits 1 and marks the session cancelled", "[askpas
     auto const run = runHelper(variablesOf(**session));
     CHECK(run.exitCode == 1);
     CHECK(run.out.empty());
+    CHECK((*session)->wasCancelled());
+}
+
+TEST_CASE(
+    "dismissing a prompt wakes the transport, and a second request of the attempt never reaches the sink",
+    "[askpass][broker][cancel]")
+{
+    auto sink = FakeSink {};
+    sink.answer = [](FakeSink::Ask const&) {
+        return AskpassReply { AskpassOutcome::Cancelled, {} };
+    };
+    auto broker = AskpassBroker { sink, "/opt/contour/contour" };
+    auto session = broker.open(targetOf());
+    REQUIRE(session.has_value());
+    auto woken = std::atomic<int> { 0 };
+    (*session)->onCancelled([&woken] { ++woken; });
+
+    auto const first = runHelper(variablesOf(**session));
+    CHECK(first.exitCode == 1);
+    // The transport was told, from the broker's thread, as the user dismissed the prompt.
+    pumpUntil([&] { return woken.load() == 1; });
+    CHECK((*session)->wasCancelled());
+
+    // ssh asks again before it has been ended: nobody is asked, and the answer is no.
+    auto const second = runHelper(variablesOf(**session), "Password: ");
+    CHECK(second.exitCode == 1);
+    CHECK(second.out.empty());
+    CHECK(sink.asks.size() == 1);
+    CHECK(woken.load() == 1);
+
+    // A transport that listens late is told at once.
+    auto late = std::atomic<int> { 0 };
+    (*session)->onCancelled([&late] { ++late; });
+    CHECK(late.load() == 1);
+}
+
+TEST_CASE("cancelling a notice, a security key's touch, ends the attempt", "[askpass][broker][cancel]")
+{
+    auto sink = FakeSink {};
+    auto broker = AskpassBroker { sink, "/opt/contour/contour" };
+    auto session = broker.open(targetOf());
+    REQUIRE(session.has_value());
+    auto woken = std::atomic<int> { 0 };
+    (*session)->onCancelled([&woken] { ++woken; });
+    auto variables = variablesOf(**session);
+    variables["SSH_ASKPASS_PROMPT"] = "none";
+    auto helper = startHelper(variables, "Confirm user presence for key ED25519-SK");
+    pumpUntil([&] { return sink.asks.size() == 1; });
+    CHECK(sink.asks.front().kind == AskpassPromptKind::Notice);
+    CHECK_FALSE((*session)->wasCancelled());
+
+    // The notice's one button is Cancel.
+    sink.held(AskpassReply { AskpassOutcome::Cancelled, {} });
+    while (helper.wait_for(0ms) != std::future_status::ready)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    CHECK(helper.get().exitCode == 1);
+    pumpUntil([&] { return woken.load() == 1; });
+    CHECK((*session)->wasCancelled());
+}
+
+TEST_CASE("a window's Cancel on a notice ends the attempt, end to end", "[askpass][broker][cancel]")
+{
+    // The dialog's host takes the notice, its Cancel button is answerPrompt(Cancelled): the helper exits 1
+    // and the transport is woken.
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto host = contour::window::PromptHost { router, 1 };
+    auto const broker = std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"));
+    auto session = RoutedAskpassBroker { broker, 1 }.open(targetOf());
+    REQUIRE(session.has_value());
+    auto woken = std::atomic<int> { 0 };
+    (*session)->onCancelled([&woken] { ++woken; });
+    auto variables = variablesOf(**session);
+    variables["SSH_ASKPASS_PROMPT"] = "none";
+    auto helper = startHelper(variables, "Confirm user presence");
+    pumpUntil([&] { return !host.pendingPrompt().isEmpty(); });
+
+    host.answerPrompt(
+        host.pendingPrompt().value("promptId").toInt(), static_cast<int>(AskpassOutcome::Cancelled), {});
+    while (helper.wait_for(0ms) != std::future_status::ready)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    CHECK(helper.get().exitCode == 1);
+    pumpUntil([&] { return woken.load() == 1; });
     CHECK((*session)->wasCancelled());
 }
 
@@ -280,7 +363,7 @@ TEST_CASE("the time a prompt is open is counted, and the server closes with its 
     clock.advance(3s);
     CHECK((*session)->promptTime() == 3s);
 
-    sink.held(AskpassReply { AskpassOutcome::Answered, "x" });
+    sink.held(answeredReply("x"));
     // The answer is written once the broker's thread has closed the prompt; the client has it by then.
     REQUIRE(client->waitForReadyRead(2000));
     clock.advance(10s);
@@ -360,7 +443,7 @@ TEST_CASE("an attach polled from the event loop completes once its prompt is ans
     // The prompt is open and nobody answered: the attach goes on, and the look returns at once.
     CHECK_FALSE(controller.pollConnected(budget).has_value());
 
-    sink.held(AskpassReply { AskpassOutcome::Answered, "hunter2" });
+    sink.held(answeredReply("hunter2"));
     auto settled = std::optional<std::expected<void, std::string>> {};
     pumpUntil([&] {
         settled = controller.pollConnected(budget);
@@ -404,7 +487,7 @@ TEST_CASE("a session serves one request after another, as ssh asks a password an
 {
     auto sink = FakeSink {};
     sink.answer = [](FakeSink::Ask const& ask) {
-        return AskpassReply { AskpassOutcome::Answered, ask.prompt.toStdString() };
+        return answeredReply(ask.prompt.toStdString());
     };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
@@ -494,7 +577,7 @@ TEST_CASE("a helper that connects before the GUI serves events waits for its ans
 {
     auto sink = FakeSink {};
     sink.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "hunter2" };
+        return answeredReply("hunter2");
     };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
@@ -573,10 +656,10 @@ TEST_CASE("each window's attach prompts in its own window", "[askpass][broker][r
     auto left = FakeSink {};
     auto right = FakeSink {};
     left.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "left-secret" };
+        return answeredReply("left-secret");
     };
     right.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "right-secret" };
+        return answeredReply("right-secret");
     };
     router->attach(1, left);
     router->attach(2, right);
@@ -608,7 +691,7 @@ TEST_CASE("an attach with no window waits for the first window to appear", "[ask
 
     auto window = FakeSink {};
     window.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "late-window" };
+        return answeredReply("late-window");
     };
     router->attach(7, window);
     while (helper.wait_for(0ms) != std::future_status::ready)

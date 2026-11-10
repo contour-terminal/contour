@@ -152,7 +152,7 @@ TEST_CASE("askpass helper: a missing nonce or an unreachable endpoint exits 1 wi
 TEST_CASE("askpass helper: an answer is printed with a newline", "[contour][askpass]")
 {
     auto gui = FakeGui { [](AskpassRequest const&) {
-        return encode(AskpassReply { AskpassOutcome::Answered, "hunter2" });
+        return std::string { encode(answeredReply("hunter2")).view() };
     } };
     auto const result = run({ { "CONTOUR_ASKPASS_ENDPOINT", gui.path() },
                               { "CONTOUR_ASKPASS_NONCE", "feed" },
@@ -170,7 +170,9 @@ TEST_CASE("askpass helper: an answer is printed with a newline", "[contour][askp
 TEST_CASE("askpass helper: a cancelled prompt exits 1 with nothing on stdout", "[contour][askpass]")
 {
     auto gui = FakeGui { [](AskpassRequest const&) {
-        return encode(AskpassReply { AskpassOutcome::Cancelled, "ignored" });
+        return std::string { encode(AskpassReply { .outcome = AskpassOutcome::Cancelled,
+                                                   .answer = Secret { "ignored" } })
+                                 .view() };
     } };
     auto const result =
         run({ { "CONTOUR_ASKPASS_ENDPOINT", gui.path() }, { "CONTOUR_ASKPASS_NONCE", "feed" } });

@@ -5853,6 +5853,7 @@ class QuietAskpassSession final: public vthost::IAskpassSession
   public:
     [[nodiscard]] vthost::SpawnEnvironment environment() const override { return {}; }
     [[nodiscard]] bool wasCancelled() const noexcept override { return false; }
+    void onCancelled(std::function<void()> /*wake*/) override {}
     [[nodiscard]] std::chrono::milliseconds promptTime() const noexcept override
     {
         return std::chrono::milliseconds { 0 };
@@ -6281,62 +6282,66 @@ class PromptingTransport final: public vthost::ITransportFactory
 
 } // namespace
 
-// A reconnect whose login may ask the user something is held while no window of theirs is exposed -- a
-// prompt put to a hidden window would wait there unseen -- and the connection says so; it goes on, and
-// prompts, once a window is.
-TEST_CASE("a reconnect that may prompt waits for an exposed window",
+// A reconnect never waits for a window: an agent-key or batch host reconnects in the background, as it always
+// did. Only a prompt waits, for the window that would show it (the router holds it).
+TEST_CASE("a reconnect of a transport that may prompt goes on whether or not any window is looking",
           "[attach][controller][reconnect][askpass]")
 {
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("asleep");
     auto timeline = TestTimeline {};
-    auto exposed = std::make_shared<std::atomic<bool>>(true);
     auto config =
         controllerConfig(daemon.endpoint(), timeline, { .backoff = { .first = 1ms, .ceiling = 4ms } });
     auto const transport = std::make_shared<PromptingTransport>(std::move(config.transport));
     config.transport = transport;
-    config.attention = { .isAttended = [exposed] { return exposed->load(); }, .poll = 5ms };
-    auto const controllerOwned = std::make_unique<contour::remote::NativeController>(std::move(config));
-    auto& controller = *controllerOwned;
-    requireConnected(controller);
-    REQUIRE(transport->connects() == 1);
-
-    // The window goes away, and then the connection.
-    exposed->store(false);
-    daemon.dropConnections();
-    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::NeedsAttention; }, 2000));
-    // Held: no connection was asked for, so no prompt could open.
-    CHECK_FALSE(waitUntil([&] { return transport->connects() > 1; }, 150));
-    CHECK(controller.connectionState() == ConnectionState::NeedsAttention);
-
-    // Exposed again: it connects, and would prompt.
-    exposed->store(true);
-    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 2000));
-    CHECK(transport->connects() == 2);
-
-    controller.stop();
-}
-
-TEST_CASE("a reconnect of a transport that never prompts does not wait for a window",
-          "[attach][controller][reconnect][askpass]")
-{
-    using vthost::client::ConnectionState;
-    auto daemon = DaemonFixture {};
-    std::ignore = daemon.seedSession("asleep");
-    auto timeline = TestTimeline {};
-    auto config =
-        controllerConfig(daemon.endpoint(), timeline, { .backoff = { .first = 1ms, .ceiling = 4ms } });
-    // Nobody looks, but the TLS transport asks nothing: nothing to hold.
-    config.attention = { .isAttended = [] { return false; }, .poll = 5ms };
     auto const controllerOwned = std::make_unique<contour::remote::NativeController>(std::move(config));
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
+    REQUIRE(transport->connects() == 1);
 
     daemon.dropConnections();
     CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(transport->connects() == 2);
     CHECK(log.count(ConnectionState::NeedsAttention) == 0);
+
+    controller.stop();
+}
+
+TEST_CASE("a connection whose prompt is held says it needs attention, and says no more once it is shown",
+          "[attach][controller][reconnect][askpass]")
+{
+    using vthost::client::ConnectionState;
+    using UserAttention = contour::remote::NativeController::UserAttention;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    // Not while connected: nothing is being sought.
+    controller.setUserAttention(UserAttention::Needed);
+    CHECK(controller.connectionState() == ConnectionState::Connected);
+    controller.setUserAttention(UserAttention::NotNeeded);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    // The prompt of the reconnect waits for its window to be on screen.
+    controller.setUserAttention(UserAttention::Needed);
+    CHECK(controller.connectionState() == ConnectionState::NeedsAttention);
+    // The reactor says Reconnecting again as it retries: the connection keeps saying what the user must do.
+    CHECK_FALSE(
+        waitUntil([&] { return controller.connectionState() != ConnectionState::NeedsAttention; }, 100));
+
+    // Shown: the connection is being sought, as before.
+    controller.setUserAttention(UserAttention::NotNeeded);
+    CHECK(controller.connectionState() == ConnectionState::Reconnecting);
+
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
 
     controller.stop();
 }

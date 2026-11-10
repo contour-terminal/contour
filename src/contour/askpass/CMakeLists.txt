@@ -7,6 +7,7 @@
 add_library(contour_askpass STATIC
     AskpassClient.cpp AskpassClient.hpp
     AskpassProtocol.cpp AskpassProtocol.hpp
+    Secret.cpp Secret.hpp
 )
 target_link_libraries(contour_askpass PUBLIC core::base core::async core::net)
 target_include_directories(contour_askpass PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../..")

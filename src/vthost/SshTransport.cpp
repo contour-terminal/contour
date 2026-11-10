@@ -2,8 +2,10 @@
 #include <vthost/SshTransport.hpp>
 
 #include <core/Overloaded.hpp>
+#include <core/async/StopToken.hpp>
 #include <core/async/WhenAny.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/net/InterruptibleSleep.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
@@ -24,6 +26,7 @@
 #include <vthost/Askpass.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/StdioPreamble.hpp>
+#include <vthost/WithDeadline.hpp>
 
 namespace vthost
 {
@@ -74,6 +77,12 @@ namespace
 
     /// Appended to a Batch-mode failure when the local ssh is too old to be asked for passwords: {0} the
     /// version found.
+    /// Said instead of OldSshAdvice when ssh was asked its version and did not answer like OpenSSH.
+    constexpr auto UnknownSshAdvice =
+        std::string_view { "\nContour could not tell which ssh this is (no OpenSSH version banner), so it "
+                           "did not offer password "
+                           "prompts; Contour can only ask for them with OpenSSH 8.4 or newer." };
+
     constexpr auto OldSshAdvice = std::string_view {
         "\nContour can only ask for passwords with OpenSSH 8.4 or newer (found {0}); on Windows install the "
         "current Win32-OpenSSH release."
@@ -187,44 +196,23 @@ namespace
         }
     }
 
-    /// Sleeps until @p budget plus the time prompts have been open, which grows while it sleeps.
+    /// Sleeps until @p budget plus the time prompts have been open, which grows while it sleeps; returns
+    /// early once @p cancelled was requested, the user having dismissed a prompt.
     /// @param session Whose promptTime() extends the deadline; null: no prompt ever does.
     core::async::Task<void> pausableDeadline(core::net::EventLoop* loop,
                                              std::chrono::milliseconds budget,
-                                             IAskpassSession const* session)
+                                             IAskpassSession const* session,
+                                             core::async::StopToken cancelled)
     {
         auto const start = loop->clock().now();
-        while (true)
+        while (!cancelled.stop_requested())
         {
             auto const prompts = session ? session->promptTime() : std::chrono::milliseconds { 0 };
             auto const deadline = start + budget + prompts;
             if (loop->clock().now() >= deadline)
                 co_return;
-            co_await loop->sleepUntil(deadline);
+            std::ignore = co_await core::net::interruptibleSleepUntil(loop, cancelled, deadline);
         }
-    }
-
-    /// Stores what @p work returns in @p slot.
-    core::async::Task<void> captureInto(core::async::Task<PreambleScan> work,
-                                        std::shared_ptr<std::optional<PreambleScan>> slot)
-    {
-        *slot = co_await std::move(work);
-    }
-
-    /// core::net::withTimeout, but the deadline moves out by the time @p session's prompts were open.
-    /// @return What @p work returned; nullopt when the deadline passed first.
-    core::async::Task<std::optional<PreambleScan>> withPausableTimeout(core::net::EventLoop* loop,
-                                                                       core::async::Task<PreambleScan> work,
-                                                                       std::chrono::milliseconds budget,
-                                                                       IAskpassSession const* session)
-    {
-        auto slot = std::make_shared<std::optional<PreambleScan>>();
-        auto tasks = std::vector<core::async::Task<void>> {};
-        tasks.push_back(captureInto(std::move(work), slot));
-        tasks.push_back(pausableDeadline(loop, budget, session));
-        if (co_await core::async::whenAny(std::move(tasks)) == 0)
-            co_return std::move(*slot);
-        co_return std::nullopt;
     }
 
     /// Ends @p child and fails with @p error.
@@ -341,6 +329,9 @@ TransportError sshTransportError(SshFailure failure, SshFailureContext const& co
         auto const found = std::format("{}.{}", context.foundVersion->major, context.foundVersion->minor);
         message += std::vformat(OldSshAdvice, std::make_format_args(found));
     }
+    else if (context.mode == SshPromptMode::Batch && context.probed == SshVersionProbed::Yes
+             && !context.foundVersion && row->advice == PromptAdvice::Interactive)
+        message += UnknownSshAdvice;
     return TransportError { .kind = row->kind, .message = std::move(message) };
 }
 
@@ -447,10 +438,12 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
     // Prompts need a broker and an ssh that honours SSH_ASKPASS_REQUIRE; anything else runs in batch mode.
     auto mode = SshPromptMode::Batch;
     auto foundVersion = std::optional<OpenSshVersion> {};
+    auto probed = SshVersionProbed::No;
     auto session = std::unique_ptr<IAskpassSession> {};
     if (_broker)
     {
         foundVersion = co_await _probe->version(loop, _spawner.get());
+        probed = SshVersionProbed::Yes;
         mode = promptModeFor(foundVersion);
     }
     if (mode == SshPromptMode::Askpass)
@@ -487,12 +480,18 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
         return session && session->wasCancelled();
     };
     auto const cancelledError = [&]() {
-        return sshTransportError(SshFailure::Cancelled,
-                                 { .target = _target, .mode = mode, .foundVersion = foundVersion });
+        return sshTransportError(
+            SshFailure::Cancelled,
+            { .target = _target, .mode = mode, .foundVersion = foundVersion, .probed = probed });
     };
 
+    // A prompt the user dismisses ends the attempt at once: ssh would ask again, or go on waiting for a key.
+    auto dismissed = core::async::StopSource {};
+    if (session)
+        session->onCancelled([dismissed]() mutable { dismissed.request_stop(); });
     auto scanned =
-        co_await withPausableTimeout(loop, readPreamble(socket.get()), _connectTimeout, session.get());
+        co_await withDeadline(readPreamble(socket.get()),
+                              pausableDeadline(loop, _connectTimeout, session.get(), dismissed.get_token()));
     if (!scanned)
     {
         if (cancelled())
@@ -528,7 +527,8 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
                                                     .detail = lastNonEmptyLine(tail),
                                                     .exitCode = exitCode,
                                                     .mode = mode,
-                                                    .foundVersion = foundVersion }));
+                                                    .foundVersion = foundVersion,
+                                                    .probed = probed }));
             },
             [&](PreambleRefused const& refused) -> ConnectResult {
                 return failWith(*child,

@@ -6,6 +6,8 @@
 /// is told over the local socket, and how it is classified. Qt-free, so the helper process that ssh
 /// starts links no Qt and tests it in contour_test.
 
+#include <contour/askpass/Secret.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +36,12 @@ enum class AskpassPromptKind : std::uint8_t
     Confirm,    ///< A yes-or-no question answered by exit status (`SSH_ASKPASS_PROMPT=confirm`).
     Notice,     ///< A message to show, answered by nothing (`SSH_ASKPASS_PROMPT=none`), e.g. a FIDO touch.
     HostKey,    ///< The unknown-host question, answered with `yes` or `no` or a fingerprint.
+    /// ssh warns about a host key it has other evidence about -- the IP address's key differs
+    /// (CheckHostIP), or keys of another type are known -- and asks whether to go on, answered `yes` or `no`.
+    HostKeyWarning,
+    HostKeyUpdate, ///< UpdateHostKeys: whether to take the new keys the server offers, answered `yes` or
+                   ///< `no`.
+    Question, ///< Any other question ssh asks in the `(yes/no` form: shown as it is, answered `yes` or `no`.
 };
 
 /// One row of the table classifyAskpassPrompt() reads: what in the request selects a kind.
@@ -55,7 +63,19 @@ struct AskpassPromptRule
 inline constexpr auto AskpassPromptRules = std::array {
     AskpassPromptRule { AskpassPromptRule::Field::SshAskpassPrompt, "confirm", AskpassPromptKind::Confirm },
     AskpassPromptRule { AskpassPromptRule::Field::SshAskpassPrompt, "none", AskpassPromptKind::Notice },
-    AskpassPromptRule { AskpassPromptRule::Field::PromptText, "(yes/no", AskpassPromptKind::HostKey },
+    // The warnings first: their text holds the generic question's `(yes/no` too.
+    AskpassPromptRule { AskpassPromptRule::Field::PromptText,
+                        "differs from the key for the IP address",
+                        AskpassPromptKind::HostKeyWarning },
+    AskpassPromptRule { AskpassPromptRule::Field::PromptText,
+                        "keys of different type are already known",
+                        AskpassPromptKind::HostKeyWarning },
+    AskpassPromptRule {
+        AskpassPromptRule::Field::PromptText, "Accept updated hostkeys", AskpassPromptKind::HostKeyUpdate },
+    AskpassPromptRule {
+        AskpassPromptRule::Field::PromptText, "can't be established", AskpassPromptKind::HostKey },
+    // What no row above names, but asks yes or no: neutral, and shown verbatim.
+    AskpassPromptRule { AskpassPromptRule::Field::PromptText, "(yes/no", AskpassPromptKind::Question },
 };
 
 /// @param prompt The prompt text ssh passed as the helper's argument.
@@ -85,10 +105,17 @@ enum class AskpassOutcome : std::uint8_t
 struct AskpassReply
 {
     AskpassOutcome outcome = AskpassOutcome::Cancelled;
-    std::string answer; ///< Meaningful only for Answered. A secret: never logged.
+    Secret answer; ///< Meaningful only for Answered. A secret: wiped when it goes, never logged.
 
     [[nodiscard]] bool operator==(AskpassReply const&) const = default;
 };
+
+/// @param answer The text to answer with.
+/// @return A reply that answers with @p answer.
+[[nodiscard]] inline AskpassReply answeredReply(std::string_view answer)
+{
+    return AskpassReply { .outcome = AskpassOutcome::Answered, .answer = Secret { answer } };
+}
 
 /// The longest payload either direction carries.
 inline constexpr std::size_t MaxAskpassPayload = std::size_t { 64 } * 1024;
@@ -101,8 +128,9 @@ inline constexpr std::size_t AskpassFramePrefixSize = 4;
 [[nodiscard]] std::string encode(AskpassRequest const& request);
 
 /// @param reply The reply.
-/// @return A frame, laid out like a request's, the outcome byte first.
-[[nodiscard]] std::string encode(AskpassReply const& reply);
+/// @return A frame, laid out like a request's, the outcome byte first. It carries the answer, so it is a
+/// Secret.
+[[nodiscard]] Secret encode(AskpassReply const& reply);
 
 /// @param buffered The bytes received so far, from the first byte of a frame.
 /// @return The frame's total size (prefix included) once the prefix is in; nullopt while it is not;
@@ -117,10 +145,5 @@ inline constexpr std::size_t AskpassFramePrefixSize = 4;
 /// @param frame Exactly one whole frame.
 /// @return The reply, or why the frame is not one.
 [[nodiscard]] std::expected<AskpassReply, std::string> decodeAskpassReply(std::string_view frame);
-
-/// Overwrites @p secret with zeros, then empties it: for an answer once it has been delivered. The writes go
-/// through a volatile reference so the compiler cannot drop them as dead stores.
-/// @param secret The string to wipe.
-void wipe(std::string& secret) noexcept;
 
 } // namespace contour::askpass

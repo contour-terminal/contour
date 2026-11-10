@@ -193,10 +193,11 @@ Contour reads what ssh reports and says what to do. The messages, and the fix fo
 | `ssh was not found on PATH; install the OpenSSH client` | No ssh client on this machine. | Install OpenSSH. |
 
 A connection that drops mid-session — the laptop sleeps, the Wi-Fi changes — is reconnected with a
-fresh ssh, while the window shows that it is reconnecting. If that login needs you again (a password
-that is not in the agent) and no window of yours is on screen, the reconnect waits, and the window says
-"Reconnecting needs your attention", rather than put a dialog to a window nobody sees; it goes on when a
-window is shown again. Contour never raises or focuses a window by itself for this. A failure that retrying cannot fix (a refused
+fresh ssh, while the window shows that it is reconnecting. A reconnect always goes on, in the background: a host that logs in with a key or the agent
+needs nobody. If the login asks you something again (a password that is not in the agent) and the window
+that attached is not on screen -- minimised or hidden -- the question waits instead of being put to a
+window nobody sees, and the window says "Reconnecting needs your attention"; it is shown once the window
+is. Contour never raises or focuses a window by itself for this. A failure that retrying cannot fix (a refused
 login, a host key, a missing Contour) ends the attempt with its message instead of repeating it.
 
 ## Over TLS

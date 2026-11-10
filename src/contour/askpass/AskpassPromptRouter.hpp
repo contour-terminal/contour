@@ -15,6 +15,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <utility>
 #include <vector>
@@ -40,7 +41,22 @@ inline constexpr AskpassRouteId BootstrapRoute = std::numeric_limits<AskpassRout
 [[nodiscard]] std::optional<AskpassRouteId> pickAskpassSinkRoute(std::span<AskpassRouteId const> attached,
                                                                  AskpassRouteId route);
 
+/// What the application publishes about one window that has a prompt sink.
+struct SinkExposure
+{
+    AskpassRouteId route = AnyWindow; ///< The window's route.
+    /// Whether the window is on screen for the user.
+    enum class State : std::uint8_t
+    {
+        OnScreen = 0,
+        Hidden, ///< Hidden, minimised, or parked off screen.
+    } state = State::OnScreen;
+};
+
 /// Finds the sink of the window a prompt belongs to. GUI thread only, as the sinks are.
+///
+/// A prompt whose window is not on screen is held: nobody would see it, so it waits, like one that has no
+/// window yet, and is shown once its window is exposed (updateExposure()).
 ///
 /// A prompt whose window has no sink, or whose route is AnyWindow, goes to the sink that was attached first
 /// (the BootstrapRoute's last); while there is none the prompt waits, and goes to the first sink attached.
@@ -54,11 +70,25 @@ class AskpassPromptRouter
     /// @param onSinksChanged Told, on the GUI thread, after a sink was attached or detached or the router
     /// shut
     ///        down. Empty: nobody is told.
+    /// @param onHeldChanged Told, on the GUI thread, after the prompts that wait for a window changed: one
+    ///        began to wait, or was shown, withdrawn or cancelled. Empty: nobody is told.
     explicit AskpassPromptRouter(std::function<void()> onWaiting = {},
-                                 std::function<void()> onSinksChanged = {}):
-        _onWaiting { std::move(onWaiting) }, _onSinksChanged { std::move(onSinksChanged) }
+                                 std::function<void()> onSinksChanged = {},
+                                 std::function<void()> onHeldChanged = {}):
+        _onWaiting { std::move(onWaiting) },
+        _onSinksChanged { std::move(onSinksChanged) },
+        _onHeldChanged { std::move(onHeldChanged) }
     {
     }
+
+    /// Says which windows are on screen. A window not named, and the stand-in, count as on screen. The
+    /// prompts held for a window that is now on screen are shown.
+    /// @param windows Every window that has a sink.
+    void updateExposure(std::vector<SinkExposure> const& windows);
+
+    /// @param route The window an attach was started from.
+    /// @return Whether a prompt of that route waits, for want of a window or because it is not on screen.
+    [[nodiscard]] bool isHolding(AskpassRouteId route) const noexcept;
 
     /// @return The routes that have a sink, oldest first.
     [[nodiscard]] std::span<AskpassRouteId const> attachedRoutes() const noexcept { return _attachOrder; }
@@ -119,6 +149,12 @@ class AskpassPromptRouter
     /// @return The route whose sink shows prompts asked for @p route; none while no sink is attached.
     [[nodiscard]] std::optional<AskpassRouteId> sinkRouteFor(AskpassRouteId route) const;
 
+    /// Shows the prompts that wait to the windows that can show them now.
+    void flush();
+
+    /// Tells whoever wants to know that the prompts that wait changed.
+    void noteHeldChanged() const;
+
     /// Hands @p prompt to the sink of @p sinkRoute.
     void deliver(Prompt prompt, AskpassRouteId sinkRoute);
 
@@ -127,10 +163,15 @@ class AskpassPromptRouter
 
     std::map<AskpassRouteId, IAskpassPromptSink*> _sinks;
     std::vector<AskpassRouteId> _attachOrder; ///< The routes of the sinks, oldest first.
-    std::vector<Prompt> _waiting;             ///< Prompts no sink could take yet, in the order asked.
-    std::vector<Prompt> _shown;               ///< Prompts a sink has, in the order asked.
+    /// Routes whose sink went away: their window is closed, and what they still ask is cancelled, not shown
+    /// in another window the user did not start it from.
+    std::set<AskpassRouteId> _closed;
+    std::vector<Prompt> _waiting; ///< Prompts no sink could take yet, in the order asked.
+    std::vector<Prompt> _shown;   ///< Prompts a sink has, in the order asked.
     std::function<void()> _onWaiting;
     std::function<void()> _onSinksChanged;
+    std::function<void()> _onHeldChanged;
+    std::set<AskpassRouteId> _hidden; ///< The routes whose window is not on screen.
     bool _isShutDown = false;
 };
 

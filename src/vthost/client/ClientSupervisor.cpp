@@ -22,15 +22,13 @@ ClientSupervisor::ClientSupervisor(core::net::EventLoop& loop,
                                    ClientFactory makeClient,
                                    proto::AttachIntent firstIntent,
                                    BackoffSchedule backoff,
-                                   StateHandler onState,
-                                   AttentionGate gate):
+                                   StateHandler onState):
     _loop(loop),
     _transport(std::move(transport)),
     _makeClient(std::move(makeClient)),
     _firstIntent(std::move(firstIntent)),
     _backoff(backoff),
-    _onState(std::move(onState)),
-    _gate(std::move(gate))
+    _onState(std::move(onState))
 {
 }
 
@@ -113,18 +111,6 @@ core::async::Task<void> ClientSupervisor::backoffUntil(core::platform::SteadyTim
         resetRetry();
 }
 
-core::async::Task<void> ClientSupervisor::untilAttended()
-{
-    if (!_gate.isAttended || !_transport->mayPrompt() || _gate.isAttended())
-        co_return;
-    enter(ConnectionState::NeedsAttention);
-    while (!_stop.stop_requested() && !_gate.isAttended())
-        std::ignore = co_await core::net::interruptibleSleepUntil(
-            &_loop, _stop.get_token(), _loop.clock().now() + _gate.poll);
-    if (!_stop.stop_requested())
-        enter(ConnectionState::Reconnecting, "a window is exposed again");
-}
-
 core::async::Task<void> ClientSupervisor::connectInto(std::optional<ConnectResult>* result)
 {
     *result = co_await _transport->connect(_loop);
@@ -201,9 +187,6 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::reconnect()
     for (auto const retry: std::views::iota(uint32_t { 1 }))
     {
         co_await backoffUntil(_loop.clock().now() + backoffDelay(_backoff, retry));
-        if (_stop.stop_requested())
-            co_return Outcome {};
-        co_await untilAttended();
         if (_stop.stop_requested())
             co_return Outcome {};
         // Before the attempt that would start a daemon again, so that the state says so first.

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <vthost/Transport.hpp>
+#include <vthost/WithDeadline.hpp>
 
 namespace vthost
 {
@@ -101,13 +102,6 @@ namespace detail
         }
     }
 
-    /// Stores what @p work returns in @p slot.
-    template <typename T>
-    core::async::Task<void> captureAttachResult(core::async::Task<T> work,
-                                                std::shared_ptr<std::optional<T>> slot)
-    {
-        *slot = co_await std::move(work);
-    }
 } // namespace detail
 
 /// core::net::withTimeout over an AttachBudget.
@@ -123,13 +117,7 @@ core::async::Task<std::optional<T>> withAttachBudget(core::net::EventLoop* loop,
                                                      AttachBudget budget,
                                                      TransportReturnMark const* mark)
 {
-    auto slot = std::make_shared<std::optional<T>>();
-    auto tasks = std::vector<core::async::Task<void>> {};
-    tasks.push_back(detail::captureAttachResult<T>(std::move(work), slot));
-    tasks.push_back(detail::attachDeadline(loop, budget, mark));
-    if (co_await core::async::whenAny(std::move(tasks)) == 0)
-        co_return std::move(*slot);
-    co_return std::nullopt;
+    return withDeadline<T>(std::move(work), detail::attachDeadline(loop, budget, mark));
 }
 
 /// A transport that says when it has handed out a connection, which is when the handshake phase begins.

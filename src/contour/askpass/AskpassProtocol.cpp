@@ -36,6 +36,14 @@ namespace
         return out;
     }
 
+    void appendLength(Secret& out, std::size_t value)
+    {
+        auto bytes = std::array<char, LengthBytes> {};
+        for (auto const shift: std::views::iota(0U, 4U))
+            bytes[shift] = static_cast<char>((value >> (shift * 8U)) & 0xFFU);
+        out.append(std::string_view { bytes.data(), bytes.size() });
+    }
+
     [[nodiscard]] std::size_t readLength(std::string_view bytes) noexcept
     {
         auto value = std::size_t { 0 };
@@ -56,6 +64,20 @@ namespace
                 return std::nullopt;
             auto const value = _rest.front();
             _rest.remove_prefix(1);
+            return value;
+        }
+
+        /// @return The next field as a Secret, never as a plain string.
+        [[nodiscard]] std::optional<Secret> secretField()
+        {
+            if (_rest.size() < LengthBytes)
+                return std::nullopt;
+            auto const size = readLength(_rest);
+            _rest.remove_prefix(LengthBytes);
+            if (_rest.size() < size)
+                return std::nullopt;
+            auto value = Secret { _rest.substr(0, size) };
+            _rest.remove_prefix(size);
             return value;
         }
 
@@ -115,12 +137,16 @@ std::string encode(AskpassRequest const& request)
     return framed(payload);
 }
 
-std::string encode(AskpassReply const& reply)
+Secret encode(AskpassReply const& reply)
 {
-    auto payload = std::string {};
-    payload.push_back(static_cast<char>(std::to_underlying(reply.outcome)));
-    appendField(payload, reply.answer);
-    return framed(payload);
+    // The answer is only ever in Secrets: the frame is laid out straight into one.
+    auto frame = Secret {};
+    appendLength(frame, 1 + LengthBytes + reply.answer.size());
+    auto const outcome = static_cast<char>(std::to_underlying(reply.outcome));
+    frame.append(std::string_view { &outcome, 1 });
+    appendLength(frame, reply.answer.size());
+    frame.append(reply.answer.view());
+    return frame;
 }
 
 std::expected<std::optional<std::size_t>, std::string> askpassFrameSize(std::string_view buffered)
@@ -157,20 +183,13 @@ std::expected<AskpassReply, std::string> decodeAskpassReply(std::string_view fra
         return std::unexpected { payload.error() };
     auto reader = Reader { *payload };
     auto const outcome = reader.byte();
-    auto answer = reader.field();
+    auto answer = reader.secretField();
     if (!outcome || !answer || !reader.atEnd())
         return std::unexpected { std::string { "askpass reply is malformed" } };
     auto const value = static_cast<std::uint8_t>(*outcome);
     if (value > std::to_underlying(AskpassOutcome::Cancelled))
         return std::unexpected { std::string { "askpass reply has an unknown outcome" } };
     return AskpassReply { .outcome = static_cast<AskpassOutcome>(value), .answer = *std::move(answer) };
-}
-
-void wipe(std::string& secret) noexcept
-{
-    for (auto& character: secret)
-        static_cast<char volatile&>(character) = '\0';
-    secret.clear();
 }
 
 } // namespace contour::askpass

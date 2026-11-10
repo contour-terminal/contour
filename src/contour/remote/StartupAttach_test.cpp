@@ -152,7 +152,7 @@ TEST_CASE("ContourGuiApp: a check's transport never prompts, a launch's does", "
                                      .tlsCa = {},
                                      .remoteCommand = {},
                                      .profile = {} };
-    using Policy = contour::ContourGuiApp::SshPromptPolicy;
+    using Policy = contour::cli::SshPrompts;
     auto const check = app.app().transportOf("home", host, contour::askpass::AnyWindow, Policy::Batch);
     auto const attach = app.app().transportOf("home", host, contour::askpass::AnyWindow, Policy::Askpass);
     REQUIRE(check.has_value());

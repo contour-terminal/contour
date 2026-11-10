@@ -94,6 +94,36 @@ inline constexpr auto PromptKindRows = std::array {
                     "yes",
                     askpass::AskpassOutcome::Answered,
                     "no" },
+    PromptKindRow { askpass::AskpassPromptKind::HostKeyWarning,
+                    PromptKindRow::Answer::Question,
+                    PromptKindRow::Text::Verbatim,
+                    QT_TRANSLATE_NOOP("PromptHost", "Warning: ssh doubts the host key of %1"),
+                    QT_TRANSLATE_NOOP("PromptHost", "Yes"),
+                    QT_TRANSLATE_NOOP("PromptHost", "No"),
+                    askpass::AskpassOutcome::Answered,
+                    "yes",
+                    askpass::AskpassOutcome::Answered,
+                    "no" },
+    PromptKindRow { askpass::AskpassPromptKind::HostKeyUpdate,
+                    PromptKindRow::Answer::Question,
+                    PromptKindRow::Text::Verbatim,
+                    QT_TRANSLATE_NOOP("PromptHost", "Take the new host keys of %1?"),
+                    QT_TRANSLATE_NOOP("PromptHost", "Yes"),
+                    QT_TRANSLATE_NOOP("PromptHost", "No"),
+                    askpass::AskpassOutcome::Answered,
+                    "yes",
+                    askpass::AskpassOutcome::Answered,
+                    "no" },
+    PromptKindRow { askpass::AskpassPromptKind::Question,
+                    PromptKindRow::Answer::Question,
+                    PromptKindRow::Text::Verbatim,
+                    QT_TRANSLATE_NOOP("PromptHost", "ssh asks about %1"),
+                    QT_TRANSLATE_NOOP("PromptHost", "Yes"),
+                    QT_TRANSLATE_NOOP("PromptHost", "No"),
+                    askpass::AskpassOutcome::Answered,
+                    "yes",
+                    askpass::AskpassOutcome::Answered,
+                    "no" },
 };
 
 namespace detail
@@ -108,7 +138,7 @@ namespace detail
 } // namespace detail
 
 static_assert(detail::promptKindRowsInOrder(), "PromptKindRows must list the prompt kinds in order");
-static_assert(PromptKindRows.size() == static_cast<std::size_t>(askpass::AskpassPromptKind::HostKey) + 1,
+static_assert(PromptKindRows.size() == static_cast<std::size_t>(askpass::AskpassPromptKind::Question) + 1,
               "PromptKindRows must have a row for every prompt kind");
 
 /// @param kind A prompt kind.

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/askpass/AskpassAttention.hpp>
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/remote/DaemonLink.hpp>
@@ -8,6 +7,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <QtCore/QPointer>
@@ -1224,15 +1224,13 @@ TEST_CASE("ContourGuiApp: a link ended by a restarted daemon outlives the ptys i
     }));
 }
 
-// A reconnect that would prompt waits for the window that would show its prompt: per window, not for any.
-TEST_CASE("ContourGuiApp: ssh prompts are attended per window, by the window that would show them",
+// A prompt waits for the window that would show it: per window, not for any.
+TEST_CASE("ContourGuiApp: an ssh prompt is held for its own window until that window is on screen",
           "[contour][app][askpass]")
 {
     auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
     auto& manager = app.app().sessionsManager();
-    auto const& attention = app.app().askpassAttention();
-    // No window yet: the prompt would get one of its own.
-    CHECK(attention.isAttended(contour::askpass::AnyWindow));
+    auto const& router = app.app().askpassRouter();
 
     auto* const first = manager.createWindowController();
     auto* const second = manager.createWindowController();
@@ -1240,39 +1238,68 @@ TEST_CASE("ContourGuiApp: ssh prompts are attended per window, by the window tha
     REQUIRE(second != nullptr);
     auto const firstRoute = first->windowId().value;
     auto const secondRoute = second->windowId().value;
-    // Both have a sink and neither is on screen.
-    CHECK_FALSE(attention.isAttended(firstRoute));
-    CHECK_FALSE(attention.isAttended(secondRoute));
-    CHECK_FALSE(attention.isAttended(contour::askpass::AnyWindow));
+    auto const pendingOf = [](QObject* host) {
+        return host->property("pendingPrompt").toMap();
+    };
+    auto replies = std::vector<contour::askpass::AskpassReply> {};
+    auto const ask = [&](contour::askpass::AskpassRouteId route, contour::askpass::AskpassPromptId id) {
+        router->ask(
+            route,
+            id,
+            contour::askpass::AskpassPromptKind::Secret,
+            QStringLiteral("ssh://me@host"),
+            QStringLiteral("Password: "),
+            [&replies](contour::askpass::AskpassReply reply) { replies.push_back(std::move(reply)); });
+    };
 
-    // Showing the second window opens the gate for its own prompts alone; the first window's prompts, and
-    // those of no window (the first window's), go on waiting.
+    // Neither window is on screen: a prompt for either is held, and nothing is shown.
+    ask(firstRoute, 1);
+    ask(secondRoute, 2);
+    CHECK(router->isHolding(firstRoute));
+    CHECK(router->isHolding(secondRoute));
+    CHECK(pendingOf(first->promptHost()).isEmpty());
+    CHECK(pendingOf(second->promptHost()).isEmpty());
+
+    // Showing the second window shows its prompt, and the first window's goes on waiting.
     auto osWindow = QQuickWindow {};
     second->bindWindow(&osWindow);
     osWindow.show();
     REQUIRE(QTest::qWaitForWindowExposed(&osWindow));
     app.app().refreshWindowAttention();
-    CHECK(attention.isAttended(secondRoute));
-    CHECK_FALSE(attention.isAttended(firstRoute));
-    CHECK_FALSE(attention.isAttended(contour::askpass::AnyWindow));
+    CHECK_FALSE(router->isHolding(secondRoute));
+    CHECK(router->isHolding(firstRoute));
+    CHECK(pendingOf(second->promptHost()).value("promptId").toInt() == 2);
+    CHECK(pendingOf(first->promptHost()).isEmpty());
 
-    // Hidden again: nobody is looking.
-    osWindow.hide();
-    app.app().refreshWindowAttention();
-    CHECK_FALSE(attention.isAttended(secondRoute));
+    // A prompt of the window that is on screen is shown at once; one that has no window of its own goes to
+    // the first window, which is not.
+    ask(secondRoute, 3);
+    CHECK_FALSE(router->isHolding(secondRoute));
+    ask(contour::askpass::AnyWindow, 4);
+    CHECK(router->isHolding(contour::askpass::AnyWindow));
 
-    // Minimised is not on screen either, where the platform has the state.
+    // Minimised is not on screen either, where the platform has the state: what comes next is held again.
     osWindow.showMinimized();
     QTest::qWait(50);
     if (osWindow.windowStates().testFlag(Qt::WindowMinimized))
     {
         app.app().refreshWindowAttention();
-        CHECK_FALSE(attention.isAttended(secondRoute));
+        ask(secondRoute, 5);
+        CHECK(router->isHolding(secondRoute));
         osWindow.showNormal();
         QTest::qWait(50);
         app.app().refreshWindowAttention();
-        CHECK(attention.isAttended(secondRoute));
+        CHECK_FALSE(router->isHolding(secondRoute));
     }
+
+    // Closing the window cancels what it still holds, rather than showing it elsewhere.
+    osWindow.hide();
+    app.app().refreshWindowAttention();
+    ask(secondRoute, 6);
+    CHECK(router->isHolding(secondRoute));
+    router->shutdown();
+    CHECK_FALSE(router->isHolding(secondRoute));
+    CHECK_FALSE(replies.empty());
 }
 
 // Review (PR 3, item 9): a label from a program or another daemon was joined into a socket path unchecked.

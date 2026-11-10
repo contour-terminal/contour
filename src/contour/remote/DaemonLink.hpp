@@ -4,6 +4,7 @@
 /// @file
 /// One daemon connection and the windows it serves.
 
+#include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
 #include <contour/remote/NativeController.hpp>
@@ -99,6 +100,8 @@ struct DaemonLinkConfig
     /// What a link a window switch started does once its connection shows its workspace; none for every
     /// other link.
     std::optional<SwitchArrival> arrival = std::nullopt;
+    /// The window whose ssh prompts this link's attach shows: the one that started it, or AnyWindow.
+    askpass::AskpassRouteId askpassRoute = askpass::AnyWindow;
 };
 
 /// The launch's link: it adopts the boot window, and takes no workspace over.
@@ -224,6 +227,12 @@ class DaemonLink final: public session::WindowBinding
 
     /// @return The daemon as a window switch names it (DaemonLinkConfig::address).
     [[nodiscard]] DaemonAddress const& address() const noexcept { return _handOverTemplate.address; }
+
+    /// @return The window whose prompts this link's attach shows (DaemonLinkConfig::askpassRoute).
+    [[nodiscard]] askpass::AskpassRouteId askpassRoute() const noexcept
+    {
+        return _handOverTemplate.askpassRoute;
+    }
 
     /// @return What a further link to this link's daemon is built with: this one's configuration, taking over
     ///         nothing, started by no switch and stating no working directory. Its intent is the caller's to

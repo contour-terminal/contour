@@ -1066,10 +1066,6 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
                 .timeline = _startupTimeline,
                 .powerMonitor = _powerMonitor.get(),
                 .backoff = {},
-                // A login prompt put to a hidden window would wait there unseen: the reconnect that would ask
-                // waits until the window that would show it is on screen.
-                .attention = { .isAttended = [attention = _askpassAttention,
-                                              askpassRoute] { return attention->isAttended(askpassRoute); } },
             },
         .hostLabel = std::move(hostLabel),
         .locality = locality,
@@ -1077,6 +1073,7 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
         .handOverFrom = std::nullopt,
         .address = std::move(address),
         .arrival = std::nullopt,
+        .askpassRoute = askpassRoute,
     };
 }
 
@@ -1294,7 +1291,7 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(std::string const& configPath,
                                                                               std::string const& nameOrUrl,
                                                                               askpass::AskpassRouteId route,
-                                                                              SshPromptPolicy prompting)
+                                                                              cli::SshPrompts prompting)
 {
     auto host = config::resolveHost(configPath, nameOrUrl);
     if (!host)
@@ -1328,7 +1325,18 @@ void ContourGuiApp::refreshWindowAttention()
                                                 .state = isOnScreen(route)
                                                              ? askpass::SinkExposure::State::OnScreen
                                                              : askpass::SinkExposure::State::Hidden });
-    _askpassAttention->publish(std::move(sinks));
+    _askpassRouter->updateExposure(sinks);
+}
+
+void ContourGuiApp::refreshAttachAttention()
+{
+    // A link whose attach has a prompt held, for want of a window on screen to show it, says so; and says no
+    // more once it is shown.
+    for (auto const& link: _daemonLinks)
+        if (auto* const controller = link->liveController())
+            controller->setUserAttention(_askpassRouter->isHolding(link->askpassRoute())
+                                             ? remote::NativeController::UserAttention::Needed
+                                             : remote::NativeController::UserAttention::NotNeeded);
 }
 
 std::shared_ptr<askpass::AskpassBroker> const& ContourGuiApp::askpassBroker()
@@ -1350,7 +1358,7 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
     std::string const& nameOrUrl,
     config::HostEntry host,
     askpass::AskpassRouteId route,
-    SshPromptPolicy prompting)
+    cli::SshPrompts prompting)
 {
     // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
     auto label = nameOrUrl.contains("://") ? config::toString(host.url) : nameOrUrl;
@@ -1361,7 +1369,7 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
                    .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }),
                cli::SshPrompting {
-                   .broker = prompting == SshPromptPolicy::Askpass
+                   .broker = prompting == cli::SshPrompts::Askpass
                                  ? std::make_shared<askpass::RoutedAskpassBroker>(askpassBroker(), route)
                                  : nullptr,
                    .probe = _sshVersionProbe })
@@ -3183,6 +3191,10 @@ int ContourGuiApp::terminalGuiAction()
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
+        // A prompt that arrived before the engine existed (a startup attach reaching ssh first) found no
+        // stand-in to show it; it waits in the router, so show it now.
+        if (_askpassRouter->waitingCount() > 0)
+            showBootstrapPrompt();
 
         // Keep the override seam resolveResource() gave the QML back when it shipped as loose qrc
         // files, now expressed the way a QML module is overridden: the config directory becomes an
@@ -3995,11 +4007,11 @@ std::function<std::expected<void, std::string>()> ContourGuiApp::prepareCheck(
     auto const& saved = _config.hosts.value();
     auto const found = saved.find(target.name);
     auto opened = found != saved.end()
-                      ? transportOf(target.name, found->second, askpass::AnyWindow, SshPromptPolicy::Batch)
+                      ? transportOf(target.name, found->second, askpass::AnyWindow, cli::SshPrompts::Batch)
                       : openHost(core::platform::normalizePath(_config.configFile),
                                  target.name,
                                  askpass::AnyWindow,
-                                 SshPromptPolicy::Batch);
+                                 cli::SshPrompts::Batch);
     if (!opened)
         return [reason = opened.error()]() -> std::expected<void, std::string> {
             return std::unexpected { reason };

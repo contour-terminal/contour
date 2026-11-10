@@ -16,6 +16,7 @@
 #include <QtNetwork/QLocalSocket>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -25,6 +26,10 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+#ifdef Q_OS_WIN
+    #include <Windows.h>
+#endif
 
 #include <vthost/SpawnEnvironment.hpp>
 #include <vthost/SshTransport.hpp>
@@ -39,6 +44,9 @@ namespace
     {
         std::mutex mutex;
         bool isCancelled = false;
+        /// Told, once, when a prompt is dismissed; see vthost::IAskpassSession::onCancelled. Guarded by @c
+        /// mutex.
+        std::function<void()> onCancelled;
         std::chrono::milliseconds closedTime { 0 };               ///< The prompts that have ended.
         std::optional<core::platform::SteadyTimePoint> openSince; ///< The prompt that has not.
         /// The session's server, which lives on the broker's thread; owned by the session. Guarded by @c
@@ -76,6 +84,9 @@ namespace
             case AskpassPromptKind::Confirm: return "confirm";
             case AskpassPromptKind::Notice: return "notice";
             case AskpassPromptKind::HostKey: return "host key";
+            case AskpassPromptKind::HostKeyWarning: return "host key warning";
+            case AskpassPromptKind::HostKeyUpdate: return "host key update";
+            case AskpassPromptKind::Question: return "question";
         }
         return "?";
     }
@@ -88,6 +99,18 @@ namespace
             bytes[index] = static_cast<char>(QRandomGenerator::system()->bounded(256U));
         return bytes.toHex();
     }
+
+#ifdef Q_OS_WIN
+    /// @return Whether @p socket's peer is on another computer: a named pipe is reachable over the network
+    ///         unless it says no, and the session's secret is for ssh's own child alone. Only a pipe with a
+    ///         remote client has a client computer name to give.
+    [[nodiscard]] bool isRemotePipeClient(QLocalSocket const& socket)
+    {
+        auto const handle = reinterpret_cast<HANDLE>(socket.socketDescriptor());
+        auto name = std::array<wchar_t, 256> {};
+        return GetNamedPipeClientComputerNameW(handle, name.data(), static_cast<ULONG>(name.size())) != 0;
+    }
+#endif
 
     /// The server of one session, living on the broker's thread: the helper processes connect here.
     class Endpoint final: public QObject
@@ -162,6 +185,15 @@ namespace
             while (auto* const socket = _server.nextPendingConnection())
             {
                 socket->setParent(this);
+#ifdef Q_OS_WIN
+                if (isRemotePipeClient(*socket))
+                {
+                    askpassLog()("askpass: refused a connection: the client is on another computer");
+                    socket->abort();
+                    socket->deleteLater();
+                    continue;
+                }
+#endif
                 if (unauthenticated() >= _config.maxUnauthenticated)
                 {
                     askpassLog()("askpass: refused a connection: too many wait for their request");
@@ -233,6 +265,19 @@ namespace
         void ask(ConnectionId id, Connection& connection, AskpassRequest const& request)
         {
             connection.phase = Phase::Asking;
+            // The user dismissed a prompt of this attempt: it is over, so nothing more is asked of them,
+            // however many more times ssh asks before the transport has ended it.
+            auto const isCancelled = [this] {
+                auto const lock = std::lock_guard { _state->mutex };
+                return _state->isCancelled;
+            }();
+            if (isCancelled)
+            {
+                askpassLog()("askpass: a prompt of a cancelled attempt is cancelled without asking");
+                ++_asking;
+                answer(id, AskpassReply { .outcome = AskpassOutcome::Cancelled, .answer = {} });
+                return;
+            }
             auto const kind = classifyAskpassPrompt(request.prompt, request.sshAskpassPrompt);
             auto const promptId = ++_hub.lastPromptId;
             connection.prompt = promptId;
@@ -245,13 +290,14 @@ namespace
             // The reply comes from the sink's thread, back to this one by a call queued to it: this
             // endpoint may be gone by then, which is only certain to be seen from this thread.
             auto reply = [worker = _hub.workerContext, self = QPointer { this }, id](AskpassReply given) {
+                // Shared only to cross the queued call, which wants a copyable functor; the answer is wiped
+                // wherever it ends, by its Secret.
+                auto carried = std::make_shared<AskpassReply>(std::move(given));
                 QMetaObject::invokeMethod(
                     worker,
-                    [self, id, given = std::move(given)]() mutable {
+                    [self, id, carried] {
                         if (self)
-                            self->answer(id, std::move(given));
-                        else
-                            wipe(given.answer);
+                            self->answer(id, std::move(*carried));
                     },
                     Qt::QueuedConnection);
             };
@@ -274,23 +320,19 @@ namespace
         {
             auto const found = _connections.find(id);
             if (found == _connections.end() || found->second.phase != Phase::Asking)
-            {
-                wipe(reply.answer);
                 return;
-            }
             auto& connection = found->second;
             connection.phase = Phase::Done;
             auto const cancelled = reply.outcome == AskpassOutcome::Cancelled;
             askpassLog()("askpass: the prompt was {}", cancelled ? "cancelled" : "answered");
             // A cancelled prompt carries no answer, whatever the sink put there.
             if (cancelled)
-                wipe(reply.answer);
+                reply.answer.wipe();
             closePrompt(cancelled ? PromptEnd::Cancelled : PromptEnd::Answered);
-            auto frame = encode(reply);
-            wipe(reply.answer);
-            connection.socket->write(frame.data(), static_cast<qint64>(frame.size()));
+            auto const frame = encode(reply);
+            auto const bytes = frame.storage().first(frame.size());
+            connection.socket->write(bytes.data(), static_cast<qint64>(bytes.size()));
             connection.socket->flush();
-            wipe(frame);
             connection.socket->disconnectFromServer();
         }
 
@@ -332,15 +374,24 @@ namespace
         void closePrompt(PromptEnd end)
         {
             --_asking;
-            auto const lock = std::lock_guard { _state->mutex };
-            if (end == PromptEnd::Cancelled)
-                _state->isCancelled = true;
-            if (_asking == 0 && _state->openSince)
+            auto wake = std::function<void()> {};
             {
-                _state->closedTime +=
-                    std::chrono::ceil<std::chrono::milliseconds>(_hub.clock.now() - *_state->openSince);
-                _state->openSince.reset();
+                auto const lock = std::lock_guard { _state->mutex };
+                if (end == PromptEnd::Cancelled)
+                {
+                    _state->isCancelled = true;
+                    wake = std::exchange(_state->onCancelled, nullptr);
+                }
+                if (_asking == 0 && _state->openSince)
+                {
+                    _state->closedTime +=
+                        std::chrono::ceil<std::chrono::milliseconds>(_hub.clock.now() - *_state->openSince);
+                    _state->openSince.reset();
+                }
             }
+            // Outside the lock: the transport's handler may look at the session.
+            if (wake)
+                wake();
         }
 
         Hub _hub;
@@ -389,6 +440,19 @@ namespace
         Session& operator=(Session&&) = delete;
 
         [[nodiscard]] vthost::SpawnEnvironment environment() const override { return _environment; }
+
+        void onCancelled(std::function<void()> wake) override
+        {
+            {
+                auto const lock = std::lock_guard { _state->mutex };
+                if (!_state->isCancelled)
+                {
+                    _state->onCancelled = std::move(wake);
+                    return;
+                }
+            }
+            wake();
+        }
 
         [[nodiscard]] bool wasCancelled() const noexcept override
         {

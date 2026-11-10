@@ -47,10 +47,7 @@ void AskpassPromptRouter::deliver(Prompt prompt, AskpassRouteId sinkRoute)
     auto reply = [this, id](AskpassReply given) {
         auto const found = std::ranges::find(_shown, id, &Prompt::id);
         if (found == _shown.end())
-        {
-            wipe(given.answer);
-            return;
-        }
+            return; // the prompt ended meanwhile: the answer goes, wiped by its Secret
         auto original = std::move(found->reply);
         _shown.erase(found);
         if (original)
@@ -63,16 +60,11 @@ void AskpassPromptRouter::attach(AskpassRouteId route, IAskpassPromptSink& sink)
 {
     if (_isShutDown)
         return;
+    _closed.erase(route);
     if (!_sinks.contains(route))
         _attachOrder.push_back(route);
     _sinks[route] = &sink;
-    // Prompts that waited for any window go to the one that came first, which is this one if it is alone.
-    auto waiting = std::exchange(_waiting, {});
-    for (auto& prompt: waiting)
-    {
-        auto const sinkRoute = sinkRouteFor(prompt.route);
-        deliver(std::move(prompt), sinkRoute.value_or(route));
-    }
+    flush();
     if (_onSinksChanged)
         _onSinksChanged();
 }
@@ -82,6 +74,9 @@ void AskpassPromptRouter::detach(AskpassRouteId route)
     if (_sinks.erase(route) == 0)
         return;
     std::erase(_attachOrder, route);
+    // Never the stand-in, nor "any window": those have no window of their own that could have been closed.
+    if (route != AnyWindow && route != BootstrapRoute)
+        _closed.insert(route);
     auto ended = std::vector<Prompt> {};
     std::erase_if(_shown, [&](Prompt& prompt) {
         if (prompt.shownBy != route)
@@ -89,8 +84,17 @@ void AskpassPromptRouter::detach(AskpassRouteId route)
         ended.push_back(std::move(prompt));
         return true;
     });
+    // What was held for this window can never be shown there now.
+    if (route != AnyWindow && route != BootstrapRoute)
+        std::erase_if(_waiting, [&](Prompt& prompt) {
+            if (prompt.route != route)
+                return false;
+            ended.push_back(std::move(prompt));
+            return true;
+        });
     for (auto& prompt: ended)
         cancel(prompt);
+    noteHeldChanged();
     if (_onSinksChanged)
         _onSinksChanged();
 }
@@ -109,19 +113,61 @@ void AskpassPromptRouter::ask(AskpassRouteId route,
                           .text = std::move(prompt),
                           .reply = std::move(reply),
                           .shownBy = AnyWindow };
-    if (_isShutDown)
+    if (_isShutDown || _closed.contains(route))
     {
         cancel(asked);
         return;
     }
-    if (auto const sinkRoute = sinkRouteFor(route))
-        deliver(std::move(asked), *sinkRoute);
-    else
+    auto const sinkRoute = sinkRouteFor(route);
+    if (sinkRoute && !_hidden.contains(*sinkRoute))
     {
-        _waiting.push_back(std::move(asked));
-        if (_onWaiting)
-            _onWaiting();
+        deliver(std::move(asked), *sinkRoute);
+        return;
     }
+    _waiting.push_back(std::move(asked));
+    noteHeldChanged();
+    // With no window at all the application brings one up; a window that is only not on screen is waited for.
+    if (!sinkRoute && _onWaiting)
+        _onWaiting();
+}
+
+void AskpassPromptRouter::flush()
+{
+    auto waiting = std::exchange(_waiting, {});
+    auto delivered = false;
+    for (auto& prompt: waiting)
+    {
+        auto const sinkRoute = sinkRouteFor(prompt.route);
+        if (sinkRoute && !_hidden.contains(*sinkRoute))
+        {
+            deliver(std::move(prompt), *sinkRoute);
+            delivered = true;
+        }
+        else
+            _waiting.push_back(std::move(prompt));
+    }
+    if (delivered)
+        noteHeldChanged();
+}
+
+void AskpassPromptRouter::noteHeldChanged() const
+{
+    if (_onHeldChanged)
+        _onHeldChanged();
+}
+
+void AskpassPromptRouter::updateExposure(std::vector<SinkExposure> const& windows)
+{
+    _hidden.clear();
+    for (auto const& window: windows)
+        if (window.state == SinkExposure::State::Hidden && window.route != BootstrapRoute)
+            _hidden.insert(window.route);
+    flush();
+}
+
+bool AskpassPromptRouter::isHolding(AskpassRouteId route) const noexcept
+{
+    return std::ranges::any_of(_waiting, [route](Prompt const& prompt) { return prompt.route == route; });
 }
 
 void AskpassPromptRouter::withdraw(AskpassPromptId promptId)
@@ -129,6 +175,7 @@ void AskpassPromptRouter::withdraw(AskpassPromptId promptId)
     if (auto const waiting = std::ranges::find(_waiting, promptId, &Prompt::id); waiting != _waiting.end())
     {
         _waiting.erase(waiting);
+        noteHeldChanged();
         return;
     }
     auto const shown = std::ranges::find(_shown, promptId, &Prompt::id);
@@ -151,6 +198,7 @@ void AskpassPromptRouter::shutdown()
         cancel(prompt);
     for (auto& prompt: waiting)
         cancel(prompt);
+    noteHeldChanged();
     if (_onSinksChanged)
         _onSinksChanged();
 }

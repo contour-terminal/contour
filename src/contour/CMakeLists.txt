@@ -363,7 +363,6 @@ if(CONTOUR_FRONTEND_GUI)
         geometry/WindowGeometry.hpp
         askpass/AskpassBroker.hpp
         askpass/AskpassPromptRouter.hpp
-        askpass/AskpassAttention.hpp
         window/PromptHost.hpp
         askpass/AskpassPromptSink.hpp
         remote/DaemonDriftFollower.hpp
@@ -388,7 +387,6 @@ if(CONTOUR_FRONTEND_GUI)
         window/DaemonDriftModel.cpp
         window/PromptHost.cpp
         window/BootstrapPrompt.cpp
-        askpass/AskpassAttention.cpp
         window/NewDefaultsNotice.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
@@ -954,7 +952,6 @@ if(CONTOUR_FRONTEND_GUI)
             askpass/AskpassPromptRouter_test.cpp
             window/PromptHost_test.cpp
             remote/StartupAttach_test.cpp
-            askpass/AskpassAttention_test.cpp
             remote/RemoteController_test.cpp
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp

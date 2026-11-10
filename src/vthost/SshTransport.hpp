@@ -185,6 +185,14 @@ inline constexpr int ShellCommandNotFound = 127;
 ///         127; else NoPreamble.
 [[nodiscard]] SshFailure classifySshFailure(std::string_view stderrTail, std::optional<int> exitCode);
 
+/// Whether the local ssh was asked for its version before the attempt.
+enum class SshVersionProbed : uint8_t
+{
+    No,  ///< No probe ran (no prompt helper was offered).
+    Yes, ///< The probe ran; its answer is SshFailureContext::foundVersion, empty when it was no OpenSSH
+         ///< banner.
+};
+
 /// What the words of an ssh failure are made from.
 struct SshFailureContext
 {
@@ -194,7 +202,8 @@ struct SshFailureContext
         std::nullopt;                          ///< ssh's exit code, which NoPreamble names; nullopt: unknown.
     SshPromptMode mode = SshPromptMode::Batch; ///< How the attempt ran.
     std::optional<OpenSshVersion> foundVersion =
-        std::nullopt; ///< The local ssh's version, when it was probed.
+        std::nullopt; ///< The local ssh's version, when it was probed and recognised.
+    SshVersionProbed probed = SshVersionProbed::No; ///< Whether foundVersion is an answer or never asked.
 };
 
 /// The user-facing error for @p failure.
