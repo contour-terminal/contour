@@ -186,6 +186,7 @@ DriftReassessment DaemonDriftModel::followConnection(vthost::client::ConnectionS
         case ConnectionState::Connected:
             return _action == DriftAction::Upgrading ? DriftReassessment::Reassess : DriftReassessment::Keep;
         case ConnectionState::Reconnecting:
+        case ConnectionState::NeedsAttention:
         case ConnectionState::Refused:
         case ConnectionState::Failed:
         case ConnectionState::Stopped:

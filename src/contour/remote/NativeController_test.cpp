@@ -6221,7 +6221,15 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
     // only this test ends, so the call must not be what the test hangs on.
     auto const began = std::chrono::steady_clock::now();
     auto call = std::async(std::launch::async, [&] {
-        return contour::remote::awaitConnectedOrAbandon(live, abandoned, 50ms, &owner);
+        auto polled = live->pollConnected(50ms);
+        while (!polled)
+        {
+            std::this_thread::sleep_for(5ms);
+            polled = live->pollConnected(50ms);
+        }
+        if (!*polled)
+            contour::remote::abandonConnect(live, abandoned, &owner);
+        return *polled;
     });
     auto const returned = call.wait_for(5s) == std::future_status::ready;
     if (!returned)
@@ -6240,4 +6248,95 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
     CHECK(destroyed.wait_for(300ms) == std::future_status::timeout);
     gate->release();
     CHECK(destroyed.wait_for(10s) == std::future_status::ready);
+}
+
+namespace
+{
+
+/// A transport that may prompt, as an ssh one does: every connect() is a prompt that could open, counted.
+class PromptingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit PromptingTransport(std::shared_ptr<vthost::ITransportFactory> inner): _inner(std::move(inner)) {}
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& loop) override
+    {
+        ++_connects;
+        return _inner->connect(loop);
+    }
+
+    [[nodiscard]] std::string describe() const override { return _inner->describe(); }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
+    [[nodiscard]] bool mayPrompt() const noexcept override { return true; }
+
+    /// @return How many connections were asked for, each a prompt that could have opened.
+    [[nodiscard]] int connects() const noexcept { return _connects; }
+
+  private:
+    std::shared_ptr<vthost::ITransportFactory> _inner;
+    std::atomic<int> _connects { 0 };
+};
+
+} // namespace
+
+// A reconnect whose login may ask the user something is held while no window of theirs is exposed -- a
+// prompt put to a hidden window would wait there unseen -- and the connection says so; it goes on, and
+// prompts, once a window is.
+TEST_CASE("a reconnect that may prompt waits for an exposed window",
+          "[attach][controller][reconnect][askpass]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto exposed = std::make_shared<std::atomic<bool>>(true);
+    auto config =
+        controllerConfig(daemon.endpoint(), timeline, { .backoff = { .first = 1ms, .ceiling = 4ms } });
+    auto const transport = std::make_shared<PromptingTransport>(std::move(config.transport));
+    config.transport = transport;
+    config.attention = { .isAttended = [exposed] { return exposed->load(); }, .poll = 5ms };
+    auto const controllerOwned = std::make_unique<contour::remote::NativeController>(std::move(config));
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(transport->connects() == 1);
+
+    // The window goes away, and then the connection.
+    exposed->store(false);
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::NeedsAttention; }, 2000));
+    // Held: no connection was asked for, so no prompt could open.
+    CHECK_FALSE(waitUntil([&] { return transport->connects() > 1; }, 150));
+    CHECK(controller.connectionState() == ConnectionState::NeedsAttention);
+
+    // Exposed again: it connects, and would prompt.
+    exposed->store(true);
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 2000));
+    CHECK(transport->connects() == 2);
+
+    controller.stop();
+}
+
+TEST_CASE("a reconnect of a transport that never prompts does not wait for a window",
+          "[attach][controller][reconnect][askpass]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto config =
+        controllerConfig(daemon.endpoint(), timeline, { .backoff = { .first = 1ms, .ceiling = 4ms } });
+    // Nobody looks, but the TLS transport asks nothing: nothing to hold.
+    config.attention = { .isAttended = [] { return false; }, .poll = 5ms };
+    auto const controllerOwned = std::make_unique<contour::remote::NativeController>(std::move(config));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    daemon.dropConnections();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(log.count(ConnectionState::NeedsAttention) == 0);
+
+    controller.stop();
 }

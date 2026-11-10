@@ -69,3 +69,17 @@ TEST_CASE("hostChip.notice", "[hostchip]")
     CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::Reconnecting) == HostNotice::Interrupted);
     CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::Disconnected) == HostNotice::Interrupted);
 }
+
+TEST_CASE("hostChip.needsAttention", "[hostchip]")
+{
+    // A reconnect held for a window to be shown says so, and still counts as seeking the connection.
+    CHECK(hostChipStateOf(ConnectionState::NeedsAttention) == HostChipState::NeedsAttention);
+    CHECK(hostChipLook(HostChipState::NeedsAttention).status == "Reconnecting needs your attention");
+    CHECK(hostChipLook(HostChipState::NeedsAttention).dot == StatusColorRole::Warning);
+    CHECK(isSeekingConnection(HostChipState::NeedsAttention));
+    CHECK(isSeekingConnection(HostChipState::Reconnecting));
+    CHECK_FALSE(isSeekingConnection(HostChipState::Connected));
+    CHECK_FALSE(isSeekingConnection(HostChipState::Disconnected));
+    // The band must show for it, as for any interrupted connection.
+    CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::NeedsAttention) == HostNotice::Interrupted);
+}

@@ -40,6 +40,9 @@ enum class ControlErrorCode : uint8_t
     Unsupported,    ///< The daemon does not offer daemon control (it predates it).
     Timeout,        ///< The daemon did not answer, or did not stop, in time.
     Transport,      ///< The connection failed or broke; the detail says how.
+    /// The transport needs an answer from the user (a password, a host-key confirmation) that the caller did
+    /// not let it ask for: the host answered, and logging in will ask.
+    LoginNeeded,
 };
 
 /// A failed daemon-control request.

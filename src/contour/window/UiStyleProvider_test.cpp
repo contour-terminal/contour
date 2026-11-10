@@ -1255,7 +1255,8 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == QStringLiteral("hidden"));
     CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, static_cast<int>(contour::window::HostChipStateCount))
+              .isEmpty());
     // Fluent's joined band always shows, holding its one tab (R-j).
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
     CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("shown"));

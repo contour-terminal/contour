@@ -233,6 +233,7 @@ class SshTransportFactory final: public ITransportFactory
     /// @return Verified: ssh checks the host's key against known_hosts, and batch mode refuses a key it
     ///         does not know rather than asking, so no connection reaches an unauthenticated peer.
     [[nodiscard]] PeerTrust peerTrust() const noexcept override { return PeerTrust::Verified; }
+    [[nodiscard]] bool mayPrompt() const noexcept override { return _broker != nullptr; }
 
   private:
     /// The connect itself: a coroutine takes the loop by pointer, as its reference would outlive the call.

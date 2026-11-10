@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -344,6 +346,7 @@ class ConnectingController final: public contour::remote::RemoteController
     ~ConnectingController() { stop(); }
 
     using RemoteController::isConnected;
+    using RemoteController::noteTransportReturned;
 
     /// @return Whether stop() has torn the controller down.
     [[nodiscard]] bool stopped() const
@@ -598,4 +601,93 @@ TEST_CASE("a connect that fails within the floor still fails, and at once", "[re
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "refused");
     CHECK(took < contour::remote::MinimumConnectAwait); // the failure ends the wait, not the floor
+}
+
+TEST_CASE("pollConnected returns at once while connecting, then the outcome", "[remote][mux][controller]")
+{
+    auto release = std::atomic<bool> { false };
+    auto controller = ConnectingController { core::platform::defaultSteadyClock(), &release };
+    auto const started = std::chrono::steady_clock::now();
+    CHECK_FALSE(controller.pollConnected(10s).has_value());
+    CHECK_FALSE(controller.pollConnected(10s).has_value());
+    CHECK(std::chrono::steady_clock::now() - started < 1s);
+
+    release.store(true, std::memory_order_release);
+    auto settled = std::optional<std::expected<void, std::string>> {};
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 1000))
+    {
+        settled = controller.pollConnected(10s);
+        if (settled)
+            break;
+        std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE(settled.has_value());
+    CHECK(settled->has_value());
+}
+
+TEST_CASE("pollConnected passes on a failure, and gives up past its budget as awaitConnected does",
+          "[remote][mux][controller]")
+{
+    SECTION("failure")
+    {
+        auto release = std::atomic<bool> { true };
+        auto controller =
+            ConnectingController { core::platform::defaultSteadyClock(), &release, OnRelease::Fail };
+        auto settled = std::optional<std::expected<void, std::string>> {};
+        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 1000))
+        {
+            settled = controller.pollConnected(10s);
+            if (settled)
+                break;
+            std::this_thread::sleep_for(5ms);
+        }
+        REQUIRE(settled.has_value());
+        REQUIRE_FALSE(settled->has_value());
+        CHECK(settled->error() == "refused");
+    }
+
+    SECTION("budget")
+    {
+        auto clock = core::platform::ManualClock {};
+        auto controller = ConnectingController { clock };
+        CHECK_FALSE(controller.pollConnected(vthost::AttachBudget { 1s }).has_value());
+        // Never less than the minimum from the first look, then the bound.
+        clock.advance(1500ms);
+        auto const settled = controller.pollConnected(vthost::AttachBudget { 1s });
+        REQUIRE(settled.has_value());
+        REQUIRE_FALSE(settled->has_value());
+        CHECK(settled->error() == "timed out");
+        CHECK(controller.stopped());
+    }
+}
+
+TEST_CASE("pollConnected: a stalled handshake fails once its bound has passed, however often it is looked at",
+          "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto controller = ConnectingController { clock };
+    auto const budget = vthost::AttachBudget::promptsOpen(1s);
+
+    // No connect bound, and the transport has not returned: there is no deadline yet, however long it takes
+    // (a prompt may be open).
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    CHECK_FALSE(controller.untilAttachDeadline(budget).has_value());
+    clock.advance(1h);
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+
+    // The transport returned its connection: the handshake bound runs from here, and is the same on every
+    // look.
+    controller.noteTransportReturned();
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 1000ms });
+    clock.advance(400ms);
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 600ms });
+    clock.advance(400ms);
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    CHECK(controller.untilAttachDeadline(budget) == std::optional { 200ms });
+    clock.advance(300ms);
+    auto const settled = controller.pollConnected(budget);
+    REQUIRE(settled.has_value());
+    REQUIRE_FALSE(settled->has_value());
+    CHECK(settled->error() == "timed out");
 }

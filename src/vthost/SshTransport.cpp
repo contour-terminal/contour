@@ -87,7 +87,7 @@ namespace
           .askpassFormat = "The host key of {0} was not accepted: {3}",
           .advice = PromptAdvice::Interactive },
         { .failure = SshFailure::HostKeyChanged,
-          .kind = TransportErrorKind::HostKeyUnknown,
+          .kind = TransportErrorKind::HostKeyChanged,
           .format = "The host key of {0} has changed. If you expected that, remove the old key with "
                     "`ssh-keygen -R {2}` and run `{1}` once in a terminal." },
         { .failure = SshFailure::AuthenticationRequired,

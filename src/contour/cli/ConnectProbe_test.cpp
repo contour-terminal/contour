@@ -124,6 +124,27 @@ TEST_CASE("ConnectProbe.a host that answers is reachable, an old daemon too", "[
     CHECK(checkHostReachable(old).has_value());
 }
 
+TEST_CASE("ConnectProbe.a login that wants an answer the check may not ask for is reachable",
+          "[contour][connect]")
+{
+    // The check never prompts: where ssh would ask (a password, a host key) the host has answered, and the
+    // window that attaches asks, so the user answers once.
+    auto needsLogin = FakeControl { std::unexpected {
+        failure(ControlErrorCode::LoginNeeded, "ssh could not log in to ssh://me@homepc") } };
+    CHECK(checkHostReachable(needsLogin).has_value());
+
+    // A changed host key is not a login to answer: the host is not the one on record, and the check says so.
+    auto changedKey = FakeControl { std::unexpected {
+        failure(ControlErrorCode::Transport, "The host key of ssh://me@homepc has changed.") } };
+    auto const changed = checkHostReachable(changedKey);
+    REQUIRE_FALSE(changed.has_value());
+    CHECK(changed.error().contains("has changed"));
+
+    // Any other failure of the connection is still one.
+    auto broken = FakeControl { std::unexpected { failure(ControlErrorCode::Transport, "no route") } };
+    CHECK_FALSE(checkHostReachable(broken).has_value());
+}
+
 TEST_CASE("ConnectProbe.a host that fails says why in the transport's words", "[contour][connect]")
 {
     auto missing = FakeControl { std::unexpected { failure(

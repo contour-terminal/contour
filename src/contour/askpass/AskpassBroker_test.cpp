@@ -303,8 +303,8 @@ namespace
 class PromptingController final: public contour::remote::RemoteController
 {
   public:
-    PromptingController(AskpassBroker& broker, contour::remote::WaitPump pump):
-        RemoteController(core::platform::defaultSteadyClock(), 3000ms, std::move(pump)), _broker { broker }
+    explicit PromptingController(AskpassBroker& broker):
+        RemoteController(core::platform::defaultSteadyClock(), 3000ms), _broker { broker }
     {
     }
     PromptingController(PromptingController const&) = delete;
@@ -318,7 +318,8 @@ class PromptingController final: public contour::remote::RemoteController
   protected:
     [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* /*loop*/) override
     {
-        auto session = _broker.open(targetOf()); // the reactor thread asks the GUI thread's broker
+        auto session = _broker.open(
+            targetOf()); // the reactor thread opens the session; the broker's own thread serves its socket
         if (!session)
         {
             failConnect(session.error());
@@ -343,21 +344,30 @@ class PromptingController final: public contour::remote::RemoteController
 };
 } // namespace
 
-TEST_CASE("a connect awaited on the GUI thread completes while its prompt is answered there",
+TEST_CASE("an attach polled from the event loop completes once its prompt is answered, and the loop is free "
+          "meanwhile",
           "[askpass][broker][controller]")
 {
-    // The reactor thread below must not pump the GUI's events: the helper it starts is awaited by the GUI
-    // thread, whose pump is what serves the broker's server and the sink.
+    // What the launch of `contour client --host` does: it looks at the attach from the event loop, which is
+    // what serves the broker's server and the window that shows the prompt. Nothing waits on the GUI thread.
     auto sink = FakeSink {};
-    sink.answer = [](FakeSink::Ask const&) {
-        return AskpassReply { AskpassOutcome::Answered, "hunter2" };
-    };
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
-    auto controller =
-        PromptingController { broker,
-                              [] { QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents); } };
-    auto const connected = controller.connectAndWait(10s);
-    REQUIRE(connected.has_value());
+    auto controller = PromptingController { broker };
+    auto const budget = vthost::AttachBudget { 10s };
+
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+    pumpUntil([&] { return sink.asks.size() == 1; });
+    // The prompt is open and nobody answered: the attach goes on, and the look returns at once.
+    CHECK_FALSE(controller.pollConnected(budget).has_value());
+
+    sink.held(AskpassReply { AskpassOutcome::Answered, "hunter2" });
+    auto settled = std::optional<std::expected<void, std::string>> {};
+    pumpUntil([&] {
+        settled = controller.pollConnected(budget);
+        return settled.has_value();
+    });
+    REQUIRE(settled.has_value());
+    CHECK(settled->has_value());
     CHECK(controller.answer == "hunter2\n");
     CHECK(sink.asks.size() == 1);
 }
@@ -409,10 +419,12 @@ TEST_CASE("a session serves one request after another, as ssh asks a password an
 TEST_CASE("connections that do not send their request are bounded in number and in time", "[askpass][broker]")
 {
     auto sink = FakeSink {};
-    auto broker = AskpassBroker { sink,
-                                  "/opt/contour/contour",
-                                  core::platform::defaultSteadyClock(),
-                                  AskpassBrokerConfig { .maxUnauthenticated = 2, .requestTimeout = 300ms, .socketDirectory = {} } };
+    auto broker = AskpassBroker {
+        sink,
+        "/opt/contour/contour",
+        core::platform::defaultSteadyClock(),
+        AskpassBrokerConfig { .maxUnauthenticated = 2, .requestTimeout = 300ms, .socketDirectory = {} }
+    };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
     auto const variables = variablesOf(**session);
@@ -554,3 +566,77 @@ TEST_CASE("a stop while the GUI thread serves no events does not hang on the bro
 }
 
 #endif
+
+TEST_CASE("each window's attach prompts in its own window", "[askpass][broker][route]")
+{
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto left = FakeSink {};
+    auto right = FakeSink {};
+    left.answer = [](FakeSink::Ask const&) {
+        return AskpassReply { AskpassOutcome::Answered, "left-secret" };
+    };
+    right.answer = [](FakeSink::Ask const&) {
+        return AskpassReply { AskpassOutcome::Answered, "right-secret" };
+    };
+    router->attach(1, left);
+    router->attach(2, right);
+    auto const broker = std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"));
+    // Two windows attach to the same host.
+    auto leftSession = RoutedAskpassBroker { broker, 1 }.open(targetOf());
+    auto rightSession = RoutedAskpassBroker { broker, 2 }.open(targetOf());
+    REQUIRE(leftSession.has_value());
+    REQUIRE(rightSession.has_value());
+
+    auto const rightRun = runHelper(variablesOf(**rightSession));
+    auto const leftRun = runHelper(variablesOf(**leftSession));
+
+    CHECK(rightRun.out == "right-secret\n");
+    CHECK(leftRun.out == "left-secret\n");
+    CHECK(left.asks.size() == 1);
+    CHECK(right.asks.size() == 1);
+}
+
+TEST_CASE("an attach with no window waits for the first window to appear", "[askpass][broker][route]")
+{
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto const broker = std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"));
+    auto session = broker->open(targetOf());
+    REQUIRE(session.has_value());
+    auto helper = startHelper(variablesOf(**session));
+
+    pumpUntil([&] { return router->waitingCount() == 1; });
+
+    auto window = FakeSink {};
+    window.answer = [](FakeSink::Ask const&) {
+        return AskpassReply { AskpassOutcome::Answered, "late-window" };
+    };
+    router->attach(7, window);
+    while (helper.wait_for(0ms) != std::future_status::ready)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    CHECK(helper.get().out == "late-window\n");
+}
+
+TEST_CASE("a broker a transport kept alive past the windows neither crashes nor prompts",
+          "[askpass][broker][lifetime]")
+{
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto sink = std::make_unique<FakeSink>();
+    router->attach(1, *sink);
+    auto const broker = std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"));
+    auto session = broker->open(targetOf());
+    REQUIRE(session.has_value());
+    auto const variables = variablesOf(**session);
+
+    // The application goes: the broker is shut down, the sink dies, a factory still holds the broker.
+    broker->shutdown();
+    router->detach(1);
+    sink.reset();
+
+    // A helper that is still around is turned away without the sink being asked, and no new attach is given
+    // a session: ssh then runs without prompts.
+    auto const run = runHelper(variables);
+    CHECK(run.exitCode == 1);
+    CHECK(run.out.empty());
+    auto const later = broker->open(targetOf());
+    CHECK_FALSE(later.has_value());
+}

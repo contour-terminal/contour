@@ -362,7 +362,9 @@ if(CONTOUR_FRONTEND_GUI)
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         askpass/AskpassBroker.hpp
-        askpass/AskpassDialogs.hpp
+        askpass/AskpassPromptRouter.hpp
+        askpass/AskpassAttention.hpp
+        window/PromptHost.hpp
         askpass/AskpassPromptSink.hpp
         remote/DaemonDriftFollower.hpp
         remote/DaemonLink.hpp
@@ -384,6 +386,9 @@ if(CONTOUR_FRONTEND_GUI)
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
+        window/PromptHost.cpp
+        window/BootstrapPrompt.cpp
+        askpass/AskpassAttention.cpp
         window/NewDefaultsNotice.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
@@ -426,8 +431,9 @@ if(CONTOUR_FRONTEND_GUI)
         session/FontControl.cpp
         session/SpawnCommand.cpp
         askpass/AskpassBroker.cpp
-        askpass/AskpassDialogs.cpp
+        askpass/AskpassPromptRouter.cpp
         remote/DaemonLink.cpp
+        remote/StartupAttach.cpp
         remote/DaemonSwitchDirectory.cpp
         remote/NativeController.cpp
         remote/RemoteController.cpp
@@ -565,6 +571,8 @@ if(CONTOUR_FRONTEND_GUI)
         qml/KitShortcutField.qml
         qml/KitFontPicker.qml
         qml/PermissionDialog.qml
+        qml/AskpassDialog.qml
+        qml/PromptWindow.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at
@@ -943,6 +951,10 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             askpass/AskpassBroker_test.cpp
+            askpass/AskpassPromptRouter_test.cpp
+            window/PromptHost_test.cpp
+            remote/StartupAttach_test.cpp
+            askpass/AskpassAttention_test.cpp
             remote/RemoteController_test.cpp
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp

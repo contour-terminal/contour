@@ -105,7 +105,7 @@ namespace
 } // namespace
 
 NativeController::NativeController(Config config):
-    RemoteController(config.clock, DefaultDetachBound, std::move(config.waitPump)),
+    RemoteController(config.clock, DefaultDetachBound),
     // Told when the transport returns its connection, which is when an AttachBudget's handshake bound starts.
     _transport(std::make_shared<vthost::ConnectObservingFactory>(std::move(config.transport),
                                                                  [this] { noteTransportReturned(); })),
@@ -118,7 +118,8 @@ NativeController::NativeController(Config config):
     _sessionSettings(std::move(config.sessionSettings)),
     _colorPreference(std::move(config.colorPreference)),
     _timeline(config.timeline),
-    _backoff(config.backoff)
+    _backoff(config.backoff),
+    _attention(std::move(config.attention))
 {
     // On the monitor's platform thread: only marshaled from there, as its contract asks.
     if (config.powerMonitor != nullptr)
@@ -363,7 +364,8 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         _backoff,
         [this](vthost::client::ConnectionState state, std::string const& reason) {
             onConnectionState(state, reason);
-        }
+        },
+        _attention
     };
     {
         auto const lock = std::lock_guard { _mutex };
@@ -455,6 +457,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 attachLog()("Attached to {}.", where);
                 break;
             case ConnectionState::Reconnecting:
+            case ConnectionState::NeedsAttention:
             case ConnectionState::Upgrading:
                 // An upgrade is a reconnect to the same daemon: adoptReconnect() keeps every binding then.
                 _client = nullptr;
@@ -463,11 +466,14 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
                     _state = State::Reconnecting;
-                attachLog()("Lost the connection to {} ({}); {}.",
-                            where,
-                            reason,
-                            state == ConnectionState::Upgrading ? "waiting for it to come back"
-                                                                : "reconnecting");
+                if (state == ConnectionState::NeedsAttention)
+                    attachLog()("Reconnecting to {} waits until a window is exposed.", where);
+                else
+                    attachLog()("Lost the connection to {} ({}); {}.",
+                                where,
+                                reason,
+                                state == ConnectionState::Upgrading ? "waiting for it to come back"
+                                                                    : "reconnecting");
                 break;
             case ConnectionState::Failed:
             case ConnectionState::Refused:
@@ -493,6 +499,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         }
     }
     _connected.notify_all();
+    emit attachProgressed();
     if (missingWorkspaces)
         failConnect(
             std::format("the daemon has no workspace {}", core::joinHumanReadable(_intent.workspaces)));
@@ -706,6 +713,7 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
     lock.unlock();
 
     _connected.notify_all();
+    emit attachProgressed();
     emit remoteSessionDiscovered();
 }
 
@@ -1917,18 +1925,13 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     return pty;
 }
 
-std::expected<void, std::string> awaitConnectedOrAbandon(std::unique_ptr<NativeController>& live,
-                                                         std::unique_ptr<NativeController>& abandoned,
-                                                         vthost::AttachBudget budget,
-                                                         QObject const* owner)
+void abandonConnect(std::unique_ptr<NativeController>& live,
+                    std::unique_ptr<NativeController>& abandoned,
+                    QObject const* owner)
 {
-    auto connected = live->awaitConnected(budget);
-    if (connected)
-        return {};
     live->stop();
     QObject::disconnect(live.get(), nullptr, owner, nullptr);
     abandoned = std::move(live);
-    return connected;
 }
 
 } // namespace contour::remote

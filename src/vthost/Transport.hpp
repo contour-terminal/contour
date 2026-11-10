@@ -46,6 +46,9 @@ enum class TransportErrorKind : uint8_t
     DaemonAbsent = 8, ///< Nothing listens there: the socket file is gone, or the connection was refused.
     /// This end's own settings cannot be used (a CA that does not parse): the user must fix them first.
     Misconfigured = 9,
+    /// The remote host's key differs from the one on record: a reinstalled machine, or someone in between.
+    /// Unlike HostKeyUnknown, no answer from the user makes it safe to go on.
+    HostKeyChanged = 10,
 };
 
 /// A failed transport.
@@ -71,7 +74,7 @@ namespace detail
         TransportRetry retry;
     };
 
-    /// Every kind's retry, one row each; a kind missing here is Permanent.
+    /// Every kind's retry, one row each.
     inline constexpr auto TransportRetryTable = std::to_array<TransportRetryRow>({
         { .kind = TransportErrorKind::Unreachable, .retry = TransportRetry::Transient },
         { .kind = TransportErrorKind::Refused, .retry = TransportRetry::Permanent },
@@ -85,7 +88,12 @@ namespace detail
         { .kind = TransportErrorKind::DaemonAbsent, .retry = TransportRetry::Transient },
         // A setting of this end's own reads the same on the next attempt.
         { .kind = TransportErrorKind::Misconfigured, .retry = TransportRetry::Permanent },
+        { .kind = TransportErrorKind::HostKeyChanged, .retry = TransportRetry::Permanent },
     });
+
+    static_assert(TransportRetryTable.size()
+                      == static_cast<std::size_t>(TransportErrorKind::HostKeyChanged) + 1,
+                  "TransportRetryTable needs a row for every TransportErrorKind");
 } // namespace detail
 
 /// @param kind A transport failure.
@@ -130,6 +138,11 @@ class ITransportFactory
 
     /// @return Where this factory connects to, for log lines and failure messages.
     [[nodiscard]] virtual std::string describe() const = 0;
+
+    /// @return Whether a connect may put a question to the user (an ssh login's password, say). A reconnect
+    ///         of such a transport is held until someone can see it (client::AttentionGate); the others never
+    ///         wait for anyone.
+    [[nodiscard]] virtual bool mayPrompt() const noexcept { return false; }
 
     /// @return Whether the peer is authenticated, known before connecting: a control client refuses an
     ///         Unverified transport, as an active man-in-the-middle would take its token.

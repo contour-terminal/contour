@@ -143,7 +143,7 @@ class DaemonLink final: public session::WindowBinding
     /// Builds the link and its controller, and starts connecting: wires the controller's signals to the
     /// link's windows, installs the attach-window binder on the manager (removed again as the link stops or
     /// gives up), and starts the connect on the controller's reactor. Nothing of it can fail here; a connect
-    /// that fails is told by awaitAttached().
+    /// that fails is told by pollAttached().
     /// @param id The link's name among the application's.
     /// @param config What it connects with.
     /// @param host The application. Borrowed; it must outlive the link.
@@ -165,10 +165,10 @@ class DaemonLink final: public session::WindowBinding
     /// @return The link's name among the application's.
     [[nodiscard]] Id id() const noexcept { return _id; }
 
-    /// @return The controller, until the attach was given up (awaitAttached()); null after.
+    /// @return The controller, until the attach was given up (pollAttached()); null after.
     [[nodiscard]] NativeController* liveController() noexcept { return _controller.get(); }
 
-    /// @return Whether awaitAttached() succeeded: the attach settled connected, was not given up, and the
+    /// @return Whether pollAttached() succeeded: the attach settled connected, was not given up, and the
     ///         link has not stopped since.
     [[nodiscard]] bool isAttached() const noexcept { return _state == AttachState::Attached; }
 
@@ -188,12 +188,12 @@ class DaemonLink final: public session::WindowBinding
     ///         destroyed.
     [[nodiscard]] bool isFinished() const;
 
-    /// @return The controller as the factory of the link's sessions; the given-up one after awaitAttached()
+    /// @return The controller as the factory of the link's sessions; the given-up one after pollAttached()
     ///         gave up, which creates nothing.
     [[nodiscard]] session::SessionFactory& sessions() noexcept override;
 
     /// @return The remote host the link is attached to; empty for a local daemon, `--connect-tcp`, until
-    ///         awaitAttached() succeeded, and once the link stopped.
+    ///         pollAttached() succeeded, and once the link stopped.
     [[nodiscard]] std::string_view hostLabel() const noexcept override;
     [[nodiscard]] std::string_view chromeLabel() const noexcept override;
     [[nodiscard]] std::optional<session::SwitchTarget> daemonTarget() const override;
@@ -302,12 +302,12 @@ class DaemonLink final: public session::WindowBinding
     /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
     [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
 
-    /// Waits for the connect the constructor began, with what remains of @p budget; gives the controller up
-    /// when it does not connect in time (@see awaitConnectedOrAbandon()), and with it the attach-window
-    /// binder.
-    /// @param budget How long the connect may take since the link was built.
-    /// @return Nothing once attached; why not otherwise.
-    [[nodiscard]] std::expected<void, std::string> awaitAttached(vthost::AttachBudget budget);
+    /// Looks at the connect the constructor began, with what remains of @p budget, and returns at once, so
+    /// the event loop serves whatever the connect needs the GUI thread for (ssh's prompts). On failure the
+    /// controller is given up (@see abandonConnect()), and with it the attach-window binder.
+    /// @param budget How long the attach may take since the link was built.
+    /// @return Nothing while it is still going; else nothing once attached, or why not.
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollAttached(vthost::AttachBudget budget);
 
     /// Shows the drift badge when the daemon runs another release than this client, and wires its actions to
     /// the host's upgrade and restart, for a local daemon. Follows the daemon through an upgrade: the badge
@@ -470,7 +470,7 @@ class DaemonLink final: public session::WindowBinding
     /// The live controller; null once given up. Remote-backed sessions hold ptys that unregister from it.
     std::unique_ptr<NativeController> _controller;
     /// The controller given up on, stopped: kept rather than destroyed, because its destruction waits for a
-    /// daemon start still under way (@see awaitConnectedOrAbandon()). Null otherwise.
+    /// daemon start still under way (@see abandonConnect()). Null otherwise.
     std::unique_ptr<NativeController> _givenUp;
 
     /// Where the answers to the daemon's extensions are recorded, and so sent; made with the first question.

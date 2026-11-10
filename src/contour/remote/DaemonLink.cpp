@@ -230,7 +230,7 @@ void DaemonLink::installAttachWindowBinder()
 {
     // A window spawned to host a daemon workspace binds itself here (from its Main.qml, via
     // consumeAttachWindow) instead of creating a fresh first tab.
-    // Removed by the manager as the link stops (releaseBinding()), and by awaitAttached() on giving up.
+    // Removed by the manager as the link stops (releaseBinding()), and by pollAttached() on giving up.
     _sessions.setAttachWindowBinder(*this, [this](window::WindowController* controller) {
         return controller != nullptr && bindPendingWindow(*controller) == WindowAdoption::Adopted;
     });
@@ -278,7 +278,7 @@ void DaemonLink::connectController()
         &NativeController::connectionClosed,
         &_receiver,
         [this] {
-            // Not once a connect that failed has been given up on (see awaitAttached()).
+            // Not once a connect that failed has been given up on (see pollAttached()).
             if (!isLive())
                 return;
             // A link taking a workspace over that never showed it leaves it where it was; so does a switch.
@@ -345,24 +345,29 @@ void DaemonLink::connectController()
         Qt::QueuedConnection);
 #endif
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots; the
-    // application waits for them through awaitAttached() just before the first window. The signals above are
+    // application waits for them through pollAttached() just before the first window. The signals above are
     // connected first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part
     // of the connect, in the transport's ensureDaemon, on a worker thread of the transport's own.
     _controller->startConnecting();
 }
 
-std::expected<void, std::string> DaemonLink::awaitAttached(vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> DaemonLink::pollAttached(vthost::AttachBudget budget)
 {
     requireGuiThread();
-    // Given up, not destroyed: see awaitConnectedOrAbandon(). Kept until the link ends instead.
-    if (auto attached = awaitConnectedOrAbandon(_controller, _givenUp, budget, &_receiver); !attached)
+    if (_controller == nullptr)
+        return std::unexpected(std::string { "the attach was given up" });
+    auto polled = _controller->pollConnected(budget);
+    if (!polled)
+        return std::nullopt;
+    if (!*polled)
     {
+        abandonConnect(_controller, _givenUp, &_receiver);
         // A window spawned from now on is no daemon workspace's: it opens a tab of its own.
         _sessions.clearAttachWindowBinder(*this);
-        return attached;
+        return polled;
     }
     _state = AttachState::Attached;
-    return {};
+    return polled;
 }
 
 void DaemonLink::stop()
@@ -982,7 +987,7 @@ void DaemonLink::connectReconnectSignals()
                 if (!isLive())
                     return;
             }
-            // A link taking a workspace over awaits nobody's awaitAttached(): it settles as it connects, or
+            // A link taking a workspace over awaits nobody's pollAttached(): it settles as it connects, or
             // learns the daemon has no such workspace (NativeController's failed connect, which stays up). So
             // does a link a switch started.
             if (isBootLink() || _state != AttachState::Connecting)

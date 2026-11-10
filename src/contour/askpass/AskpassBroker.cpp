@@ -60,7 +60,8 @@ namespace
     /// What the servers of a broker reach the rest of the program through.
     struct Hub
     {
-        IAskpassPromptSink& sink;
+        std::shared_ptr<AskpassPromptRouter> router; ///< Finds the window that shows a prompt.
+        AskpassRouteId route;                        ///< The window that started the attach.
         QObject* guiContext;    ///< Lives on the thread the sink is asked on; outlives every session.
         QObject* workerContext; ///< Lives on the broker's thread; outlives every session.
         std::atomic<AskpassPromptId>& lastPromptId;
@@ -249,17 +250,23 @@ namespace
                     [self, id, given = std::move(given)]() mutable {
                         if (self)
                             self->answer(id, std::move(given));
+                        else
+                            wipe(given.answer);
                     },
                     Qt::QueuedConnection);
             };
             QMetaObject::invokeMethod(
                 _hub.guiContext,
-                [sink = &_hub.sink,
+                [router = _hub.router,
+                 route = _hub.route,
                  promptId,
                  kind,
                  target = _target,
                  prompt = QString::fromStdString(request.prompt),
-                 reply = std::move(reply)]() mutable { sink->ask(promptId, kind, target, prompt, reply); },
+                 reply = std::move(reply)]() mutable {
+                    router->ask(
+                        route, promptId, kind, std::move(target), std::move(prompt), std::move(reply));
+                },
                 Qt::QueuedConnection);
         }
 
@@ -267,7 +274,10 @@ namespace
         {
             auto const found = _connections.find(id);
             if (found == _connections.end() || found->second.phase != Phase::Asking)
+            {
+                wipe(reply.answer);
                 return;
+            }
             auto& connection = found->second;
             connection.phase = Phase::Done;
             auto const cancelled = reply.outcome == AskpassOutcome::Cancelled;
@@ -315,7 +325,7 @@ namespace
         {
             QMetaObject::invokeMethod(
                 _hub.guiContext,
-                [sink = &_hub.sink, promptId] { sink->withdraw(promptId); },
+                [router = _hub.router, promptId] { router->withdraw(promptId); },
                 Qt::QueuedConnection);
         }
 
@@ -403,11 +413,11 @@ namespace
     };
 } // namespace
 
-AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
+AskpassBroker::AskpassBroker(std::shared_ptr<AskpassPromptRouter> router,
                              QString executablePath,
                              core::platform::IClock const& clock,
                              AskpassBrokerConfig config):
-    _sink { sink },
+    _router { std::move(router) },
     _executablePath { std::move(executablePath) },
     _clock { clock },
     _config { std::move(config) },
@@ -416,6 +426,23 @@ AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
     _thread.setObjectName(QStringLiteral("askpass-broker"));
     _worker->moveToThread(&_thread);
     _thread.start();
+    _state = _thread.isRunning() ? State::Serving : State::NotStarted;
+}
+
+AskpassBroker::AskpassBroker(IAskpassPromptSink& sink,
+                             QString executablePath,
+                             core::platform::IClock const& clock,
+                             AskpassBrokerConfig config):
+    AskpassBroker(
+        std::make_shared<AskpassPromptRouter>(), std::move(executablePath), clock, std::move(config))
+{
+    _router->attach(AnyWindow, sink);
+}
+
+void AskpassBroker::shutdown()
+{
+    _state = State::ShutDown;
+    _router->shutdown();
 }
 
 AskpassBroker::~AskpassBroker()
@@ -428,6 +455,21 @@ AskpassBroker::~AskpassBroker()
 std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
     vthost::SshTarget const& target)
 {
+    return open(target, AnyWindow);
+}
+
+std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBroker::open(
+    vthost::SshTarget const& target, AskpassRouteId route)
+{
+    switch (_state.load())
+    {
+        case State::Serving: break;
+        case State::ShutDown:
+            return std::unexpected { std::string { "the application no longer answers ssh's prompts" } };
+        case State::NotStarted:
+            return std::unexpected { std::string {
+                "cannot serve ssh's prompts: the broker's thread did not start" } };
+    }
     auto state = std::make_shared<SessionState>();
     auto nonce = randomHex(32).toStdString();
     auto const name = QString::fromLatin1("contour-askpass-") + QString::fromLatin1(randomHex(8));
@@ -438,8 +480,12 @@ std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> AskpassBrok
     QMetaObject::invokeMethod(
         _worker.get(),
         [&] {
-            auto server = std::make_unique<Endpoint>(
-                Hub { _sink, this, _worker.get(), _lastPromptId, _clock }, state, nonce, targetText, _config);
+            auto server =
+                std::make_unique<Endpoint>(Hub { _router, route, this, _worker.get(), _lastPromptId, _clock },
+                                           state,
+                                           nonce,
+                                           targetText,
+                                           _config);
             listening = server->listen(name);
             if (listening)
             {

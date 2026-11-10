@@ -435,6 +435,15 @@ VerbatimCommand classifyVerbatimCommand(std::string_view token,
     return VerbatimCommand { .kind = VerbatimCommandKind::Unknown, .workingDirectory = {} };
 }
 
+namespace
+{
+    /// The default way the app ends its event loop.
+    void exitQtEventLoop(int status)
+    {
+        QCoreApplication::exit(status);
+    }
+} // namespace
+
 ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<session::SessionFactory> sessionFactory,
                              std::unique_ptr<platform::ExternalLauncher> externalLauncher,
@@ -456,9 +465,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<window::DragEndProbe> dragEndProbe,
                              std::unique_ptr<platform::ApplicationRestart> applicationRestart,
                              std::unique_ptr<remote::SwitchingService> windowSwitching,
-                             std::unique_ptr<session::SwitchDirectory> switchDirectory):
+                             std::unique_ptr<session::SwitchDirectory> switchDirectory,
+                             std::function<void(int)> exitEventLoop):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
+    _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
+                                   : std::function<void(int)> { exitQtEventLoop } },
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(cli::makeBackgroundExecutor(StatusLineCommandThreads)),
@@ -602,6 +614,12 @@ ContourGuiApp::~ContourGuiApp()
     // Before any member is destroyed: cancels the status-line commands still running or queued, so the
     // command pool joins without waiting out their timeouts.
     _commandShutdown.request_stop();
+    // Ends the ssh prompts first: a link stopped below may be inside a prompt, and the transport factories
+    // keep the broker alive past this destructor.
+    // The router even without a broker: it ends the hooks that read the windows, which are going.
+    _askpassRouter->shutdown();
+    if (_askpassBroker)
+        _askpassBroker->shutdown();
     // While the session manager they release their windows from still exists: the links outlive it.
     for (auto const& link: _daemonLinks)
         link->stop();
@@ -762,7 +780,7 @@ void ContourGuiApp::finishLatencyProbe()
         exitCode = EXIT_FAILURE;
     }
     _latencyProbeExitCode = exitCode;
-    QCoreApplication::exit(exitCode);
+    _exitEventLoop(exitCode);
 }
 
 void ContourGuiApp::logGpuInUse(QQuickWindow& window)
@@ -853,7 +871,7 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
         return;
     }
     errorLog()("{} could not render; restarting Contour on the automatic GPU.", failed);
-    QCoreApplication::exit(EXIT_SUCCESS);
+    _exitEventLoop(EXIT_SUCCESS);
 }
 
 void ContourGuiApp::takeGpuFallbackRequest()
@@ -975,25 +993,19 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
-std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::DaemonLink& link,
-                                                                  vthost::AttachBudget budget)
+std::optional<std::expected<void, std::string>> ContourGuiApp::pollNativeAttach(remote::DaemonLink& link,
+                                                                                vthost::AttachBudget budget)
 {
-    // The wait pumps the event loop (DaemonLinkConfig's waitPump), so a queued destroyEndedLinks() can run in
-    // it: it must leave the link that is being waited for alone.
-    _awaitedLinkId = link.id();
-    // Once it is over, a link that ended meanwhile is let go of, by a call of its own: not here, as the caller
-    // goes on to use the link it waited for.
-    auto const forgetAwaited = core::Finally { [this] {
-        _awaitedLinkId.reset();
-        QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
-    } };
-    if (auto attached = link.awaitAttached(budget); !attached)
+    auto attached = link.pollAttached(budget);
+    if (!attached)
+        return std::nullopt;
+    if (!*attached)
         return attached;
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
     // can restart -- the local one it launched on (DaemonLinkConfig::upkeep), which is what _restartDaemon is
     // set for -- is offered anything.
     link.offerDaemonRestartIfDrifted();
-    return {};
+    return attached;
 }
 
 remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig config)
@@ -1026,7 +1038,8 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
                                                          vthost::proto::AttachIntent intent,
                                                          std::string hostLabel,
                                                          window::DaemonLocality locality,
-                                                         remote::DaemonAddress address)
+                                                         remote::DaemonAddress address,
+                                                         askpass::AskpassRouteId askpassRoute)
 {
     // The emulation settings the daemon gives the sessions this client creates, from the configuration
     // loaded already; every session created later takes them from the configuration in memory, exactly
@@ -1038,23 +1051,26 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
     else
         errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
     return remote::DaemonLinkConfig {
-        .controller = remote::NativeController::Config {
-            .transport = std::move(transport),
-            .intent = std::move(intent),
-            .profileName = profileName(),
-            .workingDirectory = {},
-            .attachSettings = std::move(attachSettings),
-            .sessionSettings = [this] { return currentEmulationSettings(); },
+        .controller =
+            remote::NativeController::Config {
+                .transport = std::move(transport),
+                .intent = std::move(intent),
+                .profileName = profileName(),
+                .workingDirectory = {},
+                .attachSettings = std::move(attachSettings),
+                .sessionSettings = [this] { return currentEmulationSettings(); },
             // Asked as each hello goes out: this config is built before the OS's scheme is read, and the
             // links a switch or a hand-over clone from it go on connecting long after.
             .colorPreference = [this] { return _shownColorPreference.load(); },
-            .clock = core::platform::defaultSteadyClock(),
-            .timeline = _startupTimeline,
-            .powerMonitor = _powerMonitor.get(),
-            .backoff = {},
-            // ssh's prompts are answered by dialogs on this thread, which awaits the connect.
-            .waitPump = [] { QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents); },
-        },
+                .clock = core::platform::defaultSteadyClock(),
+                .timeline = _startupTimeline,
+                .powerMonitor = _powerMonitor.get(),
+                .backoff = {},
+                // A login prompt put to a hidden window would wait there unseen: the reconnect that would ask
+                // waits until the window that would show it is on screen.
+                .attention = { .isAttended = [attention = _askpassAttention,
+                                              askpassRoute] { return attention->isAttended(askpassRoute); } },
+            },
         .hostLabel = std::move(hostLabel),
         .locality = locality,
         .clientRelease = CONTOUR_VERSION_STRING,
@@ -1071,7 +1087,7 @@ std::vector<remote::DaemonLink*> ContourGuiApp::switchableLinks()
 }
 
 std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFor(
-    remote::DaemonAddress const& daemon)
+    remote::DaemonAddress const& daemon, vtworkspace::WorkspaceId window)
 {
     using vthost::proto::SwitchDaemonKind;
     switch (daemon.kind)
@@ -1101,14 +1117,15 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
         }
         case SwitchDaemonKind::Host:
             // Attach to Host's lookup: a saved host's name, or an ssh:// URL.
-            return openHost(core::platform::normalizePath(_config.configFile), daemon.name)
+            return openHost(core::platform::normalizePath(_config.configFile), daemon.name, window.value)
                 .transform([&](OpenedHost opened) {
                     auto label = opened.transport.label;
                     return daemonLinkConfig(std::move(opened.transport.factory),
                                             {},
                                             std::move(label),
                                             window::DaemonLocality::Remote,
-                                            daemon);
+                                            daemon,
+                                            window.value);
                 });
         case SwitchDaemonKind::Same: break;
     }
@@ -1141,9 +1158,8 @@ void ContourGuiApp::destroyEndedLinks()
 {
     // A link whose closed windows still hold a pane waits: it asks again as its last pane lets it go.
     // Each window's drift badge reads its own link's model (WindowController::daemonDrift).
-    std::erase_if(_daemonLinks, [this](auto const& link) {
-        return link->isFinished() && _awaitedLinkId != link->id();
-    });
+    std::erase_if(_daemonLinks,
+                  [this](auto const& link) { return link->isFinished() && _awaitedLinkId != link->id(); });
 }
 
 std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
@@ -1276,28 +1292,65 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
 }
 
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(std::string const& configPath,
-                                                                              std::string const& nameOrUrl)
+                                                                              std::string const& nameOrUrl,
+                                                                              askpass::AskpassRouteId route,
+                                                                              SshPromptPolicy prompting)
 {
     auto host = config::resolveHost(configPath, nameOrUrl);
     if (!host)
         return std::unexpected { host.error() };
-    return transportOf(nameOrUrl, *std::move(host));
+    return transportOf(nameOrUrl, *std::move(host), route, prompting);
+}
+
+void ContourGuiApp::showBootstrapPrompt()
+{
+    if (_bootstrapPrompt || !_qmlEngine)
+        return;
+    _bootstrapPrompt = window::BootstrapPrompt::create(_askpassRouter, *_qmlEngine);
+}
+
+void ContourGuiApp::refreshWindowAttention()
+{
+    // A quick terminal parked off screen is hidden for the user though the platform may still count its
+    // window as visible.
+    auto const isOnScreen = [this](askpass::AskpassRouteId route) {
+        if (route == askpass::BootstrapRoute)
+            return true; // the stand-in shows itself as a prompt asks
+        auto const* const controller = _sessionManager.controllerFor(vtworkspace::WorkspaceId { route });
+        if (controller == nullptr || !controller->isExposed())
+            return false;
+        return controller->role() != window::WindowRole::QuickTerminal
+               || (_quickTerminal && window::quickTerminalKeepsAppAlive(_quickTerminal->state()));
+    };
+    auto sinks = std::vector<askpass::SinkExposure> {};
+    for (auto const route: _askpassRouter->attachedRoutes())
+        sinks.push_back(askpass::SinkExposure { .route = route,
+                                                .state = isOnScreen(route)
+                                                             ? askpass::SinkExposure::State::OnScreen
+                                                             : askpass::SinkExposure::State::Hidden });
+    _askpassAttention->publish(std::move(sinks));
 }
 
 std::shared_ptr<askpass::AskpassBroker> const& ContourGuiApp::askpassBroker()
 {
+    // Its servers and its prompts live on the GUI thread, and so does whoever asks for it.
+    Q_ASSERT(std::this_thread::get_id() == _guiThread);
     if (!_askpassBroker)
     {
         // Qt-free, as the broker may be made before the application object exists (`contour client --host`).
         auto const executable = vtpty::currentExecutablePath();
         _askpassBroker = std::make_shared<askpass::AskpassBroker>(
-            _askpassSink, QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()));
+            _askpassRouter,
+            QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()));
     }
     return _askpassBroker;
 }
 
-std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(std::string const& nameOrUrl,
-                                                                                 config::HostEntry host)
+std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(
+    std::string const& nameOrUrl,
+    config::HostEntry host,
+    askpass::AskpassRouteId route,
+    SshPromptPolicy prompting)
 {
     // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
     auto label = nameOrUrl.contains("://") ? config::toString(host.url) : nameOrUrl;
@@ -1307,7 +1360,11 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                fileSystem(),
                vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
                    .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }),
-               cli::SshPrompting { .broker = askpassBroker(), .probe = _sshVersionProbe })
+               cli::SshPrompting {
+                   .broker = prompting == SshPromptPolicy::Askpass
+                                 ? std::make_shared<askpass::RoutedAskpassBroker>(askpassBroker(), route)
+                                 : nullptr,
+                   .probe = _sshVersionProbe })
         .transform([&](cli::HostTransport transport) {
             return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
         });
@@ -1571,7 +1628,7 @@ namespace
 
 void ContourGuiApp::releaseHosting()
 {
-    _awaitAttach = nullptr;
+    _startupAttachPlan.reset();
     _onGuiBooted = nullptr;
     // Each stops serving its windows as it stops.
     for (auto const& link: _daemonLinks)
@@ -1744,11 +1801,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         if (auto* const link = daemonLink(id))
             link->followLayout();
     };
-    _awaitAttach = [this, id, budget]() -> std::expected<void, std::string> {
-        auto* const link = daemonLink(id);
-        Require(link != nullptr);
-        return awaitNativeAttach(*link, budget);
-    };
+    _startupAttachPlan = StartupAttachPlan { .link = id, .budget = budget };
     return {};
 }
 
@@ -2445,10 +2498,18 @@ void ContourGuiApp::warnOfMenuOwnedBindings() const
 
 void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anchor)
 {
+    if (isStartingUp() && remote::duringStartup(action) == remote::DuringStartup::Refused)
+    {
+        attachLog()("Menu bar action \"{}\" ignored: the launch still waits for its attach.",
+                    actions::name(action));
+        return;
+    }
     if (std::holds_alternative<actions::Quit>(action))
     {
+        // The prompts that are open end with the app: ssh's helpers are told, and the attach is given up.
+        _askpassRouter->shutdown();
         // As TerminalSession's Quit does: unwind the event loop rather than exit().
-        QCoreApplication::exit(EXIT_SUCCESS);
+        _exitEventLoop(EXIT_SUCCESS);
         return;
     }
     if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
@@ -2996,6 +3057,9 @@ int ContourGuiApp::terminalGuiAction()
         // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
         _qmlEngine.reset();
+        // Its window went with the engine; the host cancels the prompts it still holds, so that none targets
+        // a sink that is gone.
+        _bootstrapPrompt.reset();
         // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance).
         _latencyProbeDriver.reset();
         _firstFrameWatchdog.reset();
@@ -3211,18 +3275,6 @@ int ContourGuiApp::terminalGuiAction()
         startQuickTerminal();
     _startupTimeline.mark(vthost::latency::StartupMark::QmlEngineReady);
 
-    // Attach mode's connect has run beside everything above; the first window needs it done, and decides
-    // whether there is a daemon to show at all. A `required` one that is not there ends the launch here,
-    // before any window exists.
-    if (_awaitAttach)
-    {
-        if (auto const settled = settleHosting(std::exchange(_awaitAttach, nullptr)()); !settled)
-        {
-            cerr << settled.error() << '\n';
-            return EXIT_FAILURE;
-        }
-    }
-
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
@@ -3257,28 +3309,17 @@ int ContourGuiApp::terminalGuiAction()
         multimediaWarmedUp.store(true, std::memory_order_release);
     });
 
-    if (auto const opened = openFirstWindow(); !opened)
+    // Attach mode's connect runs beside everything above and goes on beside the event loop: the first window
+    // needs it done, and decides whether there is a daemon to show at all. Its ssh prompts are answered in
+    // the stand-in window until then, and nothing but those can start a window or reconfigure the app
+    // meanwhile.
+    if (_startupAttachPlan)
+        startAttachWait();
+    else if (auto const booted = bootFirstWindow(); !booted)
     {
-        cerr << opened.error() << '\n';
+        cerr << booted.error() << '\n';
         return EXIT_FAILURE;
     }
-    _startupTimeline.mark(vthost::latency::StartupMark::WindowCreated);
-    // The window that runs its shells itself, as the daemon could not be had, says so.
-    if (!_hostingNotice.empty())
-        if (auto const window = _sessionManager.focusedWindow())
-            if (auto* controller = _sessionManager.controllerFor(*window))
-                controller->showHostingNotice(QString::fromStdString(_hostingNotice));
-
-    // The hotkey the desktop refused while the app started, which no window existed to be told of.
-    announceQuickTerminalHotkeyProblem();
-
-    // Attach mode adopts the remaining remote sessions as tabs now that a
-    // window exists to put them in.
-    if (_onGuiBooted)
-        _onGuiBooted();
-
-    if (_latencyProbeRequest)
-        armLatencyProbe();
 
     // Run the event loop FIRST (it populates _exitStatus via onExit during the run), THEN map that
     // status to the process exit code. The mapping is the pure exitCodeFor() (ExitCode.h), extracted
@@ -3286,7 +3327,8 @@ int ContourGuiApp::terminalGuiAction()
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
     // A finished probe has the last word: the echo child it ends exits 0 whether or not the probe succeeded.
-    auto const rv = _latencyProbeExitCode.value_or(session::exitCodeFor(_exitStatus, loopResult));
+    auto const rv = _startupExitCode.value_or(
+        _latencyProbeExitCode.value_or(session::exitCodeFor(_exitStatus, loopResult)));
 
     // Ensure the multimedia warmup thread has finished before destroying Qt objects -- but keep serving
     // this thread's event queue while waiting, rather than blocking straight into join().
@@ -3465,12 +3507,15 @@ void ContourGuiApp::startQuickTerminal()
             .onHotkeyError = [this](platform::HotkeyError error) { reportQuickTerminalHotkeyError(error); },
             .onHotkeyBound = [this] { reportQuickTerminalHotkeyBound(); },
             .onOffScreen = [this] { quitIfNothingKeepsAppAlive(); },
+            .onStateChanged = [this] { refreshWindowAttention(); },
             .isMenuOwned =
                 [this](config::HotkeyChord const& chord) {
                     return display::isMenuOwnedChord(chord, _menuBarPlacement);
                 },
             .cornerRadius = [this] { return resolvedChromeTokens().radii.quickTerminal; },
-            .placement = placementControl() },
+            .placement = placementControl(),
+            // The hotkey is ignored until the launch's first window: its attach is not settled before.
+            .isReady = [this] { return !isStartingUp(); } },
         _config.quickTerminal.value(),
         resolvedChromeTokens().motion);
     // The last ordinary window closing is Qt's to see on most hosts, but a quick terminal parked off screen
@@ -3824,6 +3869,88 @@ int ContourGuiApp::connectAction()
     return launchClient(std::move(request), plan.host);
 }
 
+std::expected<void, std::string> ContourGuiApp::bootFirstWindow()
+{
+    if (auto const opened = openFirstWindow(); !opened)
+        return opened;
+    _startupTimeline.mark(vthost::latency::StartupMark::WindowCreated);
+    // The window that runs its shells itself, as the daemon could not be had, says so.
+    if (!_hostingNotice.empty())
+        if (auto const window = _sessionManager.focusedWindow())
+            if (auto* controller = _sessionManager.controllerFor(*window))
+                controller->showHostingNotice(QString::fromStdString(_hostingNotice));
+
+    // The hotkey the desktop refused while the app started, which no window existed to be told of.
+    announceQuickTerminalHotkeyProblem();
+
+    // Attach mode adopts the remaining remote sessions as tabs now that a
+    // window exists to put them in.
+    if (_onGuiBooted)
+        _onGuiBooted();
+
+    if (_latencyProbeRequest)
+        armLatencyProbe();
+    return {};
+}
+
+void ContourGuiApp::waitForAttach(remote::StartupAttachSteps steps)
+{
+    // The stand-in window closing between two prompts must not end the app: no terminal window exists yet.
+    QGuiApplication::setQuitOnLastWindowClosed(false);
+    _startupAttach = std::make_unique<remote::StartupAttach>(std::move(steps));
+    _startupAttach->start();
+}
+
+void ContourGuiApp::startAttachWait()
+{
+    Require(_startupAttachPlan.has_value());
+    auto const plan = *_startupAttachPlan;
+    // The event loop runs while the attach goes on, so a queued destroyEndedLinks() can run in it: it must
+    // leave the link that is being waited for alone.
+    _awaitedLinkId = plan.link;
+    waitForAttach(remote::StartupAttachSteps {
+        .look = [this, plan]() -> std::optional<std::expected<void, std::string>> {
+            auto* const link = daemonLink(plan.link);
+            if (link == nullptr)
+                return std::unexpected(std::string { "the attach was given up" });
+            return pollNativeAttach(*link, plan.budget);
+        },
+        .untilDeadline = [this, plan]() -> std::optional<std::chrono::milliseconds> {
+            auto* const link = daemonLink(plan.link);
+            auto* const controller = link != nullptr ? link->liveController() : nullptr;
+            return controller != nullptr ? controller->untilAttachDeadline(plan.budget) : std::nullopt;
+        },
+        .openFirstWindow =
+            [this](std::expected<void, std::string> attached) -> std::expected<void, std::string> {
+            _startupAttachPlan.reset();
+            // Once it is over, a link that ended meanwhile is let go of, by a call of its own: not here, as
+            // the first window goes on to use the link it waited for.
+            _awaitedLinkId.reset();
+            QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
+            if (auto const settled = settleHosting(attached); !settled)
+                return settled;
+            auto booted = bootFirstWindow();
+            if (booted)
+                QGuiApplication::setQuitOnLastWindowClosed(true);
+            return booted;
+        },
+        .end =
+            [this](std::string const& reason, int exitCode) {
+                // As a launch that cannot attach has always ended: its reason on stderr, and a failure
+                // status.
+                cerr << reason << '\n';
+                _startupExitCode = exitCode;
+                _exitEventLoop(exitCode);
+            },
+    });
+    // What the attach has to say comes from the reactor: looked at again on each piece of news.
+    if (auto* const link = daemonLink(plan.link); link != nullptr && link->liveController() != nullptr)
+        connect(link->liveController(),
+                &remote::NativeController::attachProgressed,
+                _startupAttach.get(),
+                &remote::StartupAttach::progressed);
+}
+
 std::expected<void, std::string> ContourGuiApp::openFirstWindow()
 {
     // Ask where the sessions should live first, or open the window at once.
@@ -3868,8 +3995,11 @@ std::function<std::expected<void, std::string>()> ContourGuiApp::prepareCheck(
     auto const& saved = _config.hosts.value();
     auto const found = saved.find(target.name);
     auto opened = found != saved.end()
-                      ? transportOf(target.name, found->second)
-                      : openHost(core::platform::normalizePath(_config.configFile), target.name);
+                      ? transportOf(target.name, found->second, askpass::AnyWindow, SshPromptPolicy::Batch)
+                      : openHost(core::platform::normalizePath(_config.configFile),
+                                 target.name,
+                                 askpass::AnyWindow,
+                                 SshPromptPolicy::Batch);
     if (!opened)
         return [reason = opened.error()]() -> std::expected<void, std::string> {
             return std::unexpected { reason };

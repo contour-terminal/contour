@@ -434,6 +434,12 @@ TEST_CASE("every ssh failure has a message naming the host", "[vthost][ssh]")
         vthost::sshTransportError(SshFailure::HostKeyChanged,
                                   { .target = { .user = "", .host = "homepc", .port = 2222 }, .detail = "x" })
             .message.contains("ssh-keygen -R '[homepc]:2222'"));
+    // Its own kind: not the unknown key a user may accept, which a check reads as reachable.
+    CHECK(
+        vthost::sshTransportError(SshFailure::HostKeyChanged,
+                                  { .target = { .user = "", .host = "homepc", .port = 2222 }, .detail = "x" })
+            .kind
+        == vthost::TransportErrorKind::HostKeyChanged);
 }
 
 TEST_CASE("sshArguments in askpass mode drops batch mode", "[vthost][ssh]")
@@ -1085,4 +1091,12 @@ TEST_CASE("a real ssh to a port nobody serves reads as an unreachable host", "[v
     CHECK(connection.error().kind == TransportErrorKind::Unreachable);
     CHECK(connection.error().message.starts_with("ssh could not reach ssh://127.0.0.1:1: "));
     CHECK(connection.error().message.contains("Connection refused"));
+}
+
+TEST_CASE("an ssh transport may prompt exactly when it has a broker", "[vthost][ssh][askpass]")
+{
+    auto fixture = SshFixture {};
+    CHECK_FALSE(fixture.factory().mayPrompt());
+    fixture.broker = std::make_shared<FakeAskpassBroker>();
+    CHECK(fixture.factory().mayPrompt());
 }

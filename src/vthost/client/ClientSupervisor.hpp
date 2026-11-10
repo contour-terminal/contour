@@ -72,6 +72,17 @@ using ClientFactory = std::function<std::unique_ptr<NativeClient>(std::unique_pt
 /// Refused.
 using StateHandler = std::function<void(ConnectionState state, std::string const& reason)>;
 
+/// Holds a reconnect of a transport that may prompt (ITransportFactory::mayPrompt) until someone can see the
+/// prompt.
+struct AttentionGate
+{
+    /// Whether a window of the user's is exposed. Called on the loop's thread, so it must be safe to call
+    /// from there. Empty: nobody is waited for.
+    std::function<bool()> isAttended;
+    /// How often a held reconnect asks again.
+    std::chrono::milliseconds poll { 250 };
+};
+
 /// Runs one native connection after another: the first with the caller's intent, every later one resuming
 /// the workspaces the connection before it followed -- or, for a client that attached with AllWorkspaces,
 /// following every workspace again.
@@ -84,12 +95,14 @@ class ClientSupervisor
     /// @param firstIntent What the first connection asks to follow.
     /// @param backoff How long to wait before each reconnect attempt.
     /// @param onState Told every state change.
+    /// @param gate Holds a reconnect of a transport that may prompt until a window is exposed.
     ClientSupervisor(core::net::EventLoop& loop,
                      std::shared_ptr<ITransportFactory> transport,
                      ClientFactory makeClient,
                      proto::AttachIntent firstIntent,
                      BackoffSchedule backoff,
-                     StateHandler onState);
+                     StateHandler onState,
+                     AttentionGate gate = {});
 
     /// Connects, serves, and reconnects until a connection fails for good or stop() is called.
     [[nodiscard]] core::async::Task<void> run();
@@ -176,6 +189,10 @@ class ClientSupervisor
     /// Installs a fresh retry source: a retryNow() before it no longer counts.
     void resetRetry();
 
+    /// Returns once the next reconnect attempt may be made: at once unless the transport may prompt and
+    /// nobody is looking; else when someone is, or stop() was called. Says NeedsAttention while it holds.
+    [[nodiscard]] core::async::Task<void> untilAttended();
+
     /// Starts the UpgradeHold: the transport starts no daemon until it ends.
     void beginUpgradeHold();
 
@@ -192,6 +209,7 @@ class ClientSupervisor
     proto::AttachIntent _firstIntent;
     BackoffSchedule _backoff;
     StateHandler _onState;
+    AttentionGate _gate;
     core::async::StopSource _stop;
     /// Guards @ref _retry, which retryNow() reaches from any thread.
     std::mutex _retryMutex;

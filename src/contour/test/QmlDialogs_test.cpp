@@ -3,6 +3,7 @@
 // QML component tests, continued: the permission dialog, dialogs on the display, secure input, the
 // Settings kit controls and the shell integration card.
 
+#include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -14,7 +15,9 @@
 #include <contour/test/QmlComponentsTestSupport.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/window/BootstrapPrompt.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -2871,3 +2874,369 @@ TEST_CASE("shell integration card: every ink reads at 4.5:1 on every row, scheme
         CHECK(contrastOf(colorOf(label), over(wash, buttonFill)) >= 3.0);
     }
 }
+
+// {{{ The ssh login dialog
+namespace
+{
+
+using contour::askpass::AskpassOutcome;
+using contour::askpass::AskpassPromptKind;
+using contour::askpass::AskpassReply;
+using contour::askpass::AskpassRouteId;
+
+/// Hosts AskpassDialog.qml in a Window with Main.qml's wiring, verbatim: the host's pendingPrompt is
+/// presented, and an answer goes back to the host naming the prompt it answers.
+struct AskpassHost
+{
+    /// What the broker side was told, in order. First, so it outlives the host: ending a window cancels what
+    /// is open in it.
+    std::vector<AskpassReply> replies;
+    QQmlEngine engine;
+    std::shared_ptr<contour::askpass::AskpassPromptRouter> router =
+        std::make_shared<contour::askpass::AskpassPromptRouter>();
+    contour::window::PromptHost promptHost { router, contour::askpass::AnyWindow };
+    std::unique_ptr<QObject> window;
+    QObject* dialog = nullptr;
+
+    AskpassHost()
+    {
+        contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+        engine.rootContext()->setContextProperty("promptHost", &promptHost);
+        auto component = QQmlComponent { &engine };
+        component.setData(
+            QByteArrayLiteral(
+                "import QtQuick\n"
+                "import QtQuick.Window\n"
+                "import Contour.Ui\n"
+                "Window {\n"
+                "  id: host\n"
+                "  width: 800; height: 600; visible: true\n"
+                "  property alias askpassDialogItem: dialogItem\n"
+                "  AskpassDialog {\n"
+                "    id: dialogItem\n"
+                "    prompt: ({})\n"
+                "    onAnswered: (promptId, outcome, answer) => promptHost.answerPrompt(promptId, outcome, "
+                "answer)\n"
+                "  }\n"
+                "  Connections {\n"
+                "    target: promptHost\n"
+                "    function onPendingPromptChanged() { dialogItem.present(promptHost.pendingPrompt) }\n"
+                "  }\n"
+                "}\n"),
+            QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/AskpassTestHost.qml")));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        INFO("AskpassTestHost errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        window.reset(component.create());
+        REQUIRE(window != nullptr);
+        dialog = window->property("askpassDialogItem").value<QObject*>();
+        REQUIRE(dialog != nullptr);
+    }
+
+    /// The broker's side asks.
+    void ask(contour::askpass::AskpassPromptId id, AskpassPromptKind kind, QString prompt)
+    {
+        router->ask(contour::askpass::AnyWindow,
+                    id,
+                    kind,
+                    QStringLiteral("ssh://me@host"),
+                    std::move(prompt),
+                    [this](AskpassReply reply) { replies.push_back(std::move(reply)); });
+        QCoreApplication::processEvents();
+    }
+
+    [[nodiscard]] bool opened() const { return dialog->property("opened").toBool(); }
+    [[nodiscard]] bool waitOpened(bool open) const
+    {
+        return QTest::qWaitFor(
+            [&] { return dialog->property("visible").toBool() == open && opened() == open; }, 2000);
+    }
+
+    [[nodiscard]] QQuickItem* part(QString const& name) const
+    {
+        auto const parts = dialogPartsNamed(*dialog, name);
+        REQUIRE(parts.size() == 1);
+        return parts.front();
+    }
+
+    void click(QString const& name) const
+    {
+        REQUIRE(QMetaObject::invokeMethod(part(name), "clicked"));
+        QCoreApplication::processEvents();
+    }
+};
+
+} // namespace
+
+TEST_CASE("AskpassDialog: a password is typed into a masked field and cleared once answered (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto host = AskpassHost {};
+    host.ask(1, AskpassPromptKind::Secret, QStringLiteral("me@host's password: "));
+    REQUIRE(host.waitOpened(true));
+
+    auto* const field = host.part(QStringLiteral("askpassSecret"));
+    CHECK(field->isVisible());
+    // TextInput.Password: what is typed is never shown.
+    CHECK(field->property("echoMode").toInt() == 2);
+    CHECK(host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "OK");
+    CHECK(host.part(QStringLiteral("kitDialogReject"))->property("text").toString() == "Cancel");
+    CHECK(host.dialog->property("heading").toString().contains("ssh://me@host"));
+    // Secrets are not selectable text: no verbatim block for a password.
+    CHECK_FALSE(host.part(QStringLiteral("askpassVerbatimScroll"))->isVisible());
+
+    // The dialog reads ssh's words aloud, and never the field.
+    CHECK(accessibleNameOf(*field) == "Password or passphrase");
+    CHECK(host.dialog->property("description").toString() == "me@host's password:");
+
+    field->setProperty("text", QStringLiteral("hunter2"));
+    host.click(QStringLiteral("kitDialogAccept"));
+    REQUIRE(host.replies.size() == 1);
+    CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
+    CHECK(host.replies.front().answer == "hunter2");
+    REQUIRE(host.waitOpened(false));
+    CHECK(field->property("text").toString().isEmpty());
+    CHECK(host.promptHost.pendingPrompt().isEmpty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("AskpassDialog: Cancel and Escape give no answer, and clear the field (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    auto host = AskpassHost {};
+
+    SECTION("Cancel")
+    {
+        host.ask(1, AskpassPromptKind::Secret, QStringLiteral("Enter passphrase for key: "));
+        REQUIRE(host.waitOpened(true));
+        host.part(QStringLiteral("askpassSecret"))->setProperty("text", QStringLiteral("typed"));
+        host.click(QStringLiteral("kitDialogReject"));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+        CHECK(host.replies.front().answer.empty());
+        REQUIRE(host.waitOpened(false));
+        CHECK(host.part(QStringLiteral("askpassSecret"))->property("text").toString().isEmpty());
+    }
+
+    SECTION("Escape")
+    {
+        host.ask(1, AskpassPromptKind::Secret, QStringLiteral("Password: "));
+        REQUIRE(host.waitOpened(true));
+        host.part(QStringLiteral("askpassSecret"))->setProperty("text", QStringLiteral("typed"));
+        QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Escape);
+        REQUIRE(host.waitOpened(false));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+        CHECK(host.part(QStringLiteral("askpassSecret"))->property("text").toString().isEmpty());
+    }
+
+    SECTION("a withdrawn prompt closes the dialog and answers nothing")
+    {
+        host.ask(1, AskpassPromptKind::Secret, QStringLiteral("Password: "));
+        REQUIRE(host.waitOpened(true));
+        host.part(QStringLiteral("askpassSecret"))->setProperty("text", QStringLiteral("typed"));
+        host.router->withdraw(1);
+        REQUIRE(host.waitOpened(false));
+        CHECK(host.replies.empty());
+        CHECK(host.part(QStringLiteral("askpassSecret"))->property("text").toString().isEmpty());
+    }
+}
+
+TEST_CASE("AskpassDialog: a host key is shown verbatim, selectable, and defaults to No (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    auto const text =
+        QStringLiteral("The authenticity of host 'host (10.0.0.1)' can't be established.\n"
+                       "ED25519 key fingerprint is SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG.\n"
+                       "Are you sure you want to continue connecting (yes/no/[fingerprint])? ");
+    SECTION("No")
+    {
+        auto host = AskpassHost {};
+        host.ask(1, AskpassPromptKind::HostKey, text);
+        REQUIRE(host.waitOpened(true));
+        auto* const verbatim = host.part(QStringLiteral("askpassVerbatim"));
+        CHECK(verbatim->property("readOnly").toBool());
+        CHECK(verbatim->property("selectByMouse").toBool());
+        CHECK(verbatim->property("text").toString().contains(
+            "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"));
+        CHECK(verbatim->property("font").value<QFont>().family() == "monospace");
+        CHECK_FALSE(host.part(QStringLiteral("askpassSecret"))->isVisible());
+        // The default button, the one Enter takes, is No.
+        CHECK(host.dialog->property("defaultButton").toInt() == 1);
+        CHECK(host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "Yes");
+        CHECK(host.part(QStringLiteral("kitDialogReject"))->property("text").toString() == "No");
+        QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
+        REQUIRE(host.waitOpened(false));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
+        CHECK(host.replies.front().answer == "no");
+    }
+    SECTION("Yes")
+    {
+        auto host = AskpassHost {};
+        host.ask(1, AskpassPromptKind::HostKey, text);
+        REQUIRE(host.waitOpened(true));
+        host.click(QStringLiteral("kitDialogAccept"));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Answered);
+        CHECK(host.replies.front().answer == "yes");
+    }
+}
+
+TEST_CASE("AskpassDialog: a confirmation is Yes or No, and No cancels the login (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    auto host = AskpassHost {};
+    host.ask(1, AskpassPromptKind::Confirm, QStringLiteral("Allow use of key SHA256:abc?"));
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.part(QStringLiteral("askpassVerbatim"))
+              ->property("text")
+              .toString()
+              .contains("Allow use of key"));
+    CHECK(host.dialog->property("defaultButton").toInt() == 1);
+    host.click(QStringLiteral("kitDialogReject"));
+    REQUIRE(host.replies.size() == 1);
+    CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+}
+
+TEST_CASE("AskpassDialog: a notice has one button, Cancel, and goes when its helper does (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    auto host = AskpassHost {};
+
+    SECTION("Cancel abandons the login")
+    {
+        host.ask(1, AskpassPromptKind::Notice, QStringLiteral("Confirm user presence for key ED25519-SK"));
+        REQUIRE(host.waitOpened(true));
+        CHECK(host.part(QStringLiteral("kitDialogAccept"))->property("text").toString() == "Cancel");
+        CHECK_FALSE(host.part(QStringLiteral("kitDialogReject"))->isVisible());
+        CHECK_FALSE(host.part(QStringLiteral("askpassSecret"))->isVisible());
+        host.click(QStringLiteral("kitDialogAccept"));
+        REQUIRE(host.replies.size() == 1);
+        CHECK(host.replies.front().outcome == AskpassOutcome::Cancelled);
+    }
+
+    SECTION("withdraw takes it down")
+    {
+        host.ask(1, AskpassPromptKind::Notice, QStringLiteral("Confirm user presence for key ED25519-SK"));
+        REQUIRE(host.waitOpened(true));
+        host.router->withdraw(1);
+        REQUIRE(host.waitOpened(false));
+        CHECK(host.replies.empty());
+    }
+}
+
+TEST_CASE("AskpassDialog: the next prompt is shown once this one is answered (offscreen)",
+          "[contour][gui][qml][askpass]")
+{
+    auto host = AskpassHost {};
+    host.ask(1, AskpassPromptKind::Secret, QStringLiteral("Password: "));
+    host.ask(2, AskpassPromptKind::Secret, QStringLiteral("Verification code: "));
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.dialog->property("description").toString() == "Password:");
+
+    host.part(QStringLiteral("askpassSecret"))->setProperty("text", QStringLiteral("first"));
+    host.click(QStringLiteral("kitDialogAccept"));
+    REQUIRE(host.replies.size() == 1);
+    REQUIRE(QTest::qWaitFor(
+        [&] { return host.dialog->property("description").toString() == "Verification code:"; }, 2000));
+    REQUIRE(host.waitOpened(true));
+    // The field starts empty for the next prompt.
+    CHECK(host.part(QStringLiteral("askpassSecret"))->property("text").toString().isEmpty());
+    host.part(QStringLiteral("askpassSecret"))->setProperty("text", QStringLiteral("123456"));
+    host.click(QStringLiteral("kitDialogAccept"));
+    REQUIRE(host.replies.size() == 2);
+    CHECK(host.replies.back().answer == "123456");
+}
+// }}}
+
+// {{{ The stand-in window for ssh's prompts
+TEST_CASE(
+    "the stand-in window shows a prompt that no window can, and its close button cancels it (offscreen)",
+    "[contour][gui][qml][askpass][bootstrap]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto replies = std::vector<AskpassReply> {};
+    auto engine = QQmlEngine {};
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    auto router = std::shared_ptr<contour::askpass::AskpassPromptRouter> {};
+    auto prompt = std::unique_ptr<contour::window::BootstrapPrompt> {};
+    // The application's wiring: a prompt that has nowhere to wait in brings the stand-in up.
+    router = std::make_shared<contour::askpass::AskpassPromptRouter>(
+        [&] { prompt = contour::window::BootstrapPrompt::create(router, engine); });
+
+    router->ask(contour::askpass::AnyWindow,
+                1,
+                AskpassPromptKind::Secret,
+                QStringLiteral("ssh://me@host"),
+                QStringLiteral("Password: "),
+                [&replies](AskpassReply reply) { replies.push_back(std::move(reply)); });
+
+    REQUIRE(prompt != nullptr);
+    auto* const window = qobject_cast<QWindow*>(prompt->window());
+    REQUIRE(window != nullptr);
+    CHECK(QTest::qWaitFor([&] { return window->isVisible(); }, 2000));
+    CHECK(prompt->host().pendingPrompt().value("promptId").toInt() == 1);
+
+    // Its close button is Cancel, and the window goes once nothing is asked.
+    window->close();
+    QCoreApplication::processEvents();
+    REQUIRE(replies.size() == 1);
+    CHECK(replies.front().outcome == AskpassOutcome::Cancelled);
+    CHECK(QTest::qWaitFor([&] { return !window->isVisible(); }, 2000));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("once a window has a sink of its own the stand-in is left alone (offscreen)",
+          "[contour][gui][qml][askpass][bootstrap]")
+{
+    auto replies = std::vector<AskpassReply> {};
+    auto engine = QQmlEngine {};
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    auto router = std::make_shared<contour::askpass::AskpassPromptRouter>();
+    auto prompt = contour::window::BootstrapPrompt::create(router, engine);
+    REQUIRE(prompt != nullptr);
+    auto* const window = qobject_cast<QWindow*>(prompt->window());
+    REQUIRE(window != nullptr);
+    CHECK_FALSE(window->isVisible());
+
+    auto terminalWindow = contour::window::PromptHost { router, 4 };
+    router->ask(contour::askpass::AnyWindow,
+                2,
+                AskpassPromptKind::Secret,
+                QStringLiteral("ssh://me@host"),
+                QStringLiteral("Password: "),
+                [&replies](AskpassReply reply) { replies.push_back(std::move(reply)); });
+    QCoreApplication::processEvents();
+
+    CHECK(terminalWindow.pendingPrompt().value("promptId").toInt() == 2);
+    CHECK(prompt->host().pendingPrompt().isEmpty());
+    CHECK_FALSE(window->isVisible());
+}
+
+TEST_CASE("the stand-in's end cancels what it holds, so no prompt targets a sink that is gone (offscreen)",
+          "[contour][gui][qml][askpass][bootstrap]")
+{
+    auto replies = std::vector<AskpassReply> {};
+    auto engine = QQmlEngine {};
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    auto router = std::make_shared<contour::askpass::AskpassPromptRouter>();
+    auto prompt = contour::window::BootstrapPrompt::create(router, engine);
+    REQUIRE(prompt != nullptr);
+    router->ask(contour::askpass::AnyWindow,
+                3,
+                AskpassPromptKind::Secret,
+                QStringLiteral("ssh://me@host"),
+                QStringLiteral("Password: "),
+                [&replies](AskpassReply reply) { replies.push_back(std::move(reply)); });
+    REQUIRE(replies.empty());
+
+    prompt.reset();
+
+    REQUIRE(replies.size() == 1);
+    CHECK(replies.front().outcome == AskpassOutcome::Cancelled);
+    CHECK(router->attachedRoutes().empty());
+}
+// }}}

@@ -48,6 +48,7 @@ namespace
         { ControlErrorCode::Unsupported, "the daemon does not support this request" },
         { ControlErrorCode::Timeout, "the daemon did not answer in time" },
         { ControlErrorCode::Transport, "the connection to the daemon failed" },
+        { ControlErrorCode::LoginNeeded, "the login needs an answer from you" },
     });
 
     /// What a Control conversation is for.
@@ -90,6 +91,29 @@ namespace
         return outcome.stop == PumpStop::PeerClosed
                || (outcome.stop == PumpStop::TransportError && outcome.transportError
                    && outcome.transportError->code == core::net::NetErrorCode::ConnReset);
+    }
+
+    /// @return What a transport's failure is to a control caller: no daemon, a login that wants an answer, or
+    ///         any other failure of the connection.
+    [[nodiscard]] constexpr ControlErrorCode controlErrorCodeOf(TransportErrorKind kind) noexcept
+    {
+        switch (kind)
+        {
+            case TransportErrorKind::DaemonAbsent: return ControlErrorCode::NotRunning;
+            // The login would ask the user something a check may not: the host has answered.
+            case TransportErrorKind::AuthenticationRequired:
+            case TransportErrorKind::HostKeyUnknown: return ControlErrorCode::LoginNeeded;
+            // A changed key is no question to answer: it stays a failure, with its words.
+            case TransportErrorKind::HostKeyChanged:
+            case TransportErrorKind::Unreachable:
+            case TransportErrorKind::Refused:
+            case TransportErrorKind::RemoteProgramMissing:
+            case TransportErrorKind::ProgramNotFound:
+            case TransportErrorKind::Protocol:
+            case TransportErrorKind::Cancelled:
+            case TransportErrorKind::Misconfigured: break;
+        }
+        return ControlErrorCode::Transport;
     }
 
     [[nodiscard]] ControlError fail(ControlErrorCode code, std::string detail)
@@ -325,9 +349,7 @@ namespace
     {
         auto connection = co_await transport->connect(*loop);
         if (!connection)
-            co_return std::unexpected { fail(connection.error().kind == TransportErrorKind::DaemonAbsent
-                                                 ? ControlErrorCode::NotRunning
-                                                 : ControlErrorCode::Transport,
+            co_return std::unexpected { fail(controlErrorCodeOf(connection.error().kind),
                                              std::move(connection.error().message)) };
         co_return std::move((*connection)->socket);
     }

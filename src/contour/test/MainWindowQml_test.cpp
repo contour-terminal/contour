@@ -15,6 +15,7 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistory.hpp>
 #include <contour/command/Shortcut.hpp>
@@ -4836,4 +4837,51 @@ TEST_CASE("Main.qml takes every pane or tab dropped on it, and nothing else (off
     // The strip's old payload is gone: nothing writes it any more, so nothing takes it.
     CHECK_FALSE(dropOf(QStringLiteral("application/x-contour-tab")));
     CHECK_FALSE(dropOf(QStringLiteral("application/x-something-else")));
+}
+
+// Main.qml hosts one AskpassDialog per window on the window controller's prompt host.
+TEST_CASE("Main.qml shows the ssh prompts of its window and answers them (offscreen)",
+          "[contour][gui][qml][mainwindow][askpass]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    std::ignore = activeMainWindow(*root);
+
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("askpassDialog"));
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("opened").toBool());
+
+    auto answers = std::vector<contour::askpass::AskpassReply> {};
+    controller.promptRouter()->ask(
+        1,
+        7,
+        contour::askpass::AskpassPromptKind::Secret,
+        QStringLiteral("ssh://me@host"),
+        QStringLiteral("Password: "),
+        [&answers](contour::askpass::AskpassReply reply) { answers.push_back(std::move(reply)); });
+    waitForPopupOpened(*dialog);
+    // The field sits in the dialog's body, which has no QObject parent: found through the visual tree.
+    auto const findItem = [](QQuickItem* from, QString const& name, auto const& self) -> QQuickItem* {
+        if (from->objectName() == name)
+            return from;
+        for (auto* child: from->childItems())
+            if (auto* const found = self(child, name, self))
+                return found;
+        return nullptr;
+    };
+    auto* const content = dialog->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    auto* const field = findItem(content, QStringLiteral("askpassSecret"), findItem);
+    REQUIRE(field != nullptr);
+    field->setProperty("text", QStringLiteral("hunter2"));
+    REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
+    waitForPopupClosed(*dialog);
+
+    REQUIRE(answers.size() == 1);
+    CHECK(answers.front().outcome == contour::askpass::AskpassOutcome::Answered);
+    CHECK(answers.front().answer == "hunter2");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

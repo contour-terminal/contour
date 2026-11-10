@@ -220,7 +220,7 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
             links | std::views::transform([](auto const& link) { return link.get(); }));
     }
     [[nodiscard]] std::expected<DaemonLinkConfig, std::string> linkConfigFor(
-        DaemonAddress const& daemon) override
+        DaemonAddress const& daemon, vtworkspace::WorkspaceId /*window*/) override
     {
         if (daemon == unreachable())
             // Nothing listens on port 1.
@@ -422,7 +422,7 @@ struct SwitchRig
             host,
             app.manager()));
         window = std::make_unique<contour::test::ScopedController>(app.manager());
-        REQUIRE(launchLink().awaitAttached(10s).has_value());
+        REQUIRE(pollUntilAttached(launchLink(), 10s).has_value());
         REQUIRE(launchLink().bindPendingWindow(*window->controller)
                 == contour::remote::WindowAdoption::Adopted);
         REQUIRE(waitUntil([&] { return launchLink().workspaceOf(window->id) == aWorkspaces[0]; }));

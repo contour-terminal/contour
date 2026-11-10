@@ -91,13 +91,6 @@ enum class MuxConnectPhase : uint8_t
     Reconnecting, ///< It had been Ready, was lost, and is being sought again; Ready once it is back.
 };
 
-/// What a GUI-thread wait runs between its slices, so that the thread keeps serving what the connect needs it
-/// for: ssh's prompts are answered by a dialog on that thread. Empty: the wait only waits.
-using WaitPump = std::function<void()>;
-
-/// How long a pumped wait sleeps between two runs of its WaitPump.
-inline constexpr auto WaitPumpInterval = std::chrono::milliseconds { 20 };
-
 /// The result of `awaitMuxConnect`: exactly one of ready/timedOut holds, or
 /// neither (the phase reached Failed/Closed without a timeout).
 struct MuxConnectOutcome
@@ -115,16 +108,13 @@ struct MuxConnectOutcome
 /// @param cv Notified by the reactor on every phase transition.
 /// @param phase The controller's connection phase.
 /// @param failure The controller's failure reason (copied out when not Ready).
-/// @param timeout How long to wait before giving up. Counted in the waiting done here: what @p pump spends
-///        (a dialog the user takes minutes over) is not part of it.
-/// @param pump Run between slices of WaitPumpInterval, with the lock released; empty: one wait of @p timeout.
+/// @param timeout How long to wait before giving up.
 /// @return The outcome; see @c MuxConnectOutcome.
 [[nodiscard]] MuxConnectOutcome awaitMuxConnect(std::mutex& mutex,
                                                 std::condition_variable& cv,
                                                 MuxConnectPhase const& phase,
                                                 std::string const& failure,
-                                                std::chrono::milliseconds timeout,
-                                                WaitPump const& pump = {});
+                                                std::chrono::milliseconds timeout);
 
 /// The dead-end pty a controller hands out when a session must be created but
 /// none is pending (the creation guards should have prevented this). Sized to
@@ -217,6 +207,26 @@ class RemoteController
     /// @return Nothing on success; a human-readable reason on failure.
     [[nodiscard]] std::expected<void, std::string> awaitConnected(vthost::AttachBudget budget);
 
+    /// The non-blocking form of awaitConnected(): looks at where the attach stands and returns at once, so
+    /// the caller's event loop goes on serving whatever the connect needs it for (ssh's prompts are answered
+    /// in a window on that thread). Starts the connect if startConnecting() has not. Counts the budget as
+    /// awaitConnected() does, the first call being the earliest the caller could have started waiting.
+    /// On expiry it stops, as awaitConnected() does.
+    /// @param budget How long the attach may take (@see vthost::AttachBudget).
+    /// @return Nothing while the attach is still going; else what awaitConnected() would return.
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollConnected(vthost::AttachBudget budget);
+
+    /// @param budget As for pollConnected().
+    /// @return How long from now until pollConnected() would give the attach up, or none while that is not
+    ///         known yet (no connect bound, and the transport has not returned its connection). The caller
+    ///         arms a timer for it and looks again on the controller's own progress signals meanwhile.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> untilAttachDeadline(vthost::AttachBudget budget);
+
+  private:
+    /// @return When pollConnected() gives the attach up; none while not known yet.
+    [[nodiscard]] std::optional<core::platform::SteadyTimePoint> attachDeadline(vthost::AttachBudget budget);
+
+  public:
     /// startConnecting(), then awaitConnected(): for a caller with nothing to do meanwhile.
     /// @param timeout How long to wait before giving up.
     /// @return Nothing on success; a human-readable reason on failure.
@@ -252,11 +262,9 @@ class RemoteController
     ///        Borrowed: it must outlive the controller.
     /// @param detachBound How long a stop lets a detached client end its connection in order before it
     ///        cancels the loop.
-    /// @param waitPump Run while awaitConnected() waits; @see WaitPump.
     explicit RemoteController(core::platform::IClock const& clock,
-                              std::chrono::milliseconds detachBound = DefaultDetachBound,
-                              WaitPump waitPump = {}):
-        _clock(clock), _waitPump(std::move(waitPump)), _detachBound(detachBound)
+                              std::chrono::milliseconds detachBound = DefaultDetachBound):
+        _clock(clock), _detachBound(detachBound)
     {
     }
     ~RemoteController() = default;
@@ -304,13 +312,18 @@ class RemoteController
     [[nodiscard]] bool isConnected() const;
 
     using State = MuxConnectPhase;
+    /// Told on the reactor thread, after the connection phase settled or the transport returned its
+    /// connection: whoever polls the attach (pollConnected()) has something new to look at. Does nothing by
+    /// default.
+    virtual void notePhaseChange() {}
+
     /// Records that the transport has handed out its connection, so that the handshake bound of an
     /// AttachBudget runs from now. Called on the reactor thread, each time a connection is made.
     void noteTransportReturned();
 
     core::platform::IClock const& _clock;
-    /// Run between the slices of awaitConnected()'s wait.
-    WaitPump _waitPump;
+    /// When pollConnected() was first called; empty until it was. GUI thread only.
+    std::optional<core::platform::SteadyTimePoint> _pollStartedAt;
     /// When startConnecting() started the connect; empty until it has. GUI thread only.
     std::optional<core::platform::SteadyTimePoint> _connectStartedAt;
     ReactorThread _reactor;

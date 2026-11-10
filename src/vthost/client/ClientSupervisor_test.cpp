@@ -73,6 +73,10 @@ class ScriptedTransport final: public vthost::ITransportFactory
 
     [[nodiscard]] std::string describe() const override { return "scripted:"; }
     [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return vthost::PeerTrust::Local; }
+    [[nodiscard]] bool mayPrompt() const noexcept override { return prompts; }
+
+    /// Whether the transport may put a prompt in front of the user.
+    bool prompts = false;
 
     /// @return How many attempts were made.
     [[nodiscard]] std::size_t calls() const noexcept { return _calls; }
@@ -201,9 +205,11 @@ struct Supervised
                BackoffSchedule backoff = { .first = 1ms, .ceiling = 4ms },
                proto::AttachIntent firstIntent = { .kind = proto::AttachIntentKind::Launch,
                                                    .workspaces = {} },
-               vthost::client::LivenessPolicy liveness = {}):
+               vthost::client::LivenessPolicy liveness = {},
+               vthost::client::AttentionGate gate = {}):
         loop(daemon.loop), transport(std::make_shared<ScriptedTransport>(std::move(steps)))
     {
+        transport->prompts = static_cast<bool>(gate.isAttended);
         supervisor.emplace(
             loop,
             transport,
@@ -229,7 +235,8 @@ struct Supervised
             backoff,
             [this](ConnectionState state, std::string const& reason) {
                 states.push_back(Entered { .state = state, .reason = reason });
-            });
+            },
+            std::move(gate));
     }
 
     core::net::EventLoop& loop;
@@ -291,6 +298,42 @@ TEST_CASE("a first connect that fails ends Failed without retrying", "[vthost][r
     CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
     CHECK(h.states.back().reason == "no such file");
     CHECK(h.transport->calls() == 1);
+}
+
+TEST_CASE("a first connect the user cancels ends Failed, saying so", "[vthost][reconnect]")
+{
+    // A dismissed login prompt: the transport's Cancelled, with stop() never called.
+    auto daemon = Daemon {};
+    auto h =
+        Supervised { daemon, { failing(TransportErrorKind::Cancelled, "The ssh login was cancelled.") } };
+    daemon.loop.blockOn(h.supervisor->run());
+
+    CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
+    CHECK(h.states.back().reason == "The ssh login was cancelled.");
+    CHECK(h.transport->calls() == 1);
+}
+
+TEST_CASE("a reconnect the user cancels is not retried, and says so", "[vthost][reconnect]")
+{
+    auto daemon = Daemon {};
+    auto h = Supervised {
+        daemon, { daemon.serving(), failing(TransportErrorKind::Cancelled, "The ssh login was cancelled.") }
+    };
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        if (!connected)
+        {
+            h->supervisor->stop();
+            co_return;
+        }
+        daemon->dropConnection();
+        // The supervisor ends on its own, as nothing is left to retry.
+        co_await h->reached(ConnectionState::Refused);
+    }(&h, &daemon));
+
+    CHECK(h.states.back().state == ConnectionState::Refused);
+    CHECK(h.states.back().reason == "The ssh login was cancelled.");
+    CHECK(h.transport->calls() == 2);
 }
 
 TEST_CASE("a first connect the daemon refuses ends Failed", "[vthost][reconnect]")
@@ -795,4 +838,61 @@ TEST_CASE("after the hold, a still-absent daemon is started as before",
                            ConnectionState::Reconnecting,
                            ConnectionState::Connected });
     CHECK(h.states[3].reason.contains("did not come back from its upgrade"));
+}
+
+TEST_CASE("a reconnect that may prompt waits while nobody is looking", "[vthost][reconnect][attention]")
+{
+    auto daemon = Daemon {};
+    auto attended = std::make_shared<std::atomic<bool>>(false);
+    auto h = Supervised { daemon,
+                          { daemon.serving(), daemon.serving() },
+                          { .first = 1ms, .ceiling = 4ms },
+                          { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
+                          {},
+                          { .isAttended = [attended] { return attended->load(); }, .poll = 5ms } };
+    h.drive([](Supervised* h, Daemon* daemon, std::shared_ptr<std::atomic<bool>> attended) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
+        daemon->dropConnection();
+        auto const waiting = co_await h->reached(ConnectionState::NeedsAttention);
+        // Ends the supervisor before it asserts: a failed REQUIRE inside this coroutine would leave it
+        // running.
+        if (!waiting)
+        {
+            h->supervisor->stop();
+            CHECK(waiting);
+            co_return;
+        }
+        // Held: no attempt is made while nobody looks.
+        co_await core::net::testing::waitUntil(&h->loop, [] { return false; }, 60);
+        CHECK(h->transport->calls() == 1);
+        attended->store(true);
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
+        h->supervisor->stop();
+    }(&h, &daemon, attended));
+
+    CHECK(h.transport->calls() == 2);
+    CHECK(h.count(ConnectionState::NeedsAttention) == 1);
+    // Back to seeking once the window is exposed, before the attempt.
+    auto const seq = h.sequence();
+    auto const waiting = std::ranges::find(seq, ConnectionState::NeedsAttention);
+    REQUIRE(waiting != seq.end());
+    CHECK(*std::next(waiting) == ConnectionState::Reconnecting);
+}
+
+TEST_CASE("a reconnect that cannot prompt does not wait for anyone to look", "[vthost][reconnect][attention]")
+{
+    auto daemon = Daemon {};
+    auto h = Supervised { daemon, { daemon.serving(), daemon.serving() }, { .first = 1ms, .ceiling = 4ms } };
+    h.transport->prompts = false;
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
+        daemon->dropConnection();
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
+        h->supervisor->stop();
+    }(&h, &daemon));
+    CHECK(h.count(ConnectionState::NeedsAttention) == 0);
 }

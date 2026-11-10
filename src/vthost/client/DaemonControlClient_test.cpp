@@ -301,6 +301,59 @@ TEST_CASE("a connector that reports an absent daemon reads as not running", "[vt
     CHECK(port.stop(proto::StopReason::User).error().code == client::ControlErrorCode::NotRunning);
 }
 
+namespace
+{
+/// A transport whose every connect fails the way @p kind says.
+class FailingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit FailingTransport(vthost::TransportErrorKind kind): _kind(kind) {}
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& /*loop*/) override
+    {
+        return fail(_kind);
+    }
+
+    [[nodiscard]] std::string describe() const override { return "failing"; }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
+    {
+        return vthost::PeerTrust::Verified;
+    }
+
+  private:
+    vthost::TransportErrorKind _kind;
+
+  private:
+    /// The coroutine behind connect(); @p kind by value, as a coroutine's parameters must be.
+    [[nodiscard]] static core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    fail(vthost::TransportErrorKind kind)
+    {
+        co_return std::unexpected(vthost::TransportError { .kind = kind, .message = "ssh could not log in" });
+    }
+};
+} // namespace
+
+TEST_CASE("a login that wants an answer reads as LoginNeeded, any other failure as a transport error",
+          "[vthost][client][control]")
+{
+    using vthost::TransportErrorKind;
+    for (auto const kind: { TransportErrorKind::AuthenticationRequired, TransportErrorKind::HostKeyUnknown })
+    {
+        auto port = client::makeDaemonControl(std::make_shared<FailingTransport>(kind));
+        CHECK(port->status().error().code == client::ControlErrorCode::LoginNeeded);
+    }
+    auto port =
+        client::makeDaemonControl(std::make_shared<FailingTransport>(TransportErrorKind::Unreachable));
+    CHECK(port->status().error().code == client::ControlErrorCode::Transport);
+    // A changed host key is no question to answer: it is a failure, whose words say so.
+    auto changed =
+        client::makeDaemonControl(std::make_shared<FailingTransport>(TransportErrorKind::HostKeyChanged));
+    CHECK(changed->status().error().code == client::ControlErrorCode::Transport);
+}
+
 TEST_CASE("a wire status with an unknown lifecycle is not a status", "[vthost][client][control]")
 {
     CHECK(client::fromWire(proto::DaemonStatusReply { .lifecycle = 200 }) == std::nullopt);

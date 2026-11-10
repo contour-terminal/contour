@@ -90,7 +90,8 @@ class TestApp
              scriptedDragEndProbe(),
              nullptr,
              recordingWindowSwitching(),
-             fakeSwitchDirectory())
+             fakeSwitchDirectory(),
+             [this](int status) { _exitCodes.push_back(status); })
     {
         parseTerminalVerb();
     }
@@ -128,7 +129,8 @@ class TestApp
              scriptedDragEndProbe(),
              nullptr,
              recordingWindowSwitching(),
-             fakeSwitchDirectory())
+             fakeSwitchDirectory(),
+             [this](int status) { _exitCodes.push_back(status); })
     {
         parseTerminalVerb();
     }
@@ -183,7 +185,8 @@ class TestApp
              scriptedDragEndProbe(),
              nullptr,
              recordingWindowSwitching(),
-             fakeSwitchDirectory())
+             fakeSwitchDirectory(),
+             [this](int status) { _exitCodes.push_back(status); })
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -199,6 +202,9 @@ class TestApp
     TestApp& operator=(TestApp&&) = delete;
 
     [[nodiscard]] contour::ContourGuiApp& app() noexcept { return _app; }
+
+    /// @return The statuses the app ended its event loop with, in order; none while it is running.
+    [[nodiscard]] std::vector<int> const& exitCodes() const noexcept { return _exitCodes; }
     [[nodiscard]] contour::session::TerminalSessionManager& manager() noexcept
     {
         return _app.sessionsManager();
@@ -439,6 +445,8 @@ class TestApp
     /// The engine the app's Settings window is built on; see settingsWindowFactory(). Declared before _app,
     /// so the window the app owns goes before the engine it was built on.
     std::unique_ptr<QQmlEngine> _settingsEngine;
+    /// The statuses the app ended its event loop with; declared before _app, whose exit writes it.
+    std::vector<int> _exitCodes;
     contour::ContourGuiApp _app;
 };
 

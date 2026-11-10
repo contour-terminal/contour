@@ -1203,7 +1203,7 @@ TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's 
         CAPTURE(index);
         remote->setHostConnection(state);
         CHECK(remote->isReconnecting()
-              == (contour::window::hostChipStateOf(state) == contour::window::HostChipState::Reconnecting));
+              == contour::window::isSeekingConnection(contour::window::hostChipStateOf(state)));
     }
 }
 

@@ -91,6 +91,8 @@ namespace contour::window
 /// (TerminalSessionManager::hostIdentity).
 [[nodiscard]] QString const& processToken();
 
+class PromptHost;
+
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
 /// -- or re-targets -- another the user may still have open.
 enum class MenuSurface : uint8_t
@@ -214,6 +216,8 @@ class WindowController:
     // The window's own daemon's drift (window::DaemonDriftModel), which its drift badge shows; null for a
     // local window. Read anew whenever the window is bound to another host.
     Q_PROPERTY(QObject* daemonDrift READ daemonDrift NOTIFY hostLabelChanged)
+    // The window's host for ssh's login prompts (window::PromptHost), which its AskpassDialog shows.
+    Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
@@ -1053,6 +1057,8 @@ class WindowController:
     /// Read from QWindow::windowStates(), which the platform keeps current. (Wayland compositors do not
     /// report minimising, so there a minimised window reads as shown.)
     [[nodiscard]] bool isMinimized() const noexcept;
+    /// @return Whether the window is on screen for the user: shown, and not minimised.
+    [[nodiscard]] bool isExposed() const noexcept;
 
     /// The screen this window's OS window is on: where the Settings window opens when this window asks.
     /// @return The bound window's screen, or nullptr before a window is bound.
@@ -1230,6 +1236,9 @@ class WindowController:
     /// What this window's drift badge shows: whether the daemon of its own link runs another release.
     /// @return Its window::DaemonDriftModel; null for a local window.
     [[nodiscard]] QObject* daemonDrift() const;
+
+    /// @return The window's window::PromptHost: where the ssh logins this window started ask their questions.
+    [[nodiscard]] QObject* promptHost() const noexcept;
 
     /// What the host chip shows: the manager's host connection, folded onto the chip's three states.
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
@@ -1532,6 +1541,9 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WorkspaceId _windowId;
+    /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
+    /// window's whole life.
+    std::unique_ptr<PromptHost> _promptHost;
     std::vector<TabSpan> _tabSpans; ///< Where the strip's tabs are, as setTabSpans() last reported.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     WindowRole _role; ///< @see role

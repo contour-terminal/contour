@@ -46,12 +46,18 @@ struct QuickTerminalHost
     /// Told, on the GUI thread, that the quick terminal is off the screen for now (Hidden) or for good
     /// (Absent): the app may have nothing left to keep it running (ruling D1). Null where nobody asks.
     std::function<void()> onOffScreen {};
+    /// Told, on the GUI thread, after every change of the quick terminal's state, which decides whether its
+    /// window is on screen for the user. Null where nobody asks.
+    std::function<void()> onStateChanged {};
     /// Whether a chord belongs to the menu bar and so can never be the hotkey (R-f).
     std::function<bool(config::HotkeyChord const&)> isMenuOwned;
     /// The radius of the window's bottom corners in pixels (`radii.quickTerminal`); 0 leaves them square.
     std::function<int()> cornerRadius;
     /// Who places windows: a Wayland client cannot, so its quick terminal fades in place.
     PlacementControl placement = PlacementControl::Client;
+    /// Whether a press may show the quick terminal now: not while the launch still waits for its attach, when
+    /// no terminal window exists to take over from. Null: always.
+    std::function<bool()> isReady {};
 };
 
 /// The shape of a quick terminal window: its rectangle with the bottom corners rounded.

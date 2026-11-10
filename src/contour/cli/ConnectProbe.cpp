@@ -52,7 +52,10 @@ LocalDaemonState probeLocalDaemon(vthost::DaemonSpawner& spawner,
 std::expected<void, std::string> checkHostReachable(vthost::client::DaemonControlPort& port)
 {
     auto const status = port.status();
-    if (status || status.error().code == vthost::client::ControlErrorCode::Unsupported)
+    // Reachable: it answered, or its daemon is an old one, or ssh got as far as asking for a login the check
+    // may not answer. The window asks for that when it attaches, so the user types it once.
+    if (status || status.error().code == vthost::client::ControlErrorCode::Unsupported
+        || status.error().code == vthost::client::ControlErrorCode::LoginNeeded)
         return {};
     return std::unexpected { status.error().toString() };
 }
