@@ -610,9 +610,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     void paneUnbound();
 
     /// After a reconnect: daemon workspaces this client showed that the daemon no longer has for it -- it
-    /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread, ahead
-    /// of the layoutChanged() of the workspaces that came instead; connect queued).
-    /// @param daemonWorkspaces The lost workspaces' ids, as the lost connection named them.
+    /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread once the
+    /// layouts of the workspaces that came instead are settled (settledLayouts()), ahead of their
+    /// layoutChanged(); connect queued).
+    /// @param daemonWorkspaces The lost workspaces' ids, as the layouts the GUI last settled named them: the
+    ///        ids its windows are bound to, whichever connection pushed them.
     void workspacesLost(std::vector<uint64_t> daemonWorkspaces);
 
     /// The daemon says it restored its saved workspaces before this client attached, and how much came back
@@ -791,6 +793,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
     [[nodiscard]] bool layoutBatchShared() const;
+
+    /// Under _mutex: a layout of the connection up settled. Takes the reconnect's losses, which the GUI may
+    /// be told of now -- unless this connection has pushed no frame yet (a push that ended empty), when
+    /// nothing came instead and they wait.
+    /// @return The workspaces to announce lost (workspacesLost()); empty while they wait.
+    [[nodiscard]] std::vector<uint64_t> settle(std::lock_guard<std::mutex> const& held);
 
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
@@ -1026,9 +1034,30 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connection was up is dropped, never replayed into whatever shell answers after a reconnect.
     std::atomic<uint64_t> _inputConnection = 0;
     std::atomic<std::size_t> _droppedInputBytes = 0; ///< Since the connection was lost; for the log.
-    /// The workspaces the last reconnect lost, announced with the first layout that came instead. Under
-    /// _mutex.
+    /// The workspaces the last reconnect lost, announced as the first layout that came instead settles: with
+    /// that frame, or at the end of its push when the daemon batches them (onLayoutBatchEnd) -- never at the
+    /// end of a push with no frame in it. Under _mutex.
     std::vector<uint64_t> _lostWorkspaces;
+    /// How far the connection up has come in giving the GUI layouts. Under _mutex.
+    enum class ConnectionLayouts : uint8_t
+    {
+        Awaited =
+            0,    ///< No frame yet: a push it ended was empty, and nothing has come instead of what was lost.
+        Received, ///< Frames, none settled yet: the GUI still shows what an earlier connection settled.
+        Settled,  ///< Settled: the GUI shows _settledLayouts.
+    };
+    ConnectionLayouts _connectionLayouts = ConnectionLayouts::Awaited;
+    /// The workspaces the GUI's windows show, which a reconnect computes its losses against, and the run of
+    /// the daemon whose ids they are: the settled layouts of the last connection that settled any. Taken as a
+    /// connection that did is replaced (adoptReconnect()), and kept over one lost before anything it pushed
+    /// settled: that one showed the GUI nothing, and its frames may name another run's workspaces. Under
+    /// _mutex.
+    struct ShownWorkspaces
+    {
+        std::vector<uint64_t> ids;
+        uint64_t daemonInstance = 0; ///< 0 for unknown.
+    };
+    ShownWorkspaces _shownWorkspaces;
     /// What follow() and release() changed since the first connection: every later one resumes the
     /// workspaces followed since and not the ones released (makeClient()), and a layout of a released one
     /// is dropped. Forgotten for a restarted daemon, whose ids name other workspaces. Under _mutex.

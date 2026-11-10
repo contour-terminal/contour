@@ -4831,6 +4831,31 @@ struct NativeControllerTestAccess
         controller._reactor.post([] { throw std::runtime_error("reactor died"); });
     }
 
+    /// Makes the connection up one that has pushed no layout frame yet, its reconnect having lost @p lost,
+    /// and has the daemon end a push with no frame in it (one a move request alone caused).
+    static void endFramelessPushOfFreshConnection(contour::remote::NativeController& controller,
+                                                  std::vector<uint64_t> lost)
+    {
+        onReactor(controller, [&](auto& /*client*/) {
+            {
+                auto const lock = std::lock_guard { controller._mutex };
+                controller._connectionLayouts = NativeController::ConnectionLayouts::Awaited;
+                controller._lostWorkspaces = std::move(lost);
+            }
+            controller.onLayoutBatchEnd(vthost::proto::LayoutBatchEnd {});
+        });
+    }
+
+    /// Has the daemon push @p layout and end the push, on the reactor, as it would.
+    static void pushAndEnd(contour::remote::NativeController& controller,
+                           vthost::proto::LayoutState const& layout)
+    {
+        onReactor(controller, [&](auto& /*client*/) {
+            controller.onLayout(layout);
+            controller.onLayoutBatchEnd(vthost::proto::LayoutBatchEnd {});
+        });
+    }
+
     /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.
     static void closeWhileEnding(contour::remote::NativeController& controller, uint64_t session)
     {
@@ -5206,6 +5231,81 @@ TEST_CASE("workspaces the daemon no longer has are reported lost", "[attach][con
 
     controller.stop();
     pane.terminal.reset();
+}
+
+// The GUI reconciles the settled layouts as it is told of lost workspaces, to open the windows that came
+// instead before it closes the lost ones. Told with the first frame of a batched push, it found none settled
+// yet, closed a link's last window, and ended the link along with the workspaces it had just been given.
+TEST_CASE("workspaces lost to a restart are reported once what came instead has settled",
+          "[attach][controller][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("old run");
+    // Declared before the controller, which may announce on its reactor until it is destroyed.
+    auto mutex = std::mutex {};
+    auto settledAtAnnouncements = std::vector<std::size_t> {};
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    REQUIRE(controller.negotiated().has_value());
+    REQUIRE(controller.negotiated()->shared.contains(vthost::proto::Capability::LayoutBatch));
+
+    // Direct: it runs on the reactor as the loss is announced, before anything else the reactor does.
+    QObject::connect(&controller,
+                     &contour::remote::NativeController::workspacesLost,
+                     [&controller, &settledAtAnnouncements, &mutex](std::vector<uint64_t> const& /*lost*/) {
+                         auto const settled = controller.settledLayouts().size();
+                         auto const lock = std::lock_guard { mutex };
+                         settledAtAnnouncements.push_back(settled);
+                     });
+    auto const announcements = [&] {
+        auto const lock = std::lock_guard { mutex };
+        return settledAtAnnouncements;
+    };
+
+    daemon.restartHost();
+    REQUIRE(waitUntil([&] { return !announcements().empty(); }, 3000));
+    // The new run's workspaces: the Resume found nothing of the old run, and fell back to a launch.
+    REQUIRE(waitUntil([&] { return controller.settledLayouts().size() == 1; }, 3000));
+    auto const workspaces = daemon.onDaemon([&] { return daemon.host->model().workspaceCount(); });
+    REQUIRE(workspaces == 1);
+    // Told once, with every workspace that came instead settled -- the windows the GUI opens before it closes
+    // the lost one.
+    CHECK(announcements() == std::vector<std::size_t> { 1 });
+
+    controller.stop();
+}
+
+// A push the daemon ends with no frame in it -- one a move request alone caused -- settles nothing that came
+// instead of the lost workspaces: told of them then, the GUI would close their windows with none to show.
+TEST_CASE("workspaces lost to a reconnect wait out a push that ended with no frame",
+          "[attach][controller][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("shell");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    REQUIRE(controller.negotiated().has_value());
+    REQUIRE(controller.negotiated()->shared.contains(vthost::proto::Capability::LayoutBatch));
+    auto const layout = controller.layout();
+    REQUIRE(layout.has_value());
+
+    contour::remote::NativeControllerTestAccess::endFramelessPushOfFreshConnection(controller, { 42 });
+    CHECK(log.workspacesLost().empty());
+
+    // The first frame that comes instead, settled at the end of its push, tells them.
+    contour::remote::NativeControllerTestAccess::pushAndEnd(controller, *layout);
+    CHECK(log.workspacesLost() == std::vector<std::vector<uint64_t>> { { 42 } });
+
+    controller.stop();
 }
 
 TEST_CASE("a launching client still gets a new unclaimed workspace after a reconnect",
