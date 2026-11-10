@@ -28,6 +28,7 @@
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/DragEvents.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
@@ -1121,8 +1122,10 @@ TEST_CASE("a drop in a scrolled well lands under the pointer (offscreen)",
             return event.isAccepted();
         };
         auto const actions = Qt::MoveAction;
-        std::ignore = send(QDragEnterEvent { scene, actions, &mime, Qt::LeftButton, Qt::NoModifier });
-        return send(QDragMoveEvent { scene, actions, &mime, Qt::LeftButton, Qt::NoModifier });
+        std::ignore = send(QDragEnterEvent {
+            contour::test::dragPosition(scene), actions, &mime, Qt::LeftButton, Qt::NoModifier });
+        return send(QDragMoveEvent {
+            contour::test::dragPosition(scene), actions, &mime, Qt::LeftButton, Qt::NoModifier });
     };
     auto const dropAt = [&](QPoint scene) {
         auto drop = QDropEvent { QPointF { scene }, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
@@ -4766,9 +4769,13 @@ TEST_CASE("Main.qml takes every pane or tab dropped on it, and nothing else (off
     auto const dropOf = [&](QString const& format) {
         auto mime = QMimeData {};
         mime.setData(format, QByteArrayLiteral("{}"));
-        auto enter = QDragEnterEvent { at, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        auto enter = QDragEnterEvent {
+            contour::test::dragPosition(at), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier
+        };
         QCoreApplication::sendEvent(window, &enter);
-        auto move = QDragMoveEvent { at, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        auto move = QDragMoveEvent {
+            contour::test::dragPosition(at), Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier
+        };
         QCoreApplication::sendEvent(window, &move);
         auto drop = QDropEvent { QPointF { at }, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
         QCoreApplication::sendEvent(window, &drop);

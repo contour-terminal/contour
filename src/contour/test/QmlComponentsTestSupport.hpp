@@ -17,6 +17,7 @@
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
+#include <contour/test/DragEvents.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
@@ -1011,17 +1012,6 @@ struct DragSource
     explicit DragSource(QQuickWindow& target): window { target } {}
 
     static constexpr auto Actions = Qt::CopyAction | Qt::MoveAction;
-
-    /// Qt 6.12 gave the drag events QPointF constructors and deprecated the QPoint ones.
-    /// @return @p scene in the type the installed Qt's drag-event constructors take.
-    [[nodiscard]] static auto dragPosition(QPointF scene)
-    {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
-        return scene;
-#else
-        return scene.toPoint();
-#endif
-    }
 
     void enter(QPointF scene)
     {
