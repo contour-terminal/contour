@@ -139,7 +139,6 @@ class ConnectObservingFactory final: public ITransportFactory
 
     [[nodiscard]] std::string describe() const override { return _inner->describe(); }
     [[nodiscard]] PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
-    [[nodiscard]] bool mayPrompt() const noexcept override { return _inner->mayPrompt(); }
     void holdDaemonStart(core::platform::SteadyTimePoint until) override { _inner->holdDaemonStart(until); }
 
   private:

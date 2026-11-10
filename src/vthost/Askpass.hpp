@@ -37,6 +37,9 @@ class IAskpassSession
     /// Has @p wake called as soon as the user dismisses a prompt of this attempt, so that the transport ends
     /// ssh at once: left to its own devices ssh would ask again, or go on waiting for a key. Called at once,
     /// from here, if one was dismissed already. One handler per session; a later one replaces the earlier.
+    /// Until the session is destroyed the helper stays blocked on its prompt and no answer is written, so
+    /// that ssh cannot be handed an empty one: the owner must end its child first and then drop the session,
+    /// whose destruction is what lets the helper exit 1.
     /// @param wake Called from any thread, once at most.
     virtual void onCancelled(std::function<void()> wake) = 0;
 };

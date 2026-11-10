@@ -26,8 +26,8 @@ enum class ConnectionState : uint8_t
     /// The daemon announced it replaces itself in place (DaemonUpgrading) and closed the connection: the same
     /// daemon is waited for, and none is started meanwhile (ClientSupervisor's UpgradeHold).
     Upgrading = 6,
-    /// A reconnect that would ask the user something (an ssh login) is held until a window of theirs is
-    /// exposed; nothing is attempted meanwhile.
+    /// The reconnect goes on, but a prompt it raised waits for a window of the user's to be exposed; the
+    /// controller sets this itself (NativeController::setUserAttention), the supervisor never emits it.
     NeedsAttention = 7,
 };
 

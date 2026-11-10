@@ -1051,22 +1051,21 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
     else
         errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
     return remote::DaemonLinkConfig {
-        .controller =
-            remote::NativeController::Config {
-                .transport = std::move(transport),
-                .intent = std::move(intent),
-                .profileName = profileName(),
-                .workingDirectory = {},
-                .attachSettings = std::move(attachSettings),
-                .sessionSettings = [this] { return currentEmulationSettings(); },
+        .controller = remote::NativeController::Config {
+            .transport = std::move(transport),
+            .intent = std::move(intent),
+            .profileName = profileName(),
+            .workingDirectory = {},
+            .attachSettings = std::move(attachSettings),
+            .sessionSettings = [this] { return currentEmulationSettings(); },
             // Asked as each hello goes out: this config is built before the OS's scheme is read, and the
             // links a switch or a hand-over clone from it go on connecting long after.
             .colorPreference = [this] { return _shownColorPreference.load(); },
-                .clock = core::platform::defaultSteadyClock(),
-                .timeline = _startupTimeline,
-                .powerMonitor = _powerMonitor.get(),
-                .backoff = {},
-            },
+            .clock = core::platform::defaultSteadyClock(),
+            .timeline = _startupTimeline,
+            .powerMonitor = _powerMonitor.get(),
+            .backoff = {},
+        },
         .hostLabel = std::move(hostLabel),
         .locality = locality,
         .clientRelease = CONTOUR_VERSION_STRING,

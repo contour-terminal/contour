@@ -109,6 +109,31 @@ struct HelperRun
     return done.get();
 }
 
+/// What the helper of a cancelled prompt does: it stays blocked, no answer written, for as long as the
+/// session lives -- ssh must be ended first, or it would be handed an empty answer -- and exits 1 only once
+/// the session is destroyed.
+/// @param session The cancelled attempt's session; destroyed here.
+/// @param helpers The helpers that asked, each still blocked.
+/// @return What each helper did once the session was gone.
+[[nodiscard]] std::vector<HelperRun> endCancelled(std::unique_ptr<vthost::IAskpassSession>& session,
+                                                  std::vector<std::future<HelperRun>> helpers)
+{
+    auto const settle = std::chrono::steady_clock::now() + 300ms;
+    while (std::chrono::steady_clock::now() < settle)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    for (auto& helper: helpers)
+        CHECK(helper.wait_for(0ms) != std::future_status::ready);
+    session.reset();
+    auto runs = std::vector<HelperRun> {};
+    for (auto& helper: helpers)
+    {
+        while (helper.wait_for(0ms) != std::future_status::ready)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        runs.push_back(helper.get());
+    }
+    return runs;
+}
+
 /// Serves events until @p until holds, or fails after a few seconds.
 template <typename Until>
 void pumpUntil(Until const& until)
@@ -218,10 +243,13 @@ TEST_CASE("a cancelled prompt exits 1 and marks the session cancelled", "[askpas
     auto broker = AskpassBroker { sink, "/opt/contour/contour" };
     auto session = broker.open(targetOf());
     REQUIRE(session.has_value());
-    auto const run = runHelper(variablesOf(**session));
-    CHECK(run.exitCode == 1);
-    CHECK(run.out.empty());
-    CHECK((*session)->wasCancelled());
+    auto helper = std::vector<std::future<HelperRun>> {};
+    helper.push_back(startHelper(variablesOf(**session)));
+    pumpUntil([&] { return (*session)->wasCancelled(); });
+    auto const runs = endCancelled(*session, std::move(helper));
+    REQUIRE(runs.size() == 1);
+    CHECK(runs.front().exitCode == 1);
+    CHECK(runs.front().out.empty());
 }
 
 TEST_CASE(
@@ -238,23 +266,31 @@ TEST_CASE(
     auto woken = std::atomic<int> { 0 };
     (*session)->onCancelled([&woken] { ++woken; });
 
-    auto const first = runHelper(variablesOf(**session));
-    CHECK(first.exitCode == 1);
+    auto helpers = std::vector<std::future<HelperRun>> {};
+    helpers.push_back(startHelper(variablesOf(**session)));
     // The transport was told, from the broker's thread, as the user dismissed the prompt.
     pumpUntil([&] { return woken.load() == 1; });
     CHECK((*session)->wasCancelled());
 
-    // ssh asks again before it has been ended: nobody is asked, and the answer is no.
-    auto const second = runHelper(variablesOf(**session), "Password: ");
-    CHECK(second.exitCode == 1);
-    CHECK(second.out.empty());
-    CHECK(sink.asks.size() == 1);
+    // ssh asks again before it has been ended: nobody is asked, and it is held like the first.
+    helpers.push_back(startHelper(variablesOf(**session), "Password: "));
+    pumpUntil([&] { return (*session)->wasCancelled(); });
     CHECK(woken.load() == 1);
 
     // A transport that listens late is told at once.
     auto late = std::atomic<int> { 0 };
     (*session)->onCancelled([&late] { ++late; });
     CHECK(late.load() == 1);
+
+    // Neither helper has an answer until ssh is ended and the session dropped; then both see EOF and exit 1.
+    auto const runs = endCancelled(*session, std::move(helpers));
+    REQUIRE(runs.size() == 2);
+    CHECK(sink.asks.size() == 1);
+    for (auto const& run: runs)
+    {
+        CHECK(run.exitCode == 1);
+        CHECK(run.out.empty());
+    }
 }
 
 TEST_CASE("cancelling a notice, a security key's touch, ends the attempt", "[askpass][broker][cancel]")
@@ -274,17 +310,19 @@ TEST_CASE("cancelling a notice, a security key's touch, ends the attempt", "[ask
 
     // The notice's one button is Cancel.
     sink.held(AskpassReply { AskpassOutcome::Cancelled, {} });
-    while (helper.wait_for(0ms) != std::future_status::ready)
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-    CHECK(helper.get().exitCode == 1);
     pumpUntil([&] { return woken.load() == 1; });
     CHECK((*session)->wasCancelled());
+    auto helpers = std::vector<std::future<HelperRun>> {};
+    helpers.push_back(std::move(helper));
+    auto const runs = endCancelled(*session, std::move(helpers));
+    REQUIRE(runs.size() == 1);
+    CHECK(runs.front().exitCode == 1);
 }
 
 TEST_CASE("a window's Cancel on a notice ends the attempt, end to end", "[askpass][broker][cancel]")
 {
-    // The dialog's host takes the notice, its Cancel button is answerPrompt(Cancelled): the helper exits 1
-    // and the transport is woken.
+    // The dialog's host takes the notice, its Cancel button is answerPrompt(Cancelled): the transport is
+    // woken, and the helper exits 1 once the transport has dropped the session.
     auto router = std::make_shared<AskpassPromptRouter>();
     auto host = contour::window::PromptHost { router, 1 };
     auto const broker = std::make_shared<AskpassBroker>(router, QStringLiteral("/opt/contour/contour"));
@@ -299,11 +337,13 @@ TEST_CASE("a window's Cancel on a notice ends the attempt, end to end", "[askpas
 
     host.answerPrompt(
         host.pendingPrompt().value("promptId").toInt(), static_cast<int>(AskpassOutcome::Cancelled), {});
-    while (helper.wait_for(0ms) != std::future_status::ready)
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-    CHECK(helper.get().exitCode == 1);
     pumpUntil([&] { return woken.load() == 1; });
     CHECK((*session)->wasCancelled());
+    auto helpers = std::vector<std::future<HelperRun>> {};
+    helpers.push_back(std::move(helper));
+    auto const runs = endCancelled(*session, std::move(helpers));
+    REQUIRE(runs.size() == 1);
+    CHECK(runs.front().exitCode == 1);
 }
 
 TEST_CASE("a request with the wrong nonce is refused without a prompt", "[askpass][broker]")
@@ -648,8 +688,6 @@ TEST_CASE("a stop while the GUI thread serves no events does not hang on the bro
     CHECK(std::chrono::steady_clock::now() - started < 2s);
 }
 
-#endif
-
 TEST_CASE("each window's attach prompts in its own window", "[askpass][broker][route]")
 {
     auto router = std::make_shared<AskpassPromptRouter>();
@@ -715,11 +753,17 @@ TEST_CASE("a broker a transport kept alive past the windows neither crashes nor 
     router->detach(1);
     sink.reset();
 
-    // A helper that is still around is turned away without the sink being asked, and no new attach is given
-    // a session: ssh then runs without prompts.
-    auto const run = runHelper(variables);
-    CHECK(run.exitCode == 1);
-    CHECK(run.out.empty());
+    // A helper that is still around is cancelled without the sink being asked (and exits 1 once the session
+    // is dropped), and no new attach is given a session: ssh then runs without prompts.
+    auto helpers = std::vector<std::future<HelperRun>> {};
+    helpers.push_back(startHelper(variables));
+    pumpUntil([&] { return (*session)->wasCancelled(); });
+    auto const runs = endCancelled(*session, std::move(helpers));
+    REQUIRE(runs.size() == 1);
+    CHECK(runs.front().exitCode == 1);
+    CHECK(runs.front().out.empty());
     auto const later = broker->open(targetOf());
     CHECK_FALSE(later.has_value());
 }
+
+#endif

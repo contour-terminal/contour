@@ -10,16 +10,15 @@ void wipeStorage(std::string& text) noexcept
 {
     // Up to the capacity, which is within the allocation (or the small buffer) and so needs no growth.
     text.resize(text.capacity());
-    auto* const bytes = text.data();
-    for (auto index = std::size_t { 0 }; index < text.size(); ++index)
-        static_cast<char volatile*>(bytes)[index] = '\0';
+    for (auto& c: text)
+        static_cast<char volatile&>(c) = '\0';
     text.clear();
 }
 
 void wipeBytes(std::span<std::byte> bytes) noexcept
 {
-    for (auto index = std::size_t { 0 }; index < bytes.size(); ++index)
-        static_cast<std::byte volatile*>(bytes.data())[index] = std::byte { 0 };
+    for (auto& byte: bytes)
+        static_cast<std::byte volatile&>(byte) = std::byte { 0 };
 }
 
 void Secret::append(std::string_view more)

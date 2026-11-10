@@ -1729,7 +1729,7 @@ struct UpgradeRig
             contour::remote::DaemonLink::Id { 1 }, std::move(config), host, app.manager());
         if (reachability == Reachability::Reachable)
         {
-            REQUIRE(link->awaitAttached(10s).has_value());
+            REQUIRE(pollUntilAttached(*link, 10s).has_value());
             REQUIRE(link->bindPendingWindow(*window->controller) == contour::remote::WindowAdoption::Adopted);
         }
         else

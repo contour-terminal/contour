@@ -9,17 +9,29 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#ifndef _WIN32
+    #include <sys/types.h>
+
+    #include <unistd.h>
+#endif
 
 #include <vthost/SpawnEnvironment.hpp>
 #include <vthost/StderrTail.hpp>
@@ -208,6 +220,84 @@ TEST_CASE("terminate reaps a running child", "[vthost][spawn][stdio]")
     CHECK(child.process->exitCode(std::chrono::milliseconds { 0 }).has_value());
     child.process->terminate(); // idempotent
 }
+
+#ifndef _WIN32
+TEST_CASE("terminate ends the child's own children too", "[vthost][spawn][stdio]")
+{
+    // ssh with a ProxyJump runs the hop as a child of its own; it must not outlive the attempt.
+    auto fixture = SpawnFixture {};
+    auto const directory = std::filesystem::temp_directory_path()
+                           / std::format("contour-pgroup-test-{}", static_cast<long>(::getpid()));
+    std::filesystem::create_directories(directory);
+    auto const pidFile = directory / "grandchild.pid";
+    auto child =
+        fixture.spawn({ "/bin/sh", "-c", std::format("sleep 30 & echo $! > '{}'; wait", pidFile.string()) });
+    auto grandchild = pid_t { 0 };
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        if (auto in = std::ifstream { pidFile }; in >> grandchild && grandchild > 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    REQUIRE(grandchild > 0);
+    REQUIRE(::kill(grandchild, 0) == 0);
+
+    child.process->terminate();
+
+    // A killed grandchild is a zombie of init until reaped there; give that a moment.
+    auto gone = false;
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        gone = ::kill(grandchild, 0) != 0 && errno == ESRCH;
+        if (gone)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    CHECK(gone);
+    if (!gone)
+        ::kill(grandchild, SIGKILL);
+    std::filesystem::remove_all(directory);
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("terminate ends a child's own child that outlived it", "[vthost][spawn][stdio]")
+{
+    // The leader is gone before terminate(), its child is not: the group is still swept.
+    auto fixture = SpawnFixture {};
+    auto const directory = std::filesystem::temp_directory_path()
+                           / std::format("contour-pgroup-orphan-{}", static_cast<long>(::getpid()));
+    std::filesystem::create_directories(directory);
+    auto const pidFile = directory / "grandchild.pid";
+    auto child = fixture.spawn(
+        { "/bin/sh", "-c", std::format("sleep 30 >/dev/null 2>&1 & echo $! > '{}'", pidFile.string()) });
+    auto grandchild = pid_t { 0 };
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        if (auto in = std::ifstream { pidFile }; in >> grandchild && grandchild > 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    REQUIRE(grandchild > 0);
+    REQUIRE(child.process->exitCode(std::chrono::milliseconds { 5000 }).has_value()); // the leader ended
+    REQUIRE(::kill(grandchild, 0) == 0);
+
+    child.process->terminate();
+
+    auto gone = false;
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        gone = ::kill(grandchild, 0) != 0 && errno == ESRCH;
+        if (gone)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    CHECK(gone);
+    if (!gone)
+        ::kill(grandchild, SIGKILL);
+    std::filesystem::remove_all(directory);
+}
+#endif
 
 TEST_CASE("StderrTail keeps the last bytes up to its limit", "[vthost][spawn]")
 {

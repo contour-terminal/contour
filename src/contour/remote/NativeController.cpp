@@ -427,6 +427,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         switch (state)
         {
             case ConnectionState::Connecting: break;
+            case ConnectionState::NeedsAttention: break; // set above, by the controller itself
             case ConnectionState::Connected:
                 _client = _supervisor != nullptr ? _supervisor->current() : nullptr;
                 // Each connection's own: a reconnect can reach an upgraded or downgraded daemon.
@@ -463,7 +464,6 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 attachLog()("Attached to {}.", where);
                 break;
             case ConnectionState::Reconnecting:
-            case ConnectionState::NeedsAttention:
             case ConnectionState::Upgrading:
                 // An upgrade is a reconnect to the same daemon: adoptReconnect() keeps every binding then.
                 _client = nullptr;
@@ -472,14 +472,11 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
                     _state = State::Reconnecting;
-                if (state == ConnectionState::NeedsAttention)
-                    attachLog()("Reconnecting to {} waits until a window is exposed.", where);
-                else
-                    attachLog()("Lost the connection to {} ({}); {}.",
-                                where,
-                                reason,
-                                state == ConnectionState::Upgrading ? "waiting for it to come back"
-                                                                    : "reconnecting");
+                attachLog()("Lost the connection to {} ({}); {}.",
+                            where,
+                            reason,
+                            state == ConnectionState::Upgrading ? "waiting for it to come back"
+                                                                : "reconnecting");
                 break;
             case ConnectionState::Failed:
             case ConnectionState::Refused:

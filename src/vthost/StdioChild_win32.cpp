@@ -162,8 +162,10 @@ namespace
     class Win32StdioChild final: public IStdioChild
     {
       public:
-        Win32StdioChild(vtpty::UniqueHandle process, std::shared_ptr<StderrTail> tail):
-            _process { std::move(process) }, _tail { std::move(tail) }
+        Win32StdioChild(vtpty::UniqueHandle process,
+                        vtpty::UniqueHandle job,
+                        std::shared_ptr<StderrTail> tail):
+            _process { std::move(process) }, _job { std::move(job) }, _tail { std::move(tail) }
         {
         }
         ~Win32StdioChild() override { terminate(); }
@@ -189,12 +191,17 @@ namespace
         {
             if (WaitForSingleObject(_process.get(), 0) == WAIT_OBJECT_0)
                 return;
+            // The whole job: ssh's own children (a ProxyJump's hop asks the askpass endpoint itself) end
+            // with it. Closing the job's handle, in the destructor, ends whatever is left.
+            if (_job.valid())
+                TerminateJobObject(_job.get(), 1);
             TerminateProcess(_process.get(), 1);
             WaitForSingleObject(_process.get(), INFINITE);
         }
 
       private:
         vtpty::UniqueHandle _process;
+        vtpty::UniqueHandle _job; ///< Kills every process in it when closed; may be invalid.
         std::shared_ptr<StderrTail> _tail;
     };
 
@@ -288,15 +295,37 @@ namespace
                                 nullptr,
                                 nullptr,
                                 TRUE,
-                                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
                                 block ? block->data() : nullptr,
                                 nullptr,
                                 &startup,
                                 &info))
                 return std::unexpected { systemError(std::format("cannot start {}", *image),
                                                      GetLastError()) };
-            CloseHandle(info.hThread);
             auto process = vtpty::UniqueHandle { info.hProcess };
+            // A job that kills its processes when closed, so that no child of ssh outlives the attempt. The
+            // child runs only once it is in it; without a job it runs as it always did.
+            auto job = vtpty::UniqueHandle { CreateJobObjectW(nullptr, nullptr) };
+            if (job.valid())
+            {
+                auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if (!SetInformationJobObject(
+                        job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))
+                    || !AssignProcessToJobObject(job.get(), process.get()))
+                    job.reset();
+            }
+            auto const resumed = ResumeThread(info.hThread);
+            auto const resumeError = GetLastError();
+            CloseHandle(info.hThread);
+            if (resumed == static_cast<DWORD>(-1))
+            {
+                // Still suspended, and never to run: ended with everything in its job.
+                if (job.valid())
+                    TerminateJobObject(job.get(), 1);
+                TerminateProcess(process.get(), 1);
+                return std::unexpected { systemError(std::format("cannot start {}", *image), resumeError) };
+            }
             // The child holds its own copies now; the parent's would keep its streams from ever ending.
             stdinRead.reset();
             stdoutWrite.reset();
@@ -304,7 +333,8 @@ namespace
 
             auto tail = std::make_shared<StderrTail>(StderrTailLimit);
             drainInto(std::move(stderrRead), tail);
-            auto child = std::make_unique<Win32StdioChild>(std::move(process), std::move(tail));
+            auto child =
+                std::make_unique<Win32StdioChild>(std::move(process), std::move(job), std::move(tail));
 
             auto pair = makeLoopbackPair();
             if (!pair)

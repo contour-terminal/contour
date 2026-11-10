@@ -108,7 +108,11 @@ namespace
     {
         auto const handle = reinterpret_cast<HANDLE>(socket.socketDescriptor());
         auto name = std::array<wchar_t, 256> {};
-        return GetNamedPipeClientComputerNameW(handle, name.data(), static_cast<ULONG>(name.size())) != 0;
+        // Fails closed: only a pipe the system says is local is accepted. A remote client has a computer
+        // name; anything else that goes wrong is no proof of locality.
+        if (GetNamedPipeClientComputerNameW(handle, name.data(), static_cast<ULONG>(sizeof(name))) != 0)
+            return true;
+        return GetLastError() != ERROR_PIPE_LOCAL;
     }
 #endif
 
@@ -170,6 +174,9 @@ namespace
             Receiving = 0, ///< The request is still arriving.
             Asking,        ///< The sink has the prompt.
             Done,          ///< Answered, or refused.
+            Held, ///< Cancelled: no frame is written and the helper stays blocked, so that ssh cannot
+                  ///< be handed an empty answer before the transport has ended it; the session's
+                  ///< destruction closes the socket, and the helper exits 1 with ssh already gone.
         };
 
         struct Connection
@@ -322,13 +329,18 @@ namespace
             if (found == _connections.end() || found->second.phase != Phase::Asking)
                 return;
             auto& connection = found->second;
-            connection.phase = Phase::Done;
             auto const cancelled = reply.outcome == AskpassOutcome::Cancelled;
             askpassLog()("askpass: the prompt was {}", cancelled ? "cancelled" : "answered");
-            // A cancelled prompt carries no answer, whatever the sink put there.
             if (cancelled)
-                reply.answer.wipe();
-            closePrompt(cancelled ? PromptEnd::Cancelled : PromptEnd::Answered);
+            {
+                // Closing the prompt wakes the transport, which ends ssh and drops the session. Nothing is
+                // written meanwhile: a helper that exited now would let ssh read an empty password.
+                connection.phase = Phase::Held;
+                closePrompt(PromptEnd::Cancelled);
+                return;
+            }
+            connection.phase = Phase::Done;
+            closePrompt(PromptEnd::Answered);
             auto const frame = encode(reply);
             auto const bytes = frame.storage().first(frame.size());
             connection.socket->write(bytes.data(), static_cast<qint64>(bytes.size()));

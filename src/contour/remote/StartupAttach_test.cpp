@@ -158,9 +158,12 @@ TEST_CASE("ContourGuiApp: a check's transport never prompts, a launch's does", "
     REQUIRE(check.has_value());
     REQUIRE(attach.has_value());
     // The check runs ssh in batch mode, so it opens no askpass session and the user answers once, at the
-    // attach.
-    CHECK_FALSE(check->transport.factory->mayPrompt());
-    CHECK(attach->transport.factory->mayPrompt());
+    // attach. The transport's budget follows from that choice (the factory is built with a broker or not),
+    // and says it: a batch ssh has an outer clock for the connect, one that answers prompts has none, as
+    // its own deadline pauses while a prompt is open. The spawn environments themselves are pinned in
+    // SshTransport_test ("ssh spawns in batch mode exactly when it has no broker").
+    CHECK(check->transport.attach.connect.has_value());
+    CHECK_FALSE(attach->transport.attach.connect.has_value());
 }
 
 TEST_CASE("ContourGuiApp: while the launch waits for its attach a new window is refused, and Quit ends it "

@@ -104,8 +104,6 @@ void PromptHost::answerPrompt(int promptId, int outcome, QString const& answer)
             askpass::Secret { std::string_view { utf8.constData(), static_cast<std::size_t>(utf8.size()) } };
         utf8.fill('\0');
     }
-    // What the QString held, as far as this copy of it goes.
-    answer.fill(QChar { u'\0' });
     emit pendingPromptChanged();
     if (reply)
         reply(std::move(given));

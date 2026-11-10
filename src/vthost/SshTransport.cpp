@@ -272,11 +272,15 @@ std::vector<std::string> sshArguments(SshTarget const& target, SshPromptMode mod
     auto argv = std::vector<std::string> { "ssh", "-T" };
     switch (mode)
     {
-        case SshPromptMode::Batch: argv.insert(argv.end(), { "-o", "BatchMode=yes" }); break;
+        // Batch has no prompts, so ssh's own connect timer is the bound. With prompts it cannot be: it runs
+        // on while a prompt is open (a ProxyJump's login counts into it), so the transport's deadline, which
+        // pauses meanwhile, is the connect bound there.
+        case SshPromptMode::Batch:
+            argv.insert(argv.end(), { "-o", "BatchMode=yes", "-o", "ConnectTimeout=10" });
+            break;
         case SshPromptMode::Askpass: argv.insert(argv.end(), { "-o", "NumberOfPasswordPrompts=3" }); break;
     }
-    argv.insert(argv.end(),
-                { "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3" });
+    argv.insert(argv.end(), { "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3" });
     if (target.port)
     {
         argv.emplace_back("-p");

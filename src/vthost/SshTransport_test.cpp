@@ -466,7 +466,11 @@ TEST_CASE("sshArguments in askpass mode drops batch mode", "[vthost][ssh]")
     CHECK(std::ranges::contains(batch, "BatchMode=yes"));
     CHECK_FALSE(std::ranges::contains(askpass, "BatchMode=yes"));
     CHECK(std::ranges::contains(askpass, "NumberOfPasswordPrompts=3"));
-    CHECK(std::ranges::contains(askpass, "ConnectTimeout=10"));
+    // ssh's own connect timer keeps running while a prompt is open, a ProxyJump's login included, so only
+    // batch mode has it; with prompts the transport's pausable deadline bounds the connect.
+    CHECK(std::ranges::contains(batch, "ConnectTimeout=10"));
+    CHECK_FALSE(std::ranges::any_of(
+        askpass, [](std::string const& each) { return each.starts_with("ConnectTimeout"); }));
     CHECK(askpass.back() == "contour daemon --stdio");
 }
 
@@ -607,6 +611,37 @@ TEST_CASE("ssh connect passes the relay's error through", "[vthost][ssh]")
     CHECK(connection.error().kind == TransportErrorKind::Refused);
     CHECK(connection.error().message.contains("daemon did not start within 5 seconds."));
     CHECK(state->terminated == 1);
+}
+
+TEST_CASE("ssh spawns in batch mode exactly when it has no broker", "[vthost][ssh][askpass]")
+{
+    // Without a broker (a reachability check, which must never prompt): BatchMode, no askpass variables.
+    {
+        auto fixture = SshFixture {};
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReady }));
+        auto factory = fixture.factory();
+        REQUIRE(fixture.loop.blockOn(factory.connect(fixture.loop)).has_value());
+        REQUIRE(fixture.spawner->spawned.size() == 1);
+        CHECK(std::ranges::contains(fixture.spawner->spawned.front(), "BatchMode=yes"));
+        CHECK(std::ranges::contains(fixture.spawner->spawned.front(), "ConnectTimeout=10"));
+        CHECK(fixture.spawner->spawnedEnvironments.front().set.empty());
+    }
+    // With one (an attach): no BatchMode, and the askpass environment on the ssh spawn.
+    {
+        auto fixture = SshFixture {};
+        fixture.broker = std::make_shared<FakeAskpassBroker>();
+        fixture.prepareVersionProbe("OpenSSH_9.6p1 Ubuntu-3ubuntu13, OpenSSL 3.0.13 30 Jan 2024\n");
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReady }));
+        auto factory = fixture.factory();
+        REQUIRE(fixture.loop.blockOn(factory.connect(fixture.loop)).has_value());
+        REQUIRE(fixture.spawner->spawned.size() == 2);
+        CHECK_FALSE(std::ranges::contains(fixture.spawner->spawned[1], "BatchMode=yes"));
+        CHECK_FALSE(std::ranges::contains(fixture.spawner->spawned[1], "ConnectTimeout=10"));
+        REQUIRE(fixture.spawner->spawnedEnvironments[1].set.size() == 1);
+        CHECK(fixture.spawner->spawnedEnvironments[1].set.front().first == "SSH_ASKPASS_REQUIRE");
+    }
 }
 
 TEST_CASE("ssh connect refuses bytes after the preamble", "[vthost][ssh]")
@@ -1142,12 +1177,4 @@ TEST_CASE("a real ssh to a port nobody serves reads as an unreachable host", "[v
     CHECK(connection.error().kind == TransportErrorKind::Unreachable);
     CHECK(connection.error().message.starts_with("ssh could not reach ssh://127.0.0.1:1: "));
     CHECK(connection.error().message.contains("Connection refused"));
-}
-
-TEST_CASE("an ssh transport may prompt exactly when it has a broker", "[vthost][ssh][askpass]")
-{
-    auto fixture = SshFixture {};
-    CHECK_FALSE(fixture.factory().mayPrompt());
-    fixture.broker = std::make_shared<FakeAskpassBroker>();
-    CHECK(fixture.factory().mayPrompt());
 }

@@ -5892,7 +5892,7 @@ TEST_CASE("with prompts answered there is no connect clock, but a wedged handsha
         .workingDirectory = {},
         .attachSettings = std::nullopt,
         .sessionSettings = {},
-        .colorPreference = std::nullopt,
+        .colorPreference = {},
         .clock = core::platform::defaultSteadyClock(),
         .timeline = timeline.timeline,
         .powerMonitor = nullptr,
@@ -6270,7 +6270,6 @@ class PromptingTransport final: public vthost::ITransportFactory
 
     [[nodiscard]] std::string describe() const override { return _inner->describe(); }
     [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
-    [[nodiscard]] bool mayPrompt() const noexcept override { return true; }
 
     /// @return How many connections were asked for, each a prompt that could have opened.
     [[nodiscard]] int connects() const noexcept { return _connects; }
