@@ -72,6 +72,18 @@ enum class SpawnError : uint8_t
     ForkFailed,
     ExecutableUnusable,
     TooManyDescriptors,
+    ShuttingDown, ///< The daemon is ending (announced Shutdown, exited, killed); the keeper takes on nothing
+                  ///< new.
+};
+
+/// What a descriptor the keeper holds for a session is. A session holds each at most once.
+enum class KeptDescriptor : uint8_t
+{
+    Master = 0,     ///< The PTY master.
+    FastPipeReader, ///< The read end of the stdout fast pipe, so its writer never sees EPIPE.
+    Gate,           ///< The placement gate, until the session is Placed.
+    Settle,         ///< The settle descriptor.
+    ProcessHandle,  ///< The child's pidfd; minted by the keeper, never sent to it.
 };
 
 /// How a child ended, as the channel carries it.
@@ -123,6 +135,17 @@ struct EnumWire<vthost::keeper::SpawnError>
         vthost::keeper::SpawnError::ForkFailed,
         vthost::keeper::SpawnError::ExecutableUnusable,
         vthost::keeper::SpawnError::TooManyDescriptors,
+        vthost::keeper::SpawnError::ShuttingDown,
+    };
+};
+
+template <>
+struct EnumWire<vthost::keeper::KeptDescriptor>
+{
+    static constexpr auto Values = std::array {
+        vthost::keeper::KeptDescriptor::Master,        vthost::keeper::KeptDescriptor::FastPipeReader,
+        vthost::keeper::KeptDescriptor::Gate,          vthost::keeper::KeptDescriptor::Settle,
+        vthost::keeper::KeptDescriptor::ProcessHandle,
     };
 };
 
@@ -231,21 +254,24 @@ struct Serving
     [[nodiscard]] bool operator==(Serving const&) const = default;
 };
 
-/// Daemon to keeper: fork a child. The n-th received descriptor becomes child descriptor childFds[n].
+/// Daemon to keeper: fork a child. The n-th received descriptor becomes child descriptor childFds[n]; the
+/// kept.size() descriptors after those are not the child's but the keeper's to hold, kept[n] naming each.
 struct Spawn
 {
     /// How many descriptors this message carries at most.
-    static constexpr std::size_t MaxDescriptors = 8;
+    static constexpr std::size_t MaxDescriptors = 12;
     uint64_t request = 0;
     std::vector<std::string> argv;
     std::string executablePath;
     std::vector<uint32_t> childFds;
+    std::vector<KeptDescriptor> kept;
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.request);
         visitor(2, self.argv);
         visitor(3, self.executablePath);
         visitor(4, self.childFds);
+        visitor(5, self.kept);
     }
     [[nodiscard]] bool operator==(Spawn const&) const = default;
 };
@@ -380,7 +406,8 @@ struct InventoryListener
     [[nodiscard]] bool operator==(InventoryListener const&) const = default;
 };
 
-/// Keeper to daemon: one kept session. Carries master, fast-pipe reader, gate, settle and pidfd, as present.
+/// Keeper to daemon: one kept session. Carries master, fast-pipe reader, gate, settle and pidfd, as present;
+/// descriptors[n] names the n-th.
 struct InventorySession
 {
     /// How many descriptors this message carries at most.
@@ -389,12 +416,14 @@ struct InventorySession
     int64_t pid = 0;
     std::optional<WireExitStatus> exited;
     Placement placed = Placement::Placed;
+    std::vector<KeptDescriptor> descriptors;
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.session);
         visitor(2, self.pid);
         visitor(3, self.exited);
         visitor(4, self.placed);
+        visitor(5, self.descriptors);
     }
     [[nodiscard]] bool operator==(InventorySession const&) const = default;
 };

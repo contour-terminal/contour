@@ -28,7 +28,8 @@ std::vector<Message> samples()
         Spawn { .request = 7,
                 .argv = { "/bin/sh", "-l" },
                 .executablePath = "/bin/sh",
-                .childFds = { 0, 1, 2, 5 } },
+                .childFds = { 0, 1, 2, 5 },
+                .kept = { KeptDescriptor::Master, KeptDescriptor::Settle } },
         Spawned { .request = 7, .session = 42, .pid = 31'337 },
         SpawnFailed { .request = 8, .error = SpawnError::TooManyDescriptors },
         Placed { .session = 42 },
@@ -44,7 +45,8 @@ std::vector<Message> samples()
         InventorySession { .session = 5,
                            .pid = -1,
                            .exited = WireExitStatus { .kind = ExitKind::Normal, .value = -3 },
-                           .placed = Placement::Parked },
+                           .placed = Placement::Parked,
+                           .descriptors = { KeptDescriptor::Master, KeptDescriptor::ProcessHandle } },
         InventoryEnd {},
     };
 }

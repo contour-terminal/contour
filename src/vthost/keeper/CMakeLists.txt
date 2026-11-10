@@ -7,9 +7,15 @@ add_library(vthost_keeper STATIC
     Codec.hpp
     Frame.cpp
     Frame.hpp
+    Keeper.cpp
+    Keeper.hpp
     Messages.hpp
+    Ports.hpp
     RestartPolicy.cpp
     RestartPolicy.hpp
+    SessionTable.cpp
+    SessionTable.hpp
+    UniqueFd.hpp
 )
 target_include_directories(vthost_keeper PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -38,6 +44,10 @@ if(VTHOST_KEEPER_TESTING)
         Frame_test.cpp
         RestartPolicy_test.cpp
     )
+    if(NOT WIN32)
+        # The state machine's tests watch real pipes to see which descriptors the keeper closes.
+        target_sources(vthost_keeper_test PRIVATE Keeper_test.cpp)
+    endif()
     target_link_libraries(vthost_keeper_test vthost_keeper core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vthost_keeper_test COMMAND $<TARGET_FILE:vthost_keeper_test>)
     set_tests_properties(vthost_keeper_test PROPERTIES LABELS "daemon;keeper" TIMEOUT 300)
