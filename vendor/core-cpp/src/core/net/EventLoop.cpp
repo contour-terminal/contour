@@ -11,9 +11,11 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <new>
 #include <ranges>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace core::net
 {
@@ -147,6 +149,9 @@ EventLoop::~EventLoop()
     }
     _finishedRoots.clear();
     _roots.clear();
+    // The roots a throwing turn left `blockOn`, by the same rule: step 2 queued their parks as
+    // borrowed work and step 3 unwound them, so nothing names these frames any more.
+    _strandedRoots.clear();
 
     // ---- 6. Drain what destroying them queued, to a fixpoint. -----------------------------
     // A root that owned a socket or a listener closed it on the way out, and a BORROWED flow parked
@@ -1065,6 +1070,23 @@ void EventLoop::requestStop()
     // deadline of their own, which is exactly what `wake()` says.
     if (!isOnWorkerThread())
         _backend.wake();
+}
+
+void EventLoop::strandRoot(std::coroutine_handle<> root) noexcept
+{
+    // Finished ones first: their chains have unwound, so nothing names them, and a loop that keeps
+    // running after repeated throws holds at most the roots still unwinding.
+    std::erase_if(_strandedRoots, [](auto const& stranded) { return stranded.get().done(); });
+    try
+    {
+        _strandedRoots.emplace_back(root);
+    }
+    catch (std::bad_alloc const&)
+    {
+        // Leaked rather than freed: a park may still name a frame of this chain, and a leak report
+        // names the coroutine that parked where a use-after-free names nothing.
+        std::ignore = root;
+    }
 }
 
 void EventLoop::spawn(async::Task<void> task)

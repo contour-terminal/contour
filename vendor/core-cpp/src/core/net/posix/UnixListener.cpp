@@ -104,8 +104,20 @@ std::expected<void, NetError> ensureOwnedPrivateDirectory(std::filesystem::path 
     return {};
 }
 
-UnixListener::UnixListener(EventLoop& loop, int fd, std::filesystem::path path):
-    _loop(loop), _fd(fd), _path(std::move(path))
+std::optional<UnixListener::FileIdentity> UnixListener::identityOf(std::filesystem::path const& path) noexcept
+{
+    struct stat info {};
+    if (::lstat(path.c_str(), &info) != 0)
+        return std::nullopt;
+    return FileIdentity { .device = static_cast<std::uint64_t>(info.st_dev),
+                          .inode = static_cast<std::uint64_t>(info.st_ino) };
+}
+
+UnixListener::UnixListener(EventLoop& loop,
+                           int fd,
+                           std::filesystem::path path,
+                           std::optional<FileIdentity> file):
+    _loop(loop), _fd(fd), _path(std::move(path)), _file(file)
 {
 }
 
@@ -136,8 +148,14 @@ void UnixListener::closeWith(FdWakePolicy policy) noexcept
         ::close(_fd);
         _fd = -1;
     }
-    auto ec = std::error_code {};
-    std::filesystem::remove(_path, ec); // best effort; the path may already be gone
+    // Only while the path still names the file this listener bound. Once that file has been
+    // unlinked, the path is free for another listener to bind -- a restarted daemon, a replacement
+    // bound before this one closed -- and removing it by name would delete THAT socket, leaving its
+    // owner listening on a file no client can reach. The check and the unlink are two calls, so a
+    // rebind landing exactly between them still loses its file; what this closes is every rebind
+    // that happened before the close, which is the ordering a replacement produces.
+    if (_file && identityOf(_path) == _file)
+        ::unlink(_path.c_str());
 }
 
 std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventLoop& loop,
@@ -200,7 +218,7 @@ std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventL
         return std::unexpected(detail::socketError(err, "listen"));
     }
 
-    return std::unique_ptr<UnixListener>(new UnixListener(loop, fd, path));
+    return std::unique_ptr<UnixListener>(new UnixListener(loop, fd, path, identityOf(path)));
 }
 
 async::Task<AcceptResult> UnixListener::accept()

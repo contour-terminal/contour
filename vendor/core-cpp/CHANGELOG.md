@@ -7,6 +7,34 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.20.0] - 2026-11-14
+
+### Added
+
+- **`core::codec`, a tolerant field codec** (`<core/codec/Fields.hpp>`, `<core/codec/Stream.hpp>`,
+  `<core/codec/DecodeError.hpp>`; target `core::codec`, depends on base): `Writer` and `Reader` for LEB128 varints,
+  zigzag signed varints and length-prefixed frames, and `FieldEncoder`/`FieldDecoder` (`BasicFieldEncoder<Hooks>` and
+  `BasicFieldDecoder<Hooks>`) that read and write a struct from the one `visitFields(this auto& self, auto& visitor)`
+  list it declares. Bools, integers, floating point, enums (by a stable `EnumWire` table), `core::Flags` (by a stable
+  `FlagWire` table), durations, wall-clock instants, strings, byte vectors, vectors, arrays, maps, optionals, variants,
+  pairs and nested structs are supported; a reader skips the fields it does not know and leaves those the stream lacks
+  at their default. Foreign types are listed by `visitForeignFields(visitor, value)` overloads found through the hooks
+  tag. A decode keeps a memory budget proportional to the stream's size. Moved from contour's `vtbackend` state codec.
+
+### Fixed
+
+- **`EventLoop::blockOn` no longer frees frames a park still names when an exception escapes a turn.** A throwing
+  `post` or timer callback ended `blockOn` with its flow unfinished, and the root was destroyed with it; where the
+  flow was parked below the root -- in a sub-task, or on another executor -- the park kept naming the freed frame,
+  and the next drain, or `~EventLoop`'s, resumed it: a heap-use-after-free. The flow is now cancelled and its root
+  handed to the loop, which frees it once a drain has unwound the chain. The root runs under a stop token of its
+  own, linked to `rootStopSource()`, so the cancellation reaches this flow alone.
+- **`UnixListener` removes only the socket file it bound.** Closing a listener removed its path by name, so a
+  listener bound on the same path since -- after the first one's file was unlinked, by a restarted daemon or a
+  replacement -- lost its socket file and listened on a path no client could reach. The file's identity (`st_dev`,
+  `st_ino`) is recorded at bind, and the close removes the path only while it still names that file. `path()` keeps
+  answering the bound path after the close.
+
 ## [0.19.0] - 2026-11-10
 
 ### Added

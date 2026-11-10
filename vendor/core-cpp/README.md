@@ -27,6 +27,7 @@ loop; the table below says what each module has today. Nothing is tagged yet.
 | base | `core` | `core::base` | Threads; Tracy (optional) | assertions, environment, escaping, hashing, flags, time, `Base64`, `Generator`, profiling macros, range helpers | **available** |
 | log | `core::log` | `core::log` | base | log store and sinks | **available** |
 | cli | `core::cli` | `core::cli` | base, log | command-line parser, application scaffold | **available** |
+| codec | `core::codec` | `core::codec` | base | varint streams and a tolerant field codec for versioned messages | **available** |
 | platform | `core::platform` | `core::platform` | base, log | clocks, wakeup, signals, pipes, file system, environment, paths | **available** |
 | async | `core::async` | `core::async` (header-only) | the standard library | `StopToken`, `Task`, cancellation, `whenAll`/`whenAny`, executors, `AsyncQueue` | `StopToken`, `Task`, cancellation and the combinators **available** (A5); executors and `AsyncQueue` planned (B1) |
 | net | `core::net` | `core::net_types` (header-only), `core::net`, `core::net_tls` (with `CORE_CPP_WITH_TLS`) | async, platform; OpenSSL for TLS | event loop and backends (epoll, kqueue, poll; IOCP and host-driven planned), TCP and AF_UNIX sockets, descriptor passing, buffered reading, a write queue, timeouts, TLS, HTTP server; dialling planned | contour's event loop, sockets, TLS and HTTP server **available** (A6), native only but for `core::net_types`; the merge with fastcached's planned (B2-B11) |
@@ -42,7 +43,7 @@ The layering is enforced: a module links only the modules its row in
 CPMAddPackage(
     NAME core-cpp
     GITHUB_REPOSITORY contour-terminal/core-cpp
-    GIT_TAG v0.19.0
+    GIT_TAG v0.20.0
     SYSTEM YES              # core-cpp headers never trip your -Werror
     EXCLUDE_FROM_ALL YES    # build only what you link
     OPTIONS "CORE_CPP_WITH_TUI ON" "CORE_CPP_WITH_TLS OFF")
@@ -64,7 +65,7 @@ consumes core-cpp this way:
 # Copy a tag into your tree, then commit the result as one change. The script is a core-cpp
 # checkout's, not the copy's: sync reads a repository, and the repository it reads by default is
 # the one the script itself is in.
-cmake -DMODE=sync -DREF=v0.19.0 -DDEST=vendor/core-cpp \
+cmake -DMODE=sync -DREF=v0.20.0 -DDEST=vendor/core-cpp \
       -P /path/to/core-cpp/cmake/CoreCppVendor.cmake
 
 # Verify it. Needs no git, so register it as a test of your own suite.
