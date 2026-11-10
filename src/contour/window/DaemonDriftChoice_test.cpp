@@ -46,3 +46,18 @@ TEST_CASE("a daemon newer than the client is offered a restart, not an upgrade",
     CHECK(driftOfferFor(DriftKind::DaemonNewer, DaemonLocality::Local, capabilities)
           == DriftOffer::RestartOnly);
 }
+
+TEST_CASE("a daemon reached by label is this client's only when it serves the launch's socket",
+          "[contour][drift]")
+{
+    using contour::window::upkeepOfReachedDaemon;
+    CHECK(upkeepOfReachedDaemon("/run/contour/mux.sock", "/run/contour/mux.sock")
+          == DaemonUpkeep::ThisClient);
+    CHECK(upkeepOfReachedDaemon("/run/contour/mux.sock", "/run/contour/./mux.sock")
+          == DaemonUpkeep::ThisClient);
+    // --socket or $CONTOUR_MUX moved the launch's daemon off the label's socket.
+    CHECK(upkeepOfReachedDaemon("/tmp/custom.sock", "/run/contour/mux.sock") == DaemonUpkeep::None);
+    // A launch with no daemon of its own upkeeps none.
+    CHECK(upkeepOfReachedDaemon("", "/run/contour/mux.sock") == DaemonUpkeep::None);
+    CHECK(upkeepOfReachedDaemon("", "") == DaemonUpkeep::None);
+}

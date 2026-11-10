@@ -1072,7 +1072,7 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
             // A running daemon only: a switch starts none (New daemon… does, before it switches). Local, but
             // not this client's to restart or upgrade from the badge -- _restartDaemon and _upgradeDaemon
             // serve the launch's daemon alone, and a restart relaunches this process onto that one -- unless
-            // it is the launch's daemon, reached by its label.
+            // its socket is the launch's (which --socket and $CONTOUR_MUX may move off the label's).
             auto const controlPath =
                 vthost::muxSocketPath(vthost::socketLabelOf(daemon.name),
                                       cli::resolveSocketOption("", _config.daemon.value().socket));
@@ -1082,11 +1082,8 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
                                  {},
                                  window::DaemonLocality::Local,
                                  daemon);
-            if (std::ranges::any_of(_daemonLinks, [&](auto const& link) {
-                    return link->address() == daemon
-                           && link->siblingConfig().upkeep == window::DaemonUpkeep::ThisClient;
-                }))
-                config.upkeep = window::DaemonUpkeep::ThisClient;
+            if (_upgradeDaemon)
+                config.upkeep = window::upkeepOfReachedDaemon(_launchControlPath, controlPath);
             return config;
         }
         case SwitchDaemonKind::Host:
@@ -1599,6 +1596,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         };
         locality = window::DaemonLocality::Local;
         address = remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Label, .name = label };
+        _launchControlPath = controlPath;
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
         };

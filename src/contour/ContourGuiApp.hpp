@@ -1483,6 +1483,9 @@ class ContourGuiApp:
     int _argc = 0;
     char const** _argv = nullptr;
 
+    /// The control socket of the daemon this run attached to, which @ref _restartDaemon and @ref
+    /// _upgradeDaemon act on; empty when the run attaches to no local daemon.
+    std::filesystem::path _launchControlPath;
     /// Restarts the local daemon on this release (stop, then start the way a client would); empty
     /// unless this run attaches to a local daemon, since a remote one is not ours to restart. Runs
     /// on @ref _daemonRestartThread, so it touches nothing the GUI thread owns.

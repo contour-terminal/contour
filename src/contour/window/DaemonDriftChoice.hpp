@@ -6,6 +6,7 @@
 /// window, a daemon or a connection.
 
 #include <cstdint>
+#include <filesystem>
 
 #include <vthost/client/ReleaseDrift.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -53,6 +54,20 @@ enum class DriftOffer : uint8_t
     auto const upgrades = drift != vthost::client::DriftKind::DaemonNewer
                           && daemonCapabilities.contains(vthost::proto::Capability::LiveUpgrade);
     return upgrades ? DriftOffer::UpgradeAndRestart : DriftOffer::RestartOnly;
+}
+
+/// @param launchControlPath The control socket of the daemon the application launched on (--socket and
+///        $CONTOUR_MUX honoured); empty when the launch attached to none it may upkeep.
+/// @param reachedControlPath The control socket of a daemon reached some other way, by its label.
+/// @return ThisClient when both name the same socket -- the only daemon the application's restart and
+///         upgrade act on -- else None.
+[[nodiscard]] inline DaemonUpkeep upkeepOfReachedDaemon(std::filesystem::path const& launchControlPath,
+                                                        std::filesystem::path const& reachedControlPath)
+{
+    if (launchControlPath.empty()
+        || launchControlPath.lexically_normal() != reachedControlPath.lexically_normal())
+        return DaemonUpkeep::None;
+    return DaemonUpkeep::ThisClient;
 }
 
 } // namespace contour::window
