@@ -409,7 +409,7 @@ struct GutterConfig
     int blockColumnWidth { 2 };
 
     /// Native command-block rail thickness in UI points. Unset uses the style default, zero hides the line.
-    std::optional<int> railThickness;
+    std::optional<int> railThickness {};
 
     /// Draw the hovered fold's line, head and end one stroke heavier, as well as at full strength.
     bool boldOnHover { true };
