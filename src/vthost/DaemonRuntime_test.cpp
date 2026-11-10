@@ -496,3 +496,27 @@ TEST_CASE("DaemonRuntime counts the workspaces it holds, not its sessions", "[vt
     CHECK(status->workspaces == std::optional { uint32_t { 2 } });
     CHECK(status->sessions == 4);
 }
+
+// A fresh daemon holds one empty workspace; the switcher lists only workspaces with a tab, so the count it is
+// shown beside the daemon must not include it.
+TEST_CASE("DaemonRuntime counts only the workspaces that hold a tab", "[vthost][runtime]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    REQUIRE(h.host.model().createWorkspace() != nullptr); // empty: no tab, no session
+    auto runtime = vthost::DaemonRuntime { { .releaseVersion = "0.9.0",
+                                             .processId = 1,
+                                             .socketPath = "/run/c/default",
+                                             .executablePath = "/s/bin/contour",
+                                             .logFile = {},
+                                             .lifecycle = vthost::DaemonLifecycle::Persistent,
+                                             .upgradeGeneration = 0,
+                                             .relocationRequest = vthost::RelocationRequest::Allowed },
+                                           h.host,
+                                           clock,
+                                           [](vthost::ShutdownCause) {} };
+    REQUIRE(h.host.model().workspaceCount() == 2);
+    auto const status = runtime.status();
+    REQUIRE(status.has_value());
+    CHECK(status->workspaces == std::optional { uint32_t { 1 } });
+}

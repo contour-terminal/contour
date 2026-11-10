@@ -44,6 +44,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1494,10 +1495,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
 
-    /// @return How many workspaces the host holds, as `workspace.list` lists them.
-    [[nodiscard]] std::size_t workspaceCount() const noexcept
+    /// @return How many workspaces the host holds that hold a tab. The empty workspace a daemon starts with,
+    ///         before any client attached, is not counted: nothing in it can be shown or switched to, and the
+    ///         switcher lists exactly the workspaces this counts.
+    [[nodiscard]] std::size_t populatedWorkspaceCount() const noexcept
     {
-        return static_cast<std::size_t>(std::max(_model.workspaceCount(), 0));
+        auto count = std::size_t { 0 };
+        for (auto const index: std::views::iota(0, _model.workspaceCount()))
+            if (auto const* workspace = _model.workspaceAt(index);
+                workspace != nullptr && workspace->tabCount() > 0)
+                ++count;
+        return count;
     }
 
     /// @return The id of every live hosted session, ascending.
