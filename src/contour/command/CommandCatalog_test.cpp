@@ -484,7 +484,8 @@ TEST_CASE("DaemonCommandSource lists the other daemons and workspaces, and the s
                                "Switch to next daemon",
                                "Switch to previous daemon",
                                "Show daemon & workspace switcher…",
-                               "New daemon…" })
+                               "New daemon…",
+                               "Upgrade daemon" })
     {
         INFO("row: " << wanted);
         CHECK(std::ranges::contains(titles, std::string { wanted }));
@@ -542,8 +543,7 @@ TEST_CASE("a window with no daemon behind it offers none of the switching rows",
          { static_cast<CommandSource const*>(&bound), static_cast<CommandSource const*>(&floor) })
     {
         auto const gated = SwitchingGatedSource { *inner, rows }.commands();
-        CHECK(std::ranges::none_of(gated,
-                                   [](Command const& c) { return actions::isDaemonSwitching(c.action); }));
+        CHECK(std::ranges::none_of(gated, [](Command const& c) { return actions::needsDaemon(c.action); }));
         CHECK(hasCommand(gated, "SplitVertical"));
     }
 

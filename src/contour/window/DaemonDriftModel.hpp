@@ -31,6 +31,13 @@ enum class UpgradeRequest : uint8_t
     InFlight,    ///< One runs, until its worker reports back.
 };
 
+/// Whether an upgrade asked for by command started.
+enum class CommandedUpgradeStart : uint8_t
+{
+    AlreadyUnderWay = 0, ///< A restart or an upgrade runs, or an upgrade request is still being answered.
+    Started,             ///< The upgrade was requested; upgradeRequested() was emitted.
+};
+
 /// What the caller does with the drift once the connection changed.
 enum class DriftReassessment : uint8_t
 {
@@ -106,6 +113,13 @@ class DaemonDriftModel: public QObject
     /// upgradeRequested(); the request is in flight until noteUpgradeFailed() or noteUpgradeRequestDone().
     Q_INVOKABLE void requestUpgrade();
 
+    /// Starts an upgrade the user asked for by command, with or without a drift on offer (the same release
+    /// upgrades too). Otherwise as requestUpgrade(): the request is in flight until noteUpgradeFailed() or
+    /// noteUpgradeRequestDone(). The caller decides whether the daemon may upgrade at all
+    /// (upgradeVerdictFor).
+    /// @return Started, or AlreadyUnderWay when nothing was started.
+    [[nodiscard]] CommandedUpgradeStart requestCommandedUpgrade();
+
     /// Ends the restart that failed and shows why.
     /// @param reason The failure, in words for the user.
     void noteRestartFailed(QString const& reason);
@@ -113,6 +127,10 @@ class DaemonDriftModel: public QObject
     /// Ends the upgrade that failed and shows why. The restart stays on offer, as the fallback.
     /// @param reason The refusal or failure, in words for the user.
     void noteUpgradeFailed(QString const& reason);
+
+    /// Ends the upgrade request the application declined to start (another restart or upgrade runs): the
+    /// model is idle and settled again, with no failure shown, as nothing about this daemon failed.
+    void noteUpgradeNotStarted();
 
     /// Ends an upgrade shown as under way that did not end in the daemon's return (the connection went on
     /// to reconnect, or failed). Shows nothing of its own: the drift line is back.
@@ -138,10 +156,21 @@ class DaemonDriftModel: public QObject
     void changed();
     /// The user confirmed a restart.
     void restartRequested();
-    /// The user confirmed a live upgrade.
+    /// An upgrade was asked for (badge confirmation or the UpgradeDaemon action).
     void upgradeRequested();
+    /// An upgrade failed, drift or none: the badge shows it only next to a drift, so a caller that must tell
+    /// the user regardless listens here.
+    /// @param reason The refusal or failure, in words for the user.
+    void upgradeFailed(QString const& reason);
 
   private:
+    /// @return Whether no drift action runs and no upgrade request is in flight: what both ways of asking
+    ///         for an upgrade require.
+    [[nodiscard]] bool canBeginUpgrade() const noexcept;
+
+    /// Starts the upgrade: the shared tail of requestUpgrade() and requestCommandedUpgrade().
+    void beginUpgrade();
+
     vthost::client::DriftNotice _notice;
     DriftOffer _offer = DriftOffer::None;
     QString _failure;

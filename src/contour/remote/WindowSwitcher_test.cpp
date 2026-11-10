@@ -187,7 +187,10 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
         auto& window = *opened.emplace_back(std::make_unique<contour::test::ScopedController>(_manager));
         std::ignore = _manager.consumeAttachWindow(window.controller);
     }
-    void upgradeDaemon(DaemonLink& /*link*/) override {}
+    contour::remote::UpgradeStart upgradeDaemon(DaemonLink& /*link*/) override
+    {
+        return contour::remote::UpgradeStart::Started;
+    }
     void restartDaemon(DaemonLink& /*link*/) override {}
     void linkEnded() override
     {

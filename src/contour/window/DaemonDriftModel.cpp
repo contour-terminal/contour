@@ -97,8 +97,26 @@ void DaemonDriftModel::requestRestart()
 
 void DaemonDriftModel::requestUpgrade()
 {
-    if (!offersUpgrade() || _action != DriftAction::Idle)
+    if (!offersUpgrade() || !canBeginUpgrade())
         return;
+    beginUpgrade();
+}
+
+CommandedUpgradeStart DaemonDriftModel::requestCommandedUpgrade()
+{
+    if (!canBeginUpgrade())
+        return CommandedUpgradeStart::AlreadyUnderWay;
+    beginUpgrade();
+    return CommandedUpgradeStart::Started;
+}
+
+bool DaemonDriftModel::canBeginUpgrade() const noexcept
+{
+    return _action == DriftAction::Idle && _upgradeRequest == UpgradeRequest::Settled;
+}
+
+void DaemonDriftModel::beginUpgrade()
+{
     _action = DriftAction::Upgrading;
     _upgradeRequest = UpgradeRequest::InFlight;
     _failure.clear();
@@ -123,6 +141,15 @@ void DaemonDriftModel::noteUpgradeFailed(QString const& reason)
     _offer = DriftOffer::RestartOnly;
     _failure = tr("Upgrade failed: %1; restarting the daemon ends its programs")
                    .arg(reason.isEmpty() ? tr("unknown error") : reason);
+    emit changed();
+    emit upgradeFailed(reason);
+}
+
+void DaemonDriftModel::noteUpgradeNotStarted()
+{
+    if (_action == DriftAction::Upgrading)
+        _action = DriftAction::Idle;
+    _upgradeRequest = UpgradeRequest::Settled;
     emit changed();
 }
 

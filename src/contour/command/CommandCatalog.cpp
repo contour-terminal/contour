@@ -155,6 +155,7 @@ namespace
         ActionCategory { .name = "OpenDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "ShowSwitcher", .category = CommandCategory::Daemons },
         ActionCategory { .name = "NewDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "UpgradeDaemon", .category = CommandCategory::Daemons },
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.
@@ -385,6 +386,7 @@ std::vector<Command> DaemonCommandSource::commands() const
         actions::CycleWorkspace { actions::CycleDirection::Previous }, "Switch to previous workspace", {}));
     result.push_back(titledCommand(actions::ShowSwitcher {}, "Show daemon & workspace switcher…", {}));
     result.push_back(titledCommand(actions::NewDaemon {}, "New daemon…", {}));
+    result.push_back(titledCommand(actions::UpgradeDaemon {}, "Upgrade daemon", {}));
     return result;
 }
 
@@ -393,7 +395,7 @@ std::vector<Command> SwitchingGatedSource::commands() const
     auto result = _inner.commands();
     if (_rows.switchingAvailability() == DaemonSwitching::Available)
         return result;
-    std::erase_if(result, [](Command const& command) { return actions::isDaemonSwitching(command.action); });
+    std::erase_if(result, [](Command const& command) { return actions::needsDaemon(command.action); });
     return result;
 }
 

@@ -214,10 +214,10 @@ ActionList filterRepeatableActions(ActionList const& actions)
     return result;
 }
 
-bool isDaemonSwitching(Action const& action) noexcept
+bool needsDaemon(Action const& action) noexcept
 {
     return std::visit(core::Overloaded {
-                          [](DaemonSwitchingActionConcept auto const&) { return true; },
+                          [](DaemonActionConcept auto const&) { return true; },
                           [](auto const&) { return false; },
                       },
                       action);
@@ -437,6 +437,7 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry { "OpenDaemon", Action { OpenDaemon {} }, documentation::OpenDaemon },
         ActionCatalogEntry { "ShowSwitcher", Action { ShowSwitcher {} }, documentation::ShowSwitcher },
         ActionCatalogEntry { "NewDaemon", Action { NewDaemon {} }, documentation::NewDaemon },
+        ActionCatalogEntry { "UpgradeDaemon", Action { UpgradeDaemon {} }, documentation::UpgradeDaemon },
     };
     static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(catalog)>>
                       == std::variant_size_v<Action::Variant>,

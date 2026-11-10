@@ -7519,6 +7519,12 @@ bool TerminalSession::operator()(actions::NewDaemon)
     return true;
 }
 
+bool TerminalSession::operator()(actions::UpgradeDaemon)
+{
+    _manager->upgradeDaemon(*this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SaveLayout const& event)
 {
     // Naming no layout means "ask me for one": open the save-as prompt (the mirror of a colorless

@@ -398,6 +398,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// new window on it, for the window hosting @p acting.
     /// @param acting The session that triggered the action.
     void newDaemon(TerminalSession const& acting);
+
+    /// Upgrades the daemon of the window hosting @p acting in place (WindowBinding::upgradeDaemonOnCommand);
+    /// a refusal is shown to that window as a notice and logged, as is a window with no daemon.
+    /// @param acting The session that triggered the action.
+    void upgradeDaemon(TerminalSession const& acting);
     /// @}
 
     /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into

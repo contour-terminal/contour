@@ -231,6 +231,28 @@ TEST_CASE("every switching action is a no-op for a window bound to a tmux sessio
     rig.app.manager().releaseBinding(tmux);
 }
 
+TEST_CASE("UpgradeDaemon tells a window with no daemon why nothing happens", "[switch][session]")
+{
+    using namespace contour::actions;
+    SECTION("sessions in-process")
+    {
+        auto rig = SwitchRig { std::nullopt };
+        rig.run(UpgradeDaemon {});
+        CHECK(rig.window->notices().toastText()
+              == QStringLiteral("Could not upgrade the daemon: this window has no daemon to upgrade."));
+    }
+    SECTION("a binding with no daemon behind it")
+    {
+        auto rig = SwitchRig { std::nullopt };
+        auto tmux = contour::session::FactoryBinding { *rig.factory, "tmux-host" };
+        rig.app.manager().bindWindow(rig.window.id, tmux);
+        rig.run(UpgradeDaemon {});
+        CHECK(rig.window->notices().toastText()
+              == QStringLiteral("Could not upgrade the daemon: this window has no daemon to upgrade."));
+        rig.app.manager().releaseBinding(tmux);
+    }
+}
+
 TEST_CASE("a window says which daemon it is on, and stops when it moves to the default one",
           "[switch][chrome]")
 {

@@ -242,7 +242,8 @@ TEST_CASE("the daemon and workspace switching actions are bound by no default ch
                            || std::holds_alternative<SwitchToDaemon>(action)
                            || std::holds_alternative<OpenDaemon>(action)
                            || std::holds_alternative<ShowSwitcher>(action)
-                           || std::holds_alternative<NewDaemon>(action);
+                           || std::holds_alternative<NewDaemon>(action)
+                           || std::holds_alternative<UpgradeDaemon>(action);
                 });
             };
             CHECK(std::ranges::none_of(mappings.keyMappings, switching));

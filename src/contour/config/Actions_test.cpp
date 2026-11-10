@@ -177,7 +177,8 @@ TEST_CASE("Actions: the daemon and workspace switching actions are named, bare-r
                              "SwitchToDaemon",
                              "OpenDaemon",
                              "ShowSwitcher",
-                             "NewDaemon" })
+                             "NewDaemon",
+                             "UpgradeDaemon" })
     {
         INFO("action: " << name);
         auto const action = fromString(name);
@@ -195,16 +196,18 @@ TEST_CASE("Actions: the daemon and workspace switching actions are named, bare-r
     CHECK_FALSE(isParameterized(Action { CycleDaemon {} }));
     CHECK_FALSE(isParameterized(Action { ShowSwitcher {} }));
     CHECK_FALSE(isParameterized(Action { NewDaemon {} }));
+    CHECK_FALSE(isParameterized(Action { UpgradeDaemon {} }));
 }
 
-TEST_CASE("Actions: isDaemonSwitching names exactly the switching actions", "[actions][switch]")
+TEST_CASE("Actions: needsDaemon names exactly the actions that need a daemon", "[actions][switch]")
 {
     using namespace contour::actions;
-    CHECK(isDaemonSwitching(Action { CycleDaemon {} }));
-    CHECK(isDaemonSwitching(Action { OpenWorkspace {} }));
-    CHECK(isDaemonSwitching(Action { NewDaemon {} }));
-    CHECK_FALSE(isDaemonSwitching(Action { AttachToHost {} }));
-    CHECK_FALSE(isDaemonSwitching(Action { NewWindowTo {} }));
+    CHECK(needsDaemon(Action { CycleDaemon {} }));
+    CHECK(needsDaemon(Action { OpenWorkspace {} }));
+    CHECK(needsDaemon(Action { NewDaemon {} }));
+    CHECK(needsDaemon(Action { UpgradeDaemon {} }));
+    CHECK_FALSE(needsDaemon(Action { AttachToHost {} }));
+    CHECK_FALSE(needsDaemon(Action { NewWindowTo {} }));
 }
 
 TEST_CASE("Actions: the switching actions write their arguments as the keys they are read from",

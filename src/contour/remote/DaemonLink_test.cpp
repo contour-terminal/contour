@@ -106,7 +106,11 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
                                 ? contour::remote::WindowAdoption::Adopted
                                 : contour::remote::WindowAdoption::Declined);
     }
-    void upgradeDaemon(contour::remote::DaemonLink& /*link*/) override { ++upgrades; }
+    contour::remote::UpgradeStart upgradeDaemon(contour::remote::DaemonLink& /*link*/) override
+    {
+        ++upgrades;
+        return upgradeAnswer;
+    }
     void restartDaemon(contour::remote::DaemonLink& /*link*/) override { ++restarts; }
     void linkEnded() override
     {
@@ -140,6 +144,8 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     /// Changes what a hand-over link is built with, before it is; empty for nothing.
     std::function<void(contour::remote::DaemonLinkConfig&)> adjustHandOver;
     int upgrades = 0;
+    /// What upgradeDaemon() answers.
+    contour::remote::UpgradeStart upgradeAnswer = contour::remote::UpgradeStart::Started;
     int restarts = 0;
     int endings = 0; ///< How often linkEnded() was told.
 
@@ -328,6 +334,15 @@ void unreachable(contour::remote::DaemonLinkConfig& config)
 {
     config.controller.transport = std::make_shared<vthost::TlsTransportFactory>(
         vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} });
+}
+
+/// A daemon that offers in-place upgrades.
+[[nodiscard]] vthost::NativeSessionServices withLiveUpgrade()
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    return services;
 }
 
 /// A daemon that cannot change what a connection shows: one that predates workspace-follow.
@@ -1596,4 +1611,150 @@ TEST_CASE("DaemonLink: only the daemon this client launched on offers a restart 
     }
     link->stop();
     drainGuiEvents();
+}
+
+namespace
+{
+/// Whether an UpgradeRig's link can connect to its daemon.
+enum class Reachability : uint8_t
+{
+    Unreachable = 0,
+    Reachable,
+};
+
+/// A link to a local daemon on a test app, with a window bound to it for the notices.
+struct UpgradeRig
+{
+    DaemonFixture daemon { {}, withLiveUpgrade() };
+    TestTimeline timeline;
+    /// Declared before the app, as LinkRig's: the panes unregister from the link's controller as they go.
+    std::unique_ptr<contour::remote::DaemonLink> link;
+    std::vector<std::unique_ptr<contour::remote::DaemonLink>> handOverLinks;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    FakeLinkHost host { app.manager(), handOverLinks };
+    std::unique_ptr<contour::test::ScopedController> window;
+
+    /// @param upkeep Whose daemon the link says it is.
+    /// @param reachability Whether the link's daemon can be reached.
+    explicit UpgradeRig(contour::window::DaemonUpkeep upkeep,
+                        Reachability reachability = Reachability::Reachable)
+    {
+        std::ignore = seedWorkspaces(daemon, 1);
+        window = std::make_unique<contour::test::ScopedController>(app.manager());
+        auto config = linkConfig(daemon.endpoint(), timeline, "home");
+        config.locality = contour::window::DaemonLocality::Local;
+        config.upkeep = upkeep;
+        if (reachability == Reachability::Unreachable)
+            unreachable(config);
+        link = std::make_unique<contour::remote::DaemonLink>(
+            contour::remote::DaemonLink::Id { 1 }, std::move(config), host, app.manager());
+        if (reachability == Reachability::Reachable)
+        {
+            REQUIRE(link->awaitAttached(10s).has_value());
+            REQUIRE(link->bindPendingWindow(*window->controller) == contour::remote::WindowAdoption::Adopted);
+        }
+        else
+        {
+            app.manager().bindWindow(window->id, *link);
+        }
+        link->offerDaemonRestartIfDrifted();
+    }
+
+    UpgradeRig(UpgradeRig const&) = delete;
+    UpgradeRig& operator=(UpgradeRig const&) = delete;
+    UpgradeRig(UpgradeRig&&) = delete;
+    UpgradeRig& operator=(UpgradeRig&&) = delete;
+
+    ~UpgradeRig()
+    {
+        link->stop();
+        window.reset();
+        drainGuiEvents();
+    }
+};
+} // namespace
+
+TEST_CASE("DaemonLink: an upgrade by command reaches the host once for a connected daemon of this client",
+          "[attach][link][drift]")
+{
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::ThisClient };
+    auto const started = rig.link->upgradeDaemonOnCommand();
+    CHECK(started.has_value());
+    CHECK(rig.host.upgrades == 1);
+    CHECK(rig.link->drift().isUpgrading());
+}
+
+TEST_CASE("DaemonLink: an upgrade by command is refused, with the reason, for a daemon not this client's",
+          "[attach][link][drift]")
+{
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::None };
+    auto const started = rig.link->upgradeDaemonOnCommand();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error() == contour::window::describe(contour::window::UpgradeVerdict::NotThisClients));
+    CHECK(rig.host.upgrades == 0);
+}
+
+TEST_CASE("DaemonLink: a second upgrade by command while one is under way is refused",
+          "[attach][link][drift]")
+{
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::ThisClient };
+    REQUIRE(rig.link->upgradeDaemonOnCommand().has_value());
+    auto const second = rig.link->upgradeDaemonOnCommand();
+    REQUIRE_FALSE(second.has_value());
+    CHECK(second.error() == contour::window::UpgradeAlreadyUnderWay);
+    CHECK(rig.host.upgrades == 1);
+}
+
+TEST_CASE("DaemonLink: an upgrade by command is refused for a link that is not connected",
+          "[attach][link][drift]")
+{
+    // Live, with a controller that never connects: that is not a connection to judge a daemon by.
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::ThisClient, Reachability::Unreachable };
+    REQUIRE(rig.link->isLive());
+    auto const started = rig.link->upgradeDaemonOnCommand();
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error() == contour::window::describe(contour::window::UpgradeVerdict::NotConnected));
+    CHECK(rig.host.upgrades == 0);
+}
+
+TEST_CASE("DaemonLink: an upgrade the application declines leaves the model settled and tells the user",
+          "[attach][link][drift]")
+{
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::ThisClient };
+    rig.host.upgradeAnswer = contour::remote::UpgradeStart::AlreadyUnderWay;
+    CHECK(rig.link->upgradeDaemonOnCommand().has_value());
+    CHECK(rig.host.upgrades == 1);
+    CHECK_FALSE(rig.link->drift().isUpgrading());
+    CHECK(rig.window->controller->notices().toastText().contains("already being upgraded"));
+    // Settled: the next request goes through to the host again.
+    rig.host.upgradeAnswer = contour::remote::UpgradeStart::Started;
+    CHECK(rig.link->upgradeDaemonOnCommand().has_value());
+    CHECK(rig.host.upgrades == 2);
+}
+
+TEST_CASE("DaemonLink: a failed upgrade by command is a toast only when no badge shows it",
+          "[attach][link][drift]")
+{
+    auto rig = UpgradeRig { contour::window::DaemonUpkeep::ThisClient };
+    auto& notices = rig.window->controller->notices();
+
+    SECTION("no drift: the badge is invisible")
+    {
+        rig.link->drift().show({}, contour::window::DriftOffer::None);
+        REQUIRE(rig.link->upgradeDaemonOnCommand().has_value());
+        rig.link->drift().noteUpgradeFailed(QStringLiteral("no room"));
+        CHECK(notices.toastText().contains("no room"));
+    }
+
+    SECTION("a drift on show: the badge carries the failure")
+    {
+        rig.link->drift().show(vthost::client::DriftNotice { .kind = vthost::client::DriftKind::DaemonOlder,
+                                                             .text = "older",
+                                                             .confirmation = {} },
+                               contour::window::DriftOffer::UpgradeAndRestart);
+        REQUIRE(rig.link->upgradeDaemonOnCommand().has_value());
+        REQUIRE(rig.link->drift().isVisible());
+        rig.link->drift().noteUpgradeFailed(QStringLiteral("no room"));
+        CHECK_FALSE(notices.toastShown());
+    }
 }

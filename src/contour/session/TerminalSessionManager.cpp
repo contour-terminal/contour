@@ -1248,6 +1248,20 @@ void TerminalSessionManager::newDaemon(TerminalSession const& acting)
     openSwitcherOver(acting, window::SwitcherPrompt::NewDaemon, "NewDaemon");
 }
 
+void TerminalSessionManager::upgradeDaemon(TerminalSession const& acting)
+{
+    auto const* const window = hostOf(&acting).window;
+    auto* const binding = window != nullptr ? mutableBindingOf(window->id()) : nullptr;
+    auto const started =
+        binding != nullptr
+            ? binding->upgradeDaemonOnCommand()
+            : std::expected<void, std::string> { std::unexpected(std::string { NoDaemonToUpgrade }) };
+    if (started)
+        return;
+    managerLog()("UpgradeDaemon: {}.", started.error());
+    postNotice(window::upgradeFailedNotice(started.error()), &acting);
+}
+
 void TerminalSessionManager::openSwitcherOver(TerminalSession const& acting,
                                               window::SwitcherPrompt prompt,
                                               std::string_view what)

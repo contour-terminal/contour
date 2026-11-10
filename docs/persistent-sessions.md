@@ -670,6 +670,11 @@ registered service when there is one, on demand otherwise.
 
 ### Live upgrade
 
+The command palette's **Upgrade daemon** row (the `UpgradeDaemon` action, which can be bound to a key)
+starts a live upgrade (described below) at any time, drift chip or not, so a rebuilt binary of the same release can be
+picked up. It asks nothing, as the upgrade keeps every program running, and a refusal or failure is shown as
+a notice.
+
 A live upgrade replaces the daemon with the new release **without ending anything it hosts**. On
 Linux, macOS and the BSDs the daemon re-executes the new release's binary in its own process, so every
 shell and program keeps its process, its process ID, its parent and its terminal. Windows cannot replace
