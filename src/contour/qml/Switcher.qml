@@ -55,8 +55,18 @@ ThemedWindow {
     // Closed by the window manager: a start still running must not open a window afterwards.
     onClosing: if (root.switcher) root.switcher.abandon()
 
+    // Where the pointer was at its last event in the list; NaN until one: the first only records it. A popup
+    // opening under a pointer at rest, rows scrolled or recreated under it, are no hover and must not take the
+    // selection from the keys or from the popup's own choice; only a pointer whose position changed does.
+    property real lastPointerX: NaN
+    property real lastPointerY: NaN
+
     // Focus goes to the field whenever the window is shown again.
-    onVisibleChanged: if (visible) root.focusField()
+    onVisibleChanged: if (visible) {
+        root.lastPointerX = NaN
+        root.lastPointerY = NaN
+        root.focusField()
+    }
     onIsAskingLabelChanged: {
         labelField.text = "";
         root.focusField();
@@ -148,10 +158,30 @@ ThemedWindow {
             highlightMoveDuration: 0
             ScrollBar.vertical: ScrollBar {}
 
+            // Moving the pointer over a row selects it. One handler for the list rather than one per row: Qt
+            // re-delivers hover to rows that appear or move under a pointer at rest, and a row cannot tell
+            // that from the pointer arriving; the position can.
+            HoverHandler {
+                onPointChanged: {
+                    const at = point.scenePosition
+                    const moved = !isNaN(root.lastPointerX)
+                                  && (at.x !== root.lastPointerX || at.y !== root.lastPointerY)
+                    root.lastPointerX = at.x
+                    root.lastPointerY = at.y
+                    if (!moved || !hovered || !root.switcher)
+                        return
+                    const inList = list.mapFromItem(null, at.x, at.y)
+                    const index = list.indexAt(inList.x + list.contentX, inList.y + list.contentY)
+                    if (index >= 0)
+                        root.switcher.currentIndex = index
+                }
+            }
+
             delegate: Item {
                 id: row
 
                 required property int index
+
                 required property string title
                 required property string detail
                 required property string tag
@@ -282,24 +312,7 @@ ThemedWindow {
                         }
                     }
 
-                    // Moving the pointer over a row selects it; a tap chooses it. Only a MOVE counts: a popup that
-                    // opens, or a list that scrolls, under a pointer at rest must not take the selection from the
-                    // row the popup chose (Return would then act on whatever lay under the pointer).
-                    HoverHandler {
-                        id: rowHover
-                        property real enteredX: -1
-                        property real enteredY: -1
-                        onHoveredChanged: {
-                            rowHover.enteredX = rowHover.point.scenePosition.x
-                            rowHover.enteredY = rowHover.point.scenePosition.y
-                        }
-                        onPointChanged: {
-                            if (rowHover.hovered && root.switcher
-                                    && (rowHover.point.scenePosition.x !== rowHover.enteredX
-                                        || rowHover.point.scenePosition.y !== rowHover.enteredY))
-                                root.switcher.currentIndex = row.index
-                        }
-                    }
+                    // A tap chooses the row; the list's HoverHandler selects it as the pointer moves over it.
                     TapHandler {
                         onTapped: {
                             root.switcher.currentIndex = row.index;

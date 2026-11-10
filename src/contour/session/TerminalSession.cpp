@@ -32,6 +32,7 @@
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/ProgramName.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
@@ -4074,6 +4075,11 @@ config::ShellKind TerminalSession::runningShell() const
     };
     if (!profileRuns())
         return config::ShellKind::Unknown;
+    return config::shellKindOf(spawnedProgram());
+}
+
+std::string TerminalSession::spawnedProgram() const
+{
     // What names a program is asked as the spawn asks it (vtpty::programsIn()): on the PATH the child is
     // given -- the profile's own, else this process's -- through the files every session reads.
     auto const& shell = _profile.shell.value();
@@ -4083,7 +4089,12 @@ config::ShellKind TerminalSession::runningShell() const
                                 : _app.processEnvironment().get("PATH").value_or(std::string {});
     auto const namesProgram = vtpty::programsIn(
         vtpty::ProgramSearch { .path = searchPath, .workingDirectory = {}, .fileSystem = _app.fileSystem() });
-    return config::shellKindOf(vtpty::invocationToRun(shell.program, shell.arguments, namesProgram).program);
+    return vtpty::invocationToRun(shell.program, shell.arguments, namesProgram).program;
+}
+
+std::string TerminalSession::shellProgramName() const
+{
+    return std::string { window::programBaseName(spawnedProgram()) };
 }
 
 QString TerminalSession::shellCardText(std::string_view pattern) const

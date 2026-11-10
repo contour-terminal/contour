@@ -2380,6 +2380,11 @@ window::AppMenuBarSources ContourGuiApp::appMenuBarSources()
                 return command::menuBarStateOf(_config);
             },
         .chords = [this] { return command::chordIndex(_config); },
+        .refreshSwitching =
+            [this] {
+                if (auto const* const controller = focusedController())
+                    controller->refreshSwitching();
+            },
         .run = [this](actions::Action const& action,
                       command::ActionScope scope) { runMenuBarAction(action, scope); },
     };
@@ -4022,6 +4027,7 @@ window::SwitcherServices ContourGuiApp::switcherServices()
         .savedHosts =
             [this] {
                 auto hosts = std::vector<window::SwitcherDaemon> {};
+                auto const shownHere = _sessionManager.switchDirectory().hostsShownHere();
                 for (auto const& [name, entry]: _config.hosts.value())
                     hosts.push_back(window::SwitcherDaemon {
                         .address = { .kind = vthost::proto::SwitchDaemonKind::Host,
@@ -4033,8 +4039,7 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                         .listing = window::SwitcherListing::NotListed,
                         .failure = {},
                         .workspaces = {},
-                        .link = _hostsReached.contains(name) ? window::SwitcherHostLink::Disconnected
-                                                             : window::SwitcherHostLink::NeverConnected,
+                        .link = window::switcherHostLinkOf(name, _hostsReached, shownHere),
                     });
                 return hosts;
             },
@@ -4043,7 +4048,11 @@ window::SwitcherServices ContourGuiApp::switcherServices()
                    session::SwitchTarget const& daemon,
                    window::SwitcherListed done) {
                 _windowSwitching->listWorkspaces(
-                    window, daemon, [window, done = std::move(done)](auto listed) {
+                    window, daemon, [this, window, daemon, done = std::move(done)](auto listed) {
+                        // A saved host that answered a listing was connected to, whatever the popup does
+                        // next.
+                        if (listed && daemon.kind == vthost::proto::SwitchDaemonKind::Host)
+                            _hostsReached.insert(daemon.daemon);
                         done(listed.transform([window](std::vector<remote::WorkspaceRow> const& rows) {
                             return remote::switcherWorkspacesOf(rows, window);
                         }));
@@ -4104,7 +4113,7 @@ void ContourGuiApp::returnFocusTo(FocusReturn const& target)
     if (!target.workspace)
         return;
     if (auto* const controller = _sessionManager.controllerFor(*target.workspace))
-        controller->restoreTerminalFocus();
+        controller->focusActiveDisplay();
 }
 
 std::expected<void, std::string> ContourGuiApp::openSwitcher(window::SwitcherOpening opening, QScreen* anchor)

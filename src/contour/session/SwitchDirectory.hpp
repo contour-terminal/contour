@@ -58,6 +58,11 @@ class SwitchDirectory
     /// Starts refreshing what the lists above answer from, without waiting for it. Called when a surface
     /// that lists them opens.
     virtual void refresh() = 0;
+
+    /// Starts only the local discovery, without waiting for it: what is cheap enough to do ahead of any
+    /// surface that lists daemons (a window binding to one). Unlike refresh() it opens no connection to a
+    /// daemon.
+    virtual void refreshDiscovery() = 0;
 };
 
 } // namespace contour::session

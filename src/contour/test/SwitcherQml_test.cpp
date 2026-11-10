@@ -400,11 +400,87 @@ TEST_CASE("Switcher: it opens on the first daemon that is not the window's own",
     CHECK(selected.kind == window::SwitcherRowKind::Daemon);
     CHECK(selected.title == "admin");
 
-    // Moving the selection is the user's: nothing the list does afterwards takes it back.
+    // A tap on another daemon's disclosure is the user's: the rebuild keeps the selection on that row rather
+    // than going back to where the popup started.
+    auto const rows = fixture.switcher->rows();
+    auto const ownRow = std::ranges::find_if(rows, [](auto const& row) {
+        return row.kind == window::SwitcherRowKind::Daemon && row.title == "default";
+    });
+    REQUIRE(ownRow != rows.end());
+    auto const ownIndex = static_cast<int>(std::distance(rows.begin(), ownRow));
+    fixture.switcher->toggle(ownIndex);
+    auto const& after = fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())];
+    CHECK(after.title == "default");
+
+    // Asking for the discovery's answer again (a rebuild) keeps it there as well.
+    fixture.switcher->toggle(ownIndex);
+    CHECK(fixture.switcher->rows()[static_cast<std::size_t>(fixture.switcher->currentIndex())].title
+          == "default");
+}
+
+TEST_CASE("Switcher: a pointer at rest does not take the selection, a pointer that moves does",
+          "[contour][switcher][qml]")
+{
+    auto fixture = SwitcherFixture {};
+    fixture.open();
+    auto const initial = fixture.switcher->currentIndex();
+    auto const rows = fixture.all("switcherRow");
+    REQUIRE(rows.size() >= 3);
+    auto const centreOf = [](QQuickItem const* item) {
+        return item->mapToScene(QPointF { item->width() / 2, item->height() / 2 }).toPoint();
+    };
+    auto const other = std::ranges::find_if(
+        rows, [&](QQuickItem const* item) { return centreOf(item).y() != centreOf(rows[initial]).y(); });
+    REQUIRE(other != rows.end());
+    auto const otherIndex = static_cast<int>(std::distance(rows.begin(), other));
+
+    // The pointer shows up over a row: where it came to rest is no choice.
+    QTest::mouseMove(fixture.window.get(), centreOf(*other));
+    QCoreApplication::processEvents();
+    CHECK(fixture.switcher->currentIndex() == initial);
+
+    // Moving it is.
+    QTest::mouseMove(fixture.window.get(), centreOf(*other) + QPoint { 6, 1 });
+    QTest::mouseMove(fixture.window.get(), centreOf(*other) + QPoint { 12, 2 });
+    QCoreApplication::processEvents();
+    CHECK(fixture.switcher->currentIndex() == otherIndex);
+}
+
+TEST_CASE("Switcher: after the pointer moved once, keys and filtering still own the selection",
+          "[contour][switcher][qml]")
+{
+    auto fixture = SwitcherFixture {};
+    fixture.open();
+    auto const rows = fixture.all("switcherRow");
+    REQUIRE(rows.size() >= 4);
+    auto const centreOf = [](QQuickItem const* item) {
+        return item->mapToScene(QPointF { item->width() / 2, item->height() / 2 }).toPoint();
+    };
+    auto const spot = centreOf(rows[3]);
+
+    // One nudge over a row, which selects it ...
+    QTest::mouseMove(fixture.window.get(), spot);
+    QTest::mouseMove(fixture.window.get(), spot + QPoint { 4, 0 });
+    QTest::mouseMove(fixture.window.get(), spot + QPoint { 8, 0 });
+    QCoreApplication::processEvents();
+    REQUIRE(fixture.switcher->currentIndex() == 3);
+
+    // ... then the keys step the selection, the pointer at rest where it is.
+    QTest::keyClick(fixture.window.get(), Qt::Key_Down);
+    QCoreApplication::processEvents();
+    CHECK(fixture.switcher->currentIndex() == 4);
     QTest::keyClick(fixture.window.get(), Qt::Key_Up);
-    auto const moved = fixture.switcher->currentIndex();
-    fixture.switcher->setFilter(QString {});
-    CHECK(fixture.switcher->currentIndex() == moved);
+    QTest::keyClick(fixture.window.get(), Qt::Key_Up);
+    QCoreApplication::processEvents();
+    CHECK(fixture.switcher->currentIndex() == 2);
+
+    // Typing a filter rebuilds the rows under the pointer: the selection is the first match, not the row
+    // there.
+    for (auto const letter: { 'a', 'd', 'm' })
+        QTest::keyClick(fixture.window.get(), letter);
+    REQUIRE(waitUntil([&] { return fixture.switcher->filter() == QStringLiteral("adm"); }));
+    QCoreApplication::processEvents();
+    CHECK(fixture.switcher->currentIndex() == 0);
 }
 
 TEST_CASE("Switcher: Return switches, Shift+Return opens, Esc changes nothing", "[contour][switcher][qml]")

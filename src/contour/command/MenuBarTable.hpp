@@ -103,10 +103,10 @@ struct MenuBarState
     std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
     std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
-    /// The palette's "Switch to daemon" commands for this window, as DaemonCommandSource offers them: every
-    /// other local daemon and saved host. One source, so the menu and the palette cannot list different
-    /// daemons.
-    std::vector<Command> daemonSwitches {};
+    /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
+    /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette
+    /// cannot list different daemons. Each row is titled by its Command::argument.
+    std::vector<Command> switchToDaemon {};
 };
 
 /// The part of the state that the configuration decides: profiles, hosts and layouts, each sorted.

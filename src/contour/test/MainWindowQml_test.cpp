@@ -79,6 +79,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1374,6 +1375,35 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
         CHECK_FALSE(chip->isVisible());
         CHECK(chip->width() == 0);
     }
+}
+
+TEST_CASE("Main.qml remote chrome: the host chip opens the switcher on every row, the Terminal row's too "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][hostchip]")
+{
+    auto const style =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(style));
+    QQmlEngine engine;
+    MockMainController controller;
+    controller.attachedHost = QStringLiteral("home");
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+    showWindow(*root);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+    REQUIRE(chip != nullptr);
+    REQUIRE(chip->isVisible());
+
+    // Nothing the window-drag region does may take the press: the chip sits beside it, not in it.
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      Qt::NoModifier,
+                      chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+    QCoreApplication::processEvents();
+    CHECK(controller.switcherRequests == 1);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 namespace

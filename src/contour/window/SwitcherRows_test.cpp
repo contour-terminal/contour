@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -254,6 +255,18 @@ TEST_CASE("switcherInitialSelection starts on the first daemon that is not the w
         CHECK(rows[at].target.daemon == "default");
     }
 
+    SECTION("a saved host is never preselected while a local daemon can be")
+    {
+        auto const hostOnly = std::vector<SwitcherDaemon> { mockup()[0], mockup()[2] };
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = hostOnly, .windowDaemon = label("default") }, "");
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        // The only other daemon is a saved host: the window's own row stays selected.
+        CHECK(rows[at].target.kind == SwitchDaemonKind::Label);
+        CHECK(rows[at].target.daemon == "default");
+    }
+
     SECTION("without daemon rows it is the first row")
     {
         CHECK(switcherInitialSelection({}, label("default")) == 0);
@@ -276,4 +289,21 @@ TEST_CASE("a saved host reached before says it is not connected, not that it was
     CHECK(detailOfStudio() == "not yet connected");
     daemons.back().link = SwitcherHostLink::Disconnected;
     CHECK(detailOfStudio() == "not connected");
+    daemons.back().link = SwitcherHostLink::Connected;
+    CHECK(detailOfStudio() == "connected");
+}
+
+TEST_CASE("switcherHostLinkOf tells a connected host from one reached before and one never reached",
+          "[switcher]")
+{
+    using contour::window::switcherHostLinkOf;
+
+    auto const reached = std::set<std::string> { "studio" };
+    auto const shownHere = std::vector<std::string> { "build" };
+    CHECK(switcherHostLinkOf("studio", reached, shownHere) == SwitcherHostLink::Disconnected);
+    CHECK(switcherHostLinkOf("other", reached, shownHere) == SwitcherHostLink::NeverConnected);
+    // A window on it holds a live link, whether or not the application started it from the switcher.
+    CHECK(switcherHostLinkOf("build", reached, shownHere) == SwitcherHostLink::Connected);
+    CHECK(switcherHostLinkOf("studio", reached, std::vector<std::string> { "studio" })
+          == SwitcherHostLink::Connected);
 }

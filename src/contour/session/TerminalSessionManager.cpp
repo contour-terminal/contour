@@ -652,6 +652,11 @@ void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowB
     _windowsOfBinding[&binding].push_back(window);
     auto const left = previous != nullptr ? forgetMember(*previous, window) : BindingMembers::Remaining;
     notifyHostBindingChanged(window);
+    // A window on a daemon is one whose menus list daemons: start discovering them now, so that the first
+    // menu opened already has them. Discovery only: a listing opens a connection per saved host, which a bind
+    // must not (a surface that lists them refreshes fully as it opens).
+    if (binding.daemonTarget())
+        _switchDirectory.refreshDiscovery();
     // Last: the binding the window left may stop, and release what it still holds here.
     if (left == BindingMembers::None)
         previous->lastWindowReleased();
@@ -720,6 +725,12 @@ std::optional<SwitchTarget> TerminalSessionManager::daemonTargetOf(vtworkspace::
     if (binding == nullptr)
         return std::nullopt;
     return binding->daemonTarget();
+}
+
+window::DaemonLocality TerminalSessionManager::daemonLocalityOf(vtworkspace::WorkspaceId window) const
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->daemonLocality() : window::DaemonLocality::Local;
 }
 
 window::DaemonDriftModel* TerminalSessionManager::daemonDriftOf(

@@ -10,9 +10,11 @@
 
 #include <contour/session/WindowSwitching.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -76,7 +78,22 @@ enum class SwitcherHostLink : uint8_t
 {
     NeverConnected = 0, ///< No window or listing has reached it since this application started.
     Disconnected,       ///< Reached before; nothing holds a connection to it now.
+    Connected,          ///< A window of this application is on it now.
 };
+
+/// @param host A saved host's name.
+/// @param reached The saved hosts a link was started to, or a listing reached, since the application began.
+/// @param shownHere The saved hosts some window of this application is on now.
+/// @return How the host's link stands: Connected while a window is on it, else Disconnected once it was
+///         reached, else NeverConnected.
+[[nodiscard]] inline SwitcherHostLink switcherHostLinkOf(std::string const& host,
+                                                         std::set<std::string> const& reached,
+                                                         std::span<std::string const> shownHere)
+{
+    if (std::ranges::find(shownHere, host) != shownHere.end())
+        return SwitcherHostLink::Connected;
+    return reached.contains(host) ? SwitcherHostLink::Disconnected : SwitcherHostLink::NeverConnected;
+}
 
 /// One daemon the popup lists, with what is known of its workspaces.
 struct SwitcherDaemon
@@ -170,9 +187,10 @@ struct SwitcherOpening
 [[nodiscard]] std::size_t switcherSelection(std::span<SwitcherRow const> rows,
                                             std::optional<session::SwitchTarget> const& keep);
 
-/// Where the selection starts when the popup opens: the first daemon row that is not the window's own, so
-/// Return on an untouched popup moves the window somewhere (never to "New daemon…", which starts one). The
-/// window's own daemon row when it is the only daemon, else the first row.
+/// Where the selection starts when the popup opens: the first local daemon row that is not the window's own,
+/// so Return on an untouched popup moves the window somewhere (never to "New daemon…", which starts one, nor
+/// to a saved host, which Return would connect to before discovery has answered). Failing that the window's
+/// own daemon row, else the first daemon row, else the first row.
 /// @param rows The popup's rows.
 /// @param windowDaemon The daemon the window the popup is over is on.
 /// @return The row to select; 0 for none.

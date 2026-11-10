@@ -72,6 +72,24 @@ template <typename Reply, typename Request>
 
 } // namespace
 
+// The daemon's workspace count is what a client's switcher lists: the workspaces that hold a tab. Both read
+// the listing's tabs, so a workspace the daemon counts is one `workspace.list` shows with a tab.
+TEST_CASE("the populated workspace count is the number of listed workspaces that hold a tab",
+          "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    h.openTab();
+    REQUIRE(h.host.model().createWorkspace() != nullptr); // empty, as a fresh daemon's is
+
+    auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    REQUIRE(list->workspaces.size() == 2);
+    auto const holdingATab = static_cast<std::size_t>(std::ranges::count_if(
+        list->workspaces, [](auto const& workspace) { return !workspace.tabs.empty(); }));
+    CHECK(holdingATab == 1);
+    CHECK(h.host.populatedWorkspaceCount() == holdingATab);
+}
+
 TEST_CASE("workspace.list mirrors the model with registry ids", "[vthost][control]")
 {
     auto h = ControlHarness {};

@@ -216,7 +216,7 @@ void SwitcherController::rebuild(std::optional<session::SwitchTarget> const& kee
     endResetModel();
     // Until the user takes the selection, it is the popup's: it goes to the first daemon that is not this
     // window's, again each time discovery fills the list in.
-    auto const untouched = _selectionOrigin == SwitcherSelectionOrigin::Opening && _filter.isEmpty();
+    auto const untouched = _selectionOrigin == SwitcherSelectionOrigin::Opening;
     if (_rows.empty())
         _current = -1;
     else if (untouched)
@@ -319,7 +319,8 @@ void SwitcherController::collapseCurrent()
     if (daemon.expansion == SwitcherExpansion::Collapsed)
         return;
     daemon.expansion = SwitcherExpansion::Collapsed;
-    // The selection moves to the daemon whose workspaces went.
+    // The selection moves to the daemon whose workspaces went, and is the user's from here on.
+    _selectionOrigin = SwitcherSelectionOrigin::User;
     rebuild(daemon.address);
 }
 
@@ -333,6 +334,8 @@ void SwitcherController::toggle(int row)
     auto const index = chosen.daemon;
     auto& daemon = _daemons[index];
     auto const target = chosen.target;
+    // A tap or a press on a disclosure keeps the selection on its row, whoever chose the row before.
+    _selectionOrigin = SwitcherSelectionOrigin::User;
     if (daemon.expansion == SwitcherExpansion::Expanded)
         daemon.expansion = SwitcherExpansion::Collapsed;
     else

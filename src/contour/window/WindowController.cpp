@@ -168,6 +168,7 @@ WindowController::~WindowController()
 
 void WindowController::openCommandPalette()
 {
+    refreshSwitching();
     // Re-reads the bindings on every open, not once at construction: a ReloadConfig can have rebound a
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all. Also
     // re-queries the sources (so the tab rows track the tabs that exist now) and returns to the top level
@@ -282,6 +283,7 @@ void WindowController::activateHeaderBarItem(int item, QPointF windowPosition)
 
 void WindowController::openMainMenu(QPointF /*windowPosition*/)
 {
+    refreshSwitching();
     presentSurface(MenuSurface::MainMenu, resolveMenu(command::buildMenuBar(menuBarState())));
 }
 
@@ -505,8 +507,18 @@ command::MenuBarState WindowController::menuBarState() const
     }
 
     state.switching = switchingAvailability();
-    state.daemonSwitches = command::DaemonCommandSource { *this }.commands();
+    auto daemons = command::DaemonCommandSource { *this }.commands();
+    std::erase_if(daemons, [](command::Command const& each) {
+        return !std::holds_alternative<actions::SwitchToDaemon>(each.action);
+    });
+    state.switchToDaemon = std::move(daemons);
     return state;
+}
+
+void WindowController::refreshSwitching() const
+{
+    if (_manager.daemonTargetOf(_windowId))
+        _manager.switchDirectory().refresh();
 }
 
 void WindowController::showSwitcher() const
@@ -570,8 +582,9 @@ command::DaemonRowsState WindowController::daemonRows() const
     else if (target->kind == Kind::Host)
         state.current = actions::DaemonRef { actions::DaemonRefKind::Host, target->daemon };
 
+    // From the caches: opening a surface that lists these starts the refresh (refreshSwitching()), and a
+    // focus change must not cost daemon I/O.
     auto& directory = _manager.switchDirectory();
-    directory.refresh();
     for (auto const& daemon: directory.localDaemons())
         state.localDaemons.push_back({ .label = daemon.label, .workspaces = daemon.workspaces });
     for (auto const& [name, entry]: _manager.app().config().hosts.value())
@@ -804,6 +817,28 @@ std::string const& WindowController::cachedProcessName(session::TerminalSession 
     return entry->second;
 }
 
+std::string WindowController::otherMachineName() const
+{
+    if (_manager.daemonLocalityOf(_windowId) == window::DaemonLocality::Local)
+        return {};
+    // A saved host by its name; a daemon no switch can name (`--connect-tcp`) by what the chrome calls it.
+    auto const target = _manager.daemonTargetOf(_windowId);
+    if (target && !target->daemon.empty())
+        return target->daemon;
+    return std::string { _manager.chromeLabelOf(_windowId) };
+}
+
+std::string WindowController::blankTabName(session::TerminalSession const& session) const
+{
+    // Each step costs more than the one before (the process table, then a lookup of the shell on the PATH),
+    // so each is asked only when the last named nothing.
+    if (auto const& process = cachedProcessName(session); !process.empty())
+        return process;
+    if (auto machine = otherMachineName(); !machine.empty())
+        return machine;
+    return session.shellProgramName();
+}
+
 QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
                                            int row) const
@@ -834,11 +869,10 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     auto expanded = expandTabLabel(
         templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle, .tabName = tabName });
     // A blank tab names nothing: a label that came out empty falls back to the process's name, else the
-    // shell's (a remote-hosted pane's program never reaches this client). Asked only then, since the name
-    // costs a query of the process table.
+    // shell's (a daemon-hosted pane's program never reaches this client; a saved host's name stands in for
+    // it). Asked only then, since the name costs a query of the process table.
     if (expanded.empty() && session != nullptr)
-        expanded =
-            blankTabLabelFallback(cachedProcessName(*session), session->profile().shell.value().program);
+        expanded = blankTabName(*session);
     return QString::fromStdString(expanded);
 }
 
@@ -1465,10 +1499,10 @@ void WindowController::leaveChrome()
         _activeDisplay->forceActiveFocus();
 }
 
-void WindowController::restoreTerminalFocus()
+void WindowController::focusActiveDisplay()
 {
-    std::ignore = dropChromeFocus(); // the display takes the keyboard either way
-    if (_activeDisplay != nullptr)
+    leaveChrome(); // ends the chrome's hold, and focuses the display if it held one
+    if (_activeDisplay != nullptr && !_activeDisplay->hasActiveFocus())
         _activeDisplay->forceActiveFocus();
 }
 

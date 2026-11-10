@@ -44,14 +44,22 @@ namespace
     }
 
     /// @return Whether @p address names the daemon the window is on.
+    [[nodiscard]] bool isWindowDaemon(session::SwitchTarget const& windowDaemon,
+                                      session::SwitchTarget const& address)
+    {
+        return address.kind == windowDaemon.kind && address.daemon == windowDaemon.daemon;
+    }
+
+    /// @return Whether @p address names the daemon the window is on.
     [[nodiscard]] bool isWindowDaemon(SwitcherInputs const& inputs, session::SwitchTarget const& address)
     {
-        return address.kind == inputs.windowDaemon.kind && address.daemon == inputs.windowDaemon.daemon;
+        return isWindowDaemon(inputs.windowDaemon, address);
     }
 
     /// What a saved host's row says while it is not listed, per SwitcherHostLink.
-    constexpr auto HostLinkTexts = std::array<std::string_view, 2> { "not yet connected", "not connected" };
-    static_assert(HostLinkTexts.size() == static_cast<std::size_t>(SwitcherHostLink::Disconnected) + 1,
+    constexpr auto HostLinkTexts =
+        std::array<std::string_view, 3> { "not yet connected", "not connected", "connected" };
+    static_assert(HostLinkTexts.size() == static_cast<std::size_t>(SwitcherHostLink::Connected) + 1,
                   "every SwitcherHostLink needs its text");
 
     /// @return Whether a daemon runs (a local one) or is reached (a saved host).
@@ -222,17 +230,25 @@ std::size_t switcherInitialSelection(std::span<SwitcherRow const> rows,
     auto const isDaemonRow = [](SwitcherRow const& row) {
         return row.kind == SwitcherRowKind::Daemon;
     };
-    auto const isOther = [&](SwitcherRow const& row) {
-        return isDaemonRow(row)
-               && (row.target.kind != windowDaemon.kind || row.target.daemon != windowDaemon.daemon);
+    auto const isOtherLocal = [&](SwitcherRow const& row) {
+        return isDaemonRow(row) && row.group == SwitcherGroup::ThisComputer
+               && !isWindowDaemon(windowDaemon, row.target);
     };
-    auto const index = [&](auto found) {
+    auto const isOwn = [&](SwitcherRow const& row) {
+        return isDaemonRow(row) && isWindowDaemon(windowDaemon, row.target);
+    };
+    auto const indexOfFirst = [&](auto const& matches) -> std::optional<std::size_t> {
+        auto const found = std::ranges::find_if(rows, matches);
+        if (found == rows.end())
+            return std::nullopt;
         return static_cast<std::size_t>(std::distance(rows.begin(), found));
     };
-    if (auto const other = std::ranges::find_if(rows, isOther); other != rows.end())
-        return index(other);
-    if (auto const own = std::ranges::find_if(rows, isDaemonRow); own != rows.end())
-        return index(own);
+    if (auto const at = indexOfFirst(isOtherLocal))
+        return *at;
+    if (auto const at = indexOfFirst(isOwn))
+        return *at;
+    if (auto const at = indexOfFirst(isDaemonRow))
+        return *at;
     return 0;
 }
 

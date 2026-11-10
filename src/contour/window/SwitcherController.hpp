@@ -57,13 +57,6 @@ struct SwitcherServices
         startDaemon;
 };
 
-/// The daemon and workspace switcher popup's list and what choosing in it does: a Qt adapter over
-/// switcherRows(), which owns every grouping, filtering and naming decision. It holds what the user typed,
-/// the selection, which daemons are expanded and their listings, and the "New daemon…" prompt.
-///
-/// Choosing a row asks the window switcher and closes the popup (finished()); cancelling changes nothing
-/// (cancelled()). Discovery, listings and a daemon's start answer later, on the GUI thread, each dropped
-/// once the popup was opened again.
 /// Who chose the selected row: nobody yet, or the user.
 enum class SwitcherSelectionOrigin : uint8_t
 {
@@ -71,6 +64,13 @@ enum class SwitcherSelectionOrigin : uint8_t
     User,        ///< The user moved it (arrows, hover) or filtered; a rebuild keeps it where it is.
 };
 
+/// The daemon and workspace switcher popup's list and what choosing in it does: a Qt adapter over
+/// switcherRows(), which owns every grouping, filtering and naming decision. It holds what the user typed,
+/// the selection, which daemons are expanded and their listings, and the "New daemon…" prompt.
+///
+/// Choosing a row asks the window switcher and closes the popup (finished()); cancelling changes nothing
+/// (cancelled()). Discovery, listings and a daemon's start answer later, on the GUI thread, each dropped
+/// once the popup was opened again.
 class SwitcherController: public QAbstractListModel
 {
     Q_OBJECT

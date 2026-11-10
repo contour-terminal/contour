@@ -73,6 +73,7 @@ class DaemonSwitchDirectory final: public session::SwitchDirectory
     [[nodiscard]] std::vector<session::KnownWorkspace> workspacesOf(
         vtworkspace::WorkspaceId window) const override;
     void refresh() override;
+    void refreshDiscovery() override;
 
   private:
     /// Whether a discovery runs now: a refresh meanwhile starts none.

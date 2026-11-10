@@ -1218,6 +1218,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The name; empty for a remote-hosted pane, a device with no process group, or when unknown.
     [[nodiscard]] std::string foregroundProcessName() const;
 
+    /// @return The base name of the program the profile's shell spawns, as the spawn reads `shell:`; what
+    /// names
+    ///         a pane whose foreground process is not reported. Empty when the profile names none.
+    [[nodiscard]] std::string shellProgramName() const;
+
     /// Whether a program other than the shell is in front of this session's shell, which decides if closing
     /// its tab asks first. GUI thread; one query of the process table.
     /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process; closing
@@ -3111,6 +3116,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The edit is still guarded, appended and local, so it is wrong rather than harmful; the answer would
     /// have to come from tmux (`#{pane_current_command}`).
     [[nodiscard]] config::ShellKind runningShell() const;
+
+    /// @return The program the profile's shell spawns, read as the spawn reads it (`bash -l`, a path that
+    /// holds
+    ///         spaces): what names the shell where nothing reports a foreground process.
+    [[nodiscard]] std::string spawnedProgram() const;
 
     /// @param pattern A window::CardStageRow text.
     /// @return It, filled in with the card's shell, startup file and line.

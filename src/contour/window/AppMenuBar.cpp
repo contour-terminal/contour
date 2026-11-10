@@ -300,13 +300,11 @@ namespace
         });
     }
 
-    /// Removes every row of @p menu but @p keep, their submenus with them.
-    void clearMenu(QMenu& menu, QAction const* keep = nullptr)
+    /// Removes @p rows from @p menu, their submenus with them.
+    void removeRows(QMenu& menu, QList<QAction*> const& rows)
     {
-        for (auto* const action: menu.actions())
+        for (auto* const action: rows)
         {
-            if (action == keep)
-                continue;
             menu.removeAction(action);
             // A submenu takes its own menuAction with it; a row the menu made is the menu's to delete.
             auto* const submenu = action->menu();
@@ -314,6 +312,14 @@ namespace
                 delete action;
             delete submenu;
         }
+    }
+
+    /// Removes every row of @p menu but @p keep, their submenus with them.
+    void clearMenu(QMenu& menu, QAction const* keep = nullptr)
+    {
+        auto rows = menu.actions();
+        rows.removeIf([keep](QAction const* action) { return action == keep; });
+        removeRows(menu, rows);
     }
 
     /// Adds one empty menu per menu bar menu to @p bar, in MenuBarMenu order.
@@ -518,6 +524,8 @@ void AppMenuBar::refreshAll()
 
 void AppMenuBar::refresh(MenuBarMenu which)
 {
+    if (which == MenuBarMenu::Window && _sources.refreshSwitching)
+        _sources.refreshSwitching();
     refresh(which, resolve());
 }
 
@@ -547,7 +555,15 @@ void AppMenuBar::refresh(MenuBarMenu which, command::MenuTree const& tree)
             auto const tabListAt = actions.indexOf(firstTabRow);
             Require(tabListAt >= 0);
             actions.resize(tabListAt);
-            refreshActions(actions, rows.first(tabs));
+            // A row shown only in some states (the daemon rows of a window with a daemon) comes and goes
+            // here, as in Refill, ahead of the tab list.
+            if (!hasShapeOf(actions, rows.first(tabs)))
+            {
+                removeRows(top, actions);
+                fill(top, which, rows.first(tabs), tree, firstTabRow);
+            }
+            else
+                refreshActions(actions, rows.first(tabs));
             refillTabList(rows.subspan(tabs), tree);
             return;
         }

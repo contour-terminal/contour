@@ -201,10 +201,12 @@ class FakeSwitchDirectory final: public contour::session::SwitchDirectory
         return workspaces;
     }
     void refresh() override { ++refreshes; }
+    void refreshDiscovery() override { ++discoveryRefreshes; }
 
     std::vector<contour::cli::DiscoveredDaemon> daemons;      ///< What localDaemons() answers.
     std::vector<std::string> hosts;                           ///< What hostsShownHere() answers.
     std::vector<contour::session::KnownWorkspace> workspaces; ///< What workspacesOf() answers.
+    int discoveryRefreshes = 0;                               ///< How often refreshDiscovery() was called.
     int refreshes = 0;                                        ///< How often refresh() was called.
 };
 
@@ -230,8 +232,16 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
         return _target;
     }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::DaemonLocality daemonLocality() const noexcept override
+    {
+        return _locality;
+    }
     void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
     void lastWindowReleased() override {}
+
+    /// Says the daemon the binding names runs on another machine, as a saved host's or a `--connect-tcp` one
+    /// does.
+    void runElsewhere() noexcept { _locality = contour::window::DaemonLocality::Remote; }
 
     /// Changes the daemon the binding names, as a switch to another daemon does.
     /// @param target The new daemon.
@@ -246,6 +256,7 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     contour::session::SessionFactory& _factory;
     contour::session::SwitchTarget _target;
     std::string _chromeLabel;
+    contour::window::DaemonLocality _locality = contour::window::DaemonLocality::Local;
 };
 
 /// In-memory SessionFactory: every created session is backed by a vtpty::MockPty, so the manager's

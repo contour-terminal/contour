@@ -3,11 +3,11 @@
 // connection stands -- a status dot, the host, and the state's text ("Reconnecting…", "Disconnected";
 // nothing while connected). What each state looks like is UiStyleProvider::hostChipLook's table.
 //
-// A button: a click, a tap, or Space/Return while it holds the toolbar's keyboard focus opens the daemon &
-// workspace switcher (`clicked`, which the title bar wires to the ShowSwitcher action), since the host it
-// names is the thing the switcher changes. Rest, hover and pressed follow the toolbar button's kit fills,
-// and keyboard focus wears the focus ring. A local window has no host and the chip takes no room. On the Terminal row the chip is a run of cells,
-// bracketed by the chip glyph tokens: `[● host status]`.
+// A button: a click, a tap, or Space/Return while it holds the toolbar's keyboard focus emits `clicked`, which
+// the title bar answers by opening the daemon & workspace switcher (WindowController.showSwitcher), since the
+// host it names is what the switcher changes. Rest, hover and pressed follow the toolbar buttons' kit fills,
+// and keyboard focus wears the focus ring. A local window has no host and the chip takes no room. On the
+// Terminal row the chip is a run of cells, bracketed by the chip glyph tokens: `[● host status]`.
 import QtQuick
 
 Item {
@@ -28,7 +28,8 @@ Item {
 
     // How the state looks -- { dot, status, accessibleState } -- re-read on a palette change, since the
     // dot's ink follows it.
-    readonly property var look: chromeStyle.paletteRevision < 0 ? ({}) : chromeStyle.hostChipLook(root.connection)
+    readonly property var look: chromeStyle.paletteRevision < 0
+                                ? ({}) : chromeStyle.hostChipLook(root.connection)
     readonly property string statusText: root.look.status !== undefined ? root.look.status : ""
     // Whether the chip is a run of bracketed cells (the Terminal row) rather than a rounded shape.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
@@ -38,10 +39,12 @@ Item {
     Accessible.role: Accessible.Button
     Accessible.focusable: root.focusRingShown
     Accessible.focused: root.focusRingShown
-    // The connection's state is named only while it is not the ordinary one: "(on work)", "(on work, reconnecting)".
+    // The connection's state is named only while it is not the ordinary one: "(on work)",
+    // "(on work, reconnecting)".
     Accessible.name: root.statusText === ""
                          ? qsTr("Switch daemon or workspace (on %1)").arg(root.hostLabel)
-                         : qsTr("Switch daemon or workspace (on %1, %2)").arg(root.hostLabel).arg(root.look.accessibleState ?? "")
+                         : qsTr("Switch daemon or workspace (on %1, %2)")
+                               .arg(root.hostLabel).arg(root.look.accessibleState ?? "")
     Accessible.onPressAction: root.clicked()
 
     Keys.onPressed: function(event) {
@@ -52,7 +55,9 @@ Item {
     }
 
     visible: chromeStyle.isHostChipShown(root.hostLabel)
-    implicitWidth: root.visible ? row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5) : 0
+    implicitWidth: root.visible
+                   ? row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
+                   : 0
     implicitHeight: chromeStyle.size.hostChip
     width: root.implicitWidth
     height: root.implicitHeight
@@ -77,6 +82,13 @@ Item {
         color: primary.pressed ? chromeStyle.colors.controlPressedFill
              : hover.hovered || root.activeFocus ? chromeStyle.colors.tabHoverFill
              : chromeStyle.colors.chipFill
+    }
+
+    // What a click does, with the chord that does the same.
+    KitToolTipHost {
+        text: qsTr("Switch daemon or workspace")
+        shortcutCommand: "ShowSwitcher"
+        toolTipName: "hostChipToolTip"   // findChild() handle for the GUI test
     }
 
     FocusRing {

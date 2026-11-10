@@ -108,11 +108,13 @@ struct BarFixture
     command::MenuBarState state = windowWithTabs({ "one" });
     actions::ActionList ran {};
     std::vector<command::ActionScope> scopes {}; ///< The scope each run of @ref ran was handed.
+    int switchingRefreshes = 0; ///< How often the Window menu opening asked for the daemon rows to refresh.
     test::RecordingMenuBarIntegration integration {};
     window::AppMenuBar bar {
         window::AppMenuBarSources {
             .state = [this] { return state; },
             .chords = [this] { return command::chordIndex(config); },
+            .refreshSwitching = [this] { ++switchingRefreshes; },
             .run =
                 [this](actions::Action const& action, command::ActionScope scope) {
                     ran.push_back(action);
@@ -498,6 +500,42 @@ TEST_CASE("Minimize follows the focused window with its menu never opened", "[di
     state = command::MenuBarState {};
     bar.refreshAll();
     CHECK_FALSE(findAction(windows, QStringLiteral("Minimize"))->isEnabled());
+}
+
+TEST_CASE("the Window menu gains and loses the daemon rows as it opens", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+    auto& windowMenu = fixture.menu(MenuBarMenu::Window);
+    // Built before any window had focus: no daemon behind it, so neither row.
+    CHECK(findAction(windowMenu, QStringLiteral("Switch To Daemon")) == nullptr);
+    CHECK(fixture.switchingRefreshes == 0);
+
+    auto work =
+        command::Command { .id = "SwitchToDaemon:work",
+                           .title = "Switch to daemon work",
+                           .description = {},
+                           .action = actions::SwitchToDaemon { { actions::DaemonRefKind::Label, "work" } },
+                           .category = command::CommandCategory::Daemons,
+                           .argument = "work" };
+    fixture.state.switching = command::DaemonSwitching::Available;
+    fixture.state.switchToDaemon = { work };
+    emit windowMenu.aboutToShow();
+
+    CHECK(fixture.switchingRefreshes == 1);
+    auto* const submenu = findAction(windowMenu, QStringLiteral("Switch To Daemon"));
+    REQUIRE(submenu != nullptr);
+    CHECK(findAction(windowMenu, QStringLiteral("Daemon && Workspace Switcher…")) != nullptr);
+    // The tab list stays after them, and the window list's marker last.
+    auto const actionsOf = windowMenu.actions();
+    CHECK(actionsOf.indexOf(findAction(windowMenu, QStringLiteral("one"))) > actionsOf.indexOf(submenu));
+
+    // And goes again when the window on the focus has no daemon.
+    fixture.state.switching = command::DaemonSwitching::Unavailable;
+    fixture.state.switchToDaemon.clear();
+    emit windowMenu.aboutToShow();
+    CHECK(findAction(windowMenu, QStringLiteral("Switch To Daemon")) == nullptr);
+    CHECK(findAction(windowMenu, QStringLiteral("one")) != nullptr);
 }
 
 TEST_CASE("a menu opens with the current state", "[display][menubar]")

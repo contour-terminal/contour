@@ -1396,8 +1396,9 @@ struct DaemonStatusReply
     /// it. Appended after the upgrade record by a later version, so it is encoded only behind one: nullopt
     /// for a daemon from before it, whose body ends before it.
     std::optional<uint8_t> relocation = std::nullopt;
-    /// How many workspaces it holds. Appended after the relocation by a later version, so it is encoded only
-    /// behind one: nullopt for a daemon from before it.
+    /// How many workspaces it holds that hold a tab (the empty one a fresh daemon starts with is not
+    /// counted). Appended after the relocation by a later version, so it is encoded only behind one: nullopt
+    /// for a daemon from before it.
     std::optional<uint32_t> workspaces = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };

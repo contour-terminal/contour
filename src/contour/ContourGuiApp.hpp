@@ -1607,16 +1607,6 @@ class ContourGuiApp:
     /// The OS's launcher menu (Dock menu, jump list); null where there is none. Destroyed with the app's Qt
     /// objects.
     std::unique_ptr<platform::LauncherMenu> _launcherMenu;
-    /// The Connect picker, created on first use. The window is declared after the controller it binds to, so
-    /// it goes first; both go before the engine they were built on.
-    std::unique_ptr<window::ConnectPickerController> _connectPicker;
-    std::unique_ptr<QQuickWindow> _connectPickerWindow;
-    /// How the picker was last shown, which decides what a started connection does to the app.
-    PickerPresentation _connectPickerPresentation = PickerPresentation::Launcher;
-    /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
-    std::unique_ptr<window::SwitcherController> _switcher;
-    std::unique_ptr<QQuickWindow> _switcherWindow;
-
     /// The window a transient popup was opened over, so closing the popup can hand the keyboard back to it.
     struct FocusReturn
     {
@@ -1629,8 +1619,19 @@ class ContourGuiApp:
     /// (and with some) closing a popup leaves no window holding the keyboard, so keys would go nowhere until
     /// a click.
     void returnFocusTo(FocusReturn const& target);
-    FocusReturn _connectPickerReturn; ///< Where the connect picker's close gives focus back to.
-    FocusReturn _switcherReturn;      ///< Where the switcher's close gives focus back to.
+    /// Where each popup's close gives the keyboard back to. Declared before the windows: destroying a window
+    /// hides it, and hiding runs the handler that reads these.
+    FocusReturn _connectPickerReturn;
+    FocusReturn _switcherReturn;
+    /// The Connect picker, created on first use. The window is declared after the controller it binds to, so
+    /// it goes first; both go before the engine they were built on.
+    std::unique_ptr<window::ConnectPickerController> _connectPicker;
+    std::unique_ptr<QQuickWindow> _connectPickerWindow;
+    /// How the picker was last shown, which decides what a started connection does to the app.
+    PickerPresentation _connectPickerPresentation = PickerPresentation::Launcher;
+    /// The daemon and workspace switcher popup, created on first use; ordered as the picker's pair is.
+    std::unique_ptr<window::SwitcherController> _switcher;
+    std::unique_ptr<QQuickWindow> _switcherWindow;
 
     // Build the two OS appearance sources, each bound to its change handler. The app keeps these
     // factories and builds each source the first time it is read, not at construction (ruling R-i): the

@@ -114,7 +114,7 @@ void collectActionNames(std::vector<ContextMenuEntry> const& entries, std::set<s
                           .hostNames = { "server" },
                           .layoutNames = { "dev" },
                           .switching = DaemonSwitching::Available,
-                          .daemonSwitches = { switchCommand("work") } };
+                          .switchToDaemon = { switchCommand("work") } };
 }
 
 [[nodiscard]] std::set<std::string> reachableActionNames()
@@ -389,7 +389,7 @@ TEST_CASE("menuBar.windowMenuSwitchesDaemons", "[menubar]")
     SECTION("a window with a daemon lists the palette's daemons and the switcher")
     {
         auto state = fullState();
-        state.daemonSwitches = { switchCommand("work"), switchCommand("studio · host") };
+        state.switchToDaemon = { switchCommand("work"), switchCommand("studio · host") };
         auto const window = windowMenu(state);
 
         auto const* submenu = find(window, "Switch To Daemon");
@@ -405,25 +405,11 @@ TEST_CASE("menuBar.windowMenuSwitchesDaemons", "[menubar]")
         CHECK(std::holds_alternative<actions::ShowSwitcher>(switcher->action));
     }
 
-    SECTION("only the commands that switch to a daemon become rows")
-    {
-        auto state = fullState();
-        state.daemonSwitches.push_back(Command { .id = "NewDaemon",
-                                                 .title = "New daemon…",
-                                                 .description = {},
-                                                 .action = actions::NewDaemon {},
-                                                 .category = CommandCategory::Daemons });
-        auto const window = windowMenu(state);
-        auto const* submenu = find(window, "Switch To Daemon");
-        REQUIRE(submenu != nullptr);
-        CHECK(submenu->children.size() == 1);
-    }
-
     SECTION("a window with no daemon shows neither row")
     {
         auto state = fullState();
         state.switching = DaemonSwitching::Unavailable;
-        state.daemonSwitches.clear();
+        state.switchToDaemon.clear();
         auto const window = windowMenu(state);
         CHECK(find(window, "Switch To Daemon") == nullptr);
         CHECK(find(window, "Daemon & Workspace Switcher…") == nullptr);

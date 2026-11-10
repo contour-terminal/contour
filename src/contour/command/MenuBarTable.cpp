@@ -8,7 +8,6 @@
 #include <array>
 #include <ranges>
 #include <span>
-#include <variant>
 
 namespace contour::command
 {
@@ -121,7 +120,7 @@ namespace
         auto const isSwitch = [](Command const& command) {
             return std::holds_alternative<actions::SwitchToDaemon>(command.action);
         };
-        return std::ranges::to<std::vector>(state.daemonSwitches | std::views::filter(isSwitch)
+        return std::ranges::to<std::vector>(state.switchToDaemon | std::views::filter(isSwitch)
                                             | std::views::transform([](auto const& command) {
                                                   return detail::commandEntry(command.argument,
                                                                               command.action);

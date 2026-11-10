@@ -197,6 +197,7 @@ class DaemonLink final: public session::WindowBinding
     [[nodiscard]] std::string_view hostLabel() const noexcept override;
     [[nodiscard]] std::string_view chromeLabel() const noexcept override;
     [[nodiscard]] std::optional<session::SwitchTarget> daemonTarget() const override;
+    [[nodiscard]] window::DaemonLocality daemonLocality() const noexcept override { return _locality; }
 
     /// The last window the link served went (closed, or bound elsewhere): nothing is left for the connection
     /// to show. The link stops -- its controller from the event loop, not inside the window close that may

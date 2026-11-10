@@ -39,18 +39,4 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
     return result;
 }
 
-std::string blankTabLabelFallback(std::string_view foregroundProcess, std::string_view shellProgram)
-{
-    if (!foregroundProcess.empty())
-        return std::string { foregroundProcess };
-
-    // The program is its first word (the rest are its arguments), then the part after the last separator.
-    auto program = shellProgram.substr(0, shellProgram.find(' '));
-    if (auto const separator = program.find_last_of("/\\"); separator != std::string_view::npos)
-        program.remove_prefix(separator + 1);
-    if (program.starts_with('-'))
-        program.remove_prefix(1);
-    return std::string { program };
-}
-
 } // namespace contour::window

@@ -68,6 +68,9 @@ struct AppMenuBarSources
 {
     std::function<command::MenuBarState()> state {}; ///< The world the bar is drawn over.
     std::function<command::ChordIndex()> chords {};  ///< The chords the rows show.
+    /// Called as the Window menu opens, ahead of reading state(): starts refreshing what the daemon rows
+    /// list, which state() reads from caches only. May be empty.
+    std::function<void()> refreshSwitching {};
     /// Runs a picked row's action, with what the row acts on: see command::ActionScope.
     std::function<void(actions::Action const&, command::ActionScope)> run {};
 };
