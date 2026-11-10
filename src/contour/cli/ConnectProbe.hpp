@@ -16,6 +16,8 @@
 #include <optional>
 #include <string>
 
+#include <vthost/AttachBudget.hpp>
+
 namespace vthost
 {
 class DaemonSpawner;
@@ -58,6 +60,6 @@ namespace contour::cli
 /// @param timeout How long the check may take.
 /// @return Daemon control over @p transport, for checkHostReachable().
 [[nodiscard]] std::unique_ptr<vthost::client::DaemonControlPort> makeHostControl(
-    std::shared_ptr<vthost::ITransportFactory> transport, std::chrono::milliseconds timeout);
+    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget timeout);
 
 } // namespace contour::cli

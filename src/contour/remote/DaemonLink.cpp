@@ -351,7 +351,7 @@ void DaemonLink::connectController()
     _controller->startConnecting();
 }
 
-std::expected<void, std::string> DaemonLink::awaitAttached(std::chrono::milliseconds budget)
+std::expected<void, std::string> DaemonLink::awaitAttached(vthost::AttachBudget budget)
 {
     requireGuiThread();
     // Given up, not destroyed: see awaitConnectedOrAbandon(). Kept until the link ends instead.

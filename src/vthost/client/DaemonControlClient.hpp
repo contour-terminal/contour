@@ -10,6 +10,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -21,6 +22,7 @@
 #include <optional>
 #include <string>
 
+#include <vthost/AttachBudget.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/RelocationRequest.hpp>
 #include <vthost/Transport.hpp>
@@ -117,6 +119,18 @@ class SocketDaemonControl final: public DaemonControlPort
     /// @param timeout How long a whole call may take.
     SocketDaemonControl(core::net::EventLoop& loop, Connector connect, std::chrono::milliseconds timeout);
 
+    /// @param loop The loop the connections run on (not owned).
+    /// @param connect Opens one connection per call.
+    /// @param budget How long a whole call may take, in its connect and handshake phases.
+    /// @param transportReturned Told when @p connect's transport returned its connection; reset at the start
+    ///        of every call. Starts the handshake phase of a @p budget with no connect bound. Not owned.
+    /// @throws std::invalid_argument when @p budget has no connect bound and @p transportReturned is null:
+    ///         nothing would ever end the call.
+    SocketDaemonControl(core::net::EventLoop& loop,
+                        Connector connect,
+                        AttachBudget budget,
+                        TransportReturnMark* transportReturned);
+
     [[nodiscard]] std::expected<DaemonStatus, ControlError> status() override;
     [[nodiscard]] std::expected<void, ControlError> stop(proto::StopReason reason) override;
     [[nodiscard]] std::expected<proto::UpgradeDaemonReply, ControlError> upgrade(
@@ -125,7 +139,8 @@ class SocketDaemonControl final: public DaemonControlPort
   private:
     core::net::EventLoop& _loop;
     Connector _connect;
-    std::chrono::milliseconds _timeout;
+    AttachBudget _budget;
+    TransportReturnMark* _transportReturned;
 };
 
 /// The control timeout when a caller states none.
@@ -148,10 +163,11 @@ inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 15'000
 /// Daemon control over a real transport, owning the loop it runs on.
 /// @param transport How to reach the daemon. A probe passes one that never starts a daemon (a
 ///        UnixTransportFactory with an empty ensureDaemon), so asking about a daemon never starts one.
-/// @param timeout How long a whole call may take.
+/// @param timeout How long a whole call may take. Without a connect bound the transport keeps its own
+///        clock for the connect (ssh pauses it for prompts) and only the handshake after it is bound.
 /// @return The port; TransportErrorKind::DaemonAbsent -- a missing socket or a refused connection -- reads
 ///         as ControlErrorCode::NotRunning.
 [[nodiscard]] std::unique_ptr<DaemonControlPort> makeDaemonControl(
-    std::shared_ptr<ITransportFactory> transport, std::chrono::milliseconds timeout = DefaultControlTimeout);
+    std::shared_ptr<ITransportFactory> transport, AttachBudget timeout = DefaultControlTimeout);
 
 } // namespace vthost::client

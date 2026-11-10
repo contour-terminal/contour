@@ -1100,7 +1100,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
 [[nodiscard]] std::expected<void, std::string> awaitConnectedOrAbandon(
     std::unique_ptr<NativeController>& live,
     std::unique_ptr<NativeController>& abandoned,
-    std::chrono::milliseconds budget,
+    vthost::AttachBudget budget,
     QObject const* owner);
 
 } // namespace contour::remote

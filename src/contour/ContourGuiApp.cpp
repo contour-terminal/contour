@@ -976,7 +976,7 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 }
 
 std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::DaemonLink& link,
-                                                                  std::chrono::milliseconds budget)
+                                                                  vthost::AttachBudget budget)
 {
     if (auto attached = link.awaitAttached(budget); !attached)
         return attached;
@@ -1281,7 +1281,8 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                host,
                fileSystem(),
                vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
-                   .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }))
+                   .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }),
+               cli::SshPrompting { .broker = nullptr, .probe = _sshVersionProbe })
         .transform([&](cli::HostTransport transport) {
             return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
         });
@@ -1564,7 +1565,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     auto target = std::expected<NativeAttachTarget, std::string> {};
     // Ten seconds for the local daemon: the first connect starts it too, when none serves, and that waits up
     // to five seconds for it to accept before the connect's own share of the budget begins.
-    auto budget = std::chrono::milliseconds { std::chrono::seconds(10) };
+    auto budget = vthost::AttachBudget { std::chrono::seconds(10) };
     auto hostLabel = std::string {};
     // A remote daemon is not ours to restart or upgrade; the local one is.
     auto locality = window::DaemonLocality::Remote;
@@ -1574,7 +1575,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     {
         // A remote daemon is started by the remote relay, never from here; it is attached as a launch is.
         auto& host = *_clientRequest->host;
-        budget = std::max(host.connectTimeout, std::chrono::milliseconds { remote::MinimumConnectAwait });
+        budget = host.attach;
         hostLabel = host.label;
         address = remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Host, .name = host.label };
         target = NativeAttachTarget {
@@ -3849,7 +3850,7 @@ std::function<std::expected<void, std::string>()> ContourGuiApp::prepareCheck(
             return std::unexpected { reason };
         };
     return [transport = std::make_shared<cli::HostTransport>(std::move(opened->transport))]() {
-        return cli::checkHostReachable(*cli::makeHostControl(transport->factory, transport->connectTimeout));
+        return cli::checkHostReachable(*cli::makeHostControl(transport->factory, transport->attach));
     };
 }
 

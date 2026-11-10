@@ -114,30 +114,71 @@ void RemoteController::restartConnecting()
         _stopPhase = StopPhase::Running;
         _state = State::Connecting;
         _failure.clear();
+        _transportReturnedAt.reset();
     }
     _connectStartedAt = _clock.now();
     _reactor.restart([this](core::net::EventLoop* loop) { return runClient(loop); },
                      [this](std::string const& reason) { reactorDied(reason); });
 }
 
-std::expected<void, std::string> RemoteController::awaitConnected(std::chrono::milliseconds budget)
+void RemoteController::noteTransportReturned()
 {
-    startConnecting();
-    auto const spent = _clock.now() - *_connectStartedAt;
-    auto const remaining = std::max(std::min(budget, MinimumConnectAwait),
-                                    std::chrono::ceil<std::chrono::milliseconds>(budget - spent));
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, remaining);
-    if (outcome.timedOut)
-    {
-        stop();
-        return std::unexpected(connectTimeoutMessage());
-    }
-    if (!outcome.ready)
-        return std::unexpected(outcome.failure.empty() ? connectClosedMessage() : outcome.failure);
-    return {};
+    auto const lock = std::lock_guard { _mutex };
+    _transportReturnedAt = _clock.now();
 }
 
-std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::milliseconds timeout)
+std::expected<void, std::string> RemoteController::awaitConnected(vthost::AttachBudget budget)
+{
+    startConnecting();
+    // How the wait ends: the phase left Connecting, or the bound ran out.
+    auto const settled = [this](MuxConnectOutcome const& outcome) -> std::expected<void, std::string> {
+        if (!outcome.ready)
+            return std::unexpected(outcome.failure.empty() ? connectClosedMessage() : outcome.failure);
+        return {};
+    };
+    auto const timedOut = [this]() -> std::expected<void, std::string> {
+        stop();
+        return std::unexpected(connectTimeoutMessage());
+    };
+    auto const returnedAt = [this] {
+        auto const lock = std::lock_guard { _mutex };
+        return _transportReturnedAt;
+    };
+    // What remains of @p bound, counted from @p since, but never less than MinimumConnectAwait (or the whole
+    // bound, if that is shorter).
+    auto const remainingOf = [this](std::chrono::milliseconds bound, core::platform::SteadyTimePoint since) {
+        return std::max(std::min(bound, MinimumConnectAwait),
+                        std::chrono::ceil<std::chrono::milliseconds>(bound - (_clock.now() - since)));
+    };
+
+    // The connect phase. Without a bound of its own it is waited for in slices, to see the transport return.
+    auto remaining =
+        budget.connect ? std::optional { remainingOf(*budget.connect, *_connectStartedAt) } : std::nullopt;
+    while (!returnedAt())
+    {
+        auto const slice = remaining ? std::min(*remaining, vthost::TransportReturnPollInterval)
+                                     : vthost::TransportReturnPollInterval;
+        auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, slice);
+        if (!outcome.timedOut)
+            return settled(outcome);
+        if (remaining)
+        {
+            *remaining -= slice;
+            if (*remaining <= std::chrono::milliseconds::zero())
+                return timedOut();
+        }
+    }
+
+    // The handshake phase: the connect bound, where there is one, still bounds the whole attach.
+    auto const left = budget.connect ? remaining.value_or(MinimumConnectAwait)
+                                     : remainingOf(budget.handshake, *returnedAt());
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, left);
+    if (outcome.timedOut)
+        return timedOut();
+    return settled(outcome);
+}
+
+std::expected<void, std::string> RemoteController::connectAndWait(vthost::AttachBudget timeout)
 {
     startConnecting();
     return awaitConnected(timeout);

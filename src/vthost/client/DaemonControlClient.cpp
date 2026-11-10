@@ -5,7 +5,6 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/NetError.hpp>
-#include <core/net/WithTimeout.hpp>
 #include <core/net/WriteQueue.hpp>
 
 #include <algorithm>
@@ -13,6 +12,7 @@
 #include <cctype>
 #include <format>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -301,15 +301,19 @@ namespace
         co_return *std::move(answer->upgradeReply);
     }
 
-    /// Runs @p work to completion on @p loop, bounded by @p timeout.
+    /// Runs @p work to completion on @p loop, bounded by @p budget.
     template <typename T>
     std::expected<T, ControlError> bounded(core::net::EventLoop& loop,
                                            core::async::Task<std::expected<T, ControlError>> work,
-                                           std::chrono::milliseconds timeout)
+                                           AttachBudget budget,
+                                           TransportReturnMark* transportReturned)
     {
-        auto result = loop.blockOn(core::net::withTimeout(&loop, std::move(work), timeout));
+        // Each call connects afresh: what an earlier one saw says nothing about this one.
+        if (transportReturned != nullptr)
+            transportReturned->reset();
+        auto result = loop.blockOn(withAttachBudget(&loop, std::move(work), budget, transportReturned));
         if (!result)
-            return std::unexpected { fail(ControlErrorCode::Timeout, "") };
+            return std::unexpected(fail(ControlErrorCode::Timeout, ""));
         return std::move(*result);
     }
 
@@ -332,15 +336,15 @@ namespace
     class OwnedLoopDaemonControl final: public DaemonControlPort
     {
       public:
-        OwnedLoopDaemonControl(std::shared_ptr<ITransportFactory> transport,
-                               std::chrono::milliseconds timeout):
+        OwnedLoopDaemonControl(std::shared_ptr<ITransportFactory> transport, AttachBudget budget):
             _loop(*_backend),
+            _transport(std::make_shared<ConnectObservingFactory>(
+                std::move(transport), [this] { _transportReturned.note(_loop.clock().now()); })),
             _inner(
                 _loop,
-                [loop = &_loop, transport = std::move(transport)] {
-                    return connectControl(loop, transport.get());
-                },
-                timeout)
+                [loop = &_loop, transport = _transport] { return connectControl(loop, transport.get()); },
+                budget,
+                &_transportReturned)
         {
         }
 
@@ -360,6 +364,8 @@ namespace
       private:
         std::unique_ptr<core::net::IoBackend> _backend = core::net::makeDefaultBackend();
         core::net::EventLoop _loop;
+        TransportReturnMark _transportReturned; ///< Set on the loop's thread.
+        std::shared_ptr<ITransportFactory> _transport;
         SocketDaemonControl _inner;
     };
 } // namespace
@@ -401,27 +407,38 @@ std::optional<DaemonStatus> fromWire(proto::DaemonStatusReply const& reply)
 SocketDaemonControl::SocketDaemonControl(core::net::EventLoop& loop,
                                          Connector connect,
                                          std::chrono::milliseconds timeout):
-    _loop(loop), _connect(std::move(connect)), _timeout(timeout)
+    SocketDaemonControl(loop, std::move(connect), AttachBudget { timeout }, nullptr)
 {
+}
+
+SocketDaemonControl::SocketDaemonControl(core::net::EventLoop& loop,
+                                         Connector connect,
+                                         AttachBudget budget,
+                                         TransportReturnMark* transportReturned):
+    _loop(loop), _connect(std::move(connect)), _budget(budget), _transportReturned(transportReturned)
+{
+    if (!_budget.connect && _transportReturned == nullptr)
+        throw std::invalid_argument("a control call with no connect bound needs to be told when the "
+                                    "transport returned");
 }
 
 std::expected<DaemonStatus, ControlError> SocketDaemonControl::status()
 {
-    return bounded(_loop, queryStatus(&_loop, &_connect), _timeout);
+    return bounded(_loop, queryStatus(&_loop, &_connect), _budget, _transportReturned);
 }
 
 std::expected<void, ControlError> SocketDaemonControl::stop(proto::StopReason reason)
 {
-    return bounded(_loop, requestStop(&_loop, &_connect, reason), _timeout);
+    return bounded(_loop, requestStop(&_loop, &_connect, reason), _budget, _transportReturned);
 }
 
 std::expected<proto::UpgradeDaemonReply, ControlError> SocketDaemonControl::upgrade(std::string imageId)
 {
-    return bounded(_loop, requestUpgrade(&_loop, &_connect, std::move(imageId)), _timeout);
+    return bounded(_loop, requestUpgrade(&_loop, &_connect, std::move(imageId)), _budget, _transportReturned);
 }
 
 std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,
-                                                     std::chrono::milliseconds timeout)
+                                                     AttachBudget timeout)
 {
     return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), timeout);
 }

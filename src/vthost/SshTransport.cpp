@@ -2,14 +2,18 @@
 #include <vthost/SshTransport.hpp>
 
 #include <core/Overloaded.hpp>
+#include <core/async/WhenAny.hpp>
 #include <core/net/EventLoop.hpp>
-#include <core/net/WithTimeout.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <functional>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -17,6 +21,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/Askpass.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/StdioPreamble.hpp>
 
@@ -31,8 +36,22 @@ namespace
     /// How long an ended ssh is given to report its exit code and finish its stderr.
     constexpr auto ExitCodeWait = std::chrono::milliseconds { 500 };
 
+    /// How often the `ssh -V` probe looks for its child's end, and how long it waits for it in all.
+    constexpr auto ProbePollInterval = std::chrono::milliseconds { 10 };
+    constexpr auto ProbeBound = std::chrono::seconds { 3 };
+    /// How long a probe whose child ended waits for the child's stderr to arrive.
+    constexpr auto ProbeDrainGrace = std::chrono::milliseconds { 500 };
+
     /// How much one read of the preamble asks for.
     constexpr auto PreambleReadChunk = std::size_t { 4096 };
+
+    /// Whether a failure is one the user could have answered by running ssh in a terminal, and so one a
+    /// too-old ssh's note ("Contour cannot ask for passwords here") belongs to.
+    enum class PromptAdvice : std::uint8_t
+    {
+        None = 0,    ///< Nothing a prompt could have changed.
+        Interactive, ///< A prompt would have answered it; an ssh too old to be asked says so.
+    };
 
     /// One row of the message table: what a failure is called and what the user reads.
     struct SshFailureMessage
@@ -44,6 +63,7 @@ namespace
         std::string_view format;
         /// The words when Contour answered ssh's prompts; empty: @c format serves both modes.
         std::string_view askpassFormat = {};
+        PromptAdvice advice = PromptAdvice::None; ///< Whether the old-ssh note applies.
     };
 
     /// What a login that needs a prompt batch mode cannot give says.
@@ -64,7 +84,8 @@ namespace
         { .failure = SshFailure::HostKeyUnknown,
           .kind = TransportErrorKind::HostKeyUnknown,
           .format = PromptNeeded,
-          .askpassFormat = "The host key of {0} was not accepted: {3}" },
+          .askpassFormat = "The host key of {0} was not accepted: {3}",
+          .advice = PromptAdvice::Interactive },
         { .failure = SshFailure::HostKeyChanged,
           .kind = TransportErrorKind::HostKeyUnknown,
           .format = "The host key of {0} has changed. If you expected that, remove the old key with "
@@ -72,7 +93,8 @@ namespace
         { .failure = SshFailure::AuthenticationRequired,
           .kind = TransportErrorKind::AuthenticationRequired,
           .format = PromptNeeded,
-          .askpassFormat = "ssh could not log in to {0}: {3}" },
+          .askpassFormat = "ssh could not log in to {0}: {3}",
+          .advice = PromptAdvice::Interactive },
         { .failure = SshFailure::HostUnreachable,
           .kind = TransportErrorKind::Unreachable,
           .format = "ssh could not reach {0}: {3}" },
@@ -165,6 +187,46 @@ namespace
         }
     }
 
+    /// Sleeps until @p budget plus the time prompts have been open, which grows while it sleeps.
+    /// @param session Whose promptTime() extends the deadline; null: no prompt ever does.
+    core::async::Task<void> pausableDeadline(core::net::EventLoop* loop,
+                                             std::chrono::milliseconds budget,
+                                             IAskpassSession const* session)
+    {
+        auto const start = loop->clock().now();
+        while (true)
+        {
+            auto const prompts = session ? session->promptTime() : std::chrono::milliseconds { 0 };
+            auto const deadline = start + budget + prompts;
+            if (loop->clock().now() >= deadline)
+                co_return;
+            co_await loop->sleepUntil(deadline);
+        }
+    }
+
+    /// Stores what @p work returns in @p slot.
+    core::async::Task<void> captureInto(core::async::Task<PreambleScan> work,
+                                        std::shared_ptr<std::optional<PreambleScan>> slot)
+    {
+        *slot = co_await std::move(work);
+    }
+
+    /// core::net::withTimeout, but the deadline moves out by the time @p session's prompts were open.
+    /// @return What @p work returned; nullopt when the deadline passed first.
+    core::async::Task<std::optional<PreambleScan>> withPausableTimeout(core::net::EventLoop* loop,
+                                                                       core::async::Task<PreambleScan> work,
+                                                                       std::chrono::milliseconds budget,
+                                                                       IAskpassSession const* session)
+    {
+        auto slot = std::make_shared<std::optional<PreambleScan>>();
+        auto tasks = std::vector<core::async::Task<void>> {};
+        tasks.push_back(captureInto(std::move(work), slot));
+        tasks.push_back(pausableDeadline(loop, budget, session));
+        if (co_await core::async::whenAny(std::move(tasks)) == 0)
+            co_return std::move(*slot);
+        co_return std::nullopt;
+    }
+
     /// Ends @p child and fails with @p error.
     [[nodiscard]] ConnectResult failWith(IStdioChild& child, TransportError error)
     {
@@ -192,6 +254,9 @@ std::optional<OpenSshVersion> parseOpenSshVersion(std::string_view sshDashV)
     if (rest.starts_with(WindowsInfix))
         rest.remove_prefix(WindowsInfix.size());
     auto const number = [&rest]() -> std::optional<int> {
+        // from_chars would take a sign; a version has none.
+        if (rest.empty() || std::isdigit(static_cast<unsigned char>(rest.front())) == 0)
+            return std::nullopt;
         auto value = 0;
         auto const [end, error] = std::from_chars(rest.data(), rest.data() + rest.size(), value);
         if (error != std::errc {} || end == rest.data())
@@ -271,7 +336,7 @@ TransportError sshTransportError(SshFailure failure, SshFailureContext const& co
                                 std::make_format_args(described, command, knownHost, context.detail, code));
     auto const oldSsh = context.mode == SshPromptMode::Batch && context.foundVersion
                         && *context.foundVersion < AskpassMinimumOpenSsh;
-    if (oldSsh && !row->askpassFormat.empty())
+    if (oldSsh && row->advice == PromptAdvice::Interactive)
     {
         auto const found = std::format("{}.{}", context.foundVersion->major, context.foundVersion->minor);
         message += std::vformat(OldSshAdvice, std::make_format_args(found));
@@ -281,9 +346,93 @@ TransportError sshTransportError(SshFailure failure, SshFailureContext const& co
 
 SshTransportFactory::SshTransportFactory(SshTarget target,
                                          std::shared_ptr<IStdioSpawner> spawner,
-                                         std::chrono::milliseconds connectTimeout):
-    _target(std::move(target)), _spawner(std::move(spawner)), _connectTimeout(connectTimeout)
+                                         std::shared_ptr<IAskpassBroker> broker,
+                                         std::chrono::milliseconds connectTimeout,
+                                         std::shared_ptr<SshVersionProbe> probe):
+    _target(std::move(target)),
+    _spawner(std::move(spawner)),
+    _broker(std::move(broker)),
+    _connectTimeout(connectTimeout),
+    _probe(probe ? std::move(probe) : std::make_shared<SshVersionProbe>())
 {
+}
+
+core::async::Task<std::optional<OpenSshVersion>> SshVersionProbe::version(core::net::EventLoop* loop,
+                                                                          IStdioSpawner* spawner)
+{
+    // One caller probes; one that arrives meanwhile waits for its answer.
+    while (true)
+    {
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            if (_found)
+                co_return *_found;
+            if (!_isProbing)
+            {
+                _isProbing = true;
+                break;
+            }
+        }
+        co_await loop->delay(ProbePollInterval);
+    }
+    // A probe unwound by cancellation must not leave the others waiting for ever.
+    struct Release
+    {
+        SshVersionProbe* probe;
+        ~Release()
+        {
+            auto const lock = std::scoped_lock { probe->_mutex };
+            probe->_isProbing = false;
+        }
+    } const release { this };
+
+    auto const probed = co_await probeOnce(loop, spawner);
+    // Only an answer ssh gave is kept: a probe that got no banner (a loaded machine, a child that never
+    // ended) says nothing about the ssh, and the next connect asks again rather than run in batch mode for
+    // the rest of the process.
+    if (probed.conclusion == ProbeConclusion::Conclusive)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _found = probed.version;
+    }
+    co_return probed.version;
+}
+
+core::async::Task<SshVersionProbe::Probed> SshVersionProbe::probeOnce(core::net::EventLoop* loop,
+                                                                      IStdioSpawner* spawner)
+{
+    auto const argv = std::vector<std::string> { "ssh", "-V" };
+    auto spawned = spawner->spawn(*loop, argv, SpawnEnvironment {});
+    if (!spawned)
+        co_return Probed { .version = std::nullopt, .conclusion = ProbeConclusion::Inconclusive };
+    spawned->transport.reset();
+    auto const child = std::shared_ptr<IStdioChild> { std::move(spawned->process) };
+    // OpenSSH writes its banner to stderr and ends at once. The wait is a poll on the loop's timer, never
+    // a blocking wait; exitCode() does not await the stderr drain, so the banner is polled for too, until it
+    // parses, or for a grace after the child ended, or until the bound for a child that does not end.
+    auto const deadline = loop->clock().now() + ProbeBound;
+    auto exitedAt = std::optional<core::platform::SteadyTimePoint> {};
+    while (true)
+    {
+        auto const now = loop->clock().now();
+        if (!exitedAt && child->exitCode(std::chrono::milliseconds { 0 }))
+            exitedAt = now;
+        auto const banner = child->stderrTail();
+        if (auto const version = parseOpenSshVersion(banner))
+        {
+            child->terminate();
+            co_return Probed { .version = version, .conclusion = ProbeConclusion::Conclusive };
+        }
+        if (now >= (exitedAt ? *exitedAt + ProbeDrainGrace : deadline))
+        {
+            child->terminate();
+            auto const said = exitedAt && !banner.empty();
+            co_return Probed { .version = std::nullopt,
+                               .conclusion =
+                                   said ? ProbeConclusion::Conclusive : ProbeConclusion::Inconclusive };
+        }
+        co_await loop->delay(ProbePollInterval);
+    }
 }
 
 core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> SshTransportFactory::connect(
@@ -295,8 +444,32 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
 core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> SshTransportFactory::connectOn(
     core::net::EventLoop* loop)
 {
-    auto const argv = sshArguments(_target, SshPromptMode::Batch);
-    auto spawned = _spawner->spawn(*loop, argv);
+    // Prompts need a broker and an ssh that honours SSH_ASKPASS_REQUIRE; anything else runs in batch mode.
+    auto mode = SshPromptMode::Batch;
+    auto foundVersion = std::optional<OpenSshVersion> {};
+    auto session = std::unique_ptr<IAskpassSession> {};
+    if (_broker)
+    {
+        foundVersion = co_await _probe->version(loop, _spawner.get());
+        mode = promptModeFor(foundVersion);
+    }
+    if (mode == SshPromptMode::Askpass)
+    {
+        if (auto opened = _broker->open(_target); opened)
+            session = *std::move(opened);
+        else
+        {
+            // Prompts are a convenience: without them the attach still works for what needs none.
+            clientLog()("warning: ssh: {} runs without prompts, as the prompt helper could not be set up: {}",
+                        describe(),
+                        opened.error());
+            mode = SshPromptMode::Batch;
+        }
+    }
+
+    auto const argv = sshArguments(_target, mode);
+    auto const environment = session ? session->environment() : SpawnEnvironment {};
+    auto spawned = _spawner->spawn(*loop, argv, environment);
     if (!spawned)
     {
         if (spawned.error().kind == SpawnFailure::ProgramNotFound)
@@ -310,9 +483,20 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
     auto socket = std::move(spawned->transport);
     auto child = std::shared_ptr<IStdioChild> { std::move(spawned->process) };
 
-    auto scanned = co_await core::net::withTimeout(loop, readPreamble(socket.get()), _connectTimeout);
+    auto const cancelled = [&session]() {
+        return session && session->wasCancelled();
+    };
+    auto const cancelledError = [&]() {
+        return sshTransportError(SshFailure::Cancelled,
+                                 { .target = _target, .mode = mode, .foundVersion = foundVersion });
+    };
+
+    auto scanned =
+        co_await withPausableTimeout(loop, readPreamble(socket.get()), _connectTimeout, session.get());
     if (!scanned)
     {
+        if (cancelled())
+            co_return failWith(*child, cancelledError());
         auto const seconds = (_connectTimeout.count() + 999) / 1000;
         co_return failWith(
             *child,
@@ -335,11 +519,16 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
                 socket.reset();
                 auto const exitCode = child->exitCode(ExitCodeWait);
                 auto const tail = child->stderrTail();
-                return failWith(
-                    *child,
-                    sshTransportError(
-                        classifySshFailure(tail, exitCode),
-                        { .target = _target, .detail = lastNonEmptyLine(tail), .exitCode = exitCode }));
+                // A dismissed prompt makes ssh fail like a wrong password; the user's choice is the cause.
+                if (cancelled())
+                    return failWith(*child, cancelledError());
+                return failWith(*child,
+                                sshTransportError(classifySshFailure(tail, exitCode),
+                                                  { .target = _target,
+                                                    .detail = lastNonEmptyLine(tail),
+                                                    .exitCode = exitCode,
+                                                    .mode = mode,
+                                                    .foundVersion = foundVersion }));
             },
             [&](PreambleRefused const& refused) -> ConnectResult {
                 return failWith(*child,

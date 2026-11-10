@@ -9,6 +9,7 @@
 /// as received.
 
 #include <contour/cli/ExitStatus.hpp>
+#include <contour/cli/HostTransport.hpp>
 #include <contour/config/HostUrl.hpp>
 
 #include <core/Environment.hpp>
@@ -185,11 +186,13 @@ using HostLookup = std::function<std::expected<config::HostEntry, std::string>(s
 /// @param lookup Finds the host.
 /// @param fileSystem Where a host's token_file and tls_ca are read. Must outlive the resolver.
 /// @param spawner Starts ssh, for an ssh host.
+/// @param prompting Who answers an ssh host's prompts, and the shared version probe.
 /// @return The resolver, whose refusal names the host and why it cannot be reached as configured.
 [[nodiscard]] vthost::client::SavedHostResolver makeSavedHostResolver(
     HostLookup lookup,
     core::platform::FileSystem const& fileSystem,
-    std::shared_ptr<vthost::IStdioSpawner> spawner);
+    std::shared_ptr<vthost::IStdioSpawner> spawner,
+    contour::cli::SshPrompting prompting);
 
 /// @param code What the daemon answered.
 /// @return BadRequest is BadUsage; NotFound and Ambiguous are TargetNotFound; everything else

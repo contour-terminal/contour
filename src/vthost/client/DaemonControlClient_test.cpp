@@ -14,10 +14,13 @@
 #include <format>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <vthost/AttachBudget.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -193,6 +196,50 @@ TEST_CASE("status() over a Control connection returns the daemon's report", "[vt
     CHECK(status->clients == 1);
     CHECK(status->lifecycle == vthost::DaemonLifecycle::ExitWhenIdle);
     CHECK(h.host.sessionCount() == 0);
+}
+
+namespace
+{
+/// Runs @p inner, and tells @p mark when it handed out a connection, as a ConnectObservingFactory would.
+core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, client::ControlError>> noteWhenConnected(
+    core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, client::ControlError>> inner,
+    vthost::TransportReturnMark* mark,
+    core::net::EventLoop* loop)
+{
+    auto connected = co_await std::move(inner);
+    if (connected)
+        mark->note(loop->clock().now());
+    co_return connected;
+}
+} // namespace
+
+TEST_CASE("a control port with no connect bound handshakes afresh on every call", "[vthost][client][control]")
+{
+    auto h = ControlHarness {};
+    auto mark = vthost::TransportReturnMark {};
+    auto const handshakeBound = 300ms;
+    auto port = client::SocketDaemonControl {
+        h.loop,
+        [&] { return noteWhenConnected(h.connect(), &mark, &h.loop); },
+        vthost::AttachBudget::promptsOpen(handshakeBound),
+        &mark,
+    };
+    REQUIRE(port.status().has_value());
+
+    // Longer ago than the bound: the first call's return must not count for the second.
+    std::this_thread::sleep_for(handshakeBound + 150ms);
+    auto const second = port.status();
+    INFO((second ? std::string {} : second.error().toString()));
+    CHECK(second.has_value());
+}
+
+TEST_CASE("a control port with no connect bound and nobody to tell it the transport returned is refused",
+          "[vthost][client][control]")
+{
+    auto h = ControlHarness {};
+    CHECK_THROWS_AS((client::SocketDaemonControl {
+                        h.loop, h.connector(), vthost::AttachBudget::promptsOpen(1s), nullptr }),
+                    std::invalid_argument);
 }
 
 TEST_CASE("a status says what the daemon offered", "[vthost][client][control]")

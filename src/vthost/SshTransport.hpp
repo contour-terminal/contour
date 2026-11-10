@@ -3,9 +3,11 @@
 
 /// @file
 /// The ssh transport: `ssh <target> contour daemon --stdio`, read up to the stdio preamble and handed out
-/// as an ordinary connection. Authentication is ssh's own, and only what needs no prompt: every
-/// invocation runs in batch mode, and a login that wants a password, a passphrase, a second factor or a
-/// host-key confirmation fails with the command to run once in a terminal.
+/// as an ordinary connection. Authentication is ssh's own. With an IAskpassBroker and an OpenSSH that
+/// honours `SSH_ASKPASS_REQUIRE=force` (8.4+), ssh's prompts (password, passphrase, second factor,
+/// host-key confirmation) are answered by Contour and the connect deadline does not run meanwhile.
+/// Otherwise every invocation runs in batch mode, and a login that wants a prompt fails with the command
+/// to run once in a terminal.
 
 #include <core/async/Task.hpp>
 
@@ -14,6 +16,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,6 +32,8 @@ class EventLoop;
 
 namespace vthost
 {
+
+class IAskpassBroker;
 
 /// What a remote host runs when its saved entry names no `remote_command:`.
 inline constexpr std::string_view DefaultRemoteCommand = "contour daemon --stdio";
@@ -77,6 +82,41 @@ inline constexpr auto AskpassMinimumOpenSsh = OpenSshVersion { .major = 8, .mino
 /// @param found The version of the local ssh; nullopt when unknown.
 /// @return Askpass when @p found reaches AskpassMinimumOpenSsh, else Batch.
 [[nodiscard]] SshPromptMode promptModeFor(std::optional<OpenSshVersion> found);
+
+/// Finds out, once, which OpenSSH the local ssh is: `ssh -V`, whose banner OpenSSH writes to stderr.
+/// Shared by the factories of a process; an answer ssh gave, including "no version we know", is kept, and a
+/// probe that got none is repeated by the next connect.
+class SshVersionProbe
+{
+  public:
+    /// @param loop The loop the probe's child runs on.
+    /// @param spawner Starts `ssh -V`.
+    /// @return The local ssh's version; nullopt when it could not be run or its banner did not parse.
+    [[nodiscard]] core::async::Task<std::optional<OpenSshVersion>> version(core::net::EventLoop* loop,
+                                                                           IStdioSpawner* spawner);
+
+  private:
+    /// Whether a probe's answer is worth keeping.
+    enum class ProbeConclusion : std::uint8_t
+    {
+        Inconclusive = 0, ///< No banner came: ask again next time.
+        Conclusive,       ///< ssh said what it is, or that it is none we know.
+    };
+
+    /// What one `ssh -V` made of the local ssh.
+    struct Probed
+    {
+        std::optional<OpenSshVersion> version; ///< Nullopt when no version could be read.
+        ProbeConclusion conclusion = ProbeConclusion::Inconclusive; ///< Whether that is to be remembered.
+    };
+
+    /// Runs `ssh -V` and reads its banner, without blocking the loop.
+    [[nodiscard]] core::async::Task<Probed> probeOnce(core::net::EventLoop* loop, IStdioSpawner* spawner);
+
+    std::mutex _mutex;
+    bool _isProbing = false;                             ///< A caller is running the probe.
+    std::optional<std::optional<OpenSshVersion>> _found; ///< Empty until the probe finished.
+};
 
 /// The argv of one attempt:
 /// `ssh -T [-o BatchMode=yes | -o NumberOfPasswordPrompts=3] -o ConnectTimeout=10 -o ServerAliveInterval=15
@@ -170,10 +210,16 @@ class SshTransportFactory final: public ITransportFactory
   public:
     /// @param target Where to attach.
     /// @param spawner Starts ssh; shared, as a reconnect loop and its caller both hold it.
-    /// @param connectTimeout Spawn-to-preamble bound; a parameter so a test can make it short.
+    /// @param broker Answers ssh's prompts; nullptr: batch mode, no prompt is ever answered.
+    /// @param connectTimeout Spawn-to-preamble bound, which stands still while a prompt is open; a
+    ///        parameter so a test can make it short.
+    /// @param probe The process's ssh version probe, shared by every factory so that ssh -V runs once; a null
+    ///        one is replaced by a probe of this factory's own.
     SshTransportFactory(SshTarget target,
                         std::shared_ptr<IStdioSpawner> spawner,
-                        std::chrono::milliseconds connectTimeout = SshConnectTimeout);
+                        std::shared_ptr<IAskpassBroker> broker,
+                        std::chrono::milliseconds connectTimeout,
+                        std::shared_ptr<SshVersionProbe> probe);
 
     /// Spawns ssh and reads up to the relay's preamble. Every failure ends the child before it returns.
     /// @param loop The loop the connection runs on; the spawn happens on its thread.
@@ -195,7 +241,9 @@ class SshTransportFactory final: public ITransportFactory
 
     SshTarget _target;
     std::shared_ptr<IStdioSpawner> _spawner;
+    std::shared_ptr<IAskpassBroker> _broker;
     std::chrono::milliseconds _connectTimeout;
+    std::shared_ptr<SshVersionProbe> _probe;
 };
 
 } // namespace vthost

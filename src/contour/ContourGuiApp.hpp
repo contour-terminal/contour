@@ -84,6 +84,7 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/SshTransport.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
@@ -1187,7 +1188,7 @@ class ContourGuiApp:
     /// @param budget How long the attach may take since it started; never less than MinimumConnectAwait.
     /// @return Nothing once attached; why not, the controller given up, otherwise.
     [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(remote::DaemonLink& link,
-                                                                     std::chrono::milliseconds budget);
+                                                                     vthost::AttachBudget budget);
 
     /// What a link to a daemon is built with: this client's profile and emulation settings stated, on the
     /// app's clock, timeline and power monitor. The one place a link's configuration is made, for a launch's
@@ -1297,6 +1298,8 @@ class ContourGuiApp:
     /// The PATH `contour client --host` looks ssh up on. A member fixed at construction, as every spawner's
     /// vtpty::ProgramSearch holds a view of it for as long as its attach reconnects.
     std::string _sshSearchPath;
+    /// The process's one `ssh -V` probe, shared by every ssh host this app opens.
+    std::shared_ptr<vthost::SshVersionProbe> _sshVersionProbe = std::make_shared<vthost::SshVersionProbe>();
 
     config::Config _config;
     // Sessions are heap-allocated with C++ ownership and never destroyed in production, so their command

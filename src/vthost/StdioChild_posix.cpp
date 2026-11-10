@@ -11,11 +11,13 @@
     #include <sys/socket.h>
     #include <sys/wait.h>
 
+    #include <algorithm>
     #include <array>
     #include <cerrno>
     #include <csignal>
     #include <format>
     #include <initializer_list>
+    #include <string_view>
     #include <system_error>
     #include <thread>
     #include <utility>
@@ -180,11 +182,17 @@ namespace
         explicit PosixStdioSpawner(vtpty::ProgramSearch search): _search { std::move(search) } {}
 
         [[nodiscard]] std::expected<SpawnedStdioChild, StdioSpawnError> spawn(
-            core::net::EventLoop& loop, std::span<std::string const> argv) override
+            core::net::EventLoop& loop,
+            std::span<std::string const> argv,
+            SpawnEnvironment const& environment) override
         {
             if (argv.empty())
                 return std::unexpected { StdioSpawnError { .kind = SpawnFailure::SystemError,
                                                            .message = "no program to start" } };
+            if (auto const bad = invalidEnvironmentName(environment))
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError,
+                    .message = std::format("'{}' cannot name an environment variable", *bad) } };
             auto const image = vtpty::findProgram(argv.front(), _search);
             if (!image)
                 return std::unexpected { StdioSpawnError {
@@ -208,7 +216,8 @@ namespace
                     return std::unexpected { systemError("fcntl", error) };
 
             auto pid = pid_t { -1 };
-            if (auto const spawned = spawnWithStdio(*image, argv, farEnd.get(), errorWrite.get(), pid);
+            if (auto const spawned =
+                    spawnWithStdio(*image, argv, environment, farEnd.get(), errorWrite.get(), pid);
                 spawned != 0)
                 return std::unexpected { systemError(std::format("cannot start {}", *image), spawned) };
 
@@ -227,12 +236,23 @@ namespace
         }
 
       private:
+        /// @return This process's environment as `NAME=VALUE` entries, @p environment applied on top.
+        [[nodiscard]] static std::vector<std::string> mergedEnvironment(SpawnEnvironment const& environment)
+        {
+            auto inherited = std::vector<std::string> {};
+            for (auto const* entry = environ; entry != nullptr && *entry != nullptr; ++entry)
+                inherited.emplace_back(*entry);
+            return mergeEnvironment<char>(
+                inherited, environment.set, NameComparison::CaseSensitive, EntryOrder::AsFound);
+        }
+
         /// posix_spawn()s @p image with @p stdio as its stdin and stdout and @p stderrFd as its stderr.
         /// No fork in this multi-threaded process, so there is no window in which a child may only call
         /// async-signal-safe functions.
         /// @return 0, or the error number the spawn failed with.
         [[nodiscard]] static int spawnWithStdio(std::string const& image,
                                                 std::span<std::string const> arguments,
+                                                SpawnEnvironment const& environment,
                                                 int stdio,
                                                 int stderrFd,
                                                 pid_t& pid)
@@ -243,6 +263,13 @@ namespace
             for (auto& argument: copies)
                 argv.push_back(argument.data());
             argv.push_back(nullptr);
+
+            auto entries = mergedEnvironment(environment);
+            auto envp = std::vector<char*> {};
+            envp.reserve(entries.size() + 1);
+            for (auto& entry: entries)
+                envp.push_back(entry.data());
+            envp.push_back(nullptr);
 
             auto actions = vtpty::SpawnFileActions::create();
             if (!actions)
@@ -259,7 +286,7 @@ namespace
             ::posix_spawn_file_actions_adddup2(actions->get(), stderrFd, STDERR_FILENO);
 
             return ::posix_spawn(
-                &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), environ);
+                &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), envp.data());
         }
 
         vtpty::ProgramSearch _search;

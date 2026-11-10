@@ -106,7 +106,9 @@ namespace
 
 NativeController::NativeController(Config config):
     RemoteController(config.clock),
-    _transport(std::move(config.transport)),
+    // Told when the transport returns its connection, which is when an AttachBudget's handshake bound starts.
+    _transport(std::make_shared<vthost::ConnectObservingFactory>(std::move(config.transport),
+                                                                 [this] { noteTransportReturned(); })),
     _intent(std::move(config.intent)),
     _resumeFallback(config.resumeFallback),
     _switchRequests(config.switchRequests),
@@ -1917,7 +1919,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
 
 std::expected<void, std::string> awaitConnectedOrAbandon(std::unique_ptr<NativeController>& live,
                                                          std::unique_ptr<NativeController>& abandoned,
-                                                         std::chrono::milliseconds budget,
+                                                         vthost::AttachBudget budget,
                                                          QObject const* owner)
 {
     auto connected = live->awaitConnected(budget);

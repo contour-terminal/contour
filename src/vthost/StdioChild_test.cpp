@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/SpawnEnvironment.hpp>
 #include <vthost/StderrTail.hpp>
 #include <vthost/StdioChild.hpp>
 
@@ -41,9 +42,10 @@ struct SpawnFixture
     core::net::EventLoop loop { *source };
 
     /// Spawns @p argv on the loop, which must succeed.
-    [[nodiscard]] vthost::SpawnedStdioChild spawn(std::vector<std::string> const& argv)
+    [[nodiscard]] vthost::SpawnedStdioChild spawn(std::vector<std::string> const& argv,
+                                                  vthost::SpawnEnvironment const& environment = {})
     {
-        auto spawned = spawner->spawn(loop, argv);
+        auto spawned = spawner->spawn(loop, argv, environment);
         INFO((spawned ? std::string {} : spawned.error().message));
         REQUIRE(spawned.has_value());
         return std::move(*spawned);
@@ -163,6 +165,18 @@ TEST_CASE("stderr and the exit code are kept", "[vthost][spawn][stdio]")
 }
 
 #ifndef _WIN32
+TEST_CASE("a spawned child gets the set variables on top of the parent's environment",
+          "[vthost][spawn][stdio]")
+{
+    auto fixture = SpawnFixture {};
+    auto const environment =
+        vthost::SpawnEnvironment { .set = { { "CONTOUR_TEST_FOO", "bar" }, { "CONTOUR_TEST_FOO", "baz" } } };
+    auto child = fixture.spawn({ "sh", "-c", R"(printf '%s|%s' "$CONTOUR_TEST_FOO" "${PATH:+has-path}")" },
+                               environment);
+    auto const received = fixture.loop.blockOn(exchange(child.transport.get(), {}));
+    CHECK(textOf(received) == "baz|has-path");
+}
+
 TEST_CASE("stderr keeps only its tail", "[vthost][spawn][stdio]")
 {
     auto fixture = SpawnFixture {};
@@ -179,7 +193,7 @@ TEST_CASE("a missing program is named", "[vthost][spawn][stdio]")
 {
     auto fixture = SpawnFixture {};
     auto const spawned =
-        fixture.spawner->spawn(fixture.loop, std::vector<std::string> { "contour-no-such-program" });
+        fixture.spawner->spawn(fixture.loop, std::vector<std::string> { "contour-no-such-program" }, {});
     REQUIRE_FALSE(spawned.has_value());
     CHECK(spawned.error().kind == SpawnFailure::ProgramNotFound);
     CHECK(spawned.error().message.contains("contour-no-such-program"));
@@ -204,4 +218,71 @@ TEST_CASE("StderrTail keeps the last bytes up to its limit", "[vthost][spawn]")
     CHECK(tail.text() == "cdef");
     tail.append("g");
     CHECK(tail.text() == "defg");
+}
+
+TEST_CASE("mergeEnvironment lets the last of two set names win and replaces the parent's value",
+          "[vthost][spawn]")
+{
+    using vthost::EntryOrder;
+    using vthost::NameComparison;
+    auto const inherited = std::vector<std::string> { "PATH=/bin", "FOO=old", "HOME=/home/me" };
+    auto const set = std::vector<std::pair<std::string, std::string>> { { "FOO", "one" },
+                                                                        { "NEW", "x" },
+                                                                        { "FOO", "two" } };
+    auto const merged =
+        vthost::mergeEnvironment<char>(inherited, set, NameComparison::CaseSensitive, EntryOrder::AsFound);
+    CHECK(merged == std::vector<std::string> { "PATH=/bin", "HOME=/home/me", "NEW=x", "FOO=two" });
+}
+
+TEST_CASE("mergeEnvironment on Windows terms: case-blind names, sorted, per-drive names kept",
+          "[vthost][spawn]")
+{
+    using vthost::EntryOrder;
+    using vthost::NameComparison;
+    auto const inherited =
+        std::vector<std::wstring> { L"Path=C:\\bin", L"=C:=C:\\work", L"SystemRoot=C:\\Windows" };
+    auto const set = std::vector<std::pair<std::wstring, std::wstring>> { { L"PATH", L"D:\\bin" },
+                                                                          { L"askpass", L"1" },
+                                                                          { L"path", L"E:\\bin" } };
+    auto const merged = vthost::mergeEnvironment<wchar_t>(
+        inherited, set, NameComparison::CaseInsensitive, EntryOrder::SortedByName);
+    // Sorted by name without regard to case; of the two spellings of PATH only the last survives.
+    CHECK(merged
+          == std::vector<std::wstring> {
+              L"=C:=C:\\work", L"askpass=1", L"path=E:\\bin", L"SystemRoot=C:\\Windows" });
+}
+
+TEST_CASE("an environment name must be non-empty and hold no equals sign", "[vthost][spawn]")
+{
+    CHECK_FALSE(vthost::invalidEnvironmentName({ .set = { { "A", "b=c" } } }).has_value());
+    CHECK(vthost::invalidEnvironmentName({ .set = { { "A", "b" }, { "X=Y", "z" } } }) == "X=Y");
+    CHECK(vthost::invalidEnvironmentName({ .set = { { "", "z" } } }) == "");
+}
+
+TEST_CASE("a spawn with a name holding an equals sign is refused", "[vthost][spawn][stdio]")
+{
+    auto fixture = SpawnFixture {};
+    auto const spawned = fixture.spawner->spawn(
+        fixture.loop, platformCommands().echo, vthost::SpawnEnvironment { .set = { { "A=B", "c" } } });
+    REQUIRE_FALSE(spawned.has_value());
+    CHECK(spawned.error().kind == SpawnFailure::SystemError);
+    CHECK(spawned.error().message.contains("A=B"));
+}
+
+TEST_CASE("mergeEnvironment sorts case-blind names in upper-case order, as Windows does", "[vthost][spawn]")
+{
+    using vthost::EntryOrder;
+    using vthost::NameComparison;
+    // Upper-cased, '_' (0x5F) sorts after 'B' (0x42); lower-cased it would sort before 'b' (0x62).
+    auto const inherited = std::vector<std::wstring> { L"A_B=1", L"ab=2" };
+    auto const merged = vthost::mergeEnvironment<wchar_t>(
+        inherited, {}, NameComparison::CaseInsensitive, EntryOrder::SortedByName);
+    CHECK(merged == std::vector<std::wstring> { L"ab=2", L"A_B=1" });
+}
+
+TEST_CASE("environmentBlock ends every entry with a NUL and the block with one more", "[vthost][spawn]")
+{
+    auto const entries = std::vector<std::wstring> { L"A=1", L"B=2" };
+    CHECK(vthost::environmentBlock<wchar_t>(entries) == std::wstring { L"A=1\0B=2\0\0", 9 });
+    CHECK(vthost::environmentBlock<wchar_t>({}) == std::wstring { L"\0\0", 2 });
 }

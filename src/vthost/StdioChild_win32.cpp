@@ -6,9 +6,14 @@
     #include <core/WideString.hpp>
     #include <core/net/Sockets.hpp>
 
+    #include <algorithm>
     #include <array>
+    #include <cwchar>
+    #include <cwctype>
     #include <format>
     #include <initializer_list>
+    #include <optional>
+    #include <string>
     #include <string_view>
     #include <system_error>
     #include <thread>
@@ -193,17 +198,49 @@ namespace
         std::shared_ptr<StderrTail> _tail;
     };
 
+    /// @return This process's environment with @p environment applied on top, as the block CreateProcessW
+    ///         takes: `NAME=VALUE` entries sorted case-insensitively by name, each NUL-terminated, and the
+    ///         whole ended by one more NUL; nullopt when a name or value is no UTF-8.
+    [[nodiscard]] std::optional<std::wstring> mergedEnvironmentBlock(SpawnEnvironment const& environment)
+    {
+        auto overrides = std::vector<std::pair<std::wstring, std::wstring>> {};
+        for (auto const& [name, value]: environment.set)
+        {
+            auto wideName = core::toUtf16(name);
+            auto wideValue = core::toUtf16(value);
+            if (!wideName || !wideValue)
+                return std::nullopt;
+            overrides.emplace_back(*std::move(wideName), *std::move(wideValue));
+        }
+        auto inherited = std::vector<std::wstring> {};
+        if (auto* const strings = GetEnvironmentStringsW(); strings != nullptr)
+        {
+            for (auto const* entry = strings; *entry != L'\0'; entry += std::wcslen(entry) + 1)
+                inherited.emplace_back(entry);
+            FreeEnvironmentStringsW(strings);
+        }
+        auto const merged = mergeEnvironment<wchar_t>(
+            inherited, overrides, NameComparison::CaseInsensitive, EntryOrder::SortedByName);
+        return environmentBlock<wchar_t>(merged);
+    }
+
     class Win32StdioSpawner final: public IStdioSpawner
     {
       public:
         explicit Win32StdioSpawner(vtpty::ProgramSearch search): _search { std::move(search) } {}
 
         [[nodiscard]] std::expected<SpawnedStdioChild, StdioSpawnError> spawn(
-            core::net::EventLoop& loop, std::span<std::string const> argv) override
+            core::net::EventLoop& loop,
+            std::span<std::string const> argv,
+            SpawnEnvironment const& environment) override
         {
             if (argv.empty())
                 return std::unexpected { StdioSpawnError { .kind = SpawnFailure::SystemError,
                                                            .message = "no program to start" } };
+            if (auto const bad = invalidEnvironmentName(environment))
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError,
+                    .message = std::format("'{}' cannot name an environment variable", *bad) } };
             auto const image = vtpty::findProgram(argv.front(), _search);
             if (!image)
                 return std::unexpected { StdioSpawnError {
@@ -232,6 +269,12 @@ namespace
             if (!commandLine || !program)
                 return std::unexpected { StdioSpawnError {
                     .kind = SpawnFailure::SystemError, .message = "the command line is not valid UTF-8" } };
+            // Nothing to set: the child inherits the parent's environment as it is.
+            auto block = environment.set.empty() ? std::optional<std::wstring> {}
+                                                 : mergedEnvironmentBlock(environment);
+            if (!environment.set.empty() && !block)
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError, .message = "the environment is not valid UTF-8" } };
             auto startup = STARTUPINFOW {};
             startup.cb = sizeof(startup);
             startup.dwFlags = STARTF_USESTDHANDLES;
@@ -245,8 +288,8 @@ namespace
                                 nullptr,
                                 nullptr,
                                 TRUE,
-                                CREATE_NO_WINDOW,
-                                nullptr,
+                                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                                block ? block->data() : nullptr,
                                 nullptr,
                                 &startup,
                                 &info))

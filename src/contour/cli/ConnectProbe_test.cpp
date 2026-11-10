@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/ConnectProbe.hpp>
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <memory>
+#include <span>
 #include <string>
+#include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 
 using contour::cli::checkHostReachable;
@@ -121,4 +131,65 @@ TEST_CASE("ConnectProbe.a host that fails says why in the transport's words", "[
     auto const result = checkHostReachable(missing);
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().contains("Contour isn't installed on starfive"));
+}
+
+namespace
+{
+/// Holds the far end of a connection open and says nothing: a daemon wedged in the handshake. Owned by the
+/// loop it was spawned on.
+core::async::Task<void> saySomethingNever(std::unique_ptr<core::net::ISocket> remote)
+{
+    auto buffer = std::vector<std::byte>(256);
+    while (true)
+    {
+        auto const read = co_await remote->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+    }
+}
+
+/// Hands out connections to a daemon that never answers.
+class WedgedTransport final: public vthost::ITransportFactory
+{
+  public:
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& loop) override
+    {
+        return connectOn(&loop);
+    }
+
+    [[nodiscard]] std::string describe() const override { return "wedged"; }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
+    {
+        return vthost::PeerTrust::Verified;
+    }
+
+  private:
+    /// The coroutine behind connect(), which takes the loop by pointer: a coroutine's parameters outlive
+    /// the call only by value.
+    [[nodiscard]] static core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connectOn(core::net::EventLoop* loop)
+    {
+        auto pair = core::net::testing::makeSocketPair(*loop);
+        loop->spawn(saySomethingNever(std::move(pair->first)));
+        co_return std::make_unique<vthost::Connection>(
+            vthost::Connection { .lifetime = {}, .socket = std::move(pair->second), .token = {} });
+    }
+};
+} // namespace
+
+TEST_CASE("ConnectProbe.a host control with no connect bound still bounds the handshake",
+          "[contour][connect]")
+{
+    using namespace std::chrono_literals;
+    auto const control = contour::cli::makeHostControl(std::make_shared<WedgedTransport>(),
+                                                       vthost::AttachBudget::promptsOpen(300ms));
+    auto const started = std::chrono::steady_clock::now();
+    auto const result = checkHostReachable(*control);
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(result.has_value());
+    CHECK(took >= 250ms);
+    CHECK(took < 5s);
 }

@@ -307,7 +307,7 @@ class DaemonLink final: public session::WindowBinding
     /// binder.
     /// @param budget How long the connect may take since the link was built.
     /// @return Nothing once attached; why not otherwise.
-    [[nodiscard]] std::expected<void, std::string> awaitAttached(std::chrono::milliseconds budget);
+    [[nodiscard]] std::expected<void, std::string> awaitAttached(vthost::AttachBudget budget);
 
     /// Shows the drift badge when the daemon runs another release than this client, and wires its actions to
     /// the host's upgrade and restart, for a local daemon. Follows the daemon through an upgrade: the badge

@@ -70,6 +70,7 @@
 #include <expected>
 #include <span>
 
+#include <vthost/Askpass.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -79,6 +80,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/StdioChild.hpp>
+#include <vthost/StdioPreamble.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
@@ -5785,7 +5787,9 @@ class SilentStdioSpawner final: public vthost::IStdioSpawner
 {
   public:
     [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
-        core::net::EventLoop& loop, std::span<std::string const> /*argv*/) override
+        core::net::EventLoop& loop,
+        std::span<std::string const> /*argv*/,
+        vthost::SpawnEnvironment const& /*environment*/) override
     {
         auto pair = core::net::testing::makeSocketPair(loop);
         if (!pair)
@@ -5796,7 +5800,110 @@ class SilentStdioSpawner final: public vthost::IStdioSpawner
                                                std::make_unique<SilentStdioChild>(std::move(pair->second)) };
     }
 };
+
+/// An `ssh -V` that has ended and printed the banner of a modern OpenSSH.
+class BannerStdioChild final: public vthost::IStdioChild
+{
+  public:
+    [[nodiscard]] std::string stderrTail() const override { return "OpenSSH_9.6p1, OpenSSL 3.0.13\n"; }
+    [[nodiscard]] std::optional<int> exitCode(std::chrono::milliseconds /*wait*/) override { return 0; }
+    void terminate() noexcept override {}
+};
+
+/// Sends the stdio preamble, then says nothing and keeps the connection open: a remote that is wedged in
+/// the handshake.
+core::async::Task<void> preambleThenSilence(std::unique_ptr<core::net::ISocket> remote)
+{
+    auto const preamble = std::string { vthost::StdioPreambleReady };
+    std::ignore = co_await remote->write(std::as_bytes(std::span { preamble }));
+    auto buffer = std::vector<std::byte>(256);
+    while (true)
+    {
+        auto const read = co_await remote->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+    }
+}
+
+/// Answers `ssh -V` with a modern banner, and any other ssh with the preamble followed by silence.
+class WedgedAfterPreambleSpawner final: public vthost::IStdioSpawner
+{
+  public:
+    [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
+        core::net::EventLoop& loop,
+        std::span<std::string const> argv,
+        vthost::SpawnEnvironment const& /*environment*/) override
+    {
+        auto pair = core::net::testing::makeSocketPair(loop);
+        if (!pair)
+            return std::unexpected { vthost::StdioSpawnError { .kind = vthost::SpawnFailure::SystemError,
+                                                               .message = "no socket pair" } };
+        if (std::ranges::contains(argv, std::string { "-V" }))
+            return vthost::SpawnedStdioChild { .transport = std::move(pair->first),
+                                               .process = std::make_unique<BannerStdioChild>() };
+        loop.spawn(preambleThenSilence(std::move(pair->second)));
+        return vthost::SpawnedStdioChild { .transport = std::move(pair->first),
+                                           .process = std::make_unique<BannerStdioChild>() };
+    }
+};
+
+/// A session with no prompt ever open.
+class QuietAskpassSession final: public vthost::IAskpassSession
+{
+  public:
+    [[nodiscard]] vthost::SpawnEnvironment environment() const override { return {}; }
+    [[nodiscard]] bool wasCancelled() const noexcept override { return false; }
+    [[nodiscard]] std::chrono::milliseconds promptTime() const noexcept override
+    {
+        return std::chrono::milliseconds { 0 };
+    }
+};
+
+class QuietAskpassBroker final: public vthost::IAskpassBroker
+{
+  public:
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> open(
+        vthost::SshTarget const& /*target*/) override
+    {
+        return std::make_unique<QuietAskpassSession>();
+    }
+};
 } // namespace
+
+TEST_CASE("with prompts answered there is no connect clock, but a wedged handshake is failed",
+          "[attach][controller][hosts]")
+{
+    // The attach has no outer bound for the connect (the transport's own deadline pauses for prompts); what
+    // follows the preamble keeps one, from the moment the transport returned its connection.
+    auto constexpr HandshakeBound = std::chrono::milliseconds { 2500 };
+    static_assert(HandshakeBound > contour::remote::MinimumConnectAwait);
+    auto timeline = TestTimeline {};
+    auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
+        .transport = std::make_shared<vthost::SshTransportFactory>(
+            vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
+            std::make_shared<WedgedAfterPreambleSpawner>(),
+            std::make_shared<QuietAskpassBroker>(),
+            vthost::SshConnectTimeout,
+            std::make_shared<vthost::SshVersionProbe>()),
+        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                .workspaces = {} },
+        .profileName = std::string {},
+        .workingDirectory = {},
+        .attachSettings = std::nullopt,
+        .sessionSettings = {},
+        .colorPreference = std::nullopt,
+        .clock = core::platform::defaultSteadyClock(),
+        .timeline = timeline.timeline,
+        .powerMonitor = nullptr,
+    } };
+    auto const started = std::chrono::steady_clock::now();
+    auto const connected = controller.connectAndWait(vthost::AttachBudget::promptsOpen(HandshakeBound));
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(took >= HandshakeBound - std::chrono::milliseconds { 200 });
+    CHECK(took < std::chrono::seconds { 15 });
+    controller.stop();
+}
 
 TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as an attach timeout",
           "[attach][controller][hosts]")
@@ -5810,7 +5917,9 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         .transport = std::make_shared<vthost::SshTransportFactory>(
             vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
             std::make_shared<SilentStdioSpawner>(),
-            TransportBound),
+            nullptr,
+            TransportBound,
+            std::make_shared<vthost::SshVersionProbe>()),
         .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                                 .workspaces = {} },
         .profileName = std::string {},
@@ -5822,7 +5931,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         .timeline = timeline.timeline,
         .powerMonitor = nullptr,
     } };
-    auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
+    auto const connected = controller.connectAndWait(
+        contour::cli::sshAttachBudget(TransportBound, contour::cli::SshPrompts::Batch));
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "ssh://me@homepc did not answer within 3 seconds");
     controller.stop();

@@ -31,6 +31,8 @@
 #include <string>
 #include <thread>
 
+#include <vthost/AttachBudget.hpp>
+
 namespace core::net
 {
 class EventLoop;
@@ -196,14 +198,19 @@ class RemoteController
     /// `MinimumConnectAwait` (or the whole budget, if that is shorter). On expiry it stops and returns
     /// `connectTimeoutMessage()`; a non-ready close returns the recorded failure or
     /// `connectClosedMessage()`. Starts the connect first if startConnecting() has not.
-    /// @param budget How long the connect may take, from startConnecting().
+    ///
+    /// With an AttachBudget that has no connect bound, the connect phase is not timed here at all -- the
+    /// transport keeps its own clock, which a prompt may pause -- and the handshake bound runs from the
+    /// moment the transport handed out its connection (noteTransportReturned()).
+    /// @param budget How long the attach may take (@see vthost::AttachBudget); a plain duration bounds the
+    ///        whole of it, from startConnecting().
     /// @return Nothing on success; a human-readable reason on failure.
-    [[nodiscard]] std::expected<void, std::string> awaitConnected(std::chrono::milliseconds budget);
+    [[nodiscard]] std::expected<void, std::string> awaitConnected(vthost::AttachBudget budget);
 
     /// startConnecting(), then awaitConnected(): for a caller with nothing to do meanwhile.
     /// @param timeout How long to wait before giving up.
     /// @return Nothing on success; a human-readable reason on failure.
-    [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::expected<void, std::string> connectAndWait(vthost::AttachBudget timeout);
 
     /// Starts a new connect, on a fresh reactor, after the last one ended -- failed, was refused, or was
     /// stopped. The phase goes back to Connecting and the budget of awaitConnected() counts from now.
@@ -285,6 +292,10 @@ class RemoteController
     [[nodiscard]] bool isConnected() const;
 
     using State = MuxConnectPhase;
+    /// Records that the transport has handed out its connection, so that the handshake bound of an
+    /// AttachBudget runs from now. Called on the reactor thread, each time a connection is made.
+    void noteTransportReturned();
+
     core::platform::IClock const& _clock;
     /// When startConnecting() started the connect; empty until it has. GUI thread only.
     std::optional<core::platform::SteadyTimePoint> _connectStartedAt;
@@ -293,6 +304,8 @@ class RemoteController
     std::condition_variable _connected; ///< Notified by the reactor on every phase transition.
     State _state = State::Connecting;
     std::string _failure;
+    /// When the transport last handed out its connection; empty before. Guarded by _mutex.
+    std::optional<core::platform::SteadyTimePoint> _transportReturnedAt;
     StopPhase _stopPhase = StopPhase::Running; ///< Guarded by _mutex.
 
   private:
