@@ -115,6 +115,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Called on the GUI thread.
     using SessionSettingsSource = std::function<std::expected<vtbackend::Settings, std::string>()>;
 
+    /// The light/dark preference the app shows now, or nullopt while it knows none yet (the OS's scheme is
+    /// read only once the QApplication exists, after the first connection may already be under way).
+    /// Called on the reactor thread, so it must be safe to call concurrently with the GUI thread.
+    using ColorPreferenceSource = std::function<std::optional<vtbackend::ColorPreference>()>;
+
     /// What a reconnect follows when none of the workspaces it resumes survived.
     enum class ResumeFallback : uint8_t
     {
@@ -157,10 +162,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
         /// gets the reloaded settings; empty to keep @p attachSettings. When it fails, the settings last
         /// stated stay in force.
         SessionSettingsSource sessionSettings;
-        /// The light/dark preference the app shows now, stated in every hello so the daemon builds the
-        /// sessions this client follows under it; none states none. Later changes arrive through
-        /// requestHostedOperation(), and are re-stated on every reconnect.
-        std::optional<vtbackend::ColorPreference> colorPreference;
+        /// Asked as every hello is built, so the daemon builds the sessions this client follows under the
+        /// preference the app shows at that moment -- not the one it showed when this config was made, which
+        /// a link cloned later from it would otherwise state again. Empty, or nullopt from it, states what
+        /// requestHostedOperation() last stated, and none before that. Changes between hellos arrive through
+        /// requestHostedOperation().
+        ColorPreferenceSource colorPreference;
         /// What the connect budget is measured on (@see RemoteController::awaitConnected). Borrowed: it must
         /// outlive the controller.
         core::platform::IClock const& clock;
@@ -719,7 +726,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param reason Why, for a lost, failed or refused one.
     void onConnectionState(vthost::client::ConnectionState state, std::string const& reason);
 
-    /// Reactor-side: states the light/dark preference last stated, if any, for @p session to the daemon.
+    /// @return The preference the app shows now as Config::colorPreference answers, else what
+    ///         requestHostedOperation() last stated; Unstated before either. Any thread.
+    [[nodiscard]] vthost::proto::WireColorPreference shownColors() const;
+
+    /// Reactor-side: states the light/dark preference the app shows, if any, for @p session to the daemon.
     /// @param client The connection.
     /// @param session The session to state it for.
     void stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const;
@@ -871,6 +882,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::optional<vtbackend::Settings> _attachSettings;
     /// This client's profile as it is now, restated before every session this connection creates.
     SessionSettingsSource _sessionSettings;
+    /// The preference the app shows now, asked as every hello is built. @see Config::colorPreference
+    ColorPreferenceSource _colorPreference;
     vthost::latency::StartupTimeline& _timeline;
     vthost::client::BackoffSchedule _backoff;
     /// Filled, under _mutex, by the first callback after each accepted connection's ServerHello. @see
@@ -902,10 +915,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The remote session the NEXT createPty() binds to, set by the layout
     /// executor before each pane's backing session is created (GUI thread).
     std::optional<uint64_t> _nextBindSession;
-    /// The light/dark preference the app last stated, whether or not the daemon was reachable to hear it:
-    /// every hello carries it, and a reconnect or a new binding states it again for the sessions it mirrors,
-    /// so a change made while the connection was down, or before a pane existed, is not lost. Atomic: written
-    /// on the GUI thread, read on the reactor.
+    /// The light/dark preference the app last stated through requestHostedOperation(), whether or not the
+    /// daemon was reachable to hear it: what shownColors() falls back to when Config::colorPreference answers
+    /// none, so a change made while the connection was down, or before a pane existed, is not lost. Atomic:
+    /// written on the GUI thread only, read on the reactor.
     std::atomic<vthost::proto::WireColorPreference> _statedColors {
         vthost::proto::WireColorPreference::Unstated
     };

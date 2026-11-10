@@ -1027,20 +1027,21 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
     else
         errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
     return remote::DaemonLinkConfig {
-        .controller =
-            remote::NativeController::Config {
-                .transport = std::move(transport),
-                .intent = std::move(intent),
-                .profileName = profileName(),
-                .workingDirectory = {},
-                .attachSettings = std::move(attachSettings),
-                .sessionSettings = [this] { return currentEmulationSettings(); },
-                .colorPreference = _colorPreference,
-                .clock = core::platform::defaultSteadyClock(),
-                .timeline = _startupTimeline,
-                .powerMonitor = _powerMonitor.get(),
-                .backoff = {},
-            },
+        .controller = remote::NativeController::Config {
+            .transport = std::move(transport),
+            .intent = std::move(intent),
+            .profileName = profileName(),
+            .workingDirectory = {},
+            .attachSettings = std::move(attachSettings),
+            .sessionSettings = [this] { return currentEmulationSettings(); },
+            // Asked as each hello goes out: this config is built before the OS's scheme is read, and the
+            // links a switch or a hand-over clone from it go on connecting long after.
+            .colorPreference = [this] { return _shownColorPreference.load(); },
+            .clock = core::platform::defaultSteadyClock(),
+            .timeline = _startupTimeline,
+            .powerMonitor = _powerMonitor.get(),
+            .backoff = {},
+        },
         .hostLabel = std::move(hostLabel),
         .locality = locality,
         .clientRelease = CONTOUR_VERSION_STRING,
@@ -2503,6 +2504,14 @@ void ContourGuiApp::applyOsColorPreference(vtbackend::ColorPreference preference
     refreshColorPreference();
 }
 
+void ContourGuiApp::rememberColorPreference(vtbackend::ColorPreference preference)
+{
+    if (auto const saved = guiState()->update(
+            [preference](config::GuiState& state) { state.lastColorPreference = preference; });
+        !saved)
+        errorLog()("Could not remember the color preference: {}.", config::describe(saved.error()));
+}
+
 void ContourGuiApp::refreshColorPreference()
 {
     auto const preference = platform::terminalColorPreference(_effectiveGuiTheme, _osColorPreference);
@@ -2510,6 +2519,8 @@ void ContourGuiApp::refreshColorPreference()
         return;
 
     _colorPreference = preference;
+    // Before the sessions state it, so a hello going out meanwhile does not state the old one.
+    auto const previous = _shownColorPreference.exchange(preference);
     display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
     sessionsManager().updateColorPreference(_colorPreference);
     // The settings page previews a light/dark profile in the appearance the terminals now use.
@@ -2517,6 +2528,11 @@ void ContourGuiApp::refreshColorPreference()
         _settingsController->setColorPreference(_colorPreference);
     // The Terminal row paints with the scheme the new preference selects.
     refreshChromeStyle();
+    // Last, so the file write never holds up the terminals' recoloring. Until the OS's scheme is first read
+    // the value was what the GUI state remembered, so a launch that shows what the last one showed writes
+    // nothing.
+    if (previous != preference)
+        rememberColorPreference(preference);
 }
 
 int ContourGuiApp::checkConfig()
@@ -2815,6 +2831,10 @@ int ContourGuiApp::terminalGuiAction()
         _daemonEnvironment =
             vthost::daemonEnvironment(inherited, display::bootRemovedGpuVariables(parentSelfSet));
     }
+    // The daemon link connects before the OS's scheme can be read, so its first hello states what the
+    // terminals showed when this app last ran (none on a first launch); corrected once the scheme is read.
+    if (auto const state = guiState()->load())
+        _shownColorPreference = state->lastColorPreference;
     if (auto const hosting = establishHosting(); !hosting)
     {
         cerr << hosting.error() << '\n';
@@ -2974,6 +2994,10 @@ int ContourGuiApp::terminalGuiAction()
     // Apply the configured GUI chrome theme (dark/light/system). Must run after the OS scheme has
     // been captured above and before the first QQuickWindow is created, so the chrome opens themed.
     applyGuiTheme(_config.theme.value(), defaultProfileColors());
+    // From here on the daemon links' hellos state what the terminals show; until now they stated what the
+    // last launch's terminals showed, which this remembers for the next launch when it differs.
+    if (_shownColorPreference.exchange(_colorPreference) != _colorPreference)
+        rememberColorPreference(_colorPreference);
 
     // Pin the chrome row's Qt Quick Controls style app-wide, so the hand-drawn tab strip, its controls and
     // the tab context menu render, blend and stay readable on every OS. Qt otherwise picks the native style

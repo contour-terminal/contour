@@ -286,3 +286,25 @@ TEST_CASE("GuiStateStore: the last connect target round-trips and is cleared by 
     REQUIRE(store.update([](GuiState& state) { state.lastConnectTarget.clear(); }).has_value());
     CHECK_FALSE(fileSystem.readFile(stateFile()).value().contains("last_connect_target"));
 }
+
+TEST_CASE(
+    "GuiStateStore: the last color preference round-trips, and an unknown word reads as none and is kept",
+    "[config][guistate][colors]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    REQUIRE(
+        store.update([](GuiState& state) { state.lastColorPreference = vtbackend::ColorPreference::Light; })
+            .has_value());
+    CHECK(fileSystem.readFile(stateFile()).value().contains("last_color_preference: light"));
+    CHECK(FileGuiStateStore { fileSystem, configDir() }.load().value().lastColorPreference
+          == vtbackend::ColorPreference::Light);
+
+    REQUIRE(store.update([](GuiState& state) { state.lastConnectTarget = "starfive"; }).has_value());
+    CHECK(store.load().value().lastColorPreference == vtbackend::ColorPreference::Light); // not wiped
+
+    writeStateFile(fileSystem, "last_color_preference: sepia\n");
+    CHECK_FALSE(store.load().value().lastColorPreference.has_value());
+    REQUIRE(store.update([](GuiState& state) { state.lastConnectTarget = "daemon"; }).has_value());
+    CHECK(fileSystem.readFile(stateFile()).value().contains("last_color_preference: sepia")); // kept
+}

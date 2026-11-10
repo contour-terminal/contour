@@ -3564,7 +3564,7 @@ struct FollowingGui
                 .workingDirectory = {},
                 .attachSettings = std::nullopt,
                 .sessionSettings = contour::remote::NativeController::SessionSettingsSource {},
-                .colorPreference = std::nullopt,
+                .colorPreference = {},
                 .clock = core::platform::defaultSteadyClock(),
                 .timeline = timeline.timeline,
                 .powerMonitor = nullptr,
@@ -4614,8 +4614,10 @@ TEST_CASE("a dark app's controller shows its first pane dark, never the host's l
     std::ignore = daemon.seedSession("first");
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned = makeNativeController(
-        daemon.endpoint(), timeline, { .colorPreference = vtbackend::ColorPreference::Dark });
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, { .colorPreference = [] {
+                                 return std::optional { vtbackend::ColorPreference::Dark };
+                             } });
     auto& controller = *controllerOwned;
     requireConnected(controller);
     auto pane = MirrorPane { controller, controller.createPty(std::nullopt) };
@@ -4627,6 +4629,57 @@ TEST_CASE("a dark app's controller shows its first pane dark, never the host's l
 
     controller.stop();
     pane.terminal.reset();
+}
+
+TEST_CASE("each hello states the preference the app shows as it goes out, and none before the app knows one",
+          "[attach][controller][reconnect][colors]")
+{
+    // The GUI's first link connects before the OS's scheme is read, and the links a switch or a hand-over
+    // clone later from its config connect long after: a preference taken when the config was made would
+    // state a stale one, and the daemon builds every new session under the latest stated. No pane is bound
+    // here, so nothing but the hello states a preference: a binding would state it again on its own.
+    using vthost::client::ConnectionState;
+    using vthost::testing::FakeDualPaletteCatalog;
+    auto daemon = DaemonFixture { {}, {}, 1, std::make_shared<FakeDualPaletteCatalog>() };
+    std::ignore = daemon.seedSession("colors");
+
+    auto shown = std::atomic<std::optional<vtbackend::ColorPreference>> {};
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, { .colorPreference = [&shown] { return shown.load(); } });
+    auto& controller = *controllerOwned;
+    auto const daemonDefault = [&] {
+        return daemon.onDaemon([&] { return daemon.host->defaultColorPreference(); });
+    };
+
+    SECTION("an app that knows none states none")
+    {
+        daemon.onDaemon([&] {
+            daemon.host->adoptColorPreference(vtbackend::ColorPreference::Dark);
+            return 0;
+        });
+        requireConnected(controller);
+        CHECK(daemonDefault() == vtbackend::ColorPreference::Dark);
+    }
+
+    SECTION("a reconnect states what the app shows by then")
+    {
+        daemon.onDaemon([&] {
+            daemon.host->adoptColorPreference(vtbackend::ColorPreference::Dark);
+            return 0;
+        });
+        shown = vtbackend::ColorPreference::Light;
+        requireConnected(controller);
+        CHECK(daemonDefault() == vtbackend::ColorPreference::Light);
+
+        shown = vtbackend::ColorPreference::Dark;
+        daemon.dropConnections();
+        REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+        REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 1000));
+        CHECK(waitUntil([&] { return daemonDefault() == vtbackend::ColorPreference::Dark; }));
+    }
+
+    controller.stop();
 }
 
 TEST_CASE("a preference stated while disconnected reaches the daemon once it answers again",
@@ -5264,7 +5317,7 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
         .workingDirectory = {},
         .attachSettings = std::nullopt,
         .sessionSettings = {},
-        .colorPreference = std::nullopt,
+        .colorPreference = {},
         .clock = core::platform::defaultSteadyClock(),
         .timeline = timeline.timeline,
         .powerMonitor = nullptr,
@@ -5593,7 +5646,7 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
             .workingDirectory = {},
             .attachSettings = std::nullopt,
             .sessionSettings = {},
-            .colorPreference = std::nullopt,
+            .colorPreference = {},
             .clock = core::platform::defaultSteadyClock(),
             .timeline = timeline.timeline,
             .powerMonitor = nullptr,
@@ -5664,7 +5717,7 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         .workingDirectory = {},
         .attachSettings = std::nullopt,
         .sessionSettings = {},
-        .colorPreference = std::nullopt,
+        .colorPreference = {},
         .clock = core::platform::defaultSteadyClock(),
         .timeline = timeline.timeline,
         .powerMonitor = nullptr,
@@ -5944,7 +5997,7 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
             .workingDirectory = {},
             .attachSettings = std::nullopt,
             .sessionSettings = contour::remote::NativeController::SessionSettingsSource {},
-            .colorPreference = std::nullopt,
+            .colorPreference = {},
             .clock = core::platform::defaultSteadyClock(),
             .timeline = timeline.timeline,
             .powerMonitor = nullptr,

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -844,6 +845,32 @@ TEST_CASE("DaemonLink: a further link to the daemon states no working directory"
     };
 
     CHECK(link.siblingConfig().controller.workingDirectory.empty());
+    link.stop();
+}
+
+TEST_CASE("DaemonLink: a further link to the daemon is built to ask for the color preference shown then",
+          "[attach][link][colors]")
+{
+    // The launch's config is made before the OS's scheme is read; a link cloned from it later must not state
+    // the preference of that moment, or the daemon builds every new session under it.
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto shown = std::atomic<std::optional<vtbackend::ColorPreference>> {};
+    auto config = linkConfig(daemon.endpoint(), timeline);
+    config.controller.colorPreference = [&shown] {
+        return shown.load();
+    };
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto handOverLinks = std::vector<std::unique_ptr<contour::remote::DaemonLink>> {};
+    auto host = FakeLinkHost { app.manager(), handOverLinks };
+    auto link = contour::remote::DaemonLink {
+        contour::remote::DaemonLink::Id { 1 }, std::move(config), host, app.manager()
+    };
+
+    shown = vtbackend::ColorPreference::Light;
+    auto const sibling = link.siblingConfig();
+    REQUIRE(sibling.controller.colorPreference);
+    CHECK(sibling.controller.colorPreference() == vtbackend::ColorPreference::Light);
     link.stop();
 }
 

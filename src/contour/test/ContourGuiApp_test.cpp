@@ -777,6 +777,37 @@ TEST_CASE("the OS's published light/dark moves the terminal's preference", "[con
     }
 }
 
+TEST_CASE("the app remembers the light/dark preference its terminals show, writing only on a change",
+          "[contour][app][appearance][colors]")
+{
+    // What the next launch's first hello to a daemon states, before it can read the OS's scheme.
+    using contour::platform::PlatformAppearance;
+    using vtbackend::ColorPreference;
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    [[maybe_unused]] auto const initial = app.app().platformAppearance();
+    auto const savesBefore = app.guiState().saves;
+
+    auto published = PlatformAppearance {};
+    published.colorScheme =
+        app.app().colorPreference() == ColorPreference::Dark ? ColorPreference::Light : ColorPreference::Dark;
+    appearance.set(published);
+    CHECK(app.guiState().state.lastColorPreference == published.colorScheme);
+    CHECK(app.guiState().saves == savesBefore + 1);
+
+    appearance.set(published); // the same again: nothing changed, nothing written
+    CHECK(app.guiState().saves == savesBefore + 1);
+}
+
 TEST_CASE("every tab keeps the dark scheme through new tabs and tab switches under a dark OS",
           "[contour][app][appearance][colors]")
 {

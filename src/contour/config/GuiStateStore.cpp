@@ -60,6 +60,9 @@ namespace
     /// The key the Connect picker's last choice is kept under.
     constexpr auto LastConnectTargetKey = std::string_view { "last_connect_target" };
 
+    /// The key the terminals' last light/dark preference is kept under.
+    constexpr auto LastColorPreferenceKey = std::string_view { "last_color_preference" };
+
     /// The Settings window state @p node holds.
     /// @param node A `settings_window` node.
     /// @return The state; none when the node is absent or not a map. A key that does not read as its type is
@@ -153,6 +156,11 @@ namespace
             if (auto const target = document[std::string { LastConnectTargetKey }];
                 target && target.IsScalar())
                 state.lastConnectTarget = target.as<std::string>();
+            // An unknown word, as a newer release might write, is no preference.
+            if (auto const preference = document[std::string { LastColorPreferenceKey }];
+                preference && preference.IsScalar())
+                state.lastColorPreference =
+                    configEnumFromToken<vtbackend::ColorPreference>(preference.as<std::string>());
             auto offers = listedItems<OfferCodec>(document);
             if (!offers)
                 return std::unexpected { offers.error() };
@@ -218,6 +226,11 @@ namespace
             previous.remove(std::string { LastConnectTargetKey });
         else
             previous[std::string { LastConnectTargetKey }] = state.lastConnectTarget;
+        // None leaves the key as it is: what a newer release spelled there reads as none here, but is its
+        // own.
+        if (state.lastColorPreference)
+            previous[std::string { LastColorPreferenceKey }] =
+                std::string { configEnumToken(*state.lastColorPreference) };
         auto out = YAML::Emitter {};
         out << previous;
         return std::string { out.c_str() } + '\n';
