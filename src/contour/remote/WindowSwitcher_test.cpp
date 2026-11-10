@@ -151,6 +151,7 @@ class FixtureLister final: public contour::remote::IWorkspaceLister
                 info.position = static_cast<uint32_t>(index + 1);
                 info.native = std::to_string(id.value);
                 info.visibility = std::string { vthost::nameOf(daemon.host->visibility(id)) };
+                info.tabs.resize(static_cast<std::size_t>(model.workspaceAt(index)->tabCount()));
                 infos.push_back(std::move(info));
             }
             return infos;
@@ -345,14 +346,21 @@ void hide(DaemonFixture& daemon, uint64_t workspace)
     return daemon.onDaemon([&daemon] { return daemon.live.size(); });
 }
 
+/// How daemon B of a SwitchRig starts.
+enum class DaemonBStart : uint8_t
+{
+    Seeded, ///< With two workspaces of one tab each.
+    Fresh,  ///< As one no client attached to yet: its own workspace, holding no tab.
+};
+
 /// Two daemons of distinct runs, A of two workspaces (the second hidden, so a launch brings back only the
-/// first) and B of two, a window on A's first, and the switcher.
+/// first) and B of two (or of none but its own empty one), a window on A's first, and the switcher.
 struct SwitchRig
 {
     DaemonFixture a { {}, {}, 3 };
     DaemonFixture b { {}, {}, 5 };
     std::vector<uint64_t> aWorkspaces = seedWorkspaces(a, 2);
-    std::vector<uint64_t> bWorkspaces = seedWorkspaces(b, 2);
+    std::vector<uint64_t> bWorkspaces; ///< None for a fresh B.
     TestTimeline timeline;
     /// Declared before the app: the panes the manager holds unregister from the links' controllers as they
     /// go.
@@ -365,10 +373,26 @@ struct SwitchRig
     std::unique_ptr<contour::remote::WindowSwitcher> switcher;
     std::unique_ptr<contour::test::ScopedController> window;
 
-    SwitchRig(): SwitchRig(contour::remote::NativeController::SwitchRequests::Answered) {}
+    SwitchRig(): SwitchRig(contour::remote::NativeController::SwitchRequests::Answered, DaemonBStart::Seeded)
+    {
+    }
 
     /// @param switchRequests Whether the window's client answers the daemon's switch requests.
-    explicit SwitchRig(contour::remote::NativeController::SwitchRequests switchRequests)
+    explicit SwitchRig(contour::remote::NativeController::SwitchRequests switchRequests):
+        SwitchRig(switchRequests, DaemonBStart::Seeded)
+    {
+    }
+
+    /// @param bStart How daemon B starts.
+    explicit SwitchRig(DaemonBStart bStart):
+        SwitchRig(contour::remote::NativeController::SwitchRequests::Answered, bStart)
+    {
+    }
+
+    /// @param switchRequests Whether the window's client answers the daemon's switch requests.
+    /// @param bStart How daemon B starts.
+    SwitchRig(contour::remote::NativeController::SwitchRequests switchRequests, DaemonBStart bStart):
+        bWorkspaces(bStart == DaemonBStart::Seeded ? seedWorkspaces(b, 2) : std::vector<uint64_t> {})
     {
         hide(a, aWorkspaces[1]);
         auto made = std::make_unique<FixtureLister>(
@@ -620,6 +644,81 @@ TEST_CASE("WindowSwitcher: a switch to another daemon shows its workspace, and h
         CHECK(session->profileName() == profile);
     // Rebinding the old link's last window ended it.
     CHECK(waitUntil([&] { return rig.host.endings > 0; }));
+}
+
+// A daemon no client attached to yet holds one workspace, its own, and no tab. The switch followed that
+// workspace, handed the window its empty layout and detached the window's panes: the last pane's end found
+// the window empty, TerminalPane closed it, and with the last window gone the application quit.
+TEST_CASE("WindowSwitcher: a switch to a daemon no client attached to yet keeps the window, in a new "
+          "workspace there",
+          "[switch][link]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const before = rig.windowSessions();
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    // Each pane's display, as the window's QML has one: TerminalPane.qml answers its end by closing the
+    // window when the window's controller says no pane of it is left.
+    auto displays = std::vector<std::unique_ptr<contour::display::TerminalDisplay>> {};
+    auto closesWindow = false;
+    for (auto const& session: before)
+    {
+        auto& display = *displays.emplace_back(std::make_unique<contour::display::TerminalDisplay>());
+        display.setSession(session.data());
+        QObject::connect(&display, &contour::display::TerminalDisplay::terminated, [&] {
+            closesWindow = closesWindow || rig.window->controller->canCloseWindow();
+        });
+    }
+
+    REQUIRE(rig.request(to(daemonB())) == SwitchOutcome::Switched);
+
+    CHECK_FALSE(closesWindow);
+    auto* const now = rig.windowLink();
+    REQUIRE(now != nullptr);
+    CHECK(now->address() == daemonB());
+    auto const shown = now->workspaceOf(rig.window->id);
+    REQUIRE(shown.has_value());
+    CHECK(*shown != bOwn);
+    REQUIRE(waitUntil([&] { return !rig.app.manager().sessionsOfWindow(rig.window->id).empty(); }));
+    CHECK(rig.showsNoneOf(before));
+    CHECK_FALSE(rig.window->controller->canCloseWindow());
+    // Detached, not killed: A's workspace stays in its daemon as hidden.
+    CHECK(rig.a.waitUntilOnDaemon([&] {
+        return rig.a.host->visibility(vtworkspace::WorkspaceId { rig.aWorkspaces[0] })
+               == WorkspaceVisibility::Hidden;
+    }));
+}
+
+// The window is handed the workspace a link a switch started shows only once it holds a tab: until then the
+// window would be emptied, and close.
+TEST_CASE("WindowSwitcher: a link a switch started lands once its workspace holds a tab", "[switch][link]")
+{
+    auto rig = SwitchRig { DaemonBStart::Fresh };
+    auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
+    auto landed = std::optional<std::expected<uint64_t, std::string>> {};
+    auto config = linkConfig(rig.b.endpoint(),
+                             rig.timeline,
+                             daemonB(),
+                             { .kind = vthost::proto::AttachIntentKind::Workspaces, .workspaces = { bOwn } });
+    config.arrival = contour::remote::SwitchArrival {
+        .mode = SwitchMode::Switch,
+        .landed = [&](std::expected<uint64_t, std::string> outcome) { landed = std::move(outcome); },
+        .undo = vthost::proto::WorkspaceRelease::Closed,
+    };
+    auto& link = rig.host.startSwitchLink(std::move(config));
+
+    // Its layout is here, holding no tab: nothing to show, so nothing is told.
+    REQUIRE(waitUntil([&] {
+        auto const adoptable = link.canAdoptWindow(rig.window->id);
+        return !adoptable && adoptable.error() == "the daemon's workspace holds no tab";
+    }));
+    drainGuiEvents();
+    CHECK_FALSE(landed.has_value());
+
+    std::ignore = rig.b.seedSession("first");
+
+    REQUIRE(waitUntil([&] { return landed.has_value(); }));
+    CHECK(*landed == bOwn);
+    CHECK(link.canAdoptWindow(rig.window->id).has_value());
 }
 
 // Review (PR 3, item 15): a switch a program asked for is answered on the old link's connection, which the

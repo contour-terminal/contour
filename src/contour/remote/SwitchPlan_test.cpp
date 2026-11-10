@@ -270,6 +270,37 @@ TEST_CASE("workspaceRowsOf counts each workspace's tabs", "[switch][plan]")
     CHECK(rows[0].visibility == vthost::WorkspaceVisibility::Hidden);
 }
 
+// A daemon no client attached to yet lists its own workspace, holding no tab: a window switched to it was
+// emptied, and closed -- the last window, so the application quit.
+TEST_CASE("workspaceRowsOf leaves out a workspace holding no tab", "[switch][plan]")
+{
+    auto empty = vtcontrol::WorkspaceInfo {};
+    empty.id = "workspace:00000000-0000-0000-0000-000000000001";
+    empty.position = 1;
+    empty.native = "1";
+    empty.visibility = "left";
+    auto held = empty;
+    held.id = "workspace:00000000-0000-0000-0000-000000000002";
+    held.position = 2;
+    held.native = "2";
+    held.tabs = { vtcontrol::TabInfo {} };
+    auto const none = [](uint64_t) {
+        return std::optional<vtworkspace::WorkspaceId> {};
+    };
+
+    auto const rows = contour::remote::workspaceRowsOf(std::vector { empty, held }, none);
+
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].id == 2);
+    // So a daemon of none but its own empty workspace is switched to in a new workspace of its own.
+    CHECK(sameDecision(
+        contour::remote::planSwitch(naming({}),
+                                    contour::remote::workspaceRowsOf(std::vector { empty }, none),
+                                    std::nullopt,
+                                    SameDaemon::No),
+        SwitchTo { .workspace = 0 }));
+}
+
 TEST_CASE("a switch that does not land leaves its target as it was", "[switch][plan]")
 {
     using vthost::WorkspaceVisibility;

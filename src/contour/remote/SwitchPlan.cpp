@@ -107,6 +107,10 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
     auto rows = std::vector<WorkspaceRow> {};
     for (auto const& info: workspaces)
     {
+        // A workspace holding no tab has nothing to show -- a daemon no client attached to yet has one, its
+        // own -- and a window switched to it would be emptied, and close.
+        if (info.tabs.empty())
+            continue;
         auto id = uint64_t {};
         auto const* const end = info.native.data() + info.native.size();
         if (auto const [last, error] = std::from_chars(info.native.data(), end, id);

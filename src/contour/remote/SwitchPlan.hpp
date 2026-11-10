@@ -143,7 +143,8 @@ enum class SameDaemon : uint8_t
 using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t)>;
 
 /// The rows a switch decides on, from what the daemon's `workspace.list` answered. A workspace whose native
-/// id does not read as one (a daemon that predates it) is left out, as no connection could follow it.
+/// id does not read as one (a daemon that predates it) is left out, as no connection could follow it; so is
+/// one holding no tab, which has nothing for a window to show.
 /// @param workspaces The daemon's workspaces, in its order.
 /// @param shownHere Which window here shows each.
 /// @return The rows, in the daemon's order.

@@ -110,7 +110,8 @@ class FakeLister final: public contour::remote::IWorkspaceLister
         .native = std::to_string(native),
         .visibility = std::move(visibility),
         .clients = clients,
-        .tabs = {},
+        // One tab: a workspace holding none is nothing to switch to, and is not listed.
+        .tabs = { vtcontrol::TabInfo {} },
     };
 }
 

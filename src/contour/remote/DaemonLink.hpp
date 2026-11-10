@@ -273,8 +273,8 @@ class DaemonLink final: public session::WindowBinding
     /// window that asked: the window is bound here and brought to the workspace, and every pane it showed
     /// before is detached (session::SessionEnd::Detach), its session left running in its daemon.
     /// @param window The window to show the workspace in.
-    /// @return Nothing once the window shows it; why not when the connection shows no workspace yet or the
-    ///         window is gone (then nothing changed).
+    /// @return Nothing once the window shows it; why not when the connection shows no workspace yet, or one
+    ///         holding no tab, or the window is gone (then nothing changed).
     [[nodiscard]] std::expected<void, std::string> adoptWindow(vtworkspace::WorkspaceId window);
 
     /// @param window The window to show the workspace in.
@@ -425,6 +425,10 @@ class DaemonLink final: public session::WindowBinding
     /// @return Whether @p daemonWorkspace is the one a switch of a window to another workspace of this
     ///         link's daemon waits for (switchWindow()).
     [[nodiscard]] bool isSwitchTarget(uint64_t daemonWorkspace) const;
+    /// @return Whether the connection's last settled layout of @p daemonWorkspace holds a tab: only then has
+    ///         a window switched to it something to show. One that holds none would empty the window, which
+    ///         then closes as its last pane's end closes it.
+    [[nodiscard]] bool holdsTab(uint64_t daemonWorkspace) const;
     /// The workspace a given-up switch asked the daemon to make arrived late: it is released as
     /// proto::WorkspaceRelease::SwitchedAway, so it stays in the daemon as hidden -- the native protocol
     /// closes no workspace, and a left one would come back on the next launch. @see cancelSwitch
