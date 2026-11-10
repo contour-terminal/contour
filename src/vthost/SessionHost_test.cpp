@@ -3194,15 +3194,19 @@ TEST_CASE("SessionHost.extension.askNoClient", "[vthost][host][extensions][guest
         return h.indicatorText(session) == "[err:pending]";
     };
 
-    h.turnUntil([&] { return timeline.shown.has_value(); });
+    // Both awaited, as they reach the loop in two posts that may arrive in either order: the question is
+    // posted before the frame is published, but a repaint posted earlier -- the runner's start -- may pick
+    // the frame up first, a turn ahead of the question.
+    h.turnUntil([&] { return timeline.asked.has_value() && timeline.shown.has_value(); });
     h.host->unsubscribeStream(&timeline);
 
     CHECK(h.indicatorText(session) == "[err:pending]");
     REQUIRE(timeline.asked.has_value());
     REQUIRE(timeline.shown.has_value());
-    // The question opened while the call ran, and the frame it rendered followed within the call's own
-    // deadline: a call that waited for an answer would never have rendered at all.
-    CHECK(*timeline.shown - *timeline.asked < h.limits.callDeadline + std::chrono::milliseconds { 250 });
+    // The question opened while the call ran, and the frame it rendered came within the call's own deadline
+    // of it: a call that waited for an answer would never have rendered at all.
+    CHECK(std::chrono::abs(*timeline.shown - *timeline.asked)
+          < h.limits.callDeadline + std::chrono::milliseconds { 250 });
     CHECK(h.capture.runs.load() == 0);
     REQUIRE(h.host->pendingPermissionRequests().size() == 1);
     auto const& request = h.host->pendingPermissionRequests().front();
