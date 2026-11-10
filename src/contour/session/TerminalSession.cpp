@@ -420,7 +420,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                                  : app.keyboardPlatformFactory() },
     _keyboardPlatform { _keyboardPlatformFactory(input::keyboardPolicyOf(_profile)) },
     _currentColorPreference { app.colorPreference() },
-    _gutterChrome { gutterChromeFor(app.chromeStyle()) },
+    _gutterChrome { gutterChromeFor(app.chromeStyle(), _config.gutter.value().railThickness) },
     _systemScrollBars { app.platformAppearance().scrollBars },
     _localIdentity { app.hostIdentity() },
     _accumulatedPixelScroll {},
@@ -5032,12 +5032,26 @@ void TerminalSession::updateCommandBlockHover(std::optional<vtbackend::CommandBl
                                               vtbackend::LineOffset screenRow)
 {
     _blockHoverRow = screenRow;
-    _hoveredBlock = block;
+    auto const blockChanged = std::exchange(_hoveredBlock, block) != block;
 
-    auto const anchor = block && _display != nullptr
-                            ? core::locked(_terminal, [&] { return blockActionsAnchorLocked(*block); })
-                            : QRectF {};
-    if (std::exchange(_blockActionsAnchor, anchor) != anchor)
+    auto const [anchor, glyph] =
+        block && _display != nullptr
+            ? core::locked(_terminal,
+                           [&]() -> std::pair<QRectF, QString> {
+                               auto const rect = blockActionsAnchorLocked(*block);
+                               auto const* record = _terminal.commandBlocks().find(*block);
+                               if (rect.isEmpty() || !_terminal.settings().gutter.exitStatus
+                                   || record == nullptr)
+                                   return { rect, {} };
+                               auto const outcome = vtbackend::outcomeOf(*record);
+                               auto const& status =
+                                   window::StickyHeaderGlyphRows.at(static_cast<std::size_t>(outcome));
+                               return { rect, QString::fromUtf8(status.glyph) };
+                           })
+            : std::pair<QRectF, QString> {};
+    auto const anchorChanged = std::exchange(_blockActionsAnchor, anchor) != anchor;
+    auto const glyphChanged = std::exchange(_blockActionsStatusGlyph, glyph) != glyph;
+    if (blockChanged || anchorChanged || glyphChanged)
         emit blockActionsAnchorChanged();
 }
 
@@ -5660,8 +5674,10 @@ command::ContextMenuState TerminalSession::contextMenuState()
         }();
 
         // ...with what its rows may act on.
-        auto const blockUnderCursor =
-            block != nullptr ? std::optional { blockMenuStateLocked(*block) } : std::nullopt;
+        auto const& commandBlocks = _config.commandBlocks.value();
+        auto const blockUnderCursor = block != nullptr && commandBlocks.showInContextMenu
+                                          ? std::optional { blockMenuStateLocked(*block) }
+                                          : std::nullopt;
 
         return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),
@@ -5692,6 +5708,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
             .blockUnderCursor = blockUnderCursor,
+            .blockMenuPlacement = commandBlocks.compactContextMenu ? command::MenuChildPlacement::Nested
+                                                                   : command::MenuChildPlacement::Spliced,
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
@@ -7899,6 +7917,10 @@ void TerminalSession::configureTerminal()
         _app.accessibilityPreferences().motion);
     // Where the sticky header lives is the pane card's, not the profile's: a reload keeps it.
     configured.stickyHeader.presentation = window::presentationOf(_stickyHeaderHost);
+    // Rail thickness belongs to the session's construction-time chrome, even after a config reload.
+    if (_gutterChrome.form == vtbackend::BlockColumnForm::Rail && _gutterChrome.barPoints == 0
+        && configured.gutter.exitStatus)
+        configured.gutter.successRailMark = vtbackend::SuccessRailMark::Always;
 
     // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding
     // the palette with mode 2031 set. See ViNormalMode.

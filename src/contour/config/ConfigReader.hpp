@@ -914,6 +914,7 @@ struct Writer
                       v.exitStatus,
                       v.userMarks,
                       v.blockColumnWidth,
+                      v.railThickness ? std::to_string(*v.railThickness) : "null",
                       v.boldOnHover,
                       v.lineNumbers,
                       v.lineNumberWidth,
@@ -928,7 +929,12 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, CommandBlocksConfig const& v)
     {
-        return format(doc, v.maxRecords, SingleQuoted { v.pager }, v.pagerFormat);
+        return format(doc,
+                      v.maxRecords,
+                      SingleQuoted { v.pager },
+                      v.pagerFormat,
+                      v.showInContextMenu,
+                      v.compactContextMenu);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)

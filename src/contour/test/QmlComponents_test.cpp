@@ -434,13 +434,13 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
 
     contour::test::installChromeStyle(engine);
     auto const state = contour::command::ContextMenuState {
-        .hasSelection = false, // Copy must come out present-but-disabled
+        .hasSelection = true,
         .clipboardHasText = true,
         .hasLastCommand = false, // the three "last command" rows must be absent
         .hasLocalWorkingDirectory = true,
         .hasSplits = false,
         .hyperlinkUnderCursor = "", // the two hyperlink rows must be absent
-        .foldLine = std::nullopt,   // the fold row must be present but grayed
+        .foldLine = std::nullopt,   // the fold row must be absent
         .activeProfile = "dark",
         .profileNames = { "dark", "light" },
     };
@@ -476,7 +476,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
         QMetaObject::invokeMethod(menu.get(), "itemAt", Q_RETURN_ARG(QQuickItem*, copyItem), Q_ARG(int, 0)));
     REQUIRE(copyItem != nullptr);
     CHECK(copyItem->property("text").toString() == QStringLiteral("Copy"));
-    CHECK_FALSE(copyItem->property("enabled").toBool()); // no selection
+    CHECK(copyItem->property("enabled").toBool());
 
     // MenuItem exposes triggered() as a SIGNAL, and emitting it by name is what a click would do.
     //

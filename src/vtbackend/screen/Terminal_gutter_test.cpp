@@ -776,6 +776,12 @@ TEST_CASE("Gutter.terminal.hoveringASuccessShowsItsCheck", "[gutter]")
     auto const atRest = railCellsOf(renderOf(mc.terminal));
     CHECK(markAt(atRest, 0) == RailMark::None);
     CHECK(atRest.at(0).railColor == palette.blockStatusColor(CommandBlockOutcome::Success));
+
+    mc.terminal.settings().gutter.successRailMark = SuccessRailMark::Always;
+    auto const withPersistentMark = railCellsOf(renderOf(mc.terminal));
+    CHECK(markAt(withPersistentMark, 0) == RailMark::Check);
+    CHECK(markAt(withPersistentMark, 1) == RailMark::None);
+    CHECK(markAt(withPersistentMark, 3) == RailMark::Cross);
 }
 
 TEST_CASE("Gutter.terminal.aRunningBlockShowsItsTriangle", "[gutter]")

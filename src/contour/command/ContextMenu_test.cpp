@@ -89,10 +89,7 @@ TEST_CASE("ContextMenu.copy.requiresSelection", "[contextmenu]")
     state.hasSelection = false;
     auto const unselected = buildContextMenu(state);
     auto const* withoutSelection = find(unselected, "Copy");
-    // Present but grayed out -- Copy is always a meaningful thing for this terminal to offer; it just has
-    // nothing to copy right now.
-    REQUIRE(withoutSelection != nullptr);
-    CHECK(withoutSelection->availability == RowAvailability::Disabled);
+    CHECK(withoutSelection == nullptr);
 }
 
 TEST_CASE("ContextMenu.paste.requiresClipboardText", "[contextmenu]")
@@ -102,8 +99,7 @@ TEST_CASE("ContextMenu.paste.requiresClipboardText", "[contextmenu]")
     state.clipboardHasText = false;
     auto const empty = buildContextMenu(state);
     auto const* whenEmpty = find(empty, "Paste");
-    REQUIRE(whenEmpty != nullptr);
-    CHECK(whenEmpty->availability == RowAvailability::Disabled);
+    CHECK(whenEmpty == nullptr);
 
     state.clipboardHasText = true;
     auto const filled = buildContextMenu(state);
@@ -210,7 +206,7 @@ TEST_CASE("ContextMenu.detectedLinkIsPinned", "[contextmenu][links]")
     CHECK(std::get<actions::CopyHyperlink>(copy->action).link == state.linkUnderCursor);
 }
 
-TEST_CASE("ContextMenu.toggleFold.grayedRatherThanHiddenWithoutAFold", "[contextmenu]")
+TEST_CASE("ContextMenu.toggleFold.requiresFoldUnderCursor", "[contextmenu]")
 {
     auto state = fullyEnabledState();
 
@@ -224,26 +220,21 @@ TEST_CASE("ContextMenu.toggleFold.grayedRatherThanHiddenWithoutAFold", "[context
     REQUIRE(std::holds_alternative<actions::ToggleFoldAt>(row->action));
     CHECK(std::get<actions::ToggleFoldAt>(row->action).line == -12);
 
-    // Elsewhere the row stays PUT and goes gray. Hiding it would make the menu change shape depending
-    // on where you right-clicked, and would hide the fact that folding exists at all.
     state.foldLine.reset();
     auto const elsewhere = buildContextMenu(state);
-    auto const* grayed = find(elsewhere, "Toggle Output Fold");
-    REQUIRE(grayed != nullptr);
-    CHECK(grayed->availability == RowAvailability::Disabled);
+    CHECK(find(elsewhere, "Toggle Output Fold") == nullptr);
 }
 
 TEST_CASE("ContextMenu.openCurrentFolder.requiresLocalWorkingDirectory", "[contextmenu]")
 {
-    // Grayed out unless the cwd is on this host: a remote (SSH) working directory cannot be opened by the
+    // A remote (SSH) working directory cannot be opened by the
     // local file manager, so resolving it to a local path is what gates the row (see localPathOfFileUrl).
     auto state = fullyEnabledState();
 
     state.hasLocalWorkingDirectory = false;
     auto const unknown = buildContextMenu(state);
     auto const* whenUnknown = find(unknown, "Open Current Folder");
-    REQUIRE(whenUnknown != nullptr);
-    CHECK(whenUnknown->availability == RowAvailability::Disabled);
+    CHECK(whenUnknown == nullptr);
 
     state.hasLocalWorkingDirectory = true;
     auto const known = buildContextMenu(state);
@@ -485,6 +476,19 @@ TEST_CASE("ContextMenu.blockRows.noBlockNoBlockMenu", "[contextmenu][semanticblo
         INFO(title);
         CHECK(find(menu, title) == nullptr);
     }
+}
+
+TEST_CASE("ContextMenu.blockRows.compactModeGroupsBlockActions", "[contextmenu][semanticblocks]")
+{
+    auto state = fullyEnabledState();
+    state.blockMenuPlacement = MenuChildPlacement::Nested;
+    auto const menu = buildContextMenu(state);
+    REQUIRE_FALSE(menu.empty());
+    CHECK(menu.front().kind == ContextMenuEntryKind::Submenu);
+    CHECK(menu.front().title == "Command Block");
+    CHECK(find(menu.front().children, "Copy Output") != nullptr);
+    CHECK(std::ranges::count(menu, std::string("Copy Output"), &ContextMenuEntry::title) == 0);
+    CHECK(find(menu, "Copy") != nullptr);
 }
 
 TEST_CASE("the Attach to Host submenu lists saved hosts", "[contextmenu][hosts]")

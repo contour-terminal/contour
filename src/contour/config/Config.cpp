@@ -3290,6 +3290,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                        kept);
     }
 
+    if (auto const thickness = child["rail_thickness"]; thickness && !thickness.IsNull())
+    {
+        auto value = -1;
+        loadGuarded(child, "rail_thickness", value);
+        if (value >= 0 && value <= 8)
+            where.railThickness = value;
+        else
+            errorLog()("gutter.rail_thickness must be between 0 and 8; keeping the previous setting.");
+    }
+    else if (thickness)
+        where.railThickness.reset();
+
     if (child["timestamp_format"])
     {
         auto spec = where.timestampFormat;
@@ -3341,6 +3353,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     where.maxRecords = static_cast<size_t>(std::clamp<int64_t>(requested, 1, MaxCommandBlockRecords));
     loadGuarded(child, "pager", where.pager);
     loadGuarded(child, "pager_format", where.pagerFormat);
+    loadGuarded(child, "show_in_context_menu", where.showInContextMenu);
+    loadGuarded(child, "compact_context_menu", where.compactContextMenu);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where)

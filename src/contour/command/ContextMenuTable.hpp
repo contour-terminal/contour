@@ -76,13 +76,6 @@ struct MenuTable
     /// different cell. Same reasoning as ContextMenuEntry holding an action rather than a name.
     using ActionBinder = actions::Action (*)(State const&);
 
-    /// Where a Submenu row's built children go: into a submenu of their own, or into the menu itself.
-    enum class ChildPlacement : std::uint8_t
-    {
-        Nested = 0, ///< Under the row's title, as a submenu.
-        Spliced,    ///< In place of the row: the menu's own rows, as a list that grows with the state.
-    };
-
     /// The precondition of a row that has none.
     [[nodiscard]] static bool always(State const& /*state*/) noexcept { return true; }
 
@@ -103,8 +96,8 @@ struct MenuTable
         MenuItemRole role = MenuItemRole::None; ///< The role a native menu gives this row.
         ChildBuilder children = nullptr;        ///< Submenu rows: what is inside.
         ActionBinder bindAction = nullptr;      ///< When set, supplies the action in place of @ref action.
-        ChildPlacement placement = ChildPlacement::Nested; ///< Submenu rows: nested, or spliced in place.
-        ActionScope scope = ActionScope::Window;           ///< Command rows: what the row acts on.
+        MenuChildPlacement placement = MenuChildPlacement::Nested; ///< Submenu rows: nested or spliced.
+        ActionScope scope = ActionScope::Window;                   ///< Command rows: what the row acts on.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -188,7 +181,7 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = nullptr,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested,
+                     .placement = MenuChildPlacement::Nested,
                      .scope = ActionScope::Window };
     }
 
@@ -204,7 +197,7 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = nullptr,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested,
+                     .placement = MenuChildPlacement::Nested,
                      .scope = ActionScope::Window };
     }
 
@@ -220,7 +213,7 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = children,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested,
+                     .placement = MenuChildPlacement::Nested,
                      .scope = ActionScope::Window };
     }
 
@@ -239,7 +232,7 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = children,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Spliced,
+                     .placement = MenuChildPlacement::Spliced,
                      .scope = ActionScope::Window };
     }
 
@@ -330,7 +323,7 @@ struct MenuTable
                     // An empty submenu is noise: it opens onto nothing.
                     if (children.empty())
                         break;
-                    if (row.placement == ChildPlacement::Spliced)
+                    if (row.placement == MenuChildPlacement::Spliced)
                     {
                         std::ranges::move(children, std::back_inserter(entries));
                         break;

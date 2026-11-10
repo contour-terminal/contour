@@ -1122,6 +1122,28 @@ TEST_CASE("TerminalSession: the terminal draws the gutter the configuration asks
     CHECK(session->terminal().settings().gutter.lineNumbers == vtbackend::LineNumberMode::Absolute);
 }
 
+TEST_CASE("TerminalSession: a config reload keeps success marks in sync with the rail",
+          "[contour][session][gutter]")
+{
+    auto const initialThickness = GENERATE(0, 3);
+    auto const expectedMark =
+        initialThickness == 0 ? vtbackend::SuccessRailMark::Always : vtbackend::SuccessRailMark::OnAttention;
+    TestApp testApp;
+    auto& config = testApp.app().config();
+    config.gutter.value().railThickness = initialThickness;
+    config.gutter.value().exitStatus = true;
+    auto session = makeDisplaylessSession(testApp.app());
+    REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
+    REQUIRE(session->terminal().settings().gutter.successRailMark == expectedMark);
+
+    auto reloaded = config;
+    reloaded.gutter.value().railThickness = initialThickness == 0 ? 3 : 0;
+    session->applyReloadedConfig(reloaded, reloaded.defaultProfileName.value());
+
+    CHECK(session->gutterChrome().barPoints == initialThickness);
+    CHECK(session->terminal().settings().gutter.successRailMark == expectedMark);
+}
+
 TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the terminal",
           "[contour][session][stickyheader]")
 {
@@ -2226,6 +2248,7 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     CHECK(session->blockActionsAnchor().width()
           == Catch::Approx(extent.rail / surface.devicePixelRatioValue));
     CHECK(session->blockActionsAnchor().contains(overTheStrip));
+    CHECK(session->blockActionsStatusGlyph() == QStringLiteral("✗"));
 
     // Over the line numbers, left of the strip, the block is not hovered.
     auto const overTheNumbers = QPointF { extent.leadIn + (extent.columns / 2.0), 4.0 };
@@ -2233,6 +2256,7 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     contour::session::sendMouseMoveEvent(&numbers, *session);
     CHECK(spy.count() == 2);
     CHECK(session->blockActionsAnchor().isEmpty());
+    CHECK(session->blockActionsStatusGlyph().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, and only then",

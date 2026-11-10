@@ -35,19 +35,14 @@ namespace
         return hasCommandLine(state) && state.livePrompt == PromptPresence::Present;
     }
 
-    bool hasFold(BlockMenuState const& state) noexcept
-    {
-        return state.fold != FoldPresence::None;
-    }
-
     bool foldIsCollapsed(BlockMenuState const& state) noexcept
     {
         return state.fold == FoldPresence::Collapsed;
     }
 
-    bool foldIsNotCollapsed(BlockMenuState const& state) noexcept
+    bool foldIsExpanded(BlockMenuState const& state) noexcept
     {
-        return !foldIsCollapsed(state);
+        return state.fold == FoldPresence::Expanded;
     }
     // }}}
 
@@ -75,12 +70,11 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            blockRow<CopyCommandBlock>("Copy Output").enabledWhen(hasOutput),
-            blockRow<CopyCommandLine>("Copy Command").enabledWhen(hasCommandLine),
-            blockRow<RerunCommand>("Rerun…").enabledWhen(canRerun),
-            blockRow<OpenCommandOutput>("Open in Pager").enabledWhen(hasOutput),
-            // One row with two faces: shown as Collapse Output until the fold is closed.
-            blockRow<ToggleCommandFold>("Collapse Output").shownWhen(foldIsNotCollapsed).enabledWhen(hasFold),
+            blockRow<CopyCommandBlock>("Copy Output").shownWhen(hasOutput),
+            blockRow<CopyCommandLine>("Copy Command").shownWhen(hasCommandLine),
+            blockRow<RerunCommand>("Rerun…").shownWhen(canRerun),
+            blockRow<OpenCommandOutput>("Open in Pager").shownWhen(hasOutput),
+            blockRow<ToggleCommandFold>("Collapse Output").shownWhen(foldIsExpanded),
             blockRow<ToggleCommandFold>("Expand Output").shownWhen(foldIsCollapsed),
         };
         return rows;
@@ -94,8 +88,6 @@ namespace
             entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Header,
                                                  .title = line,
                                                  .availability = RowAvailability::Disabled });
-        if (!entries.empty())
-            entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator });
         return entries;
     }
 } // namespace
@@ -103,7 +95,10 @@ namespace
 std::vector<ContextMenuEntry> buildBlockMenu(BlockMenuState const& state)
 {
     auto entries = headerRows(state);
-    std::ranges::move(Table::buildRows(blockMenuTemplate(), state), std::back_inserter(entries));
+    auto rows = Table::buildRows(blockMenuTemplate(), state);
+    if (!entries.empty() && !rows.empty())
+        entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator });
+    std::ranges::move(rows, std::back_inserter(entries));
     return entries;
 }
 

@@ -118,8 +118,8 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::command(CopySelection {}, "Copy").enabledWhen(hasSelection),
-            Table::command(PasteClipboard {}, "Paste").enabledWhen(clipboardHasText),
+            Table::command(CopySelection {}, "Copy").shownWhen(hasSelection),
+            Table::command(PasteClipboard {}, "Paste").shownWhen(clipboardHasText),
             Table::command(SelectAll {}),
             // Hidden rather than greyed when there is no speech engine: a permanently dead row teaches
             // the user the feature is broken, when in truth this build or this machine simply has no
@@ -146,15 +146,10 @@ namespace
             Table::command(CopyLastCommandOutput {}, "Copy Last Command Output").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandBlock {}, "Copy Last Prompt and Output").shownWhen(hasLastCommand),
 
-            // GRAYED rather than hidden when there is no fold under the pointer, unlike the rows above:
-            // those describe a shell capability that is either there or not, while this one describes
-            // THIS spot. A row that vanished depending on where you right-clicked would make the menu
-            // change shape under the pointer, and hide the fact that folding exists at all.
-            //
             // Carries the clicked line rather than reading the viewport when picked: by then the pointer
             // has left that row for the menu, and ToggleFold's own anchor is the top of the viewport.
             Table::command(ToggleFoldAt {}, "Toggle Output Fold")
-                .enabledWhen(hasFoldUnderCursor)
+                .shownWhen(hasFoldUnderCursor)
                 .actionFrom([](ContextMenuState const& state) -> actions::Action {
                     return ToggleFoldAt { .line = state.foldLine ? state.foldLine->value : 0 };
                 }),
@@ -163,7 +158,7 @@ namespace
 
             hyperlinkCommand<FollowHyperlink>("Open Link"),
             hyperlinkCommand<CopyHyperlink>("Copy Link Address"),
-            Table::command(OpenFileManager {}, "Open Current Folder").enabledWhen(hasLocalWorkingDirectory),
+            Table::command(OpenFileManager {}, "Open Current Folder").shownWhen(hasLocalWorkingDirectory),
 
             Table::separator(),
 
@@ -200,8 +195,15 @@ std::vector<ContextMenuEntry> buildContextMenu(ContextMenuState const& state)
     auto entries = std::vector<ContextMenuEntry> {};
     if (state.blockUnderCursor)
     {
-        entries = buildBlockMenu(*state.blockUnderCursor);
-        entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator });
+        auto blockEntries = buildBlockMenu(*state.blockUnderCursor);
+        if (state.blockMenuPlacement == MenuChildPlacement::Nested && !blockEntries.empty())
+            entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
+                                                 .title = "Command Block",
+                                                 .children = std::move(blockEntries) });
+        else
+            entries = std::move(blockEntries);
+        if (!entries.empty())
+            entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator });
     }
     std::ranges::move(Table::buildRows(contextMenuTemplate(), state), std::back_inserter(entries));
     detail::dropRedundantSeparators(entries);

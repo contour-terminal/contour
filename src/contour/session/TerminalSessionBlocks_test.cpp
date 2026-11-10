@@ -1596,6 +1596,26 @@ TEST_CASE("TerminalSession: the context menu pins the command block that was rig
     writeFinishedBlock(*session, "make", "built\r\n", ";cmdline_url=make");
     auto const pixels = vtbackend::PixelCoordinate {};
 
+    SECTION("the pane menu can omit the block even when compact mode is enabled")
+    {
+        auto reloaded = testApp.app().config();
+        reloaded.commandBlocks = contour::test::loadConfigFromYaml(R"(
+command_blocks:
+    show_in_context_menu: false
+    compact_context_menu: true
+)")
+                                     .commandBlocks;
+        session->applyReloadedConfig(reloaded, reloaded.defaultProfileName.value());
+        session->sendMouseMoveEvent(
+            Modifiers {},
+            vtbackend::CellLocation { vtbackend::LineOffset(1), vtbackend::ColumnOffset(0) },
+            pixels);
+
+        auto const state = session->contextMenuState();
+        CHECK(state.hasLastCommand);
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+
     SECTION("over a finished command's output")
     {
         session->sendMouseMoveEvent(

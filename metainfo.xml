@@ -112,6 +112,8 @@
         <p>Its window and Settings are redesigned to feel native on macOS, Windows 11 and Linux, with a Terminal style of their own, a command palette, command blocks, split panes with cards and a status line.</p>
         <ul>
           <li>Adds the <code>UpgradeDaemon</code> action and the command palette's "Upgrade daemon" row, which upgrade the window's local daemon in place, keeping every program running, at any time and also when the daemon runs the same release as the client, where the drift chip offers it only for a differing release; a refusal or failure is shown as a notice</li>
+          <li>Hides unavailable actions in pane and command-block menus and adds <code>command_blocks.compact_context_menu</code> to group a command's details and actions in a submenu or <code>command_blocks.show_in_context_menu</code> to omit them (#2269)</li>
+          <li>Adds <code>gutter.rail_thickness</code> to resize or hide the rail in native UI styles. When exit-status marks are enabled, the status icon opens the command-block menu, and successful commands keep their checkmark when the rail is hidden (#2269)</li>
           <li>Changes OSC 52 to skip every byte of its data that is not base64, as xterm does, where it stopped decoding at the first one; data with no base64 in it at all is now refused rather than clearing the clipboard, where xterm clears it</li>
           <li>Fixes a rare hang when a new session, the daemon or a detached program starts: Contour no longer forks itself, which can deadlock a process that runs threads, and starts new programs through a fresh copy of itself instead</li>
           <li>Fix reversed line order when pasting multiline text on Windows (#2264)</li>

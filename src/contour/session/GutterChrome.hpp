@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 
 namespace contour::session
 {
@@ -39,14 +40,17 @@ struct GutterChrome
 
 /// The gutter chrome of chrome row @p style, from its tokens.
 /// @param style The chrome row.
+/// @param railThickness The configured rail width in points, zero to hide it, or unset for the style default.
 /// @return Its block column's form and the rail's metrics in points.
-[[nodiscard]] inline GutterChrome gutterChromeFor(config::ChromeStyle style) noexcept
+[[nodiscard]] inline GutterChrome gutterChromeFor(config::ChromeStyle style,
+                                                  std::optional<int> railThickness = std::nullopt) noexcept
 {
     auto const& row = config::ChromeTokenRows[static_cast<std::size_t>(style)];
+    auto const barPoints = row.size.rail > 0 ? railThickness.value_or(row.size.rail) : 0;
     return GutterChrome { .form = row.layout.blockColumn,
                           .stripPoints = row.space.blockGutter,
-                          .barPoints = row.size.rail,
-                          .barInsetPoints = row.space.railInset,
+                          .barPoints = barPoints,
+                          .barInsetPoints = row.space.railInset + ((row.size.rail - barPoints) / 2),
                           .barRadiusPoints = row.radii.rail,
                           .markPoints = row.size.railMark,
                           .barEndPoints = row.space.railEnd,

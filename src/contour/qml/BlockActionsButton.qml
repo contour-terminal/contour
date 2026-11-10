@@ -1,5 +1,5 @@
 // vim:syntax=qml
-// The ⋯ button beside the command block under the pointer: the pointer's way to the block's menu (Copy
+// The status button beside the command block under the pointer: the pointer's way to the block's menu (Copy
 // Output, Copy Command, Rerun, ...), which the keyboard reaches with Ctrl+Enter or Shift+F10.
 //
 // Where it goes is the session's blockActionsAnchor: the strip the rail lives in, beside the block's first
@@ -27,6 +27,8 @@ Item {
     readonly property rect anchorRect: root.session && root.session.blockActionsAnchor !== undefined
                                        ? root.session.blockActionsAnchor : Qt.rect(0, 0, 0, 0)
     readonly property bool anchored: root.anchorRect.width > 0 && root.anchorRect.height > 0
+    readonly property string statusGlyph: root.session && root.session.blockActionsStatusGlyph !== undefined
+                                          ? root.session.blockActionsStatusGlyph : ""
     /// Whether the keyboard has focused the very block this button sits beside.
     readonly property bool blockFocused: !!root.session && root.session.focusedCommandBlock !== undefined
                                          && root.session.focusedCommandBlock !== 0
@@ -62,7 +64,7 @@ Item {
         // half a hairline from the pane's edge.
         x: (parent.width - width) / 2
         y: (parent.height - height) / 2
-        text: "⋯"
+        text: root.statusGlyph || "⋯"
         // The glyph keeps a hairline of room to each side of the button: on the Terminal row the button is
         // one cell and the glyph fills it, so its first dot sat on the pane's edge and read as clipped
         // there. Shrunk into the room the button leaves, on every row alike.

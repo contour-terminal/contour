@@ -408,6 +408,9 @@ struct GutterConfig
     /// fold controls and marks are drawn across both, twice the size, and a click anywhere in them lands.
     int blockColumnWidth { 2 };
 
+    /// Native command-block rail thickness in UI points. Unset uses the style default, zero hides the line.
+    std::optional<int> railThickness {};
+
     /// Draw the hovered fold's line, head and end one stroke heavier, as well as at full strength.
     bool boldOnHover { true };
 
@@ -505,6 +508,12 @@ struct CommandBlocksConfig
     /// on every platform: `less -R` does, and so does Windows `more` running in the pane's ConPTY, which
     /// interprets the sequences itself.
     actions::OutputFormat pagerFormat { actions::OutputFormat::Sgr };
+
+    /// Include the clicked command's details and actions in the pane's context menu.
+    bool showInContextMenu { true };
+
+    /// Group the clicked command's details and actions under a submenu.
+    bool compactContextMenu { false };
 };
 
 /// The format OpenCommandOutput writes a block's output in: the binding's own when it names one, else
