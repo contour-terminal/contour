@@ -629,7 +629,8 @@ TEST_CASE("TerminalSession: extensions a reload brings are told the font the dis
           "[contour][session][extensions][guest]")
 {
     // The pane had no extensions when its display was attached, so nothing was told then; the reload that
-    // brings some tells them the display's current font.
+    // brings some tells them the display's current font. echo describes only the events it follows: the new
+    // extensions are told their size after the font, so a guest describing every event would show the resize.
     TestApp testApp;
     installFiles(testApp);
     auto in = std::ifstream { CONTOUR_TEST_ECHO_WASM, std::ios::binary };
@@ -639,7 +640,7 @@ TEST_CASE("TerminalSession: extensions a reload brings are told the font the dis
     REQUIRE(testApp.fileSystem().writeFile(moduleDirectory() / "echo.wasm", module).has_value());
     auto withEcho = mainProfile(testApp.app());
     auto follower = extensionAt("echo", moduleDirectory() / "echo.wasm");
-    follower.config = { { "events", "describe" }, { "subscribe", "font" } };
+    follower.config = { { "events", "describe-followed" }, { "subscribe", "font" } };
     withEcho.extensions.value() = { follower };
     withEcho.statusLine.value().indicator.left = "[{Extension:echo}]";
     testApp.app().config().profiles.value().insert_or_assign("echo", std::move(withEcho));
@@ -680,7 +681,7 @@ TEST_CASE("TerminalSession: the extensions are told the font, and a take-over dr
 
     auto& profile = mainProfile(testApp.app());
     auto follower = extensionAt("echo", moduleDirectory() / "echo.wasm");
-    follower.config = { { "events", "describe" }, { "subscribe", "font" } };
+    follower.config = { { "events", "describe-followed" }, { "subscribe", "font" } };
     profile.extensions.value() = { follower };
     profile.statusLine.value().indicator.left = "[{Extension:echo}]";
     auto probing = profile;
