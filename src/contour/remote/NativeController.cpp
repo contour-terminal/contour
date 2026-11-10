@@ -105,7 +105,7 @@ namespace
 } // namespace
 
 NativeController::NativeController(Config config):
-    RemoteController(config.clock),
+    RemoteController(config.clock, DefaultDetachBound, std::move(config.waitPump)),
     // Told when the transport returns its connection, which is when an AttachBudget's handshake bound starts.
     _transport(std::make_shared<vthost::ConnectObservingFactory>(std::move(config.transport),
                                                                  [this] { noteTransportReturned(); })),

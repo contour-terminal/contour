@@ -15,15 +15,31 @@ MuxConnectOutcome awaitMuxConnect(std::mutex& mutex,
                                   std::condition_variable& cv,
                                   MuxConnectPhase const& phase,
                                   std::string const& failure,
-                                  std::chrono::milliseconds timeout)
+                                  std::chrono::milliseconds timeout,
+                                  WaitPump const& pump)
 {
-    auto lock = std::unique_lock { mutex };
-    if (!cv.wait_for(lock, timeout, [&phase] { return phase != MuxConnectPhase::Connecting; }))
-        return MuxConnectOutcome { .ready = false, .timedOut = true, .failure = {} };
-    return MuxConnectOutcome { .ready =
-                                   phase == MuxConnectPhase::Ready || phase == MuxConnectPhase::Reconnecting,
-                               .timedOut = false,
-                               .failure = failure };
+    auto const settled = [&phase] {
+        return phase != MuxConnectPhase::Connecting;
+    };
+    auto remaining = timeout;
+    while (true)
+    {
+        auto const slice = pump ? std::min(remaining, WaitPumpInterval) : remaining;
+        {
+            auto lock = std::unique_lock { mutex };
+            if (cv.wait_for(lock, slice, settled))
+                return MuxConnectOutcome { .ready = phase == MuxConnectPhase::Ready
+                                                    || phase == MuxConnectPhase::Reconnecting,
+                                           .timedOut = false,
+                                           .failure = failure };
+        }
+        remaining -= slice;
+        if (remaining <= std::chrono::milliseconds::zero())
+            return MuxConnectOutcome { .ready = false, .timedOut = true, .failure = {} };
+        // Not under the lock: the pump may run a dialog, and the reactor needs the lock to settle the phase.
+        if (pump)
+            pump();
+    }
 }
 
 std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::PageSize> pageSize)
@@ -158,7 +174,7 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
     {
         auto const slice = remaining ? std::min(*remaining, vthost::TransportReturnPollInterval)
                                      : vthost::TransportReturnPollInterval;
-        auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, slice);
+        auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, slice, _waitPump);
         if (!outcome.timedOut)
             return settled(outcome);
         if (remaining)
@@ -172,7 +188,7 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
     // The handshake phase: the connect bound, where there is one, still bounds the whole attach.
     auto const left = budget.connect ? remaining.value_or(MinimumConnectAwait)
                                      : remainingOf(budget.handshake, *returnedAt());
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, left);
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, left, _waitPump);
     if (outcome.timedOut)
         return timedOut();
     return settled(outcome);

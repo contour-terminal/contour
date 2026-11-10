@@ -184,6 +184,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         ResumeFallback resumeFallback = ResumeFallback::Launch;
         /// Whether the daemon may ask this client to switch its windows.
         SwitchRequests switchRequests = SwitchRequests::Answered;
+        /// Run while awaitConnected() waits on the GUI thread, so that a prompt of the transport (ssh's
+        /// askpass) is answered while the wait goes on. Empty: the wait only waits.
+        WaitPump waitPump = {};
     };
 
     /// @param config What the controller is built with.

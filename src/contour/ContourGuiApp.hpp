@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/askpass/AskpassBroker.hpp>
+#include <contour/askpass/AskpassDialogs.hpp>
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/HostTransport.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
@@ -634,6 +636,10 @@ class ContourGuiApp:
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
+    /// @return The broker that answers ssh's prompts through this application's own askpass mode; the one
+    ///         for the process, made on first use. GUI thread only: its servers live there.
+    [[nodiscard]] std::shared_ptr<askpass::AskpassBroker> const& askpassBroker();
+
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
     /// window/tab and to open config hyperlinks. Falls back to the app name when argv is not yet
     /// available (any call before run() records it — e.g. a FollowHyperlink/NewTerminal action that
@@ -1259,6 +1265,13 @@ class ContourGuiApp:
                                              .timer = remote::qtSwitchTimer(),
                                              .clock = core::platform::defaultSteadyClock() };
 
+    /// Shows ssh's prompts until a window hosts them itself. Declared before the broker, which borrows it, and
+    /// both before _daemonLinks: a link's reconnect may still be inside the broker's open() until the link
+    /// stops, so they must outlive every link and session.
+    askpass::DialogAskpassPromptSink _askpassSink;
+    /// Answers the ssh prompts of every ssh host this app opens; made by askpassBroker() on first use.
+    std::shared_ptr<askpass::AskpassBroker> _askpassBroker;
+
     /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
     /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
     std::vector<std::unique_ptr<remote::DaemonLink>> _daemonLinks;
@@ -1267,6 +1280,8 @@ class ContourGuiApp:
     std::set<std::string> _hostsReached;
     /// The id the next link is given.
     uint32_t _nextDaemonLinkId = 1;
+    /// The link awaitNativeAttach() is waiting for, which destroyEndedLinks() leaves alone meanwhile.
+    std::optional<remote::DaemonLinkId> _awaitedLinkId;
     std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —

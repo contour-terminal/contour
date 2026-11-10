@@ -978,6 +978,15 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(remote::DaemonLink& link,
                                                                   vthost::AttachBudget budget)
 {
+    // The wait pumps the event loop (DaemonLinkConfig's waitPump), so a queued destroyEndedLinks() can run in
+    // it: it must leave the link that is being waited for alone.
+    _awaitedLinkId = link.id();
+    // Once it is over, a link that ended meanwhile is let go of, by a call of its own: not here, as the caller
+    // goes on to use the link it waited for.
+    auto const forgetAwaited = core::Finally { [this] {
+        _awaitedLinkId.reset();
+        QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
+    } };
     if (auto attached = link.awaitAttached(budget); !attached)
         return attached;
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
@@ -1043,6 +1052,8 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
             .timeline = _startupTimeline,
             .powerMonitor = _powerMonitor.get(),
             .backoff = {},
+            // ssh's prompts are answered by dialogs on this thread, which awaits the connect.
+            .waitPump = [] { QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents); },
         },
         .hostLabel = std::move(hostLabel),
         .locality = locality,
@@ -1130,7 +1141,9 @@ void ContourGuiApp::destroyEndedLinks()
 {
     // A link whose closed windows still hold a pane waits: it asks again as its last pane lets it go.
     // Each window's drift badge reads its own link's model (WindowController::daemonDrift).
-    std::erase_if(_daemonLinks, [](auto const& link) { return link->isFinished(); });
+    std::erase_if(_daemonLinks, [this](auto const& link) {
+        return link->isFinished() && _awaitedLinkId != link->id();
+    });
 }
 
 std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
@@ -1271,6 +1284,18 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(st
     return transportOf(nameOrUrl, *std::move(host));
 }
 
+std::shared_ptr<askpass::AskpassBroker> const& ContourGuiApp::askpassBroker()
+{
+    if (!_askpassBroker)
+    {
+        // Qt-free, as the broker may be made before the application object exists (`contour client --host`).
+        auto const executable = vtpty::currentExecutablePath();
+        _askpassBroker = std::make_shared<askpass::AskpassBroker>(
+            _askpassSink, QString::fromStdString(executable ? core::pathToUtf8(*executable) : programPath()));
+    }
+    return _askpassBroker;
+}
+
 std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(std::string const& nameOrUrl,
                                                                                  config::HostEntry host)
 {
@@ -1282,7 +1307,7 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                fileSystem(),
                vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
                    .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }),
-               cli::SshPrompting { .broker = nullptr, .probe = _sshVersionProbe })
+               cli::SshPrompting { .broker = askpassBroker(), .probe = _sshVersionProbe })
         .transform([&](cli::HostTransport transport) {
             return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
         });

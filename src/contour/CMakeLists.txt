@@ -173,6 +173,7 @@ endif()
 add_subdirectory(config)
 add_subdirectory(command)
 add_subdirectory(cli)
+add_subdirectory(askpass)
 
 # Declared once, on the lowest layer, and inherited by every consumer through contour_config's
 # PUBLIC usage requirements -- contour_command, contour_cli, contour_core, and through those the
@@ -360,6 +361,9 @@ if(CONTOUR_FRONTEND_GUI)
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
+        askpass/AskpassBroker.hpp
+        askpass/AskpassDialogs.hpp
+        askpass/AskpassPromptSink.hpp
         remote/DaemonDriftFollower.hpp
         remote/DaemonLink.hpp
         remote/DaemonLinkHost.hpp
@@ -421,6 +425,8 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
+        askpass/AskpassBroker.cpp
+        askpass/AskpassDialogs.cpp
         remote/DaemonLink.cpp
         remote/DaemonSwitchDirectory.cpp
         remote/NativeController.cpp
@@ -855,6 +861,7 @@ target_link_libraries(contour_core
     contour::tracy
     contour_block_tooltip
     contour_command
+    contour_askpass
     contour_command_output
     contour_cli
     contour_local_file
@@ -872,6 +879,10 @@ target_link_libraries(contour_core
     PRIVATE
     vthost
 )
+# The askpass broker compares nonces with core-cpp's constant-time comparison, which lives beside its TLS code.
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PRIVATE core::net_tls)
+endif()
 if(CONTOUR_EXTENSIONS)
     target_link_libraries(contour_core PUBLIC contour_extensions)
 endif()
@@ -931,6 +942,7 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
+            askpass/AskpassBroker_test.cpp
             remote/RemoteController_test.cpp
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp
@@ -1585,6 +1597,8 @@ if(CONTOUR_TESTING)
         cli/Hosting_test.cpp
         command/LauncherEntries_test.cpp
         cli/HostTransport_test.cpp
+        askpass/AskpassProtocol_test.cpp
+        askpass/AskpassClient_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ConfigProfileCatalog_test.cpp
         cli/ConfigReloadPoller_test.cpp
@@ -1662,6 +1676,7 @@ if(CONTOUR_TESTING)
     target_link_libraries(contour_test
         PRIVATE
         contour_application_restart
+        contour_askpass
         contour_block_tooltip
         contour_command
         contour_command_output
