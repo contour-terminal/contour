@@ -692,7 +692,7 @@ class ContourGuiApp:
 
     // remote::IDaemonLinkHost
     void openWindowFor(QScreen* screen) override;
-    void upgradeDaemon(remote::DaemonLink& link) override;
+    [[nodiscard]] remote::UpgradeStart upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
     void linkEnded() override;
     void startHandOverLink(remote::DaemonLinkConfig config) override;
@@ -1495,6 +1495,15 @@ class ContourGuiApp:
     std::function<std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure>(
         std::stop_token)>
         _upgradeDaemon;
+    /// Whether @ref _daemonRestartThread runs a restart or an upgrade. The app has one launch daemon and so
+    /// one worker, whichever window's link asked; set on the GUI thread when it starts, cleared there by the
+    /// completion the worker queues.
+    enum class DaemonWorker : uint8_t
+    {
+        Idle = 0,
+        Busy,
+    };
+    DaemonWorker _daemonWorker = DaemonWorker::Idle;
     /// The thread running @ref _restartDaemon; declared after what it reaches so it is joined first.
     std::jthread _daemonRestartThread;
     ExitStatus _exitStatus;

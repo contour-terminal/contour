@@ -1877,6 +1877,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::OpenDaemon const& event);
     bool operator()(actions::ShowSwitcher);
     bool operator()(actions::NewDaemon);
+    bool operator()(actions::UpgradeDaemon);
     bool operator()(actions::OpenContextMenu);
     bool operator()(actions::SelectAll);
     bool operator()(actions::SoftReset);

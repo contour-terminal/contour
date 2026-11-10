@@ -212,3 +212,54 @@ TEST_CASE("the drift follows a connection through an upgrade, with no drift of i
         CHECK_FALSE(model.isVisible());
     }
 }
+
+TEST_CASE("a commanded upgrade starts with no drift on offer, once, and ends like a requested one",
+          "[contour][drift]")
+{
+    using contour::window::CommandedUpgradeStart;
+    auto model = contour::window::DaemonDriftModel {};
+    model.show(vthost::client::DriftNotice {});
+    CHECK_FALSE(model.offersUpgrade());
+    auto upgrade = QSignalSpy { &model, &contour::window::DaemonDriftModel::upgradeRequested };
+    auto failure = QSignalSpy { &model, &contour::window::DaemonDriftModel::upgradeFailed };
+
+    CHECK(model.requestCommandedUpgrade() == CommandedUpgradeStart::Started);
+    CHECK(model.requestCommandedUpgrade() == CommandedUpgradeStart::AlreadyUnderWay);
+    CHECK(upgrade.count() == 1);
+    CHECK(model.isUpgrading());
+    CHECK(model.isVisible());
+
+    // Still in flight after the reconnect, until the worker reports back.
+    model.show(vthost::client::DriftNotice {});
+    CHECK_FALSE(model.isUpgrading());
+    CHECK(model.requestCommandedUpgrade() == CommandedUpgradeStart::AlreadyUnderWay);
+
+    model.noteUpgradeFailed(QStringLiteral("no room"));
+    REQUIRE(failure.count() == 1);
+    CHECK(failure.takeFirst().at(0).toString() == QStringLiteral("no room"));
+    CHECK_FALSE(model.isVisible()); // no drift to carry the failure: the caller tells the user
+    CHECK(model.requestCommandedUpgrade() == CommandedUpgradeStart::Started);
+    CHECK(upgrade.count() == 2);
+}
+
+TEST_CASE("a commanded upgrade is not started while a restart is under way", "[contour][drift]")
+{
+    using contour::window::CommandedUpgradeStart;
+    auto model = contour::window::DaemonDriftModel {};
+    model.show(vthost::client::assessDrift("0.8.2", "0.8.1", LayoutAfterRestart::Lost));
+    model.requestRestart();
+    CHECK(model.requestCommandedUpgrade() == CommandedUpgradeStart::AlreadyUnderWay);
+}
+
+TEST_CASE("an upgrade the application declined to start leaves the model idle, settled and silent",
+          "[contour][drift]")
+{
+    auto model = contour::window::DaemonDriftModel {};
+    REQUIRE(model.requestCommandedUpgrade() == contour::window::CommandedUpgradeStart::Started);
+    REQUIRE(model.isUpgrading());
+    model.noteUpgradeNotStarted();
+    CHECK_FALSE(model.isUpgrading());
+    CHECK_FALSE(model.text().contains(QStringLiteral("failed")));
+    // Settled: another request starts.
+    CHECK(model.requestCommandedUpgrade() == contour::window::CommandedUpgradeStart::Started);
+}

@@ -183,6 +183,7 @@ struct SwitchToDaemon{ DaemonRef daemon; }; // show the named daemon in this win
 struct OpenDaemon{ DaemonRef daemon; };     // show the named daemon in a new window
 struct ShowSwitcher{};                      // open the daemon & workspace switcher popup
 struct NewDaemon{};                         // start a new local daemon under a label asked for, and show it here
+struct UpgradeDaemon{};                     // upgrade this window's local daemon in place, keeping every program
 struct OpenContextMenu{};        // open the terminal pane's context menu (bound to the right button)
 struct SelectAll{};              // select the whole scrollback and screen
 struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keeping content and history
@@ -360,7 +361,8 @@ using ActionVariant = std::variant<CancelSelection,
                                    SwitchToDaemon,
                                    OpenDaemon,
                                    ShowSwitcher,
-                                   NewDaemon>;
+                                   NewDaemon,
+                                   UpgradeDaemon>;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///
@@ -525,24 +527,25 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     SwitchToDaemon,
                                                     OpenDaemon,
                                                     ShowSwitcher,
-                                                    NewDaemon>;
+                                                    NewDaemon,
+                                                    UpgradeDaemon>;
 
-/// The daemon and workspace switching actions: all of them need a daemon behind the window, so a window
-/// whose sessions run in-process hides them from the palette and menus, and ignores them when bound.
+/// The actions that need a daemon behind the window: a window whose sessions run in-process hides them from
+/// the palette and menus; bound there, they do nothing (UpgradeDaemon says why in a notice).
 template <typename T>
-concept DaemonSwitchingActionConcept = core::oneOf<T,
-                                                   SwitchToWorkspace,
-                                                   OpenWorkspace,
-                                                   CycleWorkspace,
-                                                   CycleDaemon,
-                                                   SwitchToDaemon,
-                                                   OpenDaemon,
-                                                   ShowSwitcher,
-                                                   NewDaemon>;
+concept DaemonActionConcept = core::oneOf<T,
+                                          SwitchToWorkspace,
+                                          OpenWorkspace,
+                                          CycleWorkspace,
+                                          CycleDaemon,
+                                          SwitchToDaemon,
+                                          OpenDaemon,
+                                          ShowSwitcher,
+                                          NewDaemon,
+                                          UpgradeDaemon>;
 
-/// @returns true if @p action is one of the daemon and workspace switching actions
-/// (DaemonSwitchingActionConcept).
-[[nodiscard]] bool isDaemonSwitching(Action const& action) noexcept;
+/// @returns true if @p action needs a daemon behind the window (DaemonActionConcept).
+[[nodiscard]] bool needsDaemon(Action const& action) noexcept;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -907,6 +910,11 @@ namespace documentation
                                                      "daemon or workspace, or to open one in a new window." };
     constexpr inline std::string_view NewDaemon {
         "Asks for a label, starts a new local daemon under it and shows it in this window."
+    };
+    constexpr inline std::string_view UpgradeDaemon {
+        "Upgrades this window's local daemon in place, keeping every program running, even when the daemon "
+        "already runs this release (to pick up a rebuilt binary). Refused for a remote daemon, or one this "
+        "client did not start or launch on."
     };
     constexpr inline std::string_view SaveLayout {
         "Saves the current window's tabs as a named layout in layouts.yml. Without a name it opens a "

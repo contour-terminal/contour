@@ -77,6 +77,29 @@ namespace
             manager.closeActivePane(session.data(), session::SessionEnd::Detach);
         }
     }
+
+    /// A daemon's release judged against the client's, with what both offered at the handshake.
+    struct AssessedDaemon
+    {
+        vthost::client::DriftNotice notice;        ///< How the daemon's release stands against the client's.
+        vthost::proto::CapabilitySet capabilities; ///< What the daemon and this client both offered.
+    };
+
+    /// @param controller The live connection to the daemon.
+    /// @param clientRelease This client's release.
+    /// @return The drift of the daemon's release from @p clientRelease and the negotiated capabilities.
+    [[nodiscard]] AssessedDaemon assessDaemon(NativeController const& controller,
+                                              std::string const& clientRelease)
+    {
+        auto const negotiated = controller.negotiated();
+        auto const layout = negotiated.transform(vthost::client::layoutSurvivesRestart)
+                                .value_or(vthost::client::LayoutAfterRestart::Lost);
+        return AssessedDaemon {
+            .notice = vthost::client::assessDrift(clientRelease, controller.daemonRelease(), layout),
+            .capabilities = negotiated ? negotiated->shared : vthost::proto::CapabilitySet {},
+        };
+    }
+
 } // namespace
 
 DaemonLink::DaemonLink(Id id,
@@ -379,20 +402,37 @@ void DaemonLink::stopForDaemonRestart()
 void DaemonLink::showDaemonDrift()
 {
     auto const& controller = *_controller;
-    auto const negotiated = controller.negotiated();
-    auto const layout = negotiated.transform(vthost::client::layoutSurvivesRestart)
-                            .value_or(vthost::client::LayoutAfterRestart::Lost);
     _shownDaemonRelease = controller.daemonRelease();
-    auto notice = vthost::client::assessDrift(_clientRelease, _shownDaemonRelease, layout);
+    auto assessed = assessDaemon(controller, _clientRelease);
     // Only the daemon this client launched on is its to restart or upgrade (window::DaemonUpkeep).
-    auto const offer =
-        _upkeep == window::DaemonUpkeep::ThisClient
-            ? window::driftOfferFor(
-                  notice.kind, _locality, negotiated ? negotiated->shared : vthost::proto::CapabilitySet {})
-            : window::DriftOffer::None;
+    auto const offer = window::isThisClientsDaemon(_locality, _upkeep)
+                           ? window::driftOfferFor(assessed.notice.kind, _locality, assessed.capabilities)
+                           : window::DriftOffer::None;
     // A daemon that is not ours to touch shows no badge: there is nothing the user could do about it.
-    _drift.show(offer == window::DriftOffer::None ? vthost::client::DriftNotice {} : std::move(notice),
+    _drift.show(offer == window::DriftOffer::None ? vthost::client::DriftNotice {}
+                                                  : std::move(assessed.notice),
                 offer);
+}
+
+std::expected<void, std::string> DaemonLink::upgradeDaemonOnCommand()
+{
+    requireGuiThread();
+    auto daemon = std::optional<window::ConnectedDaemon> {};
+    // A controller that is still connecting, reconnecting or held by an upgrade knows nothing current of
+    // its daemon: only a connected one is judged.
+    if (isLive() && _controller->connectionState() == vthost::client::ConnectionState::Connected)
+    {
+        auto const assessed = assessDaemon(*_controller, _clientRelease);
+        daemon = window::ConnectedDaemon { .drift = assessed.notice.kind,
+                                           .daemonCapabilities = assessed.capabilities };
+    }
+    if (auto const verdict = window::upgradeVerdictFor(_locality, _upkeep, daemon);
+        verdict != window::UpgradeVerdict::Upgrade)
+        return std::unexpected(std::string { window::describe(verdict) });
+    // The model's upgradeRequested() reaches the application (offerDaemonRestartIfDrifted()).
+    if (_drift.requestCommandedUpgrade() == window::CommandedUpgradeStart::AlreadyUnderWay)
+        return std::unexpected(std::string { window::UpgradeAlreadyUnderWay });
+    return {};
 }
 
 void DaemonLink::offerDaemonRestartIfDrifted()
@@ -411,11 +451,24 @@ void DaemonLink::offerDaemonRestartIfDrifted()
             showDaemonDrift();
     });
     // Only a daemon this client can restart -- the local one it launched on -- is offered anything.
-    if (_locality != window::DaemonLocality::Local || _upkeep != window::DaemonUpkeep::ThisClient)
+    if (!window::isThisClientsDaemon(_locality, _upkeep))
         return;
+    // The badge shows a failure only next to a drift; an upgrade asked for by command may have none.
+    QObject::connect(
+        &_drift, &window::DaemonDriftModel::upgradeFailed, &_receiver, [this](QString const& reason) {
+            if (_drift.isVisible() || isStopped())
+                return;
+            _sessions.postNoticeToWindowsOf(
+                *this,
+                window::upgradeFailedNotice(reason.isEmpty() ? "unknown error" : reason.toStdString()));
+        });
     QObject::connect(&_drift, &window::DaemonDriftModel::upgradeRequested, &_receiver, [this] {
-        if (!isStopped())
-            _host.upgradeDaemon(*this);
+        if (isStopped() || _host.upgradeDaemon(*this) == UpgradeStart::Started)
+            return;
+        // Another restart or upgrade of the application's daemon runs, asked of another window's link: this
+        // request starts nothing, and the model stands idle again.
+        _drift.noteUpgradeNotStarted();
+        _sessions.postNoticeToWindowsOf(*this, window::upgradeFailedNotice(window::UpgradeAlreadyUnderWay));
     });
     QObject::connect(&_drift, &window::DaemonDriftModel::restartRequested, &_receiver, [this] {
         if (!isStopped())

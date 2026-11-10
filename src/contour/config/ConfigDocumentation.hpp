@@ -1437,6 +1437,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - CycleWorkspace    Shows the next/previous workspace of this daemon here. Parameter: "
     "direction.\n"
     "{comment} - NewDaemon         Asks for a label, starts a local daemon under it and shows it here.\n"
+    "{comment} - UpgradeDaemon     Upgrades this window's local daemon in place, keeping every program.\n"
     "{comment} - OpenDaemon        Shows a daemon in a new window. Parameter: label or host.\n"
     "{comment} - OpenWorkspace     Shows a workspace of this daemon in a new window. Parameter: index "
     "(1-based).\n"

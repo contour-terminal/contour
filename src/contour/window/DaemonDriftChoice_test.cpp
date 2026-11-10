@@ -3,9 +3,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+using contour::window::ConnectedDaemon;
 using contour::window::DaemonLocality;
+using contour::window::DaemonUpkeep;
+using contour::window::describe;
 using contour::window::DriftOffer;
 using contour::window::driftOfferFor;
+using contour::window::UpgradeVerdict;
+using contour::window::upgradeVerdictFor;
 using vthost::client::DriftKind;
 using vthost::proto::Capability;
 using vthost::proto::CapabilitySet;
@@ -45,6 +50,54 @@ TEST_CASE("a daemon newer than the client is offered a restart, not an upgrade",
     auto const capabilities = CapabilitySet::of({ Capability::DaemonControl, Capability::LiveUpgrade });
     CHECK(driftOfferFor(DriftKind::DaemonNewer, DaemonLocality::Local, capabilities)
           == DriftOffer::RestartOnly);
+}
+
+namespace
+{
+ConnectedDaemon connectedWith(DriftKind drift)
+{
+    return { .drift = drift,
+             .daemonCapabilities =
+                 CapabilitySet::of({ Capability::DaemonControl, Capability::LiveUpgrade }) };
+}
+
+ConnectedDaemon connectedWithoutLiveUpgrade(DriftKind drift)
+{
+    return { .drift = drift, .daemonCapabilities = CapabilitySet::of({ Capability::DaemonControl }) };
+}
+} // namespace
+
+TEST_CASE("a commanded upgrade goes ahead for every drift but a newer daemon, the same release included",
+          "[contour][drift]")
+{
+    for (auto const drift:
+         { DriftKind::None, DriftKind::DaemonOlder, DriftKind::Differs, DriftKind::DaemonUnknown })
+        CHECK(upgradeVerdictFor(DaemonLocality::Local, DaemonUpkeep::ThisClient, connectedWith(drift))
+              == UpgradeVerdict::Upgrade);
+    CHECK(describe(UpgradeVerdict::Upgrade).empty());
+}
+
+TEST_CASE("a commanded upgrade is refused with a reason for each way it cannot go ahead", "[contour][drift]")
+{
+    CHECK(upgradeVerdictFor(DaemonLocality::Remote, DaemonUpkeep::None, connectedWith(DriftKind::None))
+          == UpgradeVerdict::NotThisClients);
+    CHECK(upgradeVerdictFor(DaemonLocality::Local, DaemonUpkeep::None, connectedWith(DriftKind::None))
+          == UpgradeVerdict::NotThisClients);
+    // Whose daemon it is is judged before the connection: a daemon of another's is not ours while down
+    // either.
+    CHECK(upgradeVerdictFor(DaemonLocality::Remote, DaemonUpkeep::None, std::nullopt)
+          == UpgradeVerdict::NotThisClients);
+    CHECK(upgradeVerdictFor(DaemonLocality::Local, DaemonUpkeep::ThisClient, std::nullopt)
+          == UpgradeVerdict::NotConnected);
+    CHECK(upgradeVerdictFor(
+              DaemonLocality::Local, DaemonUpkeep::ThisClient, connectedWith(DriftKind::DaemonNewer))
+          == UpgradeVerdict::WouldDowngrade);
+    CHECK(upgradeVerdictFor(
+              DaemonLocality::Local, DaemonUpkeep::ThisClient, connectedWithoutLiveUpgrade(DriftKind::None))
+          == UpgradeVerdict::NoLiveUpgrade);
+    for (auto const& row: contour::window::UpgradeVerdictRows)
+        if (row.verdict != UpgradeVerdict::Upgrade)
+            CHECK_FALSE(describe(row.verdict).empty());
 }
 
 TEST_CASE("a daemon reached by label is this client's only when it serves the launch's socket",

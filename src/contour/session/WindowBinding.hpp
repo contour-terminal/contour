@@ -4,7 +4,9 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/WindowSwitching.hpp>
 
+#include <expected>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include <vtworkspace/Primitives.hpp>
@@ -16,6 +18,9 @@ class DaemonDriftModel;
 
 namespace contour::session
 {
+
+/// Why UpgradeDaemon does nothing in a window that has no daemon behind it.
+inline constexpr std::string_view NoDaemonToUpgrade = "this window has no daemon to upgrade";
 
 /// What a window's remote sessions are bound to: the daemon connection that hosts them.
 ///
@@ -55,6 +60,16 @@ class WindowBinding
     /// than
     ///         this client; null for a binding with no daemon to drift. GUI thread.
     [[nodiscard]] virtual window::DaemonDriftModel* daemonDrift() noexcept = 0;
+
+    /// Upgrades the daemon behind the windows bound here in place, because the user commanded it (the
+    /// `UpgradeDaemon` action), whether or not its release drifts. Returns at once: the upgrade runs on, and
+    /// its outcome is told to the windows. GUI thread.
+    /// @return The reason it did not start, in words for the user -- a daemon that is not this client's to
+    ///         upgrade, an upgrade already under way -- or none. A binding with no daemon refuses.
+    [[nodiscard]] virtual std::expected<void, std::string> upgradeDaemonOnCommand()
+    {
+        return std::unexpected(std::string { NoDaemonToUpgrade });
+    }
 
     /// Tells the binding that @p window, which it served, was closed: what it showed is no longer shown here
     /// (a daemon is told so, and keeps the workspace as left). Told before lastWindowReleased() when it was

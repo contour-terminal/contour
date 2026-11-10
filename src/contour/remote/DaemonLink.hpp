@@ -298,6 +298,8 @@ class DaemonLink final: public session::WindowBinding
 
     /// @return What the drift badge of each window it serves shows: its own drift.
     [[nodiscard]] window::DaemonDriftModel* daemonDrift() noexcept override { return &_drift; }
+    /// Upgrades the daemon in place when window::upgradeVerdictFor() allows it for this link's daemon.
+    [[nodiscard]] std::expected<void, std::string> upgradeDaemonOnCommand() override;
 
     /// Waits for the connect the constructor began, with what remains of @p budget; gives the controller up
     /// when it does not connect in time (@see awaitConnectedOrAbandon()), and with it the attach-window

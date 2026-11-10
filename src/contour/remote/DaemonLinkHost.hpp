@@ -70,6 +70,13 @@ enum class HandOverOutcome : uint8_t
     Failed,      ///< The new link did not connect, or the daemon has no such workspace: the old one keeps it.
 };
 
+/// Whether the application started the upgrade a link asked for.
+enum class UpgradeStart : uint8_t
+{
+    AlreadyUnderWay = 0, ///< A restart or an upgrade of the application's daemon runs; nothing was started.
+    Started,             ///< Under way, or answered at once: the outcome reaches DaemonLink::drift().
+};
+
 /// What a link needs from the application: OS windows opened, and the local daemon restarted or upgraded by
 /// the process resources the application owns. What the link does with its windows once they are open it
 /// does through the session manager.
@@ -91,13 +98,17 @@ class IDaemonLinkHost
     /// @param screen Where the window opens; null for the default placement.
     virtual void openWindowFor(QScreen* screen) = 0;
 
-    /// The user asked, through @p link's drift badge, to upgrade its daemon in place. Asked only of a link
-    /// whose daemon is window::DaemonLocality::Local; the outcome is reported to DaemonLink::drift().
+    /// The user asked, through @p link's drift badge or the UpgradeDaemon action, to upgrade its daemon in
+    /// place. Asked only of a link whose daemon is this client's (window::isThisClientsDaemon). The
+    /// application has one daemon and so one restart or upgrade at a time, whichever window asks; the
+    /// outcome of a started one is reported to DaemonLink::drift().
     /// @param link The link whose daemon to upgrade.
-    virtual void upgradeDaemon(DaemonLink& link) = 0;
+    /// @return AlreadyUnderWay when another restart or upgrade runs, and nothing was started.
+    [[nodiscard]] virtual UpgradeStart upgradeDaemon(DaemonLink& link) = 0;
 
     /// The user asked, through @p link's drift badge, to restart its daemon on this release. Asked only of a
     /// link whose daemon is window::DaemonLocality::Local; the outcome is reported to DaemonLink::drift().
+    /// Refused, with the failure reported to the link's drift model, while another restart or upgrade runs.
     /// @param link The link whose daemon to restart.
     virtual void restartDaemon(DaemonLink& link) = 0;
 

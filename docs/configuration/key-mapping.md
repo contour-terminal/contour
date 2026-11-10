@@ -255,6 +255,7 @@ switcher popup on that daemon's workspaces, to pick one; `Esc` there cancels the
 | --- | --- |
 | `ShowSwitcher` | Opens the daemon and workspace switcher popup over this window. |
 | `NewDaemon` | Asks for a label, starts a local daemon under it, and opens a new window on it. |
+| `UpgradeDaemon` | Upgrades this window's local daemon in place, keeping every program running (palette: **Upgrade daemon**). |
 
 The switcher popup lists the daemons under **This computer** (the local daemons running, by label) and
 **Saved hosts**. This window's daemon is expanded; `Right` expands any other one to its workspaces, each with
@@ -267,3 +268,10 @@ in a new window, and `Esc` closes the popup without changing anything.
 digits, `-`, `_` and `.` only, not starting with a dot, at most 64 characters) right under the field; a
 label that is already running is offered as "Switch to daemon …" instead of starting a second one. The daemon
 it starts keeps running when its last window closes, like one started with `contour daemon --label`.
+
+`UpgradeDaemon` (the palette's **Upgrade daemon** row) starts a [live upgrade](../persistent-sessions.md#live-upgrade)
+of the window's daemon at any time, without the daemon-drift chip: it also upgrades a daemon that runs the
+same release, to pick up a rebuilt binary. It asks nothing, as an upgrade keeps every program running. It is
+for the local daemon this client launched on (one started with **New daemon…** is not); for a remote daemon, one a switch reached, a daemon
+too old to upgrade in place, or one newer than this client it does nothing but tell you why in a notice. It
+is not bound to a key by default.

@@ -44,6 +44,7 @@ enum class NoticeKind : uint8_t
     HotkeyUnavailable,      ///< The quick terminal's hotkey could not be registered.
     WindowLinkFailed,       ///< A daemon workspace's window could not get a connection of its own.
     SwitchFailed,           ///< A window switch did not get there; the window shows what it showed.
+    UpgradeFailed,          ///< The UpgradeDaemon action was refused, or the upgrade it started failed.
 };
 
 /// Where a notice is shown.
@@ -145,6 +146,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::UpgradeFailed,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -155,7 +162,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::SwitchFailed) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::UpgradeFailed) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -172,6 +179,14 @@ struct Notice
 
     bool operator==(Notice const&) const = default;
 };
+
+/// @param reason Why the upgrade did not happen, in words for the user.
+/// @return The NoticeKind::UpgradeFailed notice telling it.
+[[nodiscard]] inline Notice upgradeFailedNotice(std::string_view reason)
+{
+    return Notice { .kind = NoticeKind::UpgradeFailed,
+                    .text = std::format("Could not upgrade the daemon: {}.", reason) };
+}
 
 namespace detail
 {

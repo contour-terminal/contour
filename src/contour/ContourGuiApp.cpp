@@ -1148,15 +1148,21 @@ std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgrad
     return vthost::client::upgradeDaemonTo(*control, *settling, *binary, pacer);
 }
 
-void ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
+remote::UpgradeStart ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
 {
+    if (_daemonWorker == DaemonWorker::Busy)
+        return remote::UpgradeStart::AlreadyUnderWay;
     if (!_upgradeDaemon)
-        return;
-    // The model asks for no other upgrade or restart until this one reports back, so no worker still
-    // running is joined here, on the GUI thread. On shutdown the settling stops waiting at once; a
-    // control call already under way is not interrupted, and ends within its timeout
-    // (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request itself).
-    // The outcome is told to the link by its id: it may have ended meanwhile, with its last window.
+    {
+        // The model shows the request in flight: it must hear that nothing will answer it.
+        link.drift().noteUpgradeFailed(tr("this run has no local daemon to upgrade"));
+        return remote::UpgradeStart::Started;
+    }
+    // No worker runs (see above), so the assignment joins none on the GUI thread. On shutdown the settling
+    // stops waiting at once; a control call already under way is not interrupted, and ends within its
+    // timeout (DefaultControlTimeout for the status reads, DefaultUpgradeTimeout for the upgrade request
+    // itself). The outcome is told to the link by its id: it may have ended meanwhile, with its last window.
+    _daemonWorker = DaemonWorker::Busy;
     _daemonRestartThread = std::jthread { [this, id = link.id()](std::stop_token const& stop) {
         auto const upgraded = _upgradeDaemon(stop);
         QMetaObject::invokeMethod(
@@ -1165,6 +1171,7 @@ void ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
              id,
              reason = upgraded ? QString {}
                                : QString::fromStdString(vthost::client::describeFailure(upgraded.error()))] {
+                _daemonWorker = DaemonWorker::Idle;
                 auto* const upgradedLink = daemonLink(id);
                 if (!upgradedLink)
                     return;
@@ -1176,12 +1183,20 @@ void ContourGuiApp::upgradeDaemon(remote::DaemonLink& link)
             },
             Qt::QueuedConnection);
     } };
+    return remote::UpgradeStart::Started;
 }
 
 void ContourGuiApp::restartDaemon(remote::DaemonLink& link)
 {
     if (!_restartDaemon)
         return;
+    if (_daemonWorker == DaemonWorker::Busy)
+    {
+        link.drift().noteRestartFailed(
+            QString::fromUtf8(window::UpgradeAlreadyUnderWay.data(), window::UpgradeAlreadyUnderWay.size()));
+        return;
+    }
+    _daemonWorker = DaemonWorker::Busy;
     // Stopping the daemon drops this client's connection, which closes every window. Without this
     // the last window closing would quit the app before the queued hand-off below ever ran.
     QGuiApplication::setQuitOnLastWindowClosed(false);
@@ -1192,6 +1207,7 @@ void ContourGuiApp::restartDaemon(remote::DaemonLink& link)
         QMetaObject::invokeMethod(
             this,
             [this, id, result = std::move(result)] {
+                _daemonWorker = DaemonWorker::Idle;
                 QGuiApplication::setQuitOnLastWindowClosed(true);
                 auto* const restarted = daemonLink(id);
                 if (!result)
