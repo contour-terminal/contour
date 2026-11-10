@@ -8,6 +8,8 @@ add_library(vthost_keeper STATIC
     Frame.cpp
     Frame.hpp
     Messages.hpp
+    RestartPolicy.cpp
+    RestartPolicy.hpp
 )
 target_include_directories(vthost_keeper PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -34,6 +36,7 @@ if(VTHOST_KEEPER_TESTING)
         test_main.cpp
         Codec_test.cpp
         Frame_test.cpp
+        RestartPolicy_test.cpp
     )
     target_link_libraries(vthost_keeper_test vthost_keeper core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vthost_keeper_test COMMAND $<TARGET_FILE:vthost_keeper_test>)
