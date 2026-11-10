@@ -32,8 +32,11 @@
 
 #include <core/net/ISocket.hpp>
 #include <core/net/ITlsContext.hpp>
+#include <core/net/ITlsSession.hpp>
 
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <memory>
@@ -88,21 +91,33 @@ struct SelfSignedOptions
 [[nodiscard]] std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(
     SelfSignedOptions const& options = {});
 
+/// What a context is built to require, beyond the floor every one shares.
+struct TlsOptions
+{
+    /// The oldest protocol version the context negotiates. @c TlsVersion::Tls13 refuses a peer that
+    /// can only speak 1.2.
+    TlsVersion minimumVersion = TlsVersion::Tls12;
+};
+
 /// Builds a SERVER context from a PEM certificate chain and private key held in memory.
 /// @param certPem The leaf certificate followed by any intermediates, in PEM; every certificate in
 ///        it is served, so a client can build the chain to its trust anchor.
 /// @param keyPem The leaf's private key in PEM.
+/// @param options The protocol floor.
 /// @return The context, or a human-readable reason if the material is invalid or mismatched.
 [[nodiscard]] std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContext(
-    std::string_view certPem, std::string_view keyPem);
+    std::string_view certPem, std::string_view keyPem, TlsOptions const& options = {});
 
 /// Builds a SERVER context from a PEM certificate chain file and a PEM private key file -- the
 /// `--tls-cert` / `--tls-key` shape.
 /// @param certPath The certificate chain file.
 /// @param keyPath The private key file.
+/// @param options The protocol floor.
 /// @return The context, or a human-readable reason naming the file that could not be used.
 [[nodiscard]] std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContextFromFiles(
-    std::filesystem::path const& certPath, std::filesystem::path const& keyPath);
+    std::filesystem::path const& certPath,
+    std::filesystem::path const& keyPath,
+    TlsOptions const& options = {});
 
 /// Builds a SERVER context over a certificate generated here and now, held in memory only.
 ///
@@ -110,9 +125,10 @@ struct SelfSignedOptions
 /// not been told its fingerprint out of band cannot tell this server from anything else answering
 /// on its address. @c ITlsContext::certificateFingerprint is what an operator compares.
 /// @param options What the certificate names and how long it lasts.
+/// @param tlsOptions The protocol floor.
 /// @return The context, or a human-readable reason.
 [[nodiscard]] std::expected<std::shared_ptr<ITlsContext>, std::string> makeSelfSignedServerContext(
-    SelfSignedOptions const& options = {});
+    SelfSignedOptions const& options = {}, TlsOptions const& tlsOptions = {});
 
 /// Builds a CLIENT context. When @p caPem is empty the peer certificate is NOT verified (the
 /// trust-on-first-use posture for a self-signed server, where something else authenticates and TLS
@@ -129,9 +145,21 @@ struct SelfSignedOptions
 ///
 /// @param caPem The trust-anchor certificate in PEM, or empty for trust on first use.
 /// @param expectedHostName The host the caller connected to, or empty to skip the name check.
+/// @param options The protocol floor.
 /// @return The context, or a human-readable reason if @p caPem is invalid.
 [[nodiscard]] std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsClientContext(
-    std::string_view caPem = {}, std::string_view expectedHostName = {});
+    std::string_view caPem = {}, std::string_view expectedHostName = {}, TlsOptions const& options = {});
+
+/// Finds the TLS session behind @p socket.
+/// @param socket Any socket.
+/// @return The session if @p socket is a TLS socket from this module, null for any other (a plain
+///         TCP socket, a decorator that is not TLS). Valid for as long as @p socket lives.
+[[nodiscard]] ITlsSession const* tlsSessionOf(ISocket const& socket) noexcept;
+
+/// Spells a SHA-256 digest the way `ssh-keygen -l` does: `SHA256:` and the unpadded base64.
+/// @param sha256 The digest, e.g. of an SSH public key blob.
+/// @return The text, e.g. `SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU`.
+[[nodiscard]] std::string sshStyleFingerprint(std::array<std::byte, 32> const& sha256);
 
 /// The SHA-256 fingerprint of a PEM certificate, as 64 lower-case hex digits -- the same form
 /// @c ITlsContext::certificateFingerprint reports, so a client can compare one against the other.

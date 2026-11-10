@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/Tls.hpp>
 
+#include <core/Base64.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/async/Awaitable.hpp>
 #include <core/async/Cancellation.hpp>
@@ -64,6 +65,36 @@ namespace
     using SslCtxPtr = std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)>;
     using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
     using X509Ptr = std::unique_ptr<X509, decltype(&X509_free)>;
+
+    /// The SHA-256 of @p cert's DER, or nothing if it cannot be computed.
+    [[nodiscard]] std::optional<std::array<std::byte, 32>> certificateDigest(X509 const* cert)
+    {
+        auto digest = std::array<std::byte, 32> {};
+        auto length = 0U;
+        if (cert == nullptr
+            || X509_digest(cert, EVP_sha256(), reinterpret_cast<unsigned char*>(digest.data()), &length) != 1
+            || length != digest.size())
+            return std::nullopt;
+        return digest;
+    }
+
+    /// The SHA-256 fingerprint of @p cert as lower-case hex, or empty if it cannot be computed.
+    [[nodiscard]] std::string fingerprintOf(X509 const* cert)
+    {
+        auto const digest = certificateDigest(cert);
+        if (!digest)
+            return {};
+        constexpr auto Hex = std::string_view { "0123456789abcdef" };
+        auto out = std::string {};
+        out.reserve(digest->size() * 2);
+        for (auto const byte: *digest)
+        {
+            out += Hex[std::to_integer<unsigned>(byte) >> 4U];
+            out += Hex[std::to_integer<unsigned>(byte) & 0x0FU];
+        }
+        return out;
+    }
+
     using PKeyPtr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
     using PKeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
     using BignumPtr = std::unique_ptr<BIGNUM, decltype(&BN_free)>;
@@ -379,7 +410,7 @@ namespace
     /// `SSL_get_error` reads the THREAD's error queue, and every connection on a loop shares that
     /// thread: an entry another connection left behind turns this one's routine `WANT_READ` into
     /// `SSL_ERROR_SSL`, and a healthy connection fails for a neighbour's error.
-    class TlsSocket final: public ISocket
+    class TlsSocket final: public ISocket, public ITlsSession
     {
       public:
         /// @param inner The connected transport (owned).
@@ -453,6 +484,43 @@ namespace
         [[nodiscard]] ResultAwaitable<void> handshakeIfNeeded() override
         {
             return ResultAwaitable<void> { handshake(Direction::Any) };
+        }
+
+        [[nodiscard]] std::expected<std::array<std::byte, 32>, std::string> channelBinding() const override
+        {
+            if (SSL_is_init_finished(_ssl) != 1)
+                return std::unexpected("the TLS handshake has not finished");
+            if (SSL_version(_ssl) < TLS1_3_VERSION)
+                return std::unexpected("the tls-exporter channel binding needs TLS 1.3 (RFC 9266)");
+            ERR_clear_error();
+            auto binding = std::array<std::byte, 32> {};
+            constexpr auto Label = std::string_view { "EXPORTER-Channel-Binding" };
+            if (SSL_export_keying_material(_ssl,
+                                           reinterpret_cast<unsigned char*>(binding.data()),
+                                           binding.size(),
+                                           Label.data(),
+                                           Label.size(),
+                                           nullptr,
+                                           0,
+                                           0)
+                != 1)
+                return std::unexpected("SSL_export_keying_material: " + opensslError());
+            return binding;
+        }
+
+        [[nodiscard]] std::optional<std::array<std::byte, 32>> peerCertificateDigest() const override
+        {
+            if (SSL_is_init_finished(_ssl) != 1)
+                return std::nullopt;
+            auto const peer = X509Ptr { SSL_get1_peer_certificate(_ssl), X509_free };
+            return certificateDigest(peer.get());
+        }
+
+        [[nodiscard]] std::optional<TlsVersion> negotiatedVersion() const override
+        {
+            if (SSL_is_init_finished(_ssl) != 1)
+                return std::nullopt;
+            return SSL_version(_ssl) >= TLS1_3_VERSION ? TlsVersion::Tls13 : TlsVersion::Tls12;
         }
 
         /// Reports whether the peer has finished sending, decrypting whatever records that takes
@@ -894,24 +962,6 @@ namespace
         std::shared_ptr<void const> _lifetime = std::make_shared<char const>('\0');
     };
 
-    /// The SHA-256 fingerprint of @p cert as lower-case hex, or empty if it cannot be computed.
-    [[nodiscard]] std::string fingerprintOf(X509 const* cert)
-    {
-        auto digest = std::array<unsigned char, EVP_MAX_MD_SIZE> {};
-        auto length = 0U;
-        if (cert == nullptr || X509_digest(cert, EVP_sha256(), digest.data(), &length) != 1)
-            return {};
-        constexpr auto Hex = std::string_view { "0123456789abcdef" };
-        auto out = std::string {};
-        out.reserve(std::size_t { length } * 2);
-        for (auto const byte: std::span { digest.data(), length })
-        {
-            out += Hex[byte >> 4U];
-            out += Hex[byte & 0x0FU];
-        }
-        return out;
-    }
-
     /// The DI context: a configured SSL_CTX plus its handshake role.
     class TlsContext final: public ITlsContext
     {
@@ -957,18 +1007,20 @@ namespace
         TlsRole _role;
     };
 
-    /// A context with the floor every one of them shares: TLS 1.2 and no renegotiation.
+    /// A context with the floor every one of them shares: TLS 1.2 (or the version @p options asks for)
+    /// and no renegotiation.
     ///
     /// Renegotiation is refused because it is the one way a WRITE can need a READ after the
     /// handshake (`SSL_write` answering `WANT_READ`), and a socket with a read already parked has
     /// no second read slot to give it. TLS 1.3 has no renegotiation at all.
-    [[nodiscard]] SslCtxPtr newCtx(SSL_METHOD const* method)
+    [[nodiscard]] SslCtxPtr newCtx(SSL_METHOD const* method, TlsOptions const& options)
     {
         ERR_clear_error();
         auto ctx = SslCtxPtr { SSL_CTX_new(method), SSL_CTX_free };
         if (ctx)
         {
-            SSL_CTX_set_min_proto_version(ctx.get(), TLS1_2_VERSION);
+            SSL_CTX_set_min_proto_version(
+                ctx.get(), options.minimumVersion == TlsVersion::Tls13 ? TLS1_3_VERSION : TLS1_2_VERSION);
             SSL_CTX_set_options(ctx.get(), SSL_OP_NO_RENEGOTIATION);
         }
         return ctx;
@@ -1100,9 +1152,10 @@ namespace
 } // namespace
 
 std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContext(std::string_view certPem,
-                                                                              std::string_view keyPem)
+                                                                              std::string_view keyPem,
+                                                                              TlsOptions const& options)
 {
-    auto ctx = newCtx(TLS_server_method());
+    auto ctx = newCtx(TLS_server_method(), options);
     if (!ctx)
         return std::unexpected("SSL_CTX_new failed: " + opensslError());
     if (auto used = useServerMaterial(ctx.get(), certPem, keyPem); !used)
@@ -1111,7 +1164,7 @@ std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContext(st
 }
 
 std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContextFromFiles(
-    std::filesystem::path const& certPath, std::filesystem::path const& keyPath)
+    std::filesystem::path const& certPath, std::filesystem::path const& keyPath, TlsOptions const& options)
 {
     // Read here rather than through OpenSSL's own file functions, so a path takes the platform's
     // spelling -- a wide one on Windows -- and the same material function serves both entry points.
@@ -1121,7 +1174,7 @@ std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsServerContextFro
     auto const keyPem = readFile(keyPath, "private key file");
     if (!keyPem)
         return std::unexpected(keyPem.error());
-    return makeTlsServerContext(*certPem, *keyPem);
+    return makeTlsServerContext(*certPem, *keyPem, options);
 }
 
 std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(SelfSignedOptions const& options)
@@ -1223,20 +1276,20 @@ std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(SelfSignedO
 }
 
 std::expected<std::shared_ptr<ITlsContext>, std::string> makeSelfSignedServerContext(
-    SelfSignedOptions const& options)
+    SelfSignedOptions const& options, TlsOptions const& tlsOptions)
 {
     // Single-sourced through the PEM generator and the PEM context, so a generated certificate is
     // served by exactly the path a named one is.
     auto material = generateSelfSignedCertificate(options);
     if (!material)
         return std::unexpected(material.error());
-    return makeTlsServerContext(material->certPem, material->keyPem);
+    return makeTlsServerContext(material->certPem, material->keyPem, tlsOptions);
 }
 
 std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsClientContext(
-    std::string_view caPem, std::string_view expectedHostName)
+    std::string_view caPem, std::string_view expectedHostName, TlsOptions const& options)
 {
-    auto ctx = newCtx(TLS_client_method());
+    auto ctx = newCtx(TLS_client_method(), options);
     if (!ctx)
         return std::unexpected("SSL_CTX_new failed: " + opensslError());
 
@@ -1288,6 +1341,20 @@ std::expected<std::shared_ptr<ITlsContext>, std::string> makeTlsClientContext(
     }
 
     return std::make_shared<TlsContext>(std::move(ctx), TlsRole::Client);
+}
+
+ITlsSession const* tlsSessionOf(ISocket const& socket) noexcept
+{
+    return dynamic_cast<TlsSocket const*>(&socket);
+}
+
+std::string sshStyleFingerprint(std::array<std::byte, 32> const& sha256)
+{
+    auto const raw = std::string_view { reinterpret_cast<char const*>(sha256.data()), sha256.size() };
+    auto text = base64::encode(raw);
+    while (!text.empty() && text.back() == '=')
+        text.pop_back();
+    return "SHA256:" + text;
 }
 
 std::expected<std::string, std::string> certificateFingerprint(std::string_view certPem)
