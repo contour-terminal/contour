@@ -3,6 +3,7 @@
 
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/DaemonDriftChoice.hpp>
 
 #include <expected>
 #include <optional>
@@ -55,6 +56,13 @@ class WindowBinding
     ///         own workspaces a window can still switch between. None for a binding with no daemon behind it
     ///         -- a factory binding, as a tmux window's -- which offers no switching at all.
     [[nodiscard]] virtual std::optional<SwitchTarget> daemonTarget() const { return std::nullopt; }
+
+    /// @return Whether the daemon behind the binding runs on this machine. Local for a binding with no
+    /// daemon.
+    [[nodiscard]] virtual window::DaemonLocality daemonLocality() const noexcept
+    {
+        return window::DaemonLocality::Local;
+    }
 
     /// @return What the drift badge of a window bound here shows: whether its daemon runs another release
     /// than

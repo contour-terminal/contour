@@ -80,6 +80,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1336,10 +1337,31 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
             QCoreApplication::processEvents();
             CHECK(status->property("text").toString() == QString::fromUtf8(look.status));
             CHECK(dot->property("color").value<QColor>() == style->statusInk(static_cast<int>(look.dot)));
-            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
-                  == QStringLiteral("Attached to home, %1").arg(QString::fromUtf8(look.accessibleState)));
+            auto const expectedName = look.status.empty()
+                                          ? QStringLiteral("Switch daemon or workspace (on home)")
+                                          : QStringLiteral("Switch daemon or workspace (on home, %1)")
+                                                .arg(QString::fromUtf8(look.accessibleState));
+            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString() == expectedName);
         }
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+
+        // The chip is a button: a click opens the switcher, and so does Space or Return while it has focus.
+        controller.setHostChipState(static_cast<int>(contour::window::HostChipState::Connected));
+        showWindow(*root);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        REQUIRE(window != nullptr);
+        QCoreApplication::processEvents();
+        QTest::mouseClick(window,
+                          Qt::LeftButton,
+                          Qt::NoModifier,
+                          chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+        QCoreApplication::processEvents();
+        CHECK(controller.switcherRequests == 1);
+
+        chip->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_Space);
+        QTest::keyClick(window, Qt::Key_Return);
+        CHECK(controller.switcherRequests == 3);
     }
 
     SECTION("a local window")
@@ -1356,6 +1378,35 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its c
         CHECK_FALSE(chip->isVisible());
         CHECK(chip->width() == 0);
     }
+}
+
+TEST_CASE("Main.qml remote chrome: the host chip opens the switcher on every row, the Terminal row's too "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][hostchip]")
+{
+    auto const style =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(style));
+    QQmlEngine engine;
+    MockMainController controller;
+    controller.attachedHost = QStringLiteral("home");
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+    showWindow(*root);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+    REQUIRE(chip != nullptr);
+    REQUIRE(chip->isVisible());
+
+    // Nothing the window-drag region does may take the press: the chip sits beside it, not in it.
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      Qt::NoModifier,
+                      chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+    QCoreApplication::processEvents();
+    CHECK(controller.switcherRequests == 1);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 namespace
@@ -3077,7 +3128,7 @@ TEST_CASE("the assembled band has one title bar, holding the chip, the strip, it
         };
         CHECK(std::ranges::count(tree, QAccessible::TitleBar, &AccessibleNode::role) == 1);
         auto const chip = std::ranges::find_if(tree, [](AccessibleNode const& node) {
-            return node.name.startsWith(QStringLiteral("Attached to home"));
+            return node.name.startsWith(QStringLiteral("Switch daemon or workspace (on home"));
         });
         REQUIRE(chip != tree.end());
         CHECK(under(*chip, QAccessible::TitleBar));

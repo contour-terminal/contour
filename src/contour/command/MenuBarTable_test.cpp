@@ -90,6 +90,16 @@ void collectActionNames(std::vector<ContextMenuEntry> const& entries, std::set<s
     }
 }
 
+[[nodiscard]] Command switchCommand(std::string const& name)
+{
+    return Command { .id = "SwitchToDaemon:" + name,
+                     .title = "Switch to daemon " + name,
+                     .description = {},
+                     .action = actions::SwitchToDaemon { { actions::DaemonRefKind::Label, name } },
+                     .category = CommandCategory::Daemons,
+                     .argument = name };
+}
+
 [[nodiscard]] MenuBarState fullState()
 {
     return MenuBarState { .window = WindowPresence::Present,
@@ -102,7 +112,9 @@ void collectActionNames(std::vector<ContextMenuEntry> const& entries, std::set<s
                           .activeProfile = "main",
                           .profileNames = { "main" },
                           .hostNames = { "server" },
-                          .layoutNames = { "dev" } };
+                          .layoutNames = { "dev" },
+                          .switching = DaemonSwitching::Available,
+                          .switchToDaemon = { switchCommand("work") } };
 }
 
 [[nodiscard]] std::set<std::string> reachableActionNames()
@@ -367,6 +379,42 @@ TEST_CASE("menuBar.tabList", "[menubar]")
         CHECK(tabs[index].check == (index == 1 ? RowCheck::Checked : RowCheck::Unchecked));
     }
     CHECK(tabs[0].title == "one");
+}
+
+TEST_CASE("menuBar.windowMenuSwitchesDaemons", "[menubar]")
+{
+    auto const windowMenu = [](MenuBarState const& state) {
+        return buildMenuBar(state)[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+    };
+
+    SECTION("a window with a daemon lists the palette's daemons and the switcher")
+    {
+        auto state = fullState();
+        state.switchToDaemon = { switchCommand("work"), switchCommand("studio · host") };
+        auto const window = windowMenu(state);
+
+        auto const* submenu = find(window, "Switch To Daemon");
+        REQUIRE(submenu != nullptr);
+        REQUIRE(submenu->kind == ContextMenuEntryKind::Submenu);
+        REQUIRE(submenu->children.size() == 2);
+        CHECK(submenu->children[0].title == "work");
+        CHECK(submenu->children[1].title == "studio · host");
+        CHECK(std::holds_alternative<actions::SwitchToDaemon>(submenu->children[0].action));
+
+        auto const* switcher = find(window, "Daemon & Workspace Switcher…");
+        REQUIRE(switcher != nullptr);
+        CHECK(std::holds_alternative<actions::ShowSwitcher>(switcher->action));
+    }
+
+    SECTION("a window with no daemon shows neither row")
+    {
+        auto state = fullState();
+        state.switching = DaemonSwitching::Unavailable;
+        state.switchToDaemon.clear();
+        auto const window = windowMenu(state);
+        CHECK(find(window, "Switch To Daemon") == nullptr);
+        CHECK(find(window, "Daemon & Workspace Switcher…") == nullptr);
+    }
 }
 
 namespace

@@ -834,6 +834,31 @@ TEST_CASE("a tab whose label comes out empty is named after the program in front
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("a tab whose label comes out empty with no process to name falls back to the shell",
+          "[contour][multiwindow][model][tablabel]")
+{
+    // A daemon-hosted pane never reports its program (the mock reports none either): the profile's shell
+    // names the tab instead of leaving it blank.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    auto* session =
+        manager.sessionForId(manager.model().workspace(window.id)->tabAt(0)->activePane()->session());
+    REQUIRE(session != nullptr);
+    REQUIRE(session->resolvedWindowTitle().empty());
+    auto const expected = QString::fromStdString(session->shellProgramName());
+    REQUIRE_FALSE(expected.isEmpty());
+
+    auto const title =
+        window->data(window->index(0), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString();
+    CHECK(title == expected);
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("the default tab label shows the tab name an application sets, else the window title",
           "[contour][multiwindow][model][tablabel]")
 {

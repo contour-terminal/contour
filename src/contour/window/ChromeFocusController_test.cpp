@@ -332,6 +332,19 @@ TEST_CASE("Escape and leaveChrome return focus to the terminal", "[windowcontrol
     CHECK_FALSE(f.chromeKey(Qt::Key_Escape));
 }
 
+TEST_CASE("focusActiveDisplay ends the chrome's hold on the keyboard", "[windowcontroller][chromefocus]")
+{
+    // What closing a popup over the window does: the keyboard goes back to the terminal whatever held it.
+    auto const f = ChromeFixture {};
+    f.controller().moveChromeFocus(contour::window::ChromeFocusAction::Toolbar);
+    REQUIRE(f.area() == ChromeArea::Toolbar);
+
+    f.controller().focusActiveDisplay();
+
+    CHECK(f.area() == ChromeArea::Terminal);
+    CHECK(f.controller().focusedToolbarIndex() == -1);
+}
+
 TEST_CASE("the tab well closing under focus returns it to the terminal", "[windowcontroller][chromefocus]")
 {
     auto const f = ChromeFixture {};

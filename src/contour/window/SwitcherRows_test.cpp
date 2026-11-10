@@ -3,7 +3,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,6 +16,8 @@ using contour::session::SwitchTarget;
 using contour::window::SwitcherDaemon;
 using contour::window::SwitcherExpansion;
 using contour::window::SwitcherGroup;
+using contour::window::SwitcherHostLink;
+using contour::window::switcherInitialSelection;
 using contour::window::SwitcherInputs;
 using contour::window::SwitcherListing;
 using contour::window::SwitcherRow;
@@ -213,4 +217,93 @@ TEST_CASE("switcherSelection keeps the row it was on", "[switcher]")
     CHECK(switcherSelection(rows, std::nullopt) == 0);
     CHECK(switcherSelection(rows, label("admin")) == 4);
     CHECK(switcherSelection(rows, label("gone")) == 0);
+}
+
+TEST_CASE("switcherInitialSelection starts on the first daemon that is not the window's own", "[switcher]")
+{
+    auto const daemons = mockup();
+    auto const everything = [&](SwitchTarget const& own) {
+        return switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = own }, "");
+    };
+
+    SECTION("a window on the first daemon opens on the next one, not on New daemon")
+    {
+        auto const rows = everything(label("default"));
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon != "default");
+    }
+
+    SECTION("a window on another daemon opens on the first one")
+    {
+        auto const rows = everything(label("admin"));
+        auto const at = switcherInitialSelection(rows, label("admin"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon != "admin");
+    }
+
+    SECTION("the window's own daemon is the fallback when it is the only one")
+    {
+        auto const only = std::vector<SwitcherDaemon> { mockup()[0] };
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = only, .windowDaemon = label("default") }, "");
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        CHECK(rows[at].kind == SwitcherRowKind::Daemon);
+        CHECK(rows[at].target.daemon == "default");
+    }
+
+    SECTION("a saved host is never preselected while a local daemon can be")
+    {
+        auto const hostOnly = std::vector<SwitcherDaemon> { mockup()[0], mockup()[2] };
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = hostOnly, .windowDaemon = label("default") }, "");
+        auto const at = switcherInitialSelection(rows, label("default"));
+        REQUIRE(at < rows.size());
+        // The only other daemon is a saved host: the window's own row stays selected.
+        CHECK(rows[at].target.kind == SwitchDaemonKind::Label);
+        CHECK(rows[at].target.daemon == "default");
+    }
+
+    SECTION("without daemon rows it is the first row")
+    {
+        CHECK(switcherInitialSelection({}, label("default")) == 0);
+    }
+}
+
+TEST_CASE("a saved host reached before says it is not connected, not that it was never connected",
+          "[switcher]")
+{
+    auto daemons = mockup();
+    auto const detailOfStudio = [&] {
+        auto const rows =
+            switcherRows(SwitcherInputs { .daemons = daemons, .windowDaemon = label("default") }, "");
+        auto const studio = std::ranges::find(rows, "studio-admin", &SwitcherRow::title);
+        REQUIRE(studio != rows.end());
+        return studio->detail;
+    };
+
+    REQUIRE(daemons.back().address.kind == SwitchDaemonKind::Host);
+    CHECK(detailOfStudio() == "not yet connected");
+    daemons.back().link = SwitcherHostLink::Disconnected;
+    CHECK(detailOfStudio() == "not connected");
+    daemons.back().link = SwitcherHostLink::Connected;
+    CHECK(detailOfStudio() == "connected");
+}
+
+TEST_CASE("switcherHostLinkOf tells a connected host from one reached before and one never reached",
+          "[switcher]")
+{
+    using contour::window::switcherHostLinkOf;
+
+    auto const reached = std::set<std::string> { "studio" };
+    auto const shownHere = std::vector<std::string> { "build" };
+    CHECK(switcherHostLinkOf("studio", reached, shownHere) == SwitcherHostLink::Disconnected);
+    CHECK(switcherHostLinkOf("other", reached, shownHere) == SwitcherHostLink::NeverConnected);
+    // A window on it holds a live link, whether or not the application started it from the switcher.
+    CHECK(switcherHostLinkOf("build", reached, shownHere) == SwitcherHostLink::Connected);
+    CHECK(switcherHostLinkOf("studio", reached, std::vector<std::string> { "studio" })
+          == SwitcherHostLink::Connected);
 }

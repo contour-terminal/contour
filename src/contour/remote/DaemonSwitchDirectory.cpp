@@ -87,6 +87,11 @@ void DaemonSwitchDirectory::refresh()
         startListing(daemon);
 }
 
+void DaemonSwitchDirectory::refreshDiscovery()
+{
+    startDiscovery();
+}
+
 void DaemonSwitchDirectory::startDiscovery()
 {
     if (_discoveryState == Discovery::Running)

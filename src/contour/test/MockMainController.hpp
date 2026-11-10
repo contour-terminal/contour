@@ -501,7 +501,10 @@ class MockMainController: public MainWindowControllerMock
         if (id == QStringLiteral("ShowAbout"))
             showAbout();
     }
-    QStringList ranCommands; ///< The ids runCommand() was called with, oldest first.
+    /// Counts the requests for the switcher, which the production controller answers by running ShowSwitcher.
+    Q_INVOKABLE void showSwitcher() { ++switcherRequests; }
+    int switcherRequests = 0; ///< How often the host chip asked for the switcher.
+    QStringList ranCommands;  ///< The ids runCommand() was called with, oldest first.
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes Main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/window/ChromeFocus.hpp>
+#include <contour/window/ProgramName.hpp>
 
 #include <algorithm>
 #include <array>
@@ -156,19 +157,6 @@ enum class PaneActivity : uint8_t
     Unknown,  ///< No answer (a remote pane, Windows): cannot be told idle, so closing asks.
 };
 
-namespace detail
-{
-    /// The part of @p path after its last separator, minus a leading '-' (a login shell's argv[0]).
-    [[nodiscard]] inline std::string_view programBaseName(std::string_view path) noexcept
-    {
-        if (auto const slash = path.find_last_of("/\\"); slash != std::string_view::npos)
-            path.remove_prefix(slash + 1);
-        if (path.starts_with('-'))
-            path.remove_prefix(1);
-        return path;
-    }
-} // namespace detail
-
 /// Classifies a pane from its foreground process.
 /// @param shellProgram The profile's shell program: a path or a name, possibly with arguments ("bash -l").
 /// @param foreground The pane's foreground process name; nullopt when it cannot be known.
@@ -178,13 +166,12 @@ namespace detail
 {
     if (!foreground)
         return PaneActivity::Unknown;
-    auto const name = detail::programBaseName(*foreground);
+    auto const name = programBaseName(*foreground);
     // The whole string first: a path may hold a space ("C:/Program Files/Git/bin/bash.exe"). Then its first
     // word, for a program written with its arguments.
     auto const program = shellProgram.substr(0, shellProgram.find(' '));
-    return name == detail::programBaseName(shellProgram) || name == detail::programBaseName(program)
-               ? PaneActivity::Idle
-               : PaneActivity::Running;
+    return name == programBaseName(shellProgram) || name == programBaseName(program) ? PaneActivity::Idle
+                                                                                     : PaneActivity::Running;
 }
 
 /// Whether closing a tab should ask first.

@@ -516,6 +516,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
+
+    /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
+    /// popup over this window closes, which leaves no window holding the keyboard.
+    void focusActiveDisplay();
     /// Closes the tab the user confirmed closing, as closeTabConfirmationRequested() asked. A tab that is
     /// already gone closes nothing: its row may now hold another tab.
     /// @param tab The tab's vtworkspace::TabId value.
@@ -639,6 +643,15 @@ class WindowController:
     /// used. Unknown ids are ignored (a row can go stale between a refresh and a click).
     /// @param id The command id (CommandPaletteModel's `commandId` role).
     Q_INVOKABLE void runCommand(QString const& id);
+
+    /// Starts refreshing what the daemon rows list (the local daemons, this daemon's workspaces), without
+    /// waiting: for a surface that is about to list them. daemonRows() reads the caches only. A window with
+    /// no daemon has nothing to refresh.
+    void refreshSwitching() const;
+
+    /// Opens the daemon and workspace switcher over this window: what the ShowSwitcher action does, for
+    /// the host chip's click.
+    Q_INVOKABLE void showSwitcher() const;
     // }}}
 
     // {{{ Terminal context menu
@@ -1379,6 +1392,17 @@ class WindowController:
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.
     [[nodiscard]] std::string const& cachedProcessName(session::TerminalSession const& session) const;
+    /// @return What names the other machine this window's daemon runs on (a saved host, or the chrome's label
+    /// for
+    ///         a `--connect-tcp` daemon); empty for a daemon on this machine and a local window.
+    [[nodiscard]] std::string otherMachineName() const;
+
+    /// @return What names a tab whose label came out empty: the pane's foreground process, else the other
+    ///         machine its daemon runs on, else the shell its profile spawns (each asked only when the
+    ///         one before named nothing: a daemon-hosted pane reports no process, and another machine's shell
+    ///         is only guessed from this client's profile).
+    [[nodiscard]] std::string blankTabName(session::TerminalSession const& session) const;
+
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,

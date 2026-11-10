@@ -1426,6 +1426,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         window no binding serves, whose sessions run in-process.
     [[nodiscard]] std::optional<SwitchTarget> daemonTargetOf(vtworkspace::WorkspaceId window) const;
 
+    /// @param window A window.
+    /// @return Whether the daemon the window is bound to runs on this machine; Local for a window with none.
+    [[nodiscard]] window::DaemonLocality daemonLocalityOf(vtworkspace::WorkspaceId window) const;
+
     /// @param window A window of this manager.
     /// @return What @p window's drift badge shows: its own daemon's drift (WindowBinding::daemonDrift); null
     ///         for a local window.

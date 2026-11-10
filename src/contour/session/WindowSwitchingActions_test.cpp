@@ -68,7 +68,12 @@ struct SwitchRig
         window { app.manager() }
     {
         if (daemon)
+        {
             app.manager().bindWindow(window.id, binding);
+            // Binding to a daemon warms the discovery only: no listing, so no connection to a saved host.
+            REQUIRE(app.switchDirectory().discoveryRefreshes == 1);
+            REQUIRE(app.switchDirectory().refreshes == 0);
+        }
         window->createNewTab();
         auto* const modelWindow = app.manager().model().workspace(window.id);
         REQUIRE(modelWindow != nullptr);
@@ -179,6 +184,85 @@ TEST_CASE("ShowSwitcher refreshes what the switcher lists", "[switch][session]")
     auto rig = SwitchRig { labelTarget("default") };
     rig.run(contour::actions::ShowSwitcher {});
     CHECK(rig.app.switchDirectory().refreshes == 1);
+}
+
+TEST_CASE("the menu bar state lists the other daemons from the caches, and a menu opening refreshes them",
+          "[switch][session]")
+{
+    auto rig = SwitchRig { labelTarget("default") };
+    rig.app.switchDirectory().daemons = { { .label = "default", .socket = {}, .workspaces = std::nullopt },
+                                          { .label = "admin", .socket = {}, .workspaces = std::nullopt } };
+
+    auto const state = rig.window->menuBarState();
+
+    CHECK(state.switching == contour::command::DaemonSwitching::Available);
+    // admin alone: the window's own daemon is not one to switch to, and the open rows are not these.
+    REQUIRE(state.switchToDaemon.size() == 1);
+    CHECK(std::holds_alternative<contour::actions::SwitchToDaemon>(state.switchToDaemon[0].action));
+    // Reading the state is a focus change's cost: no daemon I/O.
+    CHECK(rig.app.switchDirectory().refreshes == 0);
+
+    rig.window->refreshSwitching();
+    CHECK(rig.app.switchDirectory().refreshes == 1);
+}
+
+TEST_CASE("a tab with no title is named after the shell on this machine's daemon, the host elsewhere",
+          "[switch][session][tablabel]")
+{
+    auto const titleOf = [](SwitchRig& rig) {
+        return rig.window
+            ->data(rig.window->index(0),
+                   static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString();
+    };
+
+    SECTION("a daemon on this machine")
+    {
+        auto rig = SwitchRig { labelTarget("default") };
+        REQUIRE(rig.session->resolvedWindowTitle().empty());
+        auto const shell = QString::fromStdString(rig.session->shellProgramName());
+        REQUIRE_FALSE(shell.isEmpty());
+        CHECK(titleOf(rig) == shell);
+    }
+
+    SECTION("a saved host")
+    {
+        auto rig = SwitchRig { hostTarget("studio") };
+        rig.binding.runElsewhere();
+        REQUIRE(rig.session->resolvedWindowTitle().empty());
+        CHECK(titleOf(rig) == QStringLiteral("studio"));
+    }
+
+    SECTION(
+        "a `--connect-tcp` daemon on another machine has no name to switch by, so the chrome's label does")
+    {
+        auto rig =
+            SwitchRig { SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} } };
+        rig.binding.runElsewhere();
+        rig.binding.renameTo(SwitchTarget { .kind = SwitchDaemonKind::Same, .daemon = {}, .workspace = {} },
+                             "far-away");
+        REQUIRE(rig.session->resolvedWindowTitle().empty());
+        CHECK(titleOf(rig) == QStringLiteral("far-away"));
+    }
+}
+
+TEST_CASE("the host chip's showSwitcher runs ShowSwitcher in the active session", "[switch][session]")
+{
+    auto rig = SwitchRig { labelTarget("default") };
+    rig.window->showSwitcher();
+    CHECK(rig.app.switchDirectory().refreshes == 1); // what ShowSwitcher does first
+}
+
+TEST_CASE("a window with no daemon has no switching rows and refreshes nothing", "[switch][session]")
+{
+    auto rig = SwitchRig { std::nullopt };
+    rig.app.switchDirectory().daemons = { { .label = "admin", .socket = {}, .workspaces = std::nullopt } };
+
+    auto const state = rig.window->menuBarState();
+    CHECK(state.switching == contour::command::DaemonSwitching::Unavailable);
+    CHECK(state.switchToDaemon.empty());
+    rig.window->refreshSwitching();
+    CHECK(rig.app.switchDirectory().refreshes == 0);
 }
 
 TEST_CASE("every switching action is a no-op for a window whose sessions run in-process", "[switch][session]")

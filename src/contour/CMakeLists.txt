@@ -256,6 +256,7 @@ set(_header_files
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
+    window/ProgramName.hpp
     window/ProgramStatusBadge.hpp
     window/QuickTerminalPolicy.hpp
     window/SecureInputPolicy.hpp
