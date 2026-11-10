@@ -493,7 +493,10 @@ if(VTHOST_BUILD_BENCH_LATENCY)
     target_link_libraries(bench-latency vthost_bench_latency core::cli)
     # `bench-latency e2e` and the display-gated runs find their executables beside the other tools.
     if(VTHOST_TESTING)
-        add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp)
+        add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp latency/HeadlessBench_test.cpp)
+        # The headless run spawns the echo child and the daemon from the real tool, not from the test binary.
+        add_dependencies(bench_latency_test bench-latency)
+        target_compile_definitions(bench_latency_test PRIVATE BENCH_LATENCY_EXECUTABLE="$<TARGET_FILE:bench-latency>")
         target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2 contour_test_trace)
         if(NOT WIN32)
             target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)

@@ -62,6 +62,13 @@ namespace
     constexpr auto FloodPoll = 5ms;
     /// How long a flood may overrun its duration before the leg gives up.
     constexpr auto FloodGrace = 15s;
+    /// What of PromptText a screen shows: its lines are shown without trailing blanks.
+    constexpr auto PromptMark = std::string_view { ">" };
+    /// How long a pane has to show its prompt, and how long a flood request has to show output before it is
+    /// sent again (input written before the child settled its terminal is discarded).
+    constexpr auto FloodRequestRetry = 500ms;
+    /// How often a flood is requested, at most.
+    constexpr auto MaxFloodRequests = std::size_t { 5 };
     /// How long the daemon has to serve after it was started.
     constexpr auto DaemonReadyTimeout = 10s;
     /// How long a quit byte has to reach the daemon before the client hangs up.
@@ -254,8 +261,123 @@ namespace
         LegOutcome outcome;
         SteadyTimePoint launchedAt {};
         std::size_t deltas = 0;
-        SteadyTimePoint endedAt {};
+        /// The session keys are typed into: the first one that showed output.
+        std::optional<uint64_t> typingSession;
+        SteadyTimePoint floodStartedAt {};         ///< When the flood was first requested.
+        std::optional<std::size_t> floodByteCount; ///< What the flood child reported, once it did.
+        SteadyTimePoint floodEndedAt {};           ///< When that was first seen.
     };
+
+    /// Takes the byte count off @p session's screen if the flood child has reported it, noting when: the
+    /// first sighting counts, however long the typing that watches for it goes on.
+    void observeFlood(client::NativeClient const& client, uint64_t session, DaemonRun& run)
+    {
+        if (run.floodByteCount)
+            return;
+        if (auto const count = floodedBytes(client.screens().at(session).viewportText()))
+        {
+            run.floodByteCount = count;
+            run.floodEndedAt = core::platform::defaultSteadyClock().now();
+        }
+    }
+
+    /// Waits for the flood child of @p session to report its byte count, and settles @p run's flood figures.
+    /// @param sessionOf Names the session to read, once there is one.
+    /// @param startedAt When the flood began.
+    /// @param duration How long the flood lasts.
+    [[nodiscard]] core::async::Task<void> awaitFloodEnd(core::net::EventLoop* loopPtr,
+                                                        client::NativeClient* clientPtr,
+                                                        std::function<std::optional<uint64_t>()> sessionOf,
+                                                        SteadyTimePoint startedAt,
+                                                        std::chrono::seconds duration,
+                                                        DaemonRun* runPtr)
+    {
+        // Pointers in the signature, as a coroutine's parameters must not be references; all outlive it.
+        auto& loop = *loopPtr;
+        auto& client = *clientPtr;
+        auto& run = *runPtr;
+        auto const& clock = core::platform::defaultSteadyClock();
+        auto const deadline = startedAt + duration + FloodGrace;
+        co_await repeatUntil(
+            &loop,
+            [&] {
+                if (auto const session = sessionOf())
+                    observeFlood(client, *session, run);
+                return run.floodByteCount.has_value() || clock.now() > deadline;
+            },
+            FloodPoll);
+        if (!run.floodByteCount)
+        {
+            run.outcome.failure = "the flood never ended";
+            co_return;
+        }
+        auto const elapsed = run.floodEndedAt - startedAt;
+        run.outcome.mibPerSecond = mibPerSecond(*run.floodByteCount, elapsed);
+        run.outcome.deltasPerSecond =
+            static_cast<double>(run.deltas) / std::chrono::duration<double>(elapsed).count();
+    }
+
+    /// Splits the typing pane and starts the flood in the new one.
+    /// @return The flooding session; nullopt if the daemon showed no pane in time (the failure is set).
+    [[nodiscard]] core::async::Task<std::optional<uint64_t>> startFloodedPane(core::net::EventLoop* loopPtr,
+                                                                              client::NativeClient* clientPtr,
+                                                                              DaemonRun* runPtr)
+    {
+        // Pointers in the signature, as a coroutine's parameters must not be references; all outlive it.
+        auto& loop = *loopPtr;
+        auto& client = *clientPtr;
+        auto& run = *runPtr;
+        auto const& clock = core::platform::defaultSteadyClock();
+        auto const deadline = run.launchedAt + DaemonReadyTimeout;
+        auto flooding = std::optional<uint64_t> {};
+        co_await repeatUntil(
+            &loop, [&] { return run.typingSession.has_value() || clock.now() > deadline; }, KeyPoll);
+        if (run.typingSession)
+        {
+            auto const split = proto::SplitPane {};
+            client.splitPane(*run.typingSession, split.orientation, split.ratio, {});
+            co_await repeatUntil(
+                &loop,
+                [&] {
+                    for (auto const& [id, screen]: client.screens())
+                        if (id != *run.typingSession)
+                            flooding = id;
+                    return flooding.has_value() || clock.now() > deadline;
+                },
+                KeyPoll);
+        }
+        if (!flooding)
+        {
+            run.outcome.failure = "the second pane never showed";
+            co_return std::nullopt;
+        }
+        // The child writes its prompt once it has set its terminal up; what was sent before that is lost.
+        auto const textOf = [&] {
+            return client.screens().at(*flooding).viewportText();
+        };
+        co_await repeatUntil(
+            &loop, [&] { return textOf().contains(PromptMark) || clock.now() > deadline; }, KeyPoll);
+        if (!textOf().contains(PromptMark))
+        {
+            run.outcome.failure = "the second pane showed no prompt";
+            co_return std::nullopt;
+        }
+        auto const started = [&] {
+            return textOf().find_first_not_of(" >\r\n\t") != std::string::npos;
+        };
+        run.floodStartedAt = clock.now();
+        for ([[maybe_unused]] auto const attempt: std::views::iota(std::size_t { 0 }, MaxFloodRequests))
+        {
+            client.sendInput(*flooding, oneByte(FloodRequestByte), proto::InputKind::Keyboard);
+            auto const sentAt = clock.now();
+            co_await repeatUntil(
+                &loop, [&] { return started() || clock.now() > sentAt + FloodRequestRetry; }, KeyPoll);
+            if (started())
+                co_return flooding;
+        }
+        run.outcome.failure = "the flood never started";
+        co_return std::nullopt;
+    }
 
     /// Types the keys the probe asks for into @p session, then quits the child and hangs up.
     [[nodiscard]] core::async::Task<void> driveDaemonSession(core::net::EventLoop* loopPtr,
@@ -278,41 +400,51 @@ namespace
         };
         if (options.workload.empty())
         {
+            auto flooding = std::optional<uint64_t> {};
+            auto lastObserved = SteadyTimePoint {};
+            if (options.keystrokeLoad == KeystrokeLoad::FloodedPane)
+            {
+                flooding = co_await startFloodedPane(&loop, &client, &run);
+                if (!flooding)
+                {
+                    client.detach();
+                    co_return;
+                }
+            }
             co_await repeatUntil(
                 &loop,
                 [&] {
-                    if (auto const key = probe.takeDueKey(KeyboardFocus::Present); key && sessionOf())
-                        client.sendInput(*sessionOf(), oneByte(*key), proto::InputKind::Keyboard);
+                    if (auto const key = probe.takeDueKey(KeyboardFocus::Present); key && run.typingSession)
+                        client.sendInput(*run.typingSession, oneByte(*key), proto::InputKind::Keyboard);
+                    // Watched all along: typing may outlast the flood, and its end is when it ended.
+                    if (flooding && clock.now() - lastObserved >= FloodPoll)
+                    {
+                        observeFlood(client, *flooding, run);
+                        lastObserved = clock.now();
+                    }
                     return isSettled(probe.phase());
                 },
                 KeyPoll);
             takeProbe(run.outcome, probe, run.launchedAt);
+            if (flooding)
+            {
+                if (run.outcome.failure.empty())
+                    co_await awaitFloodEnd(
+                        &loop,
+                        &client,
+                        [flooding] { return flooding; },
+                        run.floodStartedAt,
+                        options.floodDuration,
+                        &run);
+                client.sendInput(*flooding, oneByte(QuitByte), proto::InputKind::Keyboard);
+            }
         }
         else
-        {
-            auto flooded = std::optional<std::size_t> {};
-            auto const deadline = run.launchedAt + options.floodDuration + FloodGrace;
-            co_await repeatUntil(
-                &loop,
-                [&] {
-                    if (auto const session = sessionOf())
-                        flooded = floodedBytes(client.screens().at(*session).viewportText());
-                    run.endedAt = clock.now();
-                    return flooded.has_value() || clock.now() > deadline;
-                },
-                FloodPoll);
-            if (flooded)
-            {
-                auto const elapsed = run.endedAt - run.launchedAt;
-                run.outcome.mibPerSecond = mibPerSecond(*flooded, elapsed);
-                run.outcome.deltasPerSecond =
-                    static_cast<double>(run.deltas) / std::chrono::duration<double>(elapsed).count();
-            }
-            else
-                run.outcome.failure = "the flood never ended";
-        }
+            co_await awaitFloodEnd(&loop, &client, sessionOf, run.launchedAt, options.floodDuration, &run);
         // The child ends on it, which ends its session.
-        if (auto const session = sessionOf())
+        if (run.typingSession)
+            client.sendInput(*run.typingSession, oneByte(QuitByte), proto::InputKind::Keyboard);
+        else if (auto const session = sessionOf())
             client.sendInput(*session, oneByte(QuitByte), proto::InputKind::Keyboard);
         co_await loop.delay(QuitFlushGrace);
         client.detach();
@@ -342,9 +474,12 @@ namespace
             client::NativeClient::HandshakeOptions {},
             vtbackend::CommandBlockStoreLimits {},
             client::NativeClient::UpdateHandler {
-                [&](client::RemoteScreen const& screen, proto::Delta const&) {
+                [&](client::RemoteScreen const& screen, proto::Delta const& delta) {
                     ++run.deltas;
-                    probe.frameSwapped(screen.cursorColumn);
+                    if (!run.typingSession)
+                        run.typingSession = delta.session;
+                    if (delta.session == *run.typingSession)
+                        probe.frameSwapped(screen.cursorColumn);
                 } },
             client::NativeClient::ImageHandler {},
             client::NativeClient::SessionEventHandler {},
@@ -429,7 +564,29 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
     }
 
-    auto const self = vtpty::currentExecutablePath();
+    auto const mixed = options.keystrokeLoad == KeystrokeLoad::FloodedPane;
+    if (mixed && !options.workload.empty())
+    {
+        err << "bench-latency: `mixed` types keys while a pane floods; it takes no workload\n";
+        return EXIT_FAILURE;
+    }
+
+    // The keys are typed while the flood lasts: all of them, or the figures describe an idle terminal.
+    if (auto const typing = MaxKeyGap * (WarmupKeys + options.keys); mixed && typing >= options.floodDuration)
+    {
+        err << std::format(
+            "bench-latency: `keys {}` take up to {} ms to type, which does not fit in `seconds "
+            "{}`; lower the keys or raise the seconds\n",
+            options.keys,
+            typing.count(),
+            options.floodDuration.count());
+        return EXIT_FAILURE;
+    }
+
+    auto self = options.executable;
+    if (!self)
+        if (auto const found = vtpty::currentExecutablePath())
+            self = *found;
     if (!self)
     {
         err << "bench-latency: cannot find its own executable\n";
@@ -449,6 +606,13 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         serveArguments.insert(
             serveArguments.end(),
             { "flood", options.workload, "seconds", std::to_string(options.floodDuration.count()) });
+    if (mixed)
+        serveArguments.insert(serveArguments.end(),
+                              { "mixed",
+                                "flood",
+                                std::string(MixedFloodWorkload),
+                                "seconds",
+                                std::to_string(options.floodDuration.count()) });
     auto daemon = BenchProcess::start(*self, std::move(serveArguments));
     if (!daemon)
     {
@@ -481,7 +645,7 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
                     failed = true;
                 }
             }
-            else
+            else if (!mixed)
                 failed |= !take(runInProcessLeg(*self, options), "in-process", inProcess, err);
         }
         if (failed)
@@ -497,7 +661,14 @@ int runHeadlessBench(HeadlessOptions const& options, std::ostream& out, std::ost
         return EXIT_FAILURE;
 
     auto report = BenchReport {};
-    if (options.workload.empty())
+    if (mixed)
+    {
+        report.series = { MetricSeries {
+            .metric = "keystroke", .mode = "daemon", .samples = viaDaemon.keystroke } };
+        report.scalars = { ScalarSeries {
+            .metric = "flood-mibps", .mode = "daemon", .values = viaDaemon.mibPerSecond } };
+    }
+    else if (options.workload.empty())
     {
         report.series = {
             MetricSeries { .metric = "startup", .mode = "in-process", .samples = inProcess.startup },

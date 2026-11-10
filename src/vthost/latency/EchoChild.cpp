@@ -103,6 +103,37 @@ namespace
         }
     }
 #endif
+
+    /// @return The workload row named @p name; nullptr for none.
+    [[nodiscard]] vtbackend::test::Workload const* findWorkload(std::string_view name)
+    {
+        auto const row =
+            std::ranges::find(vtbackend::test::Workloads, name, &vtbackend::test::Workload::name);
+        return row == std::ranges::end(vtbackend::test::Workloads) ? nullptr : &*row;
+    }
+
+    /// Writes @p row's workload for @p duration, reports the byte count, and waits for QuitByte.
+    void floodThenWaitForQuit(vtbackend::test::Workload const& row, std::chrono::seconds duration)
+    {
+        auto const buffer = vtbackend::test::makeWorkload(row, FloodBufferSize);
+        auto const deadline = std::chrono::steady_clock::now() + duration;
+        auto written = std::size_t { 0 };
+        auto offset = std::size_t { 0 };
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            auto const chunk = std::string_view(buffer).substr(offset, FloodWriteSize);
+            writeAll(chunk);
+            written += chunk.size();
+            offset = offset + chunk.size() >= buffer.size() ? 0 : offset + chunk.size();
+        }
+        writeAll("\r\n" + std::string(FloodEndMarker) + std::to_string(written)
+                 + std::string(FloodEndTerminator) + "\r\n");
+        // Stays until told to end, like the echo child: a session whose application is gone is gone with
+        // its screen, and the screen is where the measuring side reads the count.
+        while (auto const byte = readByte())
+            if (*byte == QuitByte)
+                break;
+    }
 } // namespace
 
 int runEchoChild()
@@ -123,28 +154,32 @@ int runEchoChild()
 
 int runFloodChild(std::string_view workload, std::chrono::seconds duration)
 {
-    auto const row =
-        std::ranges::find(vtbackend::test::Workloads, workload, &vtbackend::test::Workload::name);
-    if (row == std::ranges::end(vtbackend::test::Workloads) || !enterRawMode())
+    auto const* const row = findWorkload(workload);
+    if (row == nullptr || !enterRawMode())
         return EXIT_FAILURE;
-    auto const buffer = vtbackend::test::makeWorkload(*row, FloodBufferSize);
-    auto const deadline = std::chrono::steady_clock::now() + duration;
-    auto written = std::size_t { 0 };
-    auto offset = std::size_t { 0 };
-    while (std::chrono::steady_clock::now() < deadline)
-    {
-        auto const chunk = std::string_view(buffer).substr(offset, FloodWriteSize);
-        writeAll(chunk);
-        written += chunk.size();
-        offset = offset + chunk.size() >= buffer.size() ? 0 : offset + chunk.size();
-    }
-    writeAll("\r\n" + std::string(FloodEndMarker) + std::to_string(written) + std::string(FloodEndTerminator)
-             + "\r\n");
-    // Stays until told to end, like the echo child: a session whose application is gone is gone with its
-    // screen, and the screen is where the measuring side reads the count.
+    floodThenWaitForQuit(*row, duration);
+    return EXIT_SUCCESS;
+}
+
+int runMixedChild(std::string_view workload, std::chrono::seconds duration)
+{
+    auto const* const row = findWorkload(workload);
+    if (row == nullptr || !enterRawMode())
+        return EXIT_FAILURE;
+    writeAll(PromptText);
+    auto state = EchoState {};
     while (auto const byte = readByte())
-        if (*byte == QuitByte)
+    {
+        if (*byte == FloodRequestByte)
+        {
+            floodThenWaitForQuit(*row, duration);
             break;
+        }
+        auto const reply = echoReply(state, *byte);
+        if (reply.action == EchoAction::Quit)
+            break;
+        writeAll(reply.bytes);
+    }
     return EXIT_SUCCESS;
 }
 

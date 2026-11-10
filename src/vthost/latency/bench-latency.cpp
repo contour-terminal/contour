@@ -60,12 +60,19 @@ class BenchLatency final: public core::cli::App
         auto const keysOption =
             CLI::Option { .name = "keys", .v = CLI::Value { 50u }, .helpText = "Measured keys per launch." };
 
+        auto const mixedOption = CLI::Option {
+            .name = "mixed",
+            .v = CLI::Value { false },
+            .helpText = "Behaves as the echo child until asked to flood (the typing and the flooding pane "
+                        "of a mixed run)."
+        };
         auto const echoChildOptions = CLI::OptionList {
             CLI::Option { .name = "flood",
                           .v = CLI::Value { ""s },
                           .helpText = "Floods the terminal with this workload, then waits for ^D.",
                           .placeholder = "WORKLOAD" },
             secondsOption,
+            mixedOption,
         };
         auto const serveOptions = CLI::OptionList {
             CLI::Option { .name = "socket",
@@ -78,6 +85,7 @@ class BenchLatency final: public core::cli::App
                           .helpText = "Its sessions run the echo child flooding this workload.",
                           .placeholder = "WORKLOAD" },
             secondsOption,
+            mixedOption,
         };
         auto const headlessOptions = CLI::OptionList {
             runsOption,
@@ -87,6 +95,10 @@ class BenchLatency final: public core::cli::App
                           .helpText = "Floods with this workload and reports MiB/s instead of typing keys.",
                           .placeholder = "NAME" },
             secondsOption,
+            CLI::Option { .name = "mixed",
+                          .v = CLI::Value { false },
+                          .helpText = "Types keys into one pane while a second pane floods `ascii` for "
+                                      "`seconds`; reports keystroke latency and the flood's MiB/s." },
             recordOption,
         };
         // The three flags are CLI-boundary booleans; runE2eBench() receives them as enums.
@@ -156,10 +168,12 @@ class BenchLatency final: public core::cli::App
     int echoChild()
     {
         auto const workload = parameters().str("bench-latency.echo-child.flood");
+        auto const seconds = std::chrono::seconds(parameters().uint("bench-latency.echo-child.seconds"));
+        if (parameters().boolean("bench-latency.echo-child.mixed"))
+            return vthost::latency::runMixedChild(workload, seconds);
         if (workload.empty())
             return vthost::latency::runEchoChild();
-        return vthost::latency::runFloodChild(
-            workload, std::chrono::seconds(parameters().uint("bench-latency.echo-child.seconds")));
+        return vthost::latency::runFloodChild(workload, seconds);
     }
 
     int serve()
@@ -174,6 +188,8 @@ class BenchLatency final: public core::cli::App
         config.instance = vthost::drawDaemonInstance();
         config.socketPath = parameters().str("bench-latency.serve.socket");
         auto arguments = std::vector<std::string> { "echo-child" };
+        if (parameters().boolean("bench-latency.serve.mixed"))
+            arguments.push_back("mixed");
         if (auto const workload = parameters().str("bench-latency.serve.flood"); !workload.empty())
             arguments.insert(arguments.end(),
                              { "flood",
@@ -193,7 +209,11 @@ class BenchLatency final: public core::cli::App
                 .runs = parameters().uint("bench-latency.headless.runs"),
                 .keys = parameters().uint("bench-latency.headless.keys"),
                 .workload = parameters().str("bench-latency.headless.workload"),
+                .keystrokeLoad = parameters().boolean("bench-latency.headless.mixed")
+                                     ? vthost::latency::KeystrokeLoad::FloodedPane
+                                     : vthost::latency::KeystrokeLoad::Idle,
                 .floodDuration = std::chrono::seconds(parameters().uint("bench-latency.headless.seconds")),
+                .executable = std::nullopt,
                 .record = recordPath(parameters().str("bench-latency.headless.record")),
             },
             std::cout,
