@@ -111,6 +111,8 @@
         <p>Contour is now daemon-first: a plain contour shows sessions a daemon hosts, starting it when none runs, so closing the window no longer ends your shells. Reopen Contour, or attach from another machine over ssh or TLS, and they are still there. Set <code>daemon: { mode: in_process }</code> to keep sessions in the window as before.</p>
         <p>Its window and Settings are redesigned to feel native on macOS, Windows 11 and Linux, with a Terminal style of their own, a command palette, command blocks, split panes with cards and a status line.</p>
         <ul>
+          <li>Adds a configurable terminal type for built-in SSH profiles and falls back to <code>xterm-256color</code> on Windows when no terminal type is set</li>
+          <li>Restores per-profile environment variables for local shells and built-in SSH sessions, with a Settings editor that shows each variable's name and value</li>
           <li>Fixes built-in SSH profiles ignoring keystrokes after a successful login when the connection is idle (#2286)</li>
           <li>Fixes Contour crashing on exit when the window's sessions live in a daemon, which on macOS also started the system crash reporter beside the next launch</li>
           <li>Adds agent status for panes: Claude Code and Codex report working, needs-you and done through hooks that <code>contour agent setup</code> installs for each agent it finds and <code>contour agent setup --uninstall</code> removes. Tab badges now rank needs-you, bell, failed, done, working and unseen output, and done and failed stay shown until the pane is seen</li>
