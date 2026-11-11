@@ -318,6 +318,61 @@ TEST_CASE("a keeper that closes its end is reported lost once", "[keeper][keeper
     CHECK(spawned.error() == keeper::SpawnError::Unknown);
 }
 
+TEST_CASE("a link that goes without an announced shutdown sends nothing still queued", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness {};
+    // Posted while the loop does not run, as a host that an exception unwinds out of runDaemon() releases its
+    // sessions: queued, not sent.
+    h.link->post(keeper::Release { .session = 7, .graceMs = 0 });
+    h.link.reset();
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    // The keeper sees its daemon's end without a Release: a crash, after which it keeps the session.
+    auto const received = h.keeperEnd.channel.receive(h.keeperEnd.clock, h.keeperEnd.clock.now() + 5s);
+    REQUIRE_FALSE(received.has_value());
+    CHECK(received.error() == vthost::keeperlink::ChannelError::Closed);
+}
+
+TEST_CASE("a sealed link sends nothing posted after it, even as the loop turns", "[keeper][keeperlink]")
+{
+    // As the host goes after an end the daemon did not announce: its sessions' Releases, and a turn of the
+    // loop (a host with extensions turns it once).
+    auto h = LinkHarness {};
+    h.link->seal();
+    h.link->post(keeper::Release { .session = 7, .graceMs = 0 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    auto const received = h.keeperEnd.channel.receive(h.keeperEnd.clock, h.keeperEnd.clock.now() + 200ms);
+    REQUIRE_FALSE(received.has_value());
+    CHECK(received.error() == vthost::keeperlink::ChannelError::TimedOut);
+}
+
+TEST_CASE("a link sealed after an announced shutdown sends on", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness {};
+    h.link->announceShutdown(3, 50ms); // the keeper takes no note: the wait ends at the bound
+    h.link->seal();
+    h.link->post(keeper::Release { .session = 7, .graceMs = 0 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    CHECK(std::holds_alternative<keeper::Shutdown>(*h.keeperEnd.receive().message));
+    CHECK(std::holds_alternative<keeper::Release>(*h.keeperEnd.receive().message));
+}
+
+TEST_CASE("after an announced shutdown, what is still queued goes as the link does", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness {};
+    h.link->announceShutdown(3, 50ms); // the keeper takes no note: the wait ends at the bound
+    h.link->post(keeper::Release { .session = 7, .graceMs = 0 });
+    h.link.reset();
+    auto const shutdown = h.keeperEnd.receive();
+    REQUIRE(std::holds_alternative<keeper::Shutdown>(*shutdown.message));
+    CHECK(std::get<keeper::Shutdown>(*shutdown.message).cause == 3);
+    auto const release = h.keeperEnd.receive();
+    REQUIRE(std::holds_alternative<keeper::Release>(*release.message));
+    CHECK(std::get<keeper::Release>(*release.message).session == 7);
+}
+
 TEST_CASE("a lost keeper orphans the children before the loss is reported", "[keeper][keeperlink]")
 {
     auto h = LinkHarness {};

@@ -158,7 +158,23 @@ namespace
         if (!launch.snapshotPath.empty())
         {
             config.persistence.snapshotPath = launch.snapshotPath;
-            config.persistence.interval = std::chrono::seconds { 1 };
+            config.persistence.interval =
+                launch.snapshotIntervalMs != 0
+                    ? std::chrono::duration_cast<decltype(config.persistence.interval)>(
+                          std::chrono::milliseconds { launch.snapshotIntervalMs })
+                    : std::chrono::seconds { 1 };
+        }
+        if (launch.lifecycle == HarnessLifecycle::ExitWhenIdle)
+        {
+            config.lifecycle = DaemonLifecycle::ExitWhenIdle;
+            config.idleExitGrace = std::chrono::seconds { 1 };
+        }
+        if (launch.start == HarnessStart::IgnoresStop)
+        {
+            // Not even its own watch hears a stop: what a forwarded one meets is SIG_IGN.
+            config.shutdownSignals = std::make_shared<NoShutdownSignals>();
+            for (auto const signum: { SIGTERM, SIGINT, SIGHUP })
+                std::signal(signum, SIG_IGN);
         }
         if (launch.tcp == HarnessTcp::Loopback)
         {
@@ -226,6 +242,8 @@ namespace
         }
         if (launch.timings.graceMs != 0)
             policy.grace = std::chrono::milliseconds { launch.timings.graceMs };
+        if (launch.timings.daemonExitBoundMs != 0)
+            policy.daemonExitBound = std::chrono::milliseconds { launch.timings.daemonExitBoundMs };
         auto writer = core::codec::Writer {};
         core::codec::encodeFields(writer, launch);
         auto const ran = keeper::runKeeperProcess(keeper::KeeperProcessConfig {
@@ -380,7 +398,9 @@ KeeperFixture::KeeperFixture(HarnessSetup const& setup):
                                                               : std::string {},
                                           .tcp = setup.tcp,
                                           .relayPath = (_directory / "relay").string(),
-                                          .timings = setup.timings }) },
+                                          .timings = setup.timings,
+                                          .snapshotIntervalMs = setup.snapshotIntervalMs,
+                                          .lifecycle = setup.lifecycle }) },
     _softDescriptorLimit { setup.softDescriptorLimit },
     _relayListener { setup.start == HarnessStart::Relays || setup.start == HarnessStart::RelaysThenServes
                          ? unixSocket((_directory / "relay").string(), ::bind)
@@ -443,6 +463,16 @@ void KeeperFixture::acceptRelay()
 
 void KeeperFixture::end(Ending ending)
 {
+    if (_secondKeeper != 0)
+    {
+        ::kill(_secondKeeper, SIGTERM);
+        if (!awaitProcess(_secondKeeper, std::chrono::seconds { 15 }))
+        {
+            ::kill(_secondKeeper, SIGKILL);
+            std::ignore = awaitProcess(_secondKeeper, std::chrono::seconds { 5 });
+        }
+        _secondKeeper = 0;
+    }
     // A relaying daemon ends once the test lets it go; with nowhere to connect to, a restarted one ends too.
     _relayListener.reset();
     _relay.reset();
@@ -546,6 +576,21 @@ std::optional<int> KeeperFixture::runSecondKeeper(std::chrono::milliseconds boun
         std::ignore = awaitProcess(second, std::chrono::seconds { 5 });
     }
     return exitStatusOf(waited);
+}
+
+int KeeperFixture::startSecondKeeper()
+{
+    _secondKeeper = spawnKeeper();
+    return _secondKeeper;
+}
+
+bool KeeperFixture::secondKeeperRuns() const
+{
+    auto info = siginfo_t {};
+    // WNOWAIT: looked at, left for end() to reap.
+    return _secondKeeper != 0
+           && ::waitid(P_PID, static_cast<id_t>(_secondKeeper), &info, WEXITED | WNOHANG | WNOWAIT) == 0
+           && info.si_pid == 0;
 }
 
 std::string KeeperFixture::log() const

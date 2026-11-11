@@ -43,7 +43,6 @@ Keeper::Keeper(KeeperPorts ports,
                std::vector<uint8_t> launchOptions):
     _ports { ports },
     _labelLock { std::move(labelLock) },
-    _policyConfig { policy },
     _policy { policy },
     _daemonImage { std::move(daemonImage) },
     _launchOptions { std::move(launchOptions) }
@@ -66,8 +65,7 @@ KeeperOutcome Keeper::run()
             onEvent(std::move(event));
         onTimers();
     }
-    _outcome = _ending;
-    return *_outcome;
+    return *_ending;
 }
 
 // {{{ the daemon's life
@@ -223,9 +221,12 @@ void Keeper::onStopSignal()
         _daemon->state = DaemonEndState::StopForwarded;
         return;
     }
+    keeperLog()("asked to stop: forwarded to the daemon (pid {}), which has {} s to end",
+                _daemon->pid,
+                std::chrono::duration_cast<std::chrono::seconds>(_policy.config().daemonExitBound).count());
     _ports.signaller.send(_daemon->pid, KeeperSignal::Terminate);
     _daemon->state = DaemonEndState::StopForwarded;
-    earliest(_daemon->killAt, now() + _policyConfig.daemonExitBound);
+    earliest(_daemon->killAt, now() + _policy.config().daemonExitBound);
 }
 
 void Keeper::forgiveOwnStop(core::platform::SteadyTimePoint deadline)
@@ -260,6 +261,12 @@ void Keeper::onTimers()
         auto& daemon = *_daemon;
         if (daemon.killAt && *daemon.killAt <= time)
         {
+            if (daemon.state == DaemonEndState::StopForwarded
+                || daemon.state == DaemonEndState::ShutdownAnnounced)
+                errorLog()("the daemon (pid {}) did not end within {} s of being stopped; killing it",
+                           daemon.pid,
+                           std::chrono::duration_cast<std::chrono::seconds>(_policy.config().daemonExitBound)
+                               .count());
             _ports.signaller.send(daemon.pid, KeeperSignal::Kill);
             daemon.killAt.reset();
         }
@@ -307,11 +314,12 @@ void Keeper::apply(RestartDecision decision, WireExitStatus status)
         case RestartAction::RetryNewestImage: restart(); break;
         case RestartAction::RestartAfter: _relaunchAt = now() + decision.delay; break;
         case RestartAction::GiveUp:
-            errorLog()("the daemon crashed {} times within {} s: giving up on restarting it; the shells and "
-                       "listeners are kept for {} s, then it is started once more from the newest image",
-                       _policy.recentCrashes(),
-                       std::chrono::duration_cast<std::chrono::seconds>(_policyConfig.giveUpWindow).count(),
-                       std::chrono::duration_cast<std::chrono::seconds>(decision.delay).count());
+            errorLog()(
+                "the daemon crashed {} times within {} s: giving up on restarting it; the shells and "
+                "listeners are kept for {} s, then it is started once more from the newest image",
+                _policy.recentCrashes(),
+                std::chrono::duration_cast<std::chrono::seconds>(_policy.config().giveUpWindow).count(),
+                std::chrono::duration_cast<std::chrono::seconds>(decision.delay).count());
             _graceAt = now() + decision.delay;
             break;
         case RestartAction::EndAll:
@@ -333,18 +341,21 @@ void Keeper::beginEnding(KeeperOutcome outcome, int exitStatus)
         return;
     _ending = outcome;
     _exitStatus = exitStatus;
-    // The listeners still held are those of a daemon that ended without closing them (a crash, a kill), so
-    // nothing else removes their socket files: the keeper leaves none behind that nobody serves. Removed
-    // while the label is still locked, so no file is a newer keeper's.
+    releaseLabelAndListeners();
+    _structure.reset();
+    _relaunchAt.reset();
+    _graceAt.reset();
+    _sessions.releaseAll(now() + ShellHangupGrace);
+}
+
+void Keeper::releaseLabelAndListeners()
+{
+    // Removed while the label is still locked, so no file is a newer keeper's.
     for (auto const& listener: _listeners)
         if (!listener.path.empty())
             _ports.socketFiles.remove(listener.path);
     _labelLock.reset();
     _listeners.clear();
-    _structure.reset();
-    _relaunchAt.reset();
-    _graceAt.reset();
-    _sessions.releaseAll(now() + ShellHangupGrace);
 }
 
 void Keeper::dropChannel()
@@ -405,8 +416,8 @@ std::optional<core::platform::SteadyTimePoint> Keeper::silenceDeadline() const
             // long as the startup bound allows a whole start, which a user raises for a slow restore.
             if (_daemon->beats == Beats::Heard)
                 return _daemon->lastHeartbeat
-                       + std::max(_daemon->heartbeatTimeout, _policyConfig.restartStartupBound);
-            return _daemon->startedAt + _policyConfig.restartStartupBound;
+                       + std::max(_daemon->heartbeatTimeout, _policy.config().restartStartupBound);
+            return _daemon->startedAt + _policy.config().restartStartupBound;
         case DaemonEndState::ShutdownAnnounced:
         case DaemonEndState::StopForwarded:
         case DaemonEndState::HungKilled:
@@ -543,7 +554,7 @@ void Keeper::handle(Serving const& message, std::vector<UniqueFd>& /*fds*/)
     auto const time = now();
     daemon.state = DaemonEndState::Serving;
     adoptKeepingSettings(daemon, message);
-    daemon.stableAt = time + _policyConfig.stableAfter;
+    daemon.stableAt = time + _policy.config().stableAfter;
 }
 
 void Keeper::adoptKeepingSettings(Daemon& daemon, Serving const& message)
@@ -674,12 +685,13 @@ void Keeper::handle(Shutdown const& /*message*/, std::vector<UniqueFd>& /*fds*/)
 {
     if (!_daemon)
         return;
-    // The label is free for a new instance and the listeners close at once; the shells wait for the
-    // daemon's exit, so its final snapshot still sees them.
-    _labelLock.reset();
-    _listeners.clear();
+    // The label is free for a new instance and the listeners close at once, their socket files gone; the
+    // shells wait for the daemon's exit, so its final snapshot still sees them.
+    releaseLabelAndListeners();
     _daemon->state = DaemonEndState::ShutdownAnnounced;
-    earliest(_daemon->killAt, now() + _policyConfig.daemonExitBound);
+    earliest(_daemon->killAt, now() + _policy.config().daemonExitBound);
+    // The daemon closes its own listeners once it hears this: by then nothing of this keeper holds the label.
+    send(ShutdownNoted {});
 }
 
 void Keeper::handle(Signal const& message, std::vector<UniqueFd>& /*fds*/)

@@ -51,6 +51,7 @@ std::vector<Message> samples()
                            .descriptors = { KeptDescriptor::Master, KeptDescriptor::ProcessHandle } },
         InventoryEnd {},
         Signal { .session = 42, .signal = ChildSignal::Kill },
+        ShutdownNoted {},
     };
 }
 
@@ -174,7 +175,8 @@ TEST_CASE("a frame with more descriptors than its message may carry is refused",
 TEST_CASE("peekTag reads the tag of a body, known or not", "[keeper][codec]")
 {
     CHECK(peekTag(encode(Hello {})) == 1);
-    CHECK(peekTag(encode(Signal {})) == std::variant_size_v<Message>);
+    CHECK(peekTag(encode(Signal {})) == 21);
+    CHECK(peekTag(encode(ShutdownNoted {})) == std::variant_size_v<Message>);
     auto writer = core::codec::Writer {};
     writer.varint(4000);
     auto const unknown = std::move(writer).take();

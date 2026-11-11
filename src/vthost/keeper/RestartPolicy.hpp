@@ -115,6 +115,9 @@ class CrashRestartPolicy
     /// @return How many crashes the give-up window holds, as of the last onExit().
     [[nodiscard]] std::size_t recentCrashes() const noexcept { return _crashes.size(); }
 
+    /// @return The tuning numbers it was made with, which also bound the daemon's start and exit.
+    [[nodiscard]] RestartPolicyConfig const& config() const noexcept { return _config; }
+
   private:
     RestartPolicyConfig _config;
     std::deque<core::platform::SteadyTimePoint> _crashes; ///< Within the give-up window.

@@ -1377,6 +1377,129 @@ TEST_CASE("a restart launch that keeps failing gives up without recursing", "[ke
     CHECK(h.launcher.images.size() == 6);
 }
 
+TEST_CASE("a daemon that ignores a forwarded stop is killed after the bound", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    h.events.then(deliver({ frameOf(Serving {}),
+                            spawnOf(1, child, { { KeptDescriptor::Master, &master } }),
+                            eventOf(EventKind::StopSignal) }));
+    h.events.then(check([&] {
+        CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Terminate });
+        CHECK(h.events.lastDeadline == h.clock.now() + 5s);
+    }));
+    h.events.then(h.after(4s));
+    h.events.then(check([&] {
+        CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Terminate });
+        CHECK(!master.writerClosed()); // the shells wait for the daemon's end
+    }));
+    h.events.then(h.after(1s));
+    h.events.then(check(
+        [&] {
+            CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Terminate, KeeperSignal::Kill });
+        },
+        ended(FirstDaemon, Killed)));
+    h.events.then(check([&] {
+        CHECK(master.writerClosed());         // hung up
+        CHECK(h.launcher.images.size() == 1); // a stopped daemon is never restarted
+    }));
+    h.events.then(h.after(3s));
+    h.events.then(check([&] { CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Kill }); },
+                        { endOf(FirstShell, Killed) }));
+    h.run(RestartPolicyConfig { .daemonExitBound = 5s });
+    CHECK(h.outcome == KeeperOutcome::Clean);
+    CHECK(h.exitStatus == 0);
+}
+
+TEST_CASE("the stop bound defaults to a minute, below systemd's stop timeout", "[keeper]")
+{
+    CHECK(RestartPolicyConfig {}.daemonExitBound == 60s);
+    auto h = Harness {};
+    h.events.then(deliver({ frameOf(Serving {}), eventOf(EventKind::StopSignal) }));
+    h.events.then(h.after(59s));
+    h.events.then(
+        check([&] { CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Terminate }); }));
+    h.events.then(h.after(1s));
+    h.events.then(check(
+        [&] {
+            CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Terminate, KeeperSignal::Kill });
+        },
+        ended(FirstDaemon, Killed)));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::Clean);
+    CHECK(h.exitStatus == 0);
+}
+
+TEST_CASE("Shutdown is noted once the label and the listeners are let go", "[keeper]")
+{
+    auto h = Harness {};
+    auto listener = makePipe();
+    auto lockReleased = false;
+    auto lockReleasedBeforeNoted = false;
+    h.onLockReleased = [&] {
+        lockReleased = true;
+        lockReleasedBeforeNoted = h.launcher.channel(0).all<ShutdownNoted>().empty();
+    };
+    auto unlinkedUnderLock = false;
+    h.socketFiles.onRemove = [&] {
+        unlinkedUnderLock = !lockReleased;
+    };
+    h.events.then(deliver(
+        { frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt, .path = "/run/contour/default" },
+                  { listener.give() }),
+          frameOf(Serving {}) }));
+    h.events.then(deliver({ frameOf(Shutdown { .cause = 3 }) }));
+    h.events.then(check(
+        [&] {
+            auto const& sent = h.launcher.channel(0).sent;
+            REQUIRE(!sent.empty());
+            CHECK(std::holds_alternative<ShutdownNoted>(sent.back().message));
+            CHECK(lockReleased);
+            CHECK(lockReleasedBeforeNoted); // the daemon closes its listeners on the note: no label held then
+            CHECK(listener.writerClosed());
+            // A daemon behind a keeper removes no socket file: the keeper does, before anyone may bind it
+            // anew.
+            CHECK(h.socketFiles.removed == std::vector<std::filesystem::path> { "/run/contour/default" });
+            CHECK(unlinkedUnderLock);
+        },
+        ended(FirstDaemon)));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::Clean);
+    CHECK(h.exitStatus == 0);
+}
+
+TEST_CASE("a stop during the grace period ends the shells and exits zero", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    auto unixListener = makePipe();
+    h.events.then(deliver(
+        { frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt, .path = "/run/contour/default" },
+                  { unixListener.give() }),
+          frameOf(Serving {}),
+          spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
+    crashFiveTimes(h);
+    h.events.then(check([&] {
+        CHECK(h.socketFiles.removed.empty()); // kept through the grace period
+        CHECK(!unixListener.writerClosed());
+    }));
+    h.events.then(deliver({ eventOf(EventKind::StopSignal) }));
+    h.events.then(check([&] {
+        CHECK(master.writerClosed());
+        // No daemon is left to remove the socket file the crashed one bound: the keeper does, as at any end.
+        CHECK(h.socketFiles.removed == std::vector<std::filesystem::path> { "/run/contour/default" });
+        CHECK(unixListener.writerClosed());
+    }));
+    h.events.then(h.after(3s));
+    h.events.then(check([] {}, { endOf(FirstShell, Killed) }));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::Clean);
+    CHECK(h.exitStatus == 0);
+    CHECK(h.launcher.images.size() == 5);
+}
+
 TEST_CASE("a daemon reaped before its channel closed is judged once, after the close", "[keeper]")
 {
     auto h = Harness {};
@@ -1732,7 +1855,11 @@ TEST_CASE("a listener deposited again under its name replaces the one held", "[k
         frameOf(Listener { .name = "control", .tlsIdentity = std::nullopt, .path = "/run/c" },
                 { second.give() }),
     }));
-    h.events.then(check([&] { CHECK(first.writerClosed()); }));
+    h.events.then(check([&] {
+        CHECK(first.writerClosed());
+        // The same socket deposited again: its file is still the one served, and stays.
+        CHECK(h.socketFiles.removed.empty());
+    }));
     h.events.then(deliver(ended(FirstDaemon, Segfault)));
     h.events.then(deliver({ frameOf(Adopt {}) }));
     h.events.then(check([&] {

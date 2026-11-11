@@ -217,7 +217,8 @@ class RestartImages
     [[nodiscard]] virtual std::filesystem::path pick(std::filesystem::path const& committed) = 0;
 };
 
-/// Removes the socket files of the listeners the keeper closes when it gives up.
+/// Removes the socket files of the listeners the keeper holds as its daemon ends, whichever way it ends: a
+/// daemon behind a keeper never removes them itself, and the keeper does while it still holds the label lock.
 class SocketFiles
 {
   public:

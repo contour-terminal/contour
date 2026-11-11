@@ -44,7 +44,7 @@ namespace
     {
         Open = 0, ///< Reading and writing.
         Lost,     ///< The keeper's end is gone, or the channel broke; reported once.
-        Closing,  ///< The link is being destroyed; nothing is reported any more.
+        Closing,  ///< The link is sealed or being destroyed: nothing is sent or reported any more.
     };
 
     /// Whether frames still go out.
@@ -75,11 +75,19 @@ namespace
         Blocked, ///< The socket takes no more now.
     };
 
-    /// Whether a spawn() waits for its answer, so that what arrives meanwhile waits too.
+    /// Whether a spawn() or announceShutdown() waits for its answer, so that what arrives meanwhile waits
+    /// too.
     enum class Dispatch : uint8_t
     {
         Free = 0,
-        InsideSpawn,
+        Held,
+    };
+
+    /// Whether the daemon told the keeper it shuts down (announceShutdown()).
+    enum class Farewell : uint8_t
+    {
+        Unannounced = 0, ///< Any end now is a crash to the keeper.
+        Announced,       ///< What is queued as the link goes is the clean end's, and goes.
     };
 } // namespace
 
@@ -114,6 +122,7 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     WriteSide writeSide = WriteSide::Open;
     Writing writing = Writing::Ready;
     Dispatch dispatch = Dispatch::Free;
+    Farewell farewell = Farewell::Unannounced;
     std::deque<ReceivedMessage> inbox;
     uint64_t lastRequest = 0;
 #ifdef CONTOUR_KEEPER_KQUEUE
@@ -260,6 +269,19 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
         return {};
     }
 
+    /// Drops what is queued, unsent: the link ends without the daemon's announcement.
+    void dropQueued()
+    {
+        auto const guard = std::scoped_lock { queueLock };
+        if (queue.empty())
+            return;
+        errorLog()(
+            "the daemon ends without announcing it to the keeper; {} queued message(s) dropped, so that "
+            "the keeper keeps every session for the daemon it restarts",
+            queue.size());
+        queue.clear();
+    }
+
     /// Queues and, on the loop thread, sends at once; elsewhere the loop sends it next.
     void post(keeper::Message const& message, std::span<int const> fds)
     {
@@ -372,7 +394,7 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     }
 #endif
 
-    /// Hands every queued message to its handler, unless a spawn() waits for its answer. Loop thread.
+    /// Hands every queued message to its handler, unless an answer is waited for. Loop thread.
     void dispatchInbox()
     {
         while (dispatch == Dispatch::Free && link == Link::Open && !inbox.empty())
@@ -381,6 +403,44 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
             inbox.pop_front();
             handle(received);
         }
+    }
+
+    /// Waits until @p deadline for the first message @p matches says is the answer. Loop thread. What arrives
+    /// meanwhile and is not it is queued, and dispatched after this returns, never inside it.
+    /// @return The answer; or ChannelError::TimedOut at the deadline, or why the channel broke.
+    template <typename Matches>
+    [[nodiscard]] std::expected<ReceivedMessage, ChannelError> awaitAnswer(
+        core::platform::SteadyTimePoint deadline, Matches const& matches)
+    {
+        dispatch = Dispatch::Held;
+        auto answer =
+            std::expected<ReceivedMessage, ChannelError> { std::unexpected { ChannelError::TimedOut } };
+        while (true)
+        {
+            auto received = channel.receive(loop.clock(), deadline);
+            if (!received)
+            {
+                answer = std::unexpected { received.error() };
+                break;
+            }
+            if (received->message && matches(*received->message))
+            {
+                answer = std::move(*received);
+                break;
+            }
+            inbox.push_back(std::move(*received));
+        }
+        // What came in the same read as the answer is not left on the channel, where nothing would look for
+        // it until the keeper writes again.
+        for (auto& message: channel.takeReady())
+            inbox.push_back(std::move(message));
+        dispatch = Dispatch::Free;
+        if (!inbox.empty())
+            loop.post([weak = weak_from_this()] {
+                if (auto const self = weak.lock())
+                    self->dispatchInbox();
+            });
+        return answer;
     }
 
     void handle(ReceivedMessage& received)
@@ -445,9 +505,15 @@ KeeperLink::KeeperLink(core::net::EventLoop& loop,
 KeeperLink::~KeeperLink()
 {
     auto& state = *_state;
-    // A Shutdown posted from the shutdown sequence is what lets the keeper tell a clean end from a crash.
-    if (state.link == Link::Open)
+    // Only an end the daemon announced sends what is still queued: the Shutdown, if it is not gone yet, and
+    // the Releases of the sessions the host let go as it was destroyed. Any other end is a crash to the
+    // keeper, and what is queued is dropped. That is only the last line: the host goes before the link, and
+    // may turn the loop as it goes, so runDaemon() seals the link before the host (seal()), and no Release of
+    // an unannounced end ever leaves.
+    if (state.link == Link::Open && state.farewell == Farewell::Announced)
         std::ignore = state.flushUntil(state.loop.clock().now() + FinalFlushBound);
+    else
+        state.dropQueued();
     state.link = Link::Closing;
     state.onLost = {};
     state.children = {};
@@ -476,51 +542,61 @@ std::expected<SpawnReply, keeper::SpawnError> KeeperLink::spawn(keeper::Spawn re
         return std::unexpected { keeper::SpawnError::Unknown };
     }
 
-    state.dispatch = Dispatch::InsideSpawn;
-    auto reply =
-        std::expected<SpawnReply, keeper::SpawnError> { std::unexpected { keeper::SpawnError::Unknown } };
-    while (true)
+    auto answer = state.awaitAnswer(deadline, [id](keeper::Message const& message) {
+        if (auto const* spawned = std::get_if<keeper::Spawned>(&message))
+            return spawned->request == id;
+        if (auto const* failed = std::get_if<keeper::SpawnFailed>(&message))
+            return failed->request == id;
+        return false;
+    });
+    if (!answer)
     {
-        auto received = state.channel.receive(state.loop.clock(), deadline);
-        if (!received)
-        {
-            if (received.error() == ChannelError::TimedOut)
-                state.abandoned.insert(id);
-            else
-                state.lose();
-            break;
-        }
-        if (received->message)
-        {
-            if (auto* const spawned = std::get_if<keeper::Spawned>(&*received->message);
-                spawned && spawned->request == id)
-            {
-                auto handle = keeper::UniqueFd {};
-                if (!received->fds.empty())
-                    handle = std::move(received->fds.front());
-                reply = SpawnReply { .spawned = *spawned, .processHandle = std::move(handle) };
-                break;
-            }
-            if (auto const* failed = std::get_if<keeper::SpawnFailed>(&*received->message);
-                failed && failed->request == id)
-            {
-                reply = std::unexpected { failed->error };
-                break;
-            }
-        }
-        state.inbox.push_back(std::move(*received));
+        if (answer.error() == ChannelError::TimedOut)
+            state.abandoned.insert(id);
+        else
+            state.lose();
+        return std::unexpected { keeper::SpawnError::Unknown };
     }
-    // What came in the same read as the answer is not left on the channel, where nothing would look for it
-    // until the keeper writes again.
-    for (auto& message: state.channel.takeReady())
-        state.inbox.push_back(std::move(message));
-    state.dispatch = Dispatch::Free;
-    if (!state.inbox.empty())
-        state.loop.post([weak = std::weak_ptr { _state }] {
-            if (auto const self = weak.lock())
-                self->dispatchInbox();
-        });
-    return reply;
+    if (auto const* failed = std::get_if<keeper::SpawnFailed>(&*answer->message))
+        return std::unexpected { failed->error };
+    auto handle = keeper::UniqueFd {};
+    if (!answer->fds.empty())
+        handle = std::move(answer->fds.front());
+    return SpawnReply { .spawned = std::get<keeper::Spawned>(*answer->message),
+                        .processHandle = std::move(handle) };
+}
+
+void KeeperLink::announceShutdown(uint8_t cause, std::chrono::milliseconds bound)
+{
+    auto& state = *_state;
+    if (state.link != Link::Open || state.writeSide == WriteSide::Closed)
+        return;
+    auto const deadline = state.loop.clock().now() + bound;
+    if (state.enqueue(keeper::Shutdown { .cause = cause }, {}) == QueueOutcome::Dropped)
+        return;
+    state.farewell = Farewell::Announced;
+    if (!state.flushUntil(deadline))
+        return; // still queued: the link's last flush tries once more as it goes
+    auto const noted = state.awaitAnswer(deadline, [](keeper::Message const& message) {
+        return std::holds_alternative<keeper::ShutdownNoted>(message);
+    });
+    if (noted)
+        return;
+    if (noted.error() != ChannelError::TimedOut)
+        state.lose();
+    else
+        errorLog()("the keeper did not take note of the shutdown within {} ms; a new instance may find the "
+                   "label still held for a moment",
+                   bound.count());
+}
+
+void KeeperLink::seal()
+{
+    auto& state = *_state;
+    if (state.farewell == Farewell::Announced || state.link != Link::Open)
+        return;
+    state.link = Link::Closing;
+    state.dropQueued();
 }
 
 void KeeperLink::beat()

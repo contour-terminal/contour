@@ -945,8 +945,10 @@ namespace
                 return {};
             return [this](ShutdownCause cause) {
 #ifndef _WIN32
+                // Waited for: the keeper lets go of the label before the listeners close, so a start that
+                // follows the stop at once finds the label free.
                 if (_link)
-                    _link->post(keeper::Shutdown { .cause = std::to_underlying(cause) });
+                    _link->announceShutdown(std::to_underlying(cause));
 #else
                 std::ignore = cause;
 #endif
@@ -978,6 +980,35 @@ namespace
             // setup before that beats at its milestones (beat()).
             _link->beat();
             loop.spawn(keepTellingTheKeeper(&loop, &*_link));
+#endif
+        }
+
+        /// Seals the link (keeperlink::KeeperLink::seal()) as it is destroyed.
+        class Seal
+        {
+          public:
+            explicit Seal(DaemonKeeper& keeper) noexcept: _keeper { keeper } {}
+            Seal(Seal const&) = delete;
+            Seal(Seal&&) = delete;
+            Seal& operator=(Seal const&) = delete;
+            Seal& operator=(Seal&&) = delete;
+            ~Seal() { _keeper.seal(); }
+
+          private:
+            DaemonKeeper& _keeper;
+        };
+
+        /// @return What seals the link as runDaemon() goes: declared right after the host, it is destroyed
+        ///         before it, so that an end the daemon did not announce sends none of the Releases the
+        ///         host's sessions post as they go.
+        [[nodiscard]] Seal sealAtExit() noexcept { return Seal { *this }; }
+
+        /// Seals the link unless the daemon announced its shutdown; nothing behind no keeper.
+        void seal()
+        {
+#ifndef _WIN32
+            if (_link)
+                _link->seal();
 #endif
         }
 
@@ -1679,6 +1710,9 @@ int runDaemon(DaemonConfig const& config,
             .adoptChild = daemonKeeper.childAdopter(),
             .seedRecovered = std::move(recovery.seeder) }
     };
+    // Destroyed before the host: an end the daemon did not announce (an exception during the setup, every
+    // listener gone on its own) leaves the sessions to the keeper, not their Releases.
+    auto const sealed = daemonKeeper.sealAtExit();
     // The host restored or recovered every session, the longest part of a start: a milestone.
     daemonKeeper.beat();
     // What the keeper kept that no session took is let go.

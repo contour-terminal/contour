@@ -35,6 +35,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/keeperlink/KeeperAttachment.hpp>
 #include <vthost/keeperlink/KeeperChannel.hpp>
+#include <vthost/keeperlink/KeeperLink.hpp>
 #include <vthost/testing/KeeperFixture.hpp>
 #include <vthost/testing/ManualShutdownSignals.hpp>
 
@@ -261,28 +262,35 @@ TEST_CASE("a daemon that shuts down tells its keeper first", "[keeper][daemon][a
 {
     auto d = DaemonBehindKeeper {};
     std::ignore = d.untilServing();
-    // Read from the daemon's own shutdown sequence, which runs before any listener closes: the Shutdown is on
-    // the channel by then, and the listeners still serve.
+    d.signals->fire();
     auto told = std::optional<keeper::Shutdown> {};
-    auto listening = false;
-    d.onShutdown = [&] {
-        auto const deadline = d.clock.now() + 5s;
-        while (!told)
-        {
-            auto received = d.keeperEnd->receive(d.clock, deadline);
-            if (!received || !received->message)
-                return;
-            if (auto const* shutdown = std::get_if<keeper::Shutdown>(&*received->message))
-                told = *shutdown;
-        }
-        listening = fs::exists(vthost::nativeSocketPath(d.config.socketPath));
-    };
+    while (!told)
+    {
+        auto const received = d.receive(d.clock.now() + 5s);
+        REQUIRE(received.message);
+        if (auto const* shutdown = std::get_if<keeper::Shutdown>(&*received.message))
+            told = *shutdown;
+    }
+    CHECK(told->cause == std::to_underlying(vthost::ShutdownCause::Signal));
+    // Review Focus 2: the daemon's listeners stay until the keeper took note, by when it let go of the label,
+    // so that nothing still holds the label once the socket stops answering.
+    std::this_thread::sleep_for(200ms);
+    CHECK(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
+    d.send(keeper::ShutdownNoted {});
+    CHECK(d.awaitEnd() == EXIT_SUCCESS);
+    CHECK(d.causes == std::vector { vthost::ShutdownCause::Signal });
+    CHECK_FALSE(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
+}
+
+TEST_CASE("a daemon whose keeper takes no note of its shutdown ends after the bound",
+          "[keeper][daemon][afunix]")
+{
+    auto d = DaemonBehindKeeper {};
+    std::ignore = d.untilServing();
+    auto const started = std::chrono::steady_clock::now();
     d.signals->fire();
     CHECK(d.awaitEnd() == EXIT_SUCCESS);
-    REQUIRE(told.has_value());
-    CHECK(told->cause == std::to_underlying(vthost::ShutdownCause::Signal));
-    CHECK(listening);
-    CHECK(d.causes == std::vector { vthost::ShutdownCause::Signal });
+    CHECK(std::chrono::steady_clock::now() - started >= vthost::keeperlink::ShutdownNoteBound);
     CHECK_FALSE(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
 }
 

@@ -61,7 +61,7 @@ class Keeper
     /// @param ports         The system, as ports; they outlive the keeper.
     /// @param labelLock     The lock on the label, held until the daemon announces Shutdown or the keeper
     /// ends.
-    /// @param policy        The crash-loop policy's numbers.
+    /// @param policy        The crash-loop policy's numbers, and how long a stopped daemon has to exit.
     /// @param daemonImage   The daemon executable to start, and to restart unless a newer one is named.
     /// @param launchOptions The daemon's options record, opaque to the keeper, sent with every Launch.
     Keeper(KeeperPorts ports,
@@ -170,6 +170,10 @@ class Keeper
     void onTimers();
     void apply(RestartDecision decision, WireExitStatus status);
     void beginEnding(KeeperOutcome outcome, int exitStatus);
+    /// Lets go of the label and of every deposited listener, removing their socket files first: under the
+    /// lock, no keeper that starts on the label after it can have bound a path yet. What every ending of the
+    /// daemon does, for a daemon behind a keeper never removes them itself (SocketFileRemoval::LeftToKeeper).
+    void releaseLabelAndListeners();
     void dropChannel();
     void send(Message const& message, std::vector<int> fds = {});
     [[nodiscard]] bool linked() const noexcept;
@@ -199,7 +203,6 @@ class Keeper
 
     KeeperPorts _ports;
     std::unique_ptr<LabelLock> _labelLock;
-    RestartPolicyConfig _policyConfig;
     CrashRestartPolicy _policy;
     std::filesystem::path _daemonImage;
     std::vector<uint8_t> _launchOptions;
@@ -217,7 +220,6 @@ class Keeper
     std::optional<core::platform::SteadyTimePoint> _relaunchAt; ///< A backed-off restart.
     std::optional<core::platform::SteadyTimePoint> _graceAt;    ///< The end of a give-up's grace period.
     std::optional<KeeperOutcome> _ending;                       ///< Set once the keeper began to end.
-    std::optional<KeeperOutcome> _outcome;                      ///< Set once it ended.
     int _exitStatus = 0;
 };
 

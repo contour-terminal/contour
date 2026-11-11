@@ -28,6 +28,10 @@ inline constexpr std::chrono::seconds SpawnReplyBound { 10 };
 /// How long the link, as it goes, waits for the keeper to take what is still queued (a Shutdown).
 inline constexpr std::chrono::seconds FinalFlushBound { 1 };
 
+/// How long announceShutdown() waits for the keeper to take note: the keeper answers at once, so this is
+/// reached only by a keeper that does not know ShutdownNoted, or that is stuck.
+inline constexpr std::chrono::seconds ShutdownNoteBound { 2 };
+
 /// What spawn() hands back: the keeper's Spawned, and the child's process handle (its pidfd) if it sent one.
 struct SpawnReply
 {
@@ -75,7 +79,9 @@ class KeeperLink
     KeeperLink& operator=(KeeperLink const&) = delete;
     KeeperLink(KeeperLink&&) = delete;
     KeeperLink& operator=(KeeperLink&&) = delete;
-    /// Sends what is still queued, for at most FinalFlushBound, and stops reading.
+    /// Stops reading. After announceShutdown() it first sends what is still queued, for at most
+    /// FinalFlushBound; without it, the end is a crash to the keeper, and what is queued is dropped: the
+    /// Releases a host being unwound queues would end the very sessions the keeper keeps for recovery.
     ~KeeperLink();
 
     /// Asks the keeper to fork a child, and waits for its answer: the one channel round trip a session's
@@ -88,6 +94,21 @@ class KeeperLink
     /// @return The answer; or why there is none (SpawnError::Unknown for a lost link or a late keeper).
     [[nodiscard]] std::expected<SpawnReply, keeper::SpawnError> spawn(keeper::Spawn request,
                                                                       std::vector<int> fds);
+
+    /// Tells the keeper that the daemon shuts down, and waits until it took note (ShutdownNoted): by then the
+    /// keeper has let go of the label and of its copies of the listeners, so that once the daemon closes its
+    /// own, a new instance starts at once -- `contour daemon stop` followed by `contour daemon` finds the
+    /// label free. Loop thread. Every frame queued before goes first; the frames that arrive meanwhile are
+    /// queued and dispatched after this returns, as for spawn().
+    /// @param cause The ShutdownCause, as the channel carries it.
+    /// @param bound How long to wait for the note; a keeper that sends none is waited for that long.
+    void announceShutdown(uint8_t cause, std::chrono::milliseconds bound = ShutdownNoteBound);
+
+    /// Ends the link's sending unless announceShutdown() ran: what is queued is dropped, and nothing posted
+    /// after it is sent. An end the daemon did not announce is a crash to the keeper, which keeps every
+    /// session for the daemon it restarts; the Releases a host posts as it is destroyed would have it hang up
+    /// every shell instead. Called before the host goes. Loop thread.
+    void seal();
 
     /// Tells the keeper the daemon is alive, sending at once what the socket takes: from the thread that
     /// drives the loop, also before the loop runs, where the loop's own heartbeat flow cannot.

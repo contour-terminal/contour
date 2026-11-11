@@ -494,6 +494,16 @@ struct InventoryEnd
     void visitFields(this auto& /*self*/, auto& /*visitor*/) {}
     [[nodiscard]] bool operator==(InventoryEnd const&) const = default;
 };
+/// Keeper to daemon: the answer to Shutdown. The keeper has let go of the label and closed its copies of the
+/// listeners, so once the daemon closes its own nothing serves the socket and nothing holds the label: a new
+/// instance starts at once.
+struct ShutdownNoted
+{
+    /// How many descriptors this message carries at most.
+    static constexpr std::size_t MaxDescriptors = 0;
+    void visitFields(this auto& /*self*/, auto& /*visitor*/) {}
+    [[nodiscard]] bool operator==(ShutdownNoted const&) const = default;
+};
 // clang-format on
 
 /// Every message of the channel, in the order of the wire table: a message's tag is its index + 1.
@@ -518,7 +528,8 @@ using Message = std::variant<Hello,
                              InventoryListener,
                              InventorySession,
                              InventoryEnd,
-                             Signal>;
+                             Signal,
+                             ShutdownNoted>;
 
 namespace detail
 {

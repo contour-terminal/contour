@@ -38,6 +38,15 @@ enum class HarnessStart : uint8_t
     /// The first daemon serves, as Serves; every daemon the keeper restarts after it is killed by a signal
     /// before it serves: a crash loop.
     ServesThenCrashes,
+    /// It serves, as Serves, but ignores SIGTERM, SIGINT and SIGHUP: a daemon a forwarded stop does not end.
+    IgnoresStop,
+};
+
+/// When the harness daemon ends of its own accord.
+enum class HarnessLifecycle : uint8_t
+{
+    Persistent = 0,
+    ExitWhenIdle, ///< After a second with no session and no client.
 };
 
 /// Whether the harness daemon keeps a workspace snapshot.
@@ -65,6 +74,16 @@ struct core::codec::EnumWire<vthost::testing::HarnessStart>
         vthost::testing::HarnessStart::Relays,
         vthost::testing::HarnessStart::RelaysThenServes,
         vthost::testing::HarnessStart::ServesThenCrashes,
+        vthost::testing::HarnessStart::IgnoresStop,
+    };
+};
+
+template <>
+struct core::codec::EnumWire<vthost::testing::HarnessLifecycle>
+{
+    static constexpr auto Values = std::array {
+        vthost::testing::HarnessLifecycle::Persistent,
+        vthost::testing::HarnessLifecycle::ExitWhenIdle,
     };
 };
 
@@ -103,8 +122,9 @@ inline constexpr int HarnessStartFailureStatus = 3;
 /// The harness keeper's crash-loop and stop numbers, in milliseconds; 0 keeps the keeper's default.
 struct HarnessTimings
 {
-    uint64_t backoffMs = 0; ///< The first backoff, and its cap: every backoff is this long.
-    uint64_t graceMs = 0;   ///< How long a keeper that gave up waits before its one retry.
+    uint64_t backoffMs = 0;         ///< The first backoff, and its cap: every backoff is this long.
+    uint64_t graceMs = 0;           ///< How long a keeper that gave up waits before its one retry.
+    uint64_t daemonExitBoundMs = 0; ///< How long a stopped daemon has to exit before it is killed.
 };
 
 /// What the harness keeper hands its daemon, as the options record: opaque to the keeper, as `contour
@@ -122,6 +142,9 @@ struct HarnessLaunch
     /// Where a relaying daemon hands its channel over.
     std::string relayPath;
     HarnessTimings timings {};
+    /// How often the snapshot is written, in milliseconds; 0 for every second.
+    uint64_t snapshotIntervalMs = 0;
+    HarnessLifecycle lifecycle = HarnessLifecycle::Persistent;
 
     /// Lists the fields.
     void visitFields(this auto& self, auto& visitor)
@@ -135,6 +158,9 @@ struct HarnessLaunch
         visitor(7, self.relayPath);
         visitor(8, self.timings.backoffMs);
         visitor(9, self.timings.graceMs);
+        visitor(10, self.timings.daemonExitBoundMs);
+        visitor(11, self.snapshotIntervalMs);
+        visitor(12, self.lifecycle);
     }
 };
 
@@ -149,7 +175,10 @@ struct HarnessSetup
     /// The soft descriptor limit the keeper is started under, as a user's session may have it; nullopt keeps
     /// the test's own.
     std::optional<uint64_t> softDescriptorLimit = std::nullopt;
-    HarnessTimings timings {}; ///< The keeper's crash-loop numbers.
+    HarnessTimings timings {}; ///< The keeper's crash-loop and stop numbers.
+    /// As HarnessLaunch::snapshotIntervalMs.
+    uint64_t snapshotIntervalMs = 0;
+    HarnessLifecycle lifecycle = HarnessLifecycle::Persistent;
 };
 
 /// @param pid A process.
@@ -231,6 +260,14 @@ class KeeperFixture
     /// @return Its exit status; nullopt when it did not end within @p bound (it is killed then).
     [[nodiscard]] std::optional<int> runSecondKeeper(std::chrono::milliseconds bound) const;
 
+    /// Starts another keeper on this fixture's socket, as `contour daemon` run again would, and leaves it
+    /// running: the fixture ends it (SIGTERM, then SIGKILL) and reaps it with itself.
+    /// @return Its pid.
+    int startSecondKeeper();
+
+    /// @return Whether the keeper startSecondKeeper() started still runs (it has not exited, unreaped).
+    [[nodiscard]] bool secondKeeperRuns() const;
+
     /// @return What the keeper and its daemons wrote to their standard error.
     [[nodiscard]] std::string log() const;
 
@@ -269,6 +306,7 @@ class KeeperFixture
     keeper::UniqueFd _channel;       ///< The channel it handed over, until taken.
     int _keeper = 0;
     KeeperState _keeperState = KeeperState::Running;
+    int _secondKeeper = 0; ///< startSecondKeeper()'s, until end() reaped it; 0 for none.
 
     /// For HarnessStart::Relays: accepts the daemon's connection and receives its channel.
     void acceptRelay();
