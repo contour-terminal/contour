@@ -9,6 +9,7 @@
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/ControlVerbs.hpp>
 #include <contour/cli/DaemonStart.hpp>
+#include <contour/cli/DaemonVerbOptions.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/McpCommand.hpp>
@@ -1299,15 +1300,19 @@ int ContourApp::daemonAction()
             return daemonVerbAction(row.verb, prefix);
     }
 
+    // Every option the daemon reads, in one record, before anything is acted on: from here on the verb uses
+    // the record alone.
+    auto const options = readDaemonVerbOptions(parameters());
+
     // On --stdio every byte of stdout belongs to the protocol, and from before the configuration
     // loads. The log sinks write to stderr, but a stray std::cout or printf write, or a daemon this
     // relay auto-starts and that inherits descriptor 1, would still corrupt a frame, so
     // makeProcessStdioStream() points stdout at stderr. A refused combination is reported first, with
     // stdout still untouched.
     auto stdioClient = std::shared_ptr<vthost::IByteStream> {};
-    if (parameters().get<bool>("contour.daemon.stdio"))
+    if (options.stdio == OptionFlag::Given)
     {
-        if (auto const combined = checkStdioCombinations(); !combined)
+        if (auto const combined = checkStdioCombinations(options); !combined)
         {
             cerr << std::format("contour daemon: {}\n", combined.error());
             return EXIT_FAILURE;
@@ -1330,7 +1335,7 @@ int ContourApp::daemonAction()
     // live upgrade. On POSIX, what is open now and the image does not name was leaked across the exec, and is
     // closed; on Windows, a successor takes over only once its predecessor committed, and ends without
     // serving anything where it may not.
-    auto received = receiveHandover(parameters().get<string>("contour.daemon.handover"));
+    auto received = receiveHandover(options.handover);
     if (!received)
         return EXIT_FAILURE;
     auto handover = std::move(*received);
@@ -1349,16 +1354,15 @@ int ContourApp::daemonAction()
     // Loaded once, and first: its `daemon:` section names the socket when --socket does not, and the
     // same configuration resolves the daemon's own profile below and, as the host's profile catalog,
     // every profile a client names later.
-    auto hostConfig = loadDaemonConfig(parameters().get<string>("contour.daemon.config"), failures);
+    auto hostConfig = loadDaemonConfig(options.config, failures);
     if (!hostConfig)
         return refuse(hostConfig.error());
     auto const daemonSettings = hostConfig->daemon.value();
 
     auto config = vthost::DaemonConfig {};
     config.instance = daemonInstanceOf(handover);
-    config.socketPath = vthost::muxSocketPath(
-        vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")),
-        resolveSocketOption(parameters().get<string>("contour.daemon.socket"), daemonSettings.socket));
+    auto const launch = DaemonLaunch::resolve(options, daemonSettings.socket);
+    config.socketPath = launch.socketPath();
 
     // Before logging, whose default file lies beside the socket: a log sink creating the socket's
     // directory would give it the umask's 0755, which the listener refuses as world-accessible.
@@ -1375,8 +1379,7 @@ int ContourApp::daemonAction()
     // Loaded again, now that there is a log: what the load has to say -- a key it does not know, a value it
     // corrects -- was said to the default sink the first time, which for a --background daemon is nowhere a
     // user looks. The socket stays the one derived above; a file that no longer loads keeps the first load.
-    if (auto reloaded = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
-        reloaded)
+    if (auto reloaded = config::tryLoadConfigNamed(options.config); reloaded)
         hostConfig = std::move(reloaded);
 
     // Logging's default sink is stderr, never stdout, and --log-file names a file or stderr; stdout
@@ -1384,22 +1387,20 @@ int ContourApp::daemonAction()
     if (stdioClient)
     {
         // The option, else the configuration's `daemon.size_policy`, as for a daemon this process becomes.
-        auto const sizePolicy = resolveSizePolicy(parameters().get<string>("contour.daemon.size-policy"),
-                                                  daemonSettings.sizePolicy);
+        auto const sizePolicy = resolveSizePolicy(options.sizePolicy, daemonSettings.sizePolicy);
         if (!sizePolicy)
             return refuse(sizePolicy.error());
-        return stdioRelayAction(std::move(stdioClient), config.socketPath, *sizePolicy);
+        return stdioRelayAction(std::move(stdioClient), options, config.socketPath, *sizePolicy);
     }
 
-    auto const ownProfile =
-        resolveDaemonProfile(*hostConfig, parameters().get<string>("contour.daemon.profile"), failures);
+    auto const ownProfile = resolveDaemonProfile(*hostConfig, options.profile, failures);
     if (!ownProfile)
         return refuse(ownProfile.error());
     auto const& daemonProfile = ownProfile->name;
     auto const& resolved = ownProfile->resolved;
     // Read before the configuration moves into the catalog. Not reloaded: a running daemon keeps the file
     // and the schedule it started with.
-    auto const daemonLabel = vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")).name;
+    auto const daemonLabel = vthost::socketLabelOf(options.label).name;
     if (auto snapshotPath = snapshotPathOf(processEnvironment(), daemonLabel, config.socketPath))
         config.persistence =
             workspacePersistenceOf(hostConfig->daemon.value().restore, *std::move(snapshotPath));
@@ -1412,7 +1413,7 @@ int ContourApp::daemonAction()
     auto reloads = std::make_shared<ConfigReloadPoller>(
         core::platform::NativeFileSystem::instance(),
         resolved.configFile,
-        [configPath = parameters().get<string>("contour.daemon.config"),
+        [configPath = options.config,
          daemonProfile]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
             return config::tryLoadConfigNamed(configPath)
                 .and_then([&](config::Config loaded) {
@@ -1439,7 +1440,7 @@ int ContourApp::daemonAction()
     // The extensions' modules and configuration are resolved here, on the daemon's side, as its sessions'
     // shells are; they run in the daemon, where each session's terminal is.
     auto extensionServices = DaemonExtensionResources {};
-    auto const label = vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")).name;
+    auto const label = vthost::socketLabelOf(options.label).name;
     auto const& fileSystem = core::platform::NativeFileSystem::instance();
     config.extensions = daemonExtensionsOf(
         resolved,
@@ -1454,12 +1455,12 @@ int ContourApp::daemonAction()
         extensionServices);
 #endif
 
-    if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
+    if (auto label = options.tmuxCompatSocket; !label.empty())
         config.tmuxCompatLabel = std::move(label);
 
     // Rejected rather than defaulted, as --size-policy is below; a handed-over daemon persists instead,
     // which ends no program.
-    auto const lifecycleText = parameters().get<string>("contour.daemon.lifecycle");
+    auto const lifecycleText = options.lifecycle;
     if (auto const lifecycle = vthost::daemonLifecycleFrom(lifecycleText))
         config.lifecycle = *lifecycle;
     else if (auto const refused = failures.fail(
@@ -1470,7 +1471,7 @@ int ContourApp::daemonAction()
         return refuse(refused.error());
 
     // The alias for --lifecycle=exit-with-last-session; stating both only conflicts when they differ.
-    if (parameters().get<bool>("contour.daemon.exit-with-last-session"))
+    if (options.exitWithLastSession == OptionFlag::Given)
     {
         if (config.lifecycle != vthost::DaemonLifecycle::Persistent
             && config.lifecycle != vthost::DaemonLifecycle::ExitWhenEmpty)
@@ -1485,8 +1486,7 @@ int ContourApp::daemonAction()
     }
 
     // The option, else the configuration's `daemon.size_policy`.
-    if (auto const policy = resolveSizePolicy(parameters().get<string>("contour.daemon.size-policy"),
-                                              daemonSettings.sizePolicy))
+    if (auto const policy = resolveSizePolicy(options.sizePolicy, daemonSettings.sizePolicy))
         config.sizePolicy = *policy;
     else if (auto const refused = failures.fail(policy.error()); !refused)
         return refuse(refused.error());
@@ -1494,7 +1494,7 @@ int ContourApp::daemonAction()
     config.defaultCellPixelSize = daemonSettings.defaultCellPixelSize;
 
     // A handed-over daemon serves no TCP at all rather than one it cannot authenticate as asked.
-    if (auto nativeTcp = nativeTcpOption(daemonLabel))
+    if (auto nativeTcp = nativeTcpOption(options, daemonLabel))
         config.nativeTcp = *std::move(nativeTcp);
     else if (auto const refused =
                  failures.fail(std::format("the TCP listener is not served: {}", nativeTcp.error()));
@@ -1504,12 +1504,12 @@ int ContourApp::daemonAction()
     // Everything above has validated the configuration, so a typo is reported by THIS process
     // rather than killing a child whose stderr nobody is reading. Only now is it safe to hand
     // the work to a detached copy of ourselves. A handed-over daemon is that copy already.
-    if (parameters().get<bool>("contour.daemon.background") && !handover)
-        return runDaemonInBackground(config.socketPath);
+    if (options.background == OptionFlag::Given && !handover)
+        return runDaemonInBackground(options, config.socketPath);
 
     // What this daemon states about itself, in every hello and status reply.
     config.releaseVersion = CONTOUR_VERSION_STRING;
-    if (auto logFile = parameters().get<string>("contour.daemon.log-file"); logFile != "-")
+    if (auto logFile = options.logFile; logFile != "-")
         config.logFile = core::pathFromUtf8(logFile).value_or(std::filesystem::path {});
 
     // Where it runs from: a per-version copy wherever an upgrade would disturb the installed binary.
@@ -1522,13 +1522,11 @@ int ContourApp::daemonAction()
                                                             CONTOUR_VERSION_STRING,
                                                             leaseOf(handover));
     // What the daemon's status states of it: its user's request alone, not the handover-combined one below.
-    config.relocationRequest = relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"));
+    config.relocationRequest = relocationRequestOf(options.inPlace == OptionFlag::Given);
     if (images)
     {
         runningLease = settleDaemonImage(
-            **images,
-            relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"), handover),
-            commandLine());
+            **images, relocationRequestOf(options.inPlace == OptionFlag::Given, handover), commandLine());
         config.executablePath = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
                                     .value_or(vthost::launchedImage((*images)->inputs()));
     }
@@ -1563,18 +1561,20 @@ int ContourApp::daemonAction()
 }
 
 std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> ContourApp::nativeTcpOption(
-    std::string_view daemonLabel)
+    DaemonVerbOptions const& options, std::string_view daemonLabel)
 {
     // Opt-in TCP listener: absent unless --listen-tcp is given; always TLS-encrypted
     // (self-signed when no cert/key), token-authenticated, loopback-bound unless the
     // host part says otherwise.
-    auto const listen = parameters().get<string>("contour.daemon.listen-tcp");
+    auto const listen = options.listenTcp;
     if (listen.empty())
     {
         // Its tokens are only ever asked for over TCP: accepting the option alone would read as
         // narrowing a listener that does not exist.
-        for (auto const option: { "access-file", "authorized-keys", "auth" })
-            if (!parameters().get<string>(std::format("contour.daemon.{}", option)).empty())
+        for (auto const& [option, value]: { std::pair { "access-file", &options.accessFile },
+                                            std::pair { "authorized-keys", &options.authorizedKeys },
+                                            std::pair { "auth", &options.auth } })
+            if (!value->empty())
                 return std::unexpected { std::format("--{} needs --listen-tcp", option) };
         return std::nullopt;
     }
@@ -1585,24 +1585,21 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
 
     // Refused before any file is read, so that the user is told what to remove rather than that a file
     // it conflicts with cannot be read.
-    auto const auth = vthost::parseDaemonAuth(parameters().get<string>("contour.daemon.auth"));
+    auto const auth = vthost::parseDaemonAuth(options.auth);
     if (!auth)
         return std::unexpected { auth.error() };
-    auto const tokenOptionsGiven = static_cast<std::size_t>(
-        std::ranges::count(std::array { !parameters().get<string>("contour.daemon.token").empty(),
-                                        !parameters().get<string>("contour.daemon.token-file").empty(),
-                                        !parameters().get<string>("contour.daemon.access-file").empty() },
-                           true));
+    auto const tokenOptionsGiven = static_cast<std::size_t>(std::ranges::count(
+        std::array { !options.token.empty(), !options.tokenFile.empty(), !options.accessFile.empty() },
+        true));
     if (auto const refused = vthost::checkAuthOptions(*auth, tokenOptionsGiven); !refused)
         return std::unexpected { refused.error() };
 
-    auto token = vthost::resolveToken(parameters().get<string>("contour.daemon.token"),
-                                      parameters().get<string>("contour.daemon.token-file"));
+    auto token = vthost::resolveToken(options.token, options.tokenFile);
     if (!token)
         return std::unexpected { token.error() };
     // Narrower tokens for the control API, beside the one that grants everything, never repeating it.
     auto accessTokens = std::vector<vthost::AcceptedToken> {};
-    if (auto const accessFile = parameters().get<string>("contour.daemon.access-file"); !accessFile.empty())
+    if (auto const accessFile = options.accessFile; !accessFile.empty())
     {
         auto const path = core::pathFromUtf8(accessFile);
         if (!path)
@@ -1615,7 +1612,7 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
     }
     // The keys that may log in by signature, beside the tokens or instead of them. A line that cannot be
     // used is said so with its number and reason, never read with part of it ignored.
-    auto const keysOption = parameters().get<string>("contour.daemon.authorized-keys");
+    auto const& keysOption = options.authorizedKeys;
     auto keysPath = config::configHome() / "authorized_keys";
     if (!keysOption.empty())
     {
@@ -1657,8 +1654,8 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
         .port = hostPort->second,
         .token = *std::move(token),
         .accessTokens = std::move(accessTokens),
-        .tlsCertPath = parameters().get<string>("contour.daemon.tls-cert"),
-        .tlsKeyPath = parameters().get<string>("contour.daemon.tls-key"),
+        .tlsCertPath = options.tlsCert,
+        .tlsKeyPath = options.tlsKey,
         .authorizedKeys = std::move(keys->keys),
         .auth = *auth,
         .identityFile = *identityFile,
@@ -1668,10 +1665,21 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
 namespace
 {
     /// Each names something only a daemon this process would become can do; the relay becomes none.
+    struct StdioRefusal
+    {
+        std::string_view name;                     ///< The option, without its dashes.
+        bool (*isGiven)(DaemonVerbOptions const&); ///< Whether the record says it was given.
+    };
+
     constexpr auto StdioRefusals = std::array {
-        OptionPresence { .name = "listen-tcp", .givenAs = GivenAs::Text },
-        OptionPresence { .name = "background", .givenAs = GivenAs::Flag },
-        OptionPresence { .name = "tmux-compat-socket", .givenAs = GivenAs::Text },
+        StdioRefusal { .name = "listen-tcp",
+                       .isGiven = [](DaemonVerbOptions const& given) { return !given.listenTcp.empty(); } },
+        StdioRefusal {
+            .name = "background",
+            .isGiven = [](DaemonVerbOptions const& given) { return given.background == OptionFlag::Given; } },
+        StdioRefusal {
+            .name = "tmux-compat-socket",
+            .isGiven = [](DaemonVerbOptions const& given) { return !given.tmuxCompatSocket.empty(); } },
     };
 } // namespace
 
@@ -1688,15 +1696,17 @@ std::optional<std::string_view> ContourApp::firstGivenOption(std::string_view ve
     return std::nullopt;
 }
 
-std::expected<void, std::string> ContourApp::checkStdioCombinations()
+std::expected<void, std::string> ContourApp::checkStdioCombinations(DaemonVerbOptions const& options)
 {
-    if (auto const given = firstGivenOption("contour.daemon", StdioRefusals))
-        return std::unexpected { std::format("--stdio relays to a daemon; it cannot be combined with --{}",
-                                             *given) };
+    for (auto const& refusal: StdioRefusals)
+        if (refusal.isGiven(options))
+            return std::unexpected { std::format(
+                "--stdio relays to a daemon; it cannot be combined with --{}", refusal.name) };
     return {};
 }
 
 int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
+                                 DaemonVerbOptions const& options,
                                  std::filesystem::path const& socketPath,
                                  vthost::ClientSizePolicy sizePolicy)
 {
@@ -1706,11 +1716,11 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     std::signal(SIGPIPE, SIG_IGN);
 #endif
     // An auto-started daemon is told what `contour client` would tell it.
-    auto const options = vthost::DaemonSpawnOptions {
-        .filter = parameters().get<string>("contour.daemon.log"),
-        .logFile = parameters().get<string>("contour.daemon.log-file"),
-        .configPath = parameters().get<string>("contour.daemon.config"),
-        .profileName = parameters().get<string>("contour.daemon.profile"),
+    auto const spawnOptions = vthost::DaemonSpawnOptions {
+        .filter = options.log,
+        .logFile = options.logFile,
+        .configPath = options.config,
+        .profileName = options.profile,
         .sizePolicy = sizePolicy,
     };
     auto const binary = vthost::makeOwnDaemonBinary(
@@ -1727,7 +1737,7 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     auto const placement = vtpty::makeDefaultProcessPlacement();
     // The registered user service when there is one, so a stopped service is started rather than an
     // on-demand daemon beside it.
-    auto const label = vthost::socketLabelOf(parameters().get<string>("contour.daemon.label")).name;
+    auto const label = vthost::socketLabelOf(options.label).name;
     auto starter = vthost::chooseDaemonStarter(
         vthost::findRepairedRegisteredService(label,
                                               vthost::nativeServiceBackendFactory(services),
@@ -1738,7 +1748,7 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
                                 .spawner = *spawner,
                                 .binary = *binary,
                                 .placement = *placement,
-                                .options = options,
+                                .options = spawnOptions,
                                 .timeout = std::chrono::seconds(5) });
     return vthost::runStdioAttach(std::move(client),
                                   vthost::makeLocalDaemonConnector(socketPath, *spawner, std::move(starter)));
@@ -2095,7 +2105,8 @@ int ContourApp::daemonRelocateAction()
     return exitCode(status);
 }
 
-int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
+int ContourApp::runDaemonInBackground(DaemonVerbOptions const& options,
+                                      std::filesystem::path const& socketPath)
 {
     // Our own tokens replayed verbatim — rebuilding the child's command line from parsed flags
     // would silently drop every option someone forgets to add to the rebuilder.
@@ -2116,7 +2127,7 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
     // A detached process has no console, so its standard error goes nowhere: without a log file
     // the backgrounded daemon becomes the one instance nobody can diagnose. Derived rather than
     // required, so the common case needs no second flag.
-    auto logFile = parameters().get<string>("contour.daemon.log-file");
+    auto logFile = options.logFile;
     if (logFile.empty())
     {
         logFile = core::pathToUtf8(vthost::daemonLogPath(socketPath));
@@ -2126,13 +2137,13 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
     // Started from this version's own copy, unless --in-place asks otherwise, and that copy held leased
     // until the child serves: by then it has leased the copy itself.
     auto const argv0 = core::pathFromUtf8(childArgs.front()).value_or(std::filesystem::path {});
-    auto const binary = relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"))
-                                == vthost::RelocationRequest::Allowed
-                            ? vthost::makeOwnDaemonBinary(processEnvironment(),
-                                                          core::platform::NativeFileSystem::instance(),
-                                                          CONTOUR_VERSION_STRING,
-                                                          argv0)
-                            : std::make_unique<vthost::InstalledDaemonBinary>(argv0);
+    auto const binary =
+        relocationRequestOf(options.inPlace == OptionFlag::Given) == vthost::RelocationRequest::Allowed
+            ? vthost::makeOwnDaemonBinary(processEnvironment(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          CONTOUR_VERSION_STRING,
+                                          argv0)
+            : std::make_unique<vthost::InstalledDaemonBinary>(argv0);
     auto const image = binary->imageForSpawn();
     childArgs.front() = core::pathToUtf8(image.executable);
 

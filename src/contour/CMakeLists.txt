@@ -1704,6 +1704,7 @@ if(CONTOUR_TESTING)
         cli/ContourApp_test.cpp
         cli/ControlVerbs_test.cpp
         cli/DaemonStart_test.cpp
+        cli/DaemonVerbOptions_test.cpp
         cli/DaemonVerbs_test.cpp
         cli/ConnectList_test.cpp
         cli/ConnectProbe_test.cpp

@@ -27,6 +27,7 @@ namespace contour::cli
 {
 
 enum class DaemonVerb : std::uint8_t; // DaemonVerbs.hpp
+struct DaemonVerbOptions;             // DaemonVerbOptions.hpp
 struct ControlVerb;                   // ControlVerbs.hpp
 
 /// What `contour daemon-service <verb>` was asked to do.
@@ -112,27 +113,32 @@ class ContourApp: public core::cli::App
     /// @return The process exit code: 0 unless a move failed.
     [[nodiscard]] int daemonRelocateAction();
     /// Reads `contour daemon --listen-tcp` and the options that go with it.
+    /// @param options The daemon's options.
     /// @param daemonLabel The daemon's label, which names its TLS identity file.
     /// @return The TCP listener to serve, nullopt for none; or why the options cannot be served.
     [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> nativeTcpOption(
-        std::string_view daemonLabel);
+        DaemonVerbOptions const& options, std::string_view daemonLabel);
     /// Checks that `contour daemon --stdio` names no option only a daemon this process becomes can honour.
+    /// @param options The daemon's options.
     /// @return The refusal, naming the option, when one is given.
-    [[nodiscard]] std::expected<void, std::string> checkStdioCombinations();
+    [[nodiscard]] std::expected<void, std::string> checkStdioCombinations(DaemonVerbOptions const& options);
     /// Runs `contour daemon --stdio`: relays the native protocol between this process's standard
     /// input/output and the daemon serving @p socketPath, starting that daemon when none serves.
     /// @param client This process's stdio, taken (makeProcessStdioStream()) before the configuration loaded.
+    /// @param options The daemon's options; a daemon this relay starts is told the log and configuration.
     /// @param socketPath The daemon's control socket.
     /// @param sizePolicy The policy a daemon this relay starts runs with.
     /// @return EXIT_SUCCESS once the daemon side ended; EXIT_FAILURE for a daemon that could not be
     ///         reached (as an error preamble on stdout).
     int stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
+                         DaemonVerbOptions const& options,
                          std::filesystem::path const& socketPath,
                          vthost::ClientSizePolicy sizePolicy);
     /// Relaunches this process detached (`--background`) and waits until it is serving.
+    /// @param options The daemon's options.
     /// @param socketPath The control socket the daemon binds; also derives its default log file.
     /// @return EXIT_SUCCESS once the background daemon accepts connections.
-    int runDaemonInBackground(std::filesystem::path const& socketPath);
+    int runDaemonInBackground(DaemonVerbOptions const& options, std::filesystem::path const& socketPath);
     /// Runs one `contour daemon-service` verb against the configured backend.
     /// @param action Which verb was invoked.
     /// @param prefix That verb's dotted flag prefix, e.g. "contour.daemon-service.install".
