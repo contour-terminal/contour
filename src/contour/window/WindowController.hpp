@@ -47,6 +47,7 @@
 #include <QtCore/QVariant>
 #include <QtGui/QColor>
 #include <QtQml/qqmlregistration.h>
+#include <QtQuick/QQuickWindow>
 
 #include <array>
 #include <chrono>
@@ -89,6 +90,8 @@ namespace contour::window
 /// @return The token, which a node drag's payload carries as its host's id
 /// (TerminalSessionManager::hostIdentity).
 [[nodiscard]] QString const& processToken();
+
+class PromptHost;
 
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
 /// -- or re-targets -- another the user may still have open.
@@ -213,6 +216,8 @@ class WindowController:
     // The window's own daemon's drift (window::DaemonDriftModel), which its drift badge shows; null for a
     // local window. Read anew whenever the window is bound to another host.
     Q_PROPERTY(QObject* daemonDrift READ daemonDrift NOTIFY hostLabelChanged)
+    // The window's host for ssh's login prompts (window::PromptHost), which its AskpassDialog shows.
+    Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
@@ -1052,6 +1057,8 @@ class WindowController:
     /// Read from QWindow::windowStates(), which the platform keeps current. (Wayland compositors do not
     /// report minimising, so there a minimised window reads as shown.)
     [[nodiscard]] bool isMinimized() const noexcept;
+    /// @return Whether the window is on screen for the user: shown, and not minimised.
+    [[nodiscard]] bool isExposed() const noexcept;
 
     /// The screen this window's OS window is on: where the Settings window opens when this window asks.
     /// @return The bound window's screen, or nullptr before a window is bound.
@@ -1229,6 +1236,9 @@ class WindowController:
     /// What this window's drift badge shows: whether the daemon of its own link runs another release.
     /// @return Its window::DaemonDriftModel; null for a local window.
     [[nodiscard]] QObject* daemonDrift() const;
+
+    /// @return The window's window::PromptHost: where the ssh logins this window started ask their questions.
+    [[nodiscard]] QObject* promptHost() const noexcept;
 
     /// What the host chip shows: the manager's host connection, folded onto the chip's three states.
     /// @return A window::HostChipState as its underlying value; Connected for a local window.
@@ -1471,6 +1481,18 @@ class WindowController:
     /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
     void refreshWindowShadow();
 
+    /// Makes @p window this controller's OS window (_osWindow), and drops the helpers built from it once it
+    /// is destroyed (@see dropWindowHelpers).
+    /// @param window The window adopted; not null.
+    void adoptOsWindow(QQuickWindow* window);
+
+    /// Drops the helpers built from an OS window this controller adopted, once that window is destroyed: the
+    /// shadow and the resize grid reach the window they were made for, and a caller after the window's end
+    /// -- a daemon link released in the application's teardown, which re-reads the title band -- must find
+    /// none rather than one that reaches freed memory. The shadow is built again from the next window on its
+    /// next refresh, the resize grid by the next bindWindow().
+    void dropWindowHelpers();
+
     /// QWindow::visibilityChanged handler.
     ///
     /// Every way the window changes presentation ends in this signal — our own setWindowMaximized
@@ -1519,6 +1541,9 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WorkspaceId _windowId;
+    /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
+    /// window's whole life.
+    std::unique_ptr<PromptHost> _promptHost;
     std::vector<TabSpan> _tabSpans; ///< Where the strip's tabs are, as setTabSpans() last reported.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     WindowRole _role; ///< @see role
@@ -1688,8 +1713,11 @@ class WindowController:
 
     display::TerminalDisplay* _activeDisplay = nullptr;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.
-    // Lets the manager route a focus/close to the controller that owns a given display's window.
-    QQuickWindow* _osWindow = nullptr;
+    // Lets the manager route a focus/close to the controller that owns a given display's window. A QPointer:
+    // the QML engine destroys the window before the controller, and a daemon link released after that (the
+    // application's teardown stops its links once the windows are gone) still re-reads the title band. Set
+    // by adoptOsWindow() only, which drops what was built from it as it goes (dropWindowHelpers()).
+    QPointer<QQuickWindow> _osWindow;
 
     // Guards closeWindow() against re-entry: closeWindow() closes _osWindow, whose QML `onClosing`
     // calls closeWindow() again — the flag makes that second call a no-op so teardown runs exactly once,

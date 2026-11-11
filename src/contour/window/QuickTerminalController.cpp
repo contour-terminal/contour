@@ -63,6 +63,8 @@ void QuickTerminalController::reconfigure(config::QuickTerminalConfig config, co
 
 void QuickTerminalController::press(std::string activationToken)
 {
+    if (_host.isReady && !_host.isReady())
+        return;
     _activationToken = std::move(activationToken);
     dispatch(QuickTerminalEvent::Hotkey);
 }
@@ -121,6 +123,8 @@ void QuickTerminalController::dispatch(QuickTerminalEvent event)
         return;
     _state = step->to;
     perform(step->effect);
+    if (_host.onStateChanged)
+        _host.onStateChanged();
 }
 
 void QuickTerminalController::perform(QuickTerminalEffect effect)
@@ -156,6 +160,8 @@ void QuickTerminalController::createAndShow()
     if (window == nullptr)
     {
         _state = QuickTerminalState::Absent;
+        if (_host.onStateChanged)
+            _host.onStateChanged();
         return;
     }
     _window = window;

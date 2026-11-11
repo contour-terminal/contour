@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
@@ -11,6 +12,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
@@ -123,6 +125,8 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
     // Mirrors WindowController's version string, which the About dialog shows.
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
+    // Mirrors WindowController's host for ssh's login prompts, which Main.qml's AskpassDialog shows.
+    Q_PROPERTY(QObject* promptHost READ promptHost CONSTANT)
     // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
@@ -167,6 +171,14 @@ class MainWindowControllerMock: public QAbstractListModel
             return;
         _hostChipState = state;
         emit hostChipStateChanged();
+    }
+
+    /// @return The window's prompt host, as WindowController has one; asks arrive through promptRouter().
+    [[nodiscard]] QObject* promptHost() noexcept { return &_promptHost; }
+    /// @return The router that sends prompts to this window's host.
+    [[nodiscard]] std::shared_ptr<contour::askpass::AskpassPromptRouter> const& promptRouter() const noexcept
+    {
+        return _promptRouter;
     }
 
     /// Mirrors WindowController::applicationVersion() with a fixed test value.
@@ -486,6 +498,9 @@ class MainWindowControllerMock: public QAbstractListModel
     void nativeMaximizeVisualChanged();
 
   private:
+    std::shared_ptr<contour::askpass::AskpassPromptRouter> _promptRouter =
+        std::make_shared<contour::askpass::AskpassPromptRouter>();
+    contour::window::PromptHost _promptHost { _promptRouter, 1 };
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
     int _hostChipState = 0;        ///< @see hostChipState; 0 = HostChipState::Connected.

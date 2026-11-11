@@ -27,6 +27,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/QtString.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
@@ -88,6 +89,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    WindowRole role):
     _manager { manager },
     _windowId { windowId },
+    // Ssh's prompts for the attaches this window starts are shown here, as soon as the window exists.
+    _promptHost { std::make_unique<PromptHost>(manager.app().askpassRouter(), windowId.value) },
     _role { role },
     _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
@@ -158,6 +161,11 @@ NoticeAnnouncerFactory qtNoticeAnnouncer()
     return [](std::function<QObject*()> anchor) -> std::unique_ptr<platform::Announcer> {
         return std::make_unique<platform::QtAnnouncer>(std::move(anchor));
     };
+}
+
+QObject* WindowController::promptHost() const noexcept
+{
+    return _promptHost.get();
 }
 
 WindowController::~WindowController()
@@ -2090,7 +2098,23 @@ void WindowController::focusDisplay(display::TerminalDisplay* display)
     // focus/close for that window to this controller (ownsOSWindow). (bindWindow() normally already did
     // this at spawn; this covers displays re-homed across windows.)
     if (display != nullptr && display->window() != nullptr)
-        _osWindow = display->window();
+        adoptOsWindow(display->window());
+}
+
+void WindowController::adoptOsWindow(QQuickWindow* window)
+{
+    _osWindow = window;
+    connect(window, &QObject::destroyed, this, &WindowController::dropWindowHelpers, Qt::UniqueConnection);
+}
+
+void WindowController::dropWindowHelpers()
+{
+    // Any window adopted, not only the current one: a helper may have been built from a window this
+    // controller adopted before, and is of no use to another. By now the shadow is normally gone already,
+    // dropped as the platform window was (QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed).
+    _windowShadow.reset();
+    _resizeGrid.reset();
+    _appliedTitleBand.reset();
 }
 
 // {{{ Window-geometry authority
@@ -2099,7 +2123,7 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
     if (osWindow == nullptr)
         return;
 
-    _osWindow = osWindow;
+    adoptOsWindow(osWindow);
     _manager.bindTaskbarWindow(_windowId, *osWindow);
 
     _resizeGrid = platform::makeWindowResizeGrid(
@@ -2233,7 +2257,7 @@ void WindowController::refreshCaptionAttachment()
 {
     QWindow* const wanted =
         _osWindow != nullptr && framePolicy().shadow == platform::FrameShadowStrategy::NativeFrameKept
-            ? _osWindow
+            ? _osWindow.data()
             : nullptr;
     if (_captionWindow.data() == wanted)
         return;
@@ -2307,11 +2331,13 @@ void WindowController::onWindowVisibilityChanged()
     // The window's presentation is READ from it (@see platform::presentationFor) rather than
     // mirrored into a member here, so this handler only has to say "look again".
     refreshWindowShadow();
+    _manager.app().refreshWindowAttention();
 }
 
 void WindowController::onWindowStateChanged()
 {
     _manager.windowStateChanged(_windowId);
+    _manager.app().refreshWindowAttention();
     // Full screen rests the band elsewhere, and moves the traffic lights into AppKit's revealed strip.
     refreshTitleBand();
     emit nativeControlsInsetChanged();
@@ -2796,8 +2822,8 @@ QQuickWindow* WindowController::osWindowFor(session::DisplaySurface& requester) 
 {
     auto* requesterWindow = requester.window();
     if (_osWindow == nullptr && requesterWindow != nullptr)
-        _osWindow = requesterWindow;
-    return requesterWindow != nullptr ? requesterWindow : _osWindow;
+        adoptOsWindow(requesterWindow);
+    return requesterWindow != nullptr ? requesterWindow : _osWindow.data();
 }
 
 void WindowController::setChromeHeight(int height)
@@ -2960,6 +2986,11 @@ void WindowController::minimizeWindow()
 bool WindowController::isMinimized() const noexcept
 {
     return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowMinimized);
+}
+
+bool WindowController::isExposed() const noexcept
+{
+    return _osWindow != nullptr && _osWindow->isVisible() && !isMinimized();
 }
 
 QScreen* WindowController::screen() const noexcept

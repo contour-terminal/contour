@@ -595,7 +595,9 @@ TEST_CASE("a saved host named by --daemon is reached through its own transport",
         std::vector<std::vector<std::string>> spawned;
 
         [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
-            core::net::EventLoop& /*loop*/, std::span<std::string const> argv) override
+            core::net::EventLoop& /*loop*/,
+            std::span<std::string const> argv,
+            vthost::SpawnEnvironment const& /*environment*/) override
         {
             spawned.emplace_back(argv.begin(), argv.end());
             return std::unexpected { vthost::StdioSpawnError { .kind = vthost::SpawnFailure::SystemError,
@@ -627,7 +629,8 @@ TEST_CASE("a saved host named by --daemon is reached through its own transport",
     run.fs.addFile("/home/me/studio.token", "secret\n");
     auto const spawner = std::make_shared<RecordingSpawner>();
     auto io = run.io();
-    io.resolveSavedHost = contour::cli::makeSavedHostResolver(lookup, run.fs, spawner);
+    io.resolveSavedHost =
+        contour::cli::makeSavedHostResolver(lookup, run.fs, spawner, contour::cli::SshPrompting {});
 
     SECTION("a tls host is the host's transport, refused for want of its tls_ca before connecting")
     {

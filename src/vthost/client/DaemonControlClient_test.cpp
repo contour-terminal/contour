@@ -14,10 +14,13 @@
 #include <format>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <vthost/AttachBudget.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -195,6 +198,50 @@ TEST_CASE("status() over a Control connection returns the daemon's report", "[vt
     CHECK(h.host.sessionCount() == 0);
 }
 
+namespace
+{
+/// Runs @p inner, and tells @p mark when it handed out a connection, as a ConnectObservingFactory would.
+core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, client::ControlError>> noteWhenConnected(
+    core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, client::ControlError>> inner,
+    vthost::TransportReturnMark* mark,
+    core::net::EventLoop* loop)
+{
+    auto connected = co_await std::move(inner);
+    if (connected)
+        mark->note(loop->clock().now());
+    co_return connected;
+}
+} // namespace
+
+TEST_CASE("a control port with no connect bound handshakes afresh on every call", "[vthost][client][control]")
+{
+    auto h = ControlHarness {};
+    auto mark = vthost::TransportReturnMark {};
+    auto const handshakeBound = 300ms;
+    auto port = client::SocketDaemonControl {
+        h.loop,
+        [&] { return noteWhenConnected(h.connect(), &mark, &h.loop); },
+        vthost::AttachBudget::promptsOpen(handshakeBound),
+        &mark,
+    };
+    REQUIRE(port.status().has_value());
+
+    // Longer ago than the bound: the first call's return must not count for the second.
+    std::this_thread::sleep_for(handshakeBound + 150ms);
+    auto const second = port.status();
+    INFO((second ? std::string {} : second.error().toString()));
+    CHECK(second.has_value());
+}
+
+TEST_CASE("a control port with no connect bound and nobody to tell it the transport returned is refused",
+          "[vthost][client][control]")
+{
+    auto h = ControlHarness {};
+    CHECK_THROWS_AS((client::SocketDaemonControl {
+                        h.loop, h.connector(), vthost::AttachBudget::promptsOpen(1s), nullptr }),
+                    std::invalid_argument);
+}
+
 TEST_CASE("a status says what the daemon offered", "[vthost][client][control]")
 {
     auto const offered =
@@ -252,6 +299,59 @@ TEST_CASE("a connector that reports an absent daemon reads as not running", "[vt
     auto port = client::SocketDaemonControl { h.loop, absent, 2s };
     CHECK(port.status().error().code == client::ControlErrorCode::NotRunning);
     CHECK(port.stop(proto::StopReason::User).error().code == client::ControlErrorCode::NotRunning);
+}
+
+namespace
+{
+/// A transport whose every connect fails the way @p kind says.
+class FailingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit FailingTransport(vthost::TransportErrorKind kind): _kind(kind) {}
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& /*loop*/) override
+    {
+        return fail(_kind);
+    }
+
+    [[nodiscard]] std::string describe() const override { return "failing"; }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
+    {
+        return vthost::PeerTrust::Verified;
+    }
+
+  private:
+    vthost::TransportErrorKind _kind;
+
+  private:
+    /// The coroutine behind connect(); @p kind by value, as a coroutine's parameters must be.
+    [[nodiscard]] static core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    fail(vthost::TransportErrorKind kind)
+    {
+        co_return std::unexpected(vthost::TransportError { .kind = kind, .message = "ssh could not log in" });
+    }
+};
+} // namespace
+
+TEST_CASE("a login that wants an answer reads as LoginNeeded, any other failure as a transport error",
+          "[vthost][client][control]")
+{
+    using vthost::TransportErrorKind;
+    for (auto const kind: { TransportErrorKind::AuthenticationRequired, TransportErrorKind::HostKeyUnknown })
+    {
+        auto port = client::makeDaemonControl(std::make_shared<FailingTransport>(kind));
+        CHECK(port->status().error().code == client::ControlErrorCode::LoginNeeded);
+    }
+    auto port =
+        client::makeDaemonControl(std::make_shared<FailingTransport>(TransportErrorKind::Unreachable));
+    CHECK(port->status().error().code == client::ControlErrorCode::Transport);
+    // A changed host key is no question to answer: it is a failure, whose words say so.
+    auto changed =
+        client::makeDaemonControl(std::make_shared<FailingTransport>(TransportErrorKind::HostKeyChanged));
+    CHECK(changed->status().error().code == client::ControlErrorCode::Transport);
 }
 
 TEST_CASE("a wire status with an unknown lifecycle is not a status", "[vthost][client][control]")

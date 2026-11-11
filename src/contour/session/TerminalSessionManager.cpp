@@ -1789,6 +1789,7 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WorkspaceId win
     bool const wasLast = _controllersByWindow.size() == 1;
     auto* controller = it->second;
     _controllersByWindow.erase(it);
+    _app.refreshWindowAttention();
     _taskbarProgressSink.removeWindow(windowId.value);
     if (controller != nullptr)
         controller->deleteLater();

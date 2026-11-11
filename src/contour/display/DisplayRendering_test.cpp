@@ -916,12 +916,12 @@ TEST_CASE("display: a font change staged without a render target reaches the sta
     REQUIRE_DISPLAY_OR_SKIP();
     auto h = DisplayHarness { HarnessWindow::Shown, [](contour::config::Config& config) {
                                  auto withEcho = config.profiles.value().at("main");
-                                 auto echo =
-                                     contour::config::ExtensionConfig { .name = "echo",
-                                                                        .path = "/ext/echo.wasm",
-                                                                        .config = { { "events", "describe" },
-                                                                                    { "subscribe", "font" } },
-                                                                        .runCommand = {} };
+                                 auto echo = contour::config::ExtensionConfig {
+                                     .name = "echo",
+                                     .path = "/ext/echo.wasm",
+                                     .config = { { "events", "describe-followed" }, { "subscribe", "font" } },
+                                     .runCommand = {}
+                                 };
                                  withEcho.extensions.value() = { std::move(echo) };
                                  withEcho.statusLine.value().indicator.left = "[{Extension:echo}]";
                                  config.profiles.value().insert_or_assign("echo", std::move(withEcho));

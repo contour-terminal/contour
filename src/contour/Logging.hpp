@@ -32,4 +32,9 @@ auto inline const launcherLog = core::log::Category("gui.launcher", "Opening URL
 /// creates it. Shared for the same reason as startupLog.
 auto inline const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
 
+/// ssh's prompts relayed to the GUI (the askpass broker). It logs that a prompt was asked, answered or
+/// withdrawn, and which kind -- never an answer, which is a secret, and never at any level.
+auto inline const askpassLog =
+    core::log::Category("gui.askpass", "ssh prompts answered through Contour's askpass.");
+
 } // namespace contour

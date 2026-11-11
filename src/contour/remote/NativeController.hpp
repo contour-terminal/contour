@@ -213,6 +213,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         bindings and ptys kept meanwhile. Safe from any thread.
     [[nodiscard]] vthost::client::ConnectionState connectionState() const;
 
+    /// Whether a prompt of this controller's attach waits for the user to be looking at a window.
+    enum class UserAttention : uint8_t
+    {
+        NotNeeded = 0,
+        Needed, ///< The connection says it needs attention (vthost::client::ConnectionState::NeedsAttention).
+    };
+
+    /// Says whether a prompt of this attach is held until its window is on screen. While it is, a connection
+    /// that is being sought again reports NeedsAttention; the reconnect itself goes on, as it never waits for
+    /// anyone. GUI thread.
+    /// @param attention Whether a prompt waits.
+    void setUserAttention(UserAttention attention);
+
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
@@ -604,15 +617,20 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// connectionState() changed (fires on the reactor thread; connect queued).
     void connectionStateChanged();
+    /// The attach has something new for whoever polls it (RemoteController::pollConnected): the connection
+    /// phase settled, or the transport returned its connection. Fires on the reactor thread; connect queued.
+    void attachProgressed();
 
     /// A pty this controller made was destroyed, whether or not it still bound its remote session (fires on
     /// whichever thread destroyed it; connect queued). @see bindsPanes
     void paneUnbound();
 
     /// After a reconnect: daemon workspaces this client showed that the daemon no longer has for it -- it
-    /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread, ahead
-    /// of the layoutChanged() of the workspaces that came instead; connect queued).
-    /// @param daemonWorkspaces The lost workspaces' ids, as the lost connection named them.
+    /// restarted, or another client closed them -- for the GUI to close (fires on the reactor thread once the
+    /// layouts of the workspaces that came instead are settled (settledLayouts()), ahead of their
+    /// layoutChanged(); connect queued).
+    /// @param daemonWorkspaces The lost workspaces' ids, as the layouts the GUI last settled named them: the
+    ///        ids its windows are bound to, whichever connection pushed them.
     void workspacesLost(std::vector<uint64_t> daemonWorkspaces);
 
     /// The daemon says it restored its saved workspaces before this client attached, and how much came back
@@ -684,6 +702,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The reactor's whole lifetime: connect, serve, notify. Takes the loop
     /// by pointer (coroutine reference parameters can dangle).
     [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override;
+
+    /// Tells whoever polls the attach that there is something new to look at (attachProgressed()).
+    void notePhaseChange() override { emit attachProgressed(); }
 
     // RemoteController hooks: the attach-specific half of the shared connect lifecycle.
     [[nodiscard]] bool detachOnReactor() override
@@ -791,6 +812,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
     [[nodiscard]] bool layoutBatchShared() const;
+
+    /// Under _mutex: a layout of the connection up settled. Takes the reconnect's losses, which the GUI may
+    /// be told of now -- unless this connection has pushed no frame yet (a push that ended empty), when
+    /// nothing came instead and they wait.
+    /// @return The workspaces to announce lost (workspacesLost()); empty while they wait.
+    [[nodiscard]] std::vector<uint64_t> settle(std::lock_guard<std::mutex> const& held);
 
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
@@ -1014,6 +1041,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// goes through it, so nothing is written to a connection still in its handshake, or to none.
     /// Reactor-owned; set and cleared under _mutex.
     vthost::client::NativeClient* _client = nullptr;
+    UserAttention _userAttention = UserAttention::NotNeeded; ///< Under _mutex.
+    /// What the connection was before it said NeedsAttention; under _mutex.
+    vthost::client::ConnectionState _stateUnderAttention = vthost::client::ConnectionState::Reconnecting;
     vthost::client::ConnectionState _connection =
         vthost::client::ConnectionState::Connecting; ///< Under _mutex.
     /// Which run of the daemon the last accepted connection reached; 0 for unknown. Under _mutex.
@@ -1026,9 +1056,30 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connection was up is dropped, never replayed into whatever shell answers after a reconnect.
     std::atomic<uint64_t> _inputConnection = 0;
     std::atomic<std::size_t> _droppedInputBytes = 0; ///< Since the connection was lost; for the log.
-    /// The workspaces the last reconnect lost, announced with the first layout that came instead. Under
-    /// _mutex.
+    /// The workspaces the last reconnect lost, announced as the first layout that came instead settles: with
+    /// that frame, or at the end of its push when the daemon batches them (onLayoutBatchEnd) -- never at the
+    /// end of a push with no frame in it. Under _mutex.
     std::vector<uint64_t> _lostWorkspaces;
+    /// How far the connection up has come in giving the GUI layouts. Under _mutex.
+    enum class ConnectionLayouts : uint8_t
+    {
+        Awaited =
+            0,    ///< No frame yet: a push it ended was empty, and nothing has come instead of what was lost.
+        Received, ///< Frames, none settled yet: the GUI still shows what an earlier connection settled.
+        Settled,  ///< Settled: the GUI shows _settledLayouts.
+    };
+    ConnectionLayouts _connectionLayouts = ConnectionLayouts::Awaited;
+    /// The workspaces the GUI's windows show, which a reconnect computes its losses against, and the run of
+    /// the daemon whose ids they are: the settled layouts of the last connection that settled any. Taken as a
+    /// connection that did is replaced (adoptReconnect()), and kept over one lost before anything it pushed
+    /// settled: that one showed the GUI nothing, and its frames may name another run's workspaces. Under
+    /// _mutex.
+    struct ShownWorkspaces
+    {
+        std::vector<uint64_t> ids;
+        uint64_t daemonInstance = 0; ///< 0 for unknown.
+    };
+    ShownWorkspaces _shownWorkspaces;
     /// What follow() and release() changed since the first connection: every later one resumes the
     /// workspaces followed since and not the ones released (makeClient()), and a layout of a released one
     /// is dropped. Forgotten for a restarted daemon, whose ids name other workspaces. Under _mutex.
@@ -1057,21 +1108,16 @@ class NativeController final: public QObject, public contour::session::SessionFa
     core::platform::PowerSubscription _powerSubscription;
 };
 
-/// Waits for @p live to connect within @p budget, and gives it up when it does not.
-///
-/// A controller given up on is stopped and cut off from @p owner, then handed to @p abandoned rather than
-/// destroyed: the daemon start its transport began may still be under way -- a first start copies this
-/// version's image -- and destroying the transport waits for that start to end (UnixTransportFactory's
-/// destructor), which would hold the caller back all that while. The caller keeps @p abandoned until it ends.
-/// @param live The controller whose connect is awaited; null once it is given up.
-/// @param abandoned Receives @p live when it is given up.
-/// @param budget @see RemoteController::awaitConnected.
-/// @param owner Every connection from @p live to this object is cut when @p live is given up.
-/// @return Why the connect failed, when it did.
-[[nodiscard]] std::expected<void, std::string> awaitConnectedOrAbandon(
-    std::unique_ptr<NativeController>& live,
-    std::unique_ptr<NativeController>& abandoned,
-    std::chrono::milliseconds budget,
-    QObject const* owner);
+/// Gives @p live up when its connect failed: stops it, cuts its connections to @p owner and hands it to
+/// @p abandoned rather than destroying it: the daemon start its transport began may still be under way -- a
+/// first start copies this version's image -- and destroying the transport waits for that start to end
+/// (UnixTransportFactory's destructor), which would hold the caller back all that while. The caller keeps
+/// @p abandoned until it ends.
+/// @param live The controller to give up; null afterwards.
+/// @param abandoned Receives it.
+/// @param owner Every connection from @p live to this object is cut.
+void abandonConnect(std::unique_ptr<NativeController>& live,
+                    std::unique_ptr<NativeController>& abandoned,
+                    QObject const* owner);
 
 } // namespace contour::remote

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/askpass/AskpassBroker.hpp>
+#include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/HostTransport.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
@@ -25,6 +27,7 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
 #include <contour/remote/RemoteLayout.hpp>
+#include <contour/remote/StartupAttach.hpp>
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchHost.hpp>
 #include <contour/remote/SwitchingService.hpp>
@@ -33,9 +36,11 @@
 #include <contour/session/RestoreSummaryPolicy.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/BootstrapPrompt.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/DragEndProbe.hpp>
 #include <contour/window/HotkeyRefusals.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SplitChrome.hpp>
@@ -62,6 +67,7 @@
 #include <core/platform/SystemPower.hpp>
 
 #include <QtCore/QPointer>
+#include <QtCore/QTimer>
 #include <QtGui/QPalette>
 #include <QtQml/QQmlApplicationEngine>
 
@@ -84,6 +90,7 @@
 #include <vector>
 
 #include <vthost/DaemonSpawn.hpp>
+#include <vthost/SshTransport.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
@@ -340,6 +347,9 @@ class ContourGuiApp:
     ///                     remote::WindowSwitcher; tests pass a recording double.
     /// @param switchDirectory What the switching actions and their palette rows list. Null (the default)
     ///                     builds the application's own; tests pass a fake.
+    /// @param exitEventLoop How the app ends its event loop with a status. Null (the default) is
+    ///                     QCoreApplication::exit; tests pass a recorder, as exiting outside a loop would end
+    ///                     every event loop the rest of the suite starts.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -362,7 +372,8 @@ class ContourGuiApp:
         std::unique_ptr<window::DragEndProbe> dragEndProbe = nullptr,
         std::unique_ptr<platform::ApplicationRestart> applicationRestart = nullptr,
         std::unique_ptr<remote::SwitchingService> windowSwitching = nullptr,
-        std::unique_ptr<session::SwitchDirectory> switchDirectory = nullptr);
+        std::unique_ptr<session::SwitchDirectory> switchDirectory = nullptr,
+        std::function<void(int)> exitEventLoop = nullptr);
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -633,6 +644,30 @@ class ContourGuiApp:
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
+    /// @return The broker that answers ssh's prompts through this application's own askpass mode; the one
+    ///         for the process, made on first use. GUI thread only: its servers live there.
+    [[nodiscard]] std::shared_ptr<askpass::AskpassBroker> const& askpassBroker();
+
+    /// Brings up the stand-in window for ssh's prompts, once: a prompt waits and no terminal window can show
+    /// it (the first attach of `contour client --host` runs before the first window opens). Without the QML
+    /// engine, which exists once the application runs, nothing is shown and the prompt waits. GUI thread.
+    void showBootstrapPrompt();
+
+    /// Looks anew at which of the windows that show ssh's prompts are on screen for the user: a prompt for a
+    /// window that is not is held until it is (askpass::AskpassPromptRouter::updateExposure()). GUI thread.
+    void refreshWindowAttention();
+
+    /// Tells every link whether a prompt of its attach is held, so that its connection says it needs
+    /// attention while it is. GUI thread.
+    void refreshAttachAttention();
+
+    /// @return The router that sends each ssh prompt to the window that started the attach; every window's
+    ///         PromptHost attaches to it. Exists from construction; GUI thread only.
+    [[nodiscard]] std::shared_ptr<askpass::AskpassPromptRouter> const& askpassRouter() const noexcept
+    {
+        return _askpassRouter;
+    }
+
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
     /// window/tab and to open config hyperlinks. Falls back to the app name when argv is not yet
     /// available (any call before run() records it — e.g. a FollowHyperlink/NewTerminal action that
@@ -706,7 +741,7 @@ class ContourGuiApp:
     // remote::ISwitchHost
     [[nodiscard]] std::vector<remote::DaemonLink*> switchableLinks() override;
     [[nodiscard]] std::expected<remote::DaemonLinkConfig, std::string> linkConfigFor(
-        remote::DaemonAddress const& daemon) override;
+        remote::DaemonAddress const& daemon, vtworkspace::WorkspaceId window) override;
     remote::DaemonLink& startSwitchLink(remote::DaemonLinkConfig config) override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
@@ -1064,6 +1099,7 @@ class ContourGuiApp:
     /// @return The process exit status.
     int launchClient(ClientRequest request, std::string const& host);
 
+  public:
     /// A host and the transport that reaches its daemon.
     struct OpenedHost
     {
@@ -1075,16 +1111,27 @@ class ContourGuiApp:
     /// @param configPath The configuration file naming the saved hosts; empty for the default one.
     /// @param nameOrUrl A saved host's name or an ssh:// URL.
     /// @return The host and its transport, or the line saying why it cannot be reached as configured.
-    [[nodiscard]] std::expected<OpenedHost, std::string> openHost(std::string const& configPath,
-                                                                  std::string const& nameOrUrl);
+    /// @param route The window that starts the attach, where its ssh prompts are shown.
+    /// @param prompting Whether the transport may ask the user anything.
+    [[nodiscard]] std::expected<OpenedHost, std::string> openHost(
+        std::string const& configPath,
+        std::string const& nameOrUrl,
+        askpass::AskpassRouteId route = askpass::AnyWindow,
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
 
     /// Maps an already resolved host onto its transport.
     /// @param nameOrUrl What named the host: its saved name, or its URL; the window's label.
     /// @param host The host.
     /// @return The host and its transport, or why it cannot be reached as configured.
-    [[nodiscard]] std::expected<OpenedHost, std::string> transportOf(std::string const& nameOrUrl,
-                                                                     config::HostEntry host);
+    /// @param route The window that starts the attach, where its ssh prompts are shown.
+    /// @param prompting Whether the transport may ask the user anything.
+    [[nodiscard]] std::expected<OpenedHost, std::string> transportOf(
+        std::string const& nameOrUrl,
+        config::HostEntry host,
+        askpass::AskpassRouteId route = askpass::AnyWindow,
+        cli::SshPrompts prompting = cli::SshPrompts::Askpass);
 
+  private:
     /// Prepares the Connect picker's check of whether @p target answers, before it spends a window on it.
     /// Reads the configuration here, on the GUI thread, so the job it returns owns everything it needs.
     /// @param target The chosen target.
@@ -1181,13 +1228,34 @@ class ContourGuiApp:
     [[nodiscard]] std::expected<void, std::string> settleHosting(
         std::expected<void, std::string> const& attached);
 
-    /// Waits for the native attach started before the GUI booted, with what remains of its budget, then
-    /// routes session creation to its controller and offers a restart to a drifted local daemon.
+    /// Looks at the native attach started before the GUI booted, without waiting, with what remains of its
+    /// budget; once attached it routes session creation to its controller and offers a restart to a drifted
+    /// local daemon.
     /// @param link The link of the attach.
     /// @param budget How long the attach may take since it started; never less than MinimumConnectAwait.
-    /// @return Nothing once attached; why not, the controller given up, otherwise.
-    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(remote::DaemonLink& link,
-                                                                     std::chrono::milliseconds budget);
+    /// @return Nothing while it goes on; else nothing once attached, or why not, the controller given up.
+    [[nodiscard]] std::optional<std::expected<void, std::string>> pollNativeAttach(
+        remote::DaemonLink& link, vthost::AttachBudget budget);
+
+    /// Opens the first window and does what follows it: the hosting notice, the hotkey problem, the adoption
+    /// of the daemon's other sessions, the latency probe.
+    /// @return Why there is no first window, otherwise nothing.
+    [[nodiscard]] std::expected<void, std::string> bootFirstWindow();
+
+  public:
+    /// Waits for the launch's attach from the event loop and then opens the first window, or ends the launch
+    /// with the reason and a failure status. Until then no terminal window exists, and the app refuses every
+    /// action but Quit (@see isStartingUp()). Public for the launch and for tests, which drive it with fakes.
+    /// @param steps The attach, and what follows its end; the ones the app builds are startAttachWait()'s.
+    void waitForAttach(remote::StartupAttachSteps steps);
+
+    /// @return Whether the launch still waits for its attach: no terminal window exists and none may be
+    /// started.
+    [[nodiscard]] bool isStartingUp() const noexcept { return _startupAttach && _startupAttach->isWaiting(); }
+
+  private:
+    /// waitForAttach() with the launch's own link as the attach.
+    void startAttachWait();
 
     /// What a link to a daemon is built with: this client's profile and emulation settings stated, on the
     /// app's clock, timeline and power monitor. The one place a link's configuration is made, for a launch's
@@ -1198,13 +1266,16 @@ class ContourGuiApp:
     /// @param locality Whether the daemon runs on this machine. Not whether it is this client's to restart
     ///        and upgrade: DaemonLinkConfig::upkeep says that, None here.
     /// @param address The daemon as a window switch names it.
+    /// @param askpassRoute The window whose prompts a reconnect of this link waits for: the one that started
+    ///        the attach, or AnyWindow.
     /// @return The configuration.
     [[nodiscard]] remote::DaemonLinkConfig daemonLinkConfig(
         std::shared_ptr<vthost::ITransportFactory> transport,
         vthost::proto::AttachIntent intent,
         std::string hostLabel,
         window::DaemonLocality locality,
-        remote::DaemonAddress address);
+        remote::DaemonAddress address,
+        askpass::AskpassRouteId askpassRoute = askpass::AnyWindow);
 
     /// @param id A link's id.
     /// @return The link of that id; null once it was destroyed.
@@ -1258,24 +1329,54 @@ class ContourGuiApp:
                                              .timer = remote::qtSwitchTimer(),
                                              .clock = core::platform::defaultSteadyClock() };
 
-    /// The daemon links, declared FIRST so they are destroyed LAST: remote-backed sessions hold ptys that
-    /// unregister from their controllers on destruction. A launch that attaches creates exactly one.
+    /// Sends ssh's prompts to the windows that host them. Declared before the broker, which shares it, and
+    /// both before _daemonLinks: a link's reconnect may still be inside the broker's open() until the link
+    /// stops, so they must outlive every link and session. The windows' PromptHosts share it too, so none of
+    /// them has to outlive the others.
+    std::shared_ptr<askpass::AskpassPromptRouter> _askpassRouter =
+        std::make_shared<askpass::AskpassPromptRouter>([this] { showBootstrapPrompt(); },
+                                                       [this] { refreshWindowAttention(); },
+                                                       [this] { refreshAttachAttention(); });
+    /// Answers the ssh prompts of every ssh host this app opens; made by askpassBroker() on first use.
+    std::shared_ptr<askpass::AskpassBroker> _askpassBroker;
+    /// The stand-in window for ssh's prompts, while no terminal window shows them, and the host it shows. The
+    /// host is declared after the router it attaches to, so it is gone before the router; the QML engine is
+    /// declared later still, so it is destroyed first, and takes the window with it before this host goes.
+    std::unique_ptr<window::BootstrapPrompt> _bootstrapPrompt;
+    /// The thread the broker is made and asked on: the GUI thread (askpassBroker() asserts it).
+    std::thread::id _guiThread = std::this_thread::get_id();
+
+    /// The daemon links, declared after the askpass members above (which must outlive them) and before
+    /// everything that holds a session, so they are destroyed after those: remote-backed sessions hold ptys
+    /// that unregister from their controllers on destruction. A launch that attaches creates exactly one.
     std::vector<std::unique_ptr<remote::DaemonLink>> _daemonLinks;
     /// The saved hosts a link was started to since this application began, so the switcher says "not
     /// connected" of one it reached before rather than "not yet connected".
     std::set<std::string> _hostsReached;
     /// The id the next link is given.
     uint32_t _nextDaemonLinkId = 1;
+    /// The link awaitNativeAttach() is waiting for, which destroyEndedLinks() leaves alone meanwhile.
+    std::optional<remote::DaemonLinkId> _awaitedLinkId;
     std::unique_ptr<remote::TmuxController> _tmuxController;
 
     /// Invoked by terminalGuiAction right after the first window booted —
     /// attach mode adopts the remaining remote sessions as tabs here.
     std::function<void()> _onGuiBooted;
 
-    /// Invoked by terminalGuiAction just before the first window: attach mode waits here for the
-    /// connect it started before the GUI booted, and adopts the controller once it is up.
-    /// @return Nothing once attached; the message to report, the controller given up, otherwise.
-    std::function<std::expected<void, std::string>()> _awaitAttach;
+    /// The connect attach mode started before the GUI booted, until its end is waited for
+    /// (startAttachWait()): the first window opens then and adopts the controller.
+    struct StartupAttachPlan
+    {
+        remote::DaemonLinkId link;
+        vthost::AttachBudget budget;
+    };
+    std::optional<StartupAttachPlan> _startupAttachPlan;
+    /// The wait for it, from the event loop.
+    std::unique_ptr<remote::StartupAttach> _startupAttach;
+    /// How the launch ends when the first window could not be had, instead of the event loop's status.
+    std::optional<int> _startupExitCode;
+    /// Ends the event loop with a status; QCoreApplication::exit unless the app was built with another.
+    std::function<void(int)> _exitEventLoop;
 
     /// What `contour client` asked for; empty for a plain launch. @see establishHosting
     std::optional<ClientRequest> _clientRequest;
@@ -1297,6 +1398,8 @@ class ContourGuiApp:
     /// The PATH `contour client --host` looks ssh up on. A member fixed at construction, as every spawner's
     /// vtpty::ProgramSearch holds a view of it for as long as its attach reconnects.
     std::string _sshSearchPath;
+    /// The process's one `ssh -V` probe, shared by every ssh host this app opens.
+    std::shared_ptr<vthost::SshVersionProbe> _sshVersionProbe = std::make_shared<vthost::SshVersionProbe>();
 
     config::Config _config;
     // Sessions are heap-allocated with C++ ownership and never destroyed in production, so their command

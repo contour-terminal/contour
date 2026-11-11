@@ -7,6 +7,7 @@
 #include <format>
 #include <utility>
 
+#include <vthost/Askpass.hpp>
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/Token.hpp>
@@ -30,16 +31,22 @@ namespace
     /// @return The ssh transport to @p host.
     [[nodiscard]] HostTransport sshHostTransport(std::string label,
                                                  config::HostEntry const& host,
-                                                 std::shared_ptr<vthost::IStdioSpawner> spawner)
+                                                 std::shared_ptr<vthost::IStdioSpawner> spawner,
+                                                 SshPrompting prompting)
     {
         auto target =
             vthost::SshTarget { .user = host.url.user, .host = host.url.host, .port = host.url.port };
         if (!host.remoteCommand.empty())
             target.remoteCommand = host.remoteCommand;
+        auto const prompts = prompting.broker ? SshPrompts::Askpass : SshPrompts::Batch;
         return HostTransport {
-            .factory = std::make_shared<vthost::SshTransportFactory>(std::move(target), std::move(spawner)),
+            .factory = std::make_shared<vthost::SshTransportFactory>(std::move(target),
+                                                                     std::move(spawner),
+                                                                     std::move(prompting.broker),
+                                                                     vthost::SshConnectTimeout,
+                                                                     std::move(prompting.probe)),
             .label = std::move(label),
-            .connectTimeout = sshAttachBudget(vthost::SshConnectTimeout),
+            .attach = sshAttachBudget(vthost::SshConnectTimeout, prompts),
         };
     }
 
@@ -73,7 +80,7 @@ namespace
         return HostTransport {
             .factory = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
             .label = std::move(label),
-            .connectTimeout = TlsHostConnectTimeout,
+            .attach = vthost::AttachBudget { TlsHostConnectTimeout },
         };
     }
 } // namespace
@@ -81,11 +88,13 @@ namespace
 std::expected<HostTransport, std::string> makeHostTransport(std::string label,
                                                             config::HostEntry const& host,
                                                             core::platform::FileSystem const& fileSystem,
-                                                            std::shared_ptr<vthost::IStdioSpawner> spawner)
+                                                            std::shared_ptr<vthost::IStdioSpawner> spawner,
+                                                            SshPrompting prompting)
 {
     switch (host.url.scheme)
     {
-        case config::HostScheme::Ssh: return sshHostTransport(std::move(label), host, std::move(spawner));
+        case config::HostScheme::Ssh:
+            return sshHostTransport(std::move(label), host, std::move(spawner), std::move(prompting));
         case config::HostScheme::Tls: return tlsHostTransport(std::move(label), host, fileSystem);
     }
     return std::unexpected { std::format("{}: the host's scheme is not supported", label) };

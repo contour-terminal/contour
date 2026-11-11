@@ -90,6 +90,7 @@
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/SshTransport.hpp>
 #include <vthost/StatePath.hpp>
 #include <vthost/StdioAttach.hpp>
 #include <vthost/StdioChild.hpp>
@@ -1712,8 +1713,10 @@ int ContourApp::controlVerbAction(ControlVerb const& verb)
     auto resolveSavedHost = makeSavedHostResolver(
         [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
         fileSystem,
-        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
-            .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }));
+        vthost::makeSystemStdioSpawner(
+            vtpty::ProgramSearch { .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }),
+        // The CLI has no window to prompt in: batch mode.
+        SshPrompting { .broker = nullptr, .probe = std::make_shared<vthost::SshVersionProbe>() });
     return runControlVerb(verb,
                           parameters(),
                           ControlIo { .env = processEnvironment(),
@@ -1735,8 +1738,10 @@ int ContourApp::mcpAction()
     auto resolveSavedHost = makeSavedHostResolver(
         [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
         fileSystem,
-        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
-            .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }));
+        vthost::makeSystemStdioSpawner(
+            vtpty::ProgramSearch { .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }),
+        // The CLI has no window to prompt in: batch mode.
+        SshPrompting { .broker = nullptr, .probe = std::make_shared<vthost::SshVersionProbe>() });
     // Standard output carries the protocol and nothing else; the diagnostics go to standard error.
     return runMcpCommand(parameters(),
                          ControlIo { .env = processEnvironment(),

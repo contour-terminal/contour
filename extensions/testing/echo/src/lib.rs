@@ -7,7 +7,9 @@
 //! names) is what `load` returns, and `log` is a message `load` passes to the host's `log` import.
 //! Two more make the guest describe what it receives, so that a test can check every type the host
 //! lowers: `events = describe` renders each event as text (see [`describe_event`]) and asks for a
-//! render, and `state = describe` makes `load` read the host's `state` and render it as text (see
+//! render, `events = describe-followed` does so only for the kinds `subscribe` lists -- not for the
+//! resizes and timers every guest is sent, which would otherwise hide the last event it follows, while
+//! a reply still shows as hex, as it does with no description -- and `state = describe` makes `load` read the host's `state` and render it as text (see
 //! [`describe_state`]). `trap = unfocused` makes `render` trap while the pane is unfocused, so that a test can
 //! fault an instance and let the next one, after the host restarts it, succeed.
 //! Built for `wasm32-wasip1` as a plain core module, never componentized.
@@ -49,6 +51,10 @@ const UNFOCUSED: &str = "unfocused";
 /// The value of [`EVENTS_KEY`] and [`STATE_KEY`] that turns description on.
 const DESCRIBE: &str = "describe";
 
+/// The value of [`EVENTS_KEY`] that describes only the events of the kinds `subscribe` lists, and shows a
+/// reply as hex.
+const DESCRIBE_FOLLOWED: &str = "describe-followed";
+
 /// The event kind names a `subscribe` setting may list, and the flag each stands for.
 const EVENT_KINDS: [(&str, EventKinds); 9] = [
     ("title", EventKinds::TITLE),
@@ -69,6 +75,22 @@ fn parse_event_kinds(names: &str) -> EventKinds {
         .map(str::trim)
         .filter_map(|name| EVENT_KINDS.iter().find(|(known, _)| *known == name))
         .fold(EventKinds::empty(), |kinds, (_, flag)| kinds | *flag)
+}
+
+/// @return The flag of @p ev's kind; empty for the kinds every guest is sent, subscribed or not.
+fn kind_of(ev: &Event) -> EventKinds {
+    match ev {
+        Event::Title(_) => EventKinds::TITLE,
+        Event::Cwd(_) => EventKinds::CWD,
+        Event::ForegroundProcess(_) => EventKinds::FOREGROUND_PROCESS,
+        Event::InputMode(_) => EventKinds::INPUT_MODE,
+        Event::Tabs(_) => EventKinds::TABS,
+        Event::UserVar(_) => EventKinds::USER_VAR,
+        Event::Progress(_) => EventKinds::PROGRESS,
+        Event::Focus(_) => EventKinds::FOCUS,
+        Event::FontChanged(_) => EventKinds::FONT,
+        Event::Resized(_) | Event::Timer | Event::Reply(_) => EventKinds::empty(),
+    }
 }
 
 /// @return The WIT name of @p mode.
@@ -165,14 +187,36 @@ fn describe_state(state: &host::StateSnapshot) -> String {
     )
 }
 
+/// Which events `update` describes, as the `events` setting chooses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Described {
+    /// None: only a reply changes the output.
+    None,
+    /// Every event.
+    All,
+    /// The events of these kinds, which `subscribe` lists; a reply still shows as hex, as with `None`.
+    Followed(EventKinds),
+}
+
+impl Described {
+    /// @return Whether @p ev is described.
+    fn includes(self, ev: &Event) -> bool {
+        match self {
+            Described::None => false,
+            Described::All => true,
+            Described::Followed(kinds) => (kinds & kind_of(ev)) != EventKinds::empty(),
+        }
+    }
+}
+
 struct Echo;
 
 thread_local! {
     /// What `render` writes. A guest instance is single-threaded, so this is the instance's state.
     static OUTPUT: RefCell<String> = const { RefCell::new(String::new()) };
 
-    /// Whether `update` describes every event (the `events` setting).
-    static DESCRIBE_EVENTS: RefCell<bool> = const { RefCell::new(false) };
+    /// Which events `update` describes (the `events` setting).
+    static DESCRIBE_EVENTS: RefCell<Described> = const { RefCell::new(Described::None) };
 
     /// Whether `render` traps while the pane is unfocused (the `trap` setting).
     static TRAP_UNFOCUSED: RefCell<bool> = const { RefCell::new(false) };
@@ -193,17 +237,23 @@ impl Guest for Echo {
             host::log(host::LogLevel::Info, message);
         }
         set_output(setting(TEXT_KEY).unwrap_or_default().to_string());
-        DESCRIBE_EVENTS
-            .with(|describe| *describe.borrow_mut() = setting(EVENTS_KEY) == Some(DESCRIBE));
+        let subscribed = setting(SUBSCRIBE_KEY).map_or(EventKinds::empty(), parse_event_kinds);
+        let described = match setting(EVENTS_KEY) {
+            Some(DESCRIBE) => Described::All,
+            Some(DESCRIBE_FOLLOWED) => Described::Followed(subscribed),
+            _ => Described::None,
+        };
+        DESCRIBE_EVENTS.with(|describe| *describe.borrow_mut() = described);
         TRAP_UNFOCUSED.with(|trap| *trap.borrow_mut() = setting(TRAP_KEY) == Some(UNFOCUSED));
         if setting(STATE_KEY) == Some(DESCRIBE) {
             set_output(describe_state(&host::state()));
         }
-        setting(SUBSCRIBE_KEY).map_or(EventKinds::empty(), parse_event_kinds)
+        subscribed
     }
 
     fn update(ev: Event) -> RenderRequest {
-        if DESCRIBE_EVENTS.with(|describe| *describe.borrow()) {
+        let described = DESCRIBE_EVENTS.with(|describe| *describe.borrow());
+        if described.includes(&ev) {
             set_output(describe_event(&ev));
             return RenderRequest::Render;
         }

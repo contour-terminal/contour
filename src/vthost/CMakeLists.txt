@@ -1,6 +1,8 @@
 add_library(vthost STATIC
     AccessFile.cpp
     AccessFile.hpp
+    Askpass.hpp
+    AttachBudget.hpp
     AttachPlan.cpp
     AttachPlan.hpp
     SwitchClient.hpp
@@ -108,6 +110,7 @@ add_library(vthost STATIC
     ShutdownSignals.hpp
     StartContinuity.hpp
     SocketPath.hpp
+    SpawnEnvironment.hpp
     SshTransport.cpp
     SshTransport.hpp
     StatePath.hpp

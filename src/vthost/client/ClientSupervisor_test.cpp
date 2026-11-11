@@ -293,6 +293,42 @@ TEST_CASE("a first connect that fails ends Failed without retrying", "[vthost][r
     CHECK(h.transport->calls() == 1);
 }
 
+TEST_CASE("a first connect the user cancels ends Failed, saying so", "[vthost][reconnect]")
+{
+    // A dismissed login prompt: the transport's Cancelled, with stop() never called.
+    auto daemon = Daemon {};
+    auto h =
+        Supervised { daemon, { failing(TransportErrorKind::Cancelled, "The ssh login was cancelled.") } };
+    daemon.loop.blockOn(h.supervisor->run());
+
+    CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
+    CHECK(h.states.back().reason == "The ssh login was cancelled.");
+    CHECK(h.transport->calls() == 1);
+}
+
+TEST_CASE("a reconnect the user cancels is not retried, and says so", "[vthost][reconnect]")
+{
+    auto daemon = Daemon {};
+    auto h = Supervised {
+        daemon, { daemon.serving(), failing(TransportErrorKind::Cancelled, "The ssh login was cancelled.") }
+    };
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        if (!connected)
+        {
+            h->supervisor->stop();
+            co_return;
+        }
+        daemon->dropConnection();
+        // The supervisor ends on its own, as nothing is left to retry.
+        co_await h->reached(ConnectionState::Refused);
+    }(&h, &daemon));
+
+    CHECK(h.states.back().state == ConnectionState::Refused);
+    CHECK(h.states.back().reason == "The ssh login was cancelled.");
+    CHECK(h.transport->calls() == 2);
+}
+
 TEST_CASE("a first connect the daemon refuses ends Failed", "[vthost][reconnect]")
 {
     auto daemon = Daemon {};

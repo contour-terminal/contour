@@ -105,7 +105,9 @@ class WindowSwitcher final: public SwitchingService
     };
 
     /// @return Where @p target goes from the window @p own serves.
-    [[nodiscard]] Destination destinationOf(DaemonLink& own, session::SwitchTarget const& target);
+    [[nodiscard]] Destination destinationOf(DaemonLink& own,
+                                            session::SwitchTarget const& target,
+                                            vtworkspace::WorkspaceId window);
 
     /// One request, from its resolution to its outcome.
     struct Request

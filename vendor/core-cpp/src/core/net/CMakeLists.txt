@@ -140,6 +140,7 @@ core_cpp_add_module(net KIND STATIC
         IoBackend.hpp
         ISocket.hpp
         ITlsContext.hpp
+        ITlsSession.hpp
         KeepAlive.hpp
         LingeringClose.hpp
         PlatformLoop.hpp
@@ -152,6 +153,7 @@ core_cpp_add_module(net KIND STATIC
         SleepUntil.hpp
         Sockets.hpp
         SplitSocket.hpp
+        SshAgentEndpoint.hpp
         TcpClient.hpp
         ThreadedAddressResolver.hpp
         UdpSocket.hpp
@@ -211,6 +213,7 @@ core_cpp_add_module(net KIND STATIC
         detail/DialPrimitives.hpp
         detail/PeerAddress.hpp
         detail/SocketErrors.hpp
+        detail/SshAgentEndpoint.hpp
         detail/WakeupChannel.hpp
     SOURCES_POSIX
         detail/WouldBlock.hpp
@@ -227,6 +230,7 @@ core_cpp_add_module(net KIND STATIC
         posix/PosixSocket.hpp
         posix/SocketErrors.cpp
         posix/SocketsPosix.cpp
+        posix/SshAgentEndpoint.cpp
         posix/StreamSocketOptions.cpp
         posix/UdpSocket.cpp
         posix/UnixListener.cpp
@@ -251,10 +255,13 @@ core_cpp_add_module(net KIND STATIC
         windows/IocpOperation.hpp
         windows/IocpSocket.cpp
         windows/IocpSocket.hpp
+        windows/NamedPipe.cpp
+        windows/NamedPipe.hpp
         windows/NetworkEvents.cpp
         windows/NetworkEvents.hpp
         windows/SocketErrors.cpp
         windows/SocketsWin32.cpp
+        windows/SshAgentEndpoint.cpp
         windows/StreamSocketOptions.cpp
         windows/UdpSocket.cpp
         windows/UnixSocketPath.cpp
@@ -277,14 +284,27 @@ core_cpp_add_module(net KIND STATIC
 #
 # testing/StrictTlsPeer is the TLS layer's test double, public like every double under testing/:
 # OpenSSL driven by hand, which a consumer can hold its own TLS code against as the tests here hold
-# this layer. It is the second of the two units `core-cpp.openssl-seam` lets include OpenSSL
+# this layer. It is one of the units `core-cpp.openssl-seam` lets include OpenSSL
 # (tests/cmake/check-openssl-seam.cmake), and its header names no OpenSSL type.
+#
+# SshKeys is OpenSSH public keys and SSHSIG verification, here because the signatures are
+# OpenSSL's to verify; testing/SoftwareSecurityKey is its tests' FIDO authenticator, made of
+# software because ssh-keygen makes sk signatures only with a device attached. Both are permitted
+# units of the seam, and neither header names an OpenSSL type. SshAgent is the ssh-agent protocol
+# over a socket: no OpenSSL, here only for SshPublicKey.
 core_cpp_add_module(net_tls KIND STATIC
     HEADERS
+        SshAgent.hpp
+        SshKeys.hpp
         Tls.hpp
+        testing/SoftwareSecurityKey.hpp
         testing/StrictTlsPeer.hpp
     SOURCES
+        SshAgent.cpp
+        SshKeys.cpp
         Tls.cpp
+        detail/SshWire.hpp
+        testing/SoftwareSecurityKey.cpp
         testing/StrictTlsPeer.cpp
     PUBLIC_LIBS core::net
     PRIVATE_LIBS OpenSSL::SSL OpenSSL::Crypto)
@@ -389,6 +409,7 @@ core_cpp_add_test(net
         posix/FdPassing_test.cpp
         posix/PortSharing_test.cpp
         posix/SocketErrors_test.cpp
+        posix/SshAgentEndpoint_test.cpp
         posix/UnixSocket_test.cpp
         posix/WaitReadableClose_test.cpp
     SOURCES_WINDOWS
@@ -396,9 +417,11 @@ core_cpp_add_test(net
         windows/IocpBackend_test.cpp
         windows/IocpDial_test.cpp
         windows/IocpSocket_test.cpp
+        windows/NamedPipe_test.cpp
         windows/NetworkEvents_test.cpp
         windows/PortSharing_test.cpp
         windows/SocketErrors_test.cpp
+        windows/SshAgentEndpoint_test.cpp
         windows/UnixListener_test.cpp
     LABELS loopback
     # IoAwaitable_test.cpp's loop of inline completions skips where symmetric transfer is not a
@@ -420,12 +443,17 @@ endif()
 # core::net_tls, and OpenSSL stays PRIVATE to it.
 core_cpp_add_test(net NAME net_tls
     SOURCES
+        SshAgent_test.cpp
+        SshKeys_test.cpp
         TlsContext_test.cpp
         TlsLifetime_test.cpp
         TlsCancelRead_test.cpp
+        TlsSession_test.cpp
         TlsSocket_test.cpp
         Tls_test.cpp
     LABELS loopback
+    # The keys and signatures ssh-keygen made, read where they are checked in (testdata/ssh/README.md).
+    DEFINITIONS "CORE_CPP_SSH_TESTDATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/testdata/ssh\""
     TIMEOUT 120)
 
 # `EventLoop::run()` and `EventLoop::blockOn()` on a host-driven loop are precondition violations,

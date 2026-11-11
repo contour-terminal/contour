@@ -128,9 +128,12 @@ file, so save it first.
 Contour runs, for every attach and every reconnect:
 
 ```sh
-ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+ssh -T -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
     [-p PORT] -- [USER@]HOST contour daemon --stdio
 ```
+
+with `SSH_ASKPASS` set to Contour itself, so that anything ssh needs to ask you is asked in a dialog of the
+window you attach from.
 
 On the remote side, `contour daemon --stdio` reaches your daemon there — starting it if none runs, the
 same way a local `contour client` does — and relays the session between it and ssh.
@@ -155,15 +158,16 @@ same way a local `contour client` does — and relays the session between it and
       remote_command: "/opt/contour/bin/contour daemon --stdio"
   ```
 
-- **Key or agent authentication.** Contour never answers a prompt: there is no terminal to type a
-  password, a key passphrase, a second factor or a host-key confirmation into. Load your key into the
-  agent (`ssh-add`) or use a key without a passphrase.
-- **The host key accepted once.** The first connection to a new host asks whether to trust its key.
-  Run this once in a terminal and answer `yes`, then attach from Contour:
-
-  ```sh
-  ssh me@homepc
-  ```
+- **OpenSSH 8.4 or newer**, which is what lets ssh hand its questions to Contour. Every login method
+  OpenSSH has then works: a key or the agent, a password, a key's passphrase, a second factor
+  (keyboard-interactive), a security key's touch, and the first-time host-key question. Each one appears as
+  a dialog in the window that started the attach (the first attach of `contour client --host`, which runs
+  before its window opens, asks in a small window of its own); a password or passphrase is typed into a masked field,
+  and a host key's fingerprint is shown exactly as ssh words it, with No as the default answer. Nothing you
+  type is stored by Contour. Cancelling a dialog ends the attempt as "Cancelled".
+  Windows 10's built-in OpenSSH is older than that (8.1): install the current
+  [Win32-OpenSSH](https://github.com/PowerShell/Win32-OpenSSH/releases) release, or keep to a key without a
+  passphrase, which also works there.
 
 Your `~/.ssh/config` applies as usual: host aliases, `User`, `Port`, `ProxyJump` and `IdentityFile` all
 work, so `url: "ssh://homepc"` can rely on what that file says about `homepc`.
@@ -174,8 +178,11 @@ Contour reads what ssh reports and says what to do. The messages, and the fix fo
 
 | Message (abridged) | Cause | Fix |
 | --- | --- | --- |
-| `ssh could not log in to ssh://me@homepc without a prompt … Run this once in a terminal, then attach again: ssh me@homepc` | The host key is not known yet, or no key/agent identity was accepted. | Run the command shown in a terminal. Accept the host key; if it asks for a password, set up a key (`ssh-copy-id me@homepc`) or load yours into the agent (`ssh-add`). |
-| `The host key of ssh://me@homepc has changed …` | The remote machine's key differs from the one in `~/.ssh/known_hosts`: a reinstalled machine, or someone in between. | If you expected it, remove the old key with `ssh-keygen -R homepc` and run `ssh me@homepc` once. If you did not, do not connect. |
+| `The host key of ssh://me@homepc was not accepted: …` | You answered No to the host-key question, or dismissed it. | Attach again, compare the fingerprint with the one the machine's owner gives you, and answer Yes only if it matches. |
+| `ssh could not log in to ssh://me@homepc: …` | The login was refused: a wrong password, or no key, passphrase or second factor ssh accepted. ssh's own words follow. | Attach again and answer the dialog; for a key login, check `ssh-add -l` and that the key is in the remote `authorized_keys`. |
+| `The ssh login to ssh://me@homepc was cancelled.` | You dismissed a dialog of the login: the password, a question, a security key's notice. | Attach again and answer it. |
+| `ssh could not log in to ssh://me@homepc without a prompt … Contour can only ask for passwords with OpenSSH 8.4 or newer (found …)` | The ssh on this machine is older than 8.4, so Contour cannot answer its prompts and ssh runs in batch mode: only a key or the agent can log in. | Upgrade OpenSSH (on Windows, install the current Win32-OpenSSH release), or load a key into the agent (`ssh-add`). |
+| `The host key of ssh://me@homepc has changed …` | The remote machine's key differs from the one in `~/.ssh/known_hosts`: a reinstalled machine, or someone in between. | If you expected it, remove the old key with `ssh-keygen -R homepc`, attach again, and answer the host-key question. If you did not, do not connect. |
 | `ssh could not reach ssh://me@homepc: …` | The name does not resolve, nothing answers on the port, or there is no route. ssh's own words follow. | Check the name, the port and the network (VPN, Tailscale). Contour retries this on its own while a window waits. |
 | `Contour was not found on ssh://me@homepc by a non-interactive ssh login …` | `contour` is not installed there, or not on the non-interactive `PATH`. | Install it, or set `remote_command:` to its full path (see above). |
 | `Contour on ssh://me@homepc is too old for ssh attach …` | The remote Contour has no `contour daemon --stdio`. | Upgrade Contour on the remote machine. |
@@ -186,7 +193,11 @@ Contour reads what ssh reports and says what to do. The messages, and the fix fo
 | `ssh was not found on PATH; install the OpenSSH client` | No ssh client on this machine. | Install OpenSSH. |
 
 A connection that drops mid-session — the laptop sleeps, the Wi-Fi changes — is reconnected with a
-fresh ssh, while the window shows that it is reconnecting. A failure that retrying cannot fix (a refused
+fresh ssh, while the window shows that it is reconnecting. A reconnect always goes on, in the background: a host that logs in with a key or the agent
+needs nobody. If the login asks you something again (a password that is not in the agent) and the window
+that attached is not on screen -- minimised or hidden -- the question waits instead of being put to a
+window nobody sees, and the window says "Reconnecting needs your attention"; it is shown once the window
+is. Contour never raises or focuses a window by itself for this. A failure that retrying cannot fix (a refused
 login, a host key, a missing Contour) ends the attempt with its message instead of repeating it.
 
 ## Over TLS

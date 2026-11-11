@@ -43,14 +43,19 @@ class StrictTlsPeer
 {
   public:
     /// A client that verifies nothing (the cases check identity by asking, not by failing).
+    /// @param maximumVersion The newest protocol version it offers; @c TlsVersion::Tls12 makes it a
+    ///        client that cannot speak TLS 1.3.
     /// @return The peer, or why OpenSSL could not build it.
-    [[nodiscard]] static std::expected<std::unique_ptr<StrictTlsPeer>, std::string> client();
+    [[nodiscard]] static std::expected<std::unique_ptr<StrictTlsPeer>, std::string> client(
+        TlsVersion maximumVersion = TlsVersion::Tls13);
 
     /// A server presenting @p material.
     /// @param material The certificate chain and key to serve.
+    /// @param maximumVersion The newest protocol version it accepts; @c TlsVersion::Tls12 makes it a
+    ///        server that cannot speak TLS 1.3.
     /// @return The peer, or why OpenSSL refused the material.
     [[nodiscard]] static std::expected<std::unique_ptr<StrictTlsPeer>, std::string> server(
-        CertKeyPem const& material);
+        CertKeyPem const& material, TlsVersion maximumVersion = TlsVersion::Tls13);
 
     ~StrictTlsPeer();
     StrictTlsPeer(StrictTlsPeer const&) = delete;

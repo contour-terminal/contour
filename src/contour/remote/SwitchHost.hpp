@@ -33,9 +33,10 @@ class ISwitchHost
     /// Resolves a daemon to what a link to it is built with, as Attach to Host and the Connect picker resolve
     /// it: a local label to its socket, a saved host to its transport. Its intent is the caller's to set.
     /// @param daemon The daemon.
+    /// @param window The window that asks for the switch: where the login prompts of the new link are shown.
     /// @return The configuration, or why the daemon cannot be reached as configured.
     [[nodiscard]] virtual std::expected<DaemonLinkConfig, std::string> linkConfigFor(
-        DaemonAddress const& daemon) = 0;
+        DaemonAddress const& daemon, vtworkspace::WorkspaceId window) = 0;
 
     /// Makes a link and starts its connect (ContourGuiApp::startDaemonLink).
     /// @param config What it is built with.

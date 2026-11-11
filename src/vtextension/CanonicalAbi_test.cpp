@@ -447,6 +447,27 @@ TEST_CASE("CanonicalAbi.echo.events", "[vtextension][guest]")
     }
 }
 
+TEST_CASE("CanonicalAbi.echo.events.followed", "[vtextension][guest]")
+{
+    // Only the kinds it subscribed to are described: a resize every guest is sent, subscribed or not, leaves
+    // the last followed event shown.
+    auto guest = RunningGuest(readTestModule("echo.wasm"));
+    REQUIRE(
+        guest.instance().load({ { "events", "describe-followed" }, { "subscribe", "font" } }).has_value());
+    auto const font =
+        FontChanged { .metrics = FontMetrics { .pointSize = 14, .cellWidth = 11, .cellHeight = 22 } };
+    CHECK(guest.instance().update(font).value() == RenderRequest::Render);
+    CHECK(guest.instance().update(Resized { .size = SurfaceSize { .cols = 80, .rows = 1 } }).value()
+          == RenderRequest::None);
+    CHECK(guest.instance().update(TitleChanged { .title = "vim" }).value() == RenderRequest::None);
+    CHECK(guest.instance().render(surface(80, 1)).value() == "font-changed:14pt 11x22");
+
+    // A reply is not described, but still shown as hex, as without description.
+    CHECK(guest.instance().update(ReplyBytes { .bytes = { 0x1b, '[', '0', 'n' } }).value()
+          == RenderRequest::Render);
+    CHECK(guest.instance().render(surface(80, 1)).value() == "1b5b306e");
+}
+
 TEST_CASE("CanonicalAbi.echo.state", "[vtextension][guest]")
 {
     // The state-snapshot record, lowered into the guest's memory at the address it passes.

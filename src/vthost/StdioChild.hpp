@@ -19,6 +19,8 @@
 #include <span>
 #include <string>
 
+#include <vthost/SpawnEnvironment.hpp>
+
 namespace vthost
 {
 
@@ -80,9 +82,12 @@ class IStdioSpawner
     /// Starts @p argv. Must run on @p loop's thread (adoptFd/adoptSocket require it).
     /// @param loop Drives the returned transport.
     /// @param argv The program and its arguments; argv[0] is looked up as a program.
+    /// @param environment What the child's environment adds to the parent's.
     /// @return The transport and the child, or why it could not be started.
     [[nodiscard]] virtual std::expected<SpawnedStdioChild, StdioSpawnError> spawn(
-        core::net::EventLoop& loop, std::span<std::string const> argv) = 0;
+        core::net::EventLoop& loop,
+        std::span<std::string const> argv,
+        SpawnEnvironment const& environment) = 0;
 };
 
 /// The operating system's spawner.
