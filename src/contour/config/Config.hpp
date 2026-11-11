@@ -1011,7 +1011,7 @@ struct TerminalProfile
     } }; // namespace contour::config
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     /// Variables written in this profile, before launch defaults or inheritance are applied.
-    vtpty::Process::Environment configuredEnvironment;
+    vtpty::Process::Environment configuredEnvironment {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
     ConfigEntry<bool, documentation::CopyCommandPreserveMultiline> copyCommandPreserveMultiline { false };
