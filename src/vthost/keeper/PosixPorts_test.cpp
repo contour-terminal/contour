@@ -62,7 +62,8 @@ PosixKeeperPorts makePorts(ProcessWatch watch = ProcessWatch::ProcessHandle,
 {
     auto ports = makePosixKeeperPorts({ .daemonArguments = std::move(daemonArguments),
                                         .environment = { "PATH=/usr/bin:/bin" },
-                                        .processWatch = watch });
+                                        .processWatch = watch,
+                                        .images = nullptr });
     REQUIRE(ports.has_value());
     return std::move(*ports);
 }
@@ -628,8 +629,8 @@ TEST_CASE("the daemon child dies with its keeper", "[keeper][posix]")
             ::_exit(1);
         for (auto const fd: { 0, 1, 2 })
             ::dup2(null, fd);
-        auto ports =
-            makePosixKeeperPorts({ .daemonArguments = { "60" }, .environment = {}, .processWatch = {} });
+        auto ports = makePosixKeeperPorts(
+            { .daemonArguments = { "60" }, .environment = {}, .processWatch = {}, .images = nullptr });
         auto launched = ports ? (*ports).launcher->launch(sleep) : std::unexpected { SpawnError::Unknown };
         auto const pid = launched ? launched->pid : 0;
         std::ignore = ::write(report.writer.get(), &pid, sizeof(pid));

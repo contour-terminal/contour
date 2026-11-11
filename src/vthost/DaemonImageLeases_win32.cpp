@@ -134,6 +134,21 @@ namespace
             return failure(leaseFile, ERROR_SHARING_VIOLATION);
         }
 
+        [[nodiscard]] std::unique_ptr<ImageLease> tryHold(std::filesystem::path const& leaseFile) override
+        {
+            // As hold() opens it, once: a claim's sharing violation, or its pending delete, is busy.
+            auto const handle = ::CreateFileW(leaseFile.c_str(),
+                                              GENERIC_READ,
+                                              FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                              nullptr,
+                                              OPEN_ALWAYS,
+                                              FILE_ATTRIBUTE_NORMAL,
+                                              nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                return nullptr;
+            return std::make_unique<HandleLease>(handle);
+        }
+
         [[nodiscard]] std::unique_ptr<ImageLease> claim(std::filesystem::path const& leaseFile) override
         {
             // Shared with nobody, and deleted on close: the lease file goes when the claim does.

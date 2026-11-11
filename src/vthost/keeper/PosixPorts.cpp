@@ -31,6 +31,7 @@
 #include <vthost/keeper/DescriptorSocket.hpp>
 #include <vthost/keeper/Frame.hpp>
 #include <vthost/keeper/Kqueue.hpp>
+#include <vthost/keeper/RestartImages.hpp>
 
 #ifdef __linux__
     #include <sys/prctl.h>
@@ -769,6 +770,16 @@ namespace
         ProcessWatch _watch;
     };
 
+    class PosixSocketFiles final: public SocketFiles
+    {
+      public:
+        void remove(std::filesystem::path const& path) override
+        {
+            // A file that is gone already needs no removal.
+            std::ignore = ::unlink(path.c_str());
+        }
+    };
+
     class PosixSignaller final: public Signaller
     {
       public:
@@ -852,10 +863,35 @@ namespace
             struct kevent event {};
             auto const none = timespec {};
             while (::kevent(_handle.get(), nullptr, 0, &event, 1, &none) == 1)
-                meaningOf(static_cast<int>(event.ident));
+            {
+                if (event.filter == EVFILT_PROC)
+                    meanings.push_back(SignalMeaning::ChildEnded);
+                else
+                    meaningOf(static_cast<int>(event.ident));
+            }
 #endif
             return meanings;
         }
+
+#ifdef CONTOUR_KEEPER_KQUEUE
+        /// Reports @p pid's exit through this watch as a ChildEnded (EVFILT_PROC, NOTE_EXIT), without reaping
+        /// it: kqueue's systems have no pidfd, and a SIGCHLD that kqueue may see coalesced, or not at all
+        /// while its action is SIG_DFL, is no lone ground to look for one. A process that ended already
+        /// cannot be watched; the caller looks for that one on its next wait regardless.
+        /// @param pid A child of this process.
+        void watchExit(int pid) const noexcept
+        {
+            struct kevent change {};
+            EV_SET(&change,
+                   static_cast<uintptr_t>(pid),
+                   EVFILT_PROC,
+                   EV_ADD | EV_ONESHOT,
+                   NOTE_EXIT,
+                   0,
+                   nullptr);
+            std::ignore = ::kevent(_handle.get(), &change, 1, nullptr, 0, nullptr);
+        }
+#endif
 
       private:
         SignalWatch()
@@ -948,6 +984,10 @@ namespace
             auto const handle = process.processHandle >= 0 ? process.processHandle : owned.get();
             if (handle < 0)
                 _isFallbackUnchecked = true; // It may have ended before SIGCHLD was looked for.
+#ifdef CONTOUR_KEEPER_KQUEUE
+            // No pidfd: kqueue reports its exit, and SIGCHLD stays the backstop.
+            _signals->watchExit(process.pid);
+#endif
             _pids.push_back({ .pid = process.pid,
                               .role = process.role,
                               .owned = std::move(owned),
@@ -1165,7 +1205,9 @@ KeeperPorts PosixKeeperPorts::ports() const
              .events = *events,
              .signaller = *signaller,
              .budget = *budget,
-             .clock = *clock };
+             .clock = *clock,
+             .images = *images,
+             .socketFiles = *socketFiles };
 }
 
 std::expected<PosixKeeperPorts, std::error_code> makePosixKeeperPorts(KeeperPortsConfig config)
@@ -1185,6 +1227,8 @@ std::expected<PosixKeeperPorts, std::error_code> makePosixKeeperPorts(KeeperPort
         .launcher = std::make_unique<PosixDaemonLauncher>(forker, std::move(config.daemonArguments)),
         .spawner = std::make_unique<PosixShellSpawner>(forker, config.processWatch),
         .signaller = std::make_unique<PosixSignaller>(),
+        .images = config.images ? std::move(config.images) : std::make_unique<CommittedRestartImage>(),
+        .socketFiles = std::make_unique<PosixSocketFiles>(),
     };
 }
 

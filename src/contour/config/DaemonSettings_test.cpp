@@ -157,3 +157,50 @@ TEST_CASE("daemon.keeper.restart_hung is on unless turned off", "[config][daemon
                     .daemon.value()
                     .keeper.restartHung);
 }
+
+TEST_CASE("daemon.keeper's crash-loop numbers are read in whole seconds", "[config][daemon]")
+{
+    auto const defaults = vthost::keeper::RestartPolicyConfig {};
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  keeper:\n"
+                                           "    give_up_crashes: 3\n"
+                                           "    give_up_window: 60\n"
+                                           "    backoff_start: 2\n"
+                                           "    backoff_cap: 10\n"
+                                           "    startup_timeout: 45\n"
+                                           "    stop_timeout: 20\n");
+    auto const& policy = config.daemon.value().keeper.restartPolicy;
+    CHECK(policy.giveUpCrashes == 3);
+    CHECK(policy.giveUpWindow == std::chrono::seconds { 60 });
+    CHECK(policy.backoffStart == std::chrono::seconds { 2 });
+    CHECK(policy.backoffCap == std::chrono::seconds { 10 });
+    CHECK(policy.restartStartupBound == std::chrono::seconds { 45 });
+    CHECK(policy.daemonExitBound == std::chrono::seconds { 20 });
+    // What the keys do not name keeps its default.
+    CHECK(policy.quickRepeat == defaults.quickRepeat);
+    CHECK(policy.grace == defaults.grace);
+}
+
+TEST_CASE("daemon.keeper's crash-loop numbers keep their defaults where unreadable", "[config][daemon]")
+{
+    auto const defaults = vthost::keeper::RestartPolicyConfig {};
+    CHECK(contour::config::Config {}.daemon.value().keeper.restartPolicy.giveUpCrashes
+          == defaults.giveUpCrashes);
+    auto const config = loadConfigFromYaml("daemon:\n"
+                                           "  keeper:\n"
+                                           "    give_up_crashes: 0\n"
+                                           "    give_up_window: soon\n"
+                                           "    startup_timeout: -5\n");
+    auto const& policy = config.daemon.value().keeper.restartPolicy;
+    CHECK(policy.giveUpCrashes == defaults.giveUpCrashes);
+    CHECK(policy.giveUpWindow == defaults.giveUpWindow);
+    CHECK(policy.restartStartupBound == defaults.restartStartupBound);
+}
+
+TEST_CASE("daemon.keeper.backoff_cap is never below backoff_start", "[config][daemon]")
+{
+    auto const config = loadConfigFromYaml("daemon:\n  keeper:\n    backoff_start: 40\n    backoff_cap: 5\n");
+    auto const& policy = config.daemon.value().keeper.restartPolicy;
+    CHECK(policy.backoffStart == std::chrono::seconds { 40 });
+    CHECK(policy.backoffCap == std::chrono::seconds { 40 });
+}

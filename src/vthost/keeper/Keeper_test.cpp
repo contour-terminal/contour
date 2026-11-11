@@ -361,6 +361,34 @@ class FakeBudget final: public DescriptorBudget
     [[nodiscard]] uint64_t originalSoftLimit() const override { return original; }
 };
 
+/// Picks what the test says: the committed image until it names a newer one.
+class FakeRestartImages final: public RestartImages
+{
+  public:
+    std::optional<std::filesystem::path> newer; ///< What a pick returns from now on; none for the committed.
+    std::vector<std::filesystem::path> picks;   ///< The committed image each pick was asked about.
+
+    [[nodiscard]] std::filesystem::path pick(std::filesystem::path const& committed) override
+    {
+        picks.push_back(committed);
+        return newer.value_or(committed);
+    }
+};
+
+class FakeSocketFiles final: public SocketFiles
+{
+  public:
+    std::vector<std::filesystem::path> removed;
+    std::function<void()> onRemove = [] {
+    };
+
+    void remove(std::filesystem::path const& path) override
+    {
+        removed.push_back(path);
+        onRemove();
+    }
+};
+
 class FakeLabelLock final: public LabelLock
 {
   public:
@@ -398,6 +426,8 @@ struct Harness
     FakeEvents events;
     FakeSignaller signaller { events };
     FakeBudget budget;
+    FakeRestartImages images;
+    FakeSocketFiles socketFiles;
     std::function<void()> onLockReleased = [] {
     };
     std::optional<KeeperOutcome> outcome;
@@ -411,7 +441,9 @@ struct Harness
                                              .events = events,
                                              .signaller = signaller,
                                              .budget = budget,
-                                             .clock = clock },
+                                             .clock = clock,
+                                             .images = images,
+                                             .socketFiles = socketFiles },
                                std::make_unique<FakeLabelLock>([this] { onLockReleased(); }),
                                policy,
                                daemonImage(),
@@ -1190,6 +1222,159 @@ TEST_CASE("five quick crashes give up, retry once after the grace, then end ever
     h.run();
     CHECK(h.outcome == KeeperOutcome::GaveUp);
     CHECK(h.exitStatus != 0);
+}
+
+namespace
+{
+/// The steps of a served first daemon that crashes, and of four restarts that crash on start, each after the
+/// backoff the policy's default numbers give it: the fifth crash within five minutes gives up.
+void crashFiveTimes(Harness& h)
+{
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));     // restart at once
+    h.events.then(deliver(ended(FirstDaemon + 1, Segfault))); // back off 1 s
+    h.events.then(h.after(1s));
+    h.events.then(deliver(ended(FirstDaemon + 2, Segfault))); // back off 2 s
+    h.events.then(h.after(2s));
+    h.events.then(deliver(ended(FirstDaemon + 3, Segfault))); // back off 4 s
+    h.events.then(h.after(4s));
+    h.events.then(deliver(ended(FirstDaemon + 4, Segfault))); // the fifth: give up
+}
+} // namespace
+
+TEST_CASE("a daemon that crashes on every start gives up after five, and the shells live", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    h.events.then(
+        deliver({ frameOf(Serving {}), spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
+    crashFiveTimes(h);
+    h.events.then(h.after(119s)); // nearly the whole grace period
+    h.events.then(check([&] {
+        CHECK(h.launcher.images.size() == 5); // no sixth start: given up
+        CHECK(!master.writerClosed());        // the shells are kept
+        CHECK(h.signaller.to(FirstShell).empty());
+        CHECK(h.socketFiles.removed.empty());
+    }));
+    h.events.then(h.after(1s));
+    h.events.then(check([&] { CHECK(h.launcher.images.size() == 6); })); // the one retry
+    h.run();
+}
+
+TEST_CASE("after the grace the keeper ends the shells, unlinks the socket and exits non-zero", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    auto unixListener = makePipe();
+    auto tcpListener = makePipe();
+    auto lockReleased = false;
+    h.onLockReleased = [&] {
+        lockReleased = true;
+    };
+    auto unlinkedUnderLock = false;
+    h.socketFiles.onRemove = [&] {
+        unlinkedUnderLock = !lockReleased;
+    };
+    h.events.then(deliver(
+        { frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt, .path = "/run/contour/default" },
+                  { unixListener.give() }),
+          frameOf(Listener { .name = "native-tcp", .tlsIdentity = std::nullopt, .path = {} },
+                  { tcpListener.give() }),
+          frameOf(Serving {}),
+          spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
+    crashFiveTimes(h);
+    h.events.then(h.after(120s));
+    h.events.then(check(
+        [&] {
+            CHECK(h.socketFiles.removed.empty()); // kept for the retry
+            CHECK(!unixListener.writerClosed());
+        },
+        ended(FirstDaemon + 5, Segfault))); // the retry crashes too: end everything
+    h.events.then(check([&] {
+        CHECK(h.socketFiles.removed == std::vector<std::filesystem::path> { "/run/contour/default" });
+        CHECK(unlinkedUnderLock); // no other keeper can have bound the path yet
+        CHECK(lockReleased);
+        CHECK(unixListener.writerClosed());
+        CHECK(tcpListener.writerClosed());
+        CHECK(master.writerClosed()); // hung up
+    }));
+    h.events.then(h.after(3s));
+    h.events.then(check([&] { CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Kill }); },
+                        { endOf(FirstShell, Killed) }));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::GaveUp);
+    CHECK(h.exitStatus != 0);
+    CHECK(h.launcher.images.size() == 6);
+}
+
+TEST_CASE("a newer image staged during the grace is the one retried", "[keeper]")
+{
+    auto const newer = std::filesystem::path { "/state/bin/0.9.0-0badcafe/contour" };
+    auto h = Harness {};
+    h.events.then(deliver({ frameOf(Serving {}) }));
+    crashFiveTimes(h);
+    h.events.then(check([&] {
+        // Every restart so far asked for the newest image no older than the committed one, and got it.
+        CHECK(h.images.picks == std::vector<std::filesystem::path>(4, daemonImage()));
+        CHECK(h.launcher.images == std::vector<std::filesystem::path>(5, daemonImage()));
+    }));
+    h.events.then(h.after(60s));
+    h.events.then(check([&] { h.images.newer = newer; })); // staged half way through the grace period
+    h.events.then(h.after(60s));
+    h.events.then(check([&] {
+        REQUIRE(h.launcher.images.size() == 6);
+        CHECK(h.launcher.images.back() == newer);
+        CHECK(h.launcher.channel(5).only<Launch>().continuity == LaunchContinuity::Recovered);
+    }));
+    h.run();
+}
+
+TEST_CASE("a retry that stays up five minutes clears the give-up, and its crash is restarted", "[keeper]")
+{
+    // No heartbeats come from a fake daemon: the five minutes must not count as a hang.
+    auto const unwatched = Serving { .hungRestart = HungRestart::Off, .heartbeatTimeoutMs = 30'000 };
+    auto h = Harness {};
+    h.events.then(deliver({ frameOf(unwatched) }));
+    crashFiveTimes(h);
+    h.events.then(h.after(120s));
+    h.events.then(check([&] { CHECK(h.launcher.images.size() == 6); }, { frameOf(unwatched) })); // it serves
+    h.events.then(h.after(299s));
+    h.events.then(deliver(ended(FirstDaemon + 5, Segfault))); // not yet stable: ends everything
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::GaveUp);
+    CHECK(h.launcher.images.size() == 6);
+
+    auto stable = Harness {};
+    stable.events.then(deliver({ frameOf(unwatched) }));
+    crashFiveTimes(stable);
+    stable.events.then(stable.after(120s));
+    stable.events.then(check([&] { CHECK(stable.launcher.images.size() == 6); }, { frameOf(unwatched) }));
+    stable.events.then(stable.after(300s));
+    stable.events.then(deliver(ended(FirstDaemon + 5, Segfault))); // stable by now: a first crash again
+    stable.events.then(check([&] {
+        REQUIRE(stable.launcher.images.size() == 7); // restarted at once, not given up on
+        CHECK(stable.launcher.channel(6).only<Launch>().continuity == LaunchContinuity::Recovered);
+    }));
+    stable.run();
+    CHECK(stable.outcome == KeeperOutcome::Clean);
+}
+
+TEST_CASE("a restart launch that keeps failing gives up without recursing", "[keeper]")
+{
+    auto h = Harness {};
+    // Every crash restarts at once, so every failed launch is followed by another one at once.
+    h.launcher.failingAttempts = { 1, 2, 3, 4, 5 };
+    h.events.then(deliver({ frameOf(Serving {}) }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] {
+        CHECK(h.launcher.images.size() == 5); // the served one, then four failed: five crashes
+        CHECK(h.launcher.channels.size() == 1);
+    }));
+    h.events.then(h.after(120s)); // the retry fails too: everything ends
+    h.run(RestartPolicyConfig { .quickRepeat = 0ms });
+    CHECK(h.outcome == KeeperOutcome::GaveUp);
+    CHECK(h.launcher.images.size() == 6);
 }
 
 TEST_CASE("a daemon reaped before its channel closed is judged once, after the close", "[keeper]")

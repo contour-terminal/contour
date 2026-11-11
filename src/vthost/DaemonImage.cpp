@@ -6,11 +6,14 @@
 
 #include <algorithm>
 #include <array>
+#include <compare>
 #include <format>
 #include <map>
 #include <ranges>
 #include <system_error>
 #include <utility>
+
+#include <vthost/ReleaseNumbers.hpp>
 
 namespace vthost
 {
@@ -459,6 +462,77 @@ std::optional<fs::path> DaemonImageStore::executableOfImage(std::string_view ima
 bool DaemonImageStore::isComplete(fs::path const& imageDir) const
 {
     return _fs.isRegularFile(imageDir / CompletionMarker);
+}
+
+std::optional<DaemonImageStore::ImageAge> DaemonImageStore::ageOf(fs::path const& imageDir) const
+{
+    auto release = _fs.readFile(imageDir / CompletionMarker);
+    auto const completed = _fs.lastWriteTime(imageDir / CompletionMarker);
+    if (!release || !completed)
+        return std::nullopt;
+    return ImageAge { .release = *std::move(release), .completed = *completed };
+}
+
+std::optional<StagedImage> DaemonImageStore::leaseNewerImage(fs::path const& committed)
+{
+    if (_plan.layout == StagingLayout::InPlace)
+        return std::nullopt;
+    auto const children = _fs.listDirectory(_config.imagesRoot);
+    if (!children)
+        return std::nullopt;
+
+    auto const committedImage = imageDirectoryOf(committed);
+    auto const committedAge = committedImage.empty() ? std::optional<ImageAge> {} : ageOf(committedImage);
+    // The installed executable is weighed by its release alone: its write time says when it was built or
+    // installed, not when it was staged, so no image of the same release counts as newer than it.
+    auto const baseline = committedAge.value_or(
+        ImageAge { .release = _config.releaseVersion, .completed = fs::file_time_type::max() });
+
+    // How one image orders against another: by release numbers, then by completion. Unordered when either
+    // release states no numbers and the two differ.
+    auto const order = [](ImageAge const& age, ImageAge const& other) -> std::optional<std::weak_ordering> {
+        auto const releases = compareReleaseNumbers(age.release, other.release);
+        if (!releases && age.release != other.release)
+            return std::nullopt;
+        if (releases && std::is_neq(*releases))
+            return *releases;
+        return age.completed <=> other.completed;
+    };
+
+    struct Candidate
+    {
+        fs::path directory;
+        ImageAge age;
+    };
+    auto candidates = std::vector<Candidate> {};
+    for (auto const& child: *children)
+    {
+        auto const name = child.path.filename().string();
+        if (!child.isDirectory || name.contains(PartialInfix) || child.path == committedImage)
+            continue;
+        auto age = ageOf(child.path);
+        if (!age)
+            continue;
+        if (auto const against = order(*age, baseline); against && std::is_gt(*against))
+            candidates.push_back(Candidate { .directory = child.path, .age = *std::move(age) });
+    }
+    // Newest first. Every candidate orders against the baseline, so all of them order among themselves: by
+    // numbers when the baseline's release states some, else by completion under one and the same release.
+    std::ranges::stable_sort(candidates, [&](Candidate const& a, Candidate const& b) {
+        auto const against = order(a.age, b.age);
+        return against && std::is_gt(*against);
+    });
+
+    for (auto const& candidate: candidates)
+    {
+        // Leased first, then looked at again: a prune that removed it before the lease was taken leaves no
+        // completion marker behind. One a prune holds right now is skipped, not waited for.
+        auto lease = _leases.tryHold(leaseFileOf(candidate.directory));
+        if (!lease || !isComplete(candidate.directory))
+            continue;
+        return imageAt(candidate.directory, std::move(lease));
+    }
+    return std::nullopt;
 }
 
 } // namespace vthost

@@ -56,7 +56,8 @@ int runKeeperVerb(KeeperVerbInputs inputs, std::ostream& errors)
         .environment = std::move(inputs.environment),
         .socketPath = socketPath,
         .launchOptions = encodeDaemonLaunch(inputs.launch),
-        .policy = {},
+        .policy = inputs.policy,
+        .images = std::move(inputs.restartImages),
     });
     if (!kept)
     {

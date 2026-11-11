@@ -3,8 +3,9 @@
 
 The keeper holds every shell's PTY so that the shells survive a crash of the daemon; it can only do that
 if nothing the daemon crashes in is linked into it. Its sources (src/vthost/keeper/) therefore include
-none of <vtbackend/...>, <vtparser/...>, <vtworkspace/...> and, of vthost, only its own <vthost/keeper/...>
-and the dependency-free <vthost/proto/Wire.hpp>. Every offending line is printed as file:line.
+none of <vtbackend/...>, <vtparser/...>, <vtworkspace/...> and, of vthost, only its own <vthost/keeper/...>,
+the dependency-free <vthost/proto/Wire.hpp>, and the headers of vthost_image (the daemon's image store, its
+leases and release numbers), which it restarts a crashed daemon from. Every offending line is printed as file:line.
 `--self-test` checks the pattern against inline fixtures and needs no tree. Python rather than shell, so
 that ctest runs it on every platform.
 """
@@ -21,7 +22,7 @@ KEEPER_ROOT = Path("src/vthost/keeper")
 
 FORBIDDEN = re.compile(
     r'^\s*#\s*include\s*[<"](?:vtbackend/|vtparser/|vtworkspace/'
-    r"|vthost/(?!keeper/|proto/Wire\.hpp[>\"]))"
+    r"|vthost/(?!keeper/|proto/Wire\.hpp[>\"]|(?:DaemonImage|DaemonBinary|ReleaseNumbers|StatePath)\.hpp[>\"]))"
 )
 
 
@@ -34,6 +35,8 @@ def self_test() -> int:
     allowed = (
         "#include <vthost/keeper/Codec.hpp>",
         "#include <vthost/proto/Wire.hpp>",
+        "#include <vthost/DaemonImage.hpp>",
+        "#include <vthost/ReleaseNumbers.hpp>",
         "#include <vtpty/ChildProcess.hpp>",
         "#include <core/codec/Fields.hpp>",
     )
@@ -43,6 +46,7 @@ def self_test() -> int:
         "#include <vtworkspace/Tab.hpp>",
         "#include <vthost/SessionHost.hpp>",
         "#include <vthost/proto/Frame.hpp>",
+        "#include <vthost/DaemonImageFoo.hpp>",
         '#  include "vthost/Daemon.hpp"',
     )
     failures = [line for line in allowed if offending_lines(line)]

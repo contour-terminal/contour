@@ -12,6 +12,8 @@ add_library(vthost_keeper STATIC
     Logging.hpp
     Messages.hpp
     Ports.hpp
+    RestartImages.cpp
+    RestartImages.hpp
     RestartPolicy.cpp
     RestartPolicy.hpp
     SessionTable.cpp
@@ -67,7 +69,8 @@ if(VTHOST_KEEPER_TESTING)
 
         # The POSIX ports run real processes, block signals and change the descriptor limit of the process
         # they run in: a binary of their own, so that none of it reaches the state machine's tests.
-        add_executable(vthost_keeper_posix_test test_main.cpp KeeperProcess_test.cpp PosixPorts_test.cpp)
+        add_executable(vthost_keeper_posix_test
+            test_main.cpp KeeperProcess_test.cpp PosixPorts_test.cpp RestartImages_test.cpp)
         target_link_libraries(vthost_keeper_posix_test vthost_keeper core::testing Catch2::Catch2 contour_test_trace)
         target_compile_options(vthost_keeper_posix_test PRIVATE -Wno-c2y-extensions)
         add_test(NAME vthost_keeper_posix_test COMMAND $<TARGET_FILE:vthost_keeper_posix_test>)

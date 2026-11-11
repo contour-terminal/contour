@@ -94,6 +94,7 @@
 
 #include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/keeper/RestartPolicy.hpp>
 #include <vtworkspace/LayoutTree.hpp> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
@@ -836,6 +837,12 @@ struct DaemonKeeperConfig
     /// `restart_hung`: whether the keeper restarts a daemon that stops answering its heartbeats. A Config
     /// boundary bool (AGENT.md exception); `contour daemon` converts it to vthost::keeper::HungRestart.
     bool restartHung = true;
+
+    /// The keeper's crash-loop numbers, each from its key (whole seconds, but `give_up_crashes`):
+    /// `give_up_crashes` and `give_up_window`, `backoff_start` and `backoff_cap`, `startup_timeout`
+    /// (RestartPolicyConfig::restartStartupBound) and `stop_timeout` (RestartPolicyConfig::daemonExitBound).
+    /// The rest keep their defaults.
+    vthost::keeper::RestartPolicyConfig restartPolicy {};
 };
 
 /// The `daemon:` section: whether and how the terminal talks to a session-hosting daemon.

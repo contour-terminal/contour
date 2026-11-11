@@ -202,6 +202,32 @@ class DescriptorBudget
     [[nodiscard]] virtual uint64_t originalSoftLimit() const = 0;
 };
 
+/// The images a crashed daemon is restarted from, and the lease that keeps the one picked from being pruned.
+class RestartImages
+{
+  public:
+    virtual ~RestartImages() = default;
+
+    /// Picks the image to restart a crashed daemon from: the newest complete image no older than
+    /// @p committed, never an older one. A newer image picked stays leased until the next pick, or until
+    /// this object ends.
+    /// @param committed The executable of the last committed daemon.
+    /// @return A newer image's executable; @p committed itself when none is newer -- always so for an install
+    ///         that runs in place, whose executable a package upgrade replaces where it lies.
+    [[nodiscard]] virtual std::filesystem::path pick(std::filesystem::path const& committed) = 0;
+};
+
+/// Removes the socket files of the listeners the keeper closes when it gives up.
+class SocketFiles
+{
+  public:
+    virtual ~SocketFiles() = default;
+
+    /// Removes the socket file at @p path; one that is gone already is no error.
+    /// @param path The socket file.
+    virtual void remove(std::filesystem::path const& path) = 0;
+};
+
 /// The ports the keeper runs on.
 struct KeeperPorts
 {
@@ -211,6 +237,8 @@ struct KeeperPorts
     Signaller& signaller;
     DescriptorBudget const& budget;
     core::platform::IClock const& clock;
+    RestartImages& images;
+    SocketFiles& socketFiles;
 };
 
 } // namespace vthost::keeper

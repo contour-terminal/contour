@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include <vthost/ReleaseNumbers.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 namespace vthost::client
@@ -25,9 +26,7 @@ enum class DriftKind : uint8_t
     DaemonUnknown, ///< The daemon states no release (it predates the field).
 };
 
-/// @param release A release string such as "0.8.1-master+abc".
-/// @return The leading dot-separated decimal run ({0, 8, 1}); nullopt when it does not start with a digit.
-[[nodiscard]] std::optional<std::vector<std::uint32_t>> parseReleaseNumbers(std::string_view release);
+using vthost::parseReleaseNumbers;
 
 /// @param client The client's release.
 /// @param daemon The daemon's release; empty when it states none.

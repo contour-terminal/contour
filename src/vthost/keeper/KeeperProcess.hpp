@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <vthost/keeper/Ports.hpp>
 #include <vthost/keeper/RestartPolicy.hpp>
 
 /// The keeper as a process: what `contour daemon` (and the test harness) runs once it has decided what to
@@ -39,6 +41,8 @@ struct KeeperProcessConfig
     std::filesystem::path socketPath;         ///< The label's socket, whose lock (labelLockPath()) is taken.
     std::vector<uint8_t> launchOptions;       ///< The options record, opaque here; sent with every Launch.
     RestartPolicyConfig policy {};            ///< The crash-loop policy's numbers.
+    /// What a crashed daemon is restarted from, and the lease on it; null for the daemon image, always.
+    std::unique_ptr<RestartImages> images = nullptr;
 };
 
 /// @return How many threads this process runs, where the platform says (Linux: `/proc/self/status`);

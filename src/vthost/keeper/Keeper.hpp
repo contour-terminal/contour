@@ -28,10 +28,6 @@ inline constexpr std::chrono::milliseconds HungKillDelay { 10'000 };
 /// How long the shells have to end after the keeper hung them up at its end, before they are killed.
 inline constexpr std::chrono::milliseconds ShellHangupGrace { 3'000 };
 
-/// How long a daemon that announced Shutdown, or was forwarded a stop, has to exit before it is killed;
-/// below systemd's default stop timeout, so the keeper still ends the shells itself.
-inline constexpr std::chrono::milliseconds DaemonExitBound { 60'000 };
-
 /// How long the keeper waits, after a daemon was reaped, for its channel's last frames and close before it
 /// judges the exit anyway (the event source reports them first; @see EventSource).
 inline constexpr std::chrono::milliseconds ChannelDrainBound { 2'000 };
@@ -151,9 +147,17 @@ class Keeper
         UniqueFd fd;
     };
 
+    /// Whether a daemon process was started.
+    enum class Launched : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+
     [[nodiscard]] core::platform::SteadyTimePoint now() const noexcept { return _ports.clock.now(); }
 
-    void launchDaemon(LaunchContinuity continuity);
+    [[nodiscard]] Launched launchDaemon(LaunchContinuity continuity);
+    void restart(); ///< Starts a Recovered daemon, counting each launch that fails as a crash.
     void onEvent(Event event);
     void onFrame(Frame frame);
     void onEnded(int pid, WireExitStatus status);

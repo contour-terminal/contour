@@ -11,11 +11,14 @@
 #include <expected>
 #include <filesystem>
 #include <iosfwd>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <vthost/KeeperSettings.hpp>
 #include <vthost/keeper/Messages.hpp>
+#include <vthost/keeper/Ports.hpp>
+#include <vthost/keeper/RestartPolicy.hpp>
 #include <vthost/keeperlink/KeeperAttachment.hpp>
 
 namespace contour::cli
@@ -36,6 +39,10 @@ struct KeeperVerbInputs
     std::filesystem::path daemonImage;    ///< The image the daemon is started, and restarted, from.
     DaemonLaunch launch;                  ///< What it launches: the options record the keeper carries.
     std::vector<std::string> environment; ///< The daemon's environment, `NAME=value`.
+    /// The crash-loop numbers it keeps the daemon by (`daemon.keeper`, DaemonKeeperConfig::restartPolicy).
+    vthost::keeper::RestartPolicyConfig policy {};
+    /// What a crashed daemon is restarted from, and the lease on it; null for daemonImage, always.
+    std::unique_ptr<vthost::keeper::RestartImages> restartImages = nullptr;
 };
 
 /// Keeps a daemon: the keeper's half of `contour daemon`. Blocks until the keeper ends.

@@ -2,6 +2,7 @@
 #include <vthost/keeper/Keeper.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <expected>
 #include <ranges>
 #include <utility>
@@ -51,7 +52,8 @@ Keeper::Keeper(KeeperPorts ports,
 
 KeeperOutcome Keeper::run()
 {
-    launchDaemon(LaunchContinuity::Fresh);
+    if (launchDaemon(LaunchContinuity::Fresh) == Launched::No)
+        beginEnding(KeeperOutcome::DaemonFailedToStart, LaunchFailedExitStatus);
     // Checked before every wait: an end that needs nothing more (a first launch that failed) must not wait
     // for an event that never comes.
     while (!hasEnded())
@@ -70,16 +72,18 @@ KeeperOutcome Keeper::run()
 
 // {{{ the daemon's life
 
-void Keeper::launchDaemon(LaunchContinuity continuity)
+Keeper::Launched Keeper::launchDaemon(LaunchContinuity continuity)
 {
-    auto launched = _ports.launcher.launch(_daemonImage);
+    // A restart after a crash runs the newest image there is, never one older than the committed daemon's.
+    auto const image =
+        continuity == LaunchContinuity::Fresh ? _daemonImage : _ports.images.pick(_daemonImage);
+    auto launched = _ports.launcher.launch(image);
     if (!launched)
     {
-        if (continuity == LaunchContinuity::Fresh)
-            beginEnding(KeeperOutcome::DaemonFailedToStart, LaunchFailedExitStatus);
-        else
-            apply(_policy.onExit(DaemonExitKind::Crashed, now()), {});
-        return;
+        errorLog()("cannot start the daemon {} (spawn error {})",
+                   image.string(),
+                   std::to_underlying(launched.error()));
+        return Launched::No;
     }
 
     auto const fresh = continuity == LaunchContinuity::Fresh;
@@ -109,6 +113,21 @@ void Keeper::launchDaemon(LaunchContinuity continuity)
     send(Launch { .continuity = continuity,
                   .options = _launchOptions,
                   .originalDescriptorLimit = _ports.budget.originalSoftLimit() });
+    return Launched::Yes;
+}
+
+void Keeper::restart()
+{
+    // A loop, not a recursion: a launch that fails is a crash, which the policy may answer with another
+    // restart at once; it backs off, or gives up, within a bounded number of those.
+    auto decision = RestartDecision { .action = RestartAction::RestartNow };
+    while (decision.action == RestartAction::RestartNow || decision.action == RestartAction::RetryNewestImage)
+    {
+        if (launchDaemon(LaunchContinuity::Recovered) == Launched::Yes)
+            return;
+        decision = _policy.onExit(DaemonExitKind::Crashed, now());
+    }
+    apply(decision, {});
 }
 
 void Keeper::onEnded(int pid, WireExitStatus status)
@@ -206,7 +225,7 @@ void Keeper::onStopSignal()
     }
     _ports.signaller.send(_daemon->pid, KeeperSignal::Terminate);
     _daemon->state = DaemonEndState::StopForwarded;
-    earliest(_daemon->killAt, now() + DaemonExitBound);
+    earliest(_daemon->killAt, now() + _policyConfig.daemonExitBound);
 }
 
 void Keeper::forgiveOwnStop(core::platform::SteadyTimePoint deadline)
@@ -271,7 +290,7 @@ void Keeper::onTimers()
     if (_relaunchAt && *_relaunchAt <= time)
     {
         _relaunchAt.reset();
-        launchDaemon(LaunchContinuity::Recovered);
+        restart();
     }
     if (_graceAt && *_graceAt <= time)
     {
@@ -285,10 +304,21 @@ void Keeper::apply(RestartDecision decision, WireExitStatus status)
     switch (decision.action)
     {
         case RestartAction::RestartNow:
-        case RestartAction::RetryNewestImage: launchDaemon(LaunchContinuity::Recovered); break;
+        case RestartAction::RetryNewestImage: restart(); break;
         case RestartAction::RestartAfter: _relaunchAt = now() + decision.delay; break;
-        case RestartAction::GiveUp: _graceAt = now() + decision.delay; break;
-        case RestartAction::EndAll: beginEnding(KeeperOutcome::GaveUp, GaveUpExitStatus); break;
+        case RestartAction::GiveUp:
+            errorLog()("the daemon crashed {} times within {} s: giving up on restarting it; the shells and "
+                       "listeners are kept for {} s, then it is started once more from the newest image",
+                       _policy.recentCrashes(),
+                       std::chrono::duration_cast<std::chrono::seconds>(_policyConfig.giveUpWindow).count(),
+                       std::chrono::duration_cast<std::chrono::seconds>(decision.delay).count());
+            _graceAt = now() + decision.delay;
+            break;
+        case RestartAction::EndAll:
+            errorLog()("the daemon's last start after giving up failed too: ending every shell, closing the "
+                       "listeners and exiting");
+            beginEnding(KeeperOutcome::GaveUp, GaveUpExitStatus);
+            break;
         case RestartAction::ExitWithStatus:
             beginEnding(KeeperOutcome::DaemonFailedToStart, exitStatusOf(status));
             break;
@@ -303,6 +333,12 @@ void Keeper::beginEnding(KeeperOutcome outcome, int exitStatus)
         return;
     _ending = outcome;
     _exitStatus = exitStatus;
+    // The listeners still held are those of a daemon that ended without closing them (a crash, a kill), so
+    // nothing else removes their socket files: the keeper leaves none behind that nobody serves. Removed
+    // while the label is still locked, so no file is a newer keeper's.
+    for (auto const& listener: _listeners)
+        if (!listener.path.empty())
+            _ports.socketFiles.remove(listener.path);
     _labelLock.reset();
     _listeners.clear();
     _structure.reset();
@@ -643,7 +679,7 @@ void Keeper::handle(Shutdown const& /*message*/, std::vector<UniqueFd>& /*fds*/)
     _labelLock.reset();
     _listeners.clear();
     _daemon->state = DaemonEndState::ShutdownAnnounced;
-    earliest(_daemon->killAt, now() + DaemonExitBound);
+    earliest(_daemon->killAt, now() + _policyConfig.daemonExitBound);
 }
 
 void Keeper::handle(Signal const& message, std::vector<UniqueFd>& /*fds*/)

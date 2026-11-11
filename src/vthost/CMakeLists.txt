@@ -18,6 +18,8 @@ add_library(vthost_image STATIC
     DaemonImage.hpp
     DaemonImageLeases_posix.cpp
     DaemonImageLeases_win32.cpp
+    ReleaseNumbers.cpp
+    ReleaseNumbers.hpp
     StatePath.hpp
 )
 target_include_directories(vthost_image PUBLIC
@@ -495,7 +497,8 @@ if(VTHOST_TESTING)
         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
         target_link_libraries(vthost_keeper_harness PUBLIC vthost)
         target_sources(vthost_test PRIVATE
-            keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp
+            KeeperCrash_test.cpp keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp
+            keeperlink/KeeperLink_test.cpp
             keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()

@@ -112,6 +112,7 @@
 #include <vthost/handover/ImageReceiver.hpp>
 #include <vthost/handover/Readiness.hpp>
 #include <vthost/handover/SuccessorLaunch.hpp>
+#include <vthost/keeper/RestartImages.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -1688,6 +1689,8 @@ int ContourApp::keeperAction(DaemonVerbOptions const& options)
     // starts the daemon from it; it holds the lease for as long as it keeps.
     auto lease = std::unique_ptr<vthost::ImageLease> {};
     auto daemonImage = std::filesystem::path {};
+    // A crashed daemon restarts from the newest image of the store, which the keeper leases while it would.
+    auto restartImages = std::unique_ptr<vthost::keeper::RestartImages> {};
     auto images = vthost::NativeDaemonImages::ofThisProcess(processEnvironment(),
                                                             core::platform::NativeFileSystem::instance(),
                                                             CONTOUR_VERSION_STRING,
@@ -1698,6 +1701,7 @@ int ContourApp::keeperAction(DaemonVerbOptions const& options)
             **images, relocationRequestOf(options.inPlace == OptionFlag::Given), commandLine());
         daemonImage = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
                           .value_or(vthost::launchedImage((*images)->inputs()));
+        restartImages = std::make_unique<vthost::keeper::StoreRestartImages>((*images)->store());
     }
     else
     {
@@ -1707,7 +1711,9 @@ int ContourApp::keeperAction(DaemonVerbOptions const& options)
     }
     return runKeeperVerb(KeeperVerbInputs { .daemonImage = std::move(daemonImage),
                                             .launch = launch,
-                                            .environment = processEnvironmentEntries() },
+                                            .environment = processEnvironmentEntries(),
+                                            .policy = hostConfig->daemon.value().keeper.restartPolicy,
+                                            .restartImages = std::move(restartImages) },
                          cerr);
 #endif
 }

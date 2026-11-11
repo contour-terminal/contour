@@ -139,6 +139,25 @@ namespace
             return failure(leaseFile, "the lease file kept being replaced");
         }
 
+        [[nodiscard]] std::unique_ptr<ImageLease> tryHold(std::filesystem::path const& leaseFile) override
+        {
+            for ([[maybe_unused]] auto const attempt: std::views::iota(0, HoldAttempts))
+            {
+                auto const fd = ::open(leaseFile.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+                if (fd == -1)
+                    return nullptr;
+                if (lockRetryingInterrupts(fd, LOCK_SH | LOCK_NB) == -1)
+                {
+                    ::close(fd); // claimed by a prune: busy
+                    return nullptr;
+                }
+                if (isFileAt(fd, leaseFile))
+                    return std::make_unique<FileLease>(fd);
+                ::close(fd); // claimed and unlinked since it was opened: lease the file there now
+            }
+            return nullptr;
+        }
+
         [[nodiscard]] std::unique_ptr<ImageLease> claim(std::filesystem::path const& leaseFile) override
         {
             auto const fd = ::open(leaseFile.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);

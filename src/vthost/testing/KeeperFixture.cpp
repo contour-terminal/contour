@@ -32,6 +32,10 @@
 #include <thread>
 #include <utility>
 
+#ifdef __APPLE__
+    #include <libproc.h>
+#endif
+
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
@@ -187,6 +191,8 @@ namespace
         std::ofstream { launch.launchLog, std::ios::app } << ::getpid() << '\n';
         if (launch.start == HarnessStart::Fails)
             return HarnessStartFailureStatus;
+        if (launch.start == HarnessStart::ServesThenCrashes && !first)
+            ::kill(::getpid(), SIGKILL); // a restart that crashes before it serves
         if (launch.start == HarnessStart::Relays || (launch.start == HarnessStart::RelaysThenServes && first))
             return relayChannel(launch.relayPath, *std::move(attachment));
         // What the daemon says goes to the keeper's output, for a test to read (KeeperFixture::log()).
@@ -209,6 +215,17 @@ namespace
             return HarnessKeeperStartFailureStatus;
         }
         auto const socket = launch.socketPath;
+        // What the keeper says goes to the fixture's output too, beside its daemons' (KeeperFixture::log()).
+        auto const logging = core::log::ScopedOutput::create(
+            { .filter = "vthost.keeper", .file = std::nullopt, .showProcessId = true });
+        auto policy = keeper::RestartPolicyConfig {};
+        if (launch.timings.backoffMs != 0)
+        {
+            policy.backoffStart = std::chrono::milliseconds { launch.timings.backoffMs };
+            policy.backoffCap = policy.backoffStart;
+        }
+        if (launch.timings.graceMs != 0)
+            policy.grace = std::chrono::milliseconds { launch.timings.graceMs };
         auto writer = core::codec::Writer {};
         core::codec::encodeFields(writer, launch);
         auto const ran = keeper::runKeeperProcess(keeper::KeeperProcessConfig {
@@ -222,7 +239,8 @@ namespace
                 }(),
             .socketPath = std::filesystem::path { std::string { socket } },
             .launchOptions = std::move(writer).take(),
-            .policy = {},
+            .policy = policy,
+            .images = nullptr,
         });
         if (!ran)
         {
@@ -306,6 +324,12 @@ namespace
 
 int parentProcessOf(int pid)
 {
+#ifdef __APPLE__
+    auto info = proc_bsdinfo {};
+    if (::proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != static_cast<int>(sizeof(info)))
+        return 0;
+    return static_cast<int>(info.pbi_ppid);
+#else
     auto file = std::ifstream { std::format("/proc/{}/stat", pid) };
     auto const stat =
         std::string { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
@@ -318,6 +342,7 @@ int parentProcessOf(int pid)
     auto parent = 0;
     rest >> state >> parent;
     return parent;
+#endif
 }
 
 std::optional<int> runKeeperHarnessIfRequested(int argc, char const* argv[])
@@ -354,7 +379,8 @@ KeeperFixture::KeeperFixture(HarnessSetup const& setup):
                                                               ? (_directory / "workspace.snapshot").string()
                                                               : std::string {},
                                           .tcp = setup.tcp,
-                                          .relayPath = (_directory / "relay").string() }) },
+                                          .relayPath = (_directory / "relay").string(),
+                                          .timings = setup.timings }) },
     _softDescriptorLimit { setup.softDescriptorLimit },
     _relayListener { setup.start == HarnessStart::Relays || setup.start == HarnessStart::RelaysThenServes
                          ? unixSocket((_directory / "relay").string(), ::bind)

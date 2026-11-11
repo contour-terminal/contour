@@ -895,3 +895,104 @@ TEST_CASE("a store that stages nothing finds no image", "[vthost][image][upgrade
     std::ignore = files.writeFile("/state/bin/0.9.0-12345678/.complete", "");
     CHECK_FALSE(store.executableOfImage("0.9.0-12345678").has_value());
 }
+
+namespace
+{
+/// Writes a complete image named @p name of @p release under /state/bin, holding Contour.AppImage.
+void writeImage(StagingFileSystem& files, std::string_view name, std::string_view release)
+{
+    auto const image = fs::path { "/state/bin" } / name;
+    std::ignore = files.writeFile(image / "Contour.AppImage", "ELF");
+    std::ignore = files.writeFile(image / ".complete", release);
+}
+} // namespace
+
+TEST_CASE("the newest image newer than the committed one is leased for a restart", "[vthost][image][restart]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    auto const committed = store.stage();
+    REQUIRE(committed.has_value());
+    writeImage(files, "0.8.0-aaaaaaaa", "0.8.0");
+    writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
+    writeImage(files, "0.8.2-cccccccc", "0.8.2");
+    writeImage(files, "nightly-dddddddd", "nightly"); // no numbers: never newer than a numbered release
+    std::ignore = files.writeFile("/state/bin/1.0.0-eeeeeeee.partial-7/Contour.AppImage", "HALF");
+    std::ignore = files.writeFile("/state/bin/1.1.0-ffffffff/Contour.AppImage", "INCOMPLETE");
+
+    auto const newer = store.leaseNewerImage(committed->executable);
+    REQUIRE(newer.has_value());
+    CHECK(newer->executable == fs::path { "/state/bin/0.9.0-bbbbbbbb/Contour.AppImage" });
+    CHECK(newer->imageId == "0.9.0-bbbbbbbb");
+    CHECK(leases.holds("/state/bin/0.9.0-bbbbbbbb.lease") == 1);
+    CHECK(leases.holds("/state/bin/0.8.2-cccccccc.lease") == 0);
+}
+
+TEST_CASE("an image a prune is removing is skipped for a restart, not waited for", "[vthost][image][restart]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    auto const committed = store.stage();
+    REQUIRE(committed.has_value());
+    writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
+    writeImage(files, "0.8.2-cccccccc", "0.8.2");
+    leases.markBusy("/state/bin/./0.9.0-bbbbbbbb.lease"); // named loosely: matched as normalised
+
+    auto const newer = store.leaseNewerImage(committed->executable);
+    REQUIRE(newer.has_value());
+    CHECK(newer->imageId == "0.8.2-cccccccc");
+    CHECK(leases.holds("/state/bin/0.9.0-bbbbbbbb.lease") == 0);
+}
+
+TEST_CASE("no image older than the committed one is ever picked for a restart", "[vthost][image][restart]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    auto const committed = store.stage();
+    REQUIRE(committed.has_value());
+    writeImage(files, "0.8.0-aaaaaaaa", "0.8.0");
+    writeImage(files, "0.7.9-bbbbbbbb", "0.7.9");
+    CHECK_FALSE(store.leaseNewerImage(committed->executable).has_value());
+    CHECK(leases.holds("/state/bin/0.8.0-aaaaaaaa.lease") == 0);
+}
+
+TEST_CASE("an installed executable is restarted from an image only of a greater release",
+          "[vthost][image][restart]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    // An image of the installed executable's own release may be another build of it: never preferred.
+    writeImage(files, "0.8.1-aaaaaaaa", "0.8.1");
+    CHECK_FALSE(store.leaseNewerImage(fs::path { AppImagePath }).has_value());
+    writeImage(files, "0.8.2-bbbbbbbb", "0.8.2");
+    auto const newer = store.leaseNewerImage(fs::path { AppImagePath });
+    REQUIRE(newer.has_value());
+    CHECK(newer->imageId == "0.8.2-bbbbbbbb");
+}
+
+TEST_CASE("an install that runs in place restarts from its installed executable", "[vthost][image][restart]")
+{
+    auto files = StagingFileSystem {};
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { linuxPackageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
+    CHECK_FALSE(store.leaseNewerImage("/usr/bin/contour").has_value());
+}

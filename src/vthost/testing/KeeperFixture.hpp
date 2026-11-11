@@ -35,6 +35,9 @@ enum class HarnessStart : uint8_t
     /// The first daemon relays, as Relays; every daemon the keeper starts after it serves, as Serves: what a
     /// test that plays a daemon to its crash, and then watches the real one recover, starts.
     RelaysThenServes,
+    /// The first daemon serves, as Serves; every daemon the keeper restarts after it is killed by a signal
+    /// before it serves: a crash loop.
+    ServesThenCrashes,
 };
 
 /// Whether the harness daemon keeps a workspace snapshot.
@@ -61,6 +64,7 @@ struct core::codec::EnumWire<vthost::testing::HarnessStart>
         vthost::testing::HarnessStart::Fails,
         vthost::testing::HarnessStart::Relays,
         vthost::testing::HarnessStart::RelaysThenServes,
+        vthost::testing::HarnessStart::ServesThenCrashes,
     };
 };
 
@@ -96,6 +100,13 @@ inline constexpr auto KeeperOnlyVariable = std::string_view { "CONTOUR_KEEPER_HA
 /// The status the harness daemon exits with when told to fail its start.
 inline constexpr int HarnessStartFailureStatus = 3;
 
+/// The harness keeper's crash-loop and stop numbers, in milliseconds; 0 keeps the keeper's default.
+struct HarnessTimings
+{
+    uint64_t backoffMs = 0; ///< The first backoff, and its cap: every backoff is this long.
+    uint64_t graceMs = 0;   ///< How long a keeper that gave up waits before its one retry.
+};
+
 /// What the harness keeper hands its daemon, as the options record: opaque to the keeper, as `contour
 /// daemon`'s DaemonLaunch is.
 struct HarnessLaunch
@@ -110,6 +121,7 @@ struct HarnessLaunch
     HarnessTcp tcp = HarnessTcp::Off;
     /// Where a relaying daemon hands its channel over.
     std::string relayPath;
+    HarnessTimings timings {};
 
     /// Lists the fields.
     void visitFields(this auto& self, auto& visitor)
@@ -121,6 +133,8 @@ struct HarnessLaunch
         visitor(5, self.snapshotPath);
         visitor(6, self.tcp);
         visitor(7, self.relayPath);
+        visitor(8, self.timings.backoffMs);
+        visitor(9, self.timings.graceMs);
     }
 };
 
@@ -135,10 +149,12 @@ struct HarnessSetup
     /// The soft descriptor limit the keeper is started under, as a user's session may have it; nullopt keeps
     /// the test's own.
     std::optional<uint64_t> softDescriptorLimit = std::nullopt;
+    HarnessTimings timings {}; ///< The keeper's crash-loop numbers.
 };
 
 /// @param pid A process.
-/// @return Its parent, as /proc/<pid>/stat states it; 0 when that cannot be read.
+/// @return Its parent, as /proc/<pid>/stat (Linux) or proc_pidinfo() (macOS) states it; 0 when that cannot be
+///         read.
 [[nodiscard]] int parentProcessOf(int pid);
 
 /// Runs the keeper or its daemon when the test binary is invoked as one. Called first thing in main(),

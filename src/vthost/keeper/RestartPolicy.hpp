@@ -4,6 +4,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -52,6 +53,9 @@ struct RestartPolicyConfig
     /// or is killed as hung (a first one as failed to start); from its first heartbeat on, this bounds each
     /// silence until it serves (or the heartbeat timeout, if longer).
     std::chrono::milliseconds restartStartupBound { 30'000 };
+    /// How long a daemon that announced Shutdown, or was forwarded a stop, has to exit before it is killed:
+    /// below systemd's default stop timeout (90 s), so that the keeper still ends the shells itself.
+    std::chrono::milliseconds daemonExitBound { 60'000 };
 };
 
 /// Where the policy stands in giving up.
@@ -107,6 +111,9 @@ class CrashRestartPolicy
     /// The daemon has stayed up for RestartPolicyConfig::stableAfter: forget the crashes.
     /// @param now When.
     void onStable(core::platform::SteadyTimePoint now);
+
+    /// @return How many crashes the give-up window holds, as of the last onExit().
+    [[nodiscard]] std::size_t recentCrashes() const noexcept { return _crashes.size(); }
 
   private:
     RestartPolicyConfig _config;

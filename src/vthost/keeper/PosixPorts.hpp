@@ -43,6 +43,9 @@ struct KeeperPortsConfig
 
     /// How processes are watched.
     ProcessWatch processWatch = ProcessWatch::ProcessHandle;
+
+    /// What a crashed daemon is restarted from; null restarts it from the committed image, always.
+    std::unique_ptr<RestartImages> images = nullptr;
 };
 
 /// The POSIX ports, owned; ports() lends them to a Keeper. Movable: the ports live on the heap, so the
@@ -58,6 +61,8 @@ struct PosixKeeperPorts
     std::unique_ptr<DaemonLauncher> launcher;
     std::unique_ptr<ShellSpawner> spawner;
     std::unique_ptr<Signaller> signaller;
+    std::unique_ptr<RestartImages> images;
+    std::unique_ptr<SocketFiles> socketFiles; ///< unlink().
 
     /// @return The ports, by reference, for a Keeper; valid while this object lives.
     [[nodiscard]] KeeperPorts ports() const;

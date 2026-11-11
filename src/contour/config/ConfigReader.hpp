@@ -13,6 +13,7 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -445,6 +446,11 @@ struct YAMLConfigReader
                            std::string const& entry,
                            vtbackend::ImageSize& where) const;
 
+    /// Reads the keeper's crash-loop numbers of `daemon.keeper` (DaemonKeeperConfig::restartPolicy).
+    /// @param keeper The `keeper` node.
+    /// @param where Receives what the node names; the rest keeps its defaults.
+    void loadKeeperRestartPolicy(YAML::Node const& keeper, vthost::keeper::RestartPolicyConfig& where) const;
+
     /// Loads @p entry as a YAML list of scrollbar mark sources, replacing @p where whole: `[]` is a
     /// deliberate "none". Left unchanged when absent or not a list; a list item that names no source is
     /// reported and skipped.
@@ -861,6 +867,12 @@ struct Writer
         return format(doc, v.sixelScrolling, v.maxImageColorRegisters, v.goodImageProtocol);
     }
 
+    /// @return @p duration in whole seconds, as the configuration writes it.
+    [[nodiscard]] static std::chrono::seconds::rep wholeSeconds(std::chrono::milliseconds duration)
+    {
+        return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+    }
+
     [[nodiscard]] std::string format(std::string_view doc, DaemonSettings const& v)
     {
         auto const historyLimit = [&]() -> std::string {
@@ -886,7 +898,13 @@ struct Writer
                       v.restore.scrollbackLines,
                       rerunPrograms,
                       v.restore.interval.count(),
-                      v.keeper.restartHung);
+                      v.keeper.restartHung,
+                      v.keeper.restartPolicy.giveUpCrashes,
+                      wholeSeconds(v.keeper.restartPolicy.giveUpWindow),
+                      wholeSeconds(v.keeper.restartPolicy.backoffStart),
+                      wholeSeconds(v.keeper.restartPolicy.backoffCap),
+                      wholeSeconds(v.keeper.restartPolicy.restartStartupBound),
+                      wholeSeconds(v.keeper.restartPolicy.daemonExitBound));
     }
 
     [[nodiscard]] std::string format(std::string_view doc, QuickTerminalConfig const& v)

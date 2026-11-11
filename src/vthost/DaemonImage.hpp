@@ -181,6 +181,12 @@ class ImageLeases
     [[nodiscard]] virtual std::expected<std::unique_ptr<ImageLease>, StagingError> hold(
         std::filesystem::path const& leaseFile) = 0;
 
+    /// Takes a shared lease as hold() does, but without waiting: a lease a claim() holds is busy, and none is
+    /// taken. What a caller that must never stall asks for -- the keeper, whose loop serves every shell.
+    /// @param leaseFile The lease file, a sibling of the image it leases.
+    /// @return The held lease, or null when a claim holds it, or it could not be taken.
+    [[nodiscard]] virtual std::unique_ptr<ImageLease> tryHold(std::filesystem::path const& leaseFile) = 0;
+
     /// Takes the lease exclusively, without waiting: what lets a prune remove an image knowing nobody
     /// holds it, or can come to hold it, until the removal is done. While it is claimed, a hold()
     /// waits, and one that finds the lease file gone or replaced once it gets the lease takes it
@@ -335,6 +341,21 @@ class DaemonImageStore
     ///         a partial copy's), names no complete image, or this layout stages nothing (InPlace).
     [[nodiscard]] std::optional<std::filesystem::path> executableOfImage(std::string_view imageId) const;
 
+    /// Finds and leases the newest complete image that is newer than @p committed: what a daemon that crashed
+    /// is restarted from, never an older one than the last committed daemon's.
+    ///
+    /// Images order by their release's numbers (@see compareReleaseNumbers), then, for an equal release, by
+    /// when they were completed. An image is newer than @p committed when its release's numbers are greater;
+    /// or, when @p committed is an image of this store, when its release is equal and it was completed later
+    /// (a newer build of one development release). A release that states no numbers counts as equal only to
+    /// the very same release. Each candidate is leased before it is looked at again, newest first, so a prune
+    /// that removed it meanwhile is noticed and the next one is taken. The lease is never waited for
+    /// (ImageLeases::tryHold): a candidate a prune is removing is skipped, so the keeper's loop never stalls.
+    /// @param committed The executable of the last committed daemon: an image of this store, or the installed
+    ///                  executable (whose release is this store's, DaemonImageStoreConfig::releaseVersion).
+    /// @return The newer image, its lease held; nullopt when none is newer, or this layout stages nothing.
+    [[nodiscard]] std::optional<StagedImage> leaseNewerImage(std::filesystem::path const& committed);
+
     /// @param imageDir An image directory.
     /// @return Its lease file, `<imageDir>.lease`.
     [[nodiscard]] std::filesystem::path leaseFileOf(std::filesystem::path const& imageDir) const;
@@ -363,6 +384,16 @@ class DaemonImageStore
 
     /// @return Whether @p imageDir holds a complete image.
     [[nodiscard]] bool isComplete(std::filesystem::path const& imageDir) const;
+
+    /// A complete image as leaseNewerImage() weighs it.
+    struct ImageAge
+    {
+        std::string release;                       ///< As its completion marker states it.
+        std::filesystem::file_time_type completed; ///< When its completion marker was written.
+    };
+
+    /// @return The release and completion time of the complete image @p imageDir; nullopt for none.
+    [[nodiscard]] std::optional<ImageAge> ageOf(std::filesystem::path const& imageDir) const;
 
     DaemonImageStoreConfig _config;
     StagingPlan _plan;

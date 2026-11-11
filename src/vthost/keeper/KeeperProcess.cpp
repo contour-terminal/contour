@@ -108,7 +108,8 @@ std::expected<int, KeeperStartError> runKeeperProcess(KeeperProcessConfig config
     auto ports =
         makePosixKeeperPorts(KeeperPortsConfig { .daemonArguments = std::move(config.daemonArguments),
                                                  .environment = std::move(config.environment),
-                                                 .processWatch = ProcessWatch::ProcessHandle });
+                                                 .processWatch = ProcessWatch::ProcessHandle,
+                                                 .images = std::move(config.images) });
     if (!ports)
     {
         errorLog()("the keeper cannot watch its signals: {}", ports.error().message());
