@@ -272,6 +272,21 @@ TEST_CASE("overridesShellProgram only counts a real program override", "[contour
     CHECK(contour::session::overridesShellProgram(command));
 }
 
+TEST_CASE("an in-process session does not inherit a hosting daemon's variables", "[contour][session]")
+{
+    // A window started from a daemon's pane inherits that pane's variables; its own shells are hosted by
+    // no daemon, so their agents must not report into the outer pane.
+    auto shell = vtpty::Process::ExecInfo {};
+    shell.removedEnvironment = { "CONTOUR_PANE", "LOG" };
+    shell.env = { { "CONTOUR_TAB", "set-by-profile" } };
+    contour::session::dropHostingDaemonVariables(shell);
+    for (auto const name:
+         { "CONTOUR_PANE", "CONTOUR_TAB", "CONTOUR_WORKSPACE", "CONTOUR_DAEMON", "CONTOUR_MUX" })
+        CHECK(std::ranges::count(shell.removedEnvironment, std::string { name }) == 1);
+    CHECK(std::ranges::contains(shell.removedEnvironment, std::string { "LOG" }));
+    CHECK(shell.env.at("CONTOUR_TAB") == "set-by-profile"); // a profile's own entry still applies
+}
+
 // Regression (#2102, "both documented paths produce an error message"): `contour terminal PROGRAM
 // ARGS...` is the documented way to run a command, and a program named the way anyone names one --
 // `echo`, not `/usr/bin/echo` -- was reported as "Do not know what to do with `echo`", because the

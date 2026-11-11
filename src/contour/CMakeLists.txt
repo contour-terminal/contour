@@ -1586,6 +1586,9 @@ if(CONTOUR_TESTING)
         command/Shortcut_test.cpp
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
+        cli/AgentHookConfig_test.cpp
+        cli/AgentIntegrations_test.cpp
+        cli/AgentReport_test.cpp
         cli/AgentSkill_test.cpp
         cli/BackgroundExecutor_test.cpp
         cli/McpCommand_test.cpp

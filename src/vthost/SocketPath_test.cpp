@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -207,6 +208,16 @@ TEST_CASE("a daemon-hosted shell is told where its own daemon is", "[vthost][soc
         vthost::hostedShellEnvironment(std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName);
     CHECK(awkward.at("CONTOUR_MUX") == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
     CHECK(awkward.at("CONTOUR_DAEMON") == awkward.at("CONTOUR_MUX"));
+}
+
+TEST_CASE("HostedShellVariables names every variable a hosted shell is handed", "[vthost][socketpath]")
+{
+    auto const uuid = *vtcontrol::parseUuid("018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    auto handed = vthost::hostedShellEnvironment("/run/c.sock");
+    handed.merge(vthost::paneEnvironment(uuid, uuid, uuid));
+    CHECK(handed.size() == vthost::HostedShellVariables.size());
+    for (auto const& [name, value]: handed)
+        CHECK(std::ranges::contains(vthost::HostedShellVariables, std::string_view { name }));
 }
 
 TEST_CASE("a hosted shell's pane variables are full references", "[vthost][socketpath]")

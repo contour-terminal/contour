@@ -6,6 +6,9 @@
 /// generated from the control verb table and the API catalog, never written by hand, so it cannot drift
 /// from what the binary does; rerunning the verb after an upgrade refreshes it.
 
+#include <contour/cli/AgentHookConfig.hpp>
+#include <contour/cli/AgentIntegrations.hpp>
+
 #include <core/Environment.hpp>
 #include <core/platform/FileSystem.hpp>
 
@@ -13,6 +16,8 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,25 +26,70 @@
 namespace contour::cli
 {
 
-/// One row per agent that reads skills from a directory.
+/// What setup does when the variable that relocates an agent's hook directory names a directory that is
+/// absent.
+enum class RelocatedHookDirectory : uint8_t
+{
+    Create = 0, ///< Create it.
+    MustExist,  ///< Leave it, and report it: the agent itself refuses a relocation to a missing directory.
+};
+
+/// Whether setup sets an agent up when the user did not name it.
+enum class AgentDetection : uint8_t
+{
+    Always = 0,      ///< Always: its directory is one that many agents read.
+    WhenConfigFound, ///< Only once its configuration directory exists, which is how an installed agent shows.
+};
+
+/// One row per agent `contour agent setup` knows: where its configuration lives, and which of a skill and
+/// status hooks go there.
 struct AgentTarget
 {
-    std::string_view name;  ///< The `--agent` name.
+    /// The `--agent` name; for an agent with hooks, its integration id, the name `contour agent report`
+    /// takes too.
+    std::string_view name;
     std::string_view label; ///< What it is called to people.
     std::string_view
         configDirEnv;            ///< The variable that relocates its configuration directory; empty for none.
     std::string_view defaultDir; ///< Its configuration directory beneath the home directory.
-    std::string_view skillPath;  ///< Where the skill goes beneath the configuration directory.
+    AgentDetection detection;    ///< Whether it is set up unasked.
+    std::string_view skillPath; ///< Where the skill goes beneath the configuration directory; empty for none.
+    std::optional<AgentId> hookAgent; ///< The integration whose hooks it takes; none for no hooks.
+    std::string_view hookFile;        ///< Its hook file beneath the configuration directory.
+    RelocatedHookDirectory
+        relocatedHookDirectory; ///< What to do when the variable names a missing directory.
 };
 
 /// The agents `contour agent setup` knows.
 inline constexpr auto AgentTargets = std::array {
-    AgentTarget { "claude", "Claude Code", "CLAUDE_CONFIG_DIR", ".claude", "skills/contour/SKILL.md" },
-    AgentTarget { "agents",
-                  "Codex, OpenCode and other agents reading ~/.agents",
-                  "",
-                  ".agents",
-                  "skills/contour/SKILL.md" },
+    AgentTarget { .name = "claude-code",
+                  .label = "Claude Code",
+                  .configDirEnv = "CLAUDE_CONFIG_DIR",
+                  .defaultDir = ".claude",
+                  .detection = AgentDetection::WhenConfigFound,
+                  .skillPath = "skills/contour/SKILL.md",
+                  .hookAgent = AgentId::ClaudeCode,
+                  .hookFile = "settings.json",
+                  .relocatedHookDirectory = RelocatedHookDirectory::Create },
+    // Codex reads its skills from ~/.agents, the row below.
+    AgentTarget { .name = "codex",
+                  .label = "Codex",
+                  .configDirEnv = "CODEX_HOME",
+                  .defaultDir = ".codex",
+                  .detection = AgentDetection::WhenConfigFound,
+                  .skillPath = {},
+                  .hookAgent = AgentId::Codex,
+                  .hookFile = "hooks.json",
+                  .relocatedHookDirectory = RelocatedHookDirectory::MustExist },
+    AgentTarget { .name = "agents",
+                  .label = "Codex, OpenCode and other agents reading ~/.agents",
+                  .configDirEnv = {},
+                  .defaultDir = ".agents",
+                  .detection = AgentDetection::Always,
+                  .skillPath = "skills/contour/SKILL.md",
+                  .hookAgent = std::nullopt,
+                  .hookFile = {},
+                  .relocatedHookDirectory = RelocatedHookDirectory::Create },
 };
 
 /// The line that marks a skill file as ours: a file without it was written by someone else.
@@ -58,14 +108,55 @@ enum class SkillState : uint8_t
     Updated,     ///< There was one of ours, with other text, or a foreign one replaced on request.
     Unchanged,   ///< There was one of ours with this very text.
     Foreign,     ///< There is a file that is not ours, left alone.
+    Untouched,   ///< Not looked at: an uninstall removes the hooks only.
+};
+
+/// What setup does to an agent's hook configuration.
+enum class HookAction : uint8_t
+{
+    Skip = 0, ///< Leave the hooks alone.
+    Install,  ///< Make the agent's hooks call `contour agent report`; also writes the skill.
+    Uninstall ///< Remove those hooks; the skill is left as it is.
+};
+
+/// What setting up one agent's hooks did.
+struct HookFileOutcome
+{
+    std::filesystem::path path;                          ///< The agent's configuration file.
+    HookMergeResult result = HookMergeResult::Unchanged; ///< What happened to it.
+    std::string detail;                                  ///< Why, for a file left alone; else empty.
+};
+
+/// How the hooks are set up.
+struct HookSetup
+{
+    HookAction action = HookAction::Skip; ///< Whether, and which way.
+    std::string_view contourExe; ///< The `contour` binary the hooks run (@see hookExecutable); install only.
+};
+
+/// What setting up one agent's skill did.
+struct SkillFileOutcome
+{
+    std::filesystem::path path;             ///< The skill file.
+    SkillState state = SkillState::Created; ///< What happened to it.
+};
+
+/// Why setup did or did not set an agent up.
+enum class AgentSelection : uint8_t
+{
+    Skipped = 0, ///< Not named, and its configuration directory does not exist: it is not installed.
+    Detected,    ///< Not named, but its configuration directory exists (or it is always set up).
+    Named,       ///< `--agent` named it.
 };
 
 /// The outcome for one agent.
-struct SkillOutcome
+struct AgentOutcome
 {
-    std::string_view agent;                 ///< The agent's name.
-    std::filesystem::path path;             ///< The skill file.
-    SkillState state = SkillState::Created; ///< What happened to it.
+    std::string_view agent;                             ///< The agent's name.
+    AgentSelection selection = AgentSelection::Skipped; ///< Whether it was set up, and why.
+    std::filesystem::path configDir;                    ///< Its configuration directory.
+    std::optional<SkillFileOutcome> skill; ///< What happened to its skill; none when it takes none here.
+    std::optional<HookFileOutcome> hooks;  ///< What happened to its hooks; none when they were skipped.
 };
 
 /// Whether setup writes.
@@ -93,31 +184,47 @@ enum class OutcomeFormat : uint8_t
 /// @return The names, without empty entries.
 [[nodiscard]] std::vector<std::string> parseAgentList(std::string_view commaList);
 
-/// Writes the skill for each requested agent.
+/// @param env Where `$APPIMAGE` is read.
+/// @param runningBinary The path of the running `contour` binary, asked only when it is needed.
+/// @return The binary the hooks are to run: under an AppImage the AppImage file, since the binary inside it
+///         lives in a mount that vanishes on exit; else the running binary. Or why that is unknown.
+[[nodiscard]] std::expected<std::filesystem::path, std::string> hookExecutable(
+    core::Environment const& env,
+    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary);
+
+/// Writes the skill, and installs or removes the hooks, of each requested agent. Text files it replaces --
+/// a skill, an agent's settings -- are replaced durably, and through a symlink to them (a dotfiles
+/// repository's) the target is replaced and the link kept.
 /// @param fileSystem Where the skills are read and written.
 /// @param env Where an agent's configuration-directory variable is read.
 /// @param home The home directory the default directories are beneath.
-/// @param agents The agents to set up by name; empty for all.
+/// @param agents The agents to set up by name, whether or not they are found; empty for every agent found
+///        (AgentDetection).
 /// @param mode Whether to write.
 /// @param foreign What to do with a file that is not ours.
 /// @param skillText The skill, as renderAgentSkill makes it.
+/// @param hookSetup Whether the agents' hook configuration is installed or removed too. An uninstall leaves
+///        the skill untouched; @p foreign concerns the skill file only.
 /// @return One outcome per agent, or why the request cannot be carried out (an unknown agent, a write
 ///         that failed).
-[[nodiscard]] std::expected<std::vector<SkillOutcome>, std::string> setupAgentSkills(
+[[nodiscard]] std::expected<std::vector<AgentOutcome>, std::string> setupAgentSkills(
     core::platform::FileSystem& fileSystem,
     core::Environment const& env,
     std::filesystem::path const& home,
     std::span<std::string const> agents,
     SetupMode mode,
     ForeignSkill foreign,
-    std::string_view skillText);
+    std::string_view skillText,
+    HookSetup const& hookSetup);
 
 /// @param outcomes What setup did.
 /// @param mode Whether it wrote; a dry run says so.
+/// @param action What setup did to the hooks; an agent skipped by an uninstall is not told how to set it up.
 /// @param format Text lines or JSON.
 /// @return The report, newline-terminated.
-[[nodiscard]] std::string formatSkillOutcomes(std::span<SkillOutcome const> outcomes,
+[[nodiscard]] std::string formatSkillOutcomes(std::span<AgentOutcome const> outcomes,
                                               SetupMode mode,
+                                              HookAction action,
                                               OutcomeFormat format);
 
 } // namespace contour::cli

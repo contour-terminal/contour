@@ -16,6 +16,7 @@
     #include <vtpty/SshSession.hpp>
 #endif
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -26,6 +27,7 @@
 #include <string_view>
 #include <vector>
 
+#include <vthost/HostedShell.hpp>
 #include <vthost/client/TabPresentation.hpp>
 #include <vtworkspace/Move.hpp>
 #include <vtworkspace/Primitives.hpp>
@@ -68,6 +70,17 @@ namespace contour::session
     std::optional<vtpty::Process::ExecInfo> const& commandOverride) noexcept
 {
     return commandOverride.has_value() && !commandOverride->program.empty();
+}
+
+/// Drops from what @p shell inherits every variable a daemon hands the shells it hosts. A session the GUI
+/// spawns in process is hosted by no daemon, so a window started from a daemon's pane must not pass that
+/// pane's `$CONTOUR_PANE` and `$CONTOUR_DAEMON` on to its own shells, whose agents would report into it.
+/// @param shell The shell about to be spawned in process; its own `env` entries of those names still apply.
+inline void dropHostingDaemonVariables(vtpty::Process::ExecInfo& shell)
+{
+    for (auto const name: vthost::HostedShellVariables)
+        if (!std::ranges::contains(shell.removedEnvironment, name))
+            shell.removedEnvironment.emplace_back(name);
 }
 
 /// Where the sessions a SessionFactory makes run their programs.

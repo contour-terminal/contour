@@ -90,6 +90,9 @@ class ContourApp: public core::cli::App
     int catAction();
     /// Runs the headless terminal multiplexer daemon.
     int daemonAction();
+    /// Turns a coding agent's hook payload into pane status: `contour agent report`.
+    /// @return Always 0.
+    int agentReportAction();
     /// Writes the agent skill: `contour agent setup`.
     /// @return The process exit code.
     int agentSetupAction();
