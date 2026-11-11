@@ -24,10 +24,22 @@ TEST_CASE("taskbarAttention.tallyCountsBlockedTabsPerWindowAndInAll", "[taskbara
     CHECK(tally.perWindow == std::vector<std::pair<uint64_t, unsigned>> { { 1, 1 }, { 2, 2 } });
 }
 
-TEST_CASE("taskbarAttention.aWindowWithNoneWaitingIsListedWithZero", "[taskbarattention]")
+TEST_CASE("taskbarAttention.aBellCountsAsWaiting", "[taskbarattention]")
 {
     auto const tabs = std::array {
         std::pair { uint64_t { 7 }, TabBadgeKind::Bell },
+        std::pair { uint64_t { 7 }, TabBadgeKind::None },
+        std::pair { uint64_t { 8 }, TabBadgeKind::Blocked },
+    };
+    auto const tally = tallyWaitingTabs(tabs);
+    CHECK(tally.total == 2);
+    CHECK(tally.perWindow == std::vector<std::pair<uint64_t, unsigned>> { { 7, 1 }, { 8, 1 } });
+}
+
+TEST_CASE("taskbarAttention.aWindowWithNoneWaitingIsListedWithZero", "[taskbarattention]")
+{
+    auto const tabs = std::array {
+        std::pair { uint64_t { 7 }, TabBadgeKind::Done },
         std::pair { uint64_t { 7 }, TabBadgeKind::None },
         std::pair { uint64_t { 8 }, TabBadgeKind::Blocked },
     };
@@ -36,14 +48,14 @@ TEST_CASE("taskbarAttention.aWindowWithNoneWaitingIsListedWithZero", "[taskbarat
     CHECK(tally.perWindow == std::vector<std::pair<uint64_t, unsigned>> { { 7, 0 }, { 8, 1 } });
 }
 
-TEST_CASE("taskbarAttention.onlyBlockedWaits", "[taskbarattention]")
+TEST_CASE("taskbarAttention.onlyNeedsYouWaits", "[taskbarattention]")
 {
     for (auto const index: std::views::iota(size_t { 0 }, TabBadgeKindCount))
     {
         auto const kind = TabBadgeKind(index);
         auto const tabs = std::array { std::pair { uint64_t { 1 }, kind } };
         INFO("kind " << index);
-        CHECK(tallyWaitingTabs(tabs).total == (kind == TabBadgeKind::Blocked ? 1u : 0u));
+        CHECK(tallyWaitingTabs(tabs).total == (urgencyOf(kind) == Urgency::NeedsYou ? 1u : 0u));
     }
 }
 

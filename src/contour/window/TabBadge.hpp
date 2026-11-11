@@ -7,6 +7,7 @@
 
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/StatusUrgency.hpp>
 
 #include <vtbackend/shell/CommandBlock.hpp>
 
@@ -14,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -46,24 +48,6 @@ enum class FinishedBlockBadge : uint8_t
     Succeeded,
     Failed,
 };
-
-/// The badge kinds a tab can show. The enumerators keep their order (TabBadgeLooks is indexed by them); what
-/// decides between them is TabBadgeRules, most urgent first: Blocked, Bell, Error, Done, Working, Output.
-/// Bell sits directly under Blocked as it is an explicit request for attention. Done and Error show only
-/// until the user has seen them (BadgeVisibility::WhileUnseen).
-enum class TabBadgeKind : uint8_t
-{
-    None = 0, ///< No badge.
-    Output,   ///< Unseen output.
-    Done,     ///< Finished well.
-    Working,  ///< Running, with progress when known.
-    Error,    ///< Failed.
-    Blocked,  ///< Waits for the user.
-    Bell,     ///< The bell rang while the tab was out of sight.
-};
-
-/// Number of @c TabBadgeKind enumerators, derived from the last one.
-inline constexpr size_t TabBadgeKindCount = static_cast<size_t>(TabBadgeKind::Bell) + 1;
 
 /// Everything that competes for a tab's badge slot.
 struct TabBadgeInputs
@@ -124,6 +108,19 @@ inline constexpr auto TabBadgeRules = std::array {
                    TabActivity::UnseenOutput,
                    BellMark::None },
 };
+
+namespace detail
+{
+    [[nodiscard]] constexpr bool tabBadgeRulesByUrgency() noexcept
+    {
+        return std::ranges::is_sorted(TabBadgeRules, std::ranges::greater {}, [](TabBadgeRule const& rule) {
+            return urgencyOf(rule.kind);
+        });
+    }
+} // namespace detail
+
+// Hand-ordered, not sorted: Blocked and Bell tie as NeedsYou, and the tie keeps this order.
+static_assert(detail::tabBadgeRulesByUrgency(), "TabBadgeRules must list the rows most urgent first");
 
 /// Whether @p rule selects @p inputs: any of its non-None fields equals the input's.
 /// @param rule   The row.
@@ -229,6 +226,18 @@ namespace detail
 } // namespace detail
 
 static_assert(detail::tabBadgeLooksInOrder(), "TabBadgeLooks must list the kinds in enumerator order");
+
+namespace detail
+{
+    [[nodiscard]] constexpr bool everyTabBadgeKindMaps() noexcept
+    {
+        return std::ranges::all_of(TabBadgeLooks, [](TabBadgeLook const& look) {
+            return look.kind == TabBadgeKind::None || urgencyOf(look.kind) != Urgency::Idle;
+        });
+    }
+} // namespace detail
+
+static_assert(detail::everyTabBadgeKindMaps(), "every TabBadgeKind must map to an urgency");
 
 /// The look of a badge kind.
 /// @param kind The kind.
