@@ -469,6 +469,8 @@ namespace
                                                value.upgrade->lastFailure);
                        if (value.relocation)
                            text += std::format(" relocation={}", *value.relocation);
+                       if (value.keeperProcessId)
+                           text += std::format(" keeper={}", *value.keeperProcessId);
                        return text;
                    } },
         TraceRow { PduType::StopDaemon,

@@ -80,6 +80,8 @@ struct DaemonStatus
     /// The `SHA256:...` fingerprint of the certificate its TCP listener presents; nullopt for a daemon
     /// without one, or from before it states this.
     std::optional<std::string> tlsFingerprint {};
+    /// The PTY keeper it runs behind, 0 for none; nullopt for a daemon from before it states one.
+    std::optional<std::uint64_t> keeperProcessId {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.

@@ -46,6 +46,8 @@ struct DaemonRuntimeConfig
     /// The `SHA256:...` fingerprint of the certificate its TCP listener presents, for `daemon status`; empty
     /// for a daemon with no TCP listener.
     std::string tlsFingerprint {};
+    /// The PTY keeper the daemon runs behind; 0 for none.
+    std::uint64_t keeperProcessId = 0;
 };
 
 /// What a daemon needs to upgrade itself, wired by whoever builds its handover::LiveUpgrade.

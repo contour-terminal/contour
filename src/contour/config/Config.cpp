@@ -3225,6 +3225,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 
     loadFromEntry(child, "restore", where.restore);
+
+    if (auto const keeper = child["keeper"]; keeper && keeper.IsMap())
+        loadGuarded(keeper, "restart_hung", where.keeper.restartHung);
 }
 
 void YAMLConfigReader::loadCellPixelSize(YAML::Node const& node,

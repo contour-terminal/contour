@@ -232,6 +232,7 @@ core::async::Task<std::expected<void, UpgradeError>> LiveUpgrade::run(UpgradeTar
     // Only the encoded image and the handles it names go on: the decoded one, every session's terminal state
     // in it, is let go of here rather than kept through the wait for the target.
     auto [crossing, bytes] = encodedOf(*std::move(image));
+    crossing.insert(crossing.end(), _config.alsoCrossing.begin(), _config.alsoCrossing.end());
     // Refused here rather than read never: a new image that cannot read what it was handed orphans every
     // program.
     if (std::cmp_greater(bytes.size(), std::min(_config.maxImageSize, MaxHandoverImageSize)))

@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include <vthost/keeper/Codec.hpp>
+#include <vthost/keeper/DescriptorSocket.hpp>
 #include <vthost/keeper/Frame.hpp>
 #include <vthost/keeper/PosixPorts.hpp>
 
@@ -537,6 +538,41 @@ TEST_CASE("a truncated descriptor list ends the link and leaks nothing", "[keepe
     CHECK(events[0].kind == EventKind::ChannelClosed);
     CHECK(openDescriptorCount() == open);
     ports.events->unwatchChannel(*channel);
+}
+
+TEST_CASE("a receive that finds its descriptor list cut short closes what came and says so",
+          "[keeper][posix]")
+{
+    auto pair = makeSocketPair();
+    auto const pipe = makePipe();
+    auto const tooMany = std::vector<int>(MaxFdsPerFrame + 4, pipe.reader.get());
+    sendRaw(pair.daemon.get(), encodeFrame(frameOf(Heartbeat {})), tooMany);
+    auto const open = openDescriptorCount();
+
+    auto buffer = std::array<uint8_t, 256> {};
+    auto const received = receiveWithDescriptors(pair.keeper.get(), buffer);
+    REQUIRE_FALSE(received.has_value());
+    CHECK(received.error() == ReceiveError::Truncated);
+    CHECK(openDescriptorCount() == open);
+}
+
+TEST_CASE("a list longer than any receive takes in is cut short, and what came is closed", "[keeper][posix]")
+{
+#ifdef __APPLE__
+    SKIP("macOS installs the descriptors a control buffer has no room for, and leaks them");
+#else
+    auto pair = makeSocketPair();
+    auto const pipe = makePipe();
+    auto const farTooMany = std::vector<int>(MaxFdsPerFrame * 10, pipe.reader.get());
+    sendRaw(pair.daemon.get(), encodeFrame(frameOf(Heartbeat {})), farTooMany);
+    auto const open = openDescriptorCount();
+
+    auto buffer = std::array<uint8_t, 256> {};
+    auto const received = receiveWithDescriptors(pair.keeper.get(), buffer);
+    REQUIRE_FALSE(received.has_value());
+    CHECK(received.error() == ReceiveError::Truncated);
+    CHECK(openDescriptorCount() == open);
+#endif
 }
 
 TEST_CASE("a second label lock on the same path fails", "[keeper][posix]")

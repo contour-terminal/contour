@@ -44,7 +44,12 @@ CONFIG="$XDG_CONFIG_HOME/contour/contour.yml"
 DAEMON_PID=""
 PROGRAM_PID=""
 
+# $DAEMON_PID is the PTY keeper's, `contour daemon` itself; the daemon it keeps is its child, $SERVING_PID.
 daemon_pid_alive() { kill -0 "$DAEMON_PID" 2>/dev/null; }
+# The daemon's own pid, as the last `daemon status` names it.
+serving_pid() { sed -n 's/^daemon: *running (pid \([0-9]*\))$/\1/p' "$OUT/last.txt"; }
+# Whether the last `daemon status` names $DAEMON_PID as the keeper.
+keeper_named() { grep -qE "^keeper: +pid $DAEMON_PID\$" "$OUT/last.txt"; }
 daemon_pid_gone() { ! daemon_pid_alive; }
 
 # Waits, at most $1 deciseconds, for the command $2... to succeed.
@@ -67,7 +72,7 @@ reap_daemon() {
 }
 
 # Killed by PID, never by name: `pkill -f contour` on a developer's machine SIGKILLs their daily driver.
-# $DAEMON_PID is the shell's own child, and the daemon keeps it across its exec; the program is the daemon's.
+# $DAEMON_PID is the shell's own child, the keeper, which outlives the daemon's exec; the program is the daemon's.
 # Runs on every exit path, including the ones fail() takes.
 cleanup() {
     [ -n "$PROGRAM_PID" ] && kill "$PROGRAM_PID" 2>/dev/null
@@ -257,7 +262,10 @@ wait_for 200 listed_git || fail "the workspace in $OUT/repo is not listed on bra
 PANES_BEFORE="$(cat "$OUT/last.txt")"
 contour daemon status --socket "$SOCKET"
 [ "$status" -eq 0 ] || fail "daemon status exited $status"
-grep -qF "(pid $DAEMON_PID)" "$OUT/last.txt" || fail "daemon status does not name the daemon's pid $DAEMON_PID"
+keeper_named || fail "daemon status does not name the keeper's pid $DAEMON_PID"
+SERVING_PID="$(serving_pid)"
+[ -n "$SERVING_PID" ] && [ "$(ps -o ppid= -p "$SERVING_PID" | tr -d ' ')" = "$DAEMON_PID" ] \
+    || fail "the daemon '$SERVING_PID' is not the keeper $DAEMON_PID's child"
 grep -qE '^sessions: +1$' "$OUT/last.txt" || fail "the daemon does not host exactly the one session"
 grep -qE '^upgrades: +0$' "$OUT/last.txt" || fail "a fresh daemon does not count 0 upgrades"
 
@@ -292,7 +300,9 @@ echo
 daemon_pid_alive || fail "the daemon died in the upgrade"
 contour daemon status --socket "$SOCKET"
 [ "$status" -eq 0 ] || fail "daemon status after the upgrade exited $status"
-grep -qF "(pid $DAEMON_PID)" "$OUT/last.txt" || fail "the daemon's pid is not $DAEMON_PID any more"
+keeper_named || fail "the keeper's pid is not $DAEMON_PID any more"
+# An exec in place: the same daemon process runs the new image.
+[ "$(serving_pid)" = "$SERVING_PID" ] || fail "the daemon's pid is not $SERVING_PID any more, but $(serving_pid)"
 grep -qE '^sessions: +1$' "$OUT/last.txt" || fail "the upgraded daemon does not host exactly the one session"
 # An exec happened, not a rollback that kept the same process serving: only a new image counts one upgrade
 # more, and only a new image takes the session over from a handover.
@@ -343,7 +353,8 @@ daemon_pid_alive || fail "the refused upgrade killed the daemon"
 kill -0 "$PROGRAM_PID" 2>/dev/null || fail "the refused upgrade killed the hosted program"
 contour daemon status --socket "$SOCKET"
 [ "$status" -eq 0 ] || fail "daemon status after the refusal exited $status"
-grep -qF "(pid $DAEMON_PID)" "$OUT/last.txt" || fail "the refused upgrade changed the daemon's pid"
+keeper_named || fail "the refused upgrade changed the keeper's pid"
+[ "$(serving_pid)" = "$SERVING_PID" ] || fail "the refused upgrade changed the daemon's pid"
 # Refused before anything was announced: no upgrade counted, and no failure recorded for a later reader.
 grep -qE '^upgrades: +1$' "$OUT/last.txt" || fail "the refused upgrade changed the upgrade count"
 grep -q '^last upgrade:' "$OUT/last.txt" && fail "a refusal before the announcement was recorded as a failed upgrade"

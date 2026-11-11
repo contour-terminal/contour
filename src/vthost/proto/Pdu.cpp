@@ -956,9 +956,15 @@ namespace
                 if (pdu.workspaces.has_value())
                 {
                     out.varint(*pdu.workspaces);
-                    // Behind the workspace count, for the same reason.
-                    if (pdu.tlsFingerprint.has_value())
-                        out.string(*pdu.tlsFingerprint);
+                    // Behind the workspace count, for the same reason. A daemon without a TCP listener
+                    // still sends an empty one when the keeper follows, which has no place otherwise.
+                    if (pdu.tlsFingerprint.has_value() || pdu.keeperProcessId.has_value())
+                    {
+                        out.string(pdu.tlsFingerprint.value_or(std::string {}));
+                        // Behind the fingerprint, for the same reason.
+                        if (pdu.keeperProcessId.has_value())
+                            out.varint(*pdu.keeperProcessId);
+                    }
                 }
             }
         }
@@ -2153,13 +2159,23 @@ namespace
                     if (!assign(in.varint(), workspaces, error))
                         return std::unexpected(error);
                     pdu.workspaces = workspaces;
-                    // Appended after the workspace count by a later version yet.
+                    // Appended after the workspace count by a later version yet. Empty is a daemon without
+                    // a TCP listener, which sends it only to place what follows.
                     if (in.remaining() != 0)
                     {
                         auto fingerprint = std::string {};
                         if (!assign(in.string(), fingerprint, error))
                             return std::unexpected(error);
-                        pdu.tlsFingerprint = std::move(fingerprint);
+                        if (!fingerprint.empty())
+                            pdu.tlsFingerprint = std::move(fingerprint);
+                        // Appended after the fingerprint by a later version yet.
+                        if (in.remaining() != 0)
+                        {
+                            auto keeper = uint64_t {};
+                            if (!assign(in.varint(), keeper, error))
+                                return std::unexpected(error);
+                            pdu.keeperProcessId = keeper;
+                        }
                     }
                 }
             }

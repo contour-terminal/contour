@@ -885,7 +885,8 @@ struct Writer
                       v.restore.scrollback,
                       v.restore.scrollbackLines,
                       rerunPrograms,
-                      v.restore.interval.count());
+                      v.restore.interval.count(),
+                      v.keeper.restartHung);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, QuickTerminalConfig const& v)

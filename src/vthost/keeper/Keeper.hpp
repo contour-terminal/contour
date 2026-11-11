@@ -82,6 +82,14 @@ class Keeper
     ///         first start failed, non-zero when it gave up.
     [[nodiscard]] int exitStatus() const noexcept { return _exitStatus; }
 
+    /// @return The channel version the keeper and the daemon's current image both speak, as negotiated
+    ///         from that image's Hello: what gates a message, enum value or descriptor-carrying field a later
+    ///         version adds (@see Messages.hpp). 0 while no image has said Hello.
+    [[nodiscard]] uint32_t daemonChannelVersion() const noexcept
+    {
+        return _daemon ? _daemon->channelVersion : 0;
+    }
+
   private:
     /// Whether the daemon has received the inventory it is owed.
     enum class InventoryDelivery : uint8_t
@@ -96,6 +104,13 @@ class Keeper
     {
         NoneYet = 0,
         Heard,
+    };
+
+    /// Whether the daemon's image has said Hello yet.
+    enum class Greeting : uint8_t
+    {
+        Awaited = 0, ///< Launched; its first image has not spoken.
+        Greeted,     ///< It said Hello: another Hello is a new image, exec'd in place.
     };
 
     struct Daemon
@@ -116,6 +131,8 @@ class Keeper
         std::optional<WireExitStatus> exited; ///< Reaped; judged once the channel closed.
         std::optional<core::platform::SteadyTimePoint>
             drainUntil; ///< Judged by then if the close never comes.
+        Greeting greeting = Greeting::Awaited;
+        uint32_t channelVersion = 0; ///< Negotiated from its current image's Hello; 0 before one.
     };
 
     /// A session spawnSession() started.
@@ -130,6 +147,7 @@ class Keeper
     {
         std::string name;
         std::optional<std::vector<uint8_t>> tlsIdentity;
+        std::string path; ///< The socket file of a Unix listener; empty for TCP.
         UniqueFd fd;
     };
 
@@ -159,6 +177,10 @@ class Keeper
     [[nodiscard]] core::platform::SteadyTimePoint nextDeadline() const;
 
     // One handler per message the daemon sends the keeper; the rest are ignored.
+    /// Takes the hung-daemon settings of @p message: on Serving, and again from a live upgrade's new image.
+    void adoptKeepingSettings(Daemon& daemon, Serving const& message);
+
+    void handle(Hello const& message, std::vector<UniqueFd>& fds);
     void handle(Listener const& message, std::vector<UniqueFd>& fds);
     void handle(Serving const& message, std::vector<UniqueFd>& fds);
     void handle(Spawn const& message, std::vector<UniqueFd>& fds);

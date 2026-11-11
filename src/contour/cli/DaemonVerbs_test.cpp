@@ -259,6 +259,27 @@ TEST_CASE("status says standard error for a daemon with no log file", "[contour]
     CHECK(contour::cli::formatDaemonStatus(status).contains("standard error"));
 }
 
+TEST_CASE("status names the keeper a daemon runs behind, and none where it runs behind none",
+          "[contour][cli][daemon]")
+{
+    // The row as the status prints it, its label's padding aside.
+    auto const keeperRow = [](DaemonStatus const& status) {
+        auto lines = std::istringstream { contour::cli::formatDaemonStatus(status) };
+        auto line = std::string {};
+        while (std::getline(lines, line))
+            if (line.starts_with("keeper:"))
+                return line.substr(line.find_first_not_of(' ', std::string_view { "keeper:" }.size()));
+        return std::string {};
+    };
+    auto status = sampleStatus();
+    status.keeperProcessId = 4200;
+    CHECK(keeperRow(status) == "pid 4200");
+    status.keeperProcessId = 0;
+    CHECK(keeperRow(status) == "none");
+    status.keeperProcessId = std::nullopt;
+    CHECK(keeperRow(status) == "none");
+}
+
 TEST_CASE("status of an absent daemon says so and exits 4 (unreachable)", "[contour][cli][daemon]")
 {
     auto port = FakeControlPort { ControlErrorCode::NotRunning };

@@ -103,7 +103,8 @@ grep -q "listen-tcp" "$OUT/access-alone.txt" \
 
 # --- A daemon binds its socket ---------------------------------------------------------------
 #
-# Foreground, backgrounded by this shell, so $! is the daemon's own pid: exact, and safe to signal.
+# Foreground, backgrounded by this shell, so $! is the PTY keeper's pid -- `contour daemon` keeps the daemon,
+# its child, which it starts -- exact, and safe to signal: the keeper forwards a stop to the daemon.
 # (`--background` re-execs a detached copy and reports success on stdout, but hands back no pid,
 # which would leave this script guessing which process to stop.)
 "$CONTOUR" daemon --socket "$SOCKET" --log-file "$OUT/daemon.log" > "$OUT/daemon.out" 2>&1 &
@@ -123,17 +124,24 @@ done
 # ELF survives, so the daemon is not re-executed from a per-version copy and nothing is staged. (The
 # staging and re-exec path is covered by vthost_test's [relocate] cases, and for an AppImage by the
 # manual check in docs/internals/vthost.md.)
+# Both the keeper ($DAEMON_PID) and the daemon it started, its child, run from the binary started.
 if [ -e "/proc/$DAEMON_PID/exe" ]; then
-    RUNNING="$(readlink "/proc/$DAEMON_PID/exe")"
     STARTED="$(readlink -f "$CONTOUR")"
-    [ "$RUNNING" = "$STARTED" ] || fail "the daemon runs from $RUNNING, not from $STARTED"
+    RUNNING="$(readlink "/proc/$DAEMON_PID/exe")"
+    [ "$RUNNING" = "$STARTED" ] || fail "the keeper runs from $RUNNING, not from $STARTED"
+    KEPT="$(cat "/proc/$DAEMON_PID/task/$DAEMON_PID/children")"
+    [ -n "$KEPT" ] || fail "the keeper $DAEMON_PID runs no daemon"
+    for child in $KEPT; do
+        RUNNING="$(readlink "/proc/$child/exe")"
+        [ "$RUNNING" = "$STARTED" ] || fail "the daemon $child runs from $RUNNING, not from $STARTED"
+    done
 fi
 [ -e "$XDG_STATE_HOME/contour/bin" ] && fail "a Linux install staged a daemon image into $XDG_STATE_HOME/contour/bin"
 
 # --- A second daemon on the same socket is refused --------------------------------------------
 #
-# net::listenUnix probes the path by connecting to it first, so a live incumbent answers and the
-# newcomer gets AddressInUse rather than stealing the path out from under it.
+# The newcomer's keeper finds the label's lock (<socket>.keeper.lock) held by the incumbent's and ends at
+# once, before it starts a daemon or touches the socket.
 if timeout 20 "$CONTOUR" daemon --socket "$SOCKET" > "$OUT/second.txt" 2>&1; then
     fail "a second daemon on a live socket unexpectedly succeeded"
 fi
@@ -146,7 +154,13 @@ kill -0 "$DAEMON_PID" 2>/dev/null || fail "the incumbent daemon died when a seco
 "$CONTOUR" daemon status --socket "$SOCKET" > "$OUT/status.txt" 2>&1 \
     || fail "daemon status against a running daemon did not exit 0"
 grep -q "sessions:" "$OUT/status.txt" || fail "daemon status does not report the sessions"
-grep -q "pid $DAEMON_PID" "$OUT/status.txt" || fail "daemon status does not name the daemon's pid $DAEMON_PID"
+grep -qE "^keeper: +pid $DAEMON_PID\$" "$OUT/status.txt" \
+    || fail "daemon status does not name the keeper's pid $DAEMON_PID"
+SERVING_PID="$(sed -n 's/^daemon: *running (pid \([0-9]*\))$/\1/p' "$OUT/status.txt")"
+[ -n "$SERVING_PID" ] && [ "$SERVING_PID" != "$DAEMON_PID" ] \
+    || fail "daemon status names no daemon of its own beside the keeper: '$SERVING_PID'"
+[ "$(ps -o ppid= -p "$SERVING_PID" | tr -d ' ')" = "$DAEMON_PID" ] \
+    || fail "the daemon $SERVING_PID is not the keeper $DAEMON_PID's child"
 
 "$CONTOUR" daemon logs --socket "$SOCKET" > "$OUT/logs.txt" 2>&1 \
     || fail "daemon logs against a running daemon did not exit 0"

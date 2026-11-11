@@ -55,7 +55,10 @@ namespace
     class ExecReceiver final: public ImageReceiver
     {
       public:
-        explicit ExecReceiver(HandoverMemory& memory) noexcept: _memory { memory } {}
+        ExecReceiver(HandoverMemory& memory, std::vector<int> alsoKeep) noexcept:
+            _memory { memory }, _alsoKeep { std::move(alsoKeep) }
+        {
+        }
 
         [[nodiscard]] std::expected<std::optional<HandoverImage>, TakeoverFailure> takeOver(
             std::string_view token) override
@@ -84,22 +87,24 @@ namespace
                 return std::unexpected(TakeoverFailure::StartAfresh);
             }
             // Whatever the image does not name was leaked across the exec.
-            closeDescriptorsExcept(descriptorsToKeep(*image));
+            closeDescriptorsExcept(descriptorsToKeep(*image, _alsoKeep));
             return std::optional { *std::move(image) };
         }
 
       private:
         HandoverMemory& _memory;
+        std::vector<int> _alsoKeep;
     };
 #endif
 } // namespace
 
-std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory)
+std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory,
+                                                       [[maybe_unused]] std::vector<int> alsoKeep)
 {
 #ifdef _WIN32
     return std::make_unique<SuccessorReceiver>(memory);
 #else
-    return std::make_unique<ExecReceiver>(memory);
+    return std::make_unique<ExecReceiver>(memory, std::move(alsoKeep));
 #endif
 }
 

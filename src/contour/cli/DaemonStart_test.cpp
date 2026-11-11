@@ -122,6 +122,20 @@ TEST_CASE("a handed-over daemon runs the built-in profile when not even the defa
     CHECK(failures.take().size() == 1);
 }
 
+TEST_CASE("a daemon its keeper restarted runs on the built-in configuration, as a handed-over one does",
+          "[contour][cli][daemon]")
+{
+    auto const file = ConfigFile { Unparsable };
+    auto failures = DaemonStartFailures { StartContinuity::Recovered };
+    auto config = loadDaemonConfig(file.name(), failures);
+    REQUIRE(config.has_value());
+    CHECK(config->configFile == file.path);
+    auto const profile = resolveDaemonProfile(*config, "gone", failures);
+    REQUIRE(profile.has_value());
+    // Both are told, neither ends the daemon: ending would hang up the shells its keeper kept.
+    CHECK(failures.take().size() == 2);
+}
+
 TEST_CASE("handover-info reports whether the daemon's configuration loads and names its profile",
           "[contour][cli][daemon][upgrade]")
 {

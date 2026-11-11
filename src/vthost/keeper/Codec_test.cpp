@@ -23,7 +23,7 @@ std::vector<Message> samples()
         Hello { .version = 2, .capabilities = 0xDEAD'BEEF'0000ULL },
         Unsupported { .tag = 99 },
         Launch { .continuity = LaunchContinuity::HandedOver, .options = blob },
-        Listener { .name = "native", .tlsIdentity = blob },
+        Listener { .name = "native", .tlsIdentity = blob, .path = "/run/contour/native" },
         Serving { .hungRestart = HungRestart::Off, .heartbeatTimeoutMs = 12'345 },
         Spawn { .request = 7,
                 .argv = { "/bin/sh", "-l" },
@@ -41,7 +41,7 @@ std::vector<Message> samples()
         Shutdown { .cause = 3 },
         Exec { .executablePath = "/usr/bin/contour" },
         InventoryBegin { .daemonImagePath = "/img", .sessionCount = 4, .listenerCount = 2 },
-        InventoryListener { .name = "tls", .tlsIdentity = std::nullopt },
+        InventoryListener { .name = "tls", .tlsIdentity = std::nullopt, .path = {} },
         InventorySession { .session = 5,
                            .pid = -1,
                            .exited = WireExitStatus { .kind = ExitKind::Normal, .value = -3 },
@@ -154,14 +154,17 @@ TEST_CASE("a frame with more descriptors than its message may carry is refused",
     CHECK(decodeFrame(heartbeat).error() == CodecError::TooManyDescriptors);
 
     auto const listener =
-        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt }), .fds = { 4 } };
+        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt, .path = {} }),
+                .fds = { 4 } };
     CHECK(decodeFrame(listener).has_value());
     auto const two =
-        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt }), .fds = { 4, 5 } };
+        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt, .path = {} }),
+                .fds = { 4, 5 } };
     CHECK(decodeFrame(two).error() == CodecError::TooManyDescriptors);
 
     auto const none =
-        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt }), .fds = {} };
+        Frame { .body = encode(Listener { .name = "x", .tlsIdentity = std::nullopt, .path = {} }),
+                .fds = {} };
     CHECK(decodeFrame(none).has_value()); // a budget is a maximum
 }
 

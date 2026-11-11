@@ -42,6 +42,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -87,6 +88,7 @@
 #include <vthost/WorkspacePersistence.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/handover/LiveUpgrade.hpp>
+#include <vthost/keeper/Messages.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 
@@ -95,6 +97,8 @@
 
     #include <fcntl.h>
     #include <unistd.h>
+
+    #include <vthost/keeperlink/KeeperLink.hpp>
 #endif
 
 namespace vthost
@@ -102,6 +106,9 @@ namespace vthost
 
 namespace
 {
+    /// The socket file of each endpoint the daemon serves on one, by the endpoint's name.
+    using SocketPaths = std::map<std::string, std::string, std::less<>>;
+
     /// The machine this daemon runs on, read once from the OS for every session it will host.
     [[nodiscard]] vtbackend::HostIdentity thisHostIdentity()
     {
@@ -519,7 +526,8 @@ namespace
         DaemonConfig const& config,
         LiveUpgradeServices const& services,
         DaemonLineage lineage,
-        std::map<std::string, handover::TlsIdentity, std::less<>> tlsIdentities)
+        std::map<std::string, handover::TlsIdentity, std::less<>> tlsIdentities,
+        std::vector<vtpty::CrossingHandle> alsoCrossing)
     {
         return handover::LiveUpgradeConfig { .release = config.releaseVersion,
                                              .daemonInstance = lineage.instance,
@@ -530,7 +538,8 @@ namespace
                                              .configFile = services.configFile,
                                              .profile = services.profile,
                                              .runningConfig = services.runningConfig,
-                                             .tlsIdentities = std::move(tlsIdentities) };
+                                             .tlsIdentities = std::move(tlsIdentities),
+                                             .alsoCrossing = std::move(alsoCrossing) };
     }
 
     /// @param config The daemon's configuration.
@@ -590,7 +599,7 @@ namespace
                 // The watcher sees a last session close, which a daemon that took over from a handover may
                 // have seen already: the previous image's own shutdown was lost to the exec, or no session
                 // could be adopted. Looked at once, as the start's own last close.
-                if (continuity == StartContinuity::HandedOver && host.sessionCount() == 0)
+                if (carriesOn(continuity) && host.sessionCount() == 0)
                 {
                     daemonLog()("taken over from a handover with no session left; terminating");
                     loop.post([&funnel] { funnel.request(ShutdownCause::LastSessionClosed); });
@@ -657,17 +666,22 @@ namespace
 
     class BoundPersistence;
 
-    /// What a daemon does before its listeners close, in order: the workspace's last snapshot, the caller's
-    /// beforeShutdown, then the word that lets a console-control handler holding the process's end return
-    /// (ShutdownSignals::watch's lastWrite). Built before the funnel that runs it and the signal watch that
+    /// What a daemon does before its listeners close, in order: the workspace's last snapshot, the keeper's
+    /// announcement (a clean end, not a crash to restart from), the caller's beforeShutdown, then the word
+    /// that lets a console-control handler holding the process's end return (ShutdownSignals::watch's
+    /// lastWrite). Built before the funnel that runs it and the signal watch that
     /// waits on it; the persistence it finalizes exists only once the host does, so a BoundPersistence binds
     /// itself in for its own lifetime.
     class ShutdownSequence
     {
       public:
         /// @param callerHook DaemonConfig::beforeShutdown (not owned; outlives this); may be empty.
-        explicit ShutdownSequence(std::function<void(ShutdownCause)> const& callerHook):
-            _callerHook { callerHook }, _lastWrite { _lastWritten.get_future().share() }
+        /// @param announce Tells the keeper the daemon shuts down; empty for a daemon behind none.
+        ShutdownSequence(std::function<void(ShutdownCause)> const& callerHook,
+                         std::function<void(ShutdownCause)> announce):
+            _callerHook { callerHook },
+            _announce { std::move(announce) },
+            _lastWrite { _lastWritten.get_future().share() }
         {
         }
 
@@ -677,6 +691,8 @@ namespace
         {
             if (_persistence != nullptr)
                 _persistence->finalize(cause);
+            if (_announce)
+                _announce(cause);
             if (_callerHook)
                 _callerHook(cause);
             _lastWritten.set_value();
@@ -689,6 +705,7 @@ namespace
         friend class BoundPersistence;
 
         std::function<void(ShutdownCause)> const& _callerHook;
+        std::function<void(ShutdownCause)> _announce;
         DaemonPersistence* _persistence = nullptr; ///< Set by the BoundPersistence alive, if any.
         std::promise<void> _lastWritten;
         std::shared_future<void> _lastWrite;
@@ -739,10 +756,12 @@ namespace
     /// @param config The daemon's configuration.
     /// @param upgradeGeneration How many live upgrades this run of the daemon has completed.
     /// @param tlsFingerprint The fingerprint its TCP listener presents; empty without a listener.
+    /// @param keeperProcessId The PTY keeper it runs behind; 0 for none.
     /// @return What its DaemonRuntime states about it.
     [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config,
                                                       uint64_t upgradeGeneration,
-                                                      std::string tlsFingerprint)
+                                                      std::string tlsFingerprint,
+                                                      uint64_t keeperProcessId)
     {
         return DaemonRuntimeConfig { .releaseVersion = config.releaseVersion,
                                      .processId = currentProcessId(),
@@ -752,8 +771,239 @@ namespace
                                      .lifecycle = config.lifecycle,
                                      .upgradeGeneration = upgradeGeneration,
                                      .relocationRequest = config.relocationRequest,
-                                     .tlsFingerprint = std::move(tlsFingerprint) };
+                                     .tlsFingerprint = std::move(tlsFingerprint),
+                                     .keeperProcessId = keeperProcessId };
     }
+
+#ifndef _WIN32
+    /// @param inventory What the keeper kept for a Recovered start (keeperlink::KeeperAttachment::inventory).
+    /// @return The listeners in it, taken out of it, to serve on as a handover's are served on.
+    [[nodiscard]] std::vector<handover::InheritedListener> keptListenersOf(
+        std::vector<keeperlink::ReceivedMessage>& inventory)
+    {
+        auto listeners = std::vector<handover::InheritedListener> {};
+        for (auto& received: inventory)
+        {
+            if (!received.message || received.fds.size() != 1)
+                continue;
+            if (auto const* listener = std::get_if<keeper::InventoryListener>(&*received.message))
+                listeners.push_back(handover::InheritedListener {
+                    .name = listener->name,
+                    .handle = vtpty::CrossingHandle::of(received.fds.front().release()),
+                    .tlsIdentity = std::nullopt,
+                });
+        }
+        return listeners;
+    }
+
+    /// Tells @p link every KeeperHeartbeatInterval that the loop thread is alive, until the loop stops.
+    /// @param loop The daemon's loop (not owned; outlives the flow).
+    /// @param link The keeper's link (not owned; outlives the flow).
+    core::async::Task<void> keepTellingTheKeeper(core::net::EventLoop* loop, keeperlink::KeeperLink* link)
+    {
+        try
+        {
+            while (true)
+            {
+                co_await loop->delay(KeeperHeartbeatInterval);
+                link->post(keeper::Heartbeat {});
+            }
+        }
+        catch (core::async::OperationCancelled const&)
+        {
+            co_return;
+        }
+    }
+
+    /// @param label The tmux-compat label (DaemonConfig::tmuxCompatLabel).
+    /// @return tmux's own discovery path for it, which the tmux-compat endpoint binds.
+    [[nodiscard]] std::string tmuxCompatPathOf(std::string const& label)
+    {
+        return std::format("/tmp/tmux-{}/{}", ::getuid(), label);
+    }
+
+    /// Tells the keeper what it keeps of a daemon that serves now: a duplicate of every listener in @p
+    /// servers, each with its socket file, then that it serves.
+    /// @param link The keeper's link (not owned; outlives the loop's flows).
+    /// @param config The daemon's configuration: its keeper settings.
+    /// @param servers Every endpoint the daemon serves.
+    /// @param paths The socket file of each endpoint in @p servers that has one, by its name.
+    void tellTheKeeper(keeperlink::KeeperLink& link,
+                       DaemonConfig const& config,
+                       std::span<ConnectionAcceptor* const> servers,
+                       SocketPaths const& paths)
+    {
+        for (auto const* server: servers)
+        {
+            auto const handle = server->listeningHandle();
+            if (handle.isNone())
+                continue;
+            auto const path = paths.find(server->name());
+            link.post(keeper::Listener { .name = server->name(),
+                                         .tlsIdentity = std::nullopt,
+                                         .path = path != paths.end() ? path->second : std::string {} },
+                      { handle.native() });
+        }
+        link.post(keeper::Serving { .hungRestart = config.keeper.hungRestart,
+                                    .heartbeatTimeoutMs =
+                                        static_cast<uint32_t>(config.keeper.heartbeatTimeout.count()) });
+    }
+#endif
+
+    /// A daemon's side of the PTY keeper it runs behind, for as long as runDaemon() runs; empty for a daemon
+    /// behind none, and on Windows, where there is no keeper yet.
+    ///
+    /// Built from the handshake's attachment first, linked once the shutdown funnel it reports a loss to
+    /// exists: the funnel's sequence announces the shutdown through it, and it requests the shutdown from the
+    /// funnel when the keeper is gone (cyclic wiring, one link() call).
+    class DaemonKeeper
+    {
+      public:
+        /// @param attachment The keeper's channel past the handshake; nullopt for none.
+        explicit DaemonKeeper(std::optional<keeperlink::KeeperAttachment> attachment):
+            _attachment { std::move(attachment) }
+        {
+        }
+
+        /// @return How the keeper launched this daemon process; Fresh for one behind none.
+        [[nodiscard]] keeper::LaunchContinuity continuity() const noexcept
+        {
+            return _attachment ? _attachment->continuity : keeper::LaunchContinuity::Fresh;
+        }
+
+        /// @return The keeper's process id; 0 for none.
+        [[nodiscard]] uint64_t processId() const noexcept
+        {
+            return _attachment ? static_cast<uint64_t>(_attachment->keeperProcessId) : 0;
+        }
+
+        /// @return What tells the keeper that the daemon shuts down; empty for a daemon behind none.
+        [[nodiscard]] std::function<void(ShutdownCause)> announcer()
+        {
+            if (!_attachment)
+                return {};
+            return [this](ShutdownCause cause) {
+#ifndef _WIN32
+                if (_link)
+                    _link->post(keeper::Shutdown { .cause = std::to_underlying(cause) });
+#else
+                std::ignore = cause;
+#endif
+            };
+        }
+
+        /// Starts the link on @p loop. Called once.
+        /// @param loop The daemon's loop (not owned; outlives this).
+        /// @param onLost Called on the loop when the keeper is gone.
+        void link([[maybe_unused]] core::net::EventLoop& loop, [[maybe_unused]] std::function<void()> onLost)
+        {
+#ifndef _WIN32
+            if (!_attachment)
+                return;
+            if (_attachment->continuity == keeper::LaunchContinuity::Recovered)
+                _kept = keptListenersOf(_attachment->inventory);
+            _link.emplace(loop, std::move(_attachment->channel), _attachment->version, std::move(onLost));
+            _attachment->inventory.clear();
+            // Alive from here on, not only once it serves: a start is judged by its heartbeats once the first
+            // came, so that one restoring at length is not taken for hung. The loop beats once it turns; the
+            // setup before that beats at its milestones (beat()).
+            _link->beat();
+            loop.spawn(keepTellingTheKeeper(&loop, &*_link));
+#endif
+        }
+
+        /// Tells the keeper at once that the daemon is alive: a milestone of the setup that runs before the
+        /// loop turns and its heartbeat flow with it. Nothing behind no keeper.
+        void beat()
+        {
+#ifndef _WIN32
+            if (_link)
+                _link->beat();
+#endif
+        }
+
+        /// @return What a live upgrade's exec keeps across beside the image's handles: the keeper's channel.
+        [[nodiscard]] std::vector<vtpty::CrossingHandle> crossing() const
+        {
+#ifndef _WIN32
+            if (_link)
+                return { vtpty::CrossingHandle::of(_link->channelHandle()) };
+#endif
+            return {};
+        }
+
+        /// @return The listeners the keeper kept for a restart after a crash, to serve on as a handover's
+        /// are;
+        ///         none for any other start.
+        [[nodiscard]] std::vector<handover::InheritedListener> takeKeptListeners()
+        {
+            return std::exchange(_kept, {});
+        }
+
+        /// Turns @p loop until @p flow is done.
+        ///
+        /// Behind a keeper, an exception that escapes a turn ends the process at once (std::abort()), as any
+        /// other crash does. Unwinding would run what a clean stop runs: the drain turns the loop again, and
+        /// the host releases every session's child, which the keeper would then hang up. Aborted, the daemon
+        /// ends as a crash, without a word: the keeper keeps every session for the daemon it restarts, and
+        /// the core shows where it was. Behind none, the exception propagates.
+        /// @param loop The daemon's loop.
+        /// @param flow What the daemon serves until it ends.
+        void serve(core::net::EventLoop& loop, core::async::Task<void> flow) const
+        {
+            if (!_attachment)
+            {
+                loop.blockOn(std::move(flow));
+                return;
+            }
+            // A log line that throws in turn (a bad_alloc after a bad_alloc) aborts too, never unwinding into
+            // what the abort is there to prevent.
+            auto const crash = [](std::string_view what) noexcept {
+                try
+                {
+                    errorLog()(
+                        "an exception escaped the daemon's loop ({}); ending as a crash, for the keeper "
+                        "to recover every session",
+                        what);
+                }
+                catch (...)
+                {
+                    std::abort();
+                }
+                std::abort();
+            };
+            try
+            {
+                loop.blockOn(std::move(flow));
+            }
+            catch (std::exception const& error)
+            {
+                crash(error.what());
+            }
+            catch (...)
+            {
+                crash("of unknown type");
+            }
+        }
+
+        /// Tells the keeper what it keeps of a daemon that serves now (tellTheKeeper()); nothing without one.
+        void startKeeping([[maybe_unused]] DaemonConfig const& config,
+                          [[maybe_unused]] std::span<ConnectionAcceptor* const> servers,
+                          [[maybe_unused]] SocketPaths const& paths)
+        {
+#ifndef _WIN32
+            if (_link)
+                tellTheKeeper(*_link, config, servers, paths);
+#endif
+        }
+
+      private:
+        std::optional<keeperlink::KeeperAttachment> _attachment;
+        std::vector<handover::InheritedListener> _kept;
+#ifndef _WIN32
+        std::optional<keeperlink::KeeperLink> _link;
+#endif
+    };
 
     /// What every native endpoint of a daemon serves its connections with: @p runtime behind them, and a
     /// handshake that offers DaemonControl, because @p runtime answers it. Only a daemon offers it; an
@@ -1136,7 +1386,23 @@ std::optional<std::pair<std::string, std::uint16_t>> parseListenSpec(std::string
     return parseHostPortFrom(spec, 0);
 }
 
-int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage> image)
+StartContinuity startContinuityOf(std::optional<handover::HandoverImage> const& image,
+                                  keeper::LaunchContinuity launch) noexcept
+{
+    if (image)
+        return StartContinuity::HandedOver;
+    switch (launch)
+    {
+        case keeper::LaunchContinuity::Recovered: return StartContinuity::Recovered;
+        case keeper::LaunchContinuity::Fresh:
+        case keeper::LaunchContinuity::HandedOver: break; // without an image, nothing is carried on
+    }
+    return StartContinuity::Fresh;
+}
+
+int runDaemon(DaemonConfig const& config,
+              std::optional<handover::HandoverImage> image,
+              std::optional<keeperlink::KeeperAttachment> keeper)
 {
     Require(config.shutdownSignals != nullptr);
     auto const source = core::net::makeDefaultBackend();
@@ -1144,10 +1410,17 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     auto const clock = core::platform::SteadyClock {};
     auto const wallClock = core::platform::SystemWallClock {};
 
+    // The keeper this daemon runs behind, if any: it outlives the drain, so that the Shutdown the sequence
+    // posts as the last flows unwind is still sent.
+    auto daemonKeeper = DaemonKeeper { std::move(keeper) };
+    // How this start began: a live upgrade's handover, a keeper's restart after a crash, or afresh.
+    auto const continuity = startContinuityOf(image, daemonKeeper.continuity());
+
     // Filled as each endpoint is bound below; the funnel reads it when the shutdown comes.
     auto servers = std::vector<ConnectionAcceptor*> {};
-    auto sequence = ShutdownSequence { config.beforeShutdown };
+    auto sequence = ShutdownSequence { config.beforeShutdown, daemonKeeper.announcer() };
     auto funnel = ShutdownFunnel { loop, servers, [&sequence](ShutdownCause cause) { sequence.run(cause); } };
+    daemonKeeper.link(loop, [&funnel] { funnel.request(ShutdownCause::KeeperLost); });
 
     // Armed before the host, for two reasons. The watch blocks SIGINT/SIGTERM on this thread, and only
     // threads started afterwards inherit that mask: the host starts a pump thread per session of the
@@ -1161,9 +1434,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // What a previous image of this daemon handed over is consumed as it is taken over, part by part, and
     // kept nowhere beside: its listening sockets first, served on rather than bound again, which a client
     // reconnecting finds without a gap; the rest by the host.
-    auto const continuity = image ? StartContinuity::HandedOver : StartContinuity::Fresh;
-    auto inherited = InheritedListeners { image ? std::exchange(image->listeners, {})
-                                                : std::vector<handover::InheritedListener> {} };
+    auto inherited =
+        InheritedListeners { image ? std::exchange(image->listeners, {}) : daemonKeeper.takeKeptListeners() };
     // What the daemon could not start as configured, for the first client to be told. Only a daemon that took
     // over from a handover ever serves on so: ending would hang up every program it adopted.
     auto degradations = config.degradations;
@@ -1257,13 +1529,14 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
                               inherited,
                               core::platform::NativeFileSystem::instance(),
                               NativeFilePrivacy::instance());
-    auto runtime = DaemonRuntime {
-        runtimeConfigOf(config, lineage.upgradeGeneration, tls ? tls->fingerprint : std::string {}),
-        host,
-        clock,
-        postedShutdown(loop, funnel),
-        upgradePortOf(config, upgradeHooks, liveUpgrade)
-    };
+    auto runtime = DaemonRuntime { runtimeConfigOf(config,
+                                                   lineage.upgradeGeneration,
+                                                   tls ? tls->fingerprint : std::string {},
+                                                   daemonKeeper.processId()),
+                                   host,
+                                   clock,
+                                   postedShutdown(loop, funnel),
+                                   upgradePortOf(config, upgradeHooks, liveUpgrade) };
     // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
     // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
     // before the host goes.
@@ -1283,6 +1556,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // Serves the endpoint @p name at @p path, adopted or bound, with the handler @p makeHandler makes. One
     // that cannot be served fails a fresh daemon (the exit code returned), and is skipped by a handed-over
     // one, which says so.
+    // The socket file of each endpoint served on one, which a keeper removes once no daemon serves it.
+    auto socketPaths = SocketPaths {};
     auto const serveEndpoint = [&](std::optional<ConnectionAcceptor>& acceptor,
                                    std::string_view name,
                                    std::string const& path,
@@ -1297,6 +1572,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
         }
         acceptor.emplace(loop, std::string { name }, std::move(*bound), makeHandler());
         servers.push_back(&*acceptor);
+        socketPaths.insert_or_assign(std::string { name }, path);
         return {};
     };
 
@@ -1309,6 +1585,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
             std::move(*listener),
             countedHandler(runtime, connections.tracked(tmux::makeControlModeHandler(loop, host))));
         servers.push_back(&*server);
+        socketPaths.insert_or_assign("control", core::pathToUtf8(config.socketPath));
     }
 
     // The native cells+deltas protocol listens beside the control-mode socket. Its connections count
@@ -1344,7 +1621,7 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // REAL tmux server onto it.
     if (config.tmuxCompatLabel)
     {
-        auto const compatPath = std::format("/tmp/tmux-{}/{}", ::getuid(), *config.tmuxCompatLabel);
+        auto const compatPath = tmuxCompatPathOf(*config.tmuxCompatLabel);
         if (auto const served = serveEndpoint(compatServer, "tmux-compat", compatPath, makeImsgHandler);
             !served)
             return served.error();
@@ -1416,7 +1693,8 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
             config.liveUpgrade->probe,
             upgradeHooks,
             servers,
-            liveUpgradeConfigOf(config, *config.liveUpgrade, lineage, std::move(tlsIdentities)));
+            liveUpgradeConfigOf(
+                config, *config.liveUpgrade, lineage, std::move(tlsIdentities), daemonKeeper.crossing()));
 
 #ifdef _WIN32
     daemonLog()("serving on {} (native: {})", core::pathToUtf8(config.socketPath), nativePath);
@@ -1424,15 +1702,18 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
 #endif
+    // Every listener is bound: the keeper keeps a duplicate of each, then hears that the daemon serves, and
+    // from now on that it is alive.
+    daemonKeeper.startKeeping(config, servers, socketPaths);
     if (servers.empty())
     {
         // Only a daemon that took over hosted programs gets here: they run on, unreachable, until it is
         // asked to end.
         errorLog()("no endpoint could be served; the adopted programs run on until the daemon is stopped");
-        loop.blockOn(awaitShutdown(&loop));
+        daemonKeeper.serve(loop, awaitShutdown(&loop));
     }
     else
-        loop.blockOn(serveAll(servers));
+        daemonKeeper.serve(loop, serveAll(servers));
     // The acceptors are destroyed before the drain below turns the loop again, and a shutdown request
     // still queued may run in it — one that finds the funnel Serving when every listener died on its own.
     // Emptied, the list lets such a request close nothing that is gone. So does an upgrade under way, which

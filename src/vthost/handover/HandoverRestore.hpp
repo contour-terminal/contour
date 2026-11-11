@@ -56,10 +56,12 @@ inline constexpr std::string_view UnrestoredScreenNotice =
 std::size_t closeListeningSockets();
 
 /// @param image A decoded handover image.
-/// @return Every descriptor the new image keeps: standard input, output and error, and each one @p image
-///         names -- every session's PTY master and fast-pipe ends, every listener, the image lease --
-///         ascending, each once. What a closeDescriptorsExcept() pass is handed.
-[[nodiscard]] std::vector<int> descriptorsToKeep(HandoverImage const& image);
+/// @param alsoKeep Descriptors the new image keeps that @p image does not name: the channel to the PTY
+///        keeper a daemon behind one carries across its exec.
+/// @return Every descriptor the new image keeps: standard input, output and error, each one @p image
+///         names -- every session's PTY master and fast-pipe ends, every listener, the image lease -- and
+///         @p alsoKeep, ascending, each once. What a closeDescriptorsExcept() pass is handed.
+[[nodiscard]] std::vector<int> descriptorsToKeep(HandoverImage const& image, std::span<int const> alsoKeep);
 
 /// Closes every descriptor of this process but @p keep, the way closefrom(2) closes all from a number on:
 /// close_range(2) on Linux, closefrom(3) on the BSDs, and on macOS a loop up to the descriptor limit

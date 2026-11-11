@@ -60,7 +60,10 @@ class ImageReceiver
 /// every other descriptor open, so that no program it hosted is hung up on. Windows takes `handles=M,R,C,P`
 /// and runs receiveHandover(); where that fails, the daemon ends without serving.
 /// @param memory What reads the image (makeNativeHandoverMemory()). Not owned; outlives the receiver.
+/// @param alsoKeep Descriptors kept open beside the image's on POSIX (the PTY keeper's channel); none
+///        on Windows, where nothing crosses an exec.
 /// @return The receiver.
-[[nodiscard]] std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory);
+[[nodiscard]] std::unique_ptr<ImageReceiver> makeNativeImageReceiver(HandoverMemory& memory,
+                                                                     std::vector<int> alsoKeep = {});
 
 } // namespace vthost::handover

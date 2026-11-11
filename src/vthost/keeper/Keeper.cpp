@@ -8,6 +8,7 @@
 #include <variant>
 
 #include <vthost/keeper/Codec.hpp>
+#include <vthost/keeper/Logging.hpp>
 
 namespace vthost::keeper
 {
@@ -96,6 +97,8 @@ void Keeper::launchDaemon(LaunchContinuity continuity)
         .stableAt = std::nullopt,
         .exited = std::nullopt,
         .drainUntil = std::nullopt,
+        .greeting = Greeting::Awaited,
+        .channelVersion = 0,
     };
     _ports.events.watchChannel(*_daemon->channel, _daemon->generation);
     // The keeper reaps the daemon itself, after its last signal: until then its zombie holds the pid.
@@ -132,6 +135,13 @@ void Keeper::judgeDaemonExit()
     _daemon.reset();
     // Judged, and nothing more is sent to it: only now may its pid go.
     _ports.events.reap(pid);
+    if (kind == DaemonExitKind::Crashed || kind == DaemonExitKind::Hung)
+        keeperLog()("the daemon (pid {}) {} with {} {}{}",
+                    pid,
+                    kind == DaemonExitKind::Hung ? "was killed as hung, and ended" : "crashed",
+                    status.kind == ExitKind::Signal ? "signal" : "exit status",
+                    status.value,
+                    _ending ? "" : "; restarting it as the restart policy allows");
     if (!_ending)
         apply(_policy.onExit(kind, now()), status);
 }
@@ -156,6 +166,11 @@ void Keeper::onLinkLost()
         case DaemonEndState::HungKilled:
         case DaemonEndState::FirstStartKilled: return; // it is ending, and a kill is already scheduled
         case DaemonEndState::StartingFirst:
+            // A first start that fails closes its channel on its way out, before it has exited: its own
+            // status is what the keeper exits with, so it is given the drain bound to end before it is
+            // killed.
+            earliest(_daemon->killAt, now() + ChannelDrainBound);
+            return;
         case DaemonEndState::StartingRestart:
         case DaemonEndState::Serving: break;
     }
@@ -199,6 +214,8 @@ void Keeper::forgiveOwnStop(core::platform::SteadyTimePoint deadline)
     // A wait that returns this long after its deadline was not run: the keeper itself was stopped (Ctrl-Z on
     // a foreground `contour daemon` stops the daemon with it). The daemon's silence is its own stop's, not a
     // hang, and the heartbeats it sends once continued have yet to be read: it is measured afresh.
+    keeperLog()("the keeper did not run for {} ms past its deadline; the daemon's silence is measured afresh",
+                std::chrono::duration_cast<std::chrono::milliseconds>(overrun).count());
     _daemon->lastHeartbeat = now();
     _daemon->startedAt = now();
 }
@@ -222,6 +239,13 @@ void Keeper::onTimers()
         if (auto const deadline = silenceDeadline(); deadline && *deadline <= time)
         {
             // Hung: abort it for the core, continue it in case it is stopped, kill it if that does not do.
+            auto const beating = daemon.state == DaemonEndState::Serving || daemon.beats == Beats::Heard;
+            keeperLog()("the daemon (pid {}) is hung: {} for {} ms; aborting it",
+                        daemon.pid,
+                        beating ? "no heartbeat" : "not serving",
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            time - (beating ? daemon.lastHeartbeat : daemon.startedAt))
+                            .count());
             _ports.signaller.send(daemon.pid, KeeperSignal::Abort);
             _ports.signaller.send(daemon.pid, KeeperSignal::Continue);
             // A first start that hangs is a failed start: the keeper exits rather than restarts.
@@ -374,8 +398,7 @@ void Keeper::onEvent(Event event)
             if (!_daemon || event.generation != _daemon->generation || !_daemon->channel)
             {
                 // A dead daemon's late frame, or one after its link was dropped: never acted on.
-                for (auto const fd: event.frame->fds)
-                    UniqueFd { fd }.reset();
+                closeAll(event.frame->fds);
                 break;
             }
             onFrame(std::move(*event.frame));
@@ -404,6 +427,11 @@ void Keeper::onFrame(Frame frame)
         auto const tag = peekTag(frame.body);
         if (tag && failureOf(message.error()) == DecodeFailure::Unsupported)
         {
+            keeperLog()(
+                "the daemon sent message {}, which this keeper cannot read (codec error {}); answered "
+                "Unsupported",
+                *tag,
+                std::to_underlying(message.error()));
             send(Unsupported { .tag = *tag });
             return;
         }
@@ -413,13 +441,39 @@ void Keeper::onFrame(Frame frame)
     std::visit([&](auto const& alternative) { handle(alternative, fds); }, *message);
 }
 
+void Keeper::handle(Hello const& message, std::vector<UniqueFd>& /*fds*/)
+{
+    if (!_daemon)
+        return;
+    // Each image speaks its own version: a live upgrade's new one may speak a newer one than the last.
+    _daemon->channelVersion = negotiate(ChannelVersion, message.version);
+    if (_daemon->greeting == Greeting::Awaited)
+    {
+        _daemon->greeting = Greeting::Greeted;
+        return;
+    }
+    // The same process speaks again: a live upgrade exec'd a new image in place, which kept the channel and
+    // is owed a Launch of its own. It takes the sessions over from the handover, not from an inventory.
+    keeperLog()("the daemon (pid {}) runs a new image; it carries on from its handover", _daemon->pid);
+    send(Hello {});
+    send(Launch { .continuity = LaunchContinuity::HandedOver, .options = _launchOptions });
+}
+
 void Keeper::handle(Listener const& message, std::vector<UniqueFd>& fds)
 {
     if (fds.size() != 1 || !takesIntake())
         return; // closed at once: nobody would hand it on
 
-    _listeners.push_back(KeptListener {
-        .name = message.name, .tlsIdentity = message.tlsIdentity, .fd = std::move(fds.front()) });
+    auto kept = KeptListener { .name = message.name,
+                               .tlsIdentity = message.tlsIdentity,
+                               .path = message.path,
+                               .fd = std::move(fds.front()) };
+    // Deposited again by the new image of a live upgrade: the same socket, held once.
+    if (auto const held = std::ranges::find(_listeners, message.name, &KeptListener::name);
+        held != _listeners.end())
+        *held = std::move(kept);
+    else
+        _listeners.push_back(std::move(kept));
 }
 
 void Keeper::handle(Serving const& message, std::vector<UniqueFd>& /*fds*/)
@@ -427,15 +481,30 @@ void Keeper::handle(Serving const& message, std::vector<UniqueFd>& /*fds*/)
     if (!_daemon)
         return;
     auto& daemon = *_daemon;
+    if (daemon.state == DaemonEndState::Serving)
+    {
+        // The new image of a live upgrade serves on, and may run with other settings than the one before.
+        adoptKeepingSettings(daemon, message);
+        return;
+    }
     if (daemon.state != DaemonEndState::StartingFirst && daemon.state != DaemonEndState::StartingRestart)
         return;
     auto const time = now();
     daemon.state = DaemonEndState::Serving;
+    adoptKeepingSettings(daemon, message);
+    daemon.stableAt = time + _policyConfig.stableAfter;
+}
+
+void Keeper::adoptKeepingSettings(Daemon& daemon, Serving const& message)
+{
     daemon.hungRestart = message.hungRestart;
     daemon.heartbeatTimeout =
         std::max(std::chrono::milliseconds { message.heartbeatTimeoutMs }, MinHeartbeatTimeout);
-    daemon.lastHeartbeat = time;
-    daemon.stableAt = time + _policyConfig.stableAfter;
+    if (std::chrono::milliseconds { message.heartbeatTimeoutMs } < MinHeartbeatTimeout)
+        keeperLog()("the daemon's heartbeat timeout of {} ms is below the minimum; {} ms is used",
+                    message.heartbeatTimeoutMs,
+                    MinHeartbeatTimeout.count());
+    daemon.lastHeartbeat = now();
 }
 
 void Keeper::handle(Spawn const& message, std::vector<UniqueFd>& fds)
@@ -530,7 +599,9 @@ void Keeper::handle(Adopt const& /*message*/, std::vector<UniqueFd>& /*fds*/)
                           .listenerCount = static_cast<uint32_t>(_listeners.size()) },
          std::move(structureFds));
     for (auto const& listener: _listeners)
-        send(InventoryListener { .name = listener.name, .tlsIdentity = listener.tlsIdentity },
+        send(InventoryListener { .name = listener.name,
+                                 .tlsIdentity = listener.tlsIdentity,
+                                 .path = listener.path },
              { listener.fd.get() });
     for (auto const& session: sessions)
         send(session.message, session.fds);

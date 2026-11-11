@@ -27,6 +27,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <vthost/keeper/DescriptorSocket.hpp>
 #include <vthost/keeper/Frame.hpp>
 #include <vthost/keeper/Kqueue.hpp>
 
@@ -558,26 +559,13 @@ namespace
             std::vector<UniqueFd> fds; ///< Ride with the first byte; none once it went.
         };
 
-        static void closeAll(std::span<int const> fds) noexcept
-        {
-            for (auto const fd: fds)
-                ::close(fd);
-        }
-
         void closePending() { closeAll(_assembler.takePendingFds()); }
-
-        /// Why a send failed.
-        enum class SendFailure : uint8_t
-        {
-            PeerGone = 0, ///< EPIPE, ECONNRESET: the peer closed; what it wrote before is still to be read.
-            Broken,       ///< Anything else.
-        };
 
         /// Stops sending after @p failure: the queue goes. A peer that is gone keeps its frames readable to
         /// the end of the link, so that a Shutdown it wrote before it exited still arrives.
-        void fail(SendFailure failure)
+        void fail(SendError failure)
         {
-            if (failure == SendFailure::Broken)
+            if (failure == SendError::Broken)
             {
                 end();
                 return;
@@ -598,101 +586,27 @@ namespace
 
         /// Sends @p bytes with @p fds on the first, in one sendmsg, without blocking.
         /// @return How many bytes went (0 when the socket takes nothing now); or why the send failed.
-        [[nodiscard]] std::expected<std::size_t, SendFailure> sendChunk(std::span<uint8_t const> bytes,
-                                                                        std::span<int const> fds) const
+        [[nodiscard]] std::expected<std::size_t, SendError> sendChunk(std::span<uint8_t const> bytes,
+                                                                      std::span<int const> fds) const
         {
-            auto iov = ::iovec { .iov_base = const_cast<uint8_t*>(bytes.data()), .iov_len = bytes.size() };
-            alignas(::cmsghdr) auto control = std::array<char, CMSG_SPACE(sizeof(int) * MaxFdsPerFrame)> {};
-            auto message = ::msghdr {};
-            message.msg_iov = &iov;
-            message.msg_iovlen = 1;
-            if (!fds.empty())
-            {
-                if (fds.size() > MaxFdsPerFrame)
-                    return std::unexpected { SendFailure::Broken }; // The keeper never builds such a frame.
-                message.msg_control = control.data();
-                message.msg_controllen = CMSG_SPACE(sizeof(int) * fds.size());
-                auto* header = CMSG_FIRSTHDR(&message);
-                header->cmsg_level = SOL_SOCKET;
-                header->cmsg_type = SCM_RIGHTS;
-                header->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
-                std::memcpy(CMSG_DATA(header), fds.data(), sizeof(int) * fds.size());
-            }
-#ifdef MSG_NOSIGNAL
-            constexpr auto Flags = MSG_NOSIGNAL | MSG_DONTWAIT;
-#else
-            constexpr auto Flags = MSG_DONTWAIT; // SO_NOSIGPIPE, set on the socket, keeps SIGPIPE away.
-#endif
-            while (true)
-            {
-                auto const sent = ::sendmsg(_socket.get(), &message, Flags);
-                if (sent >= 0)
-                    return static_cast<std::size_t>(sent);
-                if (errno == EINTR)
-                    continue;
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
-                    return std::size_t { 0 };
-                if (errno == EPIPE || errno == ECONNRESET)
-                    return std::unexpected { SendFailure::PeerGone };
-                return std::unexpected { SendFailure::Broken };
-            }
+            auto const runs = std::array { bytes };
+            return sendWithDescriptors(_socket.get(), runs, fds);
         }
 
         /// Reads once into _readBuffer, collecting the descriptors that came with it into @p fds.
         /// @return How many bytes arrived, 0 at the end of the link; nothing when nothing is there now. A
-        /// broken
-        ///         link, or a truncated descriptor list, ends the link.
+        ///         broken link, or a truncated descriptor list, ends the link.
         [[nodiscard]] std::optional<std::size_t> readOnce(std::vector<int>& fds)
         {
-#ifdef MSG_CMSG_CLOEXEC
-            constexpr auto Flags = MSG_CMSG_CLOEXEC | MSG_DONTWAIT;
-#else
-            constexpr auto Flags = MSG_DONTWAIT;
-#endif
-            auto iov = ::iovec { .iov_base = _readBuffer.data(), .iov_len = _readBuffer.size() };
-            alignas(::cmsghdr) auto control = std::array<char, CMSG_SPACE(sizeof(int) * MaxFdsPerFrame)> {};
-            auto message = ::msghdr {};
-            message.msg_iov = &iov;
-            message.msg_iovlen = 1;
-            message.msg_control = control.data();
-            message.msg_controllen = control.size();
-            auto got = ssize_t { 0 };
-            do
-                got = ::recvmsg(_socket.get(), &message, Flags);
-            while (got < 0 && errno == EINTR);
-            if (got < 0)
+            auto received = receiveWithDescriptors(_socket.get(), _readBuffer);
+            if (!received)
             {
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                if (received.error() == ReceiveError::WouldBlock)
                     return std::nullopt;
-                return std::size_t { 0 }; // Broken: an end like any other.
+                return std::size_t { 0 }; // Broken, or descriptors lost: an end like any other.
             }
-
-            // On MSG_CTRUNC the kernel reports the full length although only part landed: clamp to what fits.
-            auto const capacity = (control.size() - CMSG_LEN(0)) / sizeof(int);
-            for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr;
-                 header = CMSG_NXTHDR(&message, header))
-            {
-                if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS)
-                    continue;
-                auto const count = std::min((header->cmsg_len - CMSG_LEN(0)) / sizeof(int), capacity);
-                for (auto const index: std::views::iota(std::size_t { 0 }, count))
-                {
-                    auto fd = -1;
-                    std::memcpy(&fd, CMSG_DATA(header) + (index * sizeof(int)), sizeof(int));
-#ifndef MSG_CMSG_CLOEXEC
-                    setCloseOnExec(fd);
-#endif
-                    fds.push_back(fd);
-                }
-            }
-            if ((message.msg_flags & MSG_CTRUNC) != 0)
-            {
-                // Some descriptors were lost: no frame can be trusted to have its own.
-                closeAll(fds);
-                fds.clear();
-                return std::size_t { 0 };
-            }
-            return static_cast<std::size_t>(got);
+            fds = std::move(received->fds);
+            return received->bytes;
         }
 
         UniqueFd _socket;

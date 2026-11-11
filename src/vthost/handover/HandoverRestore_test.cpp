@@ -73,8 +73,19 @@ TEST_CASE("the descriptors a handover keeps are the standard streams and every o
     image.listeners = { { .name = "native", .handle = vtpty::CrossingHandle { 5 } },
                         { .name = "control", .handle = vtpty::CrossingHandle { 7 } } };
     image.lease = vtpty::CrossingHandle { 3 };
-    CHECK(descriptorsToKeep(image) == std::vector { 0, 1, 2, 3, 5, 7, 9, 12 });
-    CHECK(descriptorsToKeep(HandoverImage {}) == std::vector { 0, 1, 2 });
+    CHECK(descriptorsToKeep(image, {}) == std::vector { 0, 1, 2, 3, 5, 7, 9, 12 });
+    CHECK(descriptorsToKeep(HandoverImage {}, {}) == std::vector { 0, 1, 2 });
+}
+
+TEST_CASE("a handover also keeps the PTY keeper's channel, which no image names", "[vthost][handover]")
+{
+    auto image = HandoverImage {};
+    image.lease = vtpty::CrossingHandle { 5 };
+    auto const channel = std::array { 3 };
+    CHECK(descriptorsToKeep(image, channel) == std::vector { 0, 1, 2, 3, 5 });
+    // Named twice, kept once.
+    auto const twice = std::array { 5, 3 };
+    CHECK(descriptorsToKeep(image, twice) == std::vector { 0, 1, 2, 3, 5 });
 }
 
 namespace

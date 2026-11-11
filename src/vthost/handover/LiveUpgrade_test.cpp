@@ -344,6 +344,30 @@ TEST_CASE("exec failure resumes the old daemon with no lost input", "[vthost][ha
     u.checkResumed(ids, "carried");
 }
 
+TEST_CASE("the handles the daemon names beside the image cross the exec too",
+          "[vthost][handover][upgrade][threading]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+
+    // The keeper's channel, as DaemonKeeper::crossing() names it.
+    auto const channel = vtpty::CrossingHandle { 99 };
+    auto keptAtExec = std::set<vtpty::CrossingHandle> {};
+    u.replacer.onReplace = [&] {
+        keptAtExec = u.memory.kept;
+    };
+    auto config = vthost::testing::UpgradeBench::config();
+    config.alsoCrossing = { channel };
+    auto upgrade = u.orchestrator(std::move(config));
+    auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(keptAtExec.contains(channel));
+    // The exec failed: it is close-on-exec again, as everything else made to cross is.
+    CHECK(u.memory.closedOnExecAgain.contains(channel));
+}
+
 TEST_CASE("unreadable format refuses before quiescing", "[vthost][handover][upgrade][threading]")
 {
     auto u = Upgrade {};

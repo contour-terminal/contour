@@ -74,6 +74,7 @@
 #include <vthost/testing/FakeProcessImageReplacer.hpp>
 #include <vthost/testing/FakeReadinessProbe.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
+#include <vthost/testing/ManualShutdownSignals.hpp>
 #include <vthost/testing/RecordingDurableFiles.hpp>
 #include <vthost/testing/RecordingFilePrivacy.hpp>
 #include <vthost/testing/StagingFileSystem.hpp>
@@ -291,58 +292,7 @@ core::async::Task<void> converseAsControl(core::net::EventLoop* loop,
     }
 }
 
-/// A signal source the test fires by hand: what stops a daemon whose test failed before it could, so the
-/// failure is reported rather than waited on forever. A fire before the watch starts is kept for it.
-class ManualShutdownSignals final: public vthost::ShutdownSignals
-{
-  public:
-    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal,
-                                               std::shared_future<void> lastWrite) override
-    {
-        auto const lock = std::scoped_lock { _mutex };
-        _onSignal = std::move(onSignal);
-        _lastWrite = std::move(lastWrite);
-        if (_fired)
-            _onSignal();
-        return std::make_unique<ManualWatch>(*this);
-    }
-
-    /// Asks the watching daemon to end, now or as soon as it watches.
-    void fire()
-    {
-        auto const lock = std::scoped_lock { _mutex };
-        _fired = true;
-        if (_onSignal)
-            _onSignal();
-    }
-
-    /// @return What the watching daemon fulfils once its last write is done.
-    [[nodiscard]] std::shared_future<void> lastWrite()
-    {
-        auto const lock = std::scoped_lock { _mutex };
-        return _lastWrite;
-    }
-
-  private:
-    class ManualWatch final: public Watch
-    {
-      public:
-        explicit ManualWatch(ManualShutdownSignals& source): _source { source } {}
-        ~ManualWatch() override
-        {
-            auto const lock = std::scoped_lock { _source._mutex };
-            _source._onSignal = nullptr;
-        }
-
-      private:
-        ManualShutdownSignals& _source;
-    };
-
-    std::mutex _mutex;
-    std::function<void()> _onSignal;
-    std::shared_future<void> _lastWrite;
-    bool _fired = false; ///< Whether fire() was called, so a watch started later fires at once.
-};
+using vthost::testing::ManualShutdownSignals;
 
 /// Fires @p signals on destruction: declared after the daemon's future, it stops the daemon before the
 /// future's destructor waits for it, on every path out of the test.

@@ -58,6 +58,8 @@ enum class DaemonVerb : uint8_t
     HandoverInfo,
     /// Forget the pinned certificate of a daemon met over TCP, so that its next contact is a first contact.
     ForgetPin,
+    /// Become the daemon behind the PTY keeper that started this process (`contour daemon` itself).
+    KeeperServe,
 };
 
 /// One row per `contour daemon` sub-verb: the command list, the dispatch and the help read this table.
@@ -101,7 +103,20 @@ inline constexpr auto DaemonSubVerbs = std::array {
         "Forgets the certificate pinned for the daemon at HOST:PORT, after that daemon was reinstalled; the "
         "next connection to it is a first contact again.",
         DaemonVerb::ForgetPin },
+    DaemonVerbRow {
+        "keeper-serve",
+        "Internal: runs the daemon behind the PTY keeper that `contour daemon` is, which starts it so; its "
+        "options arrive from the keeper, never on the command line.",
+        DaemonVerb::KeeperServe },
 };
+
+/// @param arguments A command line, argv[0] first.
+/// @return Whether it runs `contour daemon` or one of its sub-verbs: what runs without the GUI app, whose
+///         construction starts threads, as the PTY keeper `contour daemon` becomes must not.
+[[nodiscard]] constexpr bool isDaemonInvocation(std::span<char const* const> arguments) noexcept
+{
+    return arguments.size() >= 2 && arguments[1] != nullptr && std::string_view { arguments[1] } == "daemon";
+}
 
 /// Whether `daemon stop` may end sessions without asking (`--yes`).
 enum class StopConsent : uint8_t

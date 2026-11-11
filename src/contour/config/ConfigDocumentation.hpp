@@ -1657,6 +1657,13 @@ constexpr StringLiteral DaemonConfig {
     "        {comment} How often, in seconds, a changed workspace is written (at least 5).\n"
     "        interval: {}\n"
     "\n"
+    "    {comment} The PTY keeper: the process `contour daemon` runs the daemon behind, which restarts it\n"
+    "    {comment} when it crashes or stops answering.\n"
+    "    keeper:\n"
+    "        {comment} Whether a daemon that stops answering for 30 seconds is restarted as one that\n"
+    "        {comment} crashed.\n"
+    "        restart_hung: {}\n"
+    "\n"
 };
 
 constexpr StringLiteral ExperimentalFeaturesConfig {
@@ -2401,6 +2408,8 @@ constexpr StringLiteral DaemonWeb {
     "    scrollback_lines: 1000\n"
     "    rerun_programs: []\n"
     "    interval: 30\n"
+    "  keeper:\n"
+    "    restart_hung: true\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==mode== `in_process` keeps sessions in the GUI process, `auto` uses a "
     "daemon and falls back to in-process with a notice, `required` fails when no daemon can be reached.\n"
@@ -2419,6 +2428,9 @@ constexpr StringLiteral DaemonWeb {
     "was running one of them, such as `[vim, htop]`; nothing is re-run unless listed.\n"
     ":octicons-horizontal-rule-16: ==restore.interval== How often, in seconds, a changed workspace is "
     "written; at least `5`.\n"
+    ":octicons-horizontal-rule-16: ==keeper.restart_hung== Whether the PTY keeper, the process `contour "
+    "daemon` "
+    "runs the daemon behind, restarts a daemon that stops answering for 30 seconds.\n"
 };
 
 constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "

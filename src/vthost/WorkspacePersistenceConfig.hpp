@@ -47,7 +47,7 @@ enum class ShutdownWorkspace : std::uint8_t
 /// What a daemon's last snapshot keeps, by what ended it. Only a plain `contour daemon stop` discards: a
 /// signal is how a reboot ends the daemon, a last session's end may be a reboot killing the shells (one
 /// ended by `exit` has already written an empty workspace), an idle or upgrade end is not the user's
-/// choice, and `--keep-snapshot` asks to keep it.
+/// choice, `--keep-snapshot` asks to keep it, and a lost keeper is no one's choice at all.
 /// @param cause What asked for the shutdown.
 /// @return Discard for ShutdownCause::StopRequested, Keep for every other cause.
 [[nodiscard]] constexpr ShutdownWorkspace workspaceFor(ShutdownCause cause) noexcept
@@ -59,7 +59,8 @@ enum class ShutdownWorkspace : std::uint8_t
         case ShutdownCause::LastSessionClosed:
         case ShutdownCause::Idle:
         case ShutdownCause::UpgradeRestart:
-        case ShutdownCause::StopRequestedKeepingWorkspaces: return ShutdownWorkspace::Keep;
+        case ShutdownCause::StopRequestedKeepingWorkspaces:
+        case ShutdownCause::KeeperLost: return ShutdownWorkspace::Keep;
     }
     return ShutdownWorkspace::Keep;
 }

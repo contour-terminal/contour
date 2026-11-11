@@ -179,6 +179,10 @@ std::string formatDaemonStatus(DaemonStatus const& status)
     };
     auto rows = std::vector {
         Row { "daemon", std::format("running (pid {})", status.processId) },
+        // A daemon that runs behind no keeper, or from before keepers, states none.
+        Row { "keeper",
+              status.keeperProcessId.value_or(0) != 0 ? std::format("pid {}", *status.keeperProcessId)
+                                                      : std::string { "none" } },
         Row { "version", status.releaseVersion },
         Row { "uptime", formatUptime(status.uptime) },
         Row { "socket", core::pathToUtf8(status.socketPath) },

@@ -33,6 +33,7 @@
 #include <vthost/ConfigReload.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/KeeperSettings.hpp>
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/RelocationRequest.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -41,6 +42,8 @@
 #include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/handover/HandoverImage.hpp>
 #include <vthost/handover/Readiness.hpp>
+#include <vthost/keeper/Messages.hpp>
+#include <vthost/keeperlink/KeeperAttachment.hpp>
 
 namespace vthost
 {
@@ -112,6 +115,13 @@ struct NativeTcpListenerConfig
 /// The TLS floor of every native TCP listener: 1.3 only, as the channel binding of key authentication needs.
 inline constexpr auto NativeTcpTlsOptions =
     core::net::TlsOptions { .minimumVersion = core::net::TlsVersion::Tls13 };
+
+/// @param image What a live upgrade handed over; nullopt for none.
+/// @param launch How the PTY keeper launched this daemon process; Fresh for one behind none.
+/// @return How the daemon starts: carrying on from a handover, from what its keeper kept after a crash, or
+///         afresh.
+[[nodiscard]] StartContinuity startContinuityOf(std::optional<handover::HandoverImage> const& image,
+                                                keeper::LaunchContinuity launch) noexcept;
 
 /// @param listener The TCP listener's configuration.
 /// @return None for a keys-only listener; otherwise the tokens it accepts: its single token first, granting
@@ -215,6 +225,8 @@ struct DaemonConfig
     /// that cannot, which refuses every upgrade NotSupported and offers no Capability::LiveUpgrade. The
     /// upgrade states this daemon's own release and instance.
     std::optional<LiveUpgradeServices> liveUpgrade {};
+    /// What the daemon tells its PTY keeper about keeping it; read only by a daemon that runs behind one.
+    KeeperSettings keeper {};
 };
 
 /// Creates the directory @p socketPath lives in owner-only, or checks that it is safe, as the
@@ -245,9 +257,17 @@ struct DaemonConfig
 ///        DaemonConfig::profiles to them as a configuration reload would. Consumed: each part goes to what
 ///        takes it over -- the listeners, the host, a listener's TLS -- and none is kept beside it, the TLS
 ///        private keys it carries included.
+/// @param keeper The link to the PTY keeper this daemon runs behind, past its handshake; nullopt for a daemon
+///        that runs without one. With one, the daemon deposits every listener it serves with the keeper,
+///        tells it once it serves (keeper::Serving, with DaemonConfig::keeper), says it is alive every
+///        KeeperHeartbeatInterval, and announces its shutdown (keeper::Shutdown) before any listener
+///        closes; when the keeper is gone, it shuts down (ShutdownCause::KeeperLost). A Recovered start
+///        serves on the listeners the keeper kept, and carries on as a handed-over one does
+///        (StartContinuity). POSIX only.
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
 [[nodiscard]] int runDaemon(DaemonConfig const& config,
-                            std::optional<handover::HandoverImage> image = std::nullopt);
+                            std::optional<handover::HandoverImage> image = std::nullopt,
+                            std::optional<keeperlink::KeeperAttachment> keeper = std::nullopt);
 
 /// Starts @p commandLine as a detached daemon and blocks until it is serving.
 ///

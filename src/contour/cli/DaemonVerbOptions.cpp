@@ -91,6 +91,14 @@ DaemonLaunch DaemonLaunch::resolve(DaemonVerbOptions given, std::string const& c
     return DaemonLaunch { std::move(given), std::move(socketPath) };
 }
 
+DaemonLaunch DaemonLaunch::relaunched() const
+{
+    auto given = _given;
+    auto const defaults = DaemonVerbOptions {};
+    std::apply([&](auto... member) { ((given.*member = defaults.*member), ...); }, ProcessBoundOptions);
+    return DaemonLaunch { std::move(given), _socketPath };
+}
+
 DaemonLaunch DaemonLaunch::restore(DaemonVerbOptions given, std::filesystem::path socketPath)
 {
     return DaemonLaunch { std::move(given), std::move(socketPath) };

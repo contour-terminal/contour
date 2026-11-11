@@ -7,6 +7,7 @@
     #include <unistd.h>
 #endif
 
+#include <span>
 #include <utility>
 
 namespace vthost::keeper
@@ -67,5 +68,13 @@ class UniqueFd
   private:
     int _fd = -1;
 };
+
+/// Closes every descriptor of @p fds: what arrived with bytes that no frame took, or that must not be kept.
+/// @param fds The descriptors; they are closed, so the caller owns none of them afterwards.
+inline void closeAll(std::span<int const> fds) noexcept
+{
+    for (auto const fd: fds)
+        UniqueFd { fd }.reset();
+}
 
 } // namespace vthost::keeper

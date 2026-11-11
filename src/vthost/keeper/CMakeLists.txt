@@ -9,6 +9,7 @@ add_library(vthost_keeper STATIC
     Frame.hpp
     Keeper.cpp
     Keeper.hpp
+    Logging.hpp
     Messages.hpp
     Ports.hpp
     RestartPolicy.cpp
@@ -19,7 +20,9 @@ add_library(vthost_keeper STATIC
 )
 if(NOT WIN32)
     # The ports on fork/exec, an AF_UNIX channel, signalfd/pidfds or kqueue.
-    target_sources(vthost_keeper PRIVATE PosixPorts.cpp PosixPorts.hpp)
+    target_sources(vthost_keeper PRIVATE
+        DescriptorSocket.cpp DescriptorSocket.hpp KeeperProcess.cpp KeeperProcess.hpp Kqueue.hpp PosixPorts.cpp
+        PosixPorts.hpp)
 endif()
 target_include_directories(vthost_keeper PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -29,6 +32,7 @@ target_link_libraries(vthost_keeper PUBLIC
     vthost_image
     core::base
     core::codec
+    core::log
     core::platform
 )
 
@@ -63,7 +67,7 @@ if(VTHOST_KEEPER_TESTING)
 
         # The POSIX ports run real processes, block signals and change the descriptor limit of the process
         # they run in: a binary of their own, so that none of it reaches the state machine's tests.
-        add_executable(vthost_keeper_posix_test test_main.cpp PosixPorts_test.cpp)
+        add_executable(vthost_keeper_posix_test test_main.cpp KeeperProcess_test.cpp PosixPorts_test.cpp)
         target_link_libraries(vthost_keeper_posix_test vthost_keeper core::testing Catch2::Catch2 contour_test_trace)
         target_compile_options(vthost_keeper_posix_test PRIVATE -Wno-c2y-extensions)
         add_test(NAME vthost_keeper_posix_test COMMAND $<TARGET_FILE:vthost_keeper_posix_test>)

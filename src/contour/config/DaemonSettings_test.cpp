@@ -147,3 +147,13 @@ TEST_CASE("a null daemon.default_cell_pixel_size keeps the default", "[config][d
     CHECK(config.daemon.value().defaultCellPixelSize
           == vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) });
 }
+
+TEST_CASE("daemon.keeper.restart_hung is on unless turned off", "[config][daemon]")
+{
+    CHECK(contour::config::Config {}.daemon.value().keeper.restartHung);
+    CHECK(
+        loadConfigFromYaml("daemon:\n  keeper:\n    restart_hung: true\n").daemon.value().keeper.restartHung);
+    CHECK_FALSE(loadConfigFromYaml("daemon:\n  keeper:\n    restart_hung: false\n")
+                    .daemon.value()
+                    .keeper.restartHung);
+}

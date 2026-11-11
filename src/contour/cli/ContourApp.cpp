@@ -12,6 +12,7 @@
 #include <contour/cli/DaemonVerbOptions.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
+#include <contour/cli/KeeperVerb.hpp>
 #include <contour/cli/McpCommand.hpp>
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/cli/TerminalPinPrompt.hpp>
@@ -346,6 +347,17 @@ namespace
                                                    "How many trailing lines to print first; 0 prints all "
                                                    "of the last 256 KiB.",
                                                    "N" });
+                break;
+            case DaemonVerb::KeeperServe:
+                options.emplace_back(CLI::Option { "keeper-channel",
+                                                   CLI::Value { 3u },
+                                                   "The descriptor the keeper's channel is on.",
+                                                   "FD" });
+                options.emplace_back(CLI::Option { "handover",
+                                                   CLI::Value { ""s },
+                                                   "What the previous image of this daemon handed over in a "
+                                                   "live upgrade, which exec'd this one in its place.",
+                                                   "TOKEN" });
                 break;
             case DaemonVerb::HandoverInfo:
                 options.emplace_back(CLI::Option { "config",
@@ -1264,20 +1276,40 @@ namespace
 
 namespace
 {
+    /// @param keeper The keeper a daemon runs behind; null for none.
+    /// @return How the daemon process starts: as its keeper's Launch says, else afresh.
+    [[nodiscard]] vthost::keeper::LaunchContinuity keeperContinuityOf(KeeperServeStart const* keeper) noexcept
+    {
+        return keeper ? keeper->attachment.continuity : vthost::keeper::LaunchContinuity::Fresh;
+    }
+
+    /// @param keeper The keeper a daemon runs behind; null for none.
+    /// @return What a live upgrade's exec carries beside what the handover image names: the keeper's channel.
+    [[nodiscard]] std::vector<int> keptAcrossExec([[maybe_unused]] KeeperServeStart const* keeper)
+    {
+#ifndef _WIN32
+        if (keeper)
+            return { keeper->attachment.channel.handle() };
+#endif
+        return {};
+    }
+
     /// How often a followed daemon log is polled for new output.
     constexpr auto LogFollowInterval = std::chrono::milliseconds { 250 };
 
     /// Takes over what the previous daemon handed over in a live upgrade, if anything.
     /// @param token The `--handover` option's value; empty where this daemon starts afresh.
+    /// @param alsoKeep Descriptors kept open beside the image's: the keeper's channel, for a daemon behind
+    /// one.
     /// @return The image handed over, nullopt to start afresh, or TakeoverFailure::EndWithoutServing where
     ///         this process must end without serving anything.
     [[nodiscard]] std::expected<std::optional<vthost::handover::HandoverImage>,
                                 vthost::handover::TakeoverFailure>
-    receiveHandover(std::string const& token)
+    receiveHandover(std::string const& token, std::vector<int> alsoKeep)
     {
-        auto received =
-            vthost::handover::makeNativeImageReceiver(*vthost::handover::makeNativeHandoverMemory())
-                ->takeOver(token);
+        auto received = vthost::handover::makeNativeImageReceiver(
+                            *vthost::handover::makeNativeHandoverMemory(), std::move(alsoKeep))
+                            ->takeOver(token);
         if (received)
             return received;
         switch (received.error())
@@ -1303,6 +1335,23 @@ int ContourApp::daemonAction()
     // Every option the daemon reads, in one record, before anything is acted on: from here on the verb uses
     // the record alone.
     auto const options = readDaemonVerbOptions(parameters());
+
+#ifndef _WIN32
+    // The daemon runs behind a PTY keeper, which this process becomes. Not for `--stdio`, which relays to a
+    // daemon rather than becoming one; nor for `--background`, whose detached `contour daemon` becomes the
+    // keeper; nor for `--handover`, the successor of a daemon that ran without one, which carries on in that
+    // daemon's process.
+    if (options.stdio == OptionFlag::Absent && options.background == OptionFlag::Absent
+        && options.handover.empty())
+        return keeperAction(options);
+#endif
+    return serveDaemon(options, options.handover, nullptr);
+}
+
+int ContourApp::serveDaemon(DaemonVerbOptions const& options,
+                            std::string const& handoverToken,
+                            KeeperServeStart* keeper)
+{
 
     // On --stdio every byte of stdout belongs to the protocol, and from before the configuration
     // loads. The log sinks write to stderr, but a stray std::cout or printf write, or a daemon this
@@ -1335,14 +1384,14 @@ int ContourApp::daemonAction()
     // live upgrade. On POSIX, what is open now and the image does not name was leaked across the exec, and is
     // closed; on Windows, a successor takes over only once its predecessor committed, and ends without
     // serving anything where it may not.
-    auto received = receiveHandover(options.handover);
+    auto received = receiveHandover(handoverToken, keptAcrossExec(keeper));
     if (!received)
         return EXIT_FAILURE;
     auto handover = std::move(*received);
     // From here on a handover carries hosted programs, which ending this process would hang up: whatever
-    // cannot be started as configured is served on without, logged, and told to the first client.
-    auto failures = DaemonStartFailures { handover ? vthost::StartContinuity::HandedOver
-                                                   : vthost::StartContinuity::Fresh };
+    // cannot be started as configured is served on without, logged, and told to the first client. So do the
+    // programs a keeper kept for a daemon it restarts after a crash.
+    auto failures = DaemonStartFailures { vthost::startContinuityOf(handover, keeperContinuityOf(keeper)) };
 
     // The hosted terminals' full session configuration: emulation settings, presentation/color
     // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
@@ -1361,8 +1410,9 @@ int ContourApp::daemonAction()
 
     auto config = vthost::DaemonConfig {};
     config.instance = daemonInstanceOf(handover);
-    auto const launch = DaemonLaunch::resolve(options, daemonSettings.socket);
-    config.socketPath = launch.socketPath();
+    // Behind a keeper, the socket the keeper resolved and holds the lock beside.
+    config.socketPath = keeper ? keeper->launch.socketPath()
+                               : DaemonLaunch::resolve(options, daemonSettings.socket).socketPath();
 
     // Before logging, whose default file lies beside the socket: a log sink creating the socket's
     // directory would give it the umask's 0755, which the listener refuses as world-accessible.
@@ -1373,7 +1423,7 @@ int ContourApp::daemonAction()
     // Logging is installed next, so every diagnostic below — socket binds, TLS setup — is
     // captured. The app owns it, so it outlives runDaemon (categories hold a reference into its
     // sink) and every thread runDaemon spawns has been joined by the time it returns.
-    if (auto const installed = installLogging("contour.daemon", /*showProcessId=*/true); !installed)
+    if (auto const installed = installDaemonLogging(options); !installed)
         if (auto const refused = failures.fail(installed.error()); !refused)
             return refuse(refused.error());
     // Loaded again, now that there is a log: what the load has to say -- a key it does not know, a value it
@@ -1504,7 +1554,7 @@ int ContourApp::daemonAction()
     // Everything above has validated the configuration, so a typo is reported by THIS process
     // rather than killing a child whose stderr nobody is reading. Only now is it safe to hand
     // the work to a detached copy of ourselves. A handed-over daemon is that copy already.
-    if (options.background == OptionFlag::Given && !handover)
+    if (options.background == OptionFlag::Given && !handover && !keeper)
         return runDaemonInBackground(options, config.socketPath);
 
     // What this daemon states about itself, in every hello and status reply.
@@ -1525,8 +1575,11 @@ int ContourApp::daemonAction()
     config.relocationRequest = relocationRequestOf(options.inPlace == OptionFlag::Given);
     if (images)
     {
+        // A daemon behind a keeper never moves: the keeper settled the image it started it from.
         runningLease = settleDaemonImage(
-            **images, relocationRequestOf(options.inPlace == OptionFlag::Given, handover), commandLine());
+            **images,
+            relocationRequestOf(options.inPlace == OptionFlag::Given || keeper != nullptr, handover),
+            commandLine());
         config.executablePath = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
                                     .value_or(vthost::launchedImage((*images)->inputs()));
     }
@@ -1557,7 +1610,124 @@ int ContourApp::daemonAction()
             config.degradations.empty() ? vthost::handover::RunningConfig::LoadedFromFile
                                         : vthost::handover::RunningConfig::BuiltInDefaults));
 
+    config.keeper = keeperSettingsOf(daemonSettings.keeper);
+#ifndef _WIN32
+    if (keeper)
+        return vthost::runDaemon(config, std::move(handover), std::move(keeper->attachment));
+#endif
     return vthost::runDaemon(config, std::move(handover));
+}
+
+int ContourApp::keeperAction(DaemonVerbOptions const& options)
+{
+#ifdef _WIN32
+    return serveDaemon(options, options.handover, nullptr);
+#else
+    // What the keeper needs of the configuration is the socket alone, which `daemon.socket` may name. Every
+    // other part of it is the daemon's to read and refuse, which it reports on the standard error both share.
+    auto failures = DaemonStartFailures { vthost::StartContinuity::Fresh };
+    auto const hostConfig = loadDaemonConfig(options.config, failures);
+    if (!hostConfig)
+    {
+        cerr << std::format("contour daemon: {}\n", hostConfig.error());
+        return EXIT_FAILURE;
+    }
+    auto const launch = DaemonLaunch::resolve(options, hostConfig->daemon.value().socket);
+
+    // The TCP options are the command line's alone, so they are refused here, by the process the user
+    // started, rather than by a daemon that cannot start with them: the daemon reads them again, the same
+    // way.
+    if (auto const nativeTcp = nativeTcpOption(options, vthost::socketLabelOf(options.label).name);
+        !nativeTcp)
+    {
+        cerr << std::format("contour daemon: the TCP listener is not served: {}\n", nativeTcp.error());
+        return EXIT_FAILURE;
+    }
+
+    // The socket's directory before anything lies in it -- the keeper's lock, the default log -- for the
+    // reason serveDaemon() gives.
+    if (auto const prepared = vthost::prepareSocketDirectory(launch.socketPath()); !prepared)
+    {
+        cerr << std::format("contour daemon: {}\n", prepared.error());
+        return EXIT_FAILURE;
+    }
+    // The keeper logs where its daemon does: the options' log, read here and not from the record, which the
+    // keeper never decodes.
+    if (auto const installed = installDaemonLogging(options); !installed)
+    {
+        cerr << std::format("contour daemon: {}\n", installed.error());
+        return EXIT_FAILURE;
+    }
+
+    // The keeper runs from the per-version copy wherever an upgrade would disturb the installed binary, and
+    // starts the daemon from it; it holds the lease for as long as it keeps.
+    auto lease = std::unique_ptr<vthost::ImageLease> {};
+    auto daemonImage = std::filesystem::path {};
+    auto images = vthost::NativeDaemonImages::ofThisProcess(processEnvironment(),
+                                                            core::platform::NativeFileSystem::instance(),
+                                                            CONTOUR_VERSION_STRING,
+                                                            vtpty::CrossingHandle {});
+    if (images)
+    {
+        lease = settleDaemonImage(
+            **images, relocationRequestOf(options.inPlace == OptionFlag::Given), commandLine());
+        daemonImage = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
+                          .value_or(vthost::launchedImage((*images)->inputs()));
+    }
+    else
+    {
+        errorLog()("cannot locate the running executable ({}); running in place", images.error().message());
+        daemonImage = std::filesystem::absolute(
+            core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
+    }
+    return runKeeperVerb(KeeperVerbInputs { .daemonImage = std::move(daemonImage),
+                                            .launch = launch,
+                                            .environment = processEnvironmentEntries() },
+                         cerr);
+#endif
+}
+
+int ContourApp::keeperServeAction(std::string const& prefix)
+{
+#ifdef _WIN32
+    std::ignore = prefix;
+    cerr << "contour daemon keeper-serve: the PTY keeper is not available on this platform\n";
+    return EXIT_FAILURE;
+#else
+    auto started =
+        attachKeeperServe(static_cast<int>(parameters().get<unsigned>(prefix + ".keeper-channel")));
+    if (!started)
+    {
+        cerr << std::format("contour daemon keeper-serve: {}\n", started.error());
+        return EXIT_FAILURE;
+    }
+    // The options are the keeper's record of them; only what a live upgrade's exec handed over is this
+    // process's own.
+    return serveDaemon(started->launch.given(), parameters().get<string>(prefix + ".handover"), &*started);
+#endif
+}
+
+std::expected<void, std::string> ContourApp::installDaemonLogging(DaemonVerbOptions const& options)
+{
+    auto const file = core::log::parseLogFileSpec(options.logFile);
+    // Refused before the current destination is released, so logging carries on where it was.
+    if (!file)
+        return std::unexpected { std::format(
+            "cannot use log file '{}': {}", core::escape(options.logFile), file.error().message()) };
+    // Released before the replacement is made, for the reason core::cli::App::installLogging() gives.
+    _daemonLogOutput.reset();
+    auto output = core::log::ScopedOutput::create({
+        .filter = options.log,
+        .file = *file,
+        .showProcessId = true,
+    });
+    if (!output)
+        return std::unexpected { output.error() };
+    for (auto const& unmatched: core::log::unmatchedFilters(options.log))
+        cerr << std::format("contour: --log '{}' matches no known tag (see `contour list-debug-tags`).\n",
+                            unmatched);
+    _daemonLogOutput = std::move(*output);
+    return {};
 }
 
 std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> ContourApp::nativeTcpOption(
@@ -1954,7 +2124,8 @@ namespace
             case contour::cli::DaemonVerb::Relocate:
             case contour::cli::DaemonVerb::Logs:
             case contour::cli::DaemonVerb::ForgetPin:
-            case contour::cli::DaemonVerb::HandoverInfo: break;
+            case contour::cli::DaemonVerb::HandoverInfo:
+            case contour::cli::DaemonVerb::KeeperServe: break;
         }
         return vthost::client::DefaultControlTimeout;
     }
@@ -1986,6 +2157,10 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
                                                    core::systemRandom() };
         return exitCode(daemonForgetPinVerb(knownDaemons, parameters().verbatim, cout, cerr));
     }
+
+    // Asks no daemon: it becomes one, behind the keeper that started this process.
+    if (verb == DaemonVerb::KeeperServe)
+        return keeperServeAction(prefix);
 
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
     auto const label = mergeSharedOption("label",
@@ -2061,7 +2236,8 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
         case DaemonVerb::Run:
         case DaemonVerb::Relocate:
         case DaemonVerb::ForgetPin:
-        case DaemonVerb::HandoverInfo: break;
+        case DaemonVerb::HandoverInfo:
+        case DaemonVerb::KeeperServe: break;
     }
     return exitCode(ExitStatus::BadUsage);
 }

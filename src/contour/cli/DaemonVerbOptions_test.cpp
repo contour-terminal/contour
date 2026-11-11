@@ -320,3 +320,29 @@ TEST_CASE("the daemon's options are read from the parsed command line", "[cli][d
     expected.inPlace = OptionFlag::Given;
     CHECK(options == expected);
 }
+
+TEST_CASE("a relaunched daemon repeats no option meant for one process", "[cli][daemon]")
+{
+    auto given = DaemonVerbOptions {};
+    given.label = "work";
+    given.token = "secret";
+    given.handover = "fd=9";
+    given.background = OptionFlag::Given;
+    given.stdio = OptionFlag::Given;
+    given.inPlace = OptionFlag::Given;
+    auto const launch = DaemonLaunch::restore(given, "/tmp/contour-test/relaunch.sock");
+
+    auto const relaunched = launch.relaunched();
+    CHECK(relaunched.given().handover.empty());
+    CHECK(relaunched.given().background == OptionFlag::Absent);
+    CHECK(relaunched.given().stdio == OptionFlag::Absent);
+    // Everything else is the launch's, unchanged.
+    auto expected = given;
+    expected.handover.clear();
+    expected.background = OptionFlag::Absent;
+    expected.stdio = OptionFlag::Absent;
+    CHECK(relaunched.given() == expected);
+    CHECK(relaunched.socketPath() == launch.socketPath());
+    // The launch itself is left as it was.
+    CHECK(launch.given() == given);
+}

@@ -164,6 +164,10 @@ class DaemonLaunch
     /// @return The control socket the daemon binds.
     [[nodiscard]] std::filesystem::path const& socketPath() const noexcept { return _socketPath; }
 
+    /// @return This launch for a daemon its keeper restarts after a crash: a copy without what was meant
+    ///         for one process only (@ref ProcessBoundOptions).
+    [[nodiscard]] DaemonLaunch relaunched() const;
+
     [[nodiscard]] bool operator==(DaemonLaunch const&) const = default;
 
   private:
@@ -174,6 +178,15 @@ class DaemonLaunch
 
     DaemonVerbOptions _given;
     std::filesystem::path _socketPath;
+};
+
+/// The options a restarted daemon must not repeat, each back at its default in DaemonLaunch::relaunched():
+/// `--handover` named the live upgrade one process took over from, and is used up; `--background` and
+/// `--stdio` belong to the process the command line started, which a restarted daemon is not.
+inline constexpr auto ProcessBoundOptions = std::tuple {
+    &DaemonVerbOptions::handover,
+    &DaemonVerbOptions::background,
+    &DaemonVerbOptions::stdio,
 };
 
 /// The wire id of DaemonLaunch::socketPath in the options record: after every DaemonVerbOptions field.

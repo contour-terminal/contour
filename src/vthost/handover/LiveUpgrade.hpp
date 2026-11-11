@@ -113,6 +113,9 @@ struct LiveUpgradeConfig
     /// The TLS identities the daemon made up for its listeners, by listener name: each crosses with its
     /// listener (InheritedListener::tlsIdentity), so that the new image presents the very same certificate.
     std::map<std::string, TlsIdentity, std::less<>> tlsIdentities {};
+    /// Handles the target keeps that the image does not name: the PTY keeper's channel, which is
+    /// close-on-exec for every other child of the daemon. Kept across the exec only.
+    std::vector<vtpty::CrossingHandle> alsoCrossing {};
     /// How many times a capture refused for a session still starting is tried in all.
     unsigned sessionStartAttempts = 20;
     /// How long the upgrade waits between two such tries.

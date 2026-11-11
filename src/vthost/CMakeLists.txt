@@ -90,6 +90,7 @@ add_library(vthost STATIC
     WireEnum.hpp
     Daemon.cpp
     Daemon.hpp
+    KeeperSettings.hpp
     DaemonSpawn.hpp
     GracefulClose.hpp
     HistorySeed.cpp
@@ -281,6 +282,7 @@ add_library(vthost STATIC
 target_link_libraries(vthost PUBLIC
     vthost_wire
     vthost_image
+    vthost_keeper
     vtcontrol
     core::async
     core::base
@@ -292,6 +294,17 @@ target_link_libraries(vthost PUBLIC
     vtpty
     crispy::core
 )
+# The daemon's link to its PTY keeper: an AF_UNIX channel that carries descriptors, so POSIX only.
+if(NOT WIN32)
+    target_sources(vthost PRIVATE
+        keeperlink/KeeperAttachment.cpp
+        keeperlink/KeeperAttachment.hpp
+        keeperlink/KeeperChannel.cpp
+        keeperlink/KeeperChannel.hpp
+        keeperlink/KeeperLink.cpp
+        keeperlink/KeeperLink.hpp
+    )
+endif()
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.
 target_link_libraries(vthost PRIVATE core::net_tls)
 # The control API's JSON (vtcontrol/Json.hpp), read and written in .cpp files only: no header of vthost's
@@ -468,6 +481,13 @@ if(VTHOST_TESTING)
         tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    if(NOT WIN32)
+        # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
+        add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
+        target_link_libraries(vthost_keeper_harness PUBLIC vthost)
+        target_sources(vthost_test PRIVATE keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp)
+        target_link_libraries(vthost_test vthost_keeper_harness)
+    endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
         target_link_libraries(vthost_test vtextension_runtime)
@@ -526,6 +546,10 @@ if(VTHOST_BUILD_BENCH_LATENCY)
         add_dependencies(bench_latency_test bench-latency)
         target_compile_definitions(bench_latency_test PRIVATE BENCH_LATENCY_EXECUTABLE="$<TARGET_FILE:bench-latency>")
         target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2 contour_test_trace)
+        # It shares vthost_test's main(), which runs the keeper harness when asked to.
+        if(TARGET vthost_keeper_harness)
+            target_link_libraries(bench_latency_test vthost_keeper_harness)
+        endif()
         if(NOT WIN32)
             target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)
         endif()

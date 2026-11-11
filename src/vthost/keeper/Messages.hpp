@@ -199,7 +199,9 @@ struct WireExitStatus
 };
 
 // clang-format off
-/// Both sides' opening words. Sent first by each; both speak min(own, peer). Never refused.
+/// Both sides' opening words. Sent first by each; both speak min(own, peer). Never refused. A daemon process
+/// says it once per image it runs: a second Hello on the same channel is the new image of a live upgrade
+/// (an exec in place), which the keeper answers with a Hello and a Launch{HandedOver} of its own.
 struct Hello
 {
     /// How many descriptors this message carries at most.
@@ -232,14 +234,17 @@ struct Launch
     [[nodiscard]] bool operator==(Launch const&) const = default;
 };
 
-/// Daemon to keeper: a listening socket the keeper keeps a duplicate of. Carries one descriptor.
+/// Daemon to keeper: a listening socket the keeper keeps a duplicate of. Carries one descriptor. A daemon
+/// deposits each of its listeners once; a listener deposited again under the same name (by the new image of
+/// a live upgrade) replaces the one held.
 struct Listener
 {
     /// How many descriptors this message carries at most.
     static constexpr std::size_t MaxDescriptors = 1;
     std::string name;
     std::optional<std::vector<uint8_t>> tlsIdentity;
-    void visitFields(this auto& self, auto& visitor) { visitor(1, self.name); visitor(2, self.tlsIdentity); }
+    std::string path; ///< The socket file of a Unix listener, which a keeper that gives up unlinks; empty for TCP.
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self.name); visitor(2, self.tlsIdentity); visitor(3, self.path); }
     [[nodiscard]] bool operator==(Listener const&) const = default;
 };
 
@@ -402,7 +407,8 @@ struct InventoryListener
     static constexpr std::size_t MaxDescriptors = 1;
     std::string name;
     std::optional<std::vector<uint8_t>> tlsIdentity;
-    void visitFields(this auto& self, auto& visitor) { visitor(1, self.name); visitor(2, self.tlsIdentity); }
+    std::string path; ///< As Listener::path.
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self.name); visitor(2, self.tlsIdentity); visitor(3, self.path); }
     [[nodiscard]] bool operator==(InventoryListener const&) const = default;
 };
 

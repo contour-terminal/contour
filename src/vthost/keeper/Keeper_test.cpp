@@ -381,6 +381,7 @@ struct Harness
     };
     std::optional<KeeperOutcome> outcome;
     int exitStatus = -1;
+    Keeper const* running = nullptr; ///< The keeper run() runs, while it runs: what a step inspects.
 
     void run(RestartPolicyConfig policy = {})
     {
@@ -394,7 +395,9 @@ struct Harness
                                policy,
                                daemonImage(),
                                launchOptions() };
+        running = &keeper;
         outcome = keeper.run();
+        running = nullptr;
         exitStatus = keeper.exitStatus();
         CHECK(events.stepsLeft() == 0);
         CHECK(events.zombies().empty()); // every daemon that ended was reaped
@@ -590,8 +593,9 @@ TEST_CASE("Adopt streams every session, listener and the newest structure", "[ke
     auto gate2 = makePipe();
     auto const tls = std::vector<uint8_t> { 4, 2 };
     h.events.then(deliver({
-        frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt }, { native.give() }),
-        frameOf(Listener { .name = "tcp", .tlsIdentity = tls }, { tcp.give() }),
+        frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt, .path = "/run/n" },
+                { native.give() }),
+        frameOf(Listener { .name = "tcp", .tlsIdentity = tls, .path = {} }, { tcp.give() }),
         frameOf(Structure {}, { structure.give() }),
         frameOf(Serving {}),
         spawnOf(1, child1, { { KeptDescriptor::Master, &master1 }, { KeptDescriptor::Gate, &gate1 } }),
@@ -618,11 +622,11 @@ TEST_CASE("Adopt streams every session, listener and the newest structure", "[ke
         CHECK(structure.isGiven(sent[2].fds[0].get()));
 
         CHECK(std::get<InventoryListener>(sent[3].message)
-              == InventoryListener { .name = "native", .tlsIdentity = std::nullopt });
+              == InventoryListener { .name = "native", .tlsIdentity = std::nullopt, .path = "/run/n" });
         REQUIRE(sent[3].fds.size() == 1);
         CHECK(native.isGiven(sent[3].fds[0].get()));
         CHECK(std::get<InventoryListener>(sent[4].message)
-              == InventoryListener { .name = "tcp", .tlsIdentity = tls });
+              == InventoryListener { .name = "tcp", .tlsIdentity = tls, .path = {} });
         REQUIRE(sent[4].fds.size() == 1);
         CHECK(tcp.isGiven(sent[4].fds[0].get()));
 
@@ -766,10 +770,10 @@ TEST_CASE("Shutdown releases the label lock before the shells are ended", "[keep
     h.onLockReleased = [&] {
         lockReleasedWhileShellsRan = !master.writerClosed() && h.signaller.sent.empty();
     };
-    h.events.then(
-        deliver({ frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt }, { listener.give() }),
-                  frameOf(Serving {}),
-                  spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
+    h.events.then(deliver({ frameOf(Listener { .name = "native", .tlsIdentity = std::nullopt, .path = {} },
+                                    { listener.give() }),
+                            frameOf(Serving {}),
+                            spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
     h.events.then(deliver({ frameOf(Shutdown { .cause = 1 }) }));
     h.events.then(check(
         [&] {
@@ -1173,11 +1177,11 @@ TEST_CASE("after Shutdown the keeper takes on no new shell or listener", "[keepe
     auto h = Harness {};
     auto child = makePipe();
     auto listener = makePipe();
-    h.events.then(
-        deliver({ frameOf(Serving {}),
-                  frameOf(Shutdown { .cause = 1 }),
-                  spawnOf(4, child),
-                  frameOf(Listener { .name = "late", .tlsIdentity = std::nullopt }, { listener.give() }) }));
+    h.events.then(deliver({ frameOf(Serving {}),
+                            frameOf(Shutdown { .cause = 1 }),
+                            spawnOf(4, child),
+                            frameOf(Listener { .name = "late", .tlsIdentity = std::nullopt, .path = {} },
+                                    { listener.give() }) }));
     h.events.then(check([&] {
         CHECK(h.launcher.channel(0).only<SpawnFailed>()
               == SpawnFailed { .request = 4, .error = SpawnError::ShuttingDown });
@@ -1316,4 +1320,125 @@ TEST_CASE("a stop while a reaped daemon's channel drains ends cleanly without a 
     CHECK(h.outcome == KeeperOutcome::Clean);
     CHECK(h.launcher.channels.size() == 1);
     CHECK(h.events.reaps == std::vector { FirstDaemon });
+}
+
+TEST_CASE("the keeper records the channel version of each image's Hello", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(check([&] { CHECK(h.running->daemonChannelVersion() == 0); },
+                        { frameOf(Hello { .version = ChannelVersion + 4, .capabilities = 0 }) }));
+    h.events.then(check([&] { CHECK(h.running->daemonChannelVersion() == ChannelVersion); },
+                        { frameOf(Hello { .version = 0, .capabilities = 0 }) }));
+    // A live upgrade's new image speaks its own.
+    h.events.then(check([&] { CHECK(h.running->daemonChannelVersion() == 0); }));
+    h.run();
+}
+
+TEST_CASE("a second Hello from the daemon is answered with a Launch for its new image", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}) }));
+    h.events.then(check([&] {
+        // The first Hello is the launched image's own: it has its Launch already.
+        CHECK(h.launcher.channel(0).all<Launch>().size() == 1);
+    }));
+    h.events.then(deliver({ frameOf(Hello {}) }));
+    h.events.then(check([&] {
+        auto const launches = h.launcher.channel(0).all<Launch>();
+        REQUIRE(launches.size() == 2);
+        CHECK(std::get<Launch>(launches.back()->message)
+              == Launch { .continuity = LaunchContinuity::HandedOver, .options = launchOptions() });
+        CHECK(h.launcher.channel(0).all<Hello>().size() == 2);
+        CHECK(h.launcher.images.size() == 1); // the same process: nothing was launched
+        CHECK(h.signaller.sent.empty());
+    }));
+    h.run();
+}
+
+TEST_CASE("a listener deposited again under its name replaces the one held", "[keeper]")
+{
+    auto h = Harness {};
+    auto first = makePipe();
+    auto second = makePipe();
+    h.events.then(deliver({
+        frameOf(Listener { .name = "control", .tlsIdentity = std::nullopt, .path = "/run/c" },
+                { first.give() }),
+        frameOf(Serving {}),
+    }));
+    h.events.then(deliver({
+        frameOf(Listener { .name = "control", .tlsIdentity = std::nullopt, .path = "/run/c" },
+                { second.give() }),
+    }));
+    h.events.then(check([&] { CHECK(first.writerClosed()); }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(deliver({ frameOf(Adopt {}) }));
+    h.events.then(check([&] {
+        auto const& sent = h.launcher.channel(1).sent;
+        auto const listeners = h.launcher.channel(1).all<InventoryListener>();
+        REQUIRE(listeners.size() == 1);
+        CHECK(std::get<InventoryListener>(listeners.front()->message)
+              == InventoryListener { .name = "control", .tlsIdentity = std::nullopt, .path = "/run/c" });
+        REQUIRE(listeners.front()->fds.size() == 1);
+        CHECK(second.isGiven(listeners.front()->fds[0].get()));
+        CHECK(std::get<InventoryBegin>(sent[2].message).listenerCount == 1);
+    }));
+    h.run();
+}
+
+TEST_CASE("a first start that closes its channel before it exits fails with its own status", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(deliver({ eventOf(EventKind::ChannelClosed) }));
+    h.events.then(check([&] { CHECK(h.signaller.sent.empty()); },
+                        { endOf(FirstDaemon, { .kind = ExitKind::Normal, .value = 3 }) }));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::DaemonFailedToStart);
+    CHECK(h.exitStatus == 3);
+    CHECK(h.signaller.sent.empty());
+    CHECK(h.launcher.channels.size() == 1);
+}
+
+TEST_CASE("a first start that closed its channel and lingers is killed after the drain bound", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(deliver({ eventOf(EventKind::ChannelClosed) }));
+    h.events.then(h.after(ChannelDrainBound - 1ms));
+    h.events.then(check([&] { CHECK(h.signaller.sent.empty()); }));
+    h.events.then(h.after(1ms));
+    h.events.then(check([&] { CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Kill }); },
+                        { endOf(FirstDaemon, Killed) }));
+    h.run();
+    CHECK(h.outcome == KeeperOutcome::DaemonFailedToStart);
+    CHECK(h.launcher.channels.size() == 1);
+}
+
+TEST_CASE("a live upgrade's new image runs with its own hung-daemon settings", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(
+        deliver({ frameOf(Hello {}),
+                  frameOf(Serving { .hungRestart = HungRestart::On, .heartbeatTimeoutMs = 2'000 }) }));
+    // The new image says Hello, is launched, and serves with restart_hung turned off.
+    h.events.then(
+        deliver({ frameOf(Hello {}),
+                  frameOf(Serving { .hungRestart = HungRestart::Off, .heartbeatTimeoutMs = 2'000 }) }));
+    h.events.then(h.after(10s));
+    h.events.then(check([&] { CHECK(h.signaller.sent.empty()); }));
+    h.run();
+}
+
+TEST_CASE("a live upgrade's new image that shortens the heartbeat timeout is held to it", "[keeper]")
+{
+    auto h = Harness {};
+    h.events.then(
+        deliver({ frameOf(Hello {}),
+                  frameOf(Serving { .hungRestart = HungRestart::On, .heartbeatTimeoutMs = 30'000 }) }));
+    h.events.then(
+        deliver({ frameOf(Hello {}),
+                  frameOf(Serving { .hungRestart = HungRestart::On, .heartbeatTimeoutMs = 2'000 }) }));
+    h.events.then(h.after(2s));
+    h.events.then(check([&] {
+        CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Abort, KeeperSignal::Continue });
+    }));
+    h.run();
 }

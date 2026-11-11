@@ -1472,8 +1472,13 @@ struct DaemonStatusReply
     std::optional<uint32_t> workspaces = std::nullopt;
     /// The `SHA256:...` fingerprint of the certificate the daemon's TCP listener presents. Appended after the
     /// workspace count by a later version, so it is encoded only behind one: nullopt for a daemon without a
-    /// TCP listener, or from before it.
+    /// TCP listener, or from before it. Never empty: a daemon without a listener that must place
+    /// keeperProcessId sends an empty one, which decodes as nullopt.
     std::optional<std::string> tlsFingerprint = std::nullopt;
+    /// The PTY keeper the daemon runs behind, its parent; 0 for a daemon that runs without one. Appended
+    /// after the fingerprint by a later version, so it is encoded only behind one (an empty one for a daemon
+    /// without a TCP listener): nullopt for a daemon from before it.
+    std::optional<uint64_t> keeperProcessId = std::nullopt;
     bool operator==(DaemonStatusReply const&) const = default;
 };
 

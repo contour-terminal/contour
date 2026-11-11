@@ -13,7 +13,8 @@ std::expected<void, std::string> DaemonStartFailures::fail(std::string reason)
     switch (_continuity)
     {
         case vthost::StartContinuity::Fresh: return std::unexpected { std::move(reason) };
-        case vthost::StartContinuity::HandedOver: break;
+        case vthost::StartContinuity::HandedOver:
+        case vthost::StartContinuity::Recovered: break;
     }
     _kept.push_back(std::move(reason));
     return {};

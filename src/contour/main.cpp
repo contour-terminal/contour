@@ -13,11 +13,10 @@
     #if __has_include(<QtCore/QtLogging>)
         #include <QtCore/QtLogging>
     #endif
-#else
-    #include <contour/cli/ContourApp.hpp>
 #endif
-
 #include <contour/askpass/AskpassClient.hpp>
+#include <contour/cli/ContourApp.hpp>
+#include <contour/cli/DaemonVerbs.hpp>
 
 #include <vtpty/SpawnTrampoline.hpp>
 
@@ -289,6 +288,14 @@ int main(int argc, char const* argv[])
         return *exitCode;
 
 #ifdef CONTOUR_FRONTEND_GUI
+    #ifndef _WIN32
+    // `contour daemon` and its sub-verbs open no window: they run as the app without the GUI, whose
+    // construction starts threads, which the PTY keeper `contour daemon` becomes may not have (@see
+    // vthost::keeper::runKeeperProcess).
+    if (contour::cli::isDaemonInvocation(std::span { argv, static_cast<std::size_t>(argc) }))
+        return contour::cli::ContourApp { environment }.run(argc, argv);
+    #endif
+
     qInstallMessageHandler(qtCustomMessageOutput);
 
     contour::ContourGuiApp app { environment,

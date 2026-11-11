@@ -28,6 +28,7 @@ namespace contour::cli
 
 enum class DaemonVerb : std::uint8_t; // DaemonVerbs.hpp
 struct DaemonVerbOptions;             // DaemonVerbOptions.hpp
+struct KeeperServeStart;              // KeeperVerb.hpp
 struct ControlVerb;                   // ControlVerbs.hpp
 
 /// What `contour daemon-service <verb>` was asked to do.
@@ -89,11 +90,35 @@ class ContourApp: public core::cli::App
     int documentationProfileConfig();
     /// Displays an image in the terminal via GIP oneshot sequence.
     int catAction();
-    /// Runs the headless terminal multiplexer daemon.
+    /// Runs the headless terminal multiplexer daemon: behind a PTY keeper, which this process becomes, where
+    /// the platform has one.
     int daemonAction();
     /// Turns a coding agent's hook payload into pane status: `contour agent report`.
     /// @return Always 0.
     int agentReportAction();
+    /// Becomes the PTY keeper of a daemon (`contour daemon`): resolves the options, settles the image, and
+    /// keeps the daemon it starts as `contour daemon keeper-serve`. POSIX only.
+    /// @param options The daemon's options.
+    /// @return The process exit code: the keeper's.
+    int keeperAction(DaemonVerbOptions const& options);
+    /// Becomes the daemon behind the keeper that started this process (`contour daemon keeper-serve`).
+    /// @param prefix The hidden verb's dotted flag prefix.
+    /// @return The process exit code.
+    int keeperServeAction(std::string const& prefix);
+    /// Becomes the daemon -- behind a keeper, or as a successor of a daemon that ran without one -- or relays
+    /// to one (`--stdio`), or starts one in the background (`--background`).
+    /// @param options The daemon's options.
+    /// @param handoverToken What a live upgrade handed over (`--handover`); empty for none.
+    /// @param keeper The keeper's channel and launch, past the handshake; null for a daemon behind none.
+    /// @return The process exit code.
+    int serveDaemon(DaemonVerbOptions const& options,
+                    std::string const& handoverToken,
+                    KeeperServeStart* keeper);
+    /// Installs the daemon's log destination from its options rather than from this command line, which for
+    /// a daemon behind a keeper names none of them.
+    /// @param options The daemon's options: `--log` and `--log-file`.
+    /// @return Nothing, or why the log file cannot be used.
+    [[nodiscard]] std::expected<void, std::string> installDaemonLogging(DaemonVerbOptions const& options);
     /// Writes the agent skill: `contour agent setup`.
     /// @return The process exit code.
     int agentSetupAction();
@@ -153,6 +178,10 @@ class ContourApp: public core::cli::App
         std::string const& prefix,
         vthost::SocketLabel const& label,
         vthost::DaemonLaunchStyle launchStyle) const;
+
+    /// The daemon's log destination (installDaemonLogging()): categories hold a reference into it, so it
+    /// lives as long as the app.
+    std::unique_ptr<core::log::ScopedOutput> _daemonLogOutput;
 };
 
 } // namespace contour::cli

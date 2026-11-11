@@ -361,11 +361,12 @@ std::expected<HandoverImage, HandoverError> readHandover(HandoverMemory& memory,
 }
 
 #ifndef _WIN32
-std::vector<int> descriptorsToKeep(HandoverImage const& image)
+std::vector<int> descriptorsToKeep(HandoverImage const& image, std::span<int const> alsoKeep)
 {
     auto kept = std::vector<int> { 0, 1, 2 };
     for (auto const handle: handlesNamedBy(image))
         kept.push_back(handle.native());
+    kept.insert(kept.end(), alsoKeep.begin(), alsoKeep.end());
     return sortedUnique(std::move(kept), NoDescriptor);
 }
 

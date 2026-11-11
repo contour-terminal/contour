@@ -70,6 +70,8 @@ enum class ShutdownCause : std::uint8_t
     /// A Control connection asked it to stop and to keep its workspace for the next start
     /// (`contour daemon stop --keep-snapshot`).
     StopRequestedKeepingWorkspaces,
+    /// The PTY keeper the daemon runs behind is gone: its channel closed. A daemon never outlives its keeper.
+    KeeperLost,
 };
 
 /// The causes' log text, single-sourced.
@@ -80,6 +82,7 @@ inline constexpr auto ShutdownCauseNames = std::to_array<std::pair<std::string_v
     { "stop requested", ShutdownCause::StopRequested },
     { "restart for upgrade", ShutdownCause::UpgradeRestart },
     { "stop requested, keeping the workspaces", ShutdownCause::StopRequestedKeepingWorkspaces },
+    { "the keeper is gone", ShutdownCause::KeeperLost },
 });
 
 /// @param cause The cause to name.
