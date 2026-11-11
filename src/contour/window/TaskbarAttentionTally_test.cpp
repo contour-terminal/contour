@@ -66,31 +66,31 @@ TEST_CASE("taskbarAttention.noTabsNoTally", "[taskbarattention]")
 
 TEST_CASE("taskbarAttention.applicationScopeCountsOneDaemonOnceAcrossTwoWindows", "[taskbarattention]")
 {
-    constexpr auto daemonA = std::optional<uint64_t> { 10 };
-    constexpr auto daemonB = std::optional<uint64_t> { 11 };
+    constexpr auto DaemonA = std::optional<uint64_t> { 10 };
+    constexpr auto DaemonB = std::optional<uint64_t> { 11 };
 
     SECTION("two windows on one daemon count it once, as the more recently focused one sees it")
     {
         auto const windows = std::array {
-            WindowWaiting { .window = 1, .waiting = 2, .daemon = daemonA, .focusOrder = 5 },
-            WindowWaiting { .window = 2, .waiting = 3, .daemon = daemonA, .focusOrder = 9 },
+            WindowWaiting { .window = 1, .waiting = 2, .daemon = DaemonA, .focusOrder = 5 },
+            WindowWaiting { .window = 2, .waiting = 3, .daemon = DaemonA, .focusOrder = 9 },
         };
         CHECK(applicationWaiting(windows) == 3);
     }
     SECTION("the order of the list does not decide it")
     {
         auto const windows = std::array {
-            WindowWaiting { .window = 2, .waiting = 3, .daemon = daemonA, .focusOrder = 9 },
-            WindowWaiting { .window = 1, .waiting = 2, .daemon = daemonA, .focusOrder = 5 },
+            WindowWaiting { .window = 2, .waiting = 3, .daemon = DaemonA, .focusOrder = 9 },
+            WindowWaiting { .window = 1, .waiting = 2, .daemon = DaemonA, .focusOrder = 5 },
         };
         CHECK(applicationWaiting(windows) == 3);
     }
     SECTION("other daemons and in-process windows add their own")
     {
         auto const windows = std::array {
-            WindowWaiting { .window = 1, .waiting = 2, .daemon = daemonA, .focusOrder = 5 },
-            WindowWaiting { .window = 2, .waiting = 3, .daemon = daemonA, .focusOrder = 9 },
-            WindowWaiting { .window = 3, .waiting = 4, .daemon = daemonB, .focusOrder = 1 },
+            WindowWaiting { .window = 1, .waiting = 2, .daemon = DaemonA, .focusOrder = 5 },
+            WindowWaiting { .window = 2, .waiting = 3, .daemon = DaemonA, .focusOrder = 9 },
+            WindowWaiting { .window = 3, .waiting = 4, .daemon = DaemonB, .focusOrder = 1 },
             WindowWaiting { .window = 4, .waiting = 1 },
             WindowWaiting { .window = 5, .waiting = 1 },
         };

@@ -22,7 +22,7 @@ constexpr auto Shell = PaneKey { 1 };
 constexpr auto Editor = PaneKey { 2 };
 
 /// The key a window keeps a session's marks under here: the local id.
-constexpr auto keyOf = [](SessionId session) {
+constexpr auto KeyOf = [](SessionId session) {
     return PaneKey { session.value };
 };
 } // namespace
@@ -156,7 +156,7 @@ TEST_CASE("tabAttention.pooledPoolsTheBell", "[tabattention]")
                                         EditorSession);
     auto ledger = TabAttention {};
     std::ignore = ledger.noteBell(Editor, SessionVisibility::Hidden, OutputOrigin::Live);
-    CHECK(pooledAttention(tab, ledger, keyOf).bell == BellMark::Rang);
+    CHECK(pooledAttention(tab, ledger, KeyOf).bell == BellMark::Rang);
 }
 
 TEST_CASE("tabAttention.forgetDropsTheEntry", "[tabattention]")
@@ -177,19 +177,19 @@ TEST_CASE("tabAttention.pooledOverEveryLeaf", "[tabattention]")
                                         EditorSession);
 
     auto ledger = TabAttention {};
-    CHECK(pooledAttention(tab, ledger, keyOf) == SessionAttention {});
+    CHECK(pooledAttention(tab, ledger, KeyOf) == SessionAttention {});
 
     std::ignore = ledger.noteOutput(Editor, SessionVisibility::Hidden, OutputOrigin::Live);
-    CHECK(pooledAttention(tab, ledger, keyOf).activity == TabActivity::UnseenOutput);
+    CHECK(pooledAttention(tab, ledger, KeyOf).activity == TabActivity::UnseenOutput);
 
     std::ignore = ledger.noteFinished(Shell, SessionVisibility::Hidden, CommandEnding::Failed);
     std::ignore = ledger.noteFinished(Editor, SessionVisibility::Hidden, CommandEnding::Succeeded);
-    CHECK(pooledAttention(tab, ledger, keyOf)
+    CHECK(pooledAttention(tab, ledger, KeyOf)
           == SessionAttention { .activity = TabActivity::UnseenOutput,
                                 .finished = FinishedBlockBadge::Failed });
 
     std::ignore = ledger.noteSeen(Editor, 0);
-    CHECK(pooledAttention(tab, ledger, keyOf) == SessionAttention { .finished = FinishedBlockBadge::Failed });
+    CHECK(pooledAttention(tab, ledger, KeyOf) == SessionAttention { .finished = FinishedBlockBadge::Failed });
 }
 
 TEST_CASE("tabAttention.outputOrigin", "[tabattention]")
