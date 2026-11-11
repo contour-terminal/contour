@@ -7,6 +7,38 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.19.0] - 2026-11-10
+
+### Added
+
+- **OpenSSH public keys and SSHSIG verification** (`<core/net/SshKeys.hpp>`, in `core::net_tls`):
+  `parseSshPublicKey`, `parseSshPublicKeyBlob`, `parseAuthorizedKeysLine`, `sshFingerprintOf`, `sshKeyTypeName`, `verifySshSignature`,
+  `sshsigSignedData` and `assembleSshsig`, for `ssh-ed25519`, `ecdsa-sha2-nistp256` and their `sk-` security-key
+  forms (user presence required). SSHSIG's hash is `sha512` only. Every malformed input answers
+  `SshKeyError`/`SshSigError`; nothing throws.
+- **`core::net::testing::SoftwareSecurityKey`**: a FIDO authenticator in software that signs as PROTOCOL.u2f says,
+  for testing `sk-` key verification without a device.
+- **`TlsVersion` and `TlsOptions`** (`<core/net/ITlsSession.hpp>`, `<core/net/Tls.hpp>`): the server and client
+  contexts take a `TlsOptions` whose `minimumVersion` can require TLS 1.3. Additive: the `options` parameter defaults
+  to TLS 1.2, as before.
+- **`ITlsSession`, `tlsSessionOf()` and `sshStyleFingerprint()`**: what a finished handshake lets a caller ask of its
+  connection (the RFC 9266 channel binding, the peer certificate's raw SHA-256, `peerCertificateDigest()`, as `std::optional<std::array<std::byte, 32>>`, the negotiated version as `std::optional<TlsVersion>`; both empty until the handshake finishes), found behind
+  an `ISocket` by `tlsSessionOf()`; `sshStyleFingerprint()` writes a SHA-256 as `SHA256:<unpadded base64>`, as
+  `ssh-keygen` does. `channelBinding()` answers an error below TLS 1.3: RFC 9266's tls-exporter binding is defined
+  for TLS 1.3 only.
+- **An ssh-agent client** (`<core/net/SshAgent.hpp>`, in `core::net_tls`, so a `CORE_CPP_WITH_TLS=OFF` build has none): `ISshAgent` and `makeSshAgent()`
+  list an agent's identities and ask it to sign, over `SSH_AUTH_SOCK` on POSIX and the OpenSSH named pipe on Windows.
+  `parseSshPublicKeyBlob()` reads the key blobs it answers with. On Windows the named-pipe
+  connection is overlapped, so a slow agent (a security key awaiting a touch) parks the awaiting flow on a read or write,
+  not the loop; only connecting blocks the loop, for up to about 1 s when every pipe instance is busy.
+  `defaultSshAgentEndpoint()` (`<core/net/SshAgentEndpoint.hpp>`, in `core::net`, so present in every build) names where
+  the agent listens.
+- **`core::IRandom` and `core::systemRandom()`** (`<core/Random.hpp>`): the operating system's random source behind an
+  interface a test can replace: `getentropy()` on every POSIX system and under Emscripten,
+  `BCryptGenRandom()` on Windows (any other platform is refused when CMake configures). Requests over getentropy's 256
+  bytes are filled in chunks; a hard failure ends the process rather than return bytes that are not random.
+- **`StrictTlsPeer::server` and `client` take a maximum version**, to stand in for a peer that cannot speak TLS 1.3.
+
 ## [0.18.1] - 2026-11-09
 
 ### Fixed
