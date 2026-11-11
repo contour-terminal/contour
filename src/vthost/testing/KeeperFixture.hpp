@@ -40,13 +40,21 @@ enum class HarnessStart : uint8_t
     ServesThenCrashes,
     /// It serves, as Serves, but ignores SIGTERM, SIGINT and SIGHUP: a daemon a forwarded stop does not end.
     IgnoresStop,
+    /// The first daemon serves, as Serves, until HarnessThrowTrigger exists in KeeperFixture::directory();
+    /// then a job posted to its loop throws, as an exception the daemon does not expect would. Every daemon
+    /// the keeper restarts after it serves, as Serves.
+    ThrowsThenServes,
 };
+
+/// The file whose creation in KeeperFixture::directory() has a ThrowsThenServes daemon throw.
+inline constexpr auto HarnessThrowTrigger = std::string_view { "throw" };
 
 /// When the harness daemon ends of its own accord.
 enum class HarnessLifecycle : uint8_t
 {
     Persistent = 0,
-    ExitWhenIdle, ///< After a second with no session and no client.
+    ExitWhenIdle,  ///< After a second with no session and no client.
+    ExitWhenEmpty, ///< As its last hosted session ends.
 };
 
 /// Whether the harness daemon keeps a workspace snapshot.
@@ -75,6 +83,7 @@ struct core::codec::EnumWire<vthost::testing::HarnessStart>
         vthost::testing::HarnessStart::RelaysThenServes,
         vthost::testing::HarnessStart::ServesThenCrashes,
         vthost::testing::HarnessStart::IgnoresStop,
+        vthost::testing::HarnessStart::ThrowsThenServes,
     };
 };
 
@@ -84,6 +93,7 @@ struct core::codec::EnumWire<vthost::testing::HarnessLifecycle>
     static constexpr auto Values = std::array {
         vthost::testing::HarnessLifecycle::Persistent,
         vthost::testing::HarnessLifecycle::ExitWhenIdle,
+        vthost::testing::HarnessLifecycle::ExitWhenEmpty,
     };
 };
 
@@ -145,6 +155,9 @@ struct HarnessLaunch
     /// How often the snapshot is written, in milliseconds; 0 for every second.
     uint64_t snapshotIntervalMs = 0;
     HarnessLifecycle lifecycle = HarnessLifecycle::Persistent;
+    /// How long the daemon's heartbeats may stop before its keeper takes it for hung, in milliseconds; 0 for
+    /// the daemon's default.
+    uint64_t heartbeatTimeoutMs = 0;
 
     /// Lists the fields.
     void visitFields(this auto& self, auto& visitor)
@@ -161,6 +174,7 @@ struct HarnessLaunch
         visitor(10, self.timings.daemonExitBoundMs);
         visitor(11, self.snapshotIntervalMs);
         visitor(12, self.lifecycle);
+        visitor(13, self.heartbeatTimeoutMs);
     }
 };
 
@@ -179,6 +193,8 @@ struct HarnessSetup
     /// As HarnessLaunch::snapshotIntervalMs.
     uint64_t snapshotIntervalMs = 0;
     HarnessLifecycle lifecycle = HarnessLifecycle::Persistent;
+    /// As HarnessLaunch::heartbeatTimeoutMs.
+    uint64_t heartbeatTimeoutMs = 0;
 };
 
 /// @param pid A process.

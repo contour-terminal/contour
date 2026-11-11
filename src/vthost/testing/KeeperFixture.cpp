@@ -27,6 +27,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <stop_token>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -47,6 +48,7 @@
 #include <vthost/keeper/KeeperProcess.hpp>
 #include <vthost/keeper/PosixPorts.hpp>
 #include <vthost/keeperlink/KeeperAttachment.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
 
 // POSIX requires no header to declare `environ`; src/vtpty/Process_unix.cpp explains the per-platform story.
 #ifdef __APPLE__
@@ -164,11 +166,17 @@ namespace
                           std::chrono::milliseconds { launch.snapshotIntervalMs })
                     : std::chrono::seconds { 1 };
         }
-        if (launch.lifecycle == HarnessLifecycle::ExitWhenIdle)
+        switch (launch.lifecycle)
         {
-            config.lifecycle = DaemonLifecycle::ExitWhenIdle;
-            config.idleExitGrace = std::chrono::seconds { 1 };
+            case HarnessLifecycle::Persistent: break;
+            case HarnessLifecycle::ExitWhenIdle:
+                config.lifecycle = DaemonLifecycle::ExitWhenIdle;
+                config.idleExitGrace = std::chrono::seconds { 1 };
+                break;
+            case HarnessLifecycle::ExitWhenEmpty: config.lifecycle = DaemonLifecycle::ExitWhenEmpty; break;
         }
+        if (launch.heartbeatTimeoutMs != 0)
+            config.keeper.heartbeatTimeout = std::chrono::milliseconds { launch.heartbeatTimeoutMs };
         if (launch.start == HarnessStart::IgnoresStop)
         {
             // Not even its own watch hears a stop: what a forwarded one meets is SIG_IGN.
@@ -185,6 +193,65 @@ namespace
         }
         return config;
     }
+
+    /// Status-line extensions that run none, and throw out of a turn of the daemon's loop once @c trigger
+    /// exists (HarnessStart::ThrowsThenServes): the job posted to the loop throws, as a defect would.
+    class ThrowingExtensions final: public IExtensionHosting
+    {
+      public:
+        explicit ThrowingExtensions(std::filesystem::path trigger): _trigger { std::move(trigger) } {}
+        ThrowingExtensions(ThrowingExtensions const&) = delete;
+        ThrowingExtensions(ThrowingExtensions&&) = delete;
+        ThrowingExtensions& operator=(ThrowingExtensions const&) = delete;
+        ThrowingExtensions& operator=(ThrowingExtensions&&) = delete;
+        ~ThrowingExtensions() override { stop(); }
+
+        [[nodiscard]] std::unique_ptr<ISessionExtensions> createSession(SessionExtensionEvents events,
+                                                                        OwnerPost post) override
+        {
+            // The first session's post is the loop's: one watch, for the daemon's one throw.
+            if (!_watch.joinable())
+                _watch =
+                    std::jthread { [trigger = _trigger, post = std::move(post)](std::stop_token const& stop) {
+                        while (!stop.stop_requested())
+                        {
+                            if (std::filesystem::exists(trigger))
+                            {
+                                post([] {
+                                    throw std::runtime_error { "keeper-serve: thrown out of a loop turn" };
+                                });
+                                return;
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+                        }
+                    } };
+            return std::make_unique<FakeSessionExtensions>(std::move(events));
+        }
+
+        void answer(std::string_view /*hostId*/, std::string_view /*digest*/, GrantState /*answer*/) override
+        {
+        }
+
+        [[nodiscard]] GrantState lookup(std::string_view /*hostId*/,
+                                        std::string_view /*digest*/) const override
+        {
+            return GrantState::Pending;
+        }
+
+        void releaseRetired() noexcept override {}
+
+        void stop() noexcept override
+        {
+            if (!_watch.joinable())
+                return;
+            _watch.request_stop();
+            _watch.join();
+        }
+
+      private:
+        std::filesystem::path _trigger;
+        std::jthread _watch;
+    };
 
     /// The daemon behind the keeper: the handshake on its channel, then runDaemon().
     [[nodiscard]] int serveBehindKeeper()
@@ -214,7 +281,23 @@ namespace
         // What the daemon says goes to the keeper's output, for a test to read (KeeperFixture::log()).
         auto const logging = core::log::ScopedOutput::create(
             { .filter = "vthost.daemon,vthost.session", .file = std::nullopt, .showProcessId = true });
-        return runDaemon(daemonConfigOf(launch), std::nullopt, *std::move(attachment));
+        auto config = daemonConfigOf(launch);
+        if (launch.start == HarnessStart::ThrowsThenServes && first)
+            config.extensions = [trigger = std::filesystem::path { launch.launchLog }.parent_path()
+                                           / HarnessThrowTrigger] {
+                return std::make_shared<ThrowingExtensions>(trigger);
+            };
+        // Caught as `contour daemon`'s core::cli::App::run() catches it: an exception that escapes
+        // runDaemon() unwinds it, where an uncaught one would end the process unwound.
+        try
+        {
+            return runDaemon(config, std::nullopt, *std::move(attachment));
+        }
+        catch (std::exception const& error)
+        {
+            std::cerr << std::format("keeper-serve: {}\n", error.what());
+            return EXIT_FAILURE;
+        }
     }
 
     [[nodiscard]] std::string readFile(std::filesystem::path const& path);
@@ -400,7 +483,8 @@ KeeperFixture::KeeperFixture(HarnessSetup const& setup):
                                           .relayPath = (_directory / "relay").string(),
                                           .timings = setup.timings,
                                           .snapshotIntervalMs = setup.snapshotIntervalMs,
-                                          .lifecycle = setup.lifecycle }) },
+                                          .lifecycle = setup.lifecycle,
+                                          .heartbeatTimeoutMs = setup.heartbeatTimeoutMs }) },
     _softDescriptorLimit { setup.softDescriptorLimit },
     _relayListener { setup.start == HarnessStart::Relays || setup.start == HarnessStart::RelaysThenServes
                          ? unixSocket((_directory / "relay").string(), ::bind)
