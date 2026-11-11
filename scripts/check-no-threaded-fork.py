@@ -25,6 +25,10 @@ SOURCE_ROOT = Path("src")
 ALLOWED: dict[str, str] = {
     "src/vtpty/SpawnTrampoline_unix.cpp": "single-threaded trampoline",
     "src/crispy/StackTrace.cpp": "crash path, out of scope",
+    "src/vthost/keeper/PosixPorts.cpp": (
+        "the PTY keeper: its child is async-signal-safe up to the exec; PR_SET_PDEATHSIG and the "
+        "pthread_sigmask/signalfd setup are what need the keeper single-threaded"
+    ),
 }
 
 FORK_CALL = re.compile(r"\b(?:v?fork|forkpty)\s*\(")

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iterator>
 #include <ranges>
+#include <utility>
 
 namespace vthost::keeper
 {
@@ -22,7 +23,9 @@ std::vector<uint8_t> encodeFrame(Frame const& frame)
 void FrameAssembler::feed(std::span<uint8_t const> bytes, std::span<int const> fds)
 {
     if (!fds.empty())
-        _arrivals.push_back({ .offset = _buffer.size(), .fds = { fds.begin(), fds.end() } });
+        _arrivals.push_back({ .begin = _buffer.size(),
+                              .end = _buffer.size() + bytes.size(),
+                              .fds = { fds.begin(), fds.end() } });
     _buffer.insert(_buffer.end(), bytes.begin(), bytes.end());
 }
 
@@ -57,22 +60,39 @@ std::optional<Frame> FrameAssembler::next()
     if (_buffer.size() < total)
         return std::nullopt;
 
+    // The read that brought this frame's first byte; its descriptors are this frame's if it announces any,
+    // and otherwise may still be those of a later frame that starts in the same read.
+    auto const startedHere = [](Arrival const& arrival) {
+        return arrival.begin == 0 && arrival.end > 0;
+    };
+    auto const own = std::ranges::find_if(_arrivals, startedHere);
     auto frame = Frame {};
-    frame.body.assign(_buffer.begin() + static_cast<std::ptrdiff_t>(headerSize),
-                      _buffer.begin() + static_cast<std::ptrdiff_t>(total));
-    for (auto const& arrival: _arrivals | std::views::filter([&](auto const& a) { return a.offset < total; }))
-        frame.fds.insert(frame.fds.end(), arrival.fds.begin(), arrival.fds.end());
-    std::erase_if(_arrivals, [&](auto const& a) { return a.offset < total; });
-    if (frame.fds.size() != *fdCount)
+    if (*fdCount != 0)
     {
+        if (own == _arrivals.end() || own->fds.size() != *fdCount)
+        {
+            _error = FrameError::DescriptorMismatch;
+            return std::nullopt;
+        }
+        frame.fds = std::move(own->fds);
+        _arrivals.erase(own);
+    }
+    // Descriptors whose read ended within this frame have no frame left to belong to.
+    if (std::ranges::any_of(_arrivals, [&](Arrival const& arrival) { return arrival.end <= total; }))
+    {
+        _arrivals.push_back({ .begin = 0, .end = 0, .fds = std::move(frame.fds) });
         _error = FrameError::DescriptorMismatch;
-        _arrivals.push_back({ .offset = 0, .fds = std::move(frame.fds) });
         return std::nullopt;
     }
 
+    frame.body.assign(_buffer.begin() + static_cast<std::ptrdiff_t>(headerSize),
+                      _buffer.begin() + static_cast<std::ptrdiff_t>(total));
     _buffer.erase(_buffer.begin(), _buffer.begin() + static_cast<std::ptrdiff_t>(total));
     for (auto& arrival: _arrivals)
-        arrival.offset -= total;
+    {
+        arrival.begin = arrival.begin > total ? arrival.begin - total : 0;
+        arrival.end -= total;
+    }
     return frame;
 }
 

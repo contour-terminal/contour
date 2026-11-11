@@ -38,8 +38,12 @@ enum class FrameError : uint8_t
 
 /// Cuts a stream of reads into frames, reuniting each with the descriptors that arrived with its bytes.
 ///
-/// Contract: descriptors belong to the frame whose first byte arrived with them; joining a plain frame with a
-/// following descriptor-carrying one in one read is the receiver's job (Task 6), not the assembler's.
+/// Contract: descriptors belong to the frame whose first byte arrived in the same read, and that announces
+/// them. A stream socket may glue a plain frame to a following descriptor-carrying one in one read (Linux
+/// does: a read stops after the bytes that carried descriptors, not before), so a read's descriptors go to
+/// the first frame starting in it that announces any. The sender therefore sends each descriptor-carrying
+/// frame with its own `sendmsg`, its descriptors on its first byte. Descriptors that no frame starting in
+/// their read announces, or that a frame announces in a different number, break the stream.
 class FrameAssembler
 {
   public:
@@ -58,9 +62,11 @@ class FrameAssembler
     [[nodiscard]] std::vector<int> takePendingFds();
 
   private:
+    /// The descriptors of one read, and the bytes that read brought.
     struct Arrival
     {
-        std::size_t offset = 0; ///< Where in _buffer, counted from its front, the descriptors arrived.
+        std::size_t begin = 0; ///< Where in _buffer the read's bytes start; 0 once its start was consumed.
+        std::size_t end = 0;   ///< Where in _buffer they end.
         std::vector<int> fds;
     };
 

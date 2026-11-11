@@ -93,7 +93,7 @@ enum class EventKind : uint8_t
     Frame = 0,     ///< A frame arrived on the daemon's channel.
     ChannelClosed, ///< The daemon's channel ended, or broke.
     Ended,         ///< A watched process ended: reaped already, or kept as a zombie (@see Reaping).
-    StopSignal,    ///< The keeper was asked to stop (SIGTERM, SIGINT, the console-control event).
+    StopSignal,    ///< The keeper was asked to stop (SIGTERM, SIGINT, SIGHUP, the console-control event).
     Timer,         ///< The deadline passed.
 };
 

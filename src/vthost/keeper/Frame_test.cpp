@@ -96,6 +96,42 @@ TEST_CASE("descriptors arriving with the second frame stay with it", "[keeper][f
     CHECK(two->fds == second.fds);
 }
 
+TEST_CASE("descriptors read together with a preceding plain frame stay with the frame they rode on",
+          "[keeper][frame]")
+{
+    // A stream socket glues a plain frame to a following descriptor-carrying one in one read, and the
+    // descriptors arrive with that read: they belong to the frame that announces them, not to the first.
+    auto const plain = Frame { .body = encode(Heartbeat {}), .fds = {} };
+    auto const carrying = Frame { .body = encode(Structure {}), .fds = { 30, 31 } };
+    auto wire = encodeFrame(plain);
+    auto const second = encodeFrame(carrying);
+    auto const split = second.size() / 2;
+    wire.insert(wire.end(), second.begin(), second.begin() + static_cast<std::ptrdiff_t>(split));
+    auto assembler = FrameAssembler {};
+    assembler.feed(wire, carrying.fds);
+    assembler.feed(std::span { second }.subspan(split), {});
+
+    auto const one = assembler.next();
+    auto const two = assembler.next();
+    REQUIRE(one.has_value());
+    REQUIRE(two.has_value());
+    CHECK(one->fds.empty());
+    CHECK(two->fds == carrying.fds);
+    CHECK(!assembler.error().has_value());
+}
+
+TEST_CASE("descriptors that arrived after a frame's first byte are a protocol error", "[keeper][frame]")
+{
+    auto const sent = Frame { .body = encode(Structure {}), .fds = { 30 } };
+    auto const wire = encodeFrame(sent);
+    auto assembler = FrameAssembler {};
+    assembler.feed(std::span { wire }.first(1), {});
+    assembler.feed(std::span { wire }.subspan(1), sent.fds);
+    CHECK(!assembler.next().has_value());
+    CHECK(assembler.error() == FrameError::DescriptorMismatch);
+    CHECK(assembler.takePendingFds() == sent.fds);
+}
+
 TEST_CASE("a broken header ends the stream", "[keeper][frame]")
 {
     SECTION("too many descriptors")
