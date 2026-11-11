@@ -22,8 +22,12 @@ namespace contour::remote
 
 namespace
 {
-    /// @return A reference to the daemon's workspace @p id that only this process uses, to tell the rows of
-    ///         a directory apart: a directory carries no control ids (@see namesControlId()).
+    /// The control id of a workspace a daemon stated none for.
+    constexpr auto NoControlId = std::array<uint8_t, 16> {};
+
+    /// @return A reference to the daemon's workspace @p id that only this process uses, to tell apart the
+    /// rows
+    ///         of a directory whose daemon stated no control ids (@see resolvesFromDirectory()).
     [[nodiscard]] vtcontrol::ObjectRef localRefOf(uint64_t id)
     {
         auto ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = {} };
@@ -159,7 +163,10 @@ std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& dire
         auto shown = shownHere(workspace.id);
         rows.push_back(WorkspaceRow {
             .id = workspace.id,
-            .ref = localRefOf(workspace.id),
+            .ref = workspace.controlId != NoControlId
+                       ? vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                .uuid = vtcontrol::Uuid { .bytes = workspace.controlId } }
+                       : localRefOf(workspace.id),
             .label = workspace.label,
             .position = position,
             .name = workspaceDisplayName(workspace.label, workspace.tabs.front().label, position),
@@ -188,6 +195,31 @@ bool namesControlId(session::WorkspaceTarget const& workspace)
     };
     return vtcontrol::parseObjectRef(spec).has_value()
            || (spec.size() >= 4 && std::ranges::all_of(spec, isHex) && !std::ranges::all_of(spec, isDigit));
+}
+
+bool resolvesFromDirectory(session::WorkspaceTarget const& workspace,
+                           window::WorkspaceDirectory const& directory)
+{
+    if (!namesControlId(workspace))
+        return true;
+    // The workspaces a switch could go to whose control id the daemon stated: one holding no tab is no row.
+    auto candidates = std::vector<vtcontrol::TargetCandidate> {};
+    for (auto const [index, listed]: core::views::enumerate(directory.workspaces))
+        if (!listed.tabs.empty() && listed.controlId != NoControlId)
+            candidates.push_back(vtcontrol::TargetCandidate {
+                .ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                              .uuid = vtcontrol::Uuid { .bytes = listed.controlId } },
+                .label = listed.label,
+                .position = static_cast<uint32_t>(index + 1),
+            });
+    // Only an id the directory carries resolves here; one it does not yet (a reconnect's empty directory, a
+    // workspace created before its batch settled) is the listing's to find.
+    if (auto const* const ref = std::get_if<vtcontrol::ObjectRef>(&workspace))
+        return std::ranges::contains(candidates, *ref, &vtcontrol::TargetCandidate::ref);
+    return vtcontrol::resolveTarget(vtcontrol::ObjectKind::Workspace,
+                                    std::get<session::WorkspaceNamed>(workspace).spec,
+                                    candidates)
+        .has_value();
 }
 
 std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceRow const> rows,

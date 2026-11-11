@@ -850,6 +850,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Reactor thread. Takes the role the daemon gives this connection.
     void onRaiseRole(vthost::proto::RaiseRole role);
 
+    /// Reactor thread. Merges what the daemon states of a workspace field by field into the metadata store.
+    void onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta);
+
     /// _mutex held. Has the GUI thread announce directoryChanged() once for every change of
     /// the status store until then.
     void scheduleStatusFlush();
@@ -1151,6 +1154,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// pushes for every session, and the fields of its PaneSummary for the panes of the workspaces this
     /// window does not select. Under _mutex.
     std::map<uint64_t, window::PaneStatus> _paneStatus;
+    /// What the daemon stated of each workspace (label, control id, git state), by daemon workspace id, as
+    /// WorkspaceMeta merged it. Under _mutex.
+    std::map<uint64_t, window::WorkspaceMetadata> _workspaceMeta;
     /// Whether a flush of _paneStatus is queued for the GUI thread. Under _mutex.
     enum class StatusFlush : uint8_t
     {

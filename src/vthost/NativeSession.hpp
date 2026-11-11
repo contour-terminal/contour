@@ -41,6 +41,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <coroutine>
@@ -72,6 +73,7 @@
 #include <vthost/DaemonControl.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/KeyAuth.hpp>
+#include <vthost/ObjectRegistry.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -131,7 +133,8 @@ struct HandshakePolicy
                                                                    proto::Capability::ClipboardTargets,
                                                                    proto::Capability::SoftFonts,
                                                                    proto::Capability::WorkspaceSwitch,
-                                                                   proto::Capability::DaemonFollow });
+                                                                   proto::Capability::DaemonFollow,
+                                                                   proto::Capability::WorkspaceMeta });
 };
 
 /// When a connection sends a session's program-status set.
@@ -286,6 +289,18 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// viewer sharing Capability::ProgramStatus. Every other signal is the control service's.
     void sessionSignal(vtworkspace::SessionId session, SessionSignal const& signal) override;
     void raiseRoleChanged(proto::RaiseRole role) override;
+
+    /// A workspace's git state changed: told to a following client as a WorkspaceMeta delta
+    /// (@see sendWorkspaceGit).
+    void workspaceGitChanged(WorkspaceGitChangedSignal const& signal) override;
+
+    /// Tells the client of @p workspace's git state (WorkspaceMeta), if it follows the daemon (the sidebar is
+    /// a following window's), shares Capability::WorkspaceMeta and was told the workspace already; one it was
+    /// not told yet is told the state in full with it.
+    /// @param workspace The daemon's workspace id.
+    /// @param git Its git state now; none when it is in no repository (anymore), sent as
+    ///        GitHeadKindWire::None.
+    void sendWorkspaceGit(uint64_t workspace, std::optional<proto::WireGitInfo> const& git);
 
     /// Asks this client's user, whose GUI shows the prompt in @p session's pane. Sent as the question opens;
     /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
@@ -936,6 +951,28 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Whether this connection is told what changed in the panes it does not mirror (its client shares
     /// Capability::DaemonFollow).
     [[nodiscard]] bool summarizesPanes() const noexcept;
+
+    /// Whether this connection is told each workspace's label, control id and git state (its client shares
+    /// Capability::WorkspaceMeta).
+    [[nodiscard]] bool sharesWorkspaceMeta() const noexcept;
+
+    /// Sends @p workspace's WorkspaceMeta in full, once: the first time its layout goes to this connection
+    /// with a tab. A layout with none forgets it was sent, so the workspace is announced again once it holds
+    /// a tab.
+    /// @param workspace A workspace whose layout was just sent.
+    void announceWorkspaceMeta(vtworkspace::Workspace const& workspace);
+
+    /// Forgets the workspaces the model no longer holds, so a WorkspaceMeta delta never names one.
+    void forgetRemovedWorkspaceMeta();
+
+    /// Sends a label delta when @p ref is a workspace this connection was told of.
+    /// @param ref The object whose label changed.
+    /// @param label Its label now; empty when it was cleared.
+    void workspaceLabelChanged(vtcontrol::ObjectRef const& ref, std::string_view label);
+
+    /// @param workspace A workspace of the model.
+    /// @return Its control id as WorkspaceMeta carries it; all zero for one the registry does not bind.
+    [[nodiscard]] std::array<uint8_t, 16> controlIdOf(vtworkspace::WorkspaceId workspace) const;
     /// @param session A hosted session.
     /// @return Whether a bell or notification of @p session reaches this connection in the pane's summary
     ///         rather than as a SessionBell or SessionNotify: it summarizes panes and does not mirror this
@@ -1280,6 +1317,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
     /// When each unmirrored pane last had its output marked, which paces the next mark.
     std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _activityMarkedAt;
+    /// The workspaces whose WorkspaceMeta this connection was sent in full; a delta names only these.
+    /// @see announceWorkspaceMeta
+    std::unordered_set<uint64_t> _announcedMeta;
     /// The role the daemon gave this window. @see raiseRoleChanged
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet;
     /// Sessions whose echo state is to be read at the next flush, beside those with new output: one that took
@@ -1348,6 +1388,8 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// the last members, so they are released before anything they deliver to.
     std::optional<ScopedStreamSubscription> _streamSubscription;
     std::optional<ScopedModelSubscription> _layoutSubscription;
+    /// The registry's label changes, taken for a client sharing Capability::WorkspaceMeta.
+    std::optional<ObjectRegistry::Subscription> _labelSubscription;
     UpgradeEnd _upgradeEnd = UpgradeEnd::Open;
     std::shared_ptr<UpgradeLink> _upgradeLink = std::make_shared<UpgradeLink>(UpgradeLink { this });
     /// Told of the daemon's upgrade from run() on. Last, so it is released before anything it delivers to.

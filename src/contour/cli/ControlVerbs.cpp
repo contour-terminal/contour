@@ -340,6 +340,8 @@ namespace
                     return event.title;
                 else if constexpr (std::same_as<Event, vtcontrol::CwdChangedEvent>)
                     return event.cwd;
+                else if constexpr (std::same_as<Event, vtcontrol::WorkspaceLabelChangedEvent>)
+                    return event.label;
                 else if constexpr (std::same_as<Event, vtcontrol::ProgramStatusChangedEvent>)
                     return std::format(
                         "{} record(s), {}", event.records.size(), vtcontrol::nameOf(event.reason));

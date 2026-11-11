@@ -342,6 +342,10 @@ namespace
     {
         return std::to_underlying(PduType::PaneSummary);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(WorkspaceMeta const&) noexcept
+    {
+        return std::to_underlying(PduType::WorkspaceMeta);
+    }
 
     [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
     {
@@ -1126,6 +1130,48 @@ namespace
                 out.string(notification.body);
                 out.u8(std::to_underlying(notification.occasion));
             }
+        }
+    }
+
+    /// The presence bits of a WorkspaceMeta's optionals, in the order its fields follow the mask.
+    enum WorkspaceMetaPresence : uint8_t
+    {
+        MetaHasLabel = 0b01,
+        MetaHasGit = 0b10,
+    };
+
+    /// The presence bits of a WireGitInfo's optionals.
+    enum GitPresence : uint8_t
+    {
+        GitHasAhead = 0b01,
+        GitHasBehind = 0b10,
+    };
+
+    void encodeBody(Writer& out, WorkspaceMeta const& pdu)
+    {
+        out.varint(pdu.workspace);
+        out.bytes(std::as_bytes(std::span { pdu.controlId }));
+        auto mask = uint8_t { 0 };
+        mask |= pdu.label ? MetaHasLabel : 0;
+        mask |= pdu.git ? MetaHasGit : 0;
+        out.u8(mask);
+        if (pdu.label)
+            out.string(*pdu.label);
+        if (pdu.git)
+        {
+            // A growing record: a blob, so a field appended to it later stays inside it.
+            auto git = Writer {};
+            git.u8(std::to_underlying(pdu.git->kind));
+            git.string(pdu.git->branch);
+            auto gitMask = uint8_t { 0 };
+            gitMask |= pdu.git->ahead ? GitHasAhead : 0;
+            gitMask |= pdu.git->behind ? GitHasBehind : 0;
+            git.u8(gitMask);
+            if (pdu.git->ahead)
+                git.varint(*pdu.git->ahead);
+            if (pdu.git->behind)
+                git.varint(*pdu.git->behind);
+            out.blob(git.view());
         }
     }
 
@@ -2375,6 +2421,61 @@ namespace
         return pdu;
     }
 
+    /// Reads the count of a WireGitInfo that @p bit of @p mask announces into @p out.
+    [[nodiscard]] bool decodeOptionalCount(
+        Reader& in, uint8_t mask, uint8_t bit, std::optional<uint32_t>& out, DecodeError& error)
+    {
+        if ((mask & bit) == 0)
+            return true;
+        auto count = uint32_t { 0 };
+        if (!assign(in.varint(), count, error))
+            return false;
+        out = count;
+        return true;
+    }
+
+    /// One WireGitInfo, read from its blob; a kind a newer peer names reads as another ref, its name kept.
+    [[nodiscard]] bool decodeGitInfo(Reader& in, WireGitInfo& git, DecodeError& error)
+    {
+        auto kind = uint8_t { 0 };
+        auto mask = uint8_t { 0 };
+        if (!assign(in.u8(), kind, error) || !assign(in.string(), git.branch, error)
+            || !assign(in.u8(), mask, error))
+            return false;
+        git.kind = enumOrElse(kind, GitHeadKindWire::OtherRef, GitHeadKindWire::OtherRef);
+        return decodeOptionalCount(in, mask, GitHasAhead, git.ahead, error)
+               && decodeOptionalCount(in, mask, GitHasBehind, git.behind, error);
+    }
+
+    DecodeResult decodeWorkspaceMeta(Reader& in)
+    {
+        auto pdu = WorkspaceMeta {};
+        auto error = DecodeError {};
+        auto mask = uint8_t { 0 };
+        if (!assign(in.varint(), pdu.workspace, error))
+            return std::unexpected(error);
+        auto const controlId = in.bytes(pdu.controlId.size());
+        if (!controlId)
+            return std::unexpected(controlId.error());
+        std::ranges::transform(
+            *controlId, pdu.controlId.begin(), [](std::byte b) { return std::to_integer<uint8_t>(b); });
+        if (!assign(in.u8(), mask, error) || !decodeOptionalString(in, mask, MetaHasLabel, pdu.label, error))
+            return std::unexpected(error);
+        if ((mask & MetaHasGit) != 0)
+        {
+            // A blob: the bytes a newer peer appended to the record stay inside it, unread.
+            auto const fields = in.blob();
+            if (!fields)
+                return std::unexpected(fields.error());
+            auto inner = Reader { *fields };
+            auto git = WireGitInfo {};
+            if (!decodeGitInfo(inner, git, error))
+                return std::unexpected(error);
+            pdu.git = std::move(git);
+        }
+        return pdu;
+    }
+
     DecodeResult decodeSwitchRequest(Reader& in)
     {
         auto pdu = SwitchRequest {};
@@ -2635,6 +2736,7 @@ namespace
         DecodeRow { PduType::NotifyRole, decodeNotifyRole },
         DecodeRow { PduType::PaneSummary, decodePaneSummary },
         DecodeRow { PduType::AuthChallenge, decodeAuthChallenge },
+        DecodeRow { PduType::WorkspaceMeta, decodeWorkspaceMeta },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

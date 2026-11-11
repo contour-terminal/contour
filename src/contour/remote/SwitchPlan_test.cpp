@@ -327,6 +327,90 @@ TEST_CASE("planSwitch takes a position or a control id for that alone, never for
         planSwitch(at(contour::session::WorkspaceAt { 9 }), rows, std::nullopt, SameDaemon::No)));
 }
 
+TEST_CASE("a same-daemon switch naming a control id resolves from the directory without a listing",
+          "[switch][plan]")
+{
+    auto const tabbed = [](uint64_t id, std::array<uint8_t, 16> controlId) {
+        return contour::window::DirectoryWorkspace { .id = id,
+                                                     .label = {},
+                                                     .tabs = { contour::window::DirectoryTab {} },
+                                                     .controlId = controlId,
+                                                     .git = {} };
+    };
+    auto const idOf = [](uint8_t last) {
+        auto id = std::array<uint8_t, 16> {};
+        id.back() = last;
+        id.at(14) = 0xab; // so the id's end is hex, not a position
+        id.front() = 0x5e;
+        return id;
+    };
+    auto const stated = contour::window::WorkspaceDirectory {
+        .workspaces = { tabbed(1, idOf(1)), tabbed(2, idOf(2)) },
+        .selected = 1,
+    };
+    auto const idText = vtcontrol::toString(vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Workspace, .uuid = vtcontrol::Uuid { .bytes = idOf(2) } });
+    auto const byId = contour::session::workspaceTargetOf(idText);
+    REQUIRE(contour::remote::namesControlId(byId));
+    auto const none = [](uint64_t) {
+        return std::optional<vtworkspace::WorkspaceId> {};
+    };
+
+    CHECK(contour::remote::resolvesFromDirectory(byId, stated));
+    auto const rows = contour::remote::workspaceRowsOf(stated, none);
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[1].ref.uuid.bytes == idOf(2));
+    CHECK(sameDecision(contour::remote::planSwitch(naming(idText), rows, 1, SameDaemon::Yes),
+                       SwitchTo { .workspace = 2 }));
+
+    // A daemon that states no control ids leaves them to its listing; what names none needs no listing.
+    auto unstated = stated;
+    unstated.workspaces[1].controlId = {};
+    CHECK_FALSE(contour::remote::resolvesFromDirectory(byId, unstated));
+    CHECK(contour::remote::resolvesFromDirectory(contour::session::WorkspaceAt { .position = 2 }, unstated));
+    // A workspace holding no tab is no row: its id is the listing's to resolve.
+    auto emptied = stated;
+    emptied.workspaces[1].tabs.clear();
+    CHECK_FALSE(contour::remote::resolvesFromDirectory(byId, emptied));
+    // The end of an id the directory carries resolves there too.
+    CHECK(contour::remote::resolvesFromDirectory(
+        contour::session::workspaceTargetOf(idText.substr(idText.size() - 6)), stated));
+}
+
+TEST_CASE("a switch naming a control id the directory does not carry goes to the listing", "[switch][plan]")
+{
+    auto absentId = std::array<uint8_t, 16> {};
+    absentId.front() = 0x5e;
+    absentId.back() = 9;
+    auto const named = contour::session::workspaceTargetOf(vtcontrol::toString(vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Workspace, .uuid = vtcontrol::Uuid { .bytes = absentId } }));
+    auto const asRef = contour::session::WorkspaceTarget { vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Workspace, .uuid = vtcontrol::Uuid { .bytes = absentId } } };
+
+    SECTION("an empty directory, as a reconnect holds before its first batch")
+    {
+        auto const empty = contour::window::WorkspaceDirectory {};
+        CHECK_FALSE(contour::remote::resolvesFromDirectory(named, empty));
+        CHECK_FALSE(contour::remote::resolvesFromDirectory(asRef, empty));
+    }
+    SECTION("an id absent from it, as a workspace created before its batch settled")
+    {
+        auto known = std::array<uint8_t, 16> {};
+        known.back() = 1;
+        auto const directory = contour::window::WorkspaceDirectory {
+            .workspaces = { contour::window::DirectoryWorkspace {
+                .id = 1,
+                .label = {},
+                .tabs = { contour::window::DirectoryTab {} },
+                .controlId = known,
+                .git = {} } },
+            .selected = 1,
+        };
+        CHECK_FALSE(contour::remote::resolvesFromDirectory(named, directory));
+        CHECK_FALSE(contour::remote::resolvesFromDirectory(asRef, directory));
+    }
+}
+
 TEST_CASE("a switch is judged by the answer to its own selection request", "[switch][select]")
 {
     using contour::remote::SelectAnswer;

@@ -888,6 +888,31 @@ TEST_CASE("the layout and the working directory are events", "[vthost][control][
         }
 }
 
+TEST_CASE("object.setLabel on a workspace publishes workspace.labelChanged", "[vthost][control][events]")
+{
+    auto h = ControlHarness {};
+    std::ignore = h.openTab();
+    std::ignore = subscribe(h);
+    auto const workspace = vtcontrol::toString(vtcontrol::ObjectRef {
+        .kind = vtcontrol::ObjectKind::Workspace, .uuid = *h.host.objects().uuidOf(h.host.workspaceId()) });
+
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = workspace, .label = "ops" })
+                .has_value());
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = workspace, .label = "" })
+                .has_value());
+    h.drain();
+
+    auto const changes = delivered<vtcontrol::WorkspaceLabelChangedEvent>(h.context.sink);
+    REQUIRE(changes.size() == 2);
+    CHECK(changes[0].label == "ops");
+    CHECK(changes[1].label.empty());
+    for (auto const& delivery: h.context.sink.deliveries)
+        if (std::holds_alternative<vtcontrol::WorkspaceLabelChangedEvent>(delivery.event.payload))
+            CHECK(delivery.event.origin.workspace == workspace);
+}
+
 TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
           "[vthost][control][programstatus]")
 {

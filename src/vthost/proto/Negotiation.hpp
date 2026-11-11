@@ -120,6 +120,9 @@ enum class Capability : uint8_t
     /// every other workspace's panes as status only (PaneSummary), reports its focus (ReportFocus) and is
     /// told its raise role (NotifyRole).
     DaemonFollow = 28,
+    /// The peer states each workspace's label, control id and git state (WorkspaceMeta): in full after the
+    /// hello and for a workspace created since, and as a delta on each change.
+    WorkspaceMeta = 29,
 };
 
 /// One row of the table naming a Capability.
@@ -157,6 +160,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ProgramStatusTiming, .name = "program-status-timing" },
     CapabilityRow { .capability = Capability::InputKinds, .name = "input-kinds" },
     CapabilityRow { .capability = Capability::DaemonFollow, .name = "daemon-follow" },
+    CapabilityRow { .capability = Capability::WorkspaceMeta, .name = "workspace-meta" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

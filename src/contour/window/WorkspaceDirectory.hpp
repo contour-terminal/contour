@@ -3,8 +3,10 @@
 
 #include <contour/window/PaneKey.hpp>
 
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <optional>
@@ -18,11 +20,9 @@ namespace contour::window
 {
 
 /// What a window lists of the workspaces it can show: every workspace, its tabs and their panes, as plain
-/// values. It is built from what the client already holds (the daemon's layouts, its status and the labels
-/// of its workspaces), so the list never depends on which workspace is mirrored.
-///
-/// A workspace will also carry the git state of its panes' working directories; its slot is
-/// DirectoryWorkspace.
+/// values. It is built from what the client already holds (the daemon's layouts, its status and what it
+/// states of its workspaces: label, control id, git state), so the list never depends on which workspace is
+/// mirrored.
 
 /// One pane of a tab, with what is known of it.
 struct DirectoryPane
@@ -47,12 +47,24 @@ struct DirectoryTab
     bool operator==(DirectoryTab const&) const = default;
 };
 
+/// The git state of a workspace: the repository its active pane's working directory is in.
+struct DirectoryGit
+{
+    std::string branch; ///< The branch or ref, or the short object id.
+    vtbackend::GitHeadKind kind = vtbackend::GitHeadKind::Branch; ///< What @ref branch names.
+    std::optional<uint32_t> ahead {};  ///< Commits ahead of its upstream, if it has one.
+    std::optional<uint32_t> behind {}; ///< Commits behind its upstream, if it has one.
+    bool operator==(DirectoryGit const&) const = default;
+};
+
 /// One workspace and its tabs.
 struct DirectoryWorkspace
 {
     uint64_t id = 0;   ///< The daemon's workspace id.
     std::string label; ///< The workspace's label; empty when it has none.
     std::vector<DirectoryTab> tabs;
+    std::array<uint8_t, 16> controlId {}; ///< Its control-API UUID; all zero while the daemon stated none.
+    std::optional<DirectoryGit> git {};   ///< Its git state; none when it is in no repository, or unknown.
     bool operator==(DirectoryWorkspace const&) const = default;
 };
 
@@ -91,20 +103,29 @@ class PaneStatusLookup
     [[nodiscard]] virtual std::optional<PaneStatus> statusOf(PaneKey pane) const = 0;
 };
 
-/// Where a directory gets the label of a workspace from.
-class LabelLookup
+/// What a daemon states of one workspace besides its layout.
+struct WorkspaceMetadata
+{
+    std::string label;                    ///< Its label; empty when it has none.
+    std::array<uint8_t, 16> controlId {}; ///< Its control-API UUID; all zero when unknown.
+    std::optional<DirectoryGit> git {};   ///< Its git state; none when it is in no repository, or unknown.
+    bool operator==(WorkspaceMetadata const&) const = default;
+};
+
+/// Where a directory gets what is stated of a workspace (its label, control id and git state) from.
+class WorkspaceMetaLookup
 {
   public:
-    LabelLookup() = default;
-    LabelLookup(LabelLookup const&) = delete;
-    LabelLookup& operator=(LabelLookup const&) = delete;
-    LabelLookup(LabelLookup&&) = delete;
-    LabelLookup& operator=(LabelLookup&&) = delete;
-    virtual ~LabelLookup() = default;
+    WorkspaceMetaLookup() = default;
+    WorkspaceMetaLookup(WorkspaceMetaLookup const&) = delete;
+    WorkspaceMetaLookup& operator=(WorkspaceMetaLookup const&) = delete;
+    WorkspaceMetaLookup(WorkspaceMetaLookup&&) = delete;
+    WorkspaceMetaLookup& operator=(WorkspaceMetaLookup&&) = delete;
+    virtual ~WorkspaceMetaLookup() = default;
 
     /// @param workspace The daemon's workspace id.
-    /// @return Its label, empty when it has none.
-    [[nodiscard]] virtual std::string labelOf(uint64_t workspace) const = 0;
+    /// @return What is stated of it; empty fields where nothing is.
+    [[nodiscard]] virtual WorkspaceMetadata metaOf(uint64_t workspace) const = 0;
 };
 
 /// Visits the leaves (the panes) of @p node, depth-first.
@@ -150,13 +171,13 @@ namespace detail
 /// Describes every workspace of a daemon as the directory a window lists.
 /// @param inDaemonOrder Each workspace's layout, in the order the daemon lists them.
 /// @param status Where the status of a pane comes from.
-/// @param labels Where the label of a workspace comes from.
+/// @param metadata Where the label, control id and git state of a workspace come from.
 /// @param selected The workspace the window shows, if any.
 /// @return The directory.
 [[nodiscard]] inline WorkspaceDirectory directoryFromLayouts(
     std::span<vthost::proto::LayoutState const> inDaemonOrder,
     PaneStatusLookup const& status,
-    LabelLookup const& labels,
+    WorkspaceMetaLookup const& metadata,
     std::optional<uint64_t> selected)
 {
     auto directory = WorkspaceDirectory {};
@@ -166,7 +187,10 @@ namespace detail
     {
         auto workspace = DirectoryWorkspace {};
         workspace.id = layout.workspace;
-        workspace.label = labels.labelOf(layout.workspace);
+        auto stated = metadata.metaOf(layout.workspace);
+        workspace.label = std::move(stated.label);
+        workspace.controlId = stated.controlId;
+        workspace.git = std::move(stated.git);
         workspace.tabs.reserve(layout.tabs.size());
         for (auto const& wireTab: layout.tabs)
         {

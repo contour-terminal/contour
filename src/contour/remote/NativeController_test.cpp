@@ -72,6 +72,8 @@
 #include <iterator>
 #include <span>
 
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/Uuid.hpp>
 #include <vthost/Askpass.hpp>
 #include <vthost/AuthorizedKeys.hpp>
 #include <vthost/ClientSizePolicy.hpp>
@@ -4463,6 +4465,138 @@ TEST_CASE("a PaneSummary updates the directory without a mirror", "[attach][cont
     CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output);
     CHECK(controller.pendingCount() == 1); // the selected workspace's session alone: second is no mirror
     controller.stop();
+}
+
+namespace
+{
+
+/// @return The workspace @p workspace as the controller's directory lists it; an empty one when it lists
+/// none.
+[[nodiscard]] contour::window::DirectoryWorkspace workspaceOf(
+    contour::remote::NativeController const& controller, uint64_t workspace)
+{
+    auto const directory = controller.directory();
+    auto const found =
+        std::ranges::find(directory.workspaces, workspace, &contour::window::DirectoryWorkspace::id);
+    return found != directory.workspaces.end() ? *found : contour::window::DirectoryWorkspace {};
+}
+
+/// Labels the daemon's workspace @p workspace @p label, as `object.setLabel` would.
+/// @return The workspace's control UUID.
+vtcontrol::Uuid labelOnDaemon(DaemonFixture& daemon, uint64_t workspace, std::string const& label)
+{
+    return daemon.onDaemon([&] {
+        auto const uuid = *daemon.host->objects().uuidOf(vtworkspace::WorkspaceId { workspace });
+        daemon.host->objects().setLabel(
+            vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = uuid }, label);
+        return uuid;
+    });
+}
+
+} // namespace
+
+TEST_CASE("directory carries label and control id from WorkspaceMeta", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    // Stated before the window attaches: it comes with the workspace.
+    auto const uuid = labelOnDaemon(daemon, second.id, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    CHECK(workspaceOf(controller, second.id).controlId == uuid.bytes);
+    CHECK_FALSE(workspaceOf(controller, second.id).git.has_value());
+
+    // And one stated since reaches it as it changes.
+    std::ignore = labelOnDaemon(daemon, second.id, "build");
+    CHECK(waitUntil([&] { return workspaceOf(controller, second.id).label == "build"; }));
+}
+
+TEST_CASE("the metadata of a removed workspace is pruned", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    std::ignore = labelOnDaemon(daemon, second.id, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).label == "ops"; }));
+    REQUIRE(contour::remote::NativeControllerTestAccess::workspaceMetaCount(controller) == 2);
+
+    // Its one pane ends, and the daemon removes the workspace.
+    daemon.onDaemon([&] {
+        daemon.host->closeSession(second.session);
+        return 0;
+    });
+
+    // Its layout empties (the directory lists it with no tab, as a switch leaves it out), and its metadata
+    // goes with it.
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, second.id).tabs.empty(); }));
+    CHECK(waitUntil(
+        [&] { return contour::remote::NativeControllerTestAccess::workspaceMetaCount(controller) == 1; }));
+}
+
+TEST_CASE("a labelled workspace that held no tab is stated in full once it holds one",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    // The daemon's own workspace holds no tab yet; the window shows another one.
+    auto const shown = addWorkspace(daemon);
+    auto const empty = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    REQUIRE(empty != shown.id);
+    auto const uuid = labelOnDaemon(daemon, empty, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = shown.id } });
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return !workspaceOf(controller, shown.id).tabs.empty(); }));
+
+    // A tab lands in it: its label and control id reach the directory with it.
+    daemon.onDaemon([&daemon] {
+        std::ignore = daemon.host->createTab();
+        return 0;
+    });
+
+    REQUIRE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }));
+    CHECK(waitUntil([&] { return workspaceOf(controller, empty).label == "ops"; }));
+    CHECK(workspaceOf(controller, empty).controlId == uuid.bytes);
+}
+
+TEST_CASE("an empty label clears it", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto const uuid = labelOnDaemon(daemon, first, "ops");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, first).label == "ops"; }));
+
+    std::ignore = labelOnDaemon(daemon, first, "");
+
+    REQUIRE(waitUntil([&] { return workspaceOf(controller, first).label.empty(); }));
+    // The control id stays: clearing a label changes nothing else.
+    CHECK(workspaceOf(controller, first).controlId == uuid.bytes);
 }
 
 TEST_CASE("the program status of an unmirrored pane reaches the directory", "[attach][controller][directory]")

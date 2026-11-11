@@ -145,18 +145,20 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         return;
     }
     request.config.emplace(*std::move(destination.config));
-    // The window's own daemon: its connection holds the directory of every workspace, so nothing is listed --
-    // but for a workspace named by its control id, which only the daemon's listing knows.
-    if (request.sameDaemon == SameDaemon::Yes && !namesControlId(request.target.workspace))
+    // The window's own daemon: its connection holds the directory of every workspace, control ids and all, so
+    // nothing is listed -- but for a workspace named by its control id on a daemon that states none.
+    if (request.sameDaemon == SameDaemon::Yes)
     {
-        auto const rows =
-            workspaceRowsOf(own->liveController() != nullptr ? own->liveController()->directory()
-                                                             : window::WorkspaceDirectory {},
-                            [&](uint64_t daemonWorkspace) {
-                                return shownHere(SameDaemon::Yes, request.address, *own, daemonWorkspace);
-                            });
-        resolve(std::move(request), rows);
-        return;
+        auto const directory = own->liveController() != nullptr ? own->liveController()->directory()
+                                                                : window::WorkspaceDirectory {};
+        if (resolvesFromDirectory(request.target.workspace, directory))
+        {
+            auto const rows = workspaceRowsOf(directory, [&](uint64_t daemonWorkspace) {
+                return shownHere(SameDaemon::Yes, request.address, *own, daemonWorkspace);
+            });
+            resolve(std::move(request), rows);
+            return;
+        }
     }
     auto list = ListTarget { .address = request.address, .transport = request.config->controller.transport };
     _lister->list(std::move(list),

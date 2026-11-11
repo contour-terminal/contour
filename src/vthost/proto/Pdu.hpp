@@ -99,6 +99,7 @@ enum class PduType : uint8_t
     NotifyRole = 53,
     PaneSummary = 54,
     AuthChallenge = 55,
+    WorkspaceMeta = 56,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1739,6 +1740,42 @@ struct PaneSummary
     bool operator==(PaneSummary const&) const = default;
 };
 
+/// What a workspace's git repository's HEAD names, as WorkspaceMeta carries it: vtbackend::GitHeadKind's
+/// values one up, with None for a workspace that is in no repository (anymore).
+enum class GitHeadKindWire : uint8_t
+{
+    None = 0,     ///< Not a repository: the workspace's git state is cleared.
+    Branch = 1,   ///< A local branch.
+    Detached = 2, ///< A commit, named by its abbreviated object id.
+    OtherRef = 3, ///< Any other ref: a remote-tracking branch, a tag.
+};
+
+/// The git state of a workspace (the repository its active pane's working directory is in). A growing record:
+/// it travels as a blob inside WorkspaceMeta.
+struct WireGitInfo
+{
+    std::string branch = {}; ///< The branch or ref, or the short object id; empty for None.
+    GitHeadKindWire kind = GitHeadKindWire::None;  ///< What @ref branch names; None clears the git state.
+    std::optional<uint32_t> ahead = std::nullopt;  ///< Commits ahead of its upstream, when it has one.
+    std::optional<uint32_t> behind = std::nullopt; ///< Commits behind its upstream, when it has one.
+    bool operator==(WireGitInfo const&) const = default;
+};
+
+/// Server→client (Capability::WorkspaceMeta): what the daemon states of a workspace besides its layout.
+///
+/// The daemon sends every field after the hello, and for a workspace created since, once its layout went out;
+/// after that a delta for each change. Absent optionals mean "unchanged": an empty @ref label clears the
+/// label, and a @ref git of kind GitHeadKindWire::None says the workspace is in no repository anymore, which
+/// an absent one does not. A workspace's removal is told by its layout disappearing, not here.
+struct WorkspaceMeta
+{
+    uint64_t workspace = 0;                          ///< The daemon's workspace id.
+    std::array<uint8_t, 16> controlId = {};          ///< Its control-API UUID; all zero when unbound.
+    std::optional<std::string> label = std::nullopt; ///< Its label, if it changed; empty clears it.
+    std::optional<WireGitInfo> git = std::nullopt;   ///< Its git state, if it changed.
+    bool operator==(WorkspaceMeta const&) const = default;
+};
+
 /// @param summary A pane's summary.
 /// @return Whether it carries something a window raises for: a finished command, a bell, a notification.
 [[nodiscard]] inline bool carriesRaise(PaneSummary const& summary) noexcept
@@ -1893,7 +1930,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ReportFocus,
                                 NotifyRole,
                                 PaneSummary,
-                                AuthChallenge>;
+                                AuthChallenge,
+                                WorkspaceMeta>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

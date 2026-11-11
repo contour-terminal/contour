@@ -184,6 +184,7 @@ separated list of:
 | `pane.bell` | A pane rang the bell. |
 | `pane.titleChanged` | A pane's title changed. |
 | `pane.cwdChanged` | A pane's working directory changed. |
+| `workspace.labelChanged` | A workspace's label changed (`object.setLabel`); the payload's `label` is empty when it was cleared. |
 | `pane.programStatusChanged` | A pane's program status changed. |
 | `pane.created`, `pane.closed` | A pane was created or closed. |
 | `tab.created`, `tab.closed` | A tab was created or closed. |

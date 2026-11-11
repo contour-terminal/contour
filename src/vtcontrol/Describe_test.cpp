@@ -17,7 +17,7 @@ TEST_CASE("describeApi derives schemas from the structs", "[vtcontrol][describe]
     CHECK(vtcontrol::describeApi("block.finished")->inputSchema.text == "{}");
     CHECK(vtcontrol::describeApi("nope").error().code == vtcontrol::ControlErrorCode::MethodNotFound);
     CHECK(vtcontrol::listApi().methods.size() == 20);
-    CHECK(vtcontrol::listApi().events.size() == 12);
+    CHECK(vtcontrol::listApi().events.size() == 13);
 }
 
 TEST_CASE("a description encodes to valid, decodable JSON", "[vtcontrol][describe]")

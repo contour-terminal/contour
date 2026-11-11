@@ -167,6 +167,8 @@ ControlService::ControlService(SessionHost& host, ControlServiceConfig config):
     _waiters(_config.maxWaitsPerConnection),
     _streamSubscription(makeScopedStreamSubscription(host, *this)),
     _modelSubscription(makeScopedModelSubscription(host, *this)),
+    _labelSubscription(host.objects().onLabelChanged(
+        [this](ObjectRef const& ref, std::string_view label) { labelChanged(ref, label); })),
     _extensionControl(makeScopedExtensionControl(host, *this))
 {
 }
@@ -1223,6 +1225,15 @@ void ControlService::sinkClosed(vtcontrol::EventSink& sink)
     _hub.forget(sink);
     _waiters.forget(sink);
     std::erase_if(_switchCalls->waiting, [&sink](auto const& call) { return call.second == &sink; });
+}
+
+void ControlService::labelChanged(ObjectRef const& ref, std::string_view label)
+{
+    if (ref.kind != ObjectKind::Workspace)
+        return;
+    _hub.publish(vtcontrol::Event {
+        .origin = { .workspace = idOf(ObjectKind::Workspace, ref.uuid), .tab = {}, .pane = {} },
+        .payload = vtcontrol::WorkspaceLabelChangedEvent { .label = vtcontrol::toValidUtf8(label) } });
 }
 
 vtcontrol::EventOrigin ControlService::originOf(SessionId session) const

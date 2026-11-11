@@ -9,6 +9,7 @@
 #include <core/Random.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/async/WhenAll.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -65,6 +66,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/TabMerge.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -353,6 +355,8 @@ struct HarnessOptions
     /// The endpoint the connection was accepted on, as its ConnectionId says ("native-tcp" for a network
     /// one).
     std::string endpoint = "test";
+    /// Where the host looks up its workspaces' git state; none tracks none.
+    std::optional<vthost::WorkspaceGitServices> workspaceGit = std::nullopt;
 };
 
 /// @param options What the harness is built with.
@@ -420,6 +424,7 @@ struct NativeHarness
                                                    .startupLayout = options.startupLayout,
                                                    .identity = options.identity,
                                                    .fileSystem = files,
+                                                   .workspaceGit = options.workspaceGit,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
                                                    .profiles = options.profiles,
@@ -4939,9 +4944,11 @@ struct FlushClient
 /// through run(), whose waits are on the frozen clock — so each flush deadline is an exact instant.
 struct FlushHarness
 {
+    /// Where the host looks up its workspaces' git state; none tracks none.
+    std::optional<vthost::WorkspaceGitServices> workspaceGit = std::nullopt;
     core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
-    NativeHarness h { HarnessOptions { .clock = &clock } };
-    std::deque<FlushClient> clients;
+    NativeHarness h { HarnessOptions { .clock = &clock, .workspaceGit = workspaceGit } };
+    std::deque<FlushClient> clients {};
     /// Last: every client is let go, and its reader run out, before anything it reaches is destroyed.
     core::Finally settle { [this] {
         for (auto& client: clients)
@@ -9246,3 +9253,300 @@ TEST_CASE("a TLS peer that stalls its handshake is closed at the pre-authenticat
     CHECK(turnUntil(h.loop, [&] { return served && clientSawEnd; }));
     CHECK(capture.contains("TLS handshake was not finished"));
 }
+
+// {{{ workspace metadata
+namespace
+{
+
+/// Whether a test window offers Capability::WorkspaceMeta.
+enum class OffersMeta : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
+/// Two workspaces of one session each, and windows on a ManualClock handshaken by hand.
+struct MetaFixture
+{
+    FlushHarness flush {};
+    vtworkspace::SessionId inFirst = newSession(flush.h.host);
+    uint64_t first = flush.h.host.workspaceId().value;
+    uint64_t second = flush.h.host.createWorkspace()->id().value;
+    vtworkspace::SessionId inSecond { *sessionsOf(flush.h.host, second).begin() };
+
+    /// Attaches a window selecting @p workspace, offering the metadata as @p offers says.
+    FlushClient& attachSelecting(uint64_t workspace, OffersMeta offers = OffersMeta::Yes)
+    {
+        auto hello =
+            proto::ClientHello { .capabilities = proto::CapabilitySet::of(
+                                     { proto::Capability::AttachIntent, proto::Capability::DaemonFollow }),
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                                   .workspace = workspace } };
+        if (offers == OffersMeta::Yes)
+            hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceMeta));
+        return flush.attach(workspace == first ? inFirst : inSecond, std::move(hello));
+    }
+
+    /// Lets what is due go out, and the windows read it.
+    void settle()
+    {
+        turnIdle(flush.h.loop);
+        flush.clock.advance(30ms);
+        turnIdle(flush.h.loop);
+    }
+
+    /// @return The control reference of the daemon's workspace @p workspace.
+    [[nodiscard]] vtcontrol::ObjectRef refOf(uint64_t workspace) const
+    {
+        return vtcontrol::ObjectRef {
+            .kind = vtcontrol::ObjectKind::Workspace,
+            .uuid = *flush.h.host.objects().uuidOf(vtworkspace::WorkspaceId { workspace }),
+        };
+    }
+
+    /// @return The WorkspaceMeta PDUs @p client received after its first @p skip frames.
+    [[nodiscard]] static std::vector<proto::WorkspaceMeta> metasOf(FlushClient const& client,
+                                                                   std::size_t skip = 0)
+    {
+        auto found = std::vector<proto::WorkspaceMeta> {};
+        for (auto const& frame: client.received | std::views::drop(skip))
+            if (auto const* meta = std::get_if<proto::WorkspaceMeta>(&frame.pdu))
+                found.push_back(*meta);
+        return found;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a client with WorkspaceMeta gets one WorkspaceMeta per workspace after the hello",
+          "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "ops");
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+
+    auto const metas = MetaFixture::metasOf(client);
+    REQUIRE(metas.size() == 2);
+    CHECK(metas[0]
+          == proto::WorkspaceMeta { .workspace = f.first,
+                                    .controlId = f.refOf(f.first).uuid.bytes,
+                                    .label = std::string {},
+                                    .git = std::nullopt });
+    CHECK(metas[1]
+          == proto::WorkspaceMeta { .workspace = f.second,
+                                    .controlId = f.refOf(f.second).uuid.bytes,
+                                    .label = "ops",
+                                    .git = std::nullopt });
+    // Each comes after its workspace's layout, so the client knows the workspace by then.
+    auto const layoutAt = std::ranges::find_if(client.received, [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->workspace == f.second;
+    });
+    auto const metaAt = std::ranges::find_if(client.received, [&](auto const& frame) {
+        auto const* meta = std::get_if<proto::WorkspaceMeta>(&frame.pdu);
+        return meta != nullptr && meta->workspace == f.second;
+    });
+    CHECK(layoutAt < metaAt);
+
+    SECTION("and one for a workspace created since, once")
+    {
+        auto const skip = client.received.size();
+        auto const third = f.flush.h.host.createWorkspace()->id().value;
+        f.settle();
+        auto const created = MetaFixture::metasOf(client, skip);
+        REQUIRE(created.size() == 1);
+        CHECK(created[0].workspace == third);
+        CHECK(created[0].controlId == f.refOf(third).uuid.bytes);
+        CHECK(created[0].label == std::optional<std::string> { "" });
+    }
+}
+
+TEST_CASE("a label change reaches every client", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& other = f.attachSelecting(f.second);
+    f.settle();
+    auto const skipOne = one.received.size();
+    auto const skipOther = other.received.size();
+
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "build");
+    f.flush.h.host.objects().setLabel(f.refOf(f.second), "");
+    // A tab's label is no workspace's.
+    auto const* tab = f.flush.h.host.model().workspace(vtworkspace::WorkspaceId { f.first })->activeTab();
+    f.flush.h.host.objects().setLabel(
+        vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Tab,
+                               .uuid = *f.flush.h.host.objects().uuidOf(tab->id()) },
+        "tab");
+    f.settle();
+
+    auto const expected = std::vector {
+        proto::WorkspaceMeta { .workspace = f.second,
+                               .controlId = f.refOf(f.second).uuid.bytes,
+                               .label = "build",
+                               .git = std::nullopt },
+        proto::WorkspaceMeta { .workspace = f.second,
+                               .controlId = f.refOf(f.second).uuid.bytes,
+                               .label = std::string {},
+                               .git = std::nullopt },
+    };
+    CHECK(MetaFixture::metasOf(one, skipOne) == expected);
+    CHECK(MetaFixture::metasOf(other, skipOther) == expected);
+}
+
+TEST_CASE("a client without the capability gets none", "[vthost][native][workspace-meta]")
+{
+    auto f = MetaFixture {};
+    auto& client = f.attachSelecting(f.first, OffersMeta::No);
+    f.flush.h.host.objects().setLabel(f.refOf(f.first), "ops");
+    client.session->sendWorkspaceGit(f.first,
+                                     proto::WireGitInfo { .branch = "main",
+                                                          .kind = proto::GitHeadKindWire::Branch,
+                                                          .ahead = std::nullopt,
+                                                          .behind = std::nullopt });
+    std::ignore = f.flush.h.host.createWorkspace();
+    f.settle();
+    CHECK(MetaFixture::metasOf(client).empty());
+}
+
+namespace
+{
+/// Answers every look-up with one state.
+struct FixedGitProbe final: vthost::IGitStatusProbe
+{
+    [[nodiscard]] std::optional<vthost::GitInfo> probe(std::filesystem::path const& /*cwd*/) const override
+    {
+        return answer;
+    }
+    vthost::GitInfo answer {};
+};
+
+/// @return The git state of the WorkspaceMeta deltas of @p workspace @p client received after @p skip frames.
+[[nodiscard]] std::vector<std::optional<proto::WireGitInfo>> gitDeltasOf(FlushClient const& client,
+                                                                         uint64_t workspace,
+                                                                         std::size_t skip)
+{
+    auto found = std::vector<std::optional<proto::WireGitInfo>> {};
+    for (auto const& meta: MetaFixture::metasOf(client, skip))
+        if (meta.workspace == workspace)
+            found.push_back(meta.git);
+    return found;
+}
+} // namespace
+
+TEST_CASE("a git change reaches a client", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& following = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = following.received.size();
+
+    following.session->workspaceGitChanged(
+        vthost::WorkspaceGitChangedSignal { .workspace = vtworkspace::WorkspaceId { f.second },
+                                            .git = vthost::GitInfo { .kind = vtbackend::GitHeadKind::Detached,
+                                                                     .branch = "abc1234",
+                                                                     .ahead = 2,
+                                                                     .behind = std::nullopt } });
+    following.session->sendWorkspaceGit(9999, std::nullopt); // no workspace the client was told of
+    f.settle();
+
+    auto const metas = MetaFixture::metasOf(following, skip);
+    REQUIRE(metas.size() == 1);
+    CHECK(metas[0]
+          == proto::WorkspaceMeta { .workspace = f.second,
+                                    .controlId = f.refOf(f.second).uuid.bytes,
+                                    .label = std::nullopt,
+                                    .git = proto::WireGitInfo { .branch = "abc1234",
+                                                                .kind = proto::GitHeadKindWire::Detached,
+                                                                .ahead = 2,
+                                                                .behind = std::nullopt } });
+}
+
+TEST_CASE("leaving a repo sends kind None", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& following = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = following.received.size();
+
+    following.session->workspaceGitChanged(vthost::WorkspaceGitChangedSignal {
+        .workspace = vtworkspace::WorkspaceId { f.first }, .git = std::nullopt });
+    f.settle();
+
+    // None, not absent: absent would say nothing changed.
+    auto const deltas = gitDeltasOf(following, f.first, skip);
+    REQUIRE(deltas.size() == 1);
+    REQUIRE(deltas[0].has_value());
+    CHECK(deltas[0]->kind == proto::GitHeadKindWire::None);
+    CHECK(deltas[0]->branch.empty());
+}
+
+TEST_CASE("only a following client is told the git state", "[vthost][native][workspace-meta][git]")
+{
+    auto f = MetaFixture {};
+    auto& plain = f.flush.attach(
+        f.inFirst,
+        proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of(
+                { proto::Capability::AttachIntent, proto::Capability::WorkspaceMeta }),
+            .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = f.first } });
+    f.settle();
+    REQUIRE_FALSE(MetaFixture::metasOf(plain).empty()); // labels and control ids it is told
+    auto const skip = plain.received.size();
+
+    plain.session->workspaceGitChanged(vthost::WorkspaceGitChangedSignal {
+        .workspace = vtworkspace::WorkspaceId { f.first }, .git = vthost::GitInfo { .branch = "main" } });
+    f.settle();
+
+    CHECK(MetaFixture::metasOf(plain, skip).empty());
+}
+
+TEST_CASE("the first metadata carries the current git", "[vthost][native][workspace-meta][git]")
+{
+    auto probe = FixedGitProbe {};
+    probe.answer =
+        vthost::GitInfo { .kind = vtbackend::GitHeadKind::Branch, .branch = "main", .ahead = 1, .behind = 0 };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto flush = FlushHarness { .workspaceGit =
+                                    vthost::WorkspaceGitServices { .probe = probe, .executor = executor } };
+    auto const session = newSession(flush.h.host);
+    auto const workspace = flush.h.host.workspaceId().value;
+    flush.h.host.terminal(session)->writeToScreen("\033]7;file:///r/a\033\\");
+    auto const hello = [workspace] {
+        return proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                                       proto::Capability::DaemonFollow,
+                                                       proto::Capability::WorkspaceMeta }),
+            .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = workspace }
+        };
+    };
+    auto const settle = [&] {
+        turnIdle(flush.h.loop);
+        while (executor.pending() > 0)
+        {
+            executor.drain();
+            turnIdle(flush.h.loop);
+        }
+        flush.clock.advance(30ms);
+        turnIdle(flush.h.loop);
+    };
+
+    // The first window to follow has the host look the workspace up, and is told what it found as it changes.
+    auto& first = flush.attach(session, hello());
+    settle();
+    REQUIRE(flush.h.host.gitInfoOf(vtworkspace::WorkspaceId { workspace }) == std::optional { probe.answer });
+    auto const wire = proto::WireGitInfo {
+        .branch = "main", .kind = proto::GitHeadKindWire::Branch, .ahead = 1, .behind = 0
+    };
+    CHECK(gitDeltasOf(first, workspace, 0).back() == std::optional { wire });
+
+    // A window attaching since is told it in its first metadata.
+    auto& second = flush.attach(session, hello());
+    settle();
+    auto const metas = MetaFixture::metasOf(second);
+    auto const announced = std::ranges::find(metas, workspace, &proto::WorkspaceMeta::workspace);
+    REQUIRE(announced != metas.end());
+    CHECK(announced->git == std::optional { wire });
+}
+// }}}

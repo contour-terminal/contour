@@ -27,6 +27,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -779,6 +780,54 @@ TEST_CASE("WindowSwitcher: a switch within the daemon reuses the window's connec
                                      .daemon = {},
                                      .workspace = contour::session::WorkspaceAt { .position = 2 } })
           == SwitchOutcome::FocusedExisting);
+}
+
+TEST_CASE("WindowSwitcher: a same-daemon switch naming a control id resolves from the directory without a "
+          "listing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto const target = rig.a.onDaemon([&rig] {
+        return vtcontrol::toString(vtcontrol::ObjectRef {
+            .kind = vtcontrol::ObjectKind::Workspace,
+            .uuid = *rig.a.host->objects().uuidOf(vtworkspace::WorkspaceId { rig.aWorkspaces[1] }) });
+    });
+    // The directory carries the control ids once the daemon stated them.
+    auto* const controller = rig.launchLink().liveController();
+    REQUIRE(controller != nullptr);
+    REQUIRE(waitUntil([&] {
+        auto const directory = controller->directory();
+        return std::ranges::all_of(directory.workspaces, [](auto const& workspace) {
+            return workspace.controlId != std::array<uint8_t, 16> {};
+        });
+    }));
+
+    auto const outcome = rig.request(to(daemonA(), target));
+
+    REQUIRE(outcome == SwitchOutcome::Switched);
+    CHECK(rig.lister->listings == 0);
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[1]);
+}
+
+TEST_CASE("WindowSwitcher: a same-daemon switch naming a control id the directory lacks asks the listing",
+          "[switch][link]")
+{
+    auto rig = SwitchRig {};
+    auto* const controller = rig.launchLink().liveController();
+    REQUIRE(controller != nullptr);
+    REQUIRE(waitUntil([&] { return controller->directory().workspaces.size() == rig.aWorkspaces.size(); }));
+    // An id no workspace the window knows of carries: the daemon's listing is the one to say.
+    auto absent = vtcontrol::Uuid {};
+    absent.bytes.fill(0xEE);
+
+    auto const outcome = rig.request(to(daemonA(),
+                                        vtcontrol::toString(vtcontrol::ObjectRef {
+                                            .kind = vtcontrol::ObjectKind::Workspace, .uuid = absent })));
+
+    CHECK(rig.lister->listings == 1);
+    CHECK(outcome != SwitchOutcome::Switched);
+    CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[0]);
 }
 
 TEST_CASE("WindowSwitcher: SwitchToWorkspace selects another workspace in the same window", "[switch][link]")

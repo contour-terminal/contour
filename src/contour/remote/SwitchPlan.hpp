@@ -160,8 +160,8 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 
 /// The rows a switch on the window's own daemon decides on, from the directory its connection holds: no
 /// listing of the daemon is asked for. A workspace holding no tab is left out, as workspaceRowsOf() leaves it
-/// out; each carries a reference only this process uses, as a directory carries no control ids (@see
-/// namesControlId()).
+/// out. Each carries the control id the daemon stated for it, or, for one it stated none for, a reference
+/// only this process uses (@see resolvesFromDirectory()).
 /// @param directory Every workspace of the daemon, in its order.
 /// @param shownHere Which window here shows each.
 /// @return The rows, in the daemon's order.
@@ -169,8 +169,18 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
                                                         ShownHere const& shownHere);
 
 /// @param workspace What a switch names.
-/// @return Whether it names the workspace by its control id, which only the daemon's listing resolves.
+/// @return Whether it names the workspace by its control id, which only a listing, or a directory carrying
+///         control ids, resolves.
 [[nodiscard]] bool namesControlId(session::WorkspaceTarget const& workspace);
+
+/// @param workspace What a switch on the window's own daemon names.
+/// @param directory The directory the window's connection holds.
+/// @return Whether @p directory resolves it without a listing of the daemon: always, unless it names a
+///         control id (or the end of one) that no workspace of the directory holding a tab carries -- a
+///         reconnect's empty directory, a workspace created before its batch settled, a daemon that states
+///         no control ids.
+[[nodiscard]] bool resolvesFromDirectory(session::WorkspaceTarget const& workspace,
+                                         window::WorkspaceDirectory const& directory);
 
 /// The switcher popup's rows of a daemon's workspaces (@see window::switcherRows).
 /// @param rows The daemon's workspaces, as workspaceRowsOf() made them.

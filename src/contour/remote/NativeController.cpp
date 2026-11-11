@@ -87,6 +87,7 @@ namespace
             vthost::proto::Capability::ClipboardTargets,
             vthost::proto::Capability::SoftFonts,
             vthost::proto::Capability::DaemonFollow,
+            vthost::proto::Capability::WorkspaceMeta,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
@@ -384,7 +385,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             [this](vthost::proto::SwitchRequest const& request) { onSwitchRequest(request); } },
         NativeClient::PaneSummaryHandler {
             [this](vthost::proto::PaneSummary const& summary) { onPaneSummary(summary); } },
-        NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } });
+        NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } },
+        NativeClient::WorkspaceMetaHandler {
+            [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -661,6 +664,8 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     // or a connection that may not have delivered it.
     _layouts.clear();
     _settledLayouts.clear();
+    // The new connection states every workspace's metadata again, in full.
+    _workspaceMeta.clear();
     // A move asked of the lost connection is answered on it or not at all.
     _moveRequests.clear();
     _landedMoves.clear();
@@ -1090,12 +1095,42 @@ namespace
         std::map<uint64_t, window::PaneStatus> const& _store;
     };
 
-    /// The labels of workspaces, none of which a daemon states yet.
-    class NoLabels final: public window::LabelLookup
+    /// A directory's view of what the daemon stated of each workspace.
+    class MetaLookup final: public window::WorkspaceMetaLookup
     {
       public:
-        [[nodiscard]] std::string labelOf(uint64_t /*workspace*/) const override { return {}; }
+        explicit MetaLookup(std::map<uint64_t, window::WorkspaceMetadata> const& store): _store(store) {}
+
+        [[nodiscard]] window::WorkspaceMetadata metaOf(uint64_t workspace) const override
+        {
+            auto const found = _store.find(workspace);
+            return found != _store.end() ? found->second : window::WorkspaceMetadata {};
+        }
+
+      private:
+        std::map<uint64_t, window::WorkspaceMetadata> const& _store;
     };
+
+    /// @return @p git as a directory holds it; none for a workspace in no repository.
+    [[nodiscard]] std::optional<window::DirectoryGit> directoryGitOf(vthost::proto::WireGitInfo const& git)
+    {
+        using vthost::proto::GitHeadKindWire;
+        auto const kind = [&]() -> std::optional<vtbackend::GitHeadKind> {
+            switch (git.kind)
+            {
+                case GitHeadKindWire::None: return std::nullopt;
+                case GitHeadKindWire::Branch: return vtbackend::GitHeadKind::Branch;
+                case GitHeadKindWire::Detached: return vtbackend::GitHeadKind::Detached;
+                case GitHeadKindWire::OtherRef: break;
+            }
+            return vtbackend::GitHeadKind::OtherRef;
+        }();
+        return kind.transform([&](vtbackend::GitHeadKind headKind) {
+            return window::DirectoryGit {
+                .branch = git.branch, .kind = headKind, .ahead = git.ahead, .behind = git.behind
+            };
+        });
+    }
 } // namespace
 
 window::WorkspaceDirectory NativeController::directory() const
@@ -1107,7 +1142,7 @@ window::WorkspaceDirectory NativeController::directory() const
                                      | std::views::transform([](auto const& layout) { return *layout; }));
     return window::directoryFromLayouts(layouts,
                                         StoreLookup { _paneStatus },
-                                        NoLabels {},
+                                        MetaLookup { _workspaceMeta },
                                         _selected != 0 ? std::optional { _selected } : std::nullopt);
 }
 
@@ -1134,6 +1169,20 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
                                                        .finished = summary.finished,
                                                        .bell = summary.bell,
                                                        .notifications = summary.notifications });
+    scheduleStatusFlush();
+}
+
+void NativeController::onWorkspaceMeta(vthost::proto::WorkspaceMeta const& meta)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto& stated = _workspaceMeta[meta.workspace];
+    // Field by field: an absent one is unchanged, an empty label clears it, and a git state of kind None says
+    // the workspace is in no repository anymore.
+    stated.controlId = meta.controlId;
+    if (meta.label)
+        stated.label = *meta.label;
+    if (meta.git)
+        stated.git = directoryGitOf(*meta.git);
     scheduleStatusFlush();
 }
 
@@ -1196,6 +1245,12 @@ void NativeController::pruneStatus()
             window::forEachLeaf(
                 tab.root, [&named](vthost::proto::WirePane const& leaf) { named.insert(leaf.session); });
     std::erase_if(_paneStatus, [&named](auto const& entry) { return !named.contains(entry.first); });
+    // A workspace's metadata goes with its layout, which comes first: one whose layout is gone, or emptied as
+    // the daemon removes it, is gone.
+    std::erase_if(_workspaceMeta, [this](auto const& entry) {
+        auto const layout = _layouts.find(entry.first);
+        return layout == _layouts.end() || layout->second->tabs.empty();
+    });
 }
 
 namespace

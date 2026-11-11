@@ -143,6 +143,15 @@ TEST_CASE("DaemonFollow keeps its ident and name", "[vthost][negotiation][worksp
     CHECK(follow->name == "daemon-follow");
 }
 
+TEST_CASE("capability 29 is workspace-meta", "[vthost][negotiation][workspace-meta]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::WorkspaceMeta) == 29);
+    auto const meta =
+        std::ranges::find(CapabilityTable, Capability::WorkspaceMeta, &CapabilityRow::capability);
+    REQUIRE(meta != CapabilityTable.end());
+    CHECK(meta->name == "workspace-meta");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

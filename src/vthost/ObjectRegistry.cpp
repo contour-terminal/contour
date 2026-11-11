@@ -2,8 +2,11 @@
 #include <vthost/ObjectRegistry.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <ranges>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace vthost
 {
@@ -12,7 +15,8 @@ using vtcontrol::ObjectKind;
 using vtcontrol::ObjectRef;
 using vtcontrol::Uuid;
 
-ObjectRegistry::ObjectRegistry(std::shared_ptr<vtcontrol::UuidSource> uuids): _uuids { std::move(uuids) }
+ObjectRegistry::ObjectRegistry(std::shared_ptr<vtcontrol::UuidSource> uuids):
+    _uuids { std::move(uuids) }, _labelObservers { std::make_shared<LabelObservers>() }
 {
 }
 
@@ -119,14 +123,75 @@ std::optional<ObjectRegistry::Handle> ObjectRegistry::find(ObjectRef const& ref)
     return Handle { vtworkspace::SessionId { known->second } };
 }
 
+/// The label observers of a registry, by subscription id in subscription order.
+struct ObjectRegistry::LabelObservers
+{
+    std::vector<std::pair<uint64_t, LabelObserver>> entries;
+    uint64_t nextId = 1;
+};
+
+ObjectRegistry::Subscription::Subscription(std::weak_ptr<LabelObservers> observers, uint64_t id) noexcept:
+    _observers(std::move(observers)), _id(id)
+{
+}
+
+ObjectRegistry::Subscription::Subscription(Subscription&& other) noexcept:
+    _observers(std::move(other._observers)), _id(std::exchange(other._id, 0))
+{
+}
+
+ObjectRegistry::Subscription& ObjectRegistry::Subscription::operator=(Subscription&& other) noexcept
+{
+    if (this != &other)
+    {
+        unsubscribe();
+        _observers = std::move(other._observers);
+        _id = std::exchange(other._id, 0);
+    }
+    return *this;
+}
+
+ObjectRegistry::Subscription::~Subscription()
+{
+    unsubscribe();
+}
+
+void ObjectRegistry::Subscription::unsubscribe() noexcept
+{
+    if (auto const observers = _observers.lock())
+        std::erase_if(observers->entries, [this](auto const& entry) { return entry.first == _id; });
+    _observers.reset();
+}
+
+ObjectRegistry::Subscription ObjectRegistry::onLabelChanged(LabelObserver observer)
+{
+    auto const id = _labelObservers->nextId++;
+    _labelObservers->entries.emplace_back(id, std::move(observer));
+    return Subscription { _labelObservers, id };
+}
+
 void ObjectRegistry::setLabel(ObjectRef const& ref, std::string label)
 {
-    if (!find(ref))
+    if (!find(ref) || labelOf(ref) == label)
         return;
     if (label.empty())
         _labels.erase(ref);
     else
         _labels.insert_or_assign(ref, std::move(label));
+    // Who is told was settled before the first is: an observer may unsubscribe, or subscribe, as it is told.
+    // Each is called through a copy, so one that unsubscribes itself is not destroyed while it runs.
+    auto const ids = std::ranges::to<std::vector>(_labelObservers->entries | std::views::keys);
+    auto const now = std::string { labelOf(ref) };
+    for (auto const id: ids)
+    {
+        auto const& entries = _labelObservers->entries;
+        auto const found =
+            std::ranges::find_if(entries, [id](auto const& entry) { return entry.first == id; });
+        if (found == entries.end())
+            continue;
+        auto const observer = found->second;
+        observer(ref, now);
+    }
 }
 
 std::string_view ObjectRegistry::labelOf(ObjectRef const& ref) const

@@ -411,7 +411,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            PanesReprojectedHandler onPanesReprojected,
                            SwitchRequestHandler onSwitchRequest,
                            PaneSummaryHandler onPaneSummary,
-                           RaiseRoleHandler onRaiseRole):
+                           RaiseRoleHandler onRaiseRole,
+                           WorkspaceMetaHandler onWorkspaceMeta):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -430,6 +431,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onSwitchRequest(std::move(onSwitchRequest)),
     _onPaneSummary(std::move(onPaneSummary)),
     _onRaiseRole(std::move(onRaiseRole)),
+    _onWorkspaceMeta(std::move(onWorkspaceMeta)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -917,6 +919,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onPaneSummary)
             _onPaneSummary(*summary);
+        return true;
+    }
+    if (auto const* meta = std::get_if<proto::WorkspaceMeta>(&pdu))
+    {
+        if (_onWorkspaceMeta)
+            _onWorkspaceMeta(*meta);
         return true;
     }
     if (auto const* role = std::get_if<proto::NotifyRole>(&pdu))

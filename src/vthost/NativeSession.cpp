@@ -58,6 +58,7 @@
 #include <vthost/TabEdits.hpp>
 #include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -603,6 +604,107 @@ bool NativeSession::summarizesPanes() const noexcept
     return _following == DaemonFollowing::Yes;
 }
 
+namespace
+{
+    /// @return @p git as WorkspaceMeta carries it.
+    [[nodiscard]] proto::WireGitInfo wireGitOf(GitInfo const& git)
+    {
+        auto const kind = [&] {
+            switch (git.kind)
+            {
+                case vtbackend::GitHeadKind::Branch: return proto::GitHeadKindWire::Branch;
+                case vtbackend::GitHeadKind::Detached: return proto::GitHeadKindWire::Detached;
+                case vtbackend::GitHeadKind::OtherRef: break;
+            }
+            return proto::GitHeadKindWire::OtherRef;
+        }();
+        return proto::WireGitInfo {
+            .branch = git.branch, .kind = kind, .ahead = git.ahead, .behind = git.behind
+        };
+    }
+} // namespace
+
+bool NativeSession::sharesWorkspaceMeta() const noexcept
+{
+    return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceMeta);
+}
+
+std::array<uint8_t, 16> NativeSession::controlIdOf(vtworkspace::WorkspaceId workspace) const
+{
+    return _host.objects().uuidOf(workspace).value_or(vtcontrol::Uuid {}).bytes;
+}
+
+void NativeSession::announceWorkspaceMeta(vtworkspace::Workspace const& workspace)
+{
+    if (!sharesWorkspaceMeta())
+        return;
+    // A workspace holding no tab is one the client lists nothing of, and prunes what it knew of it: it is
+    // announced again, in full, with the layout that brings its first tab.
+    if (workspace.tabCount() == 0)
+    {
+        _announcedMeta.erase(workspace.id().value);
+        return;
+    }
+    if (!_announcedMeta.insert(workspace.id().value).second)
+        return;
+    auto const uuid = _host.objects().uuidOf(workspace.id()).value_or(vtcontrol::Uuid {});
+    auto const ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = uuid };
+    // Every field, so the client's metadata of the workspace starts from what it is now. The git state goes
+    // to a following window only (@see sendWorkspaceGit); absent, it is in no repository, or none was looked
+    // up.
+    auto git = summarizesPanes() ? _host.gitInfoOf(workspace.id()).transform(wireGitOf) : std::nullopt;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace.id().value,
+                                                    .controlId = uuid.bytes,
+                                                    .label = std::string { _host.objects().labelOf(ref) },
+                                                    .git = std::move(git) } });
+}
+
+void NativeSession::forgetRemovedWorkspaceMeta()
+{
+    auto const& model = _host.model();
+    std::erase_if(_announcedMeta, [&model](uint64_t workspace) {
+        return model.workspace(vtworkspace::WorkspaceId { workspace }) == nullptr;
+    });
+}
+
+void NativeSession::workspaceLabelChanged(vtcontrol::ObjectRef const& ref, std::string_view label)
+{
+    if (ref.kind != vtcontrol::ObjectKind::Workspace || _phase != ConnectionPhase::Viewing || _closed)
+        return;
+    auto const handle = _host.objects().find(ref);
+    if (!handle)
+        return;
+    auto const workspace = std::get<vtworkspace::WorkspaceId>(*handle).value;
+    // A workspace not announced yet is told its label in full with its layout.
+    if (!_announcedMeta.contains(workspace))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta { .workspace = workspace,
+                                                    .controlId = ref.uuid.bytes,
+                                                    .label = std::string { label },
+                                                    .git = std::nullopt } });
+}
+
+void NativeSession::workspaceGitChanged(WorkspaceGitChangedSignal const& signal)
+{
+    sendWorkspaceGit(signal.workspace.value, signal.git.transform(wireGitOf));
+}
+
+void NativeSession::sendWorkspaceGit(uint64_t workspace, std::optional<proto::WireGitInfo> const& git)
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !summarizesPanes() || !sharesWorkspaceMeta()
+        || !_announcedMeta.contains(workspace))
+        return;
+    send(0,
+         proto::DecodedPdu { proto::WorkspaceMeta {
+             .workspace = workspace,
+             .controlId = controlIdOf(vtworkspace::WorkspaceId { workspace }),
+             .label = std::nullopt,
+             // None, not absent: absent says nothing changed, None that the repository is gone.
+             .git = git.value_or(proto::WireGitInfo {}) } });
+}
+
 template <std::invocable<proto::PaneSummary&> Note>
 void NativeSession::queueSummary(SessionId session, Note&& note)
 {
@@ -817,6 +919,7 @@ void NativeSession::pushLayout()
             sendWorkspaceLayout(*workspace);
             pushed = true;
         }
+    forgetRemovedWorkspaceMeta();
     noteModelSessions();
     if (pushed && batchesLayouts())
     {
@@ -831,6 +934,7 @@ void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
     if (workspace.id().value == _selectedWorkspace)
         requestArrivedSnapshots(workspace);
     sendLayout(serializeLayout(workspace));
+    announceWorkspaceMeta(workspace);
 }
 
 void NativeSession::sendLayout(proto::LayoutState layout)
@@ -896,6 +1000,7 @@ bool NativeSession::flushChangedLayouts()
         sendLayout(std::move(emptied));
         pushed = true;
     }
+    forgetRemovedWorkspaceMeta();
     noteModelSessions();
     return pushed;
 }
@@ -2767,6 +2872,11 @@ void NativeSession::attachClient(uint64_t serial,
     _clientTicket = _services.daemon.get().admitClient();
     _streamSubscription.emplace(_host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream);
     _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
+    if (negotiated.shared.contains(proto::Capability::WorkspaceMeta))
+        _labelSubscription.emplace(
+            _host.objects().onLabelChanged([this](vtcontrol::ObjectRef const& ref, std::string_view label) {
+                workspaceLabelChanged(ref, label);
+            }));
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open. A profile the host

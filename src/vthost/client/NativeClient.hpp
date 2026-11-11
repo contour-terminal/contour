@@ -327,6 +327,9 @@ class NativeClient final
     /// Told of the role the daemon gives this connection for raising, at the start of the connection and on
     /// every change.
     using RaiseRoleHandler = std::function<void(proto::RaiseRole)>;
+    /// Told what the daemon states of a workspace besides its layout (Capability::WorkspaceMeta): in full
+    /// after the hello and for a workspace created since, then a delta for each change.
+    using WorkspaceMetaHandler = std::function<void(proto::WorkspaceMeta const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -400,6 +403,8 @@ class NativeClient final
     /// @param onPaneSummary Told what changed about a pane of a workspace this connection does not select
     ///        (Capability::DaemonFollow).
     /// @param onRaiseRole Told the role this connection has for raising (Capability::DaemonFollow).
+    /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
+    ///        (Capability::WorkspaceMeta).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -416,7 +421,8 @@ class NativeClient final
                  PanesReprojectedHandler onPanesReprojected = {},
                  SwitchRequestHandler onSwitchRequest = {},
                  PaneSummaryHandler onPaneSummary = {},
-                 RaiseRoleHandler onRaiseRole = {});
+                 RaiseRoleHandler onRaiseRole = {},
+                 WorkspaceMetaHandler onWorkspaceMeta = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -783,6 +789,7 @@ class NativeClient final
     SwitchRequestHandler _onSwitchRequest;
     PaneSummaryHandler _onPaneSummary;
     RaiseRoleHandler _onRaiseRole;
+    WorkspaceMetaHandler _onWorkspaceMeta;
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
     HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
