@@ -97,6 +97,9 @@ enum class SessionDevice : uint8_t
     /// was the daemon's to adopt: the PTY crosses alone, served until it closes, and HandoverSession::child
     /// names none.
     PtyOnly,
+    /// A child the daemon's PTY keeper holds, on a PTY: the PTY crosses, and the child is named by
+    /// HandoverSession::keeperSession rather than carried (HandoverSession::child names none).
+    KeeperChild,
 };
 
 /// One hosted session, as it crosses the exec.
@@ -125,6 +128,9 @@ struct HandoverSession
     /// ChildOnPty; an image read by such a release finds a PtyOnly session's child no child of its own, and
     /// serves its PTY all the same.
     SessionDevice device = SessionDevice::ChildOnPty;
+    /// The keeper's name for the child, for SessionDevice::KeeperChild (a keeper::KeeperSessionId's value);
+    /// 0 otherwise.
+    uint64_t keeperSession = 0;
 
     /// Lists the fields for the handover codec. Field 6 carried the settings as vtbackend::Settings, which a
     /// client's session cannot be rebuilt from as it was built; retired, never to be reused.
@@ -143,6 +149,7 @@ struct HandoverSession
         visitor(12, self.colorPreference);
         visitor(13, self.interruption);
         visitor(14, self.device);
+        visitor(15, self.keeperSession);
     }
 };
 

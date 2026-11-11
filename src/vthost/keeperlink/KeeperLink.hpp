@@ -56,10 +56,12 @@ class KeeperLink
     /// @param channel The channel, past the handshake (@see attachToKeeper()).
     /// @param channelVersion The channel version the handshake negotiated (KeeperAttachment::version).
     /// @param onLost Called once, on the loop, when the keeper's end is gone or the channel broke.
+    /// @param spawnReplyBound How long spawn() waits for the keeper's answer.
     KeeperLink(core::net::EventLoop& loop,
                KeeperChannel channel,
                uint32_t channelVersion,
-               std::function<void()> onLost);
+               std::function<void()> onLost,
+               std::chrono::milliseconds spawnReplyBound = SpawnReplyBound);
     KeeperLink(KeeperLink const&) = delete;
     KeeperLink& operator=(KeeperLink const&) = delete;
     KeeperLink(KeeperLink&&) = delete;
@@ -69,7 +71,9 @@ class KeeperLink
 
     /// Asks the keeper to fork a child, and waits for its answer: the one channel round trip a session's
     /// creation may add. Loop thread. Every frame queued before goes first. The frames that arrive meanwhile
-    /// and are not the answer are queued, and dispatched after this returns, never inside it.
+    /// and are not the answer are queued, and dispatched after this returns, never inside it. A spawn given
+    /// up on (the bound passed) that the keeper answers later is released at once: its Spawned is answered
+    /// with Release{session, 0}, so that the keeper does not keep a child no daemon object holds.
     /// @param request What to spawn; its `request` number is assigned here.
     /// @param fds The descriptors the Spawn carries; they stay the caller's.
     /// @return The answer; or why there is none (SpawnError::Unknown for a lost link or a late keeper).

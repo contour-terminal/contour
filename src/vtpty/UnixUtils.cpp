@@ -7,16 +7,26 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 
 #ifdef __linux__
     #include <sys/syscall.h>
+#endif
+
+#ifdef __APPLE__
+    #include <sys/param.h>
+
+    #include <libproc.h>
 #endif
 
 #include <sys/ioctl.h>
@@ -261,6 +271,50 @@ std::expected<void, std::error_code> loginTerminal(int slaveFd, ControllingTermi
     }
 
     return controlling;
+}
+
+std::optional<std::string> foregroundProcessNameOf(int master)
+{
+#if defined(__linux__) || defined(__APPLE__)
+    auto const group = ::tcgetpgrp(master);
+    if (group <= 0)
+        return std::nullopt;
+    #ifdef __linux__
+    // Streamed: /proc reports a size of zero, so a read sized by the file's length reads nothing.
+    auto in = std::ifstream { std::format("/proc/{}/comm", group) };
+    auto name = std::string {};
+    if (!std::getline(in, name) || name.empty())
+        return std::nullopt;
+    return name;
+    #else
+    auto name = std::array<char, (2 * MAXCOMLEN) + 1> {};
+    if (proc_name(group, name.data(), static_cast<uint32_t>(name.size())) <= 0)
+        return std::nullopt;
+    return std::string { name.data() };
+    #endif
+#else
+    std::ignore = master;
+    return std::nullopt;
+#endif
+}
+
+std::optional<std::string> workingDirectoryOf(pid_t pid)
+{
+#ifdef __linux__
+    auto ec = std::error_code {};
+    auto const cwd = std::filesystem::read_symlink(std::format("/proc/{}/cwd", pid), ec);
+    if (ec)
+        return std::nullopt;
+    return cwd.string();
+#elifdef __APPLE__
+    auto vpi = proc_vnodepathinfo {};
+    if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
+        return std::nullopt;
+    return std::string { vpi.pvi_cdir.vip_path };
+#else
+    std::ignore = pid;
+    return std::nullopt;
+#endif
 }
 
 } // namespace vtpty::util

@@ -36,6 +36,7 @@ struct StateEnumWire<vthost::handover::SessionDevice>
     static constexpr auto Values = std::array {
         vthost::handover::SessionDevice::ChildOnPty,
         vthost::handover::SessionDevice::PtyOnly,
+        vthost::handover::SessionDevice::KeeperChild,
     };
 };
 

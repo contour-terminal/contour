@@ -2,6 +2,7 @@
 #include <vtpty/ErrnoText.hpp>
 #include <vtpty/OwnedFd.hpp>
 #include <vtpty/PosixSpawn.hpp>
+#include <vtpty/PreparedSpawn.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SpawnTrampoline.hpp>
 #include <vtpty/UnixUtils.hpp>
@@ -471,38 +472,70 @@ void runSpawnTrampolineIfRequested(int argc, char const* const* argv) noexcept
     }
 }
 
-std::expected<pid_t, std::error_code> spawnTrampoline(SpawnSpec spec,
-                                                      std::span<InheritedFd const> fds,
-                                                      TrampolineEnvironment environment)
+namespace
 {
-    return selfExecutablePath().and_then(
-        [&](std::string const& self) -> std::expected<pid_t, std::error_code> {
+    /// Runs @p run with the path this process's own image is spawned through as a trampoline.
+    template <typename Run>
+    [[nodiscard]] std::expected<pid_t, std::error_code> withSelfImage(Run const& run)
+    {
+        return selfExecutablePath().and_then(
+            [&](std::string const& self) -> std::expected<pid_t, std::error_code> {
 #ifdef __linux__
-            // Through a descriptor of the running image rather than the /proc/self/exe link itself: the same
-            // file, replaced or removed on disk or not. valgrind runs this process from its own tool, which
-            // an exec of the link starts ("You cannot run 'contour-spawn' directly"), but it opens the link
-            // onto the image it runs. O_PATH, as an image may be executable without being readable; kept open
-            // until posix_spawn() returns, by which time the trampoline's exec has resolved it. Numbered
-            // above every slot, as the copies are: opened on the lowest free number, it may be a slot's,
-            // which the spawn dup2()s the slot onto before the exec reads the path.
-            auto const opened = OwnedFd { ::open(self.c_str(), O_PATH | O_CLOEXEC) };
-            if (!opened.isOpen())
-                return std::unexpected(util::lastError());
-            auto const image = OwnedFd { ::fcntl(opened.get(), F_DUPFD_CLOEXEC, FirstTemporaryFd) };
-            if (!image.isOpen())
-                return std::unexpected(util::lastError());
-            return spawnTrampolineImage(
-                std::format("/proc/self/fd/{}", image.get()), std::move(spec), fds, environment);
+                // Through a descriptor of the running image rather than the /proc/self/exe link itself: the
+                // same file, replaced or removed on disk or not. valgrind runs this process from its own
+                // tool, which an exec of the link starts ("You cannot run 'contour-spawn' directly"), but it
+                // opens the link onto the image it runs. O_PATH, as an image may be executable without being
+                // readable; kept open until posix_spawn() returns, by which time the trampoline's exec has
+                // resolved it. Numbered above every slot, as the copies are: opened on the lowest free
+                // number, it may be a slot's, which the spawn dup2()s the slot onto before the exec reads the
+                // path.
+                auto const opened = OwnedFd { ::open(self.c_str(), O_PATH | O_CLOEXEC) };
+                if (!opened.isOpen())
+                    return std::unexpected(util::lastError());
+                auto const image = OwnedFd { ::fcntl(opened.get(), F_DUPFD_CLOEXEC, FirstTemporaryFd) };
+                if (!image.isOpen())
+                    return std::unexpected(util::lastError());
+                return run(std::format("/proc/self/fd/{}", image.get()));
 #else
-            return spawnTrampolineImage(self, std::move(spec), fds, environment);
+                return run(self);
 #endif
-        });
-}
+            });
+    }
 
-std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& image,
-                                                           SpawnSpec spec,
-                                                           std::span<InheritedFd const> fds,
-                                                           TrampolineEnvironment environment)
+    /// posix_spawn()s @p image as @p prepared's trampoline, with its descriptor table, under @p envp. The
+    /// table's copies are closed here, whatever the outcome.
+    [[nodiscard]] std::expected<pid_t, std::error_code> spawnPrepared(std::string const& image,
+                                                                      PreparedSpawn& prepared,
+                                                                      char* const* envp)
+    {
+        auto const childFds = std::exchange(prepared.childFds, {});
+        auto actions = SpawnFileActions::create();
+        if (!actions)
+            return std::unexpected(actions.error());
+        for (auto const& [target, copy]: childFds)
+            if (auto const error = ::posix_spawn_file_actions_adddup2(actions->get(), copy.get(), target);
+                error != 0)
+                return std::unexpected(spawnError(error));
+
+        // Not the trampoline's to inherit, nor its program's.
+        auto attributes = SpawnAttributes::create();
+        if (!attributes)
+            return std::unexpected(attributes.error());
+        if (auto const reset = resetSignals(*attributes); !reset)
+            return std::unexpected(reset.error());
+
+        auto argv = pointersTo(prepared.argv);
+        auto pid = pid_t {};
+        auto const spawned =
+            ::posix_spawn(&pid, image.c_str(), actions->get(), attributes->get(), argv.data(), envp);
+        if (spawned != 0)
+            return std::unexpected(spawnError(spawned));
+        return pid;
+    }
+} // namespace
+
+std::expected<PreparedSpawn, std::error_code> prepareTrampoline(SpawnSpec spec,
+                                                                std::span<InheritedFd const> fds)
 {
     auto const invalid = std::unexpected(std::make_error_code(std::errc::invalid_argument));
     spec.inheritedSlots = TrampolineSlots {};
@@ -514,10 +547,8 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
     }
     // Refused here, where the caller hears why, rather than by a trampoline that could only exit.
     auto const required = std::visit([](auto const& launch) { return requiredSlots(launch); }, spec.launch);
-    if (spec.argv.empty() || (spec.inheritedSlots.raw() & required.raw()) != required.raw()
-        || (environment == TrampolineEnvironment::Program && !spec.environment))
+    if (spec.argv.empty() || (spec.inheritedSlots.raw() & required.raw()) != required.raw())
         return invalid;
-    auto const frame = encodeFramedSpawnSpec(spec);
 
     auto channel = makeGate();
     if (!channel)
@@ -525,60 +556,73 @@ std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& im
 
     // Every source is copied above the slot numbers first, and the slots are filled from the copies: a
     // source sitting on another slot's number is then never overwritten before it is read.
-    auto mappings = std::vector<SlotMapping> {};
-    mappings.reserve(fds.size() + 1);
+    auto prepared = PreparedSpawn {
+        .argv = { std::string { TrampolineProgramName },
+                  std::format("{}{}", SpawnTrampolineMarker, SpawnTrampolineProtocolVersion) },
+        .childFds = {},
+        .specSocket = std::move(channel->parentEnd),
+        .spec = encodeFramedSpawnSpec(spec),
+        .gate = {},
+        .settle = {},
+    };
+    prepared.childFds.reserve(fds.size() + 1);
     auto mapped = mapping(channel->childEnd.get(), SpawnSpecFd);
     if (!mapped)
         return std::unexpected(mapped.error());
-    mappings.push_back(std::move(*mapped));
+    prepared.childFds.emplace_back(mapped->target, std::move(mapped->copy));
     for (auto const& inherited: fds)
     {
         mapped = mapping(inherited.fd, trampolineFd(inherited.slot));
         if (!mapped)
             return std::unexpected(mapped.error());
-        mappings.push_back(std::move(*mapped));
+        prepared.childFds.emplace_back(mapped->target, std::move(mapped->copy));
     }
+    return prepared;
+}
 
-    auto actions = SpawnFileActions::create();
-    if (!actions)
-        return std::unexpected(actions.error());
-    for (auto const& [copy, target]: mappings)
-        if (auto const error = ::posix_spawn_file_actions_adddup2(actions->get(), copy.get(), target);
-            error != 0)
-            return std::unexpected(spawnError(error));
+std::expected<pid_t, std::error_code> launchTrampoline(PreparedSpawn& prepared)
+{
+    return withSelfImage([&](std::string const& image) { return spawnPrepared(image, prepared, environ); });
+}
 
-    // Not the trampoline's to inherit, nor its program's.
-    auto attributes = SpawnAttributes::create();
-    if (!attributes)
-        return std::unexpected(attributes.error());
-    if (auto const reset = resetSignals(*attributes); !reset)
-        return std::unexpected(reset.error());
+std::expected<void, std::error_code> writeSpawnSpec(PreparedSpawn& prepared)
+{
+    auto socket = std::move(prepared.specSocket);
+    return util::writeAll(socket.get(), util::DescriptorKind::Socket, prepared.spec);
+}
 
-    auto arguments = std::array {
-        std::string { TrampolineProgramName },
-        std::format("{}{}", SpawnTrampolineMarker, SpawnTrampolineProtocolVersion),
-    };
-    auto argv = std::array<char*, 3> { arguments[0].data(), arguments[1].data(), nullptr };
+std::expected<pid_t, std::error_code> spawnTrampoline(SpawnSpec spec,
+                                                      std::span<InheritedFd const> fds,
+                                                      TrampolineEnvironment environment)
+{
+    return withSelfImage([&](std::string const& image) {
+        return spawnTrampolineImage(image, std::move(spec), fds, environment);
+    });
+}
 
+std::expected<pid_t, std::error_code> spawnTrampolineImage(std::string const& image,
+                                                           SpawnSpec spec,
+                                                           std::span<InheritedFd const> fds,
+                                                           TrampolineEnvironment environment)
+{
+    if (environment == TrampolineEnvironment::Program && !spec.environment)
+        return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     // Under the program's environment, the spawn reads nothing of this process's, which another thread may
     // be changing (DetachedCommand::environment).
-    auto envp = environment == TrampolineEnvironment::Program
-                    ? std::optional { pointersTo(*spec.environment) }
-                    : std::nullopt;
+    auto programEnvironment = environment == TrampolineEnvironment::Program ? spec.environment : std::nullopt;
+    auto envp = programEnvironment.transform([](auto& entries) { return pointersTo(entries); });
 
-    auto pid = pid_t {};
-    auto const spawned = ::posix_spawn(
-        &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), envp ? envp->data() : environ);
-    mappings.clear();
-    channel->childEnd.reset();
-    if (spawned != 0)
-        return std::unexpected(spawnError(spawned));
+    auto prepared = prepareTrampoline(std::move(spec), fds);
+    if (!prepared)
+        return std::unexpected(prepared.error());
+    auto const pid = spawnPrepared(image, *prepared, envp ? envp->data() : environ);
+    if (!pid)
+        return pid;
 
     // Written after the spawn, not before: a spec larger than the socket's buffer is read as it is written.
-    if (auto sent = util::writeAll(channel->parentEnd.get(), util::DescriptorKind::Socket, frame); !sent)
+    if (auto sent = writeSpawnSpec(*prepared); !sent)
     {
-        channel->parentEnd.reset(); // end-of-file, for a trampoline still reading
-        std::ignore = util::waitForExit(pid);
+        std::ignore = util::waitForExit(*pid); // it read end-of-file as the socket closed
         return std::unexpected(sent.error());
     }
     return pid;

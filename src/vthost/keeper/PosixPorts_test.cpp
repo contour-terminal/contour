@@ -94,6 +94,15 @@ std::optional<WireExitStatus> waitForEnd(EventSource& events, int pid)
     return found->status;
 }
 
+/// @return The end of @p pid, once the event source reported it; reaped then, as the keeper does.
+std::optional<WireExitStatus> reapEnded(EventSource& events, int pid)
+{
+    auto status = waitForEnd(events, pid);
+    if (status)
+        events.reap(pid);
+    return status;
+}
+
 /// @return Whether @p pid is a child of this process that has ended and not been reaped.
 bool isUnreapedZombie(int pid)
 {
@@ -256,7 +265,7 @@ TEST_CASE("the spawner runs a program with exactly the given descriptors", "[kee
                                  .kept = {} };
     auto const descriptors = std::array { input.get(), output.writer.get() };
 
-    auto const child = ports.spawner->spawn(request, descriptors);
+    auto const child = ports.spawner->spawn(request, descriptors, std::nullopt);
     REQUIRE(child.has_value());
     // The program opens and closes files as it starts (its libraries, the locale); once it sleeps, what it
     // has open is what it was given.
@@ -268,9 +277,10 @@ TEST_CASE("the spawner runs a program with exactly the given descriptors", "[kee
           == std::filesystem::read_symlink(std::format("/proc/self/fd/{}", output.writer.get())));
     CHECK(child->processHandle.isOpen());
 
-    ports.events->watchPid(child->pid, Reaping::OnEnd);
+    ports.events->watchPid(
+        WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
     ports.signaller->send(child->pid, KeeperSignal::Kill);
-    CHECK(waitForEnd(*ports.events, child->pid).has_value());
+    CHECK(reapEnded(*ports.events, child->pid).has_value());
 #endif
 }
 
@@ -304,16 +314,17 @@ TEST_CASE("the child gets a clean signal mask and the original descriptor limit"
                                      .executablePath = program("sleep").string(),
                                      .childFds = {},
                                      .kept = {} };
-        auto const child = ports.spawner->spawn(request, {});
+        auto const child = ports.spawner->spawn(request, {}, std::nullopt);
         REQUIRE(child.has_value());
         CHECK(procLine(child->pid, "status", "SigBlk:") == "0000000000000000");
         CHECK(procLine(child->pid, "status", "SigIgn:") == "0000000000000000");
         CHECK(procLine(child->pid, "limits", "Max open files")
                   .starts_with(std::to_string(limit.rlim_cur) + " "));
 
-        ports.events->watchPid(child->pid, Reaping::OnEnd);
+        ports.events->watchPid(
+            WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
         ports.signaller->send(child->pid, KeeperSignal::Kill);
-        CHECK(waitForEnd(*ports.events, child->pid).has_value());
+        CHECK(reapEnded(*ports.events, child->pid).has_value());
     }
 
     ::pthread_sigmask(SIG_SETMASK, &previousMask, nullptr);
@@ -329,12 +340,13 @@ TEST_CASE("the reaper reports a signalled child", "[keeper][posix]")
                                  .executablePath = program("sleep").string(),
                                  .childFds = {},
                                  .kept = {} };
-    auto const child = ports.spawner->spawn(request, {});
+    auto const child = ports.spawner->spawn(request, {}, std::nullopt);
     REQUIRE(child.has_value());
-    ports.events->watchPid(child->pid, Reaping::OnEnd);
+    ports.events->watchPid(
+        WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
     ports.signaller->send(child->pid, KeeperSignal::Terminate);
 
-    auto const status = waitForEnd(*ports.events, child->pid);
+    auto const status = reapEnded(*ports.events, child->pid);
     REQUIRE(status.has_value());
     CHECK(*status == WireExitStatus { .kind = ExitKind::Signal, .value = SIGTERM });
     CHECK(isReaped(child->pid));
@@ -348,12 +360,13 @@ TEST_CASE("the pidfd-less fallback reaps too", "[keeper][posix]")
                                  .executablePath = program("sh").string(),
                                  .childFds = {},
                                  .kept = {} };
-    auto const child = ports.spawner->spawn(request, {});
+    auto const child = ports.spawner->spawn(request, {}, std::nullopt);
     REQUIRE(child.has_value());
     CHECK(!child->processHandle.isOpen());
-    ports.events->watchPid(child->pid, Reaping::OnEnd);
+    ports.events->watchPid(
+        WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
 
-    auto const status = waitForEnd(*ports.events, child->pid);
+    auto const status = reapEnded(*ports.events, child->pid);
     REQUIRE(status.has_value());
     CHECK(*status == WireExitStatus { .kind = ExitKind::Normal, .value = 7 });
     CHECK(isReaped(child->pid));
@@ -398,7 +411,8 @@ TEST_CASE("a daemon stays a signalable zombie until the keeper reaps it", "[keep
     auto launched = ports.launcher->launch(program("sh"));
     REQUIRE(launched.has_value());
     ports.events->watchChannel(*launched->channel, DaemonGeneration { 1 });
-    ports.events->watchPid(launched->pid, Reaping::ByKeeper);
+    ports.events->watchPid(
+        WatchedProcess { .pid = launched->pid, .role = WatchedRole::Daemon, .processHandle = -1 });
 
     auto const status = waitForEnd(*ports.events, launched->pid);
     REQUIRE(status.has_value());
@@ -422,7 +436,8 @@ TEST_CASE("a daemon's last frames and its channel's close come before its end", 
     REQUIRE(launched.has_value());
     auto const generation = DaemonGeneration { 4 };
     ports.events->watchChannel(*launched->channel, generation);
-    ports.events->watchPid(launched->pid, Reaping::ByKeeper);
+    ports.events->watchPid(
+        WatchedProcess { .pid = launched->pid, .role = WatchedRole::Daemon, .processHandle = -1 });
 
     auto const events = collectUntil(*ports.events, [&](auto const& seen) {
         return std::ranges::any_of(seen, [](Event const& event) { return event.kind == EventKind::Ended; });
@@ -677,10 +692,34 @@ TEST_CASE("an executable that cannot run is reported, not started", "[keeper][po
                                  .executablePath = "/nonexistent/keeper-test-program",
                                  .childFds = {},
                                  .kept = {} };
-    auto const child = ports.spawner->spawn(request, {});
+    auto const child = ports.spawner->spawn(request, {}, std::nullopt);
     REQUIRE(!child.has_value());
     CHECK(child.error() == SpawnError::ExecutableUnusable);
     CHECK(!ports.launcher->launch("/nonexistent/keeper-test-daemon").has_value());
+}
+
+TEST_CASE("an executable sent as a descriptor runs by it, whatever its path names", "[keeper][posix]")
+{
+#ifndef __linux__
+    SKIP("execveat() is Linux's");
+#else
+    auto ports = makePorts();
+    auto const shell = UniqueFd { ::open(program("sh").c_str(), O_PATH | O_CLOEXEC) };
+    REQUIRE(shell.isOpen());
+    auto const request = Spawn { .request = 1,
+                                 .argv = { "sh", "-c", "exit 6" },
+                                 .executablePath = "/nonexistent/keeper-test-program",
+                                 .childFds = {},
+                                 .kept = {},
+                                 .executable = ExecutableSource::Descriptor };
+    auto const child = ports.spawner->spawn(request, {}, shell.get());
+    REQUIRE(child.has_value());
+    ports.events->watchPid(
+        WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
+    auto const status = reapEnded(*ports.events, child->pid);
+    REQUIRE(status.has_value());
+    CHECK(*status == WireExitStatus { .kind = ExitKind::Normal, .value = 6 });
+#endif
 }
 
 TEST_CASE("a send to a peer that is gone still reports what the peer wrote", "[keeper][posix]")
@@ -722,10 +761,11 @@ TEST_CASE("a shell that is a script runs", "[keeper][posix]")
     auto const request = Spawn {
         .request = 1, .argv = { "script" }, .executablePath = script.string(), .childFds = {}, .kept = {}
     };
-    auto const child = ports.spawner->spawn(request, {});
+    auto const child = ports.spawner->spawn(request, {}, std::nullopt);
     REQUIRE(child.has_value());
-    ports.events->watchPid(child->pid, Reaping::OnEnd);
-    auto const status = waitForEnd(*ports.events, child->pid);
+    ports.events->watchPid(
+        WatchedProcess { .pid = child->pid, .role = WatchedRole::Session, .processHandle = -1 });
+    auto const status = reapEnded(*ports.events, child->pid);
     REQUIRE(status.has_value());
     CHECK(*status == WireExitStatus { .kind = ExitKind::Normal, .value = 5 });
 }
@@ -785,4 +825,74 @@ TEST_CASE("a daemon that does not read is dropped", "[keeper][posix]")
     REQUIRE(events.size() == 1);
     CHECK(events[0].kind == EventKind::ChannelClosed);
     ports.events->unwatchChannel(*channel);
+}
+
+TEST_CASE("a shell that ends while the daemon lives leaves the daemon's channel read in bounds",
+          "[keeper][posix]")
+{
+    auto ports = makePorts();
+    auto pair = makeSocketPair();
+    auto const channel = makePosixChannel(std::move(pair.keeper));
+    auto const pipe = makePipe();
+    // Each frame carries a descriptor, so that each takes a read of its own.
+    constexpr auto Frames = 40;
+    for ([[maybe_unused]] auto const frame: std::views::iota(0, Frames))
+        sendRaw(pair.daemon.get(),
+                encodeFrame(frameOf(Structure {}, { pipe.reader.get() })),
+                { pipe.reader.get() });
+    auto const request = Spawn { .request = 1,
+                                 .argv = { "sh", "-c", "exit 0" },
+                                 .executablePath = program("sh").string(),
+                                 .childFds = {},
+                                 .kept = {} };
+    auto const shell = ports.spawner->spawn(request, {}, std::nullopt);
+    REQUIRE(shell.has_value());
+    auto const until = std::chrono::steady_clock::now() + 5s;
+    while (!isUnreapedZombie(shell->pid) && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(1ms);
+    REQUIRE(isUnreapedZombie(shell->pid));
+    ports.events->watchChannel(*channel, DaemonGeneration { 1 });
+    ports.events->watchPid(WatchedProcess {
+        .pid = shell->pid, .role = WatchedRole::Session, .processHandle = shell->processHandle.get() });
+
+    auto events = ports.events->wait(ports.clock->now() + 1s);
+    auto received = std::vector<UniqueFd> {};
+    for (auto& event: events)
+        if (event.frame)
+            for (auto const fd: event.frame->fds)
+                received.emplace_back(fd);
+    auto const count = [&](EventKind kind) {
+        return std::ranges::count(events, kind, &Event::kind);
+    };
+    CHECK(count(EventKind::Ended) == 1);
+    CHECK(count(EventKind::Frame) > 0);
+    CHECK(count(EventKind::Frame) < Frames); // bounded: only the daemon's end reads its channel to the end
+
+    ports.events->reap(shell->pid);
+    CHECK(isReaped(shell->pid));
+    ports.events->unwatchChannel(*channel);
+}
+
+TEST_CASE("a shell is watched by the pidfd its spawn opened", "[keeper][posix]")
+{
+#ifndef __linux__
+    SKIP("pidfds are Linux's; elsewhere a child is watched by kqueue or SIGCHLD");
+#else
+    auto ports = makePorts();
+    auto const request = Spawn { .request = 1,
+                                 .argv = { "sh", "-c", "exit 5" },
+                                 .executablePath = program("sh").string(),
+                                 .childFds = {},
+                                 .kept = {} };
+    auto const shell = ports.spawner->spawn(request, {}, std::nullopt);
+    REQUIRE(shell.has_value());
+    REQUIRE(shell->processHandle.isOpen());
+    auto const open = openDescriptorCount();
+    ports.events->watchPid(WatchedProcess {
+        .pid = shell->pid, .role = WatchedRole::Session, .processHandle = shell->processHandle.get() });
+    CHECK(openDescriptorCount() == open); // no second pidfd
+    auto const status = reapEnded(*ports.events, shell->pid);
+    REQUIRE(status.has_value());
+    CHECK(*status == WireExitStatus { .kind = ExitKind::Normal, .value = 5 });
+#endif
 }

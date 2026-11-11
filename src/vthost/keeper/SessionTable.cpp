@@ -36,8 +36,11 @@ void SessionTable::release(KeeperSessionId id, core::platform::SteadyTimePoint k
         _sessions.erase(found);
         return;
     }
-    for (auto& descriptor: session.descriptors)
-        descriptor.reset();
+    // All but the pidfd, which the event source watches the child by until it is reaped, when the session is
+    // forgotten with it.
+    for (auto const role: core::codec::EnumWire<KeptDescriptor>::Values)
+        if (role != KeptDescriptor::ProcessHandle)
+            session.descriptors[slotOf(role)].reset();
     session.hold = Hold::Released;
     session.killAt = session.killAt ? std::min(*session.killAt, killAt) : killAt;
 }
@@ -49,6 +52,14 @@ void SessionTable::releaseAll(core::platform::SteadyTimePoint killAt)
         ids.push_back(id);
     for (auto const id: ids)
         release(id, killAt);
+}
+
+std::optional<int> SessionTable::signallableChild(KeeperSessionId id) const
+{
+    auto const found = _sessions.find(id);
+    if (found == _sessions.end() || found->second.exited || found->second.hold == Hold::Released)
+        return std::nullopt;
+    return found->second.pid;
 }
 
 std::optional<ReapedSession> SessionTable::reap(int pid, WireExitStatus status)

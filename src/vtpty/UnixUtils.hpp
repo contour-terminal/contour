@@ -10,6 +10,8 @@
 #include <cerrno>
 #include <cstdint>
 #include <expected>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -259,6 +261,17 @@ inline void saveDup2(int a, int b) noexcept
         ;
 }
 // }}}
+
+/// The name of the program leading the foreground process group of a terminal (tcgetpgrp(), which needs
+/// no parenthood of it). Linux and macOS only.
+/// @param master The terminal's master.
+/// @return The name, as the operating system shortens it; none where it cannot be told.
+[[nodiscard]] std::optional<std::string> foregroundProcessNameOf(int master);
+
+/// The working directory of a process. Linux and macOS only.
+/// @param pid The process.
+/// @return Its working directory; none where it cannot be told.
+[[nodiscard]] std::optional<std::string> workingDirectoryOf(pid_t pid);
 
 } // namespace vtpty::util
 

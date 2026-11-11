@@ -190,6 +190,7 @@ class Keeper
     void handle(Heartbeat const& message, std::vector<UniqueFd>& fds);
     void handle(Adopt const& message, std::vector<UniqueFd>& fds);
     void handle(Shutdown const& message, std::vector<UniqueFd>& fds);
+    void handle(Signal const& message, std::vector<UniqueFd>& fds);
     void handle(auto const& /*message*/, std::vector<UniqueFd>& /*fds*/) {}
 
     KeeperPorts _ports;
@@ -200,6 +201,11 @@ class Keeper
     std::vector<uint8_t> _launchOptions;
 
     SessionTable _sessions;
+    /// What DescriptorBudget::available() said in this wait's batch of events, less the descriptor each spawn
+    /// of the batch kept since; asked again in the next batch. The budget counts what the process holds, from
+    /// wherever it came -- received with frames, opened for a spawn, inherited -- which no running count here
+    /// could follow exactly, so it is asked at most once a batch rather than once a spawn.
+    std::optional<std::size_t> _descriptorsLeft;
     std::vector<KeptListener> _listeners;
     UniqueFd _structure;
     std::optional<Daemon> _daemon;

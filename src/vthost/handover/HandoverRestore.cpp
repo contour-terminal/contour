@@ -174,6 +174,15 @@ void SessionHost::adoptHandoverSession(HandoverSession& session)
                          id.value);
             return std::move(*pty);
         }
+        if (session.device == handover::SessionDevice::KeeperChild)
+        {
+            // Held by the keeper across the exec; re-attaching it to its keeper session comes with the live
+            // upgrade under a keeper. Until then the PTY is served as one no child of this process runs on.
+            sessionLog()("handover: session {}: serving its PTY; its child is the keeper's (session {})",
+                         id.value,
+                         session.keeperSession);
+            return std::move(*pty);
+        }
         if (!vtpty::Process::canAdopt(session.child))
         {
             sessionLog()("handover: session {}: process {} is no child of this one any more; serving its PTY "

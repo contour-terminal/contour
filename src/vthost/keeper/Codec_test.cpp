@@ -29,7 +29,8 @@ std::vector<Message> samples()
                 .argv = { "/bin/sh", "-l" },
                 .executablePath = "/bin/sh",
                 .childFds = { 0, 1, 2, 5 },
-                .kept = { KeptDescriptor::Master, KeptDescriptor::Settle } },
+                .kept = { KeptDescriptor::Master, KeptDescriptor::Settle },
+                .executable = ExecutableSource::Descriptor },
         Spawned { .request = 7, .session = 42, .pid = 31'337 },
         SpawnFailed { .request = 8, .error = SpawnError::TooManyDescriptors },
         Placed { .session = 42 },
@@ -48,6 +49,7 @@ std::vector<Message> samples()
                            .placed = Placement::Parked,
                            .descriptors = { KeptDescriptor::Master, KeptDescriptor::ProcessHandle } },
         InventoryEnd {},
+        Signal { .session = 42, .signal = ChildSignal::Kill },
     };
 }
 
@@ -171,9 +173,10 @@ TEST_CASE("a frame with more descriptors than its message may carry is refused",
 TEST_CASE("peekTag reads the tag of a body, known or not", "[keeper][codec]")
 {
     CHECK(peekTag(encode(Hello {})) == 1);
-    CHECK(peekTag(encode(InventoryEnd {})) == std::variant_size_v<Message>);
+    CHECK(peekTag(encode(Signal {})) == std::variant_size_v<Message>);
     auto writer = core::codec::Writer {};
     writer.varint(4000);
-    CHECK(peekTag(std::move(writer).take()) == 4000);
+    auto const unknown = std::move(writer).take();
+    CHECK(peekTag(unknown) == 4000);
     CHECK(!peekTag({}).has_value());
 }

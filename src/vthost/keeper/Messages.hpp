@@ -93,6 +93,21 @@ enum class ExitKind : uint8_t
     Signal,     ///< A signal ended it; the value is the signal number.
 };
 
+/// How a Spawn names the executable the keeper runs.
+enum class ExecutableSource : uint8_t
+{
+    Path = 0,   ///< By Spawn::executablePath, with execve(): what a platform without execveat() runs (macOS).
+    Descriptor, ///< By a descriptor the Spawn carries last, with execveat(AT_EMPTY_PATH) (Linux): the image
+                ///< the daemon runs, even after a package upgrade replaced the file its path names.
+};
+
+/// A signal the daemon asks the keeper to send a session's child.
+enum class ChildSignal : uint8_t
+{
+    Terminate = 0, ///< SIGTERM, which the child may catch or ignore.
+    Kill,          ///< SIGKILL, which no child can refuse.
+};
+
 } // namespace vthost::keeper
 
 namespace core::codec
@@ -155,6 +170,24 @@ struct EnumWire<vthost::keeper::ExitKind>
     static constexpr auto Values = std::array {
         vthost::keeper::ExitKind::Normal,
         vthost::keeper::ExitKind::Signal,
+    };
+};
+
+template <>
+struct EnumWire<vthost::keeper::ExecutableSource>
+{
+    static constexpr auto Values = std::array {
+        vthost::keeper::ExecutableSource::Path,
+        vthost::keeper::ExecutableSource::Descriptor,
+    };
+};
+
+template <>
+struct EnumWire<vthost::keeper::ChildSignal>
+{
+    static constexpr auto Values = std::array {
+        vthost::keeper::ChildSignal::Terminate,
+        vthost::keeper::ChildSignal::Kill,
     };
 };
 // }}}
@@ -260,7 +293,8 @@ struct Serving
 };
 
 /// Daemon to keeper: fork a child. The n-th received descriptor becomes child descriptor childFds[n]; the
-/// kept.size() descriptors after those are not the child's but the keeper's to hold, kept[n] naming each.
+/// kept.size() descriptors after those are not the child's but the keeper's to hold, kept[n] naming each. For
+/// ExecutableSource::Descriptor one more follows them, last: the executable, which the keeper runs by it.
 struct Spawn
 {
     /// How many descriptors this message carries at most.
@@ -270,6 +304,7 @@ struct Spawn
     std::string executablePath;
     std::vector<uint32_t> childFds;
     std::vector<KeptDescriptor> kept;
+    ExecutableSource executable = ExecutableSource::Path;
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.request);
@@ -277,6 +312,7 @@ struct Spawn
         visitor(3, self.executablePath);
         visitor(4, self.childFds);
         visitor(5, self.kept);
+        visitor(6, self.executable);
     }
     [[nodiscard]] bool operator==(Spawn const&) const = default;
 };
@@ -383,6 +419,18 @@ struct Exec
     [[nodiscard]] bool operator==(Exec const&) const = default;
 };
 
+/// Daemon to keeper: send a session's child a signal. Ignored for a child that was reaped already, whose pid
+/// may name another process by now.
+struct Signal
+{
+    /// How many descriptors this message carries at most.
+    static constexpr std::size_t MaxDescriptors = 0;
+    uint64_t session = 0; ///< A KeeperSessionId's value.
+    ChildSignal signal = ChildSignal::Terminate;
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self.session); visitor(2, self.signal); }
+    [[nodiscard]] bool operator==(Signal const&) const = default;
+};
+
 /// Keeper to daemon: opens the inventory. Carries the structure descriptor, if there is one.
 struct InventoryBegin
 {
@@ -465,7 +513,8 @@ using Message = std::variant<Hello,
                              InventoryBegin,
                              InventoryListener,
                              InventorySession,
-                             InventoryEnd>;
+                             InventoryEnd,
+                             Signal>;
 
 namespace detail
 {

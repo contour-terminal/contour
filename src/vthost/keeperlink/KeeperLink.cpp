@@ -9,6 +9,7 @@
 #include <deque>
 #include <mutex>
 #include <ranges>
+#include <set>
 #include <span>
 #include <utility>
 #include <variant>
@@ -87,11 +88,13 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     State(core::net::EventLoop& loopRef,
           KeeperChannel channelValue,
           uint32_t version,
-          std::function<void()> lostHandler):
+          std::function<void()> lostHandler,
+          std::chrono::milliseconds replyBound):
         loop { loopRef },
         channel { std::move(channelValue) },
         channelVersion { version },
-        onLost { std::move(lostHandler) }
+        onLost { std::move(lostHandler) },
+        spawnReplyBound { replyBound }
     {
     }
 
@@ -99,6 +102,9 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     KeeperChannel channel;
     uint32_t channelVersion; ///< As the handshake negotiated it.
     std::function<void()> onLost;
+    std::chrono::milliseconds spawnReplyBound;
+    /// The spawns given up on whose answer has not come: a late Spawned for one is released.
+    std::set<uint64_t> abandoned;
     std::function<void(keeper::KeeperSessionId, vtpty::ExitStatus)> exited;
 
     std::mutex queueLock;
@@ -279,6 +285,8 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
         if (link != Link::Open)
             return;
         link = Link::Lost;
+        // No answer comes any more: nothing is left to release.
+        abandoned.clear();
         loop.post([weak = weak_from_this()] {
             if (auto const self = weak.lock(); self && self->link == Link::Lost && self->onLost)
                 self->onLost();
@@ -380,6 +388,20 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
         std::visit([&](auto const& message) { handle(message); }, *received.message);
     }
 
+    void handle(keeper::Spawned const& message)
+    {
+        // The answer to a spawn given up on: nothing of this daemon holds the child, so the keeper lets it
+        // go.
+        if (abandoned.erase(message.request) == 0)
+            return;
+        errorLog()("the keeper answered spawn {} after it was given up on; session {} released",
+                   message.request,
+                   message.session);
+        post(keeper::Release { .session = message.session, .graceMs = 0 }, {});
+    }
+
+    void handle(keeper::SpawnFailed const& message) { abandoned.erase(message.request); }
+
     void handle(keeper::Exited const& message) const
     {
         if (exited)
@@ -394,7 +416,7 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     template <typename Other>
     static void handle(Other const& /*message*/)
     {
-        // A late answer to a spawn that gave up, or what only a handshake reads: nothing to act on. Its
+        // What only a handshake reads, or what the keeper never sends a daemon: nothing to act on. Its
         // descriptors close with it.
     }
 
@@ -404,8 +426,10 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
 KeeperLink::KeeperLink(core::net::EventLoop& loop,
                        KeeperChannel channel,
                        uint32_t channelVersion,
-                       std::function<void()> onLost):
-    _state { std::make_shared<State>(loop, std::move(channel), channelVersion, std::move(onLost)) }
+                       std::function<void()> onLost,
+                       std::chrono::milliseconds spawnReplyBound):
+    _state { std::make_shared<State>(
+        loop, std::move(channel), channelVersion, std::move(onLost), spawnReplyBound) }
 {
     loop.spawn(State::readLoop(_state));
 #ifdef CONTOUR_KEEPER_KQUEUE
@@ -437,11 +461,15 @@ std::expected<SpawnReply, keeper::SpawnError> KeeperLink::spawn(keeper::Spawn re
         return std::unexpected { keeper::SpawnError::Unknown };
     request.request = ++state.lastRequest;
     auto const id = request.request;
-    auto const deadline = state.loop.clock().now() + SpawnReplyBound;
+    auto const deadline = state.loop.clock().now() + state.spawnReplyBound;
     if (state.enqueue(request, fds) == QueueOutcome::Dropped)
         return std::unexpected { keeper::SpawnError::TooManyDescriptors };
     if (!state.flushUntil(deadline))
+    {
+        // Still queued, it may yet go out and be answered.
+        state.abandoned.insert(id);
         return std::unexpected { keeper::SpawnError::Unknown };
+    }
 
     state.dispatch = Dispatch::InsideSpawn;
     auto reply =
@@ -451,7 +479,9 @@ std::expected<SpawnReply, keeper::SpawnError> KeeperLink::spawn(keeper::Spawn re
         auto received = state.channel.receive(state.loop.clock(), deadline);
         if (!received)
         {
-            if (received.error() != ChannelError::TimedOut)
+            if (received.error() == ChannelError::TimedOut)
+                state.abandoned.insert(id);
+            else
                 state.lose();
             break;
         }

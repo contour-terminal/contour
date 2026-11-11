@@ -172,6 +172,7 @@ class FakeSpawner final: public ShellSpawner
     {
         Spawn spawn;
         std::size_t descriptorCount = 0;
+        std::optional<int> executable;
     };
 
     std::vector<Request> requests;
@@ -179,9 +180,11 @@ class FakeSpawner final: public ShellSpawner
     int nextPid = 2000;
 
     [[nodiscard]] std::expected<SpawnedChild, SpawnError> spawn(Spawn const& request,
-                                                                std::span<int const> descriptors) override
+                                                                std::span<int const> descriptors,
+                                                                std::optional<int> executable) override
     {
-        requests.push_back(Request { .spawn = request, .descriptorCount = descriptors.size() });
+        requests.push_back(
+            Request { .spawn = request, .descriptorCount = descriptors.size(), .executable = executable });
         auto handle = UniqueFd {};
         if (!processHandles.empty())
         {
@@ -220,29 +223,40 @@ class FakeEvents final: public EventSource
     {
         std::erase_if(_channels, [&](auto const& entry) { return entry.first == &channel; });
     }
-    void watchPid(int pid, Reaping reaping) override
+    void watchPid(WatchedProcess process) override
     {
-        _live.push_back(pid);
-        if (reaping == Reaping::ByKeeper)
-            _keptByKeeper.push_back(pid);
+        auto const pid = process.pid;
+        watches.push_back(process);
+        _watched.push_back(pid);
+        // Its end may be in the batch that started it (a step standing for two waits): reported once.
+        if (!std::ranges::contains(_ended, pid))
+            _live.push_back(pid);
     }
 
     void reap(int pid) override
     {
         // Only a process left to the keeper, reported ended and not yet reaped: once each.
-        REQUIRE(std::ranges::contains(_zombies, pid));
-        std::erase(_zombies, pid);
+        REQUIRE(std::ranges::contains(zombies(), pid));
         reaps.push_back(pid);
     }
 
     /// The pids the keeper reaped, in order.
     std::vector<int> reaps;
+    /// Every watchPid(), in order.
+    std::vector<WatchedProcess> watches;
 
     /// @return Whether @p pid was reaped by the keeper already.
     [[nodiscard]] bool isReaped(int pid) const { return std::ranges::contains(reaps, pid); }
 
     /// @return The processes left to the keeper that ended and that it has not reaped.
-    [[nodiscard]] std::vector<int> const& zombies() const noexcept { return _zombies; }
+    /// A process is watched before its end can be reported; a step that reports a shell's end beside the
+    /// Spawn that starts it stands for two waits, so it counts as watched once the keeper watches it.
+    [[nodiscard]] std::vector<int> zombies() const
+    {
+        return std::ranges::to<std::vector>(_ended | std::views::filter([this](int pid) {
+                                                return std::ranges::contains(_watched, pid) && !isReaped(pid);
+                                            }));
+    }
 
     [[nodiscard]] std::vector<Event> wait(core::platform::SteadyTimePoint deadline) override
     {
@@ -261,8 +275,7 @@ class FakeEvents final: public EventSource
             if (event.kind == EventKind::Ended)
             {
                 std::erase(_live, event.pid);
-                if (std::ranges::contains(_keptByKeeper, event.pid))
-                    _zombies.push_back(event.pid);
+                _ended.push_back(event.pid);
             }
             auto const fromChannel = event.kind == EventKind::Frame || event.kind == EventKind::ChannelClosed;
             if (fromChannel && event.generation == DaemonGeneration {})
@@ -298,8 +311,8 @@ class FakeEvents final: public EventSource
     std::deque<Step> _steps;
     std::vector<std::pair<Channel*, DaemonGeneration>> _channels;
     DaemonGeneration _newest {};
-    std::vector<int> _keptByKeeper;
-    std::vector<int> _zombies;
+    std::vector<int> _watched; ///< Every process ever watched: each ended one is the keeper's to reap.
+    std::vector<int> _ended;   ///< Every process reported ended.
     std::vector<int> _live;
     int _windDownTurns = 0;
 };
@@ -337,7 +350,13 @@ class FakeBudget final: public DescriptorBudget
   public:
     std::size_t free = 1000;
 
-    [[nodiscard]] std::size_t available() const override { return free; }
+    mutable int asked = 0; ///< How often available() was asked.
+
+    [[nodiscard]] std::size_t available() const override
+    {
+        ++asked;
+        return free;
+    }
 };
 
 class FakeLabelLock final: public LabelLock
@@ -703,6 +722,52 @@ TEST_CASE("a spawn that leaves the reserve free is accepted", "[keeper]")
     h.run();
 }
 
+TEST_CASE("the spawns of one wait count the budget once, and what each keeps", "[keeper]")
+{
+    auto h = Harness {};
+    // Room for two spawns' pidfds above the reserve, not three.
+    h.budget.free = SpawnDescriptorReserve + 2;
+    auto pidfds = std::array { makePipe(), makePipe(), makePipe() };
+    for (auto& pidfd: pidfds)
+        h.spawner.processHandles.emplace_back(pidfd.give());
+    auto first = makePipe();
+    auto second = makePipe();
+    auto third = makePipe();
+    h.events.then(deliver({ spawnOf(1, first), spawnOf(2, second), spawnOf(3, third) }));
+    h.events.then(check([&] {
+        CHECK(h.budget.asked == 1);
+        auto const& channel = h.launcher.channel(0);
+        CHECK(channel.all<Spawned>().size() == 2);
+        CHECK(channel.only<SpawnFailed>()
+              == SpawnFailed { .request = 3, .error = SpawnError::TooManyDescriptors });
+    }));
+    // A new wait counts afresh.
+    auto fourth = makePipe();
+    h.events.then(deliver({ spawnOf(4, fourth) }));
+    h.events.then(check([&] { CHECK(h.budget.asked == 2); }));
+    h.run();
+}
+
+TEST_CASE("a shell is watched by the pidfd its spawn opened, and the daemon as the daemon", "[keeper]")
+{
+    auto h = Harness {};
+    auto pidfd = makePipe();
+    auto const handle = pidfd.give();
+    h.spawner.processHandles.emplace_back(handle);
+    auto child = makePipe();
+    h.events.then(deliver({ spawnOf(7, child) }));
+    h.events.then(check([&] {
+        REQUIRE(h.events.watches.size() == 2);
+        CHECK(h.events.watches[0].pid == FirstDaemon);
+        CHECK(h.events.watches[0].role == WatchedRole::Daemon);
+        CHECK(h.events.watches[0].processHandle == -1);
+        CHECK(h.events.watches[1].pid == FirstShell);
+        CHECK(h.events.watches[1].role == WatchedRole::Session);
+        CHECK(h.events.watches[1].processHandle == handle);
+    }));
+    h.run();
+}
+
 TEST_CASE("a Spawn whose descriptors do not match its table is refused", "[keeper]")
 {
     auto h = Harness {};
@@ -716,6 +781,91 @@ TEST_CASE("a Spawn whose descriptors do not match its table is refused", "[keepe
         CHECK(h.spawner.requests.empty());
         CHECK(child.writerClosed());
     }));
+    h.run();
+}
+
+TEST_CASE("a Spawn's executable descriptor comes last and is the spawner's to run by", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    auto executable = makePipe();
+    auto spawn = Spawn { .request = 4,
+                         .argv = { "contour-spawn" },
+                         .executablePath = {},
+                         .childFds = { 3 },
+                         .kept = { KeptDescriptor::Master },
+                         .executable = ExecutableSource::Descriptor };
+    h.events.then(deliver({ frameOf(spawn, { child.give(), master.give(), executable.give() }) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).only<Spawned>().request == 4);
+        REQUIRE(h.spawner.requests.size() == 1);
+        CHECK(h.spawner.requests.front().descriptorCount == 1);
+        CHECK(h.spawner.requests.front().executable.has_value());
+        CHECK(!master.writerClosed());    // kept
+        CHECK(executable.writerClosed()); // run by, then let go
+    }));
+    h.run();
+}
+
+TEST_CASE("a Spawn that names a descriptor executable but sends none is refused", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto spawn = Spawn { .request = 5,
+                         .argv = { "contour-spawn" },
+                         .executablePath = {},
+                         .childFds = { 3 },
+                         .kept = {},
+                         .executable = ExecutableSource::Descriptor };
+    h.events.then(deliver({ frameOf(spawn, { child.give() }) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).only<SpawnFailed>().error == SpawnError::Unknown);
+        CHECK(h.spawner.requests.empty());
+    }));
+    h.run();
+}
+
+TEST_CASE("Signal reaches a held child, and never one reaped or released", "[keeper]")
+{
+    auto h = Harness {};
+    auto first = makePipe();
+    auto second = makePipe();
+    h.events.then(deliver({ spawnOf(1, first), spawnOf(2, second) }));
+    h.events.then(deliver({ frameOf(Signal { .session = 1, .signal = ChildSignal::Terminate }),
+                            frameOf(Signal { .session = 2, .signal = ChildSignal::Kill }),
+                            frameOf(Signal { .session = 99, .signal = ChildSignal::Kill }) }));
+    h.events.then(check([&] {
+        CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Terminate });
+        CHECK(h.signaller.to(FirstShell + 1) == std::vector { KeeperSignal::Kill });
+    }));
+    // The first is reaped, the second released: neither is signalled again.
+    h.events.then(deliver({ endOf(FirstShell, Killed),
+                            frameOf(Release { .session = 2, .graceMs = 60'000 }),
+                            frameOf(Signal { .session = 1, .signal = ChildSignal::Kill }),
+                            frameOf(Signal { .session = 2, .signal = ChildSignal::Kill }) }));
+    h.events.then(check([&] {
+        CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Terminate });
+        CHECK(h.signaller.to(FirstShell + 1) == std::vector { KeeperSignal::Kill });
+    }));
+    h.run();
+}
+
+TEST_CASE("a Signal read in the same wait as its shell's end reaches only the unreaped zombie", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    h.events.then(deliver({ spawnOf(1, child) }));
+    // As the event source orders one wait: the frames first, then the ends.
+    h.events.then(
+        deliver({ frameOf(Signal { .session = 1, .signal = ChildSignal::Kill }), endOf(FirstShell) }));
+    h.events.then(check([&] {
+        // Sent while the zombie held the pid (FakeSignaller checks it was not reaped yet), then reaped.
+        CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Kill });
+        CHECK(h.events.isReaped(FirstShell));
+    }));
+    h.events.then(deliver({ frameOf(Signal { .session = 1, .signal = ChildSignal::Kill }) }));
+    h.events.then(check([&] { CHECK(h.signaller.to(FirstShell) == std::vector { KeeperSignal::Kill }); }));
     h.run();
 }
 

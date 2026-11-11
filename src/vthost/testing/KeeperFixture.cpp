@@ -6,8 +6,11 @@
 #include <core/codec/Stream.hpp>
 #include <core/platform/Clock.hpp>
 
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <array>
 #include <csignal>
 #include <cstdlib>
@@ -27,11 +30,13 @@
 #include <utility>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <spawn.h>
 #include <unistd.h>
 
 #include <vthost/Daemon.hpp>
 #include <vthost/Transport.hpp>
+#include <vthost/keeper/DescriptorSocket.hpp>
 #include <vthost/keeper/KeeperProcess.hpp>
 #include <vthost/keeper/PosixPorts.hpp>
 #include <vthost/keeperlink/KeeperAttachment.hpp>
@@ -51,7 +56,33 @@ namespace
 {
     constexpr auto KeeperMode = std::string_view { "--keeper" };
     constexpr auto ServeMode = std::string_view { "--keeper-serve" };
-    constexpr auto FailsWord = std::string_view { "fails" };
+
+    /// How each HarnessStart is spelled on the harness keeper's command line.
+    struct StartWord
+    {
+        HarnessStart start;
+        std::string_view word;
+    };
+
+    constexpr auto StartWords = std::array {
+        StartWord { .start = HarnessStart::Serves, .word = "serves" },
+        StartWord { .start = HarnessStart::Fails, .word = "fails" },
+        StartWord { .start = HarnessStart::Relays, .word = "relays" },
+    };
+    static_assert(StartWords.size() == core::codec::EnumWire<HarnessStart>::Values.size());
+
+    /// @return How @p start is spelled.
+    [[nodiscard]] std::string_view wordOf(HarnessStart start)
+    {
+        return std::ranges::find(StartWords, start, &StartWord::start)->word;
+    }
+
+    /// @return What @p word spells; Serves for a word no start is spelled as.
+    [[nodiscard]] HarnessStart startOf(std::string_view word)
+    {
+        auto const row = std::ranges::find(StartWords, word, &StartWord::word);
+        return row != StartWords.end() ? row->start : HarnessStart::Serves;
+    }
 
     /// The status the harness daemon exits with when the handshake with its keeper failed.
     constexpr auto AttachFailureStatus = 2;
@@ -76,6 +107,51 @@ namespace
         return environment;
     }
 
+    /// @return A connected or listening AF_UNIX stream socket on @p path; none where it could not be made.
+    [[nodiscard]] keeper::UniqueFd unixSocket(std::string const& path,
+                                              int (*act)(int, sockaddr const*, socklen_t))
+    {
+        // Close-on-exec set after the fact: macOS has no SOCK_CLOEXEC.
+        auto socket = keeper::UniqueFd { ::socket(AF_UNIX, SOCK_STREAM, 0) };
+        auto address = sockaddr_un {};
+        address.sun_family = AF_UNIX;
+        if (!socket.isOpen() || ::fcntl(socket.get(), F_SETFD, FD_CLOEXEC) != 0
+            || path.size() >= sizeof(address.sun_path))
+            return {};
+        std::ranges::copy(path, std::begin(address.sun_path));
+        if (act(socket.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address)) != 0)
+            return {};
+        return socket;
+    }
+
+    /// The relaying daemon: hands its channel to the test listening on @p path, and lives until the test
+    /// closes the connection.
+    [[nodiscard]] int relayChannel(std::string const& path, keeperlink::KeeperAttachment attachment)
+    {
+        auto const connection = unixSocket(path, ::connect);
+        if (!connection.isOpen())
+        {
+            std::cerr << std::format("keeper-serve: cannot reach the test at {}\n", path);
+            return AttachFailureStatus;
+        }
+        auto const marker = std::array<uint8_t, 1> { 1 };
+        auto const runs = std::array { std::span<uint8_t const> { marker } };
+        auto const channel = std::array { attachment.channel.handle() };
+        if (!keeper::sendWithDescriptors(connection.get(), runs, channel))
+            return AttachFailureStatus;
+        // The test holds the channel now; this process holds none of it.
+        {
+            auto const handedOver = std::move(attachment);
+        }
+        auto byte = char {};
+        while (true)
+        {
+            auto const got = ::read(connection.get(), &byte, 1);
+            if (got == 0 || (got < 0 && errno != EINTR))
+                return 0;
+        }
+    }
+
     /// The daemon behind the keeper: the handshake on its channel, then runDaemon().
     [[nodiscard]] int serveBehindKeeper()
     {
@@ -96,6 +172,8 @@ namespace
         std::ofstream { launch.launchLog, std::ios::app } << ::getpid() << '\n';
         if (launch.start == HarnessStart::Fails)
             return HarnessStartFailureStatus;
+        if (launch.start == HarnessStart::Relays)
+            return relayChannel(launch.socketPath, *std::move(attachment));
 
         auto config = DaemonConfig {};
         config.socketPath = launch.socketPath;
@@ -108,16 +186,20 @@ namespace
                                         std::string_view launchLog,
                                         std::string_view start)
     {
-        auto const launch =
-            HarnessLaunch { .socketPath = std::string { socket },
-                            .launchLog = std::string { launchLog },
-                            .start = start == FailsWord ? HarnessStart::Fails : HarnessStart::Serves };
+        auto const launch = HarnessLaunch { .socketPath = std::string { socket },
+                                            .launchLog = std::string { launchLog },
+                                            .start = startOf(start) };
         auto writer = core::codec::Writer {};
         core::codec::encodeFields(writer, launch);
         auto const ran = keeper::runKeeperProcess(keeper::KeeperProcessConfig {
             .daemonImage = ownExecutable(),
             .daemonArguments = { std::string { ServeMode } },
-            .environment = processEnvironment(),
+            .environment =
+                [] {
+                    auto environment = processEnvironment();
+                    environment.push_back(std::format("{}=1", KeeperOnlyVariable));
+                    return environment;
+                }(),
             .socketPath = std::filesystem::path { std::string { socket } },
             .launchOptions = std::move(writer).take(),
             .policy = {},
@@ -205,10 +287,17 @@ KeeperFixture::KeeperFixture(HarnessStart start):
     _socket { _directory / "control" },
     _launchLog { _directory / "launches" },
     _output { _directory / "output" },
+    _relayListener { start == HarnessStart::Relays ? unixSocket(_socket.string(), ::bind)
+                                                   : keeper::UniqueFd {} },
     _keeper { spawnKeeper(start) }
 {
     if (start == HarnessStart::Fails)
         return;
+    if (start == HarnessStart::Relays)
+    {
+        acceptRelay();
+        return;
+    }
     auto const deadline = std::chrono::steady_clock::now() + StartBound;
     while (daemonPid() == 0)
     {
@@ -228,8 +317,39 @@ KeeperFixture::~KeeperFixture()
     end(Ending::Orderly);
 }
 
+void KeeperFixture::acceptRelay()
+{
+    auto const fail = [this](std::string_view what) {
+        auto const output = log();
+        end(Ending::AtOnce);
+        throw std::runtime_error { std::format("the keeper's relaying daemon {}:\n{}", what, output) };
+    };
+    // Waits for @p fd to turn readable within the start bound.
+    auto const readable = [](int fd) {
+        auto poller = ::pollfd { .fd = fd, .events = POLLIN, .revents = 0 };
+        auto const bound = std::chrono::duration_cast<std::chrono::milliseconds>(StartBound).count();
+        return ::poll(&poller, 1, static_cast<int>(bound)) == 1;
+    };
+    if (!_relayListener.isOpen() || ::listen(_relayListener.get(), 1) != 0)
+        fail("has nowhere to connect to");
+    if (!readable(_relayListener.get()))
+        fail("did not connect");
+    _relay = keeper::UniqueFd { ::accept(_relayListener.get(), nullptr, nullptr) };
+    if (!_relay.isOpen() || !readable(_relay.get()))
+        fail("did not hand over its channel");
+    auto buffer = std::array<uint8_t, 1> {};
+    auto received = keeper::receiveWithDescriptors(_relay.get(), buffer);
+    if (!received || received->fds.size() != 1)
+        fail("handed over no channel");
+    _channel = keeper::UniqueFd { received->fds.front() };
+}
+
 void KeeperFixture::end(Ending ending)
 {
+    // A relaying daemon ends once the test lets it go; with nowhere to connect to, a restarted one ends too.
+    _relayListener.reset();
+    _relay.reset();
+    _channel.reset();
     if (_keeperState == KeeperState::Running)
     {
         if (ending == Ending::Orderly)
@@ -266,8 +386,7 @@ int KeeperFixture::spawnKeeper(HarnessStart start) const
     auto const image = ownExecutable().string();
     auto const socket = _socket.string();
     auto const launchLog = _launchLog.string();
-    auto const startWord =
-        std::string { start == HarnessStart::Fails ? FailsWord : std::string_view { "serves" } };
+    auto const startWord = std::string { wordOf(start) };
     auto arguments =
         std::array<std::string, 5> { image, std::string { KeeperMode }, socket, launchLog, startWord };
     auto argv = std::array<char*, 6> {};

@@ -14,9 +14,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/keeper/UniqueFd.hpp>
 
 namespace vthost::testing
 {
@@ -26,6 +28,10 @@ enum class HarnessStart : uint8_t
 {
     Serves = 0, ///< It serves, as a configured daemon does.
     Fails,      ///< It ends before serving, as a daemon with an invalid configuration does.
+    /// It hands its channel to the test (KeeperFixture::takeChannel()), which plays the daemon from then on,
+    /// and lives until the test lets it go: the keeper's daemon in name, so that the test's own process
+    /// spawns through the keeper as a daemon would.
+    Relays,
 };
 
 } // namespace vthost::testing
@@ -36,6 +42,7 @@ struct core::codec::EnumWire<vthost::testing::HarnessStart>
     static constexpr auto Values = std::array {
         vthost::testing::HarnessStart::Serves,
         vthost::testing::HarnessStart::Fails,
+        vthost::testing::HarnessStart::Relays,
     };
 };
 
@@ -46,6 +53,10 @@ namespace vthost::testing
 /// among the reasons).
 inline constexpr int HarnessKeeperStartFailureStatus = 70;
 
+/// A variable the harness keeper adds to the environment it runs its children under (its daemon and every
+/// spawn trampoline), and that the test process never has: a program a keeper spawns must not see it.
+inline constexpr auto KeeperOnlyVariable = std::string_view { "CONTOUR_KEEPER_HARNESS_ONLY" };
+
 /// The status the harness daemon exits with when told to fail its start.
 inline constexpr int HarnessStartFailureStatus = 3;
 
@@ -53,8 +64,9 @@ inline constexpr int HarnessStartFailureStatus = 3;
 /// daemon`'s DaemonLaunch is.
 struct HarnessLaunch
 {
-    std::string socketPath; ///< The daemon's control socket.
-    std::string launchLog;  ///< The file each daemon process appends its pid to, as it starts.
+    std::string
+        socketPath;        ///< The daemon's control socket; for HarnessStart::Relays, where the test listens.
+    std::string launchLog; ///< The file each daemon process appends its pid to, as it starts.
     HarnessStart start = HarnessStart::Serves;
 
     /// Lists the fields.
@@ -82,8 +94,9 @@ struct HarnessLaunch
 class KeeperFixture
 {
   public:
-    /// Starts the keeper and, for HarnessStart::Serves, waits until its daemon serves.
-    /// @param start Whether the daemon serves.
+    /// Starts the keeper and, for HarnessStart::Serves, waits until its daemon serves; for
+    /// HarnessStart::Relays, until its daemon handed over its channel.
+    /// @param start Whether the daemon serves, fails, or relays.
     explicit KeeperFixture(HarnessStart start = HarnessStart::Serves);
     KeeperFixture(KeeperFixture const&) = delete;
     KeeperFixture& operator=(KeeperFixture const&) = delete;
@@ -102,6 +115,12 @@ class KeeperFixture
 
     /// @return A control client of the daemon.
     [[nodiscard]] std::unique_ptr<client::DaemonControlPort> client() const;
+
+    /// For HarnessStart::Relays: the keeper's channel, past Hello and Launch, for the test to play the daemon
+    /// on. It says Serving first, or the keeper takes its daemon for one that never started; and Shutdown
+    /// before it closes the channel, or the keeper takes it for a crash.
+    /// @return The channel, once; none after.
+    [[nodiscard]] keeper::UniqueFd takeChannel() noexcept { return std::move(_channel); }
 
     /// @return The daemon's control socket.
     [[nodiscard]] std::filesystem::path const& socketPath() const noexcept { return _socket; }
@@ -149,8 +168,14 @@ class KeeperFixture
         Reaped,
     };
 
+    keeper::UniqueFd _relayListener; ///< For HarnessStart::Relays: where the daemon hands its channel over.
+    keeper::UniqueFd _relay;         ///< Its connection: closing it lets the daemon end.
+    keeper::UniqueFd _channel;       ///< The channel it handed over, until taken.
     int _keeper = 0;
     KeeperState _keeperState = KeeperState::Running;
+
+    /// For HarnessStart::Relays: accepts the daemon's connection and receives its channel.
+    void acceptRelay();
 };
 
 } // namespace vthost::testing

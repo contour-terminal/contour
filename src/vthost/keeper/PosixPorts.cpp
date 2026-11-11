@@ -17,6 +17,7 @@
 #include <cstring>
 #include <deque>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -289,9 +290,10 @@ namespace
     /// How a forked child names its program to the kernel.
     enum class ExecBy : uint8_t
     {
-        Path = 0,   ///< execve(path): a shell, which may be a `#!` script.
+        Path = 0,   ///< execve(path): a program named by path, which may be a `#!` script.
         Descriptor, ///< execveat(fd, "", AT_EMPTY_PATH) on the program opened before the fork (Linux; the
-                    ///< daemon image, always ELF). A script cannot run so: its descriptor is close-on-exec.
+                    ///< daemon image, or the spawn trampoline the daemon sent, always ELF). A script cannot
+                    ///< run so: its descriptor is close-on-exec.
     };
 
     /// What a child is started as.
@@ -303,6 +305,9 @@ namespace
         std::span<int const> targets;
         ParentDeath parentDeath = ParentDeath::Survive;
         ExecBy execBy = ExecBy::Path;
+        /// For ExecBy::Descriptor: the program, opened already (it stays the caller's); none to open the
+        /// path.
+        std::optional<int> executable = std::nullopt;
     };
 
     /// The pipe a forked child reports a failed exec through.
@@ -331,10 +336,17 @@ namespace
         /// @return The child's pid; or why it does not run.
         [[nodiscard]] std::expected<pid_t, SpawnError> start(ChildRequest request) const
         {
+            auto const opened = request.execBy == ExecBy::Descriptor && !request.executable
+                                    ? openExecutable(request.path)
+                                    : UniqueFd {};
             auto const executable =
-                request.execBy == ExecBy::Descriptor ? openExecutable(request.path) : UniqueFd {};
+                request.execBy == ExecBy::Descriptor ? request.executable.value_or(opened.get()) : -1;
 #ifdef __linux__
-            if (request.execBy == ExecBy::Descriptor && !executable.isOpen())
+            if (request.execBy == ExecBy::Descriptor && executable < 0)
+                return std::unexpected { SpawnError::ExecutableUnusable };
+#else
+            // No execveat() here: only a path can be run.
+            if (request.executable)
                 return std::unexpected { SpawnError::ExecutableUnusable };
 #endif
             auto errorPipe = makeErrorPipe();
@@ -347,7 +359,7 @@ namespace
             auto moved = std::vector<int>(request.sources.size(), -1);
             auto const plan = ChildPlan {
                 .path = request.path.c_str(),
-                .executable = executable.get(),
+                .executable = executable,
                 .argv = argv.data(),
                 .envp = _envp.data(),
                 .sources = request.sources,
@@ -697,7 +709,8 @@ namespace
         }
 
         [[nodiscard]] std::expected<SpawnedChild, SpawnError> spawn(Spawn const& request,
-                                                                    std::span<int const> descriptors) override
+                                                                    std::span<int const> descriptors,
+                                                                    std::optional<int> executable) override
         {
             if (request.argv.empty() || descriptors.size() != request.childFds.size())
                 return std::unexpected { SpawnError::Unknown };
@@ -713,7 +726,8 @@ namespace
                                               .sources = descriptors,
                                               .targets = targets,
                                               .parentDeath = ParentDeath::Survive,
-                                              .execBy = ExecBy::Path });
+                                              .execBy = executable ? ExecBy::Descriptor : ExecBy::Path,
+                                              .executable = executable });
             if (!pid)
                 return std::unexpected { pid.error() };
             return SpawnedChild { .pid = *pid, .processHandle = openProcessHandle(*pid, _watch) };
@@ -896,13 +910,18 @@ namespace
                           [&](WatchedChannel const& watched) { return watched.channel == &channel; });
         }
 
-        void watchPid(int pid, Reaping reaping) override
+        void watchPid(WatchedProcess process) override
         {
-            auto handle = openProcessHandle(pid, _watch);
-            if (!handle.isOpen())
+            // The spawn's pidfd where it opened one: one pidfd per child, not two.
+            auto owned = process.processHandle >= 0 ? UniqueFd {} : openProcessHandle(process.pid, _watch);
+            auto const handle = process.processHandle >= 0 ? process.processHandle : owned.get();
+            if (handle < 0)
                 _isFallbackUnchecked = true; // It may have ended before SIGCHLD was looked for.
-            _pids.push_back(
-                { .pid = pid, .reaping = reaping, .handle = std::move(handle), .end = Report::Pending });
+            _pids.push_back({ .pid = process.pid,
+                              .role = process.role,
+                              .owned = std::move(owned),
+                              .handle = handle,
+                              .end = Report::Pending });
         }
 
         void reap(int pid) override
@@ -929,7 +948,7 @@ namespace
                                     .revents = 0 });
             }
             for (auto const& watched: _pids | std::views::filter(&WatchedPid::isPolled))
-                pollSet.push_back({ .fd = watched.handle.get(), .events = POLLIN, .revents = 0 });
+                pollSet.push_back({ .fd = watched.handle, .events = POLLIN, .revents = 0 });
 
             auto const ready = ::poll(pollSet.data(), pollSet.size(), timeoutUntil(deadline));
             if (ready < 0)
@@ -948,6 +967,7 @@ namespace
             // Which processes ended, first: their channels are then read to the end before the ends are
             // reported (@see EventSource).
             auto ended = std::vector<Event> {};
+            auto drain = PosixChannel::Drain::Bounded;
             auto const revents = [&](int fd) {
                 auto const found = std::ranges::find(pollSet, fd, &::pollfd::fd);
                 return found != pollSet.end() ? found->revents : short { 0 };
@@ -956,20 +976,22 @@ namespace
             {
                 if (watched.end == Report::Reported)
                     continue;
-                if (watched.handle.isOpen() ? revents(watched.handle.get()) != 0 : childSignalled)
+                if (watched.handle >= 0 ? revents(watched.handle) != 0 : childSignalled)
                     if (auto status = endOf(watched))
+                    {
                         ended.push_back({ .kind = EventKind::Ended,
                                           .frame = std::nullopt,
                                           .pid = watched.pid,
                                           .status = *status,
                                           .generation = {} });
+                        // Only the daemon's end reads its channel to the end: a shell's leaves the read
+                        // bounded, so that a daemon writing on cannot hold the keeper in this wait.
+                        if (watched.role == WatchedRole::Daemon)
+                            drain = PosixChannel::Drain::ToEnd;
+                    }
             }
-            std::erase_if(_pids, [](WatchedPid const& watched) {
-                return watched.end == Report::Reported && watched.reaping == Reaping::OnEnd;
-            });
 
             auto events = std::vector<Event> {};
-            auto const drain = ended.empty() ? PosixChannel::Drain::Bounded : PosixChannel::Drain::ToEnd;
             for (auto& watched: _channels | std::views::filter(&WatchedChannel::isOpen))
             {
                 auto const flags = revents(watched.channel->pollHandle());
@@ -1032,11 +1054,12 @@ namespace
         struct WatchedPid
         {
             int pid = 0;
-            Reaping reaping = Reaping::OnEnd;
-            UniqueFd handle; ///< Its pidfd; none where it is watched through SIGCHLD.
+            WatchedRole role = WatchedRole::Session;
+            UniqueFd owned;  ///< The pidfd opened here; none where the spawn's is borrowed, or there is none.
+            int handle = -1; ///< Its pidfd, owned or borrowed; -1 where it is watched through SIGCHLD.
             Report end = Report::Pending;
 
-            [[nodiscard]] bool isPolled() const noexcept { return end == Report::Pending && handle.isOpen(); }
+            [[nodiscard]] bool isPolled() const noexcept { return end == Report::Pending && handle >= 0; }
         };
 
         /// @return The poll() timeout that ends at @p deadline, rounded up to whole milliseconds; 0 when a
@@ -1052,18 +1075,18 @@ namespace
             return static_cast<int>(std::clamp<std::chrono::milliseconds::rep>(left.count(), 0, INT_MAX));
         }
 
-        /// Looks whether @p watched ended; reaps it unless the keeper does (Reaping::ByKeeper).
+        /// Looks whether @p watched ended, leaving it a zombie for the keeper to reap (reap()).
         /// @return How it ended; or nothing while it runs.
         [[nodiscard]] std::optional<WireExitStatus> endOf(WatchedPid& watched) const
         {
-            auto const options = WEXITED | WNOHANG | (watched.reaping == Reaping::ByKeeper ? WNOWAIT : 0);
+            auto const options = WEXITED | WNOHANG | WNOWAIT;
             auto info = siginfo_t {};
             auto result = 0;
             do
             {
 #ifdef __linux__
-                result = watched.handle.isOpen()
-                             ? ::waitid(PidfdIdType, static_cast<id_t>(watched.handle.get()), &info, options)
+                result = watched.handle >= 0
+                             ? ::waitid(PidfdIdType, static_cast<id_t>(watched.handle), &info, options)
                              : ::waitid(P_PID, static_cast<id_t>(watched.pid), &info, options);
 #else
                 result = ::waitid(P_PID, static_cast<id_t>(watched.pid), &info, options);
@@ -1080,8 +1103,6 @@ namespace
             if (info.si_pid == 0 || !hasEnded(info))
                 return std::nullopt;
             watched.end = Report::Reported;
-            if (watched.reaping == Reaping::OnEnd)
-                watched.handle.reset();
             return exitStatusOf(info);
         }
 

@@ -71,6 +71,23 @@ struct SpawnedChild
     UniqueFd processHandle; ///< Its pidfd where the platform has one; none otherwise.
 };
 
+/// Whose process a watched one is.
+enum class WatchedRole : uint8_t
+{
+    Session = 0, ///< A shell the keeper forked for the daemon.
+    Daemon,      ///< The daemon, whose channel holds what it wrote before it ended.
+};
+
+/// A process for EventSource::watchPid().
+struct WatchedProcess
+{
+    int pid = 0;
+    WatchedRole role = WatchedRole::Session;
+    /// Its pidfd, where its spawn opened one (SpawnedChild::processHandle): borrowed, so that no second one
+    /// is opened beside it, and kept open by its owner until reap(). -1 to have the event source open one.
+    int processHandle = -1;
+};
+
 /// Forks the shells the daemon asks for.
 class ShellSpawner
 {
@@ -80,11 +97,14 @@ class ShellSpawner
     /// Forks and execs the child @p request describes.
     /// @param request     The daemon's Spawn.
     /// @param descriptors The child's descriptors: descriptors[n] becomes child descriptor
-    /// request.childFds[n].
-    ///                    They stay the caller's; the spawner closes none of them in this process.
+    ///                    request.childFds[n]. They stay the caller's; the spawner closes none of them in
+    ///                    this process.
+    /// @param executable  The executable, for ExecutableSource::Descriptor; nullopt to run
+    ///                    request.executablePath. It stays the caller's.
     /// @return The child, or why it could not be started.
     [[nodiscard]] virtual std::expected<SpawnedChild, SpawnError> spawn(Spawn const& request,
-                                                                        std::span<int const> descriptors) = 0;
+                                                                        std::span<int const> descriptors,
+                                                                        std::optional<int> executable) = 0;
 };
 
 /// What woke the keeper.
@@ -92,9 +112,9 @@ enum class EventKind : uint8_t
 {
     Frame = 0,     ///< A frame arrived on the daemon's channel.
     ChannelClosed, ///< The daemon's channel ended, or broke.
-    Ended,         ///< A watched process ended: reaped already, or kept as a zombie (@see Reaping).
-    StopSignal,    ///< The keeper was asked to stop (SIGTERM, SIGINT, SIGHUP, the console-control event).
-    Timer,         ///< The deadline passed.
+    Ended, ///< A watched process ended; it is a zombie until the keeper reaps it (@see EventSource::reap).
+    StopSignal, ///< The keeper was asked to stop (SIGTERM, SIGINT, SIGHUP, the console-control event).
+    Timer,      ///< The deadline passed.
 };
 
 /// Which daemon process a channel belongs to; minted by the keeper per launch, never reused. Zero is none.
@@ -110,13 +130,6 @@ struct Event
     int pid = 0;                    ///< For Ended: the process.
     WireExitStatus status {};       ///< For Ended: how it ended.
     DaemonGeneration generation {}; ///< For Frame and ChannelClosed: whose channel it came from.
-};
-
-/// Who reaps a watched process.
-enum class Reaping : uint8_t
-{
-    OnEnd = 0, ///< The event source reaps it and reports Ended in the same wait() (the shells).
-    ByKeeper, ///< The event source reports Ended but leaves the zombie; the keeper calls reap() (the daemon).
 };
 
 /// The keeper's one wait: on the daemon's channel, its children and its stop signals.
@@ -135,16 +148,20 @@ class EventSource
     /// Stops reporting @p channel; called before the keeper destroys it.
     virtual void unwatchChannel(Channel& channel) = 0;
 
-    /// Reports @p pid's end, by pid, pidfd or kqueue -- never `waitpid(-1)`.
+    /// Reports a process's end, by pid, pidfd or kqueue -- never `waitpid(-1)`.
     ///
-    /// With Reaping::ByKeeper the exit status is read without reaping (`waitid(WNOWAIT)`, a pidfd): the
-    /// zombie is what keeps the pid from being reused while the keeper may still signal it. The keeper reaps
-    /// it with reap() once it has judged the exit and will send it nothing more. With Reaping::OnEnd the
-    /// process is reaped and its Ended is reported by the same wait(), before the keeper can signal it again.
-    virtual void watchPid(int pid, Reaping reaping) = 0;
+    /// The exit status is read without reaping (`waitid(WNOWAIT)`, a pidfd): the zombie is what keeps the pid
+    /// from being reused while the keeper may still signal it -- a signal handled from a frame of the same
+    /// wait() as the Ended, but before it, finds the zombie, never another process. The keeper reaps it with
+    /// reap() once it has handled the Ended and will send it nothing more.
+    ///
+    /// The daemon's end is what reads its channel to the end in the wait that reports it (@see Event); a
+    /// shell's end leaves that read bounded.
+    /// @param process The process, its role, and the pidfd its spawn opened, if one did.
+    virtual void watchPid(WatchedProcess process) = 0;
 
-    /// Reaps @p pid, watched with Reaping::ByKeeper and reported Ended. Called once per such process, after
-    /// the last signal the keeper sends it.
+    /// Reaps @p pid, watched and reported Ended. Called once per such process, after the last signal the
+    /// keeper sends it.
     virtual void reap(int pid) = 0;
 
     /// Waits for anything to happen, or for @p deadline.

@@ -59,6 +59,7 @@ KeeperOutcome Keeper::run()
         auto const deadline = nextDeadline();
         auto events = _ports.events.wait(deadline);
         forgiveOwnStop(deadline);
+        _descriptorsLeft.reset();
         for (auto& event: events)
             onEvent(std::move(event));
         onTimers();
@@ -102,7 +103,8 @@ void Keeper::launchDaemon(LaunchContinuity continuity)
     };
     _ports.events.watchChannel(*_daemon->channel, _daemon->generation);
     // The keeper reaps the daemon itself, after its last signal: until then its zombie holds the pid.
-    _ports.events.watchPid(_daemon->pid, Reaping::ByKeeper);
+    _ports.events.watchPid(
+        WatchedProcess { .pid = _daemon->pid, .role = WatchedRole::Daemon, .processHandle = -1 });
     send(Hello {});
     send(Launch { .continuity = continuity, .options = _launchOptions });
 }
@@ -122,7 +124,11 @@ void Keeper::onEnded(int pid, WireExitStatus status)
     }
 
     auto const session = _sessions.reap(pid, status);
-    if (session && session->fate == ReapedFate::Kept && linked())
+    if (!session)
+        return; // no process the keeper watches
+    // The table no longer offers it to be signalled (SessionTable::signallableChild()): its pid may go.
+    _ports.events.reap(pid);
+    if (session->fate == ReapedFate::Kept && linked())
         send(Exited { .session = std::to_underlying(session->id), .status = status });
 }
 
@@ -530,10 +536,16 @@ std::expected<Keeper::SpawnedSession, SpawnError> Keeper::spawnSession(Spawn con
     if (!takesIntake())
         return std::unexpected { SpawnError::ShuttingDown };
     auto const childCount = message.childFds.size();
-    if (fds.size() != childCount + message.kept.size())
+    auto const executableCount = message.executable == ExecutableSource::Descriptor ? 1U : 0U;
+    if (fds.size() != childCount + message.kept.size() + executableCount)
         return std::unexpected { SpawnError::Unknown };
-    // The child's pidfd is the one more descriptor a spawn keeps open here.
-    if (_ports.budget.available() < SpawnDescriptorReserve + 1)
+    auto const executable = message.executable == ExecutableSource::Descriptor
+                                ? std::optional { fds.back().get() }
+                                : std::nullopt;
+    // The child's pidfd is the one more descriptor a spawn keeps open here: what it was sent is open already.
+    if (!_descriptorsLeft)
+        _descriptorsLeft = _ports.budget.available();
+    if (*_descriptorsLeft < SpawnDescriptorReserve + 1)
         return std::unexpected { SpawnError::TooManyDescriptors };
 
     auto descriptors = SessionTable::Descriptors {};
@@ -547,14 +559,18 @@ std::expected<Keeper::SpawnedSession, SpawnError> Keeper::spawnSession(Spawn con
 
     auto const childDescriptors = std::ranges::to<std::vector>(fds | std::views::take(childCount)
                                                                | std::views::transform(&UniqueFd::get));
-    auto spawned = _ports.spawner.spawn(message, childDescriptors);
+    auto spawned = _ports.spawner.spawn(message, childDescriptors, executable);
     if (!spawned)
         return std::unexpected { spawned.error() };
 
-    // A shell is signalled only by a timer, after the wait that would have reported its end: safe to reap at
-    // once.
-    _ports.events.watchPid(spawned->pid, Reaping::OnEnd);
+    // Reaped by the keeper as its Ended is handled (onEnded()): until then its zombie holds the pid, so that
+    // a Signal handled from the same wait() before the Ended never reaches another process. Watched by the
+    // pidfd the spawn opened, which the session table keeps open until then (SessionTable::release()).
     auto const processHandle = spawned->processHandle.get();
+    _ports.events.watchPid(
+        WatchedProcess { .pid = spawned->pid, .role = WatchedRole::Session, .processHandle = processHandle });
+    if (spawned->processHandle.isOpen())
+        --*_descriptorsLeft;
     descriptors[slotOf(KeptDescriptor::ProcessHandle)] = std::move(spawned->processHandle);
     return SpawnedSession { .id = _sessions.add(spawned->pid, std::move(descriptors)),
                             .pid = spawned->pid,
@@ -619,6 +635,19 @@ void Keeper::handle(Shutdown const& /*message*/, std::vector<UniqueFd>& /*fds*/)
     _listeners.clear();
     _daemon->state = DaemonEndState::ShutdownAnnounced;
     earliest(_daemon->killAt, now() + DaemonExitBound);
+}
+
+void Keeper::handle(Signal const& message, std::vector<UniqueFd>& /*fds*/)
+{
+    // Never a child reaped already: its pid may name another process by now.
+    auto const pid = _sessions.signallableChild(KeeperSessionId { message.session });
+    if (!pid)
+        return;
+    switch (message.signal)
+    {
+        case ChildSignal::Terminate: _ports.signaller.send(*pid, KeeperSignal::Terminate); break;
+        case ChildSignal::Kill: _ports.signaller.send(*pid, KeeperSignal::Kill); break;
+    }
 }
 
 // }}}

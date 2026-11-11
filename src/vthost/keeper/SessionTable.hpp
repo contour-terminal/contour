@@ -52,8 +52,9 @@ struct InventoryEntry
 /// it, and its exit while the daemon has not let it go.
 ///
 /// A session is forgotten only when both sides are done with it: the daemon released it and its child was
-/// reaped. Releasing closes the kept descriptors (the hang-up) and names when the child is killed if it has
-/// not ended by then.
+/// reaped. Releasing closes the kept descriptors (the hang-up) but the child's pidfd, which the keeper's
+/// event source watches the child by until it is reaped (EventSource::watchPid()), and names when the child
+/// is killed if it has not ended by then.
 class SessionTable
 {
   public:
@@ -68,12 +69,18 @@ class SessionTable
     /// The daemon placed the session's pane: closes the gate. Unknown ids are ignored.
     void place(KeeperSessionId id);
 
-    /// The daemon let the session go: closes its descriptors; the child is killed at @p killAt unless it was
-    /// reaped by then. Unknown ids are ignored.
+    /// The daemon let the session go: closes its descriptors but the pidfd; the child is killed at @p killAt
+    /// unless it was reaped by then. Unknown ids are ignored.
     void release(KeeperSessionId id, core::platform::SteadyTimePoint killAt);
 
     /// Releases every session, as release() does, killing none earlier than it would already be.
     void releaseAll(core::platform::SteadyTimePoint killAt);
+
+    /// @param id A session.
+    /// @return Its child, while the daemon holds the session and the child was not reaped: the one time it
+    /// may
+    ///         be signalled. Nothing otherwise.
+    [[nodiscard]] std::optional<int> signallableChild(KeeperSessionId id) const;
 
     /// A child ended.
     /// @param pid The child. @param status How it ended.

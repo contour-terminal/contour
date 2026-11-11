@@ -2,6 +2,7 @@
 #include <vtpty/CommandLine.hpp>
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
+#include <vtpty/PreparedSpawn.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
@@ -219,57 +220,76 @@ ProgramHost Process::programHost(SandboxEscape escape)
     return programHostFor(currentSandbox().state, escape);
 }
 
-StartResult Process::start()
+SpawnProgress settleProgressOf(OwnedFd& settle) noexcept
 {
-    if (_d->origin == Private::Origin::Adopted)
-        return {}; // Running already, on a PTY that is open.
+    if (!settle.isOpen())
+        return SpawnProgress::Settled;
+    auto pollFd = pollfd { .fd = settle.get(), .events = POLLIN, .revents = 0 };
+    auto ready = 0;
+    while ((ready = ::poll(&pollFd, 1, 0)) < 0 && errno == EINTR)
+        ;
+    if (ready == 0)
+        return SpawnProgress::InProgress;
+    settle.reset();
+    return SpawnProgress::Settled;
+}
 
-    if (auto started = _d->pty->start(); !started)
-        return started;
-
-    auto const descriptors = _d->pty->spawnDescriptors();
+std::expected<PreparedSpawn, StartFailure> prepareTrampolineSpawn(Pty& startedPty,
+                                                                  Process::ExecInfo const& exec,
+                                                                  SandboxEscape escape,
+                                                                  std::optional<int> childOomScoreAdjust)
+{
+    auto const spawnFailure = [](std::string detail) {
+        return std::unexpected(
+            StartFailure { .error = StartError::SpawnFailed, .detail = std::move(detail) });
+    };
+    auto const descriptors = startedPty.spawnDescriptors();
     if (!descriptors)
-        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
-                                              .detail = "The terminal is not a Unix pseudo terminal." });
+        return spawnFailure("The terminal is not a Unix pseudo terminal.");
     auto const hasStdoutFastPipe = descriptors->stdoutFastPipeWriter.has_value();
 
     // When escaping the sandbox, flatpak-spawn is handed the variables as --env= arguments and the
     // child keeps our environment untouched.
-    auto const host = programHost(sandboxEscapeFromConfig(_d->escapeSandbox));
+    auto const host = Process::programHost(escape);
     auto const passesOwnEnvironment = host == ProgramHost::ThisMachine;
 
-    // The environment is assembled here, so that the trampoline can install it as it is.
-    auto childEnvironment = [hasStdoutFastPipe, passesOwnEnvironment, this]() -> vector<string> {
-        if (!passesOwnEnvironment)
-            return {};
-
-        auto overrides = Environment {};
-        if (isFlatpak())
-            overrides["TERMINFO"] = "/app/share/terminfo";
-        for (auto const& [name, value]: _d->env)
-            overrides[name] = value;
-        if (hasStdoutFastPipe)
-            overrides[string { StdoutFastPipeEnvironmentName }] = std::to_string(StdoutFastPipeFd);
+    // The environment is assembled here, so that the trampoline can install it as it is -- and always, so
+    // that a trampoline another process forks (the PTY keeper) runs the program under this one's.
+    auto childEnvironment = [&]() -> vector<string> {
+        auto overrides = Process::Environment {};
+        auto removed = vector<string> {};
+        if (passesOwnEnvironment)
+        {
+            if (Process::isFlatpak())
+                overrides["TERMINFO"] = "/app/share/terminfo";
+            for (auto const& [name, value]: exec.env)
+                overrides[name] = value;
+            if (hasStdoutFastPipe)
+                overrides[string { StdoutFastPipeEnvironmentName }] = std::to_string(StdoutFastPipeFd);
+            removed = exec.removedEnvironment;
+        }
         return buildEnvironmentBlock(
-            inheritedEnvironment(), overrides, _d->removedEnvironment, EnvironmentNames::CaseSensitive);
+            inheritedEnvironment(), overrides, removed, EnvironmentNames::CaseSensitive);
     }();
 
     // What runs: the program as configured -- or, where it names no program but holds whitespace
     // ("bash -l"), the command line it spells -- looked up on the PATH the child execs with, a relative
     // path in the directory the child changes to before it execs; looked up nowhere when flatpak-spawn
     // runs it on the host (programsFor()).
-    auto const searchPath = string {
-        environmentValue(childEnvironment, "PATH", EnvironmentNames::CaseSensitive).value_or(string_view {})
-    };
+    auto const searchPath =
+        passesOwnEnvironment
+            ? string { environmentValue(childEnvironment, "PATH", EnvironmentNames::CaseSensitive)
+                           .value_or(string_view {}) }
+            : string {};
     auto const invocation = invocationToRun(
-        _d->path,
-        _d->args,
+        exec.program,
+        exec.arguments,
         programsFor(host,
                     ProgramSearch { .path = searchPath,
-                                    .workingDirectory = _d->cwd,
+                                    .workingDirectory = exec.workingDirectory,
                                     .fileSystem = core::platform::NativeFileSystem::instance() }));
 
-    auto childArgv = [hasStdoutFastPipe, host, &invocation, this]() -> vector<string> {
+    auto childArgv = [&]() -> vector<string> {
         if (host == ProgramHost::ThisMachine)
         {
             auto args = vector<string> { invocation.program };
@@ -277,7 +297,8 @@ StartResult Process::start()
             return args;
         }
 
-        auto const terminfoBaseDirectory = homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
+        auto const terminfoBaseDirectory =
+            Process::homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
 
         // Prepend flatpak to jump out of sandbox:
         // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
@@ -291,10 +312,10 @@ StartResult Process::start()
             realArgs.emplace_back(
                 std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
         }
-        if (!_d->cwd.empty())
-            realArgs.emplace_back(std::format("--directory={}", _d->cwd.generic_string()));
+        if (!exec.workingDirectory.empty())
+            realArgs.emplace_back(std::format("--directory={}", exec.workingDirectory.generic_string()));
         realArgs.emplace_back(std::format("--env=TERM={}", "contour"));
-        for (auto&& [name, value]: _d->env)
+        for (auto&& [name, value]: exec.env)
             realArgs.emplace_back(std::format("--env={}={}", name, value));
         if (hasStdoutFastPipe)
             realArgs.emplace_back(
@@ -310,33 +331,76 @@ StartResult Process::start()
     // its terminal is set up. @see Process::spawnProgress()
     auto settle = makeGate();
     if (!settle)
-        return std::unexpected(
-            StartFailure { .error = StartError::SpawnFailed, .detail = settle.error().message() });
+        return spawnFailure(settle.error().message());
+    // The gate parks the program between its spawn and its exec() until the placement has moved it into its
+    // own resource domain, so everything it forks from then on is born there too. @see ProcessPlacement.
+    auto gate = makeGate();
+    if (!gate)
+        return spawnFailure(gate.error().message());
 
     auto spec = SpawnSpec {
         .argv = std::move(childArgv),
         .lookup = ExecLookup::SearchPath,
-        .environment = passesOwnEnvironment ? std::optional { std::move(childEnvironment) } : std::nullopt,
+        .environment = std::move(childEnvironment),
         .launch =
             TerminalLaunch {
                 // The login shell the trampoline falls back to where the program cannot be executed.
-                .fallbackArgv = loginShell(_d->escapeSandbox),
-                .workingDirectory = passesOwnEnvironment ? _d->cwd.generic_string() : string {},
-                .controllingTerminal = isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire,
+                .fallbackArgv = Process::loginShell(escape == SandboxEscape::Escapes),
+                .workingDirectory = passesOwnEnvironment ? exec.workingDirectory.generic_string() : string {},
+                .controllingTerminal =
+                    Process::isFlatpak() ? ControllingTerminal::Skip : ControllingTerminal::Acquire,
                 .terminalSettings = TerminalSettings::Configure,
                 .failureReport = FailureReport::OnTerminal,
                 .failureExit = FailureExit::Failure,
             },
     };
+    spec.oomScoreAdjust = childOomScoreAdjust;
     auto fds = vector<InheritedFd> {
+        { .slot = TrampolineSlot::Gate, .fd = gate->childEnd.get() },
         { .slot = TrampolineSlot::Settle, .fd = settle->childEnd.get() },
         { .slot = TrampolineSlot::Terminal, .fd = descriptors->terminal },
     };
     if (descriptors->stdoutFastPipeWriter)
         fds.push_back({ .slot = TrampolineSlot::FastPipe, .fd = *descriptors->stdoutFastPipeWriter });
 
-    auto const spawned = spawnPlaced(
-        std::move(spec), fds, *_d->placement, ProcessRole::Session, TrampolineEnvironment::Inherited);
+    auto prepared = prepareTrampoline(std::move(spec), fds);
+    if (!prepared)
+        return spawnFailure(prepared.error().message());
+    prepared->gate = std::move(gate->parentEnd);
+    prepared->settle = std::move(settle->parentEnd);
+    return std::move(*prepared);
+}
+
+StartResult Process::start()
+{
+    if (_d->origin == Private::Origin::Adopted)
+        return {}; // Running already, on a PTY that is open.
+
+    if (auto started = _d->pty->start(); !started)
+        return started;
+
+    auto prepared = prepareTrampolineSpawn(*_d->pty,
+                                           ExecInfo { .program = _d->path,
+                                                      .arguments = _d->args,
+                                                      .workingDirectory = _d->cwd,
+                                                      .env = _d->env,
+                                                      .removedEnvironment = _d->removedEnvironment },
+                                           sandboxEscapeFromConfig(_d->escapeSandbox),
+                                           _d->placement->childOomScoreAdjust());
+    if (!prepared)
+        return std::unexpected(prepared.error());
+
+    auto const spawned =
+        launchTrampoline(*prepared).and_then([&](pid_t pid) -> std::expected<pid_t, std::error_code> {
+            // Written after the spawn, not before: a spec larger than the socket's buffer is read as it is
+            // written.
+            if (auto written = writeSpawnSpec(*prepared); !written)
+            {
+                std::ignore = util::waitForExit(pid); // it read end-of-file as the socket closed
+                return std::unexpected(written.error());
+            }
+            return pid;
+        });
     if (!spawned)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = spawned.error().message() });
@@ -344,8 +408,9 @@ StartResult Process::start()
     // Known before the master can read end-of-file: until closeSpawnDescriptors(), this process holds the
     // slave open, however soon the released program ends.
     core::locked(_d->exitStatusMutex, [&] { _d->pid = *spawned; });
-    settle->childEnd.reset();
-    core::locked(_d->settleSignalMutex, [&] { _d->settleSignal = std::move(settle->parentEnd); });
+    core::locked(_d->settleSignalMutex, [&] { _d->settleSignal = std::move(prepared->settle); });
+    _d->placement->placeThenRelease(
+        ParkedChild { *spawned, openPidFd(*spawned), std::move(prepared->gate), ProcessRole::Session });
     _d->pty->closeSpawnDescriptors();
 
     // Nothing to report: a working directory that cannot be entered, or a program that cannot be
@@ -528,17 +593,7 @@ bool Process::alive() const noexcept
 Process::SpawnProgress Process::spawnProgress() const
 {
     auto const _ = lock_guard { _d->settleSignalMutex };
-    if (!_d->settleSignal.isOpen())
-        return SpawnProgress::Settled;
-    // Readable means settled: the child's byte, or end-of-file as it exited before. Without waiting.
-    auto pollFd = pollfd { .fd = _d->settleSignal.get(), .events = POLLIN, .revents = 0 };
-    auto ready = 0;
-    while ((ready = ::poll(&pollFd, 1, 0)) < 0 && errno == EINTR)
-        ;
-    if (ready == 0)
-        return SpawnProgress::InProgress;
-    _d->settleSignal.reset();
-    return SpawnProgress::Settled;
+    return settleProgressOf(_d->settleSignal);
 }
 
 void Process::terminate(TerminationHint terminationHint)
@@ -642,76 +697,29 @@ string Process::workingDirectory() const
     if (!_d->cwd.empty() && spawnProgress() == SpawnProgress::InProgress)
         return _d->cwd.string();
 
-#ifdef __linux__
     auto const childPid = _d->child();
     if (childPid == NoChild)
         return "."s;
-
-    try
-    {
-        auto const path = fs::path { std::format("/proc/{}/cwd", childPid) };
-        auto const cwd = fs::read_symlink(path);
-        return cwd.string();
-    }
-    catch (...)
-    {
-        // ignore failure, and use default instead.
+#ifdef __APPLE__
+    // Asked of the terminal's foreground process group there, as it always was.
+    auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
+    if (unixPty == nullptr)
         return "."s;
-    }
-#elifdef __APPLE__
-    try
-    {
-        // A Process may run on any Pty, so ask before taking it for a UnixPty.
-        auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
-        if (unixPty == nullptr)
-            return "."s;
-
-        auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(unixPty->handle()));
-
-        if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
-            return "."s;
-
-        return string(vpi.pvi_cdir.vip_path);
-    }
-    catch (...)
-    {
-        return "."s;
-    }
+    return util::workingDirectoryOf(tcgetpgrp(unbox<int>(unixPty->handle()))).value_or("."s);
 #else
-    // e.g. FreeBSD
-    return "."s;
+    return util::workingDirectoryOf(childPid).value_or("."s);
 #endif
 }
 
 std::optional<std::string> Process::foregroundProcessName() const
 {
-#if defined(__linux__) || defined(__APPLE__)
     if (_d->child() == NoChild)
         return std::nullopt;
     // A Process may run on any Pty, so ask before taking it for a UnixPty.
     auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
     if (unixPty == nullptr)
         return std::nullopt;
-    auto const group = tcgetpgrp(unbox<int>(unixPty->handle()));
-    if (group <= 0)
-        return std::nullopt;
-    #ifdef __linux__
-    // Streamed: /proc reports a size of zero, so a read sized by the file's length reads nothing.
-    auto in = std::ifstream { std::format("/proc/{}/comm", group) };
-    auto name = std::string {};
-    if (!std::getline(in, name) || name.empty())
-        return std::nullopt;
-    return name;
-    #else
-    auto name = std::array<char, 2 * MAXCOMLEN + 1> {};
-    if (proc_name(group, name.data(), static_cast<uint32_t>(name.size())) <= 0)
-        return std::nullopt;
-    return std::string { name.data() };
-    #endif
-#else
-    return std::nullopt;
-#endif
+    return util::foregroundProcessNameOf(unbox<int>(unixPty->handle()));
 }
 
 // {{{ startDetached

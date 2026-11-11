@@ -58,6 +58,7 @@ set(vtpty_HEADERS
     MockViewPty.hpp
     OwnedFd.hpp
     PageSize.hpp
+    PreparedSpawn.hpp
     PlacementBreaker.hpp
     Process.hpp
     ProcessPlacement.hpp

@@ -156,10 +156,15 @@ struct LinkHarness
     int losses = 0;
     std::optional<KeeperLink> link;
 
-    LinkHarness()
+    /// @param spawnReplyBound How long a spawn waits for the keeper's answer.
+    explicit LinkHarness(std::chrono::milliseconds spawnReplyBound = vthost::keeperlink::SpawnReplyBound)
     {
         link.emplace(
-            loop, KeeperChannel { std::move(ends.daemon) }, keeper::ChannelVersion, [this] { ++losses; });
+            loop,
+            KeeperChannel { std::move(ends.daemon) },
+            keeper::ChannelVersion,
+            [this] { ++losses; },
+            spawnReplyBound);
     }
 };
 
@@ -309,6 +314,53 @@ TEST_CASE("a keeper that closes its end is reported lost once", "[keeper][keeper
     CHECK(spawned.error() == keeper::SpawnError::Unknown);
 }
 
+TEST_CASE("a spawn the keeper answers after it was given up on is released at once", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness { 100ms };
+    auto const spawned = h.link->spawn(keeper::Spawn {}, {});
+    REQUIRE_FALSE(spawned.has_value());
+    CHECK(spawned.error() == keeper::SpawnError::Unknown);
+
+    // The keeper took the Spawn, and answers it late.
+    auto const request = std::get<keeper::Spawn>(*h.keeperEnd.receive().message).request;
+    h.keeperEnd.send(keeper::Spawned { .request = request, .session = 5, .pid = 4242 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    auto const released = h.keeperEnd.receive();
+    CHECK(std::get<keeper::Release>(*released.message) == keeper::Release { .session = 5, .graceMs = 0 });
+
+    // Answered once: the same answer again releases nothing more.
+    h.keeperEnd.send(keeper::Spawned { .request = request, .session = 5, .pid = 4242 });
+    h.keeperEnd.send(keeper::SpawnFailed { .request = request + 1, .error = keeper::SpawnError::ForkFailed });
+    h.link->post(keeper::Heartbeat {});
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    CHECK(std::holds_alternative<keeper::Heartbeat>(*h.keeperEnd.receive().message));
+    CHECK_FALSE(h.link->lost());
+}
+
+TEST_CASE("a late SpawnFailed for a spawn given up on forgets it", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness { 100ms };
+    REQUIRE_FALSE(h.link->spawn(keeper::Spawn {}, {}).has_value());
+    auto const request = std::get<keeper::Spawn>(*h.keeperEnd.receive().message).request;
+
+    // The keeper refuses it late: the request is answered, and forgotten.
+    h.keeperEnd.send(keeper::SpawnFailed { .request = request, .error = keeper::SpawnError::ForkFailed });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    // A Spawned under the same number now names nothing given up on: nothing is released for it.
+    h.keeperEnd.send(keeper::Spawned { .request = request, .session = 5, .pid = 4242 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    // Posted once the Spawned was handled: a Release it caused would be on the channel before it.
+    h.link->post(keeper::Heartbeat {});
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+    CHECK(std::holds_alternative<keeper::Heartbeat>(*h.keeperEnd.receive().message));
+    CHECK_FALSE(h.link->lost());
+}
+
 TEST_CASE("the handshake records the channel version both ends speak", "[keeper][keeperlink]")
 {
     auto ends = makeChannelPair();
@@ -335,11 +387,9 @@ TEST_CASE("a frame whose descriptor cannot be duplicated is dropped and the link
           "[keeper][keeperlink]")
 {
     auto h = LinkHarness {};
-    auto const closed = [] {
-        auto const pipe = makePipe();
-        return pipe.reader.get(); // closed as the pipe goes: no longer a descriptor of this process
-    }();
-    h.link->post(keeper::Structure {}, { closed });
+    // No descriptor at all, so that nothing opened meanwhile can make it one.
+    auto const none = -1;
+    h.link->post(keeper::Structure {}, { none });
     h.link->post(keeper::Heartbeat {});
     std::ignore = h.loop.runOnce(10ms);
 

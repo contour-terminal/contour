@@ -31,8 +31,9 @@ namespace
     struct SessionCrossing
     {
         vtpty::InheritedPty pty;
-        vtpty::AdoptedChild child;                        ///< None for SessionDevice::PtyOnly.
-        SessionDevice device = SessionDevice::ChildOnPty; ///< Which of the two cross.
+        vtpty::AdoptedChild child;                        ///< None but for SessionDevice::ChildOnPty.
+        SessionDevice device = SessionDevice::ChildOnPty; ///< What crosses.
+        uint64_t keeperSession = 0;                       ///< For SessionDevice::KeeperChild.
     };
 
     /// What a PTY's refusal to be handed over makes of a capture.
@@ -79,7 +80,8 @@ namespace
                 if (process == nullptr)
                     return SessionCrossing { .pty = std::move(pty),
                                              .child = {},
-                                             .device = SessionDevice::PtyOnly };
+                                             .device = SessionDevice::PtyOnly,
+                                             .keeperSession = 0 };
                 auto crossing = process->crossing();
                 switch (crossing.kind)
                 {
@@ -88,14 +90,19 @@ namespace
                             return std::unexpected(HandoverError::UnsupportedSession);
                         return SessionCrossing { .pty = std::move(pty),
                                                  .child = *std::move(crossing.child),
-                                                 .device = SessionDevice::ChildOnPty };
+                                                 .device = SessionDevice::ChildOnPty,
+                                                 .keeperSession = 0 };
                     case vtpty::CrossingKind::None:
                         return SessionCrossing { .pty = std::move(pty),
                                                  .child = {},
-                                                 .device = SessionDevice::PtyOnly };
+                                                 .device = SessionDevice::PtyOnly,
+                                                 .keeperSession = 0 };
                     case vtpty::CrossingKind::Keeper:
-                        // A keeper-held child crosses by name, which a later change teaches the capture.
-                        return std::unexpected(HandoverError::UnsupportedSession);
+                        // The keeper holds the child across the exec; the new image names it again.
+                        return SessionCrossing { .pty = std::move(pty),
+                                                 .child = {},
+                                                 .device = SessionDevice::KeeperChild,
+                                                 .keeperSession = crossing.keeperSession };
                 }
                 return std::unexpected(HandoverError::UnsupportedSession);
             });
@@ -149,6 +156,7 @@ namespace
             .colorPreference = host.colorPreferenceOf(quiesced.id),
             .interruption = host.interruptionOf(quiesced.id),
             .device = crossing.device,
+            .keeperSession = crossing.keeperSession,
         };
     }
 } // namespace

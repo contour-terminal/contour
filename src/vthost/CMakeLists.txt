@@ -301,8 +301,12 @@ if(NOT WIN32)
         keeperlink/KeeperAttachment.hpp
         keeperlink/KeeperChannel.cpp
         keeperlink/KeeperChannel.hpp
+        keeperlink/KeeperChild.cpp
+        keeperlink/KeeperChild.hpp
         keeperlink/KeeperLink.cpp
         keeperlink/KeeperLink.hpp
+        keeperlink/KeeperPtyFactory.cpp
+        keeperlink/KeeperPtyFactory.hpp
     )
 endif()
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.
@@ -485,7 +489,8 @@ if(VTHOST_TESTING)
         # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
         target_link_libraries(vthost_keeper_harness PUBLIC vthost)
-        target_sources(vthost_test PRIVATE keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp)
+        target_sources(vthost_test PRIVATE
+            keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.

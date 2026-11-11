@@ -99,6 +99,7 @@
     #include <unistd.h>
 
     #include <vthost/keeperlink/KeeperLink.hpp>
+    #include <vthost/keeperlink/KeeperPtyFactory.hpp>
 #endif
 
 namespace vthost
@@ -126,6 +127,23 @@ namespace
         co_await core::async::whenAll(std::move(accepts));
     }
 
+    /// Makes the device a hosted shell runs on, at the size given: its process on a fresh PTY, whoever is its
+    /// parent. Shared by the daemon's PTY factories, so that one decides who spawns for both.
+    using ShellDevices = std::function<std::unique_ptr<vtpty::Pty>(
+        vtbackend::PageSize, vtpty::Process::ExecInfo, SandboxEscape)>;
+
+    /// @param placement Moves each hosted shell into its own resource domain.
+    /// @return Shell devices this daemon spawns itself, each a child of its own (vtpty::Process).
+    [[nodiscard]] ShellDevices ownShellDevices(std::shared_ptr<vtpty::ProcessPlacement> placement)
+    {
+        return [placement = std::move(placement)](vtbackend::PageSize pageSize,
+                                                  vtpty::Process::ExecInfo const& exec,
+                                                  SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
+            return std::make_unique<vtpty::Process>(
+                exec, vtpty::createPty(pageSize, std::nullopt), sandbox == SandboxEscape::Escapes, placement);
+        };
+    }
+
     /// The daemon's PTY factory: every session spawns the configured shell over a
     /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
     ///
@@ -137,29 +155,24 @@ namespace
     /// @param socketPath    The daemon's control socket, which every hosted shell is told about so
     ///                      it can reach back. Merged in here rather than by the caller, so that
     ///                      every entry into runDaemon() hosts shells that can find their own daemon.
-    /// @param placement     Moves each hosted shell into its own resource domain, so an
-    ///                      out-of-memory kill inside one cannot stop the daemon's unit.
+    /// @param devices       Makes each shell's device: spawned by this daemon, or by its PTY keeper.
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
                                                  bool escapeSandbox,
                                                  std::filesystem::path const& socketPath,
-                                                 std::shared_ptr<vtpty::ProcessPlacement> placement)
+                                                 ShellDevices devices)
     {
-        return
-            [shell = std::move(shell),
-             hosted = hostedShellEnvironment(socketPath),
-             escapeSandbox,
-             placement = std::move(placement)](vtbackend::PageSize pageSize,
-                                               std::optional<vtpty::Process::ExecInfo> const& commandOverride)
-                -> std::unique_ptr<vtpty::Pty> {
-                // A fresh shell per spawn: `shell` is captured by the closure and reused for every session
-                // this factory spawns, so writing one session's override back into it would leak that pane's
-                // command/directory into every later session. Mirrors AppSessionFactory::createPty.
-                return std::make_unique<vtpty::Process>(
-                    hostedShellFor(shell, commandOverride, ShellOverride::Overlays, hosted),
-                    vtpty::createPty(pageSize, std::nullopt),
-                    escapeSandbox,
-                    placement);
-            };
+        return [shell = std::move(shell),
+                hosted = hostedShellEnvironment(socketPath),
+                sandbox = vtpty::sandboxEscapeFromConfig(escapeSandbox),
+                devices = std::move(devices)](vtbackend::PageSize pageSize,
+                                              std::optional<vtpty::Process::ExecInfo> const& commandOverride)
+                   -> std::unique_ptr<vtpty::Pty> {
+            // A fresh shell per spawn: `shell` is captured by the closure and reused for every session
+            // this factory spawns, so writing one session's override back into it would leak that pane's
+            // command/directory into every later session. Mirrors AppSessionFactory::createPty.
+            return devices(
+                pageSize, hostedShellFor(shell, commandOverride, ShellOverride::Overlays, hosted), sandbox);
+        };
     }
 
     /// The PTY factory of a daemon with profiles: each session runs its resolved profile's whole shell, with
@@ -167,21 +180,18 @@ namespace
     /// (SessionFactory takes `escape_sandbox` from the session's own profile).
     /// @param shell      The daemon's default shell, whose program runs when a profile names none.
     /// @param socketPath The daemon's control socket, which every hosted shell is told about.
-    /// @param placement  Moves each hosted shell into its own resource domain.
+    /// @param devices    Makes each shell's device: spawned by this daemon, or by its PTY keeper.
     [[nodiscard]] ProfilePtyFactory makeProfilePtyFactory(vtpty::Process::ExecInfo shell,
                                                           std::filesystem::path const& socketPath,
-                                                          std::shared_ptr<vtpty::ProcessPlacement> placement)
+                                                          ShellDevices devices)
     {
         return [base = std::move(shell),
                 hosted = hostedShellEnvironment(socketPath),
-                placement = std::move(placement)](vtbackend::PageSize pageSize,
-                                                  vtpty::Process::ExecInfo const& profileShell,
-                                                  SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
-            return std::make_unique<vtpty::Process>(
-                hostedShellFor(base, profileShell, ShellOverride::Replaces, hosted),
-                vtpty::createPty(pageSize, std::nullopt),
-                sandbox == SandboxEscape::Escapes,
-                placement);
+                devices = std::move(devices)](vtbackend::PageSize pageSize,
+                                              vtpty::Process::ExecInfo const& profileShell,
+                                              SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
+            return devices(
+                pageSize, hostedShellFor(base, profileShell, ShellOverride::Replaces, hosted), sandbox);
         };
     }
 
@@ -922,6 +932,25 @@ namespace
 #endif
         }
 
+        /// @param placement Moves each hosted shell into its own resource domain.
+        /// @return What hosted shells run on: spawned through the keeper behind one, by this daemon
+        /// otherwise.
+        ///         Called once: the keeper's factory takes over the link's Exited handler.
+        [[nodiscard]] ShellDevices shellDevices(std::shared_ptr<vtpty::ProcessPlacement> placement)
+        {
+#ifndef _WIN32
+            if (_link)
+                return
+                    [factory = std::make_shared<keeperlink::KeeperPtyFactory>(*_link, std::move(placement))](
+                        vtbackend::PageSize pageSize,
+                        vtpty::Process::ExecInfo exec,
+                        SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
+                        return factory->make(pageSize, std::move(exec), sandbox);
+                    };
+#endif
+            return ownShellDevices(std::move(placement));
+        }
+
         /// @return What a live upgrade's exec keeps across beside the image's handles: the keeper's channel.
         [[nodiscard]] std::vector<vtpty::CrossingHandle> crossing() const
         {
@@ -1467,9 +1496,11 @@ int runDaemon(DaemonConfig const& config,
     auto const gitProbe = makeGitStatusProbe(gitFileSystem, *gitCommands);
     auto gitExecutor = core::async::ThreadPoolExecutor { 1 };
 
+    // Behind a keeper, every shell is the keeper's child, spawned through it; otherwise this daemon's own.
+    auto const shellDevices = daemonKeeper.shellDevices(config.placement);
     auto host = SessionHost {
         loop,
-        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
+        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, shellDevices),
         config.settings,
         core::defaultEnvironment(),
         SessionHostConfig {
@@ -1482,7 +1513,7 @@ int runDaemon(DaemonConfig const& config,
             .extensions = config.extensions ? config.extensions() : nullptr,
             .profiles = config.profiles,
             .profilePtys = config.profiles
-                               ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
+                               ? makeProfilePtyFactory(config.shell, config.socketPath, shellDevices)
                                : ProfilePtyFactory {},
             .instance = lineage.instance,
             .restore = std::move(restore),
