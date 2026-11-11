@@ -379,9 +379,10 @@ void DaemonLink::stop()
         // The attach-window binder goes with the windows.
         _sessions.releaseBinding(*this);
     }
-    // Also once ended: lastWindowReleased() posts this stop, and the application's teardown may stop the
-    // link before that event runs. Left running, the reactor would go on writing the mirrors of the sessions
-    // the teardown deletes. Idempotent, as is a given-up controller's stop.
+    // Also once ended: lastWindowReleased() only began this stop, in the background, and the application's
+    // teardown may stop the link before it ended. Left running, the reactor would go on writing the mirrors
+    // of the sessions the teardown deletes; this waits for it. Idempotent, as is a given-up controller's
+    // stop.
     anyController().stop();
 }
 

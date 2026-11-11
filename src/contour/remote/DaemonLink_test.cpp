@@ -234,16 +234,28 @@ struct LinkRig
         contour::remote::DaemonAddress address = {})
     {
         // In the body: the link is declared before the app and host it is built on.
-        link = std::make_unique<contour::remote::DaemonLink>(contour::remote::DaemonLink::Id { 1 },
-                                                             linkConfig(std::move(endpoint),
-                                                                        timeline,
-                                                                        std::move(hostLabel),
-                                                                        std::move(sessionSettings),
-                                                                        std::move(intent),
-                                                                        std::move(address)),
-                                                             host,
-                                                             app.manager());
-        host.launchLink = link.get();
+        makeLink(linkConfig(std::move(endpoint),
+                            timeline,
+                            std::move(hostLabel),
+                            std::move(sessionSettings),
+                            std::move(intent),
+                            std::move(address)));
+    }
+
+    /// What a link's controller connects through, made of the transport it would have had.
+    using TransportWrapper =
+        std::function<std::shared_ptr<vthost::ITransportFactory>(std::shared_ptr<vthost::ITransportFactory>)>;
+
+    /// Builds the link to @p endpoint, its controller connecting through what @p wrapTransport makes of the
+    /// transport it would have had.
+    /// @param wrapTransport Makes the controller's transport of the one it would have had.
+    /// @param endpoint The daemon.
+    /// @param hostLabel The host label the link is configured with.
+    LinkRig(TransportWrapper const& wrapTransport, vthost::TcpEndpoint endpoint, std::string hostLabel)
+    {
+        auto config = linkConfig(std::move(endpoint), timeline, std::move(hostLabel));
+        config.controller.transport = wrapTransport(std::move(config.controller.transport));
+        makeLink(std::move(config));
     }
 
     LinkRig(LinkRig const&) = delete;
@@ -259,6 +271,15 @@ struct LinkRig
             handedTo->stop();
         host.opened.clear();
         drainGuiEvents();
+    }
+
+  private:
+    /// Builds the link of @p config on this rig's host and manager.
+    void makeLink(contour::remote::DaemonLinkConfig config)
+    {
+        link = std::make_unique<contour::remote::DaemonLink>(
+            contour::remote::DaemonLink::Id { 1 }, std::move(config), host, app.manager());
+        host.launchLink = link.get();
     }
 };
 
@@ -1004,13 +1025,25 @@ TEST_CASE("DaemonLink: closing its last window ends the link and stops its contr
     }));
 }
 
-// What the application's teardown relies on: a link whose last window just went has only posted its
-// controller's stop, and the teardown stops every link before that event may run.
+// What the application's teardown relies on: a link whose last window just went has only begun its
+// controller's stop, in the background (RemoteController::stopInBackground), and the teardown stops every
+// link while that stop may still be under way. The connection here does not end on its detach, as against a
+// daemon that stopped reading, so the controller is still connected until its stop waits out the detach
+// bound; without that, the background stop of a connection to this in-process daemon ends at once, and
+// whether it already had when closeWindow() returned is a race.
+//
+// The case therefore deliberately waits out the production DefaultDetachBound (about 3 s), in link.stop().
+// That hang is what makes the precondition deterministic: isWindingDown() and Connected hold for the whole
+// bound, so the margin after closeWindow() is 3 s, against a race that used to be microseconds wide. Do not
+// shorten the bound to speed the case up.
 TEST_CASE("DaemonLink: stop() stops the controller of a link that just ended", "[attach][link]")
 {
     auto daemon = DaemonFixture {};
     std::ignore = seedWorkspaces(daemon, 1);
-    auto rig = LinkRig { daemon.endpoint(), "home" };
+    auto rig =
+        LinkRig { [](auto inner) { return std::make_shared<UnendingDetachTransport>(std::move(inner)); },
+                  daemon.endpoint(),
+                  "home" };
     auto& link = *rig.link;
     auto const local = contour::test::ScopedController { rig.app.manager() };
     auto const boot = contour::test::ScopedController { rig.app.manager() };
@@ -1019,10 +1052,12 @@ TEST_CASE("DaemonLink: stop() stops the controller of a link that just ended", "
     auto const* const controller = link.liveController();
     REQUIRE(controller != nullptr);
     boot.controller->closeWindow();
+    REQUIRE(controller->isWindingDown());
     REQUIRE(controller->connectionState() == vthost::client::ConnectionState::Connected);
 
     link.stop();
 
+    CHECK_FALSE(controller->isWindingDown());
     CHECK(controller->connectionState() != vthost::client::ConnectionState::Connected);
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }

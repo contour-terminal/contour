@@ -331,8 +331,8 @@ class DaemonLink final: public session::WindowBinding
 
     /// Stops the controller, and serves no window any more: what they make from then on is local
     /// (@see session::TerminalSessionManager::releaseBinding). A signal of the controller still queued is
-    /// ignored from then on. Idempotent; stops the controller of a link that ended too, whose stop
-    /// lastWindowReleased() only posted.
+    /// ignored from then on. Idempotent; stops the controller of a link that ended too, waiting for the stop
+    /// lastWindowReleased() only began in the background.
     void stop();
 
     /// Has the controller state the reloaded configuration's session settings, to the daemon and in the hello

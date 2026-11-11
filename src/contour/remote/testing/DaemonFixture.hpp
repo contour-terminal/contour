@@ -166,6 +166,74 @@ class DroppableSocket final: public core::net::testing::SocketDecorator
     std::set<DroppableSocket*>& _live;
 };
 
+/// A connection's socket that a detach does not end: the client's detach retires its parked read
+/// (ISocket::cancelRead), which this drops, as against a daemon that stopped reading. A stop then waits out
+/// the whole detach bound before it cancels the loop.
+class UnendingDetachSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    /// @param inner The socket every other operation is forwarded to.
+    explicit UnendingDetachSocket(std::unique_ptr<core::net::ISocket> inner):
+        SocketDecorator(*inner), _inner(std::move(inner))
+    {
+    }
+    ~UnendingDetachSocket() override = default;
+
+    UnendingDetachSocket(UnendingDetachSocket const&) = delete;
+    UnendingDetachSocket& operator=(UnendingDetachSocket const&) = delete;
+    UnendingDetachSocket(UnendingDetachSocket&&) = delete;
+    UnendingDetachSocket& operator=(UnendingDetachSocket&&) = delete;
+
+    /// Drops the request: the parked read stays parked, so the detach that asked for it never ends the
+    /// connection.
+    void cancelRead() noexcept override {}
+
+  private:
+    std::unique_ptr<core::net::ISocket> _inner;
+};
+
+/// Connects through another transport, and hands out connections a detach does not end
+/// (@see UnendingDetachSocket).
+class UnendingDetachTransport final: public vthost::ITransportFactory
+{
+  public:
+    /// @param inner The transport every connection is made by.
+    explicit UnendingDetachTransport(std::shared_ptr<vthost::ITransportFactory> inner):
+        _inner(std::move(inner))
+    {
+    }
+
+    /// Connects through the inner transport.
+    /// @param loop The loop the connection runs on.
+    /// @return The inner transport's connection, its socket one a detach does not end; or why there is none.
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& loop) override
+    {
+        return connectOn(_inner, &loop);
+    }
+
+    /// @return The inner transport's description.
+    [[nodiscard]] std::string describe() const override { return _inner->describe(); }
+    /// @return How far the inner transport trusts its peer.
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
+
+  private:
+    /// The coroutine behind connect(), which takes its arguments by value: a coroutine's parameters outlive
+    /// the call only by value.
+    [[nodiscard]] static core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connectOn(std::shared_ptr<vthost::ITransportFactory> inner, core::net::EventLoop* loop)
+    {
+        auto connection = co_await inner->connect(*loop);
+        if (connection)
+            (*connection)->socket = std::make_unique<UnendingDetachSocket>(std::move((*connection)->socket));
+        co_return connection;
+    }
+
+    std::shared_ptr<vthost::ITransportFactory> _inner;
+};
+
 /// How many PDUs of each counted kind the daemon received from its clients, across every connection. The
 /// kinds are the rows of @c Kinds: counting another is one more row. Written on the daemon thread, read by
 /// any. Every read fails the case if the client's bytes did not decode, for what it reads is then incomplete.
