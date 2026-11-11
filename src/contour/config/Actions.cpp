@@ -377,6 +377,7 @@ span<ActionCatalogEntry const> actionCatalog()
                              Action { ToggleSplitOrientation {} },
                              documentation::ToggleSplitOrientation },
         ActionCatalogEntry { "TogglePaneZoom", Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
+        ActionCatalogEntry { "NewWorkspace", Action { NewWorkspace {} }, documentation::NewWorkspace },
         ActionCatalogEntry {
             "ResizePane", Action { ResizePane { Direction::Right } }, documentation::ResizePane },
         ActionCatalogEntry { "LaunchLayout", Action { LaunchLayout {} }, documentation::LaunchLayout },

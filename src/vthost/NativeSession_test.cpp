@@ -323,6 +323,7 @@ struct HarnessOptions
     std::optional<std::size_t> pipeBytes = std::nullopt;
     vtbackend::CommandBlockStoreLimits blockLimits {}; ///< How many records each hosted terminal keeps.
     vtbackend::HostIdentity identity {};               ///< The machine the host says it runs on.
+    uint64_t instance = 0;                             ///< Which run of the daemon the host is.
     /// The longest an exchange waits for the PDUs it counts on before it gives up on them.
     std::chrono::milliseconds collectBudget = CollectBudget;
     /// Who feeds the hosted terminals from their PTYs: the case itself, unless it asks for the pumps.
@@ -417,7 +418,8 @@ struct NativeHarness
                                                    .fileSystem = files,
                                                    .inputWatermarks = options.inputWatermarks,
                                                    .extensions = options.extensions,
-                                                   .profiles = options.profiles } };
+                                                   .profiles = options.profiles,
+                                                   .instance = options.instance } };
     core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
     core::platform::ManualWallClock wall {};
     /// The control API the connection calls, under ControlServing::Served; before the connection, which
@@ -1029,6 +1031,30 @@ struct NativeSessionFollowTester
     }
     static std::size_t followedCount(NativeSession const& session) { return session._followed.size(); }
 
+    /// Queues a snapshot of @p id, as a selection does for the sessions it brings in.
+    static void requestSnapshotOf(NativeSession& session, vtworkspace::SessionId id)
+    {
+        session.requestSnapshot(id);
+    }
+
+    /// @return The session whose snapshot the streamer has taken off its queue and is sending, if any.
+    static std::optional<uint64_t> streaming(NativeSession const& session)
+    {
+        return session._streamingSession;
+    }
+
+    /// @return Whether the streamer has @p id off its queue and is sending it (or waiting for room to).
+    static bool streamingOffQueue(NativeSession const& session, vtworkspace::SessionId id)
+    {
+        return session._streamingSession == id.value && session._snapshotQueue.empty();
+    }
+
+    /// Selects @p workspace as a SelectWorkspace does.
+    static void select(NativeSession& session, vtworkspace::WorkspaceId workspace)
+    {
+        session.selectWorkspace(workspace);
+    }
+
     /// @return The SessionState of the snapshot the streamer would send for @p id now.
     static proto::SessionState snapshot(NativeSession& session, vtworkspace::SessionId id)
     {
@@ -1153,6 +1179,12 @@ struct NativeSessionFlushTester
     static bool snapshotPending(NativeSession const& session, vtworkspace::SessionId id)
     {
         return session.snapshotPending(id);
+    }
+
+    /// Serves @p pdu as a workspace verb that arrived on the connection.
+    static void serveWorkspaceVerb(NativeSession& session, proto::DecodedPdu pdu)
+    {
+        std::ignore = session.serveWorkspaceVerb(proto::DecodedFrame { .pdu = std::move(pdu) });
     }
 
     /// Accepts @p hello as if it had arrived: the connection attaches and queues its snapshots.
@@ -4910,7 +4942,8 @@ struct FlushHarness
     core::Finally settle { [this] {
         for (auto& client: clients)
         {
-            CHECK(NativeSessionFlushTester::letGo(*client.session, h.loop, clock));
+            if (client.session)
+                CHECK(NativeSessionFlushTester::letGo(*client.session, h.loop, clock));
             client.end->close();
         }
         CHECK(turnUntil(h.loop, [this] { return std::ranges::all_of(clients, &FlushClient::readerEnded); }));
@@ -4924,12 +4957,11 @@ struct FlushHarness
     {
         // Every client shows the session's workspace by name: a plain launch of a second client is given a
         // workspace of its own, which would not carry the session.
-        if (hello.attachIntent.kind == proto::AttachIntentKind::AllWorkspaces)
+        if (hello.attachIntent.kind == proto::AttachIntentKind::Default)
         {
             hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::AttachIntent));
-            hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces,
-                                   .workspaces = {
-                                       std::get<0>(h.host.model().findSessionLeaf(id))->id().value } };
+            hello.attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                   .workspace = std::get<0>(h.host.model().findSessionLeaf(id))->id().value };
         }
         auto& client = connect();
         NativeSessionFlushTester::handshake(*client.session, std::move(hello));
@@ -5216,13 +5248,15 @@ namespace
 {
 
 /// @param kind What the client asks to follow.
-/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
+/// @param workspaces The workspaces named, for AttachIntentKind::Select and Resume.
 /// @return A hello stating that intent, offering Capability::AttachIntent so that it is honoured.
 [[nodiscard]] proto::ClientHello intentHello(proto::AttachIntentKind kind,
                                              std::vector<uint64_t> workspaces = {})
 {
-    return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
-                                .attachIntent = { .kind = kind, .workspaces = std::move(workspaces) } };
+    return proto::ClientHello {
+        .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
+        .attachIntent = { .kind = kind, .workspace = workspaces.empty() ? 0 : workspaces.front() }
+    };
 }
 
 /// @return The ServerHello among @p frames, or nullptr when none arrived.
@@ -5266,16 +5300,6 @@ namespace
     return sessions;
 }
 
-/// @return The sessions a SessionState or a Delta among @p frames describes.
-[[nodiscard]] std::set<uint64_t> describedSessions(std::vector<proto::DecodedFrame> const& frames)
-{
-    auto sessions = snapshotSessions(frames);
-    for (auto const& frame: frames)
-        if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu))
-            sessions.insert(delta->session);
-    return sessions;
-}
-
 /// @return The sessions @p host hosts in @p workspace.
 [[nodiscard]] std::set<uint64_t> sessionsOf(SessionHost& host, uint64_t workspace)
 {
@@ -5311,168 +5335,154 @@ Task<void> probeOnce(core::net::EventLoop* loop, core::net::ISocket* client, Ste
     std::ignore = co_await client->write(std::span<std::byte const> { bytes.data(), bytes.size() });
 }
 
-/// Once the second client holds its attach snapshot: gives the workspace it follows a second tab, beside the
-/// session it already hosts, and has both connections told that every session of that workspace changed.
-/// @param ownWorkspace Receives the workspace the second client follows.
-Task<void> growSecondWorkspace(TwoClientHarness* h,
-                               std::vector<proto::DecodedFrame> const* fromTwo,
-                               uint64_t* ownWorkspace)
+} // namespace
+
+namespace
 {
-    co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
-    auto const* hello = serverHelloOf(*fromTwo);
-    REQUIRE(hello != nullptr);
-    REQUIRE(hello->followedWorkspaces.size() == 1);
-    *ownWorkspace = hello->followedWorkspaces.front();
-    auto const beside = *sessionsOf(h->host, *ownWorkspace).begin();
-    REQUIRE(h->host.createTab({}, vtworkspace::SessionId { beside }) != nullptr);
-    for (auto const session: sessionsOf(h->host, *ownWorkspace))
-    {
-        h->host.terminal(vtworkspace::SessionId { session })->writeToScreen("x");
-        h->serverOne->sessionScreenUpdated(vtworkspace::SessionId { session });
-        h->serverTwo->sessionScreenUpdated(vtworkspace::SessionId { session });
-    }
+
+/// An attached client that only selects, so a test can make the host remember a selection.
+class RememberedSelection final: public vthost::SessionStreamEvents
+{
+  public:
+    [[nodiscard]] uint64_t selectedWorkspace() const noexcept override { return selected; }
+
+    uint64_t selected = 0; ///< The workspace it selects.
+};
+
+/// @return The sessions the Deltas among @p frames describe.
+[[nodiscard]] std::set<uint64_t> deltaSessions(std::vector<proto::DecodedFrame> const& frames)
+{
+    auto sessions = std::set<uint64_t> {};
+    for (auto const& frame: frames)
+        if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+            delta != nullptr && delta->snapshot == 0)
+            sessions.insert(delta->session);
+    return sessions;
 }
 
 } // namespace
 
-TEST_CASE("a lone Launch client follows every workspace", "[vthost][native][attach-intent]")
+TEST_CASE("a lone client selects the most recently selected workspace", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
     auto const* second = h.host.createWorkspace();
-    REQUIRE(second != nullptr);
-    auto const workspaces = std::vector<uint64_t> { h.host.workspaceId().value, second->id().value };
+    auto const* third = h.host.createWorkspace();
+    REQUIRE((second != nullptr && third != nullptr));
+    auto const workspaces = std::set<uint64_t> { first, second->id().value, third->id().value };
 
-    auto const received = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Launch) },
-                                          [](auto const& got) { return snapshotRunCount(got) >= 2; });
+    auto const attachesTo = [&](uint64_t expected) {
+        auto const received = h.exchangeUntil(
+            { intentHello(proto::AttachIntentKind::Default), proto::FetchImage { .imageId = 4242 } },
+            [](auto const& got) { return imageGoneArrived(got) && snapshotRunCount(got) >= 1; });
 
-    auto const* hello = serverHelloOf(received);
-    REQUIRE(hello != nullptr);
-    CHECK(hello->followedWorkspaces == workspaces);
-    CHECK(layoutWorkspaces(received) == std::set<uint64_t>(workspaces.begin(), workspaces.end()));
-    auto expected = sessionsOf(h.host, workspaces[0]);
-    expected.merge(sessionsOf(h.host, workspaces[1]));
-    CHECK(snapshotSessions(received) == expected);
+        auto const* hello = serverHelloOf(received);
+        REQUIRE(hello != nullptr);
+        CHECK(hello->selectedWorkspace == expected);
+        CHECK(layoutWorkspaces(received) == workspaces);
+        CHECK(snapshotSessions(received) == sessionsOf(h.host, expected));
+    };
+
+    SECTION("no window ever selected one: the first workspace")
+    {
+        attachesTo(first);
+    }
+    SECTION("a window selected the second: it is the default, though that window is gone")
+    {
+        auto earlier = RememberedSelection {};
+        h.host.noteClientAttached(&earlier);
+        h.host.noteSelected(earlier, second->id().value);
+        h.host.noteClientDetached(&earlier);
+        attachesTo(second->id().value);
+    }
 }
 
-TEST_CASE("two Launch clients split the workspaces between them", "[vthost][native][attach-intent]")
+TEST_CASE("a second client sees every workspace's layout, and mirrors only the workspace it selected",
+          "[vthost][native][attach-intent]")
 {
-    // Review focus 1: the second launch gets a workspace of its own, and neither mirrors the other's.
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
-    auto const hello = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
+    auto const* second = h.host.createWorkspace();
+    auto const* third = h.host.createWorkspace();
+    REQUIRE((second != nullptr && third != nullptr));
+    auto const thirdWorkspace = third->id().value;
+    auto const workspaces = std::set<uint64_t> { first, second->id().value, thirdWorkspace };
+    auto const helloOne = encodeRequest({ intentHello(proto::AttachIntentKind::Default) });
+    auto const helloTwo = encodeRequest({ intentHello(proto::AttachIntentKind::Select, { thirdWorkspace }) });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto ownWorkspace = uint64_t { 0 };
-    auto const twoGrown = [&ownWorkspace](std::vector<proto::DecodedFrame> const& got) {
-        auto const* layout = lastLayoutOf(got, ownWorkspace);
-        return layout != nullptr && layout->tabs.size() == 2 && snapshotRunCount(got) >= 2;
+    auto const seesAll = [&](std::vector<proto::DecodedFrame> const& got) {
+        return layoutWorkspaces(got) == workspaces && snapshotRunCount(got) >= 1;
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
         h.serverTwo->run(),
-        feedBytes(h.firstPair.second.get(), &hello),
-        feedOnce(&h.loop,
-                 h.secondPair.second.get(),
-                 &hello,
-                 &fromOne,
-                 [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        growSecondWorkspace(&h, &fromTwo, &ownWorkspace),
-        probeOnce(&h.loop, h.firstPair.second.get(), [&] { return twoGrown(fromTwo); }),
+        feedBytes(h.firstPair.second.get(), &helloOne),
+        feedBytes(h.secondPair.second.get(), &helloTwo),
+        probeOnce(&h.loop, h.firstPair.second.get(), [&] { return seesAll(fromOne); }),
+        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return seesAll(fromTwo); }),
         collectUntil(&h.loop, h.firstPair.second.get(), imageGoneArrived, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), twoGrown, &fromTwo)));
+        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
 
     auto const* oneHello = serverHelloOf(fromOne);
-    REQUIRE(oneHello != nullptr);
-    CHECK(oneHello->followedWorkspaces == std::vector<uint64_t> { first });
-    REQUIRE(twoGrown(fromTwo));
-    CHECK(ownWorkspace != first);
-    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
-    CHECK_FALSE(layoutWorkspaces(fromOne).contains(ownWorkspace));
-    auto const ownSessions = sessionsOf(h.host, ownWorkspace);
-    CHECK(ownSessions.size() == 2);
-    for (auto const session: describedSessions(fromOne))
-        CHECK_FALSE(ownSessions.contains(session));
+    auto const* twoHello = serverHelloOf(fromTwo);
+    REQUIRE((oneHello != nullptr && twoHello != nullptr));
+    CHECK(oneHello->selectedWorkspace == first);
+    CHECK(twoHello->selectedWorkspace == thirdWorkspace);
+    CHECK(layoutWorkspaces(fromOne) == workspaces);
+    CHECK(layoutWorkspaces(fromTwo) == workspaces);
+    CHECK(snapshotSessions(fromOne) == sessionsOf(h.host, first));
+    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, thirdWorkspace));
+    CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Shown);
+    CHECK(h.host.visibility(thirdWorkspace) == vthost::WorkspaceVisibility::Shown);
+    CHECK(h.host.visibility(second->id().value) == vthost::WorkspaceVisibility::Hidden);
 }
 
-TEST_CASE("a Workspaces intent naming an unknown workspace follows nothing",
+TEST_CASE("a Select naming an unknown workspace selects what a launch would",
           "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
 
     auto const received = h.exchangeUntil(
-        { intentHello(proto::AttachIntentKind::Workspaces, { 999 }), proto::FetchImage { .imageId = 4242 } },
-        imageGoneArrived,
-        // Long enough for an attach snapshot that should not come to have come.
-        [](core::net::EventLoop* loop) -> Task<void> {
-            co_await loop->delay(ProbeSettle);
-        }(&h.loop));
+        { intentHello(proto::AttachIntentKind::Select, { 999 }), proto::FetchImage { .imageId = 4242 } },
+        [](auto const& got) { return imageGoneArrived(got) && snapshotRunCount(got) >= 1; });
 
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->followedWorkspaces.empty());
-    CHECK(layoutWorkspaces(received).empty());
-    CHECK(snapshotSessions(received).empty());
-    CHECK(imageGoneArrived(received)); // the connection stayed open and answered
+    CHECK(hello->selectedWorkspace == first);
+    CHECK(snapshotSessions(received) == sessionsOf(h.host, first));
 }
 
 TEST_CASE("a client without the AttachIntent capability attaches as a launch",
           "[vthost][native][attach-intent]")
 {
-    auto h = TwoClientHarness {};
+    auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
-    // The intent is stated but not offered, so it is not honoured: this is how a client predating
-    // intents attaches. It is a launch: it takes the workspaces left and, as the first client, is the
-    // primary viewer, so it also sees one no client claims, created later.
-    auto const legacy = encodeRequest({ proto::ClientHello {
-        .attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} } } });
-    auto const launching = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
+    auto const* second = h.host.createWorkspace();
+    REQUIRE(second != nullptr);
+    // The intent is stated but not offered, so it is not honoured: this is how a client predating intents
+    // attaches. It is a launch, which selects the first workspace, not the one named.
+    auto const received =
+        h.exchangeUntil({ proto::ClientHello { .attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                                                 .workspace = second->id().value } },
+                          proto::FetchImage { .imageId = 4242 } },
+                        imageGoneArrived);
 
-    auto fromOne = std::vector<proto::DecodedFrame> {};
-    auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto laterWorkspace = uint64_t { 0 };
-    auto const createUnclaimed = [](TwoClientHarness* h,
-                                    std::vector<proto::DecodedFrame> const* fromTwo,
-                                    uint64_t* laterWorkspace) -> Task<void> {
-        co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
-        auto const* workspace = h->host.createWorkspace();
-        REQUIRE(workspace != nullptr);
-        *laterWorkspace = workspace->id().value;
-    };
-    auto const oneSeesIt = [&laterWorkspace](std::vector<proto::DecodedFrame> const& got) {
-        return laterWorkspace != 0 && layoutWorkspaces(got).contains(laterWorkspace)
-               && snapshotRunCount(got) >= 2;
-    };
-    h.loop.blockOn(core::net::testing::allOf(
-        h.serverOne->run(),
-        h.serverTwo->run(),
-        feedBytes(h.firstPair.second.get(), &legacy),
-        feedOnce(&h.loop,
-                 h.secondPair.second.get(),
-                 &launching,
-                 &fromOne,
-                 [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        createUnclaimed(&h, &fromTwo, &laterWorkspace),
-        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
-        collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
-
-    auto const* oneHello = serverHelloOf(fromOne);
-    REQUIRE(oneHello != nullptr);
-    CHECK(oneHello->followedWorkspaces == std::vector<uint64_t> { first });
-    CHECK(oneSeesIt(fromOne));
-    CHECK(layoutWorkspaces(fromOne).contains(first));
-    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
+    auto const* hello = serverHelloOf(received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->selectedWorkspace == first);
 }
 
-TEST_CASE("a permission question is not asked of a client that does not show its pane",
+TEST_CASE("a permission question is not asked of a client that does not mirror its pane",
           "[vthost][native][attach-intent][extensions]")
 {
-    // Asked in its pane, so a client following only another workspace has nowhere to ask it.
+    // Asked in its pane, so a client selecting another workspace has nowhere to ask it.
     auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
     auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
     std::ignore = newSession(h.host);
@@ -5493,62 +5503,40 @@ TEST_CASE("a permission question is not asked of a client that does not show its
     }));
     REQUIRE(h.host.pendingPermissionRequests().size() == 1);
 
-    auto hello = intentHello(proto::AttachIntentKind::Workspaces, { shown });
+    auto hello = intentHello(proto::AttachIntentKind::Select, { shown });
     hello.capabilities = proto::CapabilitySet::of(
         { proto::Capability::AttachIntent, proto::Capability::ExtensionPermissions });
     auto const received =
         h.exchangeUntil({ hello }, [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     REQUIRE(snapshotRunCount(received) >= 1);
-    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { shown });
+    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { h.host.workspaceId().value, shown });
     CHECK_FALSE(std::ranges::any_of(received, isPermissionRequest));
-    CHECK(h.host.pendingPermissionRequests().size() == 1); // still waiting for a client that shows it
+    CHECK(h.host.pendingPermissionRequests().size() == 1); // still waiting for a client that mirrors it
 }
 
-TEST_CASE("a workspace this connection creates joins its follow set", "[vthost][native][attach-intent]")
-{
-    auto h = NativeHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.workspaceId().value;
-
-    auto const received = h.exchangeUntil(
-        { intentHello(proto::AttachIntentKind::Workspaces, { first }),
-          proto::DecodedPdu { proto::NewWorkspace {} } },
-        [](auto const& got) { return layoutWorkspaces(got).size() == 2 && snapshotRunCount(got) >= 2; });
-
-    auto const workspaces = layoutWorkspaces(received);
-    REQUIRE(workspaces.size() == 2);
-    auto const created =
-        *std::ranges::find_if(workspaces, [first](uint64_t workspace) { return workspace != first; });
-    auto const createdSessions = sessionsOf(h.host, created);
-    REQUIRE(createdSessions.size() == 1);
-    CHECK(snapshotSessions(received).contains(*createdSessions.begin()));
-}
-
-TEST_CASE("a workspace created by a control connection appears in the primary viewer only",
+TEST_CASE("a workspace created elsewhere is laid out to every connection and mirrored by none",
           "[vthost][native][attach-intent]")
 {
-    // Index override 6. The control API is not served yet; the host-side creation it will call, with no
-    // client claiming the workspace, stands in for it.
+    // What the control API's tab.create does: the workspace belongs to no connection.
     auto h = TwoClientHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
-    auto const hello = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
+    auto const hello = encodeRequest({ intentHello(proto::AttachIntentKind::Default) });
 
     auto fromOne = std::vector<proto::DecodedFrame> {};
     auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto controlWorkspace = uint64_t { 0 };
-    auto const createUnclaimed = [](TwoClientHarness* h,
+    auto laterWorkspace = uint64_t { 0 };
+    auto const createElsewhere = [](TwoClientHarness* h,
                                     std::vector<proto::DecodedFrame> const* fromTwo,
-                                    uint64_t* controlWorkspace) -> Task<void> {
+                                    uint64_t* laterWorkspace) -> Task<void> {
         co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
         auto const* workspace = h->host.createWorkspace();
         REQUIRE(workspace != nullptr);
-        *controlWorkspace = workspace->id().value;
+        *laterWorkspace = workspace->id().value;
     };
-    auto const oneSeesIt = [&controlWorkspace](std::vector<proto::DecodedFrame> const& got) {
-        return controlWorkspace != 0 && layoutWorkspaces(got).contains(controlWorkspace)
-               && snapshotRunCount(got) >= 2;
+    auto const bothSeeIt = [&laterWorkspace](std::vector<proto::DecodedFrame> const& got) {
+        return laterWorkspace != 0 && layoutWorkspaces(got).contains(laterWorkspace);
     };
     h.loop.blockOn(core::net::testing::allOf(
         h.serverOne->run(),
@@ -5559,68 +5547,17 @@ TEST_CASE("a workspace created by a control connection appears in the primary vi
                  &hello,
                  &fromOne,
                  [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        createUnclaimed(&h, &fromTwo, &controlWorkspace),
-        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
-        collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
+        createElsewhere(&h, &fromTwo, &laterWorkspace),
+        probeOnce(
+            &h.loop, h.firstPair.second.get(), [&] { return bothSeeIt(fromOne) && bothSeeIt(fromTwo); }),
+        collectUntil(&h.loop, h.firstPair.second.get(), imageGoneArrived, &fromOne),
+        collectUntil(&h.loop, h.secondPair.second.get(), bothSeeIt, &fromTwo)));
 
-    REQUIRE(oneSeesIt(fromOne));
-    CHECK(layoutWorkspaces(fromOne).contains(first));
-    CHECK(snapshotSessions(fromOne).contains(*sessionsOf(h.host, controlWorkspace).begin()));
-    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(controlWorkspace));
-    CHECK_FALSE(layoutWorkspaces(fromTwo).contains(first));
-}
-
-// Review (PR 4, M2): another connection's follow clears a hidden workspace's release, so the primary viewer
-// took up a workspace another window had just switched to, and it showed in two windows.
-TEST_CASE("a hidden workspace another client switches to does not also appear in the primary viewer",
-          "[vthost][native][attach-intent][visibility]")
-{
-    auto h = TwoClientHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.workspaceId().value;
-    auto const* hiddenWorkspace = h.host.createWorkspace();
-    REQUIRE(hiddenWorkspace != nullptr);
-    auto const hidden = hiddenWorkspace->id().value;
-    h.host.noteWorkspaceReleased(vtworkspace::WorkspaceId { hidden }, proto::WorkspaceRelease::SwitchedAway);
-    auto const launching = encodeRequest({ intentHello(proto::AttachIntentKind::Launch) });
-    auto const switching = encodeRequest({ intentHello(proto::AttachIntentKind::Workspaces, { hidden }) });
-
-    auto fromOne = std::vector<proto::DecodedFrame> {};
-    auto fromTwo = std::vector<proto::DecodedFrame> {};
-    auto laterWorkspace = uint64_t { 0 };
-    // A workspace no client claims, made once the second client follows the hidden one: the primary viewer
-    // takes it up, and with it looks at every other workspace again.
-    auto const createUnclaimed = [](TwoClientHarness* h,
-                                    std::vector<proto::DecodedFrame> const* fromTwo,
-                                    uint64_t* laterWorkspace) -> Task<void> {
-        co_await awaitGate(&h->loop, [fromTwo] { return snapshotRunCount(*fromTwo) >= 1; });
-        auto const* workspace = h->host.createWorkspace();
-        REQUIRE(workspace != nullptr);
-        *laterWorkspace = workspace->id().value;
-    };
-    auto const oneSeesIt = [&laterWorkspace](std::vector<proto::DecodedFrame> const& got) {
-        return laterWorkspace != 0 && layoutWorkspaces(got).contains(laterWorkspace)
-               && snapshotRunCount(got) >= 2;
-    };
-    h.loop.blockOn(core::net::testing::allOf(
-        h.serverOne->run(),
-        h.serverTwo->run(),
-        feedBytes(h.firstPair.second.get(), &launching),
-        feedOnce(&h.loop,
-                 h.secondPair.second.get(),
-                 &switching,
-                 &fromOne,
-                 [](auto const& got) { return snapshotRunCount(got) >= 1; }),
-        createUnclaimed(&h, &fromTwo, &laterWorkspace),
-        probeOnce(&h.loop, h.secondPair.second.get(), [&] { return oneSeesIt(fromOne); }),
-        collectUntil(&h.loop, h.firstPair.second.get(), oneSeesIt, &fromOne),
-        collectUntil(&h.loop, h.secondPair.second.get(), imageGoneArrived, &fromTwo)));
-
-    REQUIRE(oneSeesIt(fromOne));
-    CHECK(layoutWorkspaces(fromOne).contains(first));
-    CHECK(layoutWorkspaces(fromTwo).contains(hidden));
-    CHECK_FALSE(layoutWorkspaces(fromOne).contains(hidden));
+    REQUIRE(bothSeeIt(fromOne));
+    REQUIRE(bothSeeIt(fromTwo));
+    CHECK(layoutWorkspaces(fromOne) == std::set<uint64_t> { first, laterWorkspace });
+    CHECK(snapshotSessions(fromOne) == sessionsOf(h.host, first));
+    CHECK(snapshotSessions(fromTwo) == sessionsOf(h.host, first));
 }
 
 TEST_CASE("the host counts an Attach connection as a client beside the census",
@@ -6545,6 +6482,17 @@ namespace
     return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::MoveNode }) };
 }
 
+/// @param workspace The workspace the window selects.
+/// @return A hello offering MoveNode that selects @p workspace.
+[[nodiscard]] proto::ClientHello movingHelloSelecting(uint64_t workspace)
+{
+    return proto::ClientHello {
+        .capabilities =
+            proto::CapabilitySet::of({ proto::Capability::MoveNode, proto::Capability::AttachIntent }),
+        .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = workspace }
+    };
+}
+
 /// @return A MoveNode taking the one-pane tab of @p dragged to the tab well of the workspace hosting @p onto.
 [[nodiscard]] proto::MoveNode intoTabWell(vtworkspace::SessionId dragged, vtworkspace::SessionId onto)
 {
@@ -6591,12 +6539,12 @@ TEST_CASE("a MoveNode moves a pane into another workspace, its session keeps run
     };
     // Written once the move's layout has reached the client: the session is the same one, in its new
     // workspace.
-    auto const received =
-        h.exchangeUntil({ movingHello(), intoTabWell(draggedSession, otherSession) },
-                        arrived,
-                        writeOnce(&h, draggedSession, "after the move", [&] {
-                            return layoutShows(h.received, otherWorkspace.value, draggedSession);
-                        }));
+    auto const received = h.exchangeUntil(
+        { movingHelloSelecting(otherWorkspace.value), intoTabWell(draggedSession, otherSession) },
+        arrived,
+        writeOnce(&h, draggedSession, "after the move", [&] {
+            return layoutShows(h.received, otherWorkspace.value, draggedSession);
+        }));
 
     CHECK(arrived(received));
     auto const [workspace, tab, leaf] = h.host.model().findSessionLeaf(draggedSession);
@@ -6661,8 +6609,8 @@ TEST_CASE("two clients: a pane moved into the other client's workspace is mirror
     auto const showing = [](uint64_t workspace, std::initializer_list<proto::Capability> capabilities) {
         return proto::ClientHello {
             .capabilities = proto::CapabilitySet::of(capabilities),
-            .attachIntent = proto::AttachIntent { .kind = proto::AttachIntentKind::Workspaces,
-                                                  .workspaces = { workspace } },
+            .attachIntent =
+                proto::AttachIntent { .kind = proto::AttachIntentKind::Select, .workspace = workspace },
         };
     };
     auto const helloOne = encodeRequest({ showing(
@@ -6746,7 +6694,7 @@ TEST_CASE("two clients: a SetSplitOrientation from one pushes the new axis to bo
 
     // Both show the tab's workspace by name: a plain launch of a second client is given one of its own.
     auto const showing =
-        proto::AttachIntent { .kind = proto::AttachIntentKind::Workspaces, .workspaces = { workspace } };
+        proto::AttachIntent { .kind = proto::AttachIntentKind::Select, .workspace = workspace };
     auto const capabilities =
         proto::CapabilitySet::of({ proto::Capability::MoveNode, proto::Capability::AttachIntent });
     auto movingTheWorkspace = movingHello();
@@ -6949,8 +6897,7 @@ TEST_CASE("an old daemon: the client sees no move-node capability", "[vthost][na
     CHECK_FALSE(hello->capabilities.contains(proto::Capability::MoveNode));
 }
 
-TEST_CASE("a pane moved to a new workspace opens it for the client that asked, not for the primary viewer",
-          "[vthost][native][move][daemon]")
+TEST_CASE("a pane moved to a new workspace is laid out to every client", "[vthost][native][move][daemon]")
 {
     auto h = TwoClientHarness {};
     auto const* dragged = h.host.createTab();
@@ -6960,9 +6907,9 @@ TEST_CASE("a pane moved to a new workspace opens it for the client that asked, n
     auto const first = h.host.workspaceId().value;
     auto const draggedSession = dragged->rootPane()->session();
 
-    // Neither client lists a workspace; the one that moves also offers MoveNode.
-    auto const watcherHello = encodeRequest({ intentHello(proto::AttachIntentKind::Workspaces) });
-    auto moverHello = intentHello(proto::AttachIntentKind::Workspaces);
+    // The one that moves also offers MoveNode; the daemon lays the new workspace out to both.
+    auto const watcherHello = encodeRequest({ intentHello(proto::AttachIntentKind::Select) });
+    auto moverHello = intentHello(proto::AttachIntentKind::Select);
     moverHello.capabilities =
         proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::MoveNode });
     auto const moving = encodeRequest(
@@ -6991,7 +6938,7 @@ TEST_CASE("a pane moved to a new workspace opens it for the client that asked, n
         collectUntil(&h.loop, h.secondPair.second.get(), opensNewWorkspace, &fromMover)));
 
     CHECK(opensNewWorkspace(fromMover));
-    CHECK_FALSE(opensNewWorkspace(fromWatcher));
+    CHECK(opensNewWorkspace(fromWatcher));
 }
 
 namespace
@@ -7153,8 +7100,12 @@ struct PaneIntoOtherWorkspace
     }
 
     /// Attaches with @p hello, moves the pane, and collects until output written after the move arrived.
-    [[nodiscard]] std::vector<proto::DecodedFrame> run(proto::ClientHello const& hello)
+    [[nodiscard]] std::vector<proto::DecodedFrame> run(proto::ClientHello offered)
     {
+        // The window selects the workspace the pane moves into, so the pane arrives in what it mirrors.
+        auto hello = std::move(offered);
+        hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::AttachIntent));
+        hello.attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = otherWorkspace };
         auto const arrived = [&](auto const& got) {
             return layoutShows(got, otherWorkspace, dragged)
                    && std::ranges::any_of(increments(got),
@@ -7288,7 +7239,10 @@ TEST_CASE(
     auto f = PaneIntoOtherWorkspace {};
     auto const sourceWorkspace =
         f.h.host.model().workspaceOfTab(std::get<1>(f.h.host.model().findSessionLeaf(f.dragged))->id()).value;
-    auto const hello = encodeRequest({ batchingHello() });
+    // The window selects the workspace the pane moves into, so the pane arrives in what it mirrors.
+    auto selecting = batchingHello(proto::Capability::AttachIntent);
+    selecting.attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = f.otherWorkspace };
+    auto const hello = encodeRequest({ selecting });
     auto const move = encodedAt(2, intoTabWell(f.dragged, f.otherSession));
     auto const attachEnded = [](std::vector<proto::DecodedFrame> const& got) {
         return batchEndedBy(got, 0);
@@ -7326,9 +7280,9 @@ TEST_CASE(
     CHECK(layoutShows(received, f.otherWorkspace, f.dragged));
 }
 
-// The client that asked for a move is told it landed even when it follows none of the workspaces the move
-// changed -- here, none at all: a batch naming the request ends, with nothing pushed in it.
-TEST_CASE("a move ends its batch for the client that asked, though it follows no workspace the move changed",
+// The client that asked for a move is told it landed: a batch naming the request ends, though the workspace
+// the window selects is none of those the move changed.
+TEST_CASE("a move ends its batch for the client that asked, whatever workspace it selects",
           "[vthost][native][move][daemon]")
 {
     auto h = NativeHarness {};
@@ -7336,20 +7290,15 @@ TEST_CASE("a move ends its batch for the client that asked, though it follows no
     auto const* from = h.host.createWorkspace();
     auto const* into = h.host.createWorkspace();
     REQUIRE((from != nullptr && into != nullptr));
-    auto const fromWorkspace = from->id().value;
     auto const intoWorkspace = into->id().value;
     auto const dragged = from->tabAt(0)->rootPane()->session();
     auto const onto = into->tabAt(0)->rootPane()->session();
 
-    auto hello = batchingHello(proto::Capability::AttachIntent);
-    // A workspace no longer there: the client follows none, as one whose workspace closed meanwhile does.
-    hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = { 999 } };
-    auto const received = h.exchangeUntil({ hello, intoTabWell(dragged, onto) },
-                                          [](auto const& got) { return batchEndedBy(got, 2); });
+    auto const received =
+        h.exchangeUntil({ batchingHello(proto::Capability::AttachIntent), intoTabWell(dragged, onto) },
+                        [](auto const& got) { return batchEndedBy(got, 2); });
 
     CHECK(batchEndedBy(received, 2));
-    CHECK(lastLayoutOf(received, fromWorkspace) == nullptr);
-    CHECK(lastLayoutOf(received, intoWorkspace) == nullptr);
     CHECK(h.host.model().workspaceOfTab(std::get<1>(h.host.model().findSessionLeaf(dragged))->id()).value
           == intoWorkspace);
 }
@@ -7725,7 +7674,7 @@ using SpawnedDirectories = std::shared_ptr<std::vector<std::filesystem::path>>;
 
 /// @param kind What the client asks to follow.
 /// @param directory The working directory the hello states, as it travels.
-/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
+/// @param workspaces The workspaces named, for AttachIntentKind::Select and Resume.
 /// @return A hello stating that intent and that directory.
 [[nodiscard]] proto::ClientHello directoryHello(proto::AttachIntentKind kind,
                                                 std::string directory,
@@ -7746,7 +7695,7 @@ TEST_CASE("the first session of an attach starts in the directory its hello stat
     h.files.addDirectory(statedDirectory());
 
     std::ignore = h.exchangeUntil(
-        { directoryHello(proto::AttachIntentKind::Launch, core::pathToUtf8(statedDirectory())) },
+        { directoryHello(proto::AttachIntentKind::Default, core::pathToUtf8(statedDirectory())) },
         [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     CHECK(*spawned == std::vector { statedDirectory() });
@@ -7758,7 +7707,7 @@ TEST_CASE("a hello's relative working directory is ignored", "[vthost][native][a
     auto const spawned = std::make_shared<std::vector<std::filesystem::path>>();
     auto h = NativeHarness { recordingSpawnDirectories(spawned) };
 
-    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Launch, "relative/dir") },
+    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Default, "relative/dir") },
                                   [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     CHECK(*spawned == std::vector { std::filesystem::path {} });
@@ -7775,14 +7724,14 @@ TEST_CASE("a launch stating a directory opens a tab in it beside the workspaces 
     spawned->clear();
 
     auto const received = h.exchangeUntil(
-        { directoryHello(proto::AttachIntentKind::Launch, core::pathToUtf8(statedDirectory())) },
+        { directoryHello(proto::AttachIntentKind::Default, core::pathToUtf8(statedDirectory())) },
         [](auto const& got) { return snapshotRunCount(got) >= 2; });
 
     CHECK(*spawned == std::vector { statedDirectory() });
     CHECK(sessionsOf(h.host, workspace).size() == 2);
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->followedWorkspaces == std::vector { workspace });
+    CHECK(hello->selectedWorkspace == workspace);
 }
 
 TEST_CASE("a launch stating no directory adds nothing to the workspaces the daemon kept",
@@ -7794,7 +7743,7 @@ TEST_CASE("a launch stating no directory adds nothing to the workspaces the daem
     auto const workspace = h.host.workspaceId().value;
     spawned->clear();
 
-    std::ignore = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Launch) },
+    std::ignore = h.exchangeUntil({ intentHello(proto::AttachIntentKind::Default) },
                                   [](auto const& got) { return snapshotRunCount(got) >= 1; });
 
     CHECK(spawned->empty());
@@ -7810,7 +7759,7 @@ TEST_CASE("an attach to named workspaces stating a directory adds nothing to the
     auto const workspace = h.host.workspaceId().value;
     spawned->clear();
 
-    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Workspaces,
+    std::ignore = h.exchangeUntil({ directoryHello(proto::AttachIntentKind::Select,
                                                    core::pathToUtf8(statedDirectory()),
                                                    { workspace }) },
                                   [](auto const& got) { return snapshotRunCount(got) >= 1; });
@@ -7915,167 +7864,848 @@ TEST_CASE("a tab beside a pane whose directory is gone keeps the profile's, and 
 namespace
 {
 /// @param kind What the client asks to follow.
-/// @param workspaces The workspaces named, for AttachIntentKind::Workspaces and Resume.
-/// @return A hello that offers Capability::WorkspaceFollow beside the attach intent.
+/// @param workspaces The workspaces named, for AttachIntentKind::Select and Resume.
+/// @return A hello that offers Capability::DaemonFollow beside the attach intent.
 [[nodiscard]] proto::ClientHello followingHello(proto::AttachIntentKind kind,
                                                 std::vector<uint64_t> workspaces = {})
 {
     auto hello = intentHello(kind, std::move(workspaces));
     hello.capabilities =
-        proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::WorkspaceFollow });
+        proto::CapabilitySet::of({ proto::Capability::AttachIntent, proto::Capability::DaemonFollow });
     return hello;
 }
 } // namespace
 
-TEST_CASE("FollowWorkspace shows another workspace", "[vthost][native][workspace-follow]")
+namespace
+{
+
+/// Once @p gate holds: sends @p bytes on @p client, a request ordered after what @p gate saw arrive.
+Task<void> sendOnce(NativeHarness* h, std::vector<std::byte> const* bytes, StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    std::ignore = co_await h->pair.second->write(std::span<std::byte const> { bytes->data(), bytes->size() });
+}
+
+/// Once @p gate holds: removes @p workspace from the daemon's model, as closing everything in it does.
+Task<void> removeOnce(NativeHarness* h, uint64_t workspace, StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    h->host.model().removeWorkspace(vtworkspace::WorkspaceId { workspace });
+}
+
+/// @return Whether a LayoutBatchEnd naming @p workspace as the connection's selection is among @p frames.
+[[nodiscard]] bool batchEndSelects(std::vector<proto::DecodedFrame> const& frames, uint64_t workspace)
+{
+    return std::ranges::any_of(frames, [workspace](proto::DecodedFrame const& frame) {
+        auto const* end = std::get_if<proto::LayoutBatchEnd>(&frame.pdu);
+        return end != nullptr && end->selected == workspace;
+    });
+}
+
+/// @param kind What the client asks for.
+/// @param workspace The workspace it names.
+/// @param instance The daemon run the id is of.
+/// @return A hello stating that intent, offering the batching a window shares.
+[[nodiscard]] proto::ClientHello daemonFollowHello(proto::AttachIntentKind kind,
+                                                   uint64_t workspace = 0,
+                                                   uint64_t instance = 0)
+{
+    auto hello = followingHello(kind, { workspace });
+    hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::LayoutBatch));
+    hello.attachIntent.daemonInstance = instance;
+    return hello;
+}
+
+} // namespace
+
+TEST_CASE("SelectWorkspace moves the full mirror to another workspace", "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
     auto const* other = h.host.createWorkspace();
     REQUIRE(other != nullptr);
-    auto const second = other->id();
-    auto const secondSession = *sessionsOf(h.host, second.value).begin();
+    auto const second = other->id().value;
+    auto const oldSession = *sessionsOf(h.host, first).begin();
+    auto const newSession = *sessionsOf(h.host, second).begin();
+    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = second } });
 
-    auto const received =
-        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
-                          proto::FollowWorkspace { .workspace = second.value } },
-                        [&](auto const& got) { return snapshotSessions(got).contains(secondSession); });
+    // After the snapshot of the first workspace: select the second; after its snapshot, both sessions
+    // produce output, and one flush later the second's Delta is there and the first's never comes.
+    auto const received = h.exchangeUntil(
+        { followingHello(proto::AttachIntentKind::Default) },
+        [&](auto const& got) { return deltaSessions(got).contains(newSession); },
+        sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }),
+        writeOnce(&h,
+                  vtworkspace::SessionId { oldSession },
+                  "old",
+                  [&] { return snapshotSessions(h.received).contains(newSession); }),
+        writeOnce(&h, vtworkspace::SessionId { newSession }, "new", [&] {
+            return snapshotSessions(h.received).contains(newSession);
+        }));
 
-    CHECK(layoutWorkspaces(received) == std::set<uint64_t> { first, second.value });
-    CHECK(snapshotSessions(received).contains(secondSession));
-    CHECK_FALSE(h.host.lastRelease(second).has_value());
+    CHECK(snapshotSessions(received) == std::set<uint64_t> { oldSession, newSession });
+    CHECK(deltaSessions(received) == std::set<uint64_t> { newSession });
+    CHECK(h.session->selectedWorkspace() == second);
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
+    CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
+    CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Shown);
 }
 
-TEST_CASE("ReleaseWorkspace records why the client stopped showing a workspace",
-          "[vthost][native][workspace-follow]")
-{
-    auto h = NativeHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.workspaceId().value;
-    auto const* other = h.host.createWorkspace();
-    REQUIRE(other != nullptr);
-    auto const second = other->id();
-
-    std::ignore =
-        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
-                          proto::FollowWorkspace { .workspace = second.value },
-                          proto::ReleaseWorkspace { .workspace = second.value,
-                                                    .reason = proto::WorkspaceRelease::SwitchedAway },
-                          proto::FetchImage { .imageId = 4242 } },
-                        imageGoneArrived);
-
-    CHECK(h.host.lastRelease(second) == std::optional { proto::WorkspaceRelease::SwitchedAway });
-}
-
-TEST_CASE("FollowWorkspace 0 creates a workspace this connection shows", "[vthost][native][workspace-follow]")
+TEST_CASE("SelectWorkspace 0 creates a workspace and selects it", "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
 
     auto const received = h.exchangeUntil(
-        { followingHello(proto::AttachIntentKind::Workspaces, { first }), proto::FollowWorkspace {} },
+        { followingHello(proto::AttachIntentKind::Default), proto::SelectWorkspace { .workspace = 0 } },
         [](auto const& got) { return layoutWorkspaces(got).size() == 2 && snapshotRunCount(got) >= 2; });
 
-    CHECK(layoutWorkspaces(received).size() == 2);
+    auto const workspaces = layoutWorkspaces(received);
+    REQUIRE(workspaces.size() == 2);
+    auto const created =
+        *std::ranges::find_if(workspaces, [first](uint64_t workspace) { return workspace != first; });
+    CHECK(h.session->selectedWorkspace() == created);
+    CHECK(snapshotSessions(received).contains(*sessionsOf(h.host, created).begin()));
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { created });
+}
+
+TEST_CASE("SelectWorkspace naming no workspace keeps the selection, and one from a peer without "
+          "daemon-follow is refused",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+
+    SECTION("an unknown workspace is answered with the selection it kept, not as an unknown PDU")
+    {
+        // Sent under serial 1, which the batch answering it names as its cause.
+        auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = 999 } });
+        auto const answer = [](std::vector<proto::DecodedFrame> const& got) -> proto::LayoutBatchEnd const* {
+            for (auto const& frame: got)
+                if (auto const* end = std::get_if<proto::LayoutBatchEnd>(&frame.pdu);
+                    end && end->causeSerial == 1)
+                    return end;
+            return nullptr;
+        };
+        auto const received = h.exchangeUntil(
+            { daemonFollowHello(proto::AttachIntentKind::Default) },
+            [&](auto const& got) { return answer(got) != nullptr; },
+            sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }));
+        CHECK(std::ranges::count_if(received, isUnsupported) == 0);
+        REQUIRE(answer(received) != nullptr);
+        CHECK(answer(received)->selected == first);
+        CHECK(h.session->selectedWorkspace() == first);
+    }
+    SECTION("a workspace whose last session ended is no workspace to select")
+    {
+        auto const ended = h.host.createWorkspace()->id();
+        h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
+        REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+        auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = ended.value } });
+        auto const answered = [](std::vector<proto::DecodedFrame> const& got) {
+            return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
+                auto const* end = std::get_if<proto::LayoutBatchEnd>(&frame.pdu);
+                return end != nullptr && end->causeSerial == 1;
+            });
+        };
+        std::ignore =
+            h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Default) },
+                            answered,
+                            sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }));
+        CHECK(h.session->selectedWorkspace() == first);
+    }
+    SECTION("a peer without the capability")
+    {
+        auto const received =
+            h.exchangeUntil({ intentHello(proto::AttachIntentKind::Default),
+                              proto::DecodedPdu { proto::SelectWorkspace { .workspace = first } } },
+                            [](auto const& got) { return std::ranges::count_if(got, isUnsupported) >= 1; });
+        CHECK(std::ranges::count_if(received, isUnsupported) == 1);
+    }
+    CHECK(h.session->selectedWorkspace() == first);
 }
 
 namespace
 {
-/// @param workspaces The workspaces the hello names.
-/// @return A following hello that also offers Capability::WorkspaceShown.
-[[nodiscard]] proto::ClientHello confirmingHello(std::vector<uint64_t> workspaces)
+
+/// Once @p gate holds: closes the last tab of @p workspace, as the shell of its only pane exiting does.
+Task<void> closeLastTabOnce(NativeHarness* h, uint64_t workspace, StepGate gate)
 {
-    auto hello = followingHello(proto::AttachIntentKind::Workspaces, std::move(workspaces));
-    hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceShown));
-    return hello;
+    co_await awaitGate(&h->loop, std::move(gate));
+    auto const id = vtworkspace::WorkspaceId { workspace };
+    h->host.model().closeTab(id, h->host.model().workspace(id)->tabAt(0)->id());
 }
 
-/// @param host The daemon's host.
-/// @return A second workspace, with a tab, that a window switched away from: Hidden.
-[[nodiscard]] vtworkspace::WorkspaceId hiddenWorkspace(SessionHost& host)
-{
-    auto const* other = host.createWorkspace();
-    REQUIRE(other != nullptr);
-    host.noteWorkspaceReleased(other->id(), proto::WorkspaceRelease::SwitchedAway);
-    REQUIRE(host.visibility(other->id()) == vthost::WorkspaceVisibility::Hidden);
-    return other->id();
-}
 } // namespace
 
-TEST_CASE("a hidden workspace a connection followed but never confirmed is hidden again when it ends",
-          "[vthost][native][workspace-follow][visibility]")
-{
-    auto h = NativeHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const hidden = hiddenWorkspace(h.host);
-
-    // Its layout went out, but the client never said it arrived: the connection is lost first.
-    auto const received = h.exchangeUntil({ confirmingHello({ hidden.value }) },
-                                          [&](auto const& got) { return !layoutWorkspaces(got).empty(); });
-    REQUIRE(layoutWorkspaces(received) == std::set<uint64_t> { hidden.value });
-    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Shown);
-    h.session.reset();
-    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Hidden);
-}
-
-TEST_CASE("a hidden workspace a connection confirmed it was shown is left when it ends",
-          "[vthost][native][workspace-follow][visibility]")
-{
-    auto h = NativeHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const hidden = hiddenWorkspace(h.host);
-
-    std::ignore = h.exchangeUntil({ confirmingHello({ hidden.value }),
-                                    proto::WorkspaceShown { .workspace = hidden.value },
-                                    proto::FetchImage { .imageId = 4242 } },
-                                  imageGoneArrived);
-    h.session.reset();
-    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Left);
-}
-
-TEST_CASE(
-    "a connection that does not confirm what it was shown counts a follow shown once its layout is sent",
-    "[vthost][native][workspace-follow][visibility]")
-{
-    auto h = NativeHarness {};
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const hidden = hiddenWorkspace(h.host);
-
-    std::ignore = h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { hidden.value }) },
-                                  [&](auto const& got) { return !layoutWorkspaces(got).empty(); });
-    h.session.reset();
-    CHECK(h.host.visibility(hidden) == vthost::WorkspaceVisibility::Left);
-}
-
-TEST_CASE("a peer without workspace-shown has WorkspaceShown refused", "[vthost][native][workspace-follow]")
+TEST_CASE("a connection whose selected workspace ends selects another", "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const second = other->id().value;
+    auto const secondSession = *sessionsOf(h.host, second).begin();
+    auto const attached = [&] {
+        return snapshotRunCount(h.received) >= 1;
+    };
+    auto const moved = [&](auto const& got) {
+        return batchEndSelects(got, second) && snapshotSessions(got).contains(secondSession);
+    };
 
-    auto const received =
-        h.exchangeUntil({ followingHello(proto::AttachIntentKind::Workspaces, { first }),
-                          proto::DecodedPdu { proto::WorkspaceShown { .workspace = first } } },
-                        [](auto const& got) { return std::ranges::count_if(got, isUnsupported) >= 1; });
+    SECTION("its last tab closes, the workspace staying in the model")
+    {
+        std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                                      moved,
+                                      closeLastTabOnce(&h, first, attached));
+        REQUIRE(h.host.model().workspace(vtworkspace::WorkspaceId { first }) != nullptr);
+    }
+    SECTION("it leaves the model")
+    {
+        std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                                      moved,
+                                      removeOnce(&h, first, attached));
+    }
 
-    CHECK(std::ranges::count_if(received, isUnsupported) == 1);
+    CHECK(h.session->selectedWorkspace() == second);
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { second });
 }
 
-TEST_CASE("a peer without workspace-follow has the follow and release PDUs refused",
-          "[vthost][native][workspace-follow]")
+TEST_CASE("a connection whose only workspace ends selects none and creates none",
+          "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
     auto const first = h.host.workspaceId().value;
+    auto const attached = [&] {
+        return snapshotRunCount(h.received) >= 1;
+    };
+    auto const selectsNone = [](auto const& got) {
+        return batchEndSelects(got, 0);
+    };
+
+    SECTION("its last tab closes")
+    {
+        std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                                      selectsNone,
+                                      closeLastTabOnce(&h, first, attached));
+        CHECK(h.host.model().workspaceCount() == 1);
+    }
+    SECTION("it leaves the model")
+    {
+        std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, first) },
+                                      selectsNone,
+                                      removeOnce(&h, first, attached));
+        CHECK(h.host.model().workspaceCount() == 0);
+    }
+
+    CHECK(h.session->selectedWorkspace() == 0);
+}
+
+TEST_CASE("a workspace whose last session ended is selectable again once it holds a tab",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const own = h.host.workspaceId();
+    auto const other = h.host.createWorkspace()->id();
+    auto const endLastSession = [&h](vtworkspace::WorkspaceId workspace) {
+        h.host.closeSession(h.host.model().workspace(workspace)->tabAt(0)->rootPane()->session());
+        REQUIRE(h.host.hasEnded(workspace));
+    };
+
+    auto refilled = vtworkspace::WorkspaceId {};
+    SECTION("by a tab created naming no workspace, which lands in the host's own")
+    {
+        endLastSession(own);
+        REQUIRE(h.host.createTab() != nullptr);
+        refilled = own;
+    }
+    SECTION("by a tab moved there")
+    {
+        REQUIRE(h.host.createTab() != nullptr); // a second tab in the host's own, to move
+        endLastSession(other);
+        auto& model = h.host.model();
+        model.moveTabToWorkspace(own, model.workspace(own)->tabAt(1)->id(), other, 0);
+        refilled = other;
+    }
+    CHECK_FALSE(h.host.hasEnded(refilled));
+
+    // Selected: the batch answering the request states it.
+    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = refilled.value } });
+    std::ignore = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, refilled == own ? other.value : own.value) },
+        [&](auto const& got) { return batchEndSelects(got, refilled.value); },
+        sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }));
+    CHECK(h.session->selectedWorkspace() == refilled.value);
+}
+
+TEST_CASE("an attach selecting a workspace whose last session ended selects as a launch does",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const ended = h.host.createWorkspace()->id();
+    h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
+    REQUIRE(h.host.model().workspace(ended) != nullptr); // kept, emptied
+
+    std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, ended.value) },
+                                  [](auto const& got) { return snapshotRunCount(got) >= 1; });
+    CHECK(h.session->selectedWorkspace() == first);
+}
+
+TEST_CASE("a workspace made empty for its first tab has not ended", "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const& empty = h.host.createEmptyWorkspace();
+    auto const emptyWorkspace = empty.id().value;
+    auto const select = encodeRequest({ proto::SelectWorkspace { .workspace = emptyWorkspace } });
+
+    // Selected while it holds nothing, then another workspace changes (a batch is pushed): the connection
+    // stays on it.
+    std::ignore = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, first) },
+        [&](auto const& got) {
+            auto const* layout = lastLayoutOf(got, first);
+            return layout != nullptr && layout->tabs.size() == 2 && batchEndSelects(got, emptyWorkspace);
+        },
+        sendOnce(&h, &select, [&] { return snapshotRunCount(h.received) >= 1; }),
+        [](NativeHarness* h, uint64_t workspace) -> Task<void> {
+            co_await awaitGate(&h->loop,
+                               [h, workspace] { return h->session->selectedWorkspace() == workspace; });
+            std::ignore = h->host.createTab();
+        }(&h, emptyWorkspace));
+    CHECK(h.session->selectedWorkspace() == emptyWorkspace);
+}
+
+namespace
+{
+
+/// Attaches to @p oldWorkspace, then parks a snapshot of @p oldSession behind a send backlog the client
+/// does not read, selects @p newSession's workspace meanwhile, and reads on.
+/// @param frames Receives what the client decodes.
+/// @param switchedAt Receives how many frames had arrived when the selection was made.
+Task<void> switchWhileSnapshotParked(NativeHarness* h,
+                                     vtworkspace::SessionId oldSession,
+                                     vtworkspace::WorkspaceId newWorkspace,
+                                     vtworkspace::SessionId newSession,
+                                     std::vector<proto::DecodedFrame>* frames,
+                                     std::size_t* switchedAt)
+{
+    auto* client = h->pair.second.get();
+    co_await decodeUntil(client, [](auto const& got) { return snapshotRunCount(got) >= 1; }, frames, {});
+    // The client reads nothing now: one frame fills its pipe, the next waits in the writer's hands, and
+    // the frames behind it are the backlog the streamer must wait out.
+    using Tester = vthost::NativeSessionFollowTester;
+    Tester::stallSendQueue(*h->session, SmallQueueBytes - 4096);
+    co_await h->loop.delay(50ms);
+    Tester::stallSendQueue(*h->session, SmallQueueBytes - 4096);
+    co_await h->loop.delay(50ms);
+    for (auto const frame: std::views::iota(0, 4))
+    {
+        (void) frame;
+        Tester::stallSendQueue(*h->session, std::size_t { 12 } * 1024);
+    }
+    Tester::requestSnapshotOf(*h->session, oldSession);
+    auto const parked = co_await core::net::testing::waitUntil(
+        &h->loop,
+        [h, oldSession] {
+            return vthost::NativeSessionFollowTester::streamingOffQueue(*h->session, oldSession);
+        },
+        StepTicks);
+    CHECK(parked);
+    vthost::NativeSessionFollowTester::select(*h->session, newWorkspace);
+    *switchedAt = frames->size();
+    // Reads on: the backlog drains, the parked streamer wakes, and the new workspace's snapshot follows.
+    co_await core::net::testing::anyOf(decodeUntil(client,
+                                                   [newSession](auto const& got) {
+                                                       return snapshotSessions(got).contains(newSession.value)
+                                                              && snapshotRunCount(got) >= 2;
+                                                   },
+                                                   frames,
+                                                   {}),
+                                       core::net::testing::sleepFor(&h->loop, 5s));
+    client->close();
+}
+
+} // namespace
+
+TEST_CASE("a snapshot parked behind a send backlog when the selection moves is dropped, not sent",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness { smallQueueOptions() };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const oldSession = vtworkspace::SessionId { *sessionsOf(h.host, first).begin() };
+    auto const newSession = vtworkspace::SessionId { *sessionsOf(h.host, other->id().value).begin() };
+    auto const bytes = encodeRequest({ followingHello(proto::AttachIntentKind::Select, { first }) });
+
+    auto frames = std::vector<proto::DecodedFrame> {};
+    auto switchedAt = std::size_t { 0 };
+    h.loop.blockOn(core::net::testing::allOf(
+        h.session->run(),
+        feedBytes(h.pair.second.get(), &bytes),
+        switchWhileSnapshotParked(&h, oldSession, other->id(), newSession, &frames, &switchedAt)));
+
+    REQUIRE(switchedAt > 0);
+    auto const after = std::span { frames }.subspan(switchedAt);
+    auto const touchesOld = [oldSession](proto::DecodedFrame const& frame) {
+        if (auto const* state = std::get_if<proto::SessionState>(&frame.pdu))
+            return state->session == oldSession.value;
+        if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu))
+            return delta->session == oldSession.value;
+        if (auto const* echo = std::get_if<proto::SessionInputEcho>(&frame.pdu))
+            return echo->session == oldSession.value;
+        return false;
+    };
+    CHECK_FALSE(std::ranges::any_of(after, touchesOld));
+    CHECK_FALSE(vthost::NativeSessionFollowTester::follows(*h.session, oldSession));
+    CHECK(snapshotSessions(frames).contains(newSession.value));
+}
+
+TEST_CASE("a resumed connection selects the workspace it had", "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness { HarnessOptions { .instance = 9 } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const second = other->id().value;
 
     auto const received =
-        h.exchangeUntil({ intentHello(proto::AttachIntentKind::Workspaces, { first }),
-                          proto::DecodedPdu { proto::FollowWorkspace { .workspace = first } },
-                          proto::DecodedPdu { proto::ReleaseWorkspace { .workspace = first } } },
-                        [](auto const& got) { return std::ranges::count_if(got, isUnsupported) >= 2; });
+        h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Resume, second, 9),
+                          proto::FetchImage { .imageId = 4242 } },
+                        [](auto const& got) { return imageGoneArrived(got) && snapshotRunCount(got) >= 1; });
 
-    CHECK(std::ranges::count_if(received, isUnsupported) == 2);
-    CHECK_FALSE(h.host.lastRelease(vtworkspace::WorkspaceId { first }).has_value());
+    auto const* hello = serverHelloOf(received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->selectedWorkspace == second);
+    CHECK(snapshotSessions(received) == sessionsOf(h.host, second));
 }
+
+TEST_CASE("a resume naming a workspace of another daemon instance selects the default",
+          "[vthost][native][daemon-follow]")
+{
+    auto h = NativeHarness { HarnessOptions { .instance = 9 } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+
+    // The ids of a restarted daemon count from 1 again: the second workspace of another run is no workspace
+    // of this one.
+    auto const received =
+        h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Resume, other->id().value, 8),
+                          proto::FetchImage { .imageId = 4242 } },
+                        imageGoneArrived);
+
+    auto const* hello = serverHelloOf(received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->selectedWorkspace == first);
+}
+
+TEST_CASE("visibility is Shown while some connection selects it",
+          "[vthost][native][daemon-follow][visibility]")
+{
+    auto h = NativeHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE(other != nullptr);
+    auto const second = other->id().value;
+    REQUIRE(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
+
+    std::ignore = h.exchangeUntil(
+        { followingHello(proto::AttachIntentKind::Select, { first }), proto::FetchImage { .imageId = 4242 } },
+        imageGoneArrived);
+    CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Shown);
+    CHECK(h.host.visibility(second) == vthost::WorkspaceVisibility::Hidden);
+
+    h.session.reset();
+    CHECK(h.host.visibility(first) == vthost::WorkspaceVisibility::Hidden);
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { first });
+}
+
+// {{{ status stream and raise role
+namespace
+{
+
+/// Two workspaces of one session each, and windows on a ManualClock handshaken by hand, each selecting the
+/// workspace it is asked to.
+struct SummaryFixture
+{
+    FlushHarness flush {};
+    vtworkspace::SessionId inFirst = newSession(flush.h.host);
+    uint64_t first = flush.h.host.workspaceId().value;
+    uint64_t second = flush.h.host.createWorkspace()->id().value;
+    vtworkspace::SessionId inSecond { *sessionsOf(flush.h.host, second).begin() };
+
+    /// @return A hello that selects @p workspace and shares the capabilities the status stream rides on.
+    [[nodiscard]] static proto::ClientHello helloSelecting(uint64_t workspace)
+    {
+        return proto::ClientHello {
+            .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent,
+                                                       proto::Capability::DaemonFollow,
+                                                       proto::Capability::ProgramStatus }),
+            .attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = workspace }
+        };
+    }
+
+    /// Attaches a window selecting @p workspace.
+    FlushClient& attachSelecting(uint64_t workspace)
+    {
+        auto const shown = workspace == first ? inFirst : inSecond;
+        return flush.attach(shown, helloSelecting(workspace));
+    }
+
+    /// Delivers what the sessions raised, then lets the flush that is due go out, and the window read what
+    /// it sent.
+    void settle()
+    {
+        turnIdle(flush.h.loop);
+        flush.clock.advance(30ms);
+        turnIdle(flush.h.loop);
+    }
+
+    /// @return The PaneSummary PDUs @p client received for @p session after its first @p skip frames.
+    [[nodiscard]] static std::vector<proto::PaneSummary> summariesOf(FlushClient const& client,
+                                                                     vtworkspace::SessionId session,
+                                                                     std::size_t skip = 0)
+    {
+        auto found = std::vector<proto::PaneSummary> {};
+        for (auto const& frame: client.received | std::views::drop(skip))
+            if (auto const* summary = std::get_if<proto::PaneSummary>(&frame.pdu);
+                summary != nullptr && summary->session == session.value)
+                found.push_back(*summary);
+        return found;
+    }
+
+    /// @return The raise roles @p client was told, in order.
+    [[nodiscard]] static std::vector<proto::RaiseRole> rolesOf(FlushClient const& client)
+    {
+        auto roles = std::vector<proto::RaiseRole> {};
+        for (auto const& frame: client.received)
+            if (auto const* role = std::get_if<proto::NotifyRole>(&frame.pdu))
+                roles.push_back(role->role);
+        return roles;
+    }
+
+    /// @return How many PDUs of type @p Pdu naming @p session @p client received.
+    template <typename Pdu>
+    [[nodiscard]] static std::size_t countOf(FlushClient const& client, vtworkspace::SessionId session)
+    {
+        return static_cast<std::size_t>(std::ranges::count_if(client.received, [session](auto const& frame) {
+            auto const* pdu = std::get_if<Pdu>(&frame.pdu);
+            return pdu != nullptr && pdu->session == session.value;
+        }));
+    }
+
+    /// Reports @p focus from @p client as its window would.
+    static void reportFocus(FlushClient& client, proto::WindowFocus focus)
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(*client.session, proto::ReportFocus { .focus = focus });
+    }
+};
+
+} // namespace
+
+TEST_CASE("an unselected pane's title change reaches the client as a PaneSummary",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const announced = SummaryFixture::summariesOf(client, f.inSecond);
+    REQUIRE(announced.size() == 1); // the pane's row starts from what it is now
+    auto const skip = client.received.size();
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]2;building\033\\");
+    f.settle();
+
+    auto const summaries = SummaryFixture::summariesOf(client, f.inSecond, skip);
+    REQUIRE(summaries.size() == 1);
+    CHECK(summaries.front().title == std::optional<std::string> { "building" });
+    CHECK(SummaryFixture::countOf<proto::PaneSummary>(client, f.inFirst) == 0); // a mirrored pane has none
+}
+
+TEST_CASE("activity marks are throttled to one per second per session",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    auto const skip = client.received.size();
+    auto const marks = [&] {
+        return std::ranges::count_if(SummaryFixture::summariesOf(client, f.inSecond, skip),
+                                     [](proto::PaneSummary const& summary) {
+                                         return summary.activity == proto::OutputActivity::Output;
+                                     });
+    };
+
+    // Each output gets its own flush inside the second, so only the pacing can hold the marks back.
+    for ([[maybe_unused]] auto const output: std::views::iota(0, 10))
+    {
+        client.session->sessionScreenUpdated(f.inSecond);
+        f.settle();
+    }
+    CHECK(marks() == 1);
+
+    f.flush.clock.advance(1s);
+    client.session->sessionScreenUpdated(f.inSecond);
+    f.settle();
+    CHECK(marks() == 2);
+}
+
+TEST_CASE("a finished command in an unselected workspace is summarized",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    auto const skip = client.received.size();
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen(commandCycle("make all", 3));
+    f.settle();
+
+    auto const summaries = SummaryFixture::summariesOf(client, f.inSecond, skip);
+    auto const finished = std::ranges::find_if(
+        summaries, [](proto::PaneSummary const& summary) { return summary.finished.has_value(); });
+    REQUIRE(finished != summaries.end());
+    CHECK(finished->finished->exitCode == std::optional<int32_t> { 3 });
+    CHECK(finished->finished->commandLine == "make all");
+}
+
+TEST_CASE("a pending finished command survives another workspace being selected",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = client.received.size();
+
+    // The finished command waits in the coalescing window when the window selects another workspace, which
+    // announces the unmirrored panes once more.
+    auto const third = f.flush.h.host.createWorkspace()->id().value;
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen(commandCycle("make all", 3));
+    turnIdle(f.flush.h.loop);
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::SelectWorkspace { .workspace = third });
+    f.settle();
+
+    auto const summaries = SummaryFixture::summariesOf(client, f.inSecond, skip);
+    auto const finished = std::ranges::find_if(
+        summaries, [](proto::PaneSummary const& summary) { return summary.finished.has_value(); });
+    REQUIRE(finished != summaries.end());
+    CHECK(finished->finished->commandLine == "make all");
+}
+
+TEST_CASE("program status of an unselected pane reaches every client",
+          "[vthost][native][daemon-follow][status]")
+{
+    auto f = SummaryFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& two = f.attachSelecting(f.first);
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]7501;state=working:id=build:app=make\033\\");
+    f.settle();
+
+    CHECK(SummaryFixture::countOf<proto::ProgramStatus>(one, f.inSecond) == 1);
+    CHECK(SummaryFixture::countOf<proto::ProgramStatus>(two, f.inSecond) == 1);
+}
+
+TEST_CASE("the most recently focused client holds the raise role", "[vthost][native][daemon-follow][raise]")
+{
+    using proto::RaiseRole;
+    auto f = SummaryFixture {};
+    auto& one = f.attachSelecting(f.first);
+    f.settle();
+    CHECK(SummaryFixture::rolesOf(one) == std::vector { RaiseRole::Raise }); // alone, it holds it
+
+    auto& two = f.attachSelecting(f.first);
+    f.settle();
+    // Neither was ever focused: the one attached last holds the role.
+    CHECK(SummaryFixture::rolesOf(one) == std::vector { RaiseRole::Raise, RaiseRole::Quiet });
+    CHECK(SummaryFixture::rolesOf(two) == std::vector { RaiseRole::Raise });
+
+    SummaryFixture::reportFocus(one, proto::WindowFocus::Focused);
+    f.settle();
+    CHECK(SummaryFixture::rolesOf(one)
+          == std::vector { RaiseRole::Raise, RaiseRole::Quiet, RaiseRole::Raise });
+    CHECK(SummaryFixture::rolesOf(two) == std::vector { RaiseRole::Raise, RaiseRole::Quiet });
+
+    // A report that changes nobody's role sends nothing.
+    SummaryFixture::reportFocus(one, proto::WindowFocus::Focused);
+    SummaryFixture::reportFocus(two, proto::WindowFocus::Unfocused);
+    f.settle();
+    CHECK(SummaryFixture::rolesOf(one).size() == 3);
+    CHECK(SummaryFixture::rolesOf(two).size() == 2);
+}
+
+TEST_CASE("the raise role passes on when its holder detaches", "[vthost][native][daemon-follow][raise]")
+{
+    using proto::RaiseRole;
+    auto f = SummaryFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& two = f.attachSelecting(f.first);
+    SummaryFixture::reportFocus(two, proto::WindowFocus::Focused);
+    f.settle();
+    REQUIRE(f.flush.h.host.raiseHolderNow() == std::optional { two.session->connectionId() });
+
+    REQUIRE(NativeSessionFlushTester::letGo(*two.session, f.flush.h.loop, f.flush.clock));
+    two.session.reset();
+    f.settle();
+
+    CHECK(f.flush.h.host.raiseHolderNow() == std::optional { one.session->connectionId() });
+    CHECK(SummaryFixture::rolesOf(one).back() == RaiseRole::Raise);
+}
+
+TEST_CASE("a clipboard write reaches only the focused client that selects the pane's workspace",
+          "[vthost][native][daemon-follow][clipboard]")
+{
+    auto f = SummaryFixture {};
+    auto& earlier = f.attachSelecting(f.second);
+    auto& later = f.attachSelecting(f.second);
+    auto& elsewhere = f.attachSelecting(f.first);
+    SummaryFixture::reportFocus(later, proto::WindowFocus::Focused);
+    SummaryFixture::reportFocus(earlier, proto::WindowFocus::Focused);
+    SummaryFixture::reportFocus(elsewhere,
+                                proto::WindowFocus::Focused); // focused last, but shows no such pane
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]52;c;aGk=\033\\");
+    f.settle();
+
+    CHECK(SummaryFixture::countOf<proto::SessionClipboard>(earlier, f.inSecond) == 1);
+    CHECK(SummaryFixture::countOf<proto::SessionClipboard>(later, f.inSecond) == 0);
+    CHECK(SummaryFixture::countOf<proto::SessionClipboard>(elsewhere, f.inSecond) == 0);
+}
+
+TEST_CASE("a clipboard write no client displays is dropped", "[vthost][native][daemon-follow][clipboard]")
+{
+    auto f = SummaryFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& two = f.attachSelecting(f.first);
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\033]52;c;aGk=\033\\");
+    f.settle();
+
+    CHECK(SummaryFixture::countOf<proto::SessionClipboard>(one, f.inSecond) == 0);
+    CHECK(SummaryFixture::countOf<proto::SessionClipboard>(two, f.inSecond) == 0);
+}
+
+TEST_CASE("a bell reaches every client: as the pane's event where mirrored, in its summary elsewhere",
+          "[vthost][native][daemon-follow][bell]")
+{
+    auto f = SummaryFixture {};
+    auto& elsewhere = f.attachSelecting(f.first);
+    auto& mirroring = f.attachSelecting(f.second);
+    f.settle();
+    auto const skip = elsewhere.received.size();
+
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\a");
+    f.settle();
+
+    CHECK(SummaryFixture::countOf<proto::SessionBell>(mirroring, f.inSecond) == 1);
+    CHECK(SummaryFixture::countOf<proto::SessionBell>(elsewhere, f.inSecond) == 0);
+    auto const summaries = SummaryFixture::summariesOf(elsewhere, f.inSecond, skip);
+    CHECK(std::ranges::count(summaries, proto::PaneBell::Rang, &proto::PaneSummary::bell) == 1);
+}
+
+TEST_CASE("a desktop notification reaches every client: as the pane's event where mirrored, in its summary "
+          "elsewhere",
+          "[vthost][native][daemon-follow][notify]")
+{
+    auto f = SummaryFixture {};
+    auto& elsewhere = f.attachSelecting(f.first);
+    auto& mirroring = f.attachSelecting(f.second);
+    f.settle();
+    auto const skip = elsewhere.received.size();
+
+    // Two within one coalescing window, told to each connection as the host tells every observer: each is
+    // kept, in order.
+    for (auto* const client: { &elsewhere, &mirroring })
+    {
+        client->session->sessionNotify(f.inSecond, "agent", "needs input", std::nullopt);
+        client->session->sessionNotify(f.inSecond, "agent", "done", vtbackend::DisplayOccasion::Always);
+    }
+    f.settle();
+
+    CHECK(SummaryFixture::countOf<proto::SessionNotify>(mirroring, f.inSecond) == 2);
+    CHECK(SummaryFixture::countOf<proto::SessionNotify>(elsewhere, f.inSecond) == 0);
+    auto notified = std::vector<proto::PaneNotification> {};
+    for (auto const& summary: SummaryFixture::summariesOf(elsewhere, f.inSecond, skip))
+        notified.insert(notified.end(), summary.notifications.begin(), summary.notifications.end());
+    CHECK(notified
+          == std::vector {
+              proto::PaneNotification {
+                  .title = "agent", .body = "needs input", .occasion = proto::NotifyOccasion::Unstated },
+              proto::PaneNotification {
+                  .title = "agent", .body = "done", .occasion = proto::NotifyOccasion::Always },
+          });
+}
+
+TEST_CASE("a raise role change sends what was summarized under the old role first",
+          "[vthost][native][daemon-follow][raise]")
+{
+    auto f = SummaryFixture {};
+    auto& one = f.attachSelecting(f.first);
+    auto& two = f.attachSelecting(f.first);
+    SummaryFixture::reportFocus(one, proto::WindowFocus::Focused);
+    f.settle();
+    REQUIRE(SummaryFixture::rolesOf(one).back() == proto::RaiseRole::Raise);
+    auto const skipOne = one.received.size();
+    auto const skipTwo = two.received.size();
+
+    // A bell waits in the coalescing window when the other window takes the role.
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\a");
+    turnIdle(f.flush.h.loop);
+    SummaryFixture::reportFocus(two, proto::WindowFocus::Focused);
+    f.settle();
+
+    // On each connection the bell's summary comes before the role that replaces the one it was raised under:
+    // the window that held the role rings, and the one that takes it does not.
+    auto const bellThenRole = [&](FlushClient const& client, std::size_t skip) {
+        auto const frames = client.received | std::views::drop(skip);
+        auto const bell = std::ranges::find_if(frames, [&](proto::DecodedFrame const& frame) {
+            auto const* summary = std::get_if<proto::PaneSummary>(&frame.pdu);
+            return summary != nullptr && summary->session == f.inSecond.value
+                   && summary->bell == proto::PaneBell::Rang;
+        });
+        auto const role = std::ranges::find_if(frames, [](proto::DecodedFrame const& frame) {
+            return std::holds_alternative<proto::NotifyRole>(frame.pdu);
+        });
+        return bell != frames.end() && role != frames.end()
+               && std::ranges::distance(frames.begin(), bell) < std::ranges::distance(frames.begin(), role);
+    };
+    CHECK(bellThenRole(one, skipOne));
+    CHECK(bellThenRole(two, skipTwo));
+}
+
+TEST_CASE("a bell summarized before its workspace was selected still reaches the client",
+          "[vthost][native][daemon-follow][bell]")
+{
+    auto f = SummaryFixture {};
+    auto& client = f.attachSelecting(f.first);
+    f.settle();
+    auto const skip = client.received.size();
+
+    // The bell waits in the coalescing window when the window selects the pane's workspace.
+    f.flush.h.host.terminal(f.inSecond)->writeToScreen("\a");
+    turnIdle(f.flush.h.loop);
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::SelectWorkspace { .workspace = f.second });
+    f.settle();
+
+    auto const summaries = SummaryFixture::summariesOf(client, f.inSecond, skip);
+    CHECK(std::ranges::count(summaries, proto::PaneBell::Rang, &proto::PaneSummary::bell) == 1);
+    // Nothing but what it raised: the pane's own stream says what it is now.
+    for (auto const& summary: summaries)
+        if (summary.bell == proto::PaneBell::Rang)
+            CHECK_FALSE(summary.title.has_value());
+}
+// }}}

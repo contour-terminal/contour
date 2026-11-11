@@ -16,14 +16,16 @@
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/WindowId.hpp>
 
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
+#include <QtGui/QScreen>
 
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <functional>
-#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -72,8 +74,20 @@ struct SwitchArrival
     /// opens a window of its own for the workspace.
     session::SwitchMode mode = session::SwitchMode::Switch;
     SwitchLanded landed; ///< Told once: the workspace is shown (Open) or ready to be (Switch), or it failed.
-    /// How the workspace is let go of when the switch is abandoned: as it was before (@see undoReleaseFor()).
-    vthost::proto::WorkspaceRelease undo = vthost::proto::WorkspaceRelease::Closed;
+};
+
+/// How a link that opens a window of its own (IDaemonLinkHost::startWindowLink) opens it.
+struct WindowOpening
+{
+    /// The daemon's id of the tab the window activates once it shows the workspace -- the tab torn off
+    /// another window --; none for the tab the daemon names.
+    std::optional<uint64_t> activeTab = std::nullopt;
+    /// Where the window opens; null for the default placement, and once the platform took the screen away
+    /// while the link connected.
+    QPointer<QScreen> screen = nullptr;
+    /// The window New Window or a tear-off was asked from, told when the new window cannot open; none for
+    /// nobody to tell.
+    std::optional<window::WindowId> askedBy = std::nullopt;
 };
 
 /// Everything a DaemonLink is built with.
@@ -90,10 +104,10 @@ struct DaemonLinkConfig
     window::DaemonUpkeep upkeep = window::DaemonUpkeep::None;
     /// This client's release, which the daemon's is judged against for the drift badge.
     std::string clientRelease;
-    /// The link this one takes its workspace over from, which @c controller's intent names; none for the
-    /// launch's link, which adopts the boot window. A link taking one over opens its own window once its
-    /// connection shows the workspace, and reports the outcome (IDaemonLinkHost::handOverSettled).
-    std::optional<HandOver> handOverFrom = std::nullopt;
+    /// How a link opens a window of its own once its connection's selected workspace holds a tab (New
+    /// Window, a tab torn off); none for the launch's link, which adopts the boot window, and for a link a
+    /// switch started (@c arrival).
+    std::optional<WindowOpening> opening = std::nullopt;
     /// The daemon as a window switch names it: its local label, or its saved host; Same for one no switch can
     /// name (`--connect-tcp`).
     DaemonAddress address {};
@@ -104,39 +118,32 @@ struct DaemonLinkConfig
     askpass::AskpassRouteId askpassRoute = askpass::AnyWindow;
 };
 
-/// The launch's link: it adopts the boot window, and takes no workspace over.
+/// The launch's link: it adopts the boot window.
 struct BootRole
 {
 };
 
-/// A link that takes a further workspace over from another link (DaemonLinkConfig::handOverFrom).
-struct HandOverRole
+/// A link that opens a window of its own (DaemonLinkConfig::opening).
+struct OpeningRole
 {
-    HandOver from; ///< The link it takes the workspace over from, and the workspace.
-    /// Whether how it went has been told (@see IDaemonLinkHost::handOverSettled).
-    enum class Report : uint8_t
-    {
-        Due = 0,
-        Told,
-    };
-    Report report = Report::Due;
+    WindowOpening opening; ///< How the window opens.
 };
 
-/// Why a link was started, which decides what it does with the windows it gets: the launch's link, one taking
-/// a workspace over, or one a window switch started (SwitchArrival, whose landed callback is emptied once
-/// told).
-using LinkRole = std::variant<BootRole, HandOverRole, SwitchArrival>;
+/// Why a link was started, which decides how it comes by its window: the launch's link adopts the boot
+/// window, one opening a window opens it (OpeningRole), and one a window switch started is handed the window
+/// that asked or opens one (SwitchArrival, whose landed callback is emptied once told).
+using LinkRole = std::variant<BootRole, OpeningRole, SwitchArrival>;
 
-/// One daemon connection and the windows it serves.
+/// One daemon connection and the one window it serves.
 ///
-/// Owns the NativeController and the attach bookkeeping: which daemon workspace its OS window shows, the
-/// boot window's adoption, the window being spawned, the drift badge and the answers to the daemon's
-/// extension questions. One link serves one window: a further workspace its connection is pushed -- a launch
-/// brings back several, a new window asks the daemon for one -- is handed to a link of its own
-/// (IDaemonLinkHost::startHandOverLink), and let go here only once that link's connection shows it, so the
-/// workspace is followed throughout. Only a daemon that cannot let a connection stop showing a workspace
-/// (Capability::WorkspaceFollow), or a hand-over that failed, has one link serve several windows. GUI thread
-/// only, apart from what the controller does on its own reactor.
+/// Owns the NativeController and the attach bookkeeping: the daemon workspace its window selects and the
+/// local workspace that window displays it in, the boot window's adoption, the drift badge and the answers
+/// to the daemon's extension questions. The connection selects one workspace, and the window displays that
+/// one: every other workspace of the daemon is only an entry of the window's directory
+/// (NativeController::directory). A selection the daemon moves -- asked for (selectWorkspace()), or because
+/// the selected workspace ended -- is realized in the window in place. A further window on the daemon is a
+/// link of its own (IDaemonLinkHost::startWindowLink). GUI thread only, apart from what the controller does
+/// on its own reactor.
 class DaemonLink final: public session::WindowBinding
 {
   public:
@@ -210,72 +217,71 @@ class DaemonLink final: public session::WindowBinding
     /// so that a window its user closed does not open again. No-op once stopped.
     void lastWindowReleased() override;
 
-    /// One of its windows closed: the daemon workspace it showed is released
-    /// (proto::WorkspaceRelease::Closed), and stays left for a later launch to bring back. A workspace a move
-    /// emptied is kept followed, as the daemon may fill it again. No-op once given up or stopped, and against
-    /// a daemon without Capability::WorkspaceFollow.
+    /// Its window closed: a selection under way fails, and the daemon keeps the workspace for whichever
+    /// window selects it next. No-op once given up or stopped.
     /// @param window The closed window.
     void windowClosed(vtworkspace::WorkspaceId window) override;
 
-    /// A link started for one of this link's workspaces reports how the hand-over went: settled, the
-    /// workspace is released here (Closed: the other link shows it now); failed, it stays here and gets an OS
-    /// window of this link's, with a notice saying why. No-op once stopped.
-    /// @param workspace The daemon workspace handed over.
-    /// @param outcome How it went.
-    /// @param reason Why it failed; empty when it settled.
-    void completeHandOver(uint64_t workspace, HandOverOutcome outcome, std::string const& reason);
+    void reportFocus(vthost::proto::WindowFocus focus) override;
+    /// @return Whether its window raises, as its daemon last said; Raise for a link that has given up, whose
+    ///         window has no daemon's panes left to ring for.
+    [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override;
+    /// @return How many tabs of the workspaces its window does not select wait for the user, as the
+    ///         directory's program status has them.
+    [[nodiscard]] unsigned tabsWaitingElsewhere() const override;
+    /// @return Its daemon as every link to it names it: by the name a switch gives it, or, for one no switch
+    ///         can name, by its transport.
+    [[nodiscard]] std::optional<uint64_t> daemonKey() const override;
+    /// Starts a link of its own to this link's daemon that selects what @p window displays and opens a window
+    /// for it (IDaemonLinkHost::startWindowLink).
+    [[nodiscard]] std::expected<void, std::string> openWindowLike(vtworkspace::WorkspaceId window,
+                                                                  std::optional<vtworkspace::TabId> activeTab,
+                                                                  QScreen* screen) override;
 
     /// @return The daemon as a window switch names it (DaemonLinkConfig::address).
-    [[nodiscard]] DaemonAddress const& address() const noexcept { return _handOverTemplate.address; }
+    [[nodiscard]] DaemonAddress const& address() const noexcept { return _siblingTemplate.address; }
 
     /// @return The window whose prompts this link's attach shows (DaemonLinkConfig::askpassRoute).
     [[nodiscard]] askpass::AskpassRouteId askpassRoute() const noexcept
     {
-        return _handOverTemplate.askpassRoute;
+        return _siblingTemplate.askpassRoute;
     }
 
-    /// @return What a further link to this link's daemon is built with: this one's configuration, taking over
-    ///         nothing, started by no switch and stating no working directory. Its intent is the caller's to
+    /// @return What a further link to this link's daemon is built with: this one's configuration, opening no
+    ///         window, started by no switch and stating no working directory. Its intent is the caller's to
     ///         set.
-    [[nodiscard]] DaemonLinkConfig const& siblingConfig() const noexcept { return _handOverTemplate; }
+    [[nodiscard]] DaemonLinkConfig const& siblingConfig() const noexcept { return _siblingTemplate; }
 
-    /// @param window A window of the manager.
-    /// @return The daemon workspace @p window shows through this link; none for a window it does not serve.
+    /// @param window A local workspace of the manager.
+    /// @return The daemon workspace this link's window displays in @p window; none for any other.
     [[nodiscard]] std::optional<uint64_t> workspaceOf(vtworkspace::WorkspaceId window) const;
 
     /// @param daemonWorkspace A daemon workspace.
-    /// @return The window that shows it through this link; none when no window does.
+    /// @return The local workspace this link's window displays it in; none when the window selects another.
     [[nodiscard]] std::optional<vtworkspace::WorkspaceId> windowShowing(uint64_t daemonWorkspace) const;
 
-    /// Switches @p window to another workspace of this link's daemon over the window's own connection,
-    /// resolve first and detach last: the connection follows @p workspace as well (NativeController::follow),
-    /// and only once its first layout is here is the window's workspace released
-    /// (proto::WorkspaceRelease::SwitchedAway) and the window brought to the new one. A connection lost, or
-    /// the window closed, before that releases the followed workspace again (@p undo), and the window stays
-    /// as it was.
-    /// @param window A window this link serves.
-    /// @param workspace The daemon workspace to show; 0 for a new one.
-    /// @param undo How @p workspace is released when the switch does not land, so it is as it was before.
-    /// @param landed Told once: the workspace the window shows now, or why it still shows the old one.
-    /// @return Nothing once the follow was asked; why not otherwise (then @p landed is not told).
-    [[nodiscard]] std::expected<void, std::string> switchWindow(vtworkspace::WorkspaceId window,
-                                                                uint64_t workspace,
-                                                                vthost::proto::WorkspaceRelease undo,
-                                                                SwitchLanded landed);
+    /// Has its window show another workspace of its daemon, in place: the connection selects @p workspace
+    /// (NativeController::select), and once the daemon's layout batch states that selection and the
+    /// workspace holds a tab, the window displays it in a local workspace of its own -- realized, then
+    /// shown, then the panes of the one it displayed before detached, their sessions left running in the
+    /// daemon. A connection lost, the window closed or the switch given up (cancelSwitch()) before that leave
+    /// the window as it was.
+    /// @param workspace The daemon workspace to show; 0 for a new one, which the daemon makes.
+    /// @param landed Told once: the workspace the window shows now, or why it still shows the old one; empty
+    ///        to be told nothing.
+    /// @return Nothing once the selection was sent; why not otherwise (then @p landed is not told).
+    [[nodiscard]] std::expected<void, std::string> selectWorkspace(uint64_t workspace,
+                                                                   SwitchLanded landed = {});
 
-    /// A switch of @p window that switchWindow() started and that is not wanted any more (it took too long):
-    /// undone as a lost connection undoes it -- the followed workspace is released as it was before
-    /// (switchWindow()'s undo), the window stays as it was, and the switch's landed callback is
-    /// told @p reason. A workspace the daemon was asked to make and pushes later is hidden, and no window
-    /// shows it. No-op when no switch of @p window is under way.
+    /// A switch selectWorkspace() started that is not wanted any more (it took too long): the connection
+    /// selects again what the window displays, the window stays as it was, and the switch's landed callback
+    /// is told @p reason. No-op when no switch of @p window is under way.
     /// @param window The window switching.
     /// @param reason Why it is given up.
     void cancelSwitch(vtworkspace::WorkspaceId window, std::string const& reason);
 
-    /// The window that showed one of this link's workspaces switches to another daemon: the workspace is
-    /// released (proto::WorkspaceRelease::SwitchedAway), and stays in its daemon as hidden. The window is the
-    /// other link's to bind next (adoptWindow()), which ends this one when it was its last. No-op once given
-    /// up or stopped, and for a window that shows nothing of this link's.
+    /// Its window switches to another daemon: the window is the other link's to bind next (adoptWindow()),
+    /// which ends this one. No-op once given up or stopped, and for a window that is not this link's.
     /// @param window The window switching away.
     void switchedAway(vtworkspace::WorkspaceId window);
 
@@ -291,17 +297,9 @@ class DaemonLink final: public session::WindowBinding
     /// @return Whether adoptWindow() would take @p window now: nothing when it would, else why not.
     [[nodiscard]] std::expected<void, std::string> canAdoptWindow(vtworkspace::WorkspaceId window) const;
 
-    /// A link a switch started that is not wanted any more: the workspace its connection shows is released
-    /// as it was before (SwitchArrival::undo), and the link ends.
+    /// A link a switch started that is not wanted any more: it ends, and with its connection goes its
+    /// selection.
     void abandon();
-
-    /// Asks the daemon for a new workspace, whose layout push then opens the window showing it -- while the
-    /// link still boots only: its first layout is pending, so a window opened meanwhile would be claimed as
-    /// one more boot window and stay empty. A link serving windows is asked through them instead
-    /// (session::TerminalSessionManager::requestRemoteWorkspace).
-    /// @param spawn What the new workspace's first session runs.
-    /// @return Routed when the daemon took the request; Local when the caller is to open a window itself.
-    [[nodiscard]] session::RemoteRouting requestBootWorkspace(session::RemoteSpawn const& spawn);
 
     /// @return What the link's drift badge shows.
     [[nodiscard]] window::DaemonDriftModel& drift() noexcept { return _drift; }
@@ -339,10 +337,10 @@ class DaemonLink final: public session::WindowBinding
     /// of every later connection (NativeController::restateSessionSettings). No-op once given up or stopped.
     void onConfigurationReloaded();
 
-    /// Brings the local OS windows in line with the daemon's workspaces: the primary daemon workspace maps
-    /// onto the boot window, every other one holding a tab gets an OS window of its own (openWindowFor()),
-    /// and each window's tab/pane tree is reconciled. Idempotent; re-run on every layout change. No-op once
-    /// given up or stopped.
+    /// Brings its window in line with the daemon: the selected workspace is adopted by the boot window, or
+    /// opens the window of a link that opens one, or -- when the daemon moved the selection -- is realized in
+    /// the window in place of the one it displayed; and the displayed workspace's tab/pane tree is
+    /// reconciled. Idempotent; re-run on every layout change. No-op once given up or stopped.
     void reconcile();
 
     /// What every layout of the daemon brings, and the GUI's boot once: reconcile(), then a restore summary
@@ -350,20 +348,13 @@ class DaemonLink final: public session::WindowBinding
     /// stopped.
     void followLayout();
 
-    /// Called from a freshly spawned window's Main.qml (through the manager's attach-window binder): binds it
-    /// to the daemon workspace staged for it, or, while the boot window is still to adopt one, to the
-    /// primary daemon workspace. Every window it is called for is served by the link from then on
-    /// (session::TerminalSessionManager::bindWindow), adopted or not: one link serves every window of the
-    /// process it attached. No-op once given up or stopped.
+    /// Called from a freshly spawned window's Main.qml (through the manager's attach-window binder): the
+    /// window the link opened for itself, or the boot window, displays the workspace the link's connection
+    /// selects, and is served by the link from then on (session::TerminalSessionManager::bindWindow). No-op
+    /// once given up or stopped, and for a link that has its window.
     /// @param window The freshly created controller of the spawned OS window.
     /// @return Whether the link adopted the window.
     [[nodiscard]] WindowAdoption bindPendingWindow(window::WindowController& window);
-
-    /// Records the daemon-workspace → OS-window mapping and reconciles that daemon workspace into it at once:
-    /// the one place the "a mapping always implies a reconcile" invariant lives.
-    /// @param daemonWorkspace The daemon workspace id.
-    /// @param local The local workspace of the OS window that mirrors it.
-    void bindDaemonWorkspace(uint64_t daemonWorkspace, vtworkspace::WorkspaceId local);
 
   private:
     /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
@@ -399,57 +390,64 @@ class DaemonLink final: public session::WindowBinding
     void connectController();
     /// Makes this link the one a window spawned now asks (TerminalSessionManager::setAttachWindowBinder).
     void installAttachWindowBinder();
-    /// Opens an OS window for @p daemonWorkspace, which claims it as it loads (bindPendingWindow()).
-    /// @param daemonWorkspace The daemon workspace to show.
-    /// @param sessions The daemon sessions it shows: a window a move of this process asked for opens where
-    ///        the pane was dropped.
-    void spawnWindowFor(uint64_t daemonWorkspace, std::vector<uint64_t> const& sessions);
-    /// Places a further daemon workspace: hands it to a link of its own, or, where that is not to be,
-    /// opens a window of this link's for it.
-    /// @param daemonWorkspace The daemon workspace no window of this link shows.
-    /// @param sessions What it shows; @see spawnWindowFor().
-    /// @param replacementsDue How many further workspaces, while windows the daemon lost are closed, are
-    /// still
-    ///        to open in this link in their place rather than on a link of their own (@see
-    ///        closeLostWindows()); one is counted off for each opened so.
-    void placeFurtherWorkspace(uint64_t daemonWorkspace,
-                               std::vector<uint64_t> const& sessions,
-                               std::size_t& replacementsDue);
-    /// reconcile(), where @p replacementsDue windows the daemon lost are to be replaced in this link
-    /// (@see placeFurtherWorkspace()).
-    void reconcileReplacing(std::size_t replacementsDue);
-    /// A link taking a workspace over: tells the host how it went, once.
-    void reportHandOver(HandOverOutcome outcome, std::string const& reason);
+    /// Whether a reconcile found the link's window to bring in line, or one still to come.
+    enum class Placement : uint8_t
+    {
+        Pending = 0, ///< The window is still to come: a move landing in it is placed by a later reconcile.
+        Placed,      ///< The window displays the selected workspace.
+    };
+    /// The link has no window yet: the boot window adopts the selected workspace, a link that opens a window
+    /// opens it once that workspace holds a tab, and one a switch started waits to be handed one.
+    /// @param selected The workspace the connection selects; 0 for none yet.
+    /// @return Whether the window was placed by this reconcile.
+    [[nodiscard]] Placement placeWindow(uint64_t selected);
+    /// The daemon moved the selection to @p workspace: its window displays it, realized in a local workspace
+    /// of its own, and the panes of the one it displayed before are detached. @see selectWorkspace
+    void switchTo(uint64_t workspace);
+    /// A pane this process dragged out of every window landed in a workspace of its own on the daemon, which
+    /// no window selects: a window of a link of its own opens for it where it was dropped.
+    void openWindowForMovedPanes();
     /// A link a switch started: tells the switch how its connection came to show its workspace, once.
     void reportArrival(std::expected<uint64_t, std::string> landed);
-    /// @return Whether this is the launch's link, which adopts the boot window: it takes no workspace over
-    ///         and was started by no switch.
+    /// @return Whether this is the launch's link, which adopts the boot window: it opens no window and was
+    ///         started by no switch.
     [[nodiscard]] bool isBootLink() const noexcept { return std::holds_alternative<BootRole>(_role); }
-    /// @return What a link taking a workspace over took over; null for every other link.
-    [[nodiscard]] HandOverRole* handOverRole() noexcept { return std::get_if<HandOverRole>(&_role); }
+    /// @return How a link that opens a window of its own opens it, for one opening a window or one an Open
+    ///         switch started; null for every other link.
+    [[nodiscard]] WindowOpening const* opening() const noexcept;
     /// @return What a link a switch started is to do; null for every other link.
     [[nodiscard]] SwitchArrival* arrival() noexcept { return std::get_if<SwitchArrival>(&_role); }
     /// @return Whether a link a switch started is still to tell the switch how it arrived.
     [[nodiscard]] bool arrivalDue() noexcept { return arrival() != nullptr && arrival()->landed; }
-    /// @return The daemon workspace a link a switch started shows: the one its intent names, else the first
-    ///         its connection was pushed; none before that.
+    /// @return The daemon workspace a link a switch started shows: the one its connection selects; none
+    ///         before the daemon said.
     [[nodiscard]] std::optional<uint64_t> arrivalWorkspace() const;
-    /// @return Whether @p daemonWorkspace is the one a switch of a window to another workspace of this
-    ///         link's daemon waits for (switchWindow()).
-    [[nodiscard]] bool isSwitchTarget(uint64_t daemonWorkspace) const;
+    /// @return The workspace the window is to display: what the connection selects, unless a switch that was
+    ///         given up still waits for its revert (@see cancelSwitch()).
+    [[nodiscard]] uint64_t followedSelection();
     /// @return Whether the connection's last settled layout of @p daemonWorkspace holds a tab: only then has
     ///         a window switched to it something to show. One that holds none would empty the window, which
     ///         then closes as its last pane's end closes it.
     [[nodiscard]] bool holdsTab(uint64_t daemonWorkspace) const;
-    /// The workspace a given-up switch asked the daemon to make arrived late: it is released as
-    /// proto::WorkspaceRelease::SwitchedAway, so it stays in the daemon as hidden -- the native protocol
-    /// closes no workspace, and a left one would come back on the next launch. @see cancelSwitch
-    void hideAbandonedWorkspace();
-    /// The workspace a switch of a window waits for is shown: the window is brought to it. @see switchWindow
-    void finishSwitch(uint64_t workspace);
-    /// A switch of a window to another workspace failed before it was shown: the follow is undone, and the
-    /// switch is told why. No-op without a switch under way.
+    /// Applies the daemon's layout of the workspace the window displays to the window.
+    void applyShownLayout();
+    /// A switch selectWorkspace() started failed before it was shown: the switch is told why. No-op without a
+    /// switch under way.
     void failSwitch(std::string const& reason);
+    /// Fails the switch under way once the daemon answered its own selection request (by number) with another
+    /// workspace than the one asked for (NativeController::takeSelectAnswers): it has no such workspace, and
+    /// the switch would otherwise wait out its timeout.
+    void failRefusedSwitch();
+    /// A link opening a window of its own whose window will not come -- its connection failed, or the window
+    /// did not load -- tells the window it was asked from, once.
+    /// @param reason Why, in words for the user.
+    void noteOpeningFailed(std::string const& reason);
+    /// Rings and notifies for what the panes of the workspaces the window does not select raised while it
+    /// held the raise role (NativeController::takeRaised) -- a bell, a desktop notification, a command that
+    /// finished -- as a pane out of sight would (IDaemonLinkHost::elsewhereNotices); each once.
+    void raiseElsewhere();
+    /// Rings the bell, and alerts, on the link's window, as @p bell says.
+    void ringWindowBell(config::Bell const& bell);
     /// What a link a switch started, or a switch under way, makes of the connection's state: anything but
     /// connected or connecting before the workspace was shown fails it.
     void noteConnectionForSwitch();
@@ -457,7 +455,15 @@ class DaemonLink final: public session::WindowBinding
     /// lastWindowReleased()).
     void end();
     void connectReconnectSignals();
+    /// After a reconnect: the workspace the window displays is gone. The window displays what the
+    /// connection selects instead, or, with nothing selected, closes.
     void closeLostWindows(std::vector<uint64_t> const& daemonWorkspaces);
+    /// Records that the window displays @p daemonWorkspace in @p local, serves it from this link, and
+    /// realizes the workspace into it at once: the one place the "a displayed workspace always implies a
+    /// reconcile" invariant lives.
+    /// @param daemonWorkspace The daemon workspace id.
+    /// @param local The local workspace the window displays it in.
+    void bindDaemonWorkspace(uint64_t daemonWorkspace, vtworkspace::WorkspaceId local);
 
     void showDaemonDrift();
     void askHostedExtensions();
@@ -488,48 +494,50 @@ class DaemonLink final: public session::WindowBinding
     std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _grants { nullptr,
                                                                                              nullptr };
 
-    /// Each daemon workspace mapped to the OS window that mirrors it.
-    AttachWindowMap _attachWindowMap;
-    /// The daemon workspace whose OS window is being spawned right now: reconcile() stages it just before
-    /// openWindowFor(), and that window claims it through bindPendingWindow(). Single-slot: the QML load is
-    /// synchronous, so a stage is always consumed before the next is made.
-    std::optional<uint64_t> _pendingAttachWorkspace;
-    /// The layouts of the reconcile under way, one snapshot for every window of it -- one whose OS window
-    /// opens meanwhile included -- so that all of them are brought to the same push. Null between reconciles.
-    LayoutSnapshot const* _reconcilingLayouts = nullptr;
-    /// Where a further workspace's hand-over to a link of its own stands; one handed over is gone from here.
-    enum class HandOverState : uint8_t
+    /// The daemon workspace the window displays, and the local workspace it displays it in.
+    struct Shown
     {
-        Pending = 0, ///< The other link is connecting; this link still follows the workspace.
-        Failed,      ///< It did not connect: the workspace stays here, in a window of this link's.
+        uint64_t daemonWorkspace = 0;   ///< The daemon's id of it.
+        vtworkspace::WorkspaceId local; ///< The local workspace realizing it.
+        /// Whose active tab the next reconcile shows: the daemon's, until it was realized once.
+        TabSelection selection = TabSelection::Seed;
     };
-
-    /// What this link was started with, for the links it hands workspaces to.
-    DaemonLinkConfig _handOverTemplate;
+    std::optional<Shown> _shown;
+    /// The window bound to this link that waits for the selected workspace's first layout: the boot window
+    /// claimed before it came. Empty otherwise.
+    std::optional<vtworkspace::WorkspaceId> _pendingWindow;
+    /// Where a link that opens a window of its own stands with it.
+    enum class OwnWindow : uint8_t
+    {
+        None = 0, ///< Not opened yet.
+        Opening,  ///< Asked of the host; the window claims the workspace as it loads.
+    };
+    OwnWindow _ownWindow = OwnWindow::None;
+    /// The layouts of the reconcile under way, one snapshot for the realization a selection change makes as
+    /// for the window's pass. Null between reconciles.
+    LayoutSnapshot const* _reconcilingLayouts = nullptr;
+    /// What this link was started with, for the links it starts to its daemon.
+    DaemonLinkConfig _siblingTemplate;
     /// Why the link was started (@see LinkRole); fixed at construction, its report state aside.
     LinkRole _role;
-    /// A switch of one of this link's windows to another workspace of its daemon, waiting for that
-    /// workspace's first layout (@see switchWindow()).
+    /// A switch of the window to another workspace of its daemon, waiting for the daemon's selection to move
+    /// there and the workspace to hold a tab (@see selectWorkspace()).
     struct PendingSwitch
     {
-        vtworkspace::WorkspaceId window; ///< The window switching.
-        uint64_t to = 0;                 ///< The workspace it switches to; 0 for one the daemon makes.
-        /// How @c to is released when the switch does not land (@see undoReleaseFor()).
-        vthost::proto::WorkspaceRelease undo = vthost::proto::WorkspaceRelease::Closed;
+        uint64_t to = 0;      ///< The workspace it switches to; 0 for one the daemon makes.
+        uint64_t request = 0; ///< The selection's request number, which the daemon's answer names.
         /// The workspaces the connection was pushed before: a new one is the one not among them.
         std::set<uint64_t> before;
         SwitchLanded landed; ///< Told how it went.
     };
     std::optional<PendingSwitch> _switch;
-    /// What the connection was pushed before a switch to a workspace the daemon makes (PendingSwitch::to 0)
-    /// that cancelSwitch() gave up: the daemon may still make it, and this connection claims it. Once its
-    /// layout arrives it is hidden (hideAbandonedWorkspace()), not shown in a window of its own. Forgotten
-    /// when the connection is lost: the one sought next does not resume a workspace whose layout never came.
-    std::optional<std::set<uint64_t>> _abandonedNewWorkspace;
-    /// The further workspaces this link hands over, each with where its hand-over stands.
-    std::map<uint64_t, HandOverState> _handOvers;
-    /// Whether the boot window has adopted the daemon's primary workspace yet. Not "the map is empty": after
-    /// a reconnect lost every window, the windows that came instead are new OS windows.
+    /// What a given-up switch selected again (cancelSwitch()): until the daemon states it, a batch still
+    /// stating the given-up selection is not followed. Forgotten with the connection.
+    std::optional<uint64_t> _revertTo;
+    /// The move (session::TerminalSessionManager::PendingRemoteMove::request) a window of its own was opened
+    /// for, so that a later reconcile opens no second one; 0 for none.
+    uint64_t _movedWindowRequest = 0;
+    /// Whether the window has displayed a daemon workspace yet.
     session::AttachBoot _attachBoot = session::AttachBoot::Pending;
     /// The daemon release the drift badge was last assessed for, to notice a daemon that came back changed.
     std::string _shownDaemonRelease;
@@ -551,13 +559,5 @@ class DaemonLink final: public session::WindowBinding
 /// by their shared transport. Called whenever a link starts or ends.
 /// @param links The application's links, in the order they were made.
 void passOnLaunchResume(std::span<DaemonLink* const> links);
-
-/// The daemon workspace the boot (first) OS window should adopt when attaching, rather than authoring
-/// a fresh tab: in attach mode the boot window mirrors the daemon's primary (lowest-id) workspace. Pure so
-/// the boot-adoption rule is unit-testable without the QML boot flow.
-/// @param daemonWorkspaceIds The daemon's known workspace ids, ascending (workspaceIds() ordering).
-/// @return The daemon workspace to adopt, or nullopt if the daemon has not reported a workspace yet.
-[[nodiscard]] std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    std::vector<std::uint64_t> const& daemonWorkspaceIds);
 
 } // namespace contour::remote

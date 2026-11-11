@@ -111,6 +111,7 @@ struct MovePaneUp;
 struct MovePaneDown;
 struct ToggleSplitOrientation;
 struct TogglePaneZoom;
+struct NewWorkspace;
 struct ResizePane;
 struct LaunchLayout;
 struct SaveLayout;

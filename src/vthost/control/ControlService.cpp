@@ -20,7 +20,7 @@
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/ObjectRef.hpp>
-#include <vthost/SwitchClient.hpp>
+#include <vthost/ViewRouting.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
@@ -363,8 +363,8 @@ vtcontrol::WorkspaceInfo ControlService::workspaceInfoOf(vtworkspace::Workspace 
     info.label = std::string { _host.objects().labelOf(workspaceRef) };
     info.position = position;
     info.native = std::to_string(workspace.id().value);
-    info.visibility = std::string { nameOf(_host.visibility(workspace.id())) };
-    info.clients = static_cast<uint32_t>(_host.clientsShowing(workspace.id()).size());
+    info.visibility = std::string { nameOf(_host.visibility(workspace.id().value)) };
+    info.clients = static_cast<uint32_t>(_host.clientsShowing(workspace.id().value).size());
 
     auto const titleOf = [&](SessionId session) -> std::string {
         auto const* terminal = _host.terminal(session);
@@ -890,37 +890,51 @@ void ControlService::handle(vtcontrol::CallContext& context,
                                             .candidates = {} }));
         return;
     }
-    auto const workspace = resolveWorkspace(context, request.workspace);
-    if (!workspace)
+    // The workspace whose window is asked: the one named, else the caller's pane's; a caller outside every
+    // pane names none, and the raise holder answers.
+    auto asked = std::optional<WorkspaceId> {};
+    if (request.workspace && !request.workspace->empty())
     {
-        done(std::unexpected(workspace.error()));
-        return;
-    }
-    auto const choice = chooseSwitchClient(_host.clientsShowing(*workspace), _host.lastTypistIn(*workspace));
-    if (!choice.chosen)
-    {
-        auto error = ControlError { .code = ControlErrorCode::NotFound, .message = {}, .candidates = {} };
-        if (choice.chosen.error() == SwitchClientError::NoClient)
-            error.message = std::format("no client shows workspace '{}'",
-                                        request.workspace.empty() ? "of the caller" : request.workspace);
-        else
+        auto const named = resolveWorkspace(context, *request.workspace);
+        if (!named)
         {
-            error.code = ControlErrorCode::Ambiguous;
-            for (auto const& candidate: choice.candidates)
-                error.candidates.push_back(std::format("{}", candidate));
-            error.message = "several clients show the workspace and none typed last:";
-            for (auto const& candidate: error.candidates)
-                error.message += std::format(" {}", candidate);
+            done(std::unexpected(named.error()));
+            return;
         }
-        done(std::unexpected(std::move(error)));
+        asked = *named;
+    }
+    else if (!context.caller().empty())
+    {
+        auto const callers = resolveWorkspace(context, {});
+        if (!callers)
+        {
+            done(std::unexpected(callers.error()));
+            return;
+        }
+        asked = *callers;
+    }
+    auto const views = _host.connectionViews();
+    auto const named = request.workspace && !request.workspace->empty();
+    auto chosen =
+        vthost::switchTarget(views, asked ? std::optional<uint64_t> { asked->value } : std::nullopt);
+    // A caller's pane in a workspace nobody selects falls back to the raise holder; only a workspace the
+    // request names must be selected by someone.
+    if (!chosen && !named)
+        chosen = vthost::raiseHolder(views);
+    if (!chosen)
+    {
+        done(std::unexpected(
+            notFound(named ? std::format("no window selects workspace '{}'", *request.workspace)
+                           : std::string { "no window is attached" })));
         return;
     }
+    auto const selection = std::ranges::find(views, *chosen, &vthost::ConnectionView::connection)->selected;
 
     auto const ticket = ++_switchCalls->lastTicket;
     _switchCalls->waiting.emplace(ticket, &context.events());
     _host.requestSwitch(
-        *choice.chosen,
-        *workspace,
+        *chosen,
+        WorkspaceId { selection },
         switchTargetOf(request),
         [calls = _switchCalls, ticket, done = std::move(done)](proto::SwitchReply const& reply) {
             if (calls->waiting.erase(ticket) != 0)
@@ -941,9 +955,7 @@ std::expected<vtcontrol::CreateTabReply, ControlError> ControlService::createTab
     auto* tab = static_cast<vtworkspace::Tab*>(nullptr);
     if (request.placement == vtcontrol::WorkspacePlacement::New)
     {
-        // No client claims it, so the primary viewer -- the GUI whose launch took every workspace -- shows
-        // it.
-        auto* workspace = _host.createWorkspace(spawn, nullptr);
+        auto* workspace = _host.createWorkspace(spawn);
         if (workspace == nullptr)
             return std::unexpected(failed("the new workspace's shell could not be started"));
         tab = workspace->activeTab();

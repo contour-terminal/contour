@@ -113,6 +113,7 @@ namespace
         ActionCategory { .name = "MovePaneDown", .category = CommandCategory::Pane },
         ActionCategory { .name = "ToggleSplitOrientation", .category = CommandCategory::Pane },
         ActionCategory { .name = "TogglePaneZoom", .category = CommandCategory::Pane },
+        ActionCategory { .name = "NewWorkspace", .category = CommandCategory::Window },
         ActionCategory { .name = "ResizePane", .category = CommandCategory::Pane },
         ActionCategory { .name = "LaunchLayout", .category = CommandCategory::Layouts },
         ActionCategory { .name = "SaveLayout", .category = CommandCategory::Layouts },

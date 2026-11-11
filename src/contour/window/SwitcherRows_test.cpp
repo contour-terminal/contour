@@ -73,7 +73,7 @@ namespace
                          .listing = SwitcherListing::Listed,
                          .failure = {},
                          .workspaces = { workspace(1, "work", 4, SwitcherWorkspaceState::ThisWindow),
-                                         workspace(3, "scratch", 1, SwitcherWorkspaceState::Left) } },
+                                         workspace(3, "scratch", 1, SwitcherWorkspaceState::Hidden) } },
         SwitcherDaemon { .address = label("admin"),
                          .workspaceCount = 2,
                          .tag = {},
@@ -124,7 +124,7 @@ TEST_CASE("switcherRows groups the daemons and lists the expanded ones' workspac
     CHECK(rows[0].detail == "running · 2 workspaces · this window");
     CHECK(rows[0].expansion == SwitcherExpansion::Expanded);
     CHECK(rows[1].detail == "4 tabs · this window");
-    CHECK(rows[2].detail == "1 tab · not shown");
+    CHECK(rows[2].detail == "1 tab · hidden");
     CHECK(rows[5].detail == "3 tabs · hidden");
     CHECK(rows[6].detail == "1 tab · shown elsewhere");
     CHECK(rows[4].detail == "running · 2 workspaces");

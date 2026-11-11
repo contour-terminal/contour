@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/remote/SelectAnswer.hpp>
 #include <contour/remote/SwitchPlan.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -6,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -40,7 +42,7 @@ constexpr auto OtherWindow = vtworkspace::WorkspaceId { 7 };
         .label = label,
         .position = position,
         .name = label,
-        .visibility = vthost::WorkspaceVisibility::Left,
+        .visibility = vthost::WorkspaceVisibility::Hidden,
         .tabs = 1,
         .shownByWindowHere = shownHere,
     };
@@ -85,7 +87,7 @@ struct PlanCase
     if (auto const* focus = std::get_if<SwitchFocus>(&a))
         return focus->window == std::get<SwitchFocus>(b).window;
     if (auto const* to = std::get_if<SwitchTo>(&a))
-        return to->workspace == std::get<SwitchTo>(b).workspace && to->undo == std::get<SwitchTo>(b).undo;
+        return to->workspace == std::get<SwitchTo>(b).workspace;
     return true;
 }
 
@@ -112,18 +114,18 @@ TEST_CASE("planSwitch resolves every target as the spec says", "[switch][plan]")
           std::nullopt,
           SameDaemon::No,
           SwitchTo { .workspace = 13 } },
-        { "a hidden or left workspace is switched to like any other",
+        { "a workspace another window selected is switched to like any other",
           "1",
           { row(11, 1), row(13, 2) },
           13,
           SameDaemon::Yes,
           SwitchTo { .workspace = 11 } },
-        { "a hidden workspace a switch does not land on is let go of as hidden again",
+        { "a hidden workspace is switched to like any other",
           "2",
           { row(11, 1), hidden(row(13, 2)) },
           11,
           SameDaemon::Yes,
-          SwitchTo { .workspace = 13, .undo = vthost::proto::WorkspaceRelease::SwitchedAway } },
+          SwitchTo { .workspace = 13 } },
         { "several workspaces and none named: the user picks",
           "",
           threeWorkspaces(),
@@ -233,7 +235,7 @@ TEST_CASE("switcherWorkspacesOf marks where each workspace is shown, as the popu
         row(15, 5, "left"),
     };
     rows[0].visibility = WorkspaceVisibility::Shown;
-    rows[1].visibility = WorkspaceVisibility::Left; // the daemon has not counted that window yet
+    rows[1].visibility = WorkspaceVisibility::Hidden; // the daemon has not counted that window yet
     rows[2].visibility = WorkspaceVisibility::Shown;
     rows[3].visibility = WorkspaceVisibility::Hidden;
     rows[4].tabs = 3;
@@ -245,7 +247,7 @@ TEST_CASE("switcherWorkspacesOf marks where each workspace is shown, as the popu
     CHECK(listed[1].state == SwitcherWorkspaceState::ShownElsewhere);
     CHECK(listed[2].state == SwitcherWorkspaceState::ShownElsewhere);
     CHECK(listed[3].state == SwitcherWorkspaceState::Hidden);
-    CHECK(listed[4].state == SwitcherWorkspaceState::Left);
+    CHECK(listed[4].state == SwitcherWorkspaceState::Hidden); // the daemon tells no workspace "left" any more
     CHECK(listed[4].tabs == 3);
     CHECK(listed[4].position == 5);
     CHECK(listed[4].name == "left");
@@ -301,16 +303,6 @@ TEST_CASE("workspaceRowsOf leaves out a workspace holding no tab", "[switch][pla
         SwitchTo { .workspace = 0 }));
 }
 
-TEST_CASE("a switch that does not land leaves its target as it was", "[switch][plan]")
-{
-    using vthost::WorkspaceVisibility;
-    using vthost::proto::WorkspaceRelease;
-    STATIC_CHECK(contour::remote::undoReleaseFor(WorkspaceVisibility::Hidden)
-                 == WorkspaceRelease::SwitchedAway);
-    STATIC_CHECK(contour::remote::undoReleaseFor(WorkspaceVisibility::Left) == WorkspaceRelease::Closed);
-    STATIC_CHECK(contour::remote::undoReleaseFor(WorkspaceVisibility::Shown) == WorkspaceRelease::Closed);
-}
-
 // Review (PR 3, item 13): the switching actions sent a position as text, and the daemon's vocabulary matches
 // a label first: a workspace labelled "2" won over the second workspace.
 TEST_CASE("planSwitch takes a position or a control id for that alone, never for a label", "[switch][plan]")
@@ -332,4 +324,33 @@ TEST_CASE("planSwitch takes a position or a control id for that alone, never for
                        SwitchTo { .workspace = 13 }));
     CHECK(std::holds_alternative<SwitchUnresolved>(
         planSwitch(at(contour::session::WorkspaceAt { 9 }), rows, std::nullopt, SameDaemon::No)));
+}
+
+TEST_CASE("a switch is judged by the answer to its own selection request", "[switch][select]")
+{
+    using contour::remote::SelectAnswer;
+    using contour::remote::switchRefusal;
+    constexpr auto A = uint64_t { 1 };
+    constexpr auto B = uint64_t { 2 };
+    auto const before = std::set<uint64_t> { A, B };
+
+    // Switches to B (1), back to A (2), and to B again (3): the daemon answered the first two in one batch,
+    // stating A. The answer to request 1 asked for B and states A, but request 3 is the switch waiting.
+    auto const merged = std::array { SelectAnswer { .request = 1, .asked = B, .selected = A },
+                                     SelectAnswer { .request = 2, .asked = A, .selected = A } };
+    CHECK_FALSE(switchRefusal(3, B, before, merged).has_value());
+
+    // Its own answer decides.
+    auto const taken = std::array { SelectAnswer { .request = 3, .asked = B, .selected = B } };
+    CHECK_FALSE(switchRefusal(3, B, before, taken).has_value());
+    auto const unknown = std::array { SelectAnswer { .request = 3, .asked = 9, .selected = A } };
+    CHECK(switchRefusal(3, 9, before, unknown)
+          == std::optional<std::string_view> { "the daemon has no such workspace" });
+
+    // A new workspace is one not known before; still one known means none was made.
+    auto const made = std::array { SelectAnswer { .request = 4, .asked = 0, .selected = 7 } };
+    CHECK_FALSE(switchRefusal(4, 0, before, made).has_value());
+    auto const notMade = std::array { SelectAnswer { .request = 4, .asked = 0, .selected = A } };
+    CHECK(switchRefusal(4, 0, before, notMade)
+          == std::optional<std::string_view> { "the daemon could not make a workspace" });
 }

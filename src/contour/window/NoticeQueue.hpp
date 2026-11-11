@@ -42,9 +42,10 @@ enum class NoticeKind : uint8_t
     ShellIntegrationAdded,  ///< Install Shell Integration added its line to the shell's startup file.
     ShellIntegrationFailed, ///< It could not.
     HotkeyUnavailable,      ///< The quick terminal's hotkey could not be registered.
-    WindowLinkFailed,       ///< A daemon workspace's window could not get a connection of its own.
+    WindowLinkFailed,       ///< A window on a connection of its own (New Window, a tear-off) could not open.
     SwitchFailed,           ///< A window switch did not get there; the window shows what it showed.
     UpgradeFailed,          ///< The UpgradeDaemon action was refused, or the upgrade it started failed.
+    WorkspaceRefused,       ///< The NewWorkspace action was refused: the window is attached to a tmux server.
 };
 
 /// Where a notice is shown.
@@ -152,6 +153,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::WorkspaceRefused,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -162,7 +169,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::UpgradeFailed) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::WorkspaceRefused) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -186,6 +193,24 @@ struct Notice
 {
     return Notice { .kind = NoticeKind::UpgradeFailed,
                     .text = std::format("Could not upgrade the daemon: {}.", reason) };
+}
+
+/// @return The NoticeKind::WorkspaceRefused notice telling that a window attached to something (a tmux
+///         server) has its workspaces from what it is attached to.
+[[nodiscard]] inline Notice workspaceRefusedNotice()
+{
+    return Notice { .kind = NoticeKind::WorkspaceRefused,
+                    .text = "Could not make a workspace: this window's workspaces come from what it is "
+                            "attached to." };
+}
+
+/// @param reason Why the window could not open, in words for the user.
+/// @return The NoticeKind::WindowLinkFailed notice telling that a window on a connection of its own (New
+///         Window, a tear-off) could not open.
+[[nodiscard]] inline Notice windowLinkFailedNotice(std::string_view reason)
+{
+    return Notice { .kind = NoticeKind::WindowLinkFailed,
+                    .text = std::format("Could not open a window on this daemon: {}", reason) };
 }
 
 namespace detail

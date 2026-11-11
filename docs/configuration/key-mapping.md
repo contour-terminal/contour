@@ -228,6 +228,7 @@ palette lists them under **Daemons**. They need a window that shows a daemon.
 | Action | Key | What it does |
 | --- | --- | --- |
 | `SwitchToWorkspace` | `index:` (1-based, required) | Shows the Nth workspace of this window's daemon here. |
+| `NewWorkspace` | none | Creates a workspace and shows it in this window; for a window attached to a daemon, the workspace is created on that daemon. |
 | `OpenWorkspace` | `index:` (1-based, required) | Shows it in a new window. |
 | `CycleWorkspace` | `direction: next\|previous` (default `next`) | Shows the next or previous workspace of this window's daemon here, hidden and left ones included, in their position order. |
 | `CycleDaemon` | `direction: next\|previous` (default `next`) | Shows the next or previous daemon here: the local daemons running, by label, then the saved hosts a window here shows. |

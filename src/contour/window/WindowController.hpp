@@ -23,15 +23,18 @@
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PaneKey.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
+#include <contour/window/WindowId.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 #include <contour/window/WindowRole.hpp>
 
@@ -262,7 +265,8 @@ class WindowController:
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
-    /// @param windowId The backing vtworkspace::Workspace this controller adapts.
+    /// @param windowId This window's identity, minted by the manager; it outlives any one workspace.
+    /// @param workspace The workspace this window displays at first (and the first it owns).
     /// @param menuPresentation Whether this window's menus open natively or in the scene: the app's
     ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
     /// @param initialPosition The first window's remembered location, or where a window opened for a dropped
@@ -272,7 +276,8 @@ class WindowController:
     ///                 while `accessibility_announcements` allows.
     /// @param role     What the window is for; fixed for its life.
     WindowController(session::TerminalSessionManager& manager,
-                     vtworkspace::WorkspaceId windowId,
+                     WindowId windowId,
+                     vtworkspace::WorkspaceId workspace,
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
@@ -285,7 +290,40 @@ class WindowController:
     WindowController(WindowController&&) = delete;
     WindowController& operator=(WindowController&&) = delete;
 
-    [[nodiscard]] vtworkspace::WorkspaceId windowId() const noexcept { return _windowId; }
+    /// @return This window's identity, stable while it displays one workspace after another.
+    [[nodiscard]] WindowId windowId() const noexcept { return _windowId; }
+
+    /// @return The workspace whose tabs the tab strip lists and whose active tab fills the window.
+    [[nodiscard]] vtworkspace::WorkspaceId displayedWorkspace() const noexcept { return _displayed; }
+
+    /// @return Every workspace this window owns, in the order it took them; the displayed one is among them.
+    ///         Sessions of the others keep running while hidden.
+    [[nodiscard]] std::span<vtworkspace::WorkspaceId const> ownedWorkspaces() const noexcept
+    {
+        return _owned;
+    }
+
+    /// Shows @p workspace in this window: the tab strip and the active-tab proxies are rebound to it, and the
+    /// tab model announces a reset. A workspace this window does not own, and the one already shown, change
+    /// nothing.
+    /// @param workspace The owned workspace to show.
+    void displayWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// When @p workspace is one of several this window owns and holds no tab, ends it: the window shows the
+    /// next owned one first, if it was showing this, and the manager forgets the workspace
+    /// (session::TerminalSessionManager::forgetWorkspace). Nothing otherwise (the last workspace is the
+    /// window's to close). In-process, and for a daemon window the one it switched away from.
+    /// @param workspace The workspace that may have become empty.
+    void dropWorkspaceIfEmpty(vtworkspace::WorkspaceId workspace);
+
+    /// Takes @p workspace among those this window owns, without showing it.
+    /// @param workspace A workspace of the model no window owns yet.
+    void adoptWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// @return What this window has not yet seen of its panes' output and finished commands.
+    [[nodiscard]] TabAttention& tabAttention() noexcept { return _attention; }
+    /// @copydoc tabAttention()
+    [[nodiscard]] TabAttention const& tabAttention() const noexcept { return _attention; }
     /// @return Where this window is placed as it is first shown -- its remembered place, or where a pane
     ///         dropped outside every window opened it -- until that first expose places it.
     [[nodiscard]] std::optional<WindowPosition> const& initialPosition() const noexcept
@@ -1540,7 +1578,10 @@ class WindowController:
     void abandonNodeDrag();
 
     session::TerminalSessionManager& _manager;
-    vtworkspace::WorkspaceId _windowId;
+    WindowId _windowId;
+    vtworkspace::WorkspaceId _displayed;          ///< The workspace the tab strip lists.
+    std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
+    TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
     /// window's whole life.
     std::unique_ptr<PromptHost> _promptHost;

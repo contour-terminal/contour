@@ -3,6 +3,7 @@
 
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ActionsFwd.hpp>
+#include <contour/config/BellConfig.hpp>
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ConfigDocumentationTags.hpp>
@@ -904,13 +905,6 @@ struct ConfigEntry
 
 /// The seconds within which a shell that exits counts as an early exit (`early_exit_threshold`).
 inline constexpr unsigned DefaultEarlyExitThreshold = 5u;
-
-struct Bell
-{
-    std::string sound = "default";
-    bool alert = true;
-    float volume = 1.0f;
-};
 
 /// Every default that differs between two editions (@see DefaultsEdition), one row per edition.
 ///

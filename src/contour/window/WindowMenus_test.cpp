@@ -65,7 +65,7 @@ using contour::window::WindowController;
     auto ids = std::vector<vtworkspace::TabId> {};
     for ([[maybe_unused]] auto const _: std::views::iota(0, n))
     {
-        auto* tab = manager.model().createTab(controller.windowId());
+        auto* tab = manager.model().createTab(controller.displayedWorkspace());
         REQUIRE(tab != nullptr);
         ids.push_back(tab->id());
     }
@@ -455,7 +455,7 @@ TEST_CASE("a pick after the pane closed does nothing", "[contour][windowmenus][b
     auto const copyOutput = actionIndexOf(native.presenter->trees.front(), "Copy Output");
 
     QGuiApplication::clipboard()->setText(QStringLiteral("untouched"));
-    native.app.manager().model().closeTab(window->windowId(), created.tabs.back());
+    native.app.manager().model().closeTab(window->displayedWorkspace(), created.tabs.back());
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
     native.presenter->pick(copyOutput);
@@ -502,7 +502,7 @@ TEST_CASE("the menu bar sees this window's tabs", "[contour][windowmenus][menuba
     CHECK(state.tabCount == 3);
     CHECK(state.activeTab == window->activeTabIndex());
     CHECK(state.tabTitles == window->tabTitles());
-    auto const* tab = app.manager().model().workspace(window->windowId())->activeTab();
+    auto const* tab = app.manager().model().workspace(window->displayedWorkspace())->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(state.paneCount == tab->paneCount());
 }
@@ -552,7 +552,7 @@ TEST_CASE("an application row of the menu bar runs with no window focused", "[co
         contour::command::buildMenuBar(window->menuBarState()), {}, contour::command::ShortcutStyle::Text);
 
     // As after ⌘M, or with another application in front: no window holds focus.
-    app.manager().clearFocusedWindow(window->windowId());
+    app.manager().clearFocusedWindow(window->displayedWorkspace());
     REQUIRE_FALSE(app.manager().focusedWindow().has_value());
 
     runMenuBarRow(app, tree, "Contour Documentation");
@@ -577,8 +577,8 @@ TEST_CASE("an application row runs in the window that held focus last", "[contou
     ScopedController const second { app.manager() };
     std::ignore = createSessionTabs(app.manager(), *second, 1);
 
-    app.manager().setFocusedWindow(first->windowId());
-    app.manager().clearFocusedWindow(first->windowId());
+    app.manager().setFocusedWindow(first->displayedWorkspace());
+    app.manager().clearFocusedWindow(first->displayedWorkspace());
     CHECK(app.manager().applicationController() == first.controller);
 
     // Gone, the next one left takes its place.
@@ -594,7 +594,7 @@ TEST_CASE("a window row of the menu bar runs in the focused window", "[contour][
     ScopedController const window { app.manager() };
     std::ignore = createSessionTabs(app.manager(), *window, 2);
     window->activateTab(0);
-    app.manager().setFocusedWindow(window->windowId());
+    app.manager().setFocusedWindow(window->displayedWorkspace());
     auto const tree = contour::command::buildMenuTree(
         contour::command::buildMenuBar(window->menuBarState()), {}, contour::command::ShortcutStyle::Text);
 
@@ -616,7 +616,7 @@ TEST_CASE("a native pick against a tab closed while its menu stood open is a no-
     QCoreApplication::sendPostedEvents(); // the menu is posted, not shown inside the press handler
     REQUIRE(native.presenter->trees.size() == 1);
 
-    native.app.manager().model().closeTab(window->windowId(), ids[1]);
+    native.app.manager().model().closeTab(window->displayedWorkspace(), ids[1]);
     REQUIRE(window->count() == 2);
 
     native.presenter->pick(actionIndexOf(native.presenter->trees.front(), "Close Other Tabs"));

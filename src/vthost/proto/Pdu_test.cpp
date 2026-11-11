@@ -444,7 +444,6 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
             PerformOperation { .session = 7,
                                .operation = EngineOperation::SetUserMark,
                                .row = RowAddress { .stableId = -12, .generation = 0x1'0000'0003 } },
-            NewWorkspace {},
             PermissionRequest { .session = 4,
                                 .hostId = "git@/usr/share/contour/extensions/git.wasm",
                                 .name = "git",
@@ -1331,7 +1330,7 @@ TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost
             .token = "s3cr3t",
             .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
             // The last field this version knows, stated: a byte after it is a newer peer's.
-            .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 2 }, .daemonInstance = 3 },
+            .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 2, .daemonInstance = 3 },
             .cellPixelSize = WireCellPixelSize { .width = 9, .height = 18 },
             .workingDirectory = "/home/user"
         };
@@ -1993,33 +1992,66 @@ TEST_CASE("a command-block record's size estimate never under-counts", "[vthost]
 
 TEST_CASE("ClientHello carries an attach intent and a profile name", "[vthost][pdu]")
 {
-    auto const hello =
-        ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 1, 7 } },
-                      .profileName = "work" };
+    auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 7 },
+                                     .profileName = "work" };
     CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+}
+
+TEST_CASE("every attach intent kind round-trips with its workspace", "[vthost][pdu]")
+{
+    for (auto const kind: { AttachIntentKind::Default,
+                            AttachIntentKind::NewWorkspace,
+                            AttachIntentKind::Select,
+                            AttachIntentKind::Resume })
+    {
+        auto const hello = ClientHello { .attachIntent = { .kind = kind, .workspace = 5 } };
+        CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    }
+    // Fresh values: 0 to 4 meant the retired intents, whose workspace field was a list.
+    STATIC_CHECK(std::to_underlying(AttachIntentKind::Default) == 5);
+    STATIC_CHECK(std::to_underlying(AttachIntentKind::NewWorkspace) == 6);
+    STATIC_CHECK(std::to_underlying(AttachIntentKind::Select) == 7);
+    STATIC_CHECK(std::to_underlying(AttachIntentKind::Resume) == 8);
+}
+
+TEST_CASE("a retired attach intent kind decodes as Default", "[vthost][pdu]")
+{
+    for (auto const retired: std::views::iota(0, 5))
+    {
+        auto const hello =
+            ClientHello { .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 4 } };
+        auto const old =
+            encodeWithFieldsEdited(DecodedPdu { hello }, [retired](std::span<std::byte const> fields) {
+                auto edited = std::vector<std::byte>(fields.begin(), fields.end());
+                // The kind precedes the workspace, the empty profile's length byte and the color preference.
+                edited.rbegin()[3] = static_cast<std::byte>(retired);
+                return edited;
+            });
+        CHECK(decodeAs<ClientHello>(old).attachIntent.kind == AttachIntentKind::Default);
+    }
 }
 
 TEST_CASE("ClientHello states which daemon run its attach intent's ids are of", "[vthost][pdu]")
 {
     SECTION("with no working directory, and no cell size")
     {
-        auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume,
-                                                           .workspaces = { 2 },
-                                                           .daemonInstance = 0xC0FFEE } };
+        auto const hello = ClientHello {
+            .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 2, .daemonInstance = 0xC0FFEE }
+        };
         CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
     }
     SECTION("beside a working directory")
     {
-        auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Workspaces,
-                                                           .workspaces = { 2, 3 },
-                                                           .daemonInstance = 7 },
-                                         .workingDirectory = "/srv" };
+        auto const hello = ClientHello {
+            .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 3, .daemonInstance = 7 },
+            .workingDirectory = "/srv"
+        };
         CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
     }
     SECTION("a hello stating none is what it was before the field")
     {
         auto const hello =
-            ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 2 } } };
+            ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 2 } };
         auto stated = hello;
         stated.attachIntent.daemonInstance = 9;
         // The stated run: an empty directory and the varint 9, after a cell size of none (0x0, two varints).
@@ -2027,30 +2059,29 @@ TEST_CASE("ClientHello states which daemon run its attach intent's ids are of", 
     }
 }
 
-TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWorkspaces and no profile",
+TEST_CASE("a ClientHello truncated before the appended fields decodes to Default and no profile",
           "[vthost][pdu]")
 {
-    auto const hello =
-        ClientHello { .token = "tok",
-                      .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
-                      .role = ConnectionRole::Control,
-                      .clientArea = WireClientArea { .columns = 132, .lines = 43 },
-                      .attachIntent = { .kind = AttachIntentKind::Launch, .workspaces = { 3 } },
-                      .profileName = "work" };
+    auto const hello = ClientHello { .token = "tok",
+                                     .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+                                     .role = ConnectionRole::Control,
+                                     .clientArea = WireClientArea { .columns = 132, .lines = 43 },
+                                     .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 3 },
+                                     .profileName = "work" };
     auto expected = hello;
     expected.attachIntent = {};
     expected.profileName.clear();
 
     SECTION("after the client area")
     {
-        // The intent (kind, count, one id) and the profile (length byte, four characters).
-        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 3 + 5)) == expected);
+        // The intent (kind, one id) and the profile (length byte, four characters).
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 2 + 5)) == expected);
     }
     SECTION("after the role")
     {
         // The area (presence, two varints) goes as well.
         expected.clientArea.reset();
-        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 3 + 5 + 4)) == expected);
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 2 + 5 + 4)) == expected);
     }
     SECTION("after the session settings")
     {
@@ -2061,7 +2092,7 @@ TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWork
             bodyOf(DecodedPdu { hello }).size() - bodyOf(DecodedPdu { withoutSettings }).size();
         CHECK(settingsOnly > 0);
         // Everything after the settings block: the role as well.
-        auto const tail = std::size_t { 1 + 4 + 3 + 5 };
+        auto const tail = std::size_t { 1 + 4 + 2 + 5 };
         CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, tail)) == expected);
     }
     SECTION("the profile alone")
@@ -2071,40 +2102,39 @@ TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWork
     }
 }
 
-TEST_CASE("an attach intent kind no enumerator names decodes as AllWorkspaces", "[vthost][pdu]")
+TEST_CASE("an attach intent kind no enumerator names decodes as Default", "[vthost][pdu]")
 {
-    auto const hello =
-        ClientHello { .attachIntent = { .kind = AttachIntentKind::Workspaces, .workspaces = { 4 } } };
+    auto const hello = ClientHello { .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 4 } };
     auto const future = encodeWithFieldsEdited(DecodedPdu { hello }, [](std::span<std::byte const> fields) {
         auto edited = std::vector<std::byte>(fields.begin(), fields.end());
-        // The kind precedes the count, the one id, the empty profile's length byte and the color preference.
-        edited.rbegin()[4] = std::byte { 0xEE };
+        // The kind precedes the workspace, the empty profile's length byte and the color preference.
+        edited.rbegin()[3] = std::byte { 0xEE };
         return edited;
     });
     auto const decoded = decodeAs<ClientHello>(future);
-    CHECK(decoded.attachIntent.kind == AttachIntentKind::AllWorkspaces);
-    CHECK(decoded.attachIntent.workspaces == std::vector<uint64_t> { 4 });
+    CHECK(decoded.attachIntent.kind == AttachIntentKind::Default);
+    CHECK(decoded.attachIntent.workspace == 4);
 }
 
-TEST_CASE("ServerHello carries the followed workspaces; a refusal carries none", "[vthost][pdu]")
+TEST_CASE("ServerHello carries the selected workspace; a refusal carries none", "[vthost][pdu]")
 {
-    auto const hello = ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1, 3 } };
-    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).followedWorkspaces
-          == std::vector<uint64_t> { 1, 3 });
-    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } }))
-              .followedWorkspaces.empty());
-    // A daemon from before the field: the count, its ids, the instance and the restored counts after them are
+    auto const hello = ServerHello { .agreedVersion = 4, .selectedWorkspace = 3 };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).selectedWorkspace == 3);
+    CHECK(
+        std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } })).selectedWorkspace
+        == 0);
+    // A daemon from before the field: the workspace, the instance and the restored counts after it are
     // missing.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 6);
-    CHECK(decodeAs<ServerHello>(legacy).followedWorkspaces.empty());
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    CHECK(decodeAs<ServerHello>(legacy).selectedWorkspace == 0);
 }
 
 TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as unknown", "[vthost][pdu]")
 {
     auto const hello =
-        ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
+        ServerHello { .agreedVersion = 4, .selectedWorkspace = 1, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
-    // A daemon from before the field: the followed workspaces end the blob.
+    // A daemon from before the field: the selected workspace ends the blob.
     auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
@@ -2210,9 +2240,10 @@ TEST_CASE("LayoutBatchEnd round-trips, and a newer peer's appended bytes do not 
               == cause);
     auto body = Writer {};
     body.varint(5);
-    body.varint(7); // a field a later version appended
+    body.varint(7); // the selected workspace
+    body.varint(9); // a field a later version appended
     CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, body.view()))
-          == LayoutBatchEnd { .causeSerial = 5 });
+          == LayoutBatchEnd { .causeSerial = 5, .selected = 7 });
     STATIC_CHECK(std::to_underlying(PduType::LayoutBatchEnd) == 39);
 }
 
@@ -2235,15 +2266,8 @@ TEST_CASE("PanesReprojected round-trips, and a newer peer's appended bytes do no
     STATIC_CHECK(std::to_underlying(PduType::PanesReprojected) == 44);
 }
 
-TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][pdu][workspace-follow]")
+TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vthost][pdu][workspace-follow]")
 {
-    auto const follow = FollowWorkspace { .workspace = 9 };
-    CHECK(roundTrip(DecodedPdu { follow }) == DecodedPdu { follow });
-    for (auto const reason: { WorkspaceRelease::Closed, WorkspaceRelease::SwitchedAway })
-    {
-        auto const release = ReleaseWorkspace { .workspace = 3, .reason = reason };
-        CHECK(roundTrip(DecodedPdu { release }) == DecodedPdu { release });
-    }
     for (auto const kind: { SwitchDaemonKind::Same, SwitchDaemonKind::Label, SwitchDaemonKind::Host })
     {
         auto const request =
@@ -2262,13 +2286,116 @@ TEST_CASE("the workspace follow, release and switch PDUs round-trip", "[vthost][
         auto const reply = SwitchReply { .request = 4, .outcome = outcome, .detail = "why" };
         CHECK(roundTrip(DecodedPdu { reply }) == DecodedPdu { reply });
     }
-    STATIC_CHECK(std::to_underlying(PduType::FollowWorkspace) == 46);
-    STATIC_CHECK(std::to_underlying(PduType::ReleaseWorkspace) == 47);
     STATIC_CHECK(std::to_underlying(PduType::SwitchRequest) == 48);
     STATIC_CHECK(std::to_underlying(PduType::SwitchReply) == 49);
-    auto const shown = WorkspaceShown { .workspace = 5 };
-    CHECK(roundTrip(DecodedPdu { shown }) == DecodedPdu { shown });
-    STATIC_CHECK(std::to_underlying(PduType::WorkspaceShown) == 50);
+    for (auto const workspace: { uint64_t { 0 }, uint64_t { 9 } })
+    {
+        auto const select = SelectWorkspace { .workspace = workspace };
+        CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    for (auto const focus: { WindowFocus::Unfocused, WindowFocus::Focused })
+    {
+        auto const report = ReportFocus { .focus = focus };
+        CHECK(roundTrip(DecodedPdu { report }) == DecodedPdu { report });
+    }
+    for (auto const role: { RaiseRole::Quiet, RaiseRole::Raise })
+    {
+        auto const notify = NotifyRole { .role = role };
+        CHECK(roundTrip(DecodedPdu { notify }) == DecodedPdu { notify });
+    }
+    auto const batchEnd = LayoutBatchEnd { .causeSerial = 3, .selected = 8 };
+    CHECK(roundTrip(DecodedPdu { batchEnd }) == DecodedPdu { batchEnd });
+    STATIC_CHECK(std::to_underlying(PduType::SelectWorkspace) == 51);
+    STATIC_CHECK(std::to_underlying(PduType::ReportFocus) == 52);
+    STATIC_CHECK(std::to_underlying(PduType::NotifyRole) == 53);
+    STATIC_CHECK(std::to_underlying(PduType::PaneSummary) == 54);
+}
+
+TEST_CASE("PaneSummary decodes an unknown activity, refuses a truncated body, ignores appended bytes",
+          "[vthost][pdu][workspace-follow]")
+{
+    auto body = Writer {};
+    body.varint(4);
+    body.u8(200); // an activity no enumerator names
+    body.u8(201); // a bell no enumerator names
+    body.u8(0b001);
+    body.string("t");
+    SECTION("an unknown activity reads as None, an unknown bell as Silent")
+    {
+        auto const decoded = decodeAs<PaneSummary>(frameOf(PduType::PaneSummary, body.view()));
+        CHECK(decoded.activity == OutputActivity::None);
+        CHECK(decoded.bell == PaneBell::Silent);
+        CHECK(decoded.title == std::optional<std::string> { "t" });
+    }
+    SECTION("bytes a later version appended are ignored")
+    {
+        body.varint(9);
+        auto const decoded = decodeAs<PaneSummary>(frameOf(PduType::PaneSummary, body.view()));
+        CHECK(decoded.session == 4);
+        CHECK(decoded.title == std::optional<std::string> { "t" });
+    }
+    SECTION("a body cut short is malformed")
+    {
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.u8(1);
+        truncated.u8(0);
+        truncated.u8(0b001); // announces a title that is not there
+        auto const decoded = decodePdu(frameOf(PduType::PaneSummary, truncated.view()));
+        CHECK_FALSE(decoded.has_value());
+    }
+    SECTION("a notification cut short is malformed")
+    {
+        auto truncated = Writer {};
+        truncated.varint(4);
+        truncated.u8(0);
+        truncated.u8(0);
+        truncated.u8(0b1000); // announces notifications
+        truncated.varint(2);  // two, of which only one follows
+        truncated.string("title");
+        truncated.string("body");
+        truncated.u8(0);
+        CHECK_FALSE(decodePdu(frameOf(PduType::PaneSummary, truncated.view())).has_value());
+    }
+}
+
+TEST_CASE("PaneSummary round-trips every combination of its optional fields",
+          "[vthost][pdu][workspace-follow]")
+{
+    auto const finishedVariants = std::vector<std::optional<FinishedCommand>> {
+        std::nullopt,
+        FinishedCommand { .exitCode = std::nullopt, .durationMs = std::nullopt, .commandLine = "" },
+        FinishedCommand { .exitCode = -1, .durationMs = std::nullopt, .commandLine = "make" },
+        FinishedCommand { .exitCode = std::nullopt, .durationMs = 1500, .commandLine = "sleep 1" },
+        FinishedCommand { .exitCode = 2, .durationMs = 0, .commandLine = "false" },
+    };
+    auto const titles = std::vector<std::optional<std::string>> { std::nullopt, "build" };
+    auto const cwds = std::vector<std::optional<std::string>> { std::nullopt, "/srv" };
+    // What a pane raised: nothing, a bell, notifications (an unknown occasion is carried as it is), or both.
+    auto const raisedVariants = std::vector<std::pair<PaneBell, std::vector<PaneNotification>>> {
+        { PaneBell::Silent, {} },
+        { PaneBell::Rang, {} },
+        { PaneBell::Silent,
+          { PaneNotification { .title = "", .body = "needs input", .occasion = NotifyOccasion::Unstated } } },
+        { PaneBell::Rang,
+          { PaneNotification { .title = "agent", .body = "done", .occasion = NotifyOccasion::Always },
+            PaneNotification { .title = "t", .body = "b", .occasion = static_cast<NotifyOccasion>(0xEE) } } },
+    };
+    for (auto const activity: { OutputActivity::None, OutputActivity::Output })
+        for (auto const& title: titles)
+            for (auto const& cwd: cwds)
+                for (auto const& finished: finishedVariants)
+                    for (auto const& [bell, notifications]: raisedVariants)
+                    {
+                        auto const summary = PaneSummary { .session = 12,
+                                                           .title = title,
+                                                           .cwd = cwd,
+                                                           .activity = activity,
+                                                           .finished = finished,
+                                                           .bell = bell,
+                                                           .notifications = notifications };
+                        CHECK(roundTrip(DecodedPdu { summary }) == DecodedPdu { summary });
+                    }
 }
 
 TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as stating none",
@@ -2285,14 +2412,15 @@ TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as statin
     CHECK(decoded.answerWithinMs == 0);
 }
 
-TEST_CASE("a release reason or switch outcome a newer peer sends decodes to the safe reading",
+TEST_CASE("a focus, role or switch outcome a newer peer sends decodes to the safe reading",
           "[vthost][pdu][workspace-follow]")
 {
-    auto release = Writer {};
-    release.varint(3);
-    release.u8(200);
-    CHECK(decodeAs<ReleaseWorkspace>(frameOf(PduType::ReleaseWorkspace, release.view())).reason
-          == WorkspaceRelease::Closed);
+    auto focus = Writer {};
+    focus.u8(200);
+    CHECK(decodeAs<ReportFocus>(frameOf(PduType::ReportFocus, focus.view())).focus == WindowFocus::Unfocused);
+    auto role = Writer {};
+    role.u8(200);
+    CHECK(decodeAs<NotifyRole>(frameOf(PduType::NotifyRole, role.view())).role == RaiseRole::Quiet);
 
     auto reply = Writer {};
     reply.u32(1);
@@ -2333,11 +2461,8 @@ TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[v
                                   .session = 3, .orientation = 2, .ratio = 5000, .profileName = "x" } }))
               .profileName
           == "x");
-    CHECK(std::get<NewWorkspace>(roundTrip(DecodedPdu { NewWorkspace { .profileName = "y" } })).profileName
-          == "y");
 
     // Bodies as a peer from before the field sends them.
-    CHECK(decodeAs<NewWorkspace>(frameOf(PduType::NewWorkspace, {})).profileName.empty());
     auto createTab = Writer {};
     createTab.varint(3);
     CHECK(decodeAs<CreateTab>(frameOf(PduType::CreateTab, createTab.view())).profileName.empty());

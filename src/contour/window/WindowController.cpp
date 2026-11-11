@@ -81,7 +81,8 @@ QString const& processToken()
 }
 
 WindowController::WindowController(session::TerminalSessionManager& manager,
-                                   vtworkspace::WorkspaceId windowId,
+                                   WindowId windowId,
+                                   vtworkspace::WorkspaceId workspace,
                                    config::MenuPresentation menuPresentation,
                                    std::optional<WindowPosition> initialPosition,
                                    core::platform::IClock const& clock,
@@ -89,6 +90,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    WindowRole role):
     _manager { manager },
     _windowId { windowId },
+    _displayed { workspace },
+    _owned { workspace },
     // Ssh's prompts for the attaches this window starts are shown here, as soon as the window exists.
     _promptHost { std::make_unique<PromptHost>(manager.app().askpassRouter(), windowId.value) },
     _role { role },
@@ -430,13 +433,13 @@ void WindowController::runSurfaceAction(MenuSurface surface,
 
 QString WindowController::hostLabel() const
 {
-    auto const label = _manager.chromeLabelOf(_windowId);
+    auto const label = _manager.chromeLabelOf(_displayed);
     return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
 }
 
 QObject* WindowController::daemonDrift() const
 {
-    return _manager.daemonDriftOf(_windowId);
+    return _manager.daemonDriftOf(_displayed);
 }
 
 QString WindowController::shortcutText(QString const& commandName) const
@@ -450,7 +453,7 @@ QString WindowController::shortcutText(QString const& commandName) const
 
 int WindowController::hostChipState() const noexcept
 {
-    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_windowId))));
+    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection(_displayed))));
 }
 
 QString WindowController::applicationVersion() const
@@ -461,7 +464,7 @@ QString WindowController::applicationVersion() const
 QString WindowController::windowTitle(QString const& sessionTitle) const
 {
     return QString::fromStdString(
-        remoteWindowTitle(_manager.chromeLabelOf(_windowId), sessionTitle.toStdString()));
+        remoteWindowTitle(_manager.chromeLabelOf(_displayed), sessionTitle.toStdString()));
 }
 
 void WindowController::openTitleBarContextMenu()
@@ -525,7 +528,7 @@ command::MenuBarState WindowController::menuBarState() const
 
 void WindowController::refreshSwitching() const
 {
-    if (_manager.daemonTargetOf(_windowId))
+    if (_manager.daemonTargetOf(_displayed))
         _manager.switchDirectory().refresh();
 }
 
@@ -572,14 +575,14 @@ void WindowController::runCommand(QString const& id)
 
 command::DaemonSwitching WindowController::switchingAvailability() const
 {
-    return _manager.daemonTargetOf(_windowId) ? command::DaemonSwitching::Available
-                                              : command::DaemonSwitching::Unavailable;
+    return _manager.daemonTargetOf(_displayed) ? command::DaemonSwitching::Available
+                                               : command::DaemonSwitching::Unavailable;
 }
 
 command::DaemonRowsState WindowController::daemonRows() const
 {
     auto state = command::DaemonRowsState {};
-    auto const target = _manager.daemonTargetOf(_windowId);
+    auto const target = _manager.daemonTargetOf(_displayed);
     if (!target)
         return state;
     state.switching = command::DaemonSwitching::Available;
@@ -597,7 +600,7 @@ command::DaemonRowsState WindowController::daemonRows() const
         state.localDaemons.push_back({ .label = daemon.label, .workspaces = daemon.workspaces });
     for (auto const& [name, entry]: _manager.app().config().hosts.value())
         state.hosts.push_back({ .name = name, .hint = config::toString(entry.url) });
-    for (auto const& workspace: directory.workspacesOf(_windowId))
+    for (auto const& workspace: directory.workspacesOf(_displayed))
         state.workspaces.push_back({ .position = workspace.position,
                                      .name = workspace.name,
                                      .role = workspace.role == session::WorkspaceRole::Current
@@ -632,12 +635,61 @@ std::string WindowController::titleAtRow(int row) const
     return data(index(row, 0), static_cast<int>(Roles::TitleRole)).toString().toStdString();
 }
 
+void WindowController::adoptWorkspace(vtworkspace::WorkspaceId workspace)
+{
+    if (std::ranges::find(_owned, workspace) == _owned.end())
+        _owned.push_back(workspace);
+}
+
+void WindowController::dropWorkspaceIfEmpty(vtworkspace::WorkspaceId workspace)
+{
+    auto const at = std::ranges::find(_owned, workspace);
+    if (_closing || at == _owned.end() || _owned.size() < 2)
+        return;
+    if (auto const* const emptied = _manager.model().workspace(workspace);
+        emptied != nullptr && !emptied->empty())
+        return;
+    if (_displayed == workspace)
+    {
+        auto const index = static_cast<std::size_t>(std::distance(_owned.begin(), at));
+        // The next one, or the one before when it was the last.
+        displayWorkspace(_owned[index + 1 < _owned.size() ? index + 1 : index - 1]);
+    }
+    std::erase(_owned, workspace);
+    _manager.model().removeWorkspace(workspace);
+    // What the manager keeps per workspace goes with it: a binding of the workspace a daemon window switched
+    // away from, a close it waited for.
+    _manager.forgetWorkspace(workspace);
+}
+
+void WindowController::displayWorkspace(vtworkspace::WorkspaceId workspace)
+{
+    if (workspace == _displayed || std::ranges::find(_owned, workspace) == _owned.end())
+        return;
+    abandonNodeDrag();
+    beginResetModel();
+    auto const previous = std::exchange(_displayed, workspace);
+    _badges.clear();
+    // What the strip kept of the other workspace's tabs means nothing for these.
+    _focusedTab.reset();
+    _focusedTabRemoval = FocusedTabRemoval::None;
+    _tabSpans.clear();
+    endResetModel();
+    _manager.windowDisplayChanged(*this, previous);
+    rebuildActiveTabPaneProxies();
+    emit countChanged();
+    emit tabBarShouldShowChanged();
+    emit activeTabIndexChanged();
+    refreshActiveTabHighlight();
+    refreshAllTabTitles();
+}
+
 vtworkspace::Workspace* WindowController::window() const noexcept
 {
     // Resolve the backing vtworkspace::Workspace strictly by this controller's own WorkspaceId, so each
     // controller adapts exactly its window (correct for N windows). For the first controller this is the same
     // object the manager's ctor minted as _modelWindow.
-    return _manager.model().workspace(_windowId);
+    return _manager.model().workspace(_displayed);
 }
 
 vtworkspace::Tab* WindowController::activeModelTab() const noexcept
@@ -783,7 +835,9 @@ ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& 
             auto const _ = std::lock_guard { terminal };
             return resolvedRecords(terminal.programStatus());
         },
-        [this](vtworkspace::SessionId id) { return _manager.tabAttention().of(id).seenStatusGeneration; });
+        [this](vtworkspace::SessionId id) {
+            return _attention.of(_manager.paneKeyOf(id)).seenStatusGeneration;
+        });
 }
 
 ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab) const
@@ -794,7 +848,8 @@ ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab c
 TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab) const
 {
     auto const program = cachedProgramStatusBadge(tab);
-    auto const pooled = pooledAttention(tab, _manager.tabAttention());
+    auto const pooled = pooledAttention(
+        tab, _attention, [this](vtworkspace::SessionId id) { return _manager.paneKeyOf(id); });
     // The model holds a percentage as uint8_t; the badge decision speaks int (§3.4), widened here.
     return resolveTabBadge({
         .programStatus = program.kind,
@@ -830,13 +885,13 @@ std::string const& WindowController::cachedProcessName(session::TerminalSession 
 
 std::string WindowController::otherMachineName() const
 {
-    if (_manager.daemonLocalityOf(_windowId) == window::DaemonLocality::Local)
+    if (_manager.daemonLocalityOf(_displayed) == window::DaemonLocality::Local)
         return {};
     // A saved host by its name; a daemon no switch can name (`--connect-tcp`) by what the chrome calls it.
-    auto const target = _manager.daemonTargetOf(_windowId);
+    auto const target = _manager.daemonTargetOf(_displayed);
     if (target && !target->daemon.empty())
         return target->daemon;
-    return std::string { _manager.chromeLabelOf(_windowId) };
+    return std::string { _manager.chromeLabelOf(_displayed) };
 }
 
 std::string WindowController::blankTabName(session::TerminalSession const& session) const
@@ -894,12 +949,12 @@ void WindowController::createNewTab(QString const& profileName)
 {
     auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
                                          : std::optional<std::string> { profileName.toStdString() };
-    _manager.createNewTab(_windowId, profile);
+    _manager.createNewTab(_displayed, profile);
 }
 
 void WindowController::activateTab(int index)
 {
-    _manager.activateTab(_windowId, index);
+    _manager.activateTab(_displayed, index);
 }
 
 QString WindowController::tabWorkingDirectory(int index) const
@@ -963,7 +1018,7 @@ void WindowController::dispatchTabStripWheel(
 
 void WindowController::moveTab(int fromIndex, int toIndex)
 {
-    _manager.moveTab(_windowId, fromIndex, toIndex);
+    _manager.moveTab(_displayed, fromIndex, toIndex);
 }
 
 QString WindowController::paneDragPayload(session::TerminalSession const* pane) const
@@ -974,7 +1029,7 @@ QString WindowController::paneDragPayload(session::TerminalSession const* pane) 
 
 QString WindowController::tabDragPayload(int tabIndex) const
 {
-    auto const drag = _manager.tabDragOf(_windowId, tabIndex);
+    auto const drag = _manager.tabDragOf(_displayed, tabIndex);
     return drag ? writeNodeDrag(*drag) : QString {};
 }
 
@@ -1028,7 +1083,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
                 return none;
             // What the drag says it is, not what the card guessed: a tab of one pane drags as that pane.
             inputs.payload = drag->drag.payload;
-            inputs.refusal = _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId));
+            inputs.refusal = _manager.moveRefusalIn(*drag, _displayed, drag->edgePlaceIn(_displayed));
             if (inputs.refusal != MoveRefusal::None)
                 break;
             // A drag of this process naming what is gone since (its shell exited) is taken, and moves
@@ -1042,7 +1097,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
             // A swap is a place of its own: a daemon that serves the edges may not trade two.
             if (auto const zone = resolveDropZone(inputs);
                 zone == DropZone::Swap
-                && _manager.moveRefusalIn(*drag, _windowId, MovePlace::Swap) != MoveRefusal::None)
+                && _manager.moveRefusalIn(*drag, _displayed, MovePlace::Swap) != MoveRefusal::None)
                 return static_cast<int>(DropZone::Refused);
             break;
         }
@@ -1068,9 +1123,9 @@ QString WindowController::refusalText(QString const& nodePayload) const
     if (drag == nullptr)
         return {};
     // What a pane card that shows DropZone::Refused is refused for: its edges, else its middle.
-    auto refusal = _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId));
+    auto refusal = _manager.moveRefusalIn(*drag, _displayed, drag->edgePlaceIn(_displayed));
     if (refusal == MoveRefusal::None)
-        refusal = _manager.moveRefusalIn(*drag, _windowId, MovePlace::Swap);
+        refusal = _manager.moveRefusalIn(*drag, _displayed, MovePlace::Swap);
     return toQString(refusalTextOf(refusal));
 }
 
@@ -1097,12 +1152,12 @@ void WindowController::dropNodeOnPane(session::TerminalSession const* pane,
 
 void WindowController::dropNodeOnTab(int tabIndex, QString const& nodePayload)
 {
-    auto const* const window = _manager.model().workspace(_windowId);
+    auto const* const window = _manager.model().workspace(_displayed);
     auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
     // Beside the tab's active pane, but a place of its own: one an older daemon serves no route to.
     if (tab == nullptr || drag == nullptr
-        || _manager.moveRefusalIn(*drag, _windowId, MovePlace::OnTab) != MoveRefusal::None)
+        || _manager.moveRefusalIn(*drag, _displayed, MovePlace::OnTab) != MoveRefusal::None)
         return;
     placeNode(*drag,
               vtworkspace::EdgeTarget { .pane = tab->activePane()->session(),
@@ -1116,10 +1171,10 @@ void WindowController::dropNodeInGap(int index, QString const& nodePayload)
         return;
     // A gap is between two tabs as they are now; a tab of this window taken out of the strip first lands
     // one row left of a gap to its right.
-    if (drag->tab && drag->workspace == _windowId && drag->movesWholeTab())
-        if (auto const row = _manager.model().workspace(_windowId)->indexOf(*drag->tab); index > row)
+    if (drag->tab && drag->workspace == _displayed && drag->movesWholeTab())
+        if (auto const row = _manager.model().workspace(_displayed)->indexOf(*drag->tab); index > row)
             --index;
-    placeNode(*drag, vtworkspace::TabWellTarget { .workspace = _windowId, .index = index });
+    placeNode(*drag, vtworkspace::TabWellTarget { .workspace = _displayed, .index = index });
 }
 
 void WindowController::setTabSpans(QList<QRectF> const& tabs)
@@ -1138,7 +1193,7 @@ TabBarHitValue WindowController::tabBarHit(qreal x) const
 
 bool WindowController::springOpens(int tabIndex, QString const& nodePayload) const
 {
-    auto const* const window = _manager.model().workspace(_windowId);
+    auto const* const window = _manager.model().workspace(_displayed);
     auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
     auto const* const drag = _manager.resolveNodeDrag(nodePayload);
     if (tab == nullptr || drag == nullptr)
@@ -1147,7 +1202,7 @@ bool WindowController::springOpens(int tabIndex, QString const& nodePayload) con
     if (drag->tab == tab->id())
         subject = drag->movesWholeTab() ? DwellSubject::DraggedTab : DwellSubject::SourceTab;
     // Opened so the drag can be dropped beside one of that tab's panes.
-    return shouldSpringOpen(subject, _manager.moveRefusalIn(*drag, _windowId, drag->edgePlaceIn(_windowId)))
+    return shouldSpringOpen(subject, _manager.moveRefusalIn(*drag, _displayed, drag->edgePlaceIn(_displayed)))
            == DwellOpens::Yes;
 }
 
@@ -1172,7 +1227,7 @@ QString WindowController::beginPaneDrag(session::TerminalSession* pane)
 
 QString WindowController::beginTabDrag(int tabIndex)
 {
-    return beginNodeDrag(_manager.tabDragOf(_windowId, tabIndex), nullptr);
+    return beginNodeDrag(_manager.tabDragOf(_displayed, tabIndex), nullptr);
 }
 
 QObject* WindowController::carriedPane() const
@@ -1232,7 +1287,7 @@ void WindowController::runTabAction(int row, actions::Action const& action)
                    },
                    [&](actions::ResetTabColor const&) { resetTabColor(row); },
                    [&](actions::MoveTabToNewWindow const&) {
-                       _manager.tearOffTabToNewWindow(_windowId, row, screen());
+                       _manager.tearOffTabToNewWindow(_displayed, row, screen());
                    },
                    [&](actions::CloseTab const&) { closeTabAtIndex(row); },
                    [&](actions::CloseOtherTabs const&) { closeOtherTabs(row); },
@@ -1317,12 +1372,12 @@ namespace
 
 void WindowController::saveLayoutAs(QString const& name)
 {
-    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Keep, _notices);
+    saveWindowLayoutAndTell(_manager, _displayed, name, LayoutReplace::Keep, _notices);
 }
 
 void WindowController::replaceLayout(QString const& name)
 {
-    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Replace, _notices);
+    saveWindowLayoutAndTell(_manager, _displayed, name, LayoutReplace::Replace, _notices);
 }
 
 QVariantMap WindowController::layoutCheckMap(SaveLayoutCheck const& check, QString const& trimmed)
@@ -1348,7 +1403,7 @@ QVariantMap WindowController::checkLayoutName(QString const& name, bool replace)
 
 QString WindowController::layoutSummary() const
 {
-    auto const* const window = _manager.model().workspace(_windowId);
+    auto const* const window = _manager.model().workspace(_displayed);
     auto tabs = 0;
     auto panes = 0;
     if (window != nullptr)
@@ -1704,17 +1759,17 @@ void WindowController::confirmCloseTab(quint64 tab)
 
 void WindowController::closeTabAtIndex(int index)
 {
-    _manager.closeTabAtIndex(_windowId, index);
+    _manager.closeTabAtIndex(_displayed, index);
 }
 
 void WindowController::closeOtherTabs(int index)
 {
-    _manager.closeOtherTabs(_windowId, index);
+    _manager.closeOtherTabs(_displayed, index);
 }
 
 void WindowController::closeTabsToRight(int index)
 {
-    _manager.closeTabsToRight(_windowId, index);
+    _manager.closeTabsToRight(_displayed, index);
 }
 
 QVariantList WindowController::tabColorPalette() const
@@ -1785,15 +1840,13 @@ void WindowController::closeWindow()
     // just-freed model tree), then terminate the gathered sessions (their sessionClosed -> removeSession
     // degrades to local registry cleanup because their tabs are already gone), and finally close the OS
     // window and ask the manager to drop this controller.
-    auto* win = window();
+    // Every workspace the window owns ends with it, the hidden ones among them.
     std::vector<session::TerminalSession*> doomed;
-    if (win != nullptr)
-        for (auto const row: std::views::iota(0, win->tabCount()))
-            if (auto* tab = win->tabAt(row); tab != nullptr)
-                for (auto* session: _manager.sessionsOfTab(tab))
-                    doomed.push_back(session);
+    for (auto const workspace: _owned)
+        std::ranges::copy(_manager.sessionsOfWindow(workspace), std::back_inserter(doomed));
 
-    _manager.model().removeWorkspace(_windowId);
+    for (auto const workspace: _owned)
+        _manager.model().removeWorkspace(workspace);
 
     // Prune our PaneProxy tree explicitly (see above): clear each cached Pane* first so any getter that
     // runs before deleteLater() takes effect sees no stale pointer, then drop the root.
@@ -1839,25 +1892,22 @@ bool WindowController::canCloseWindow() const noexcept
     // session set for this window means that was its last pane; while any pane remains the split just
     // collapsed and the window stays open. Counting only THIS window's sessions (not all sessions) is what
     // lets the last pane of window A close A while window B still has sessions.
-    auto* win = window();
-    if (win == nullptr)
-        return true;
-    for (auto const row: std::views::iota(0, win->tabCount()))
-        if (auto* tab = win->tabAt(row); tab != nullptr)
-            if (!_manager.sessionsOfTab(tab).empty())
-                return false;
-    return true;
+    return std::ranges::none_of(_owned, [this](vtworkspace::WorkspaceId workspace) {
+        return !_manager.sessionsOfWindow(workspace).empty();
+    });
 }
 // }}}
 
 // {{{ Window-service reads
 std::vector<TabBadgeKind> WindowController::tabBadgeKinds() const
 {
+    // Every owned workspace: a tab waiting in a hidden one still waits for this window's user.
     auto kinds = std::vector<TabBadgeKind> {};
-    if (auto const* win = window())
-        for (auto const row: std::views::iota(0, win->tabCount()))
-            if (auto const* tab = win->tabAt(row))
-                kinds.push_back(tabBadge(*tab).kind);
+    for (auto const workspace: _owned)
+        if (auto const* win = _manager.model().workspace(workspace))
+            for (auto const row: std::views::iota(0, win->tabCount()))
+                if (auto const* tab = win->tabAt(row))
+                    kinds.push_back(tabBadge(*tab).kind);
     return kinds;
 }
 
@@ -2339,7 +2389,7 @@ void WindowController::onWindowVisibilityChanged()
 
 void WindowController::onWindowStateChanged()
 {
-    _manager.windowStateChanged(_windowId);
+    _manager.windowStateChanged(_displayed);
     _manager.app().refreshWindowAttention();
     // Full screen rests the band elsewhere, and moves the traffic lights into AppKit's revealed strip.
     refreshTitleBand();
@@ -2380,8 +2430,8 @@ TitleBand WindowController::titleBand() const
         .mode = windowMode(),
         .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
         .position = _tabBarPosition,
-        .notice = hostNoticeOf(hostChipPresence(_manager.chromeLabelOf(_windowId)),
-                               hostChipStateOf(_manager.hostConnection(_windowId))),
+        .notice = hostNoticeOf(hostChipPresence(_manager.chromeLabelOf(_displayed)),
+                               hostChipStateOf(_manager.hostConnection(_displayed))),
     });
 }
 
@@ -2494,10 +2544,10 @@ void WindowController::onOSWindowActiveChanged()
         return;
 
     if (osWindow->isActive())
-        _manager.setFocusedWindow(_windowId);
+        _manager.setFocusedWindow(_displayed);
     else
     {
-        _manager.clearFocusedWindow(_windowId);
+        _manager.clearFocusedWindow(_displayed);
         // The release of a modifier held while the window lost focus goes to another window.
         _heldModifier.modifierReleased();
         refreshHeaderReveal();
@@ -2721,7 +2771,7 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 emit nativeControlsInsetChanged();
                 // The state change of a restore comes before the platform exposes the surface, so the
                 // running times were decided while it was still hidden; decide them again now.
-                _manager.windowExposed(_windowId);
+                _manager.windowExposed(_displayed);
                 break;
 
             case QEvent::ApplicationPaletteChange:

@@ -735,7 +735,7 @@ void ContourGuiApp::armLatencyProbe()
     }
     // The first window shows its terminal display a little after the window itself exists.
     auto const focused = _sessionManager.focusedWindow();
-    auto* const controller = focused ? _sessionManager.controllerFor(*focused) : nullptr;
+    auto* const controller = focused ? _sessionManager.controllerDisplaying(*focused) : nullptr;
     auto* const terminalDisplay = controller ? controller->activeDisplay() : nullptr;
     auto* const window = terminalDisplay ? terminalDisplay->window() : nullptr;
     if (!window)
@@ -1053,7 +1053,7 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
     return remote::DaemonLinkConfig {
         .controller = remote::NativeController::Config {
             .transport = std::move(transport),
-            .intent = std::move(intent),
+            .intent = intent,
             .profileName = profileName(),
             .workingDirectory = {},
             .attachSettings = std::move(attachSettings),
@@ -1069,7 +1069,7 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
         .hostLabel = std::move(hostLabel),
         .locality = locality,
         .clientRelease = CONTOUR_VERSION_STRING,
-        .handOverFrom = std::nullopt,
+        .opening = std::nullopt,
         .address = std::move(address),
         .arrival = std::nullopt,
         .askpassRoute = askpassRoute,
@@ -1086,6 +1086,12 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
     remote::DaemonAddress const& daemon, vtworkspace::WorkspaceId window)
 {
     using vthost::proto::SwitchDaemonKind;
+    // The prompts of the attach are shown in the window that asked: routed by its id, which stays the same
+    // as it shows one workspace after another.
+    auto const askpassRoute = [&]() -> askpass::AskpassRouteId {
+        auto const* const owner = _sessionManager.controllerOwning(window);
+        return owner != nullptr ? owner->windowId().value : askpass::AnyWindow;
+    }();
     switch (daemon.kind)
     {
         case SwitchDaemonKind::Label: {
@@ -1113,7 +1119,7 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
         }
         case SwitchDaemonKind::Host:
             // Attach to Host's lookup: a saved host's name, or an ssh:// URL.
-            return openHost(core::platform::normalizePath(_config.configFile), daemon.name, window.value)
+            return openHost(core::platform::normalizePath(_config.configFile), daemon.name, askpassRoute)
                 .transform([&](OpenedHost opened) {
                     auto label = opened.transport.label;
                     return daemonLinkConfig(std::move(opened.transport.factory),
@@ -1121,7 +1127,7 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
                                             std::move(label),
                                             window::DaemonLocality::Remote,
                                             daemon,
-                                            window.value);
+                                            askpassRoute);
                 });
         case SwitchDaemonKind::Same: break;
     }
@@ -1134,20 +1140,34 @@ remote::DaemonLink& ContourGuiApp::startSwitchLink(remote::DaemonLinkConfig conf
     return startDaemonLink(std::move(config));
 }
 
-void ContourGuiApp::startHandOverLink(remote::DaemonLinkConfig config)
+void ContourGuiApp::startWindowLink(remote::DaemonLinkConfig config)
 {
-    // Awaited by nobody: it settles as it connects, and opens its window once its connection shows the
-    // workspace.
+    // Awaited by nobody: it opens its window once its connection shows the workspace it selects.
     std::ignore = startDaemonLink(std::move(config));
 }
 
-void ContourGuiApp::handOverSettled(remote::HandOver handOver,
-                                    remote::HandOverOutcome outcome,
-                                    std::string const& reason)
+remote::ElsewhereNotices ContourGuiApp::elsewhereNotices()
 {
-    // The link it came from may have ended meanwhile, its window closed: nothing then holds the workspace.
-    if (auto* const from = daemonLink(handOver.from))
-        from->completeHandOver(handOver.workspace, outcome, reason);
+    // Through the centre where there is one, as a session's notices are; where the platform's notifier is the
+    // tray, the window the user last focused shows it.
+    if (!_elsewhereNotifier)
+        _elsewhereNotifier = platform::makeDesktopNotifier(
+            _config.notificationCloseTimeout.value(),
+            [this](QString const& title, QString const& body, std::function<void()> onClicked) {
+                if (auto* const controller = _sessionManager.applicationController())
+                    controller->requestNotification(title, body, std::move(onClicked));
+            },
+            _userNotificationCenter,
+            std::format("{}finished/", platform::ApplicationRequestPrefix),
+            _hostPlatform);
+    auto const* const found = _config.findProfile(profileName());
+    auto const& profile = found != nullptr ? *found : _config.profile();
+    return remote::ElsewhereNotices {
+        .policy = profile.notifyOnCommandFinish.value(),
+        .bell = profile.bell.value(),
+        .homeDirectory = _sessionManager.homeDirectory(),
+        .notifier = *_elsewhereNotifier,
+    };
 }
 
 void ContourGuiApp::destroyEndedLinks()
@@ -1312,7 +1332,8 @@ void ContourGuiApp::refreshWindowAttention()
     auto const isOnScreen = [this](askpass::AskpassRouteId route) {
         if (route == askpass::BootstrapRoute)
             return true; // the stand-in shows itself as a prompt asks
-        auto const* const controller = _sessionManager.controllerFor(vtworkspace::WorkspaceId { route });
+        // A route is the id of the window the prompts are shown in.
+        auto const* const controller = _sessionManager.controllerOf(window::WindowId { route });
         if (controller == nullptr || !controller->isExposed())
             return false;
         return controller->role() != window::WindowRole::QuickTerminal
@@ -1504,7 +1525,8 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
     _sessionManager.setAttachWindowBinder(
         _tmuxController->windowBinding(), [this](window::WindowController* controller) {
             if (controller != nullptr)
-                _sessionManager.bindWindow(controller->windowId(), _tmuxController->windowBinding());
+                _sessionManager.bindWindow(controller->displayedWorkspace(),
+                                           _tmuxController->windowBinding());
             return false;
         });
     _onGuiBooted = [this] {
@@ -1789,11 +1811,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // has already spent part of the budget, and settles the hosting there.
     // Only this link, the launch's own, states the directory contour was started in: a link a switch opens
     // later to another daemon has no tab to open there.
-    auto config = daemonLinkConfig(std::move(target->transport),
-                                   std::move(target->intent),
-                                   std::move(hostLabel),
-                                   locality,
-                                   std::move(address));
+    auto config = daemonLinkConfig(
+        std::move(target->transport), target->intent, std::move(hostLabel), locality, std::move(address));
     config.controller.workingDirectory =
         attachWorkingDirectory(parameters().get<string>("contour.terminal.working-directory"));
     // The launch's daemon is this client's to restart and upgrade when it is local: _restartDaemon and
@@ -2453,7 +2472,7 @@ void ContourGuiApp::refreshChromeStyle()
 window::WindowController* ContourGuiApp::focusedController() const noexcept
 {
     auto const window = _sessionManager.focusedWindow();
-    return window ? _sessionManager.controllerFor(*window) : nullptr;
+    return window ? _sessionManager.controllerDisplaying(*window) : nullptr;
 }
 
 window::AppMenuBarSources ContourGuiApp::appMenuBarSources()
@@ -2519,17 +2538,12 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
         _exitEventLoop(EXIT_SUCCESS);
         return;
     }
-    if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
+    if (std::holds_alternative<actions::NewTerminal>(action))
     {
-        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give. A new
-        // window is authored on the host of the window it is asked from, and none shows a session: a daemon
-        // link ends with the last window it served. Only one still booting, its first window waiting for the
-        // first layout, has its daemon author it, as a window opened now would be claimed as its boot window.
-        auto const spawn = session::RemoteSpawn { .profileName = newTerminal->profileName.value_or("") };
-        if (std::ranges::none_of(_daemonLinks, [&spawn](auto const& link) {
-                return link->requestBootWorkspace(spawn) == session::RemoteRouting::Routed;
-            }))
-            newWindow();
+        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give. No
+        // window shows a session to open the new one beside: a daemon link ends with the last window it
+        // served, and a link still booting adopts the window that opens now as its boot window.
+        newWindow();
         return;
     }
     if (std::holds_alternative<actions::NewWindowTo>(action))
@@ -3888,7 +3902,7 @@ std::expected<void, std::string> ContourGuiApp::bootFirstWindow()
     // The window that runs its shells itself, as the daemon could not be had, says so.
     if (!_hostingNotice.empty())
         if (auto const window = _sessionManager.focusedWindow())
-            if (auto* controller = _sessionManager.controllerFor(*window))
+            if (auto* controller = _sessionManager.controllerDisplaying(*window))
                 controller->showHostingNotice(QString::fromStdString(_hostingNotice));
 
     // The hotkey the desktop refused while the app started, which no window existed to be told of.
@@ -4279,7 +4293,7 @@ void ContourGuiApp::returnFocusTo(FocusReturn const& target)
         target.window->requestActivate();
     if (!target.workspace)
         return;
-    if (auto* const controller = _sessionManager.controllerFor(*target.workspace))
+    if (auto* const controller = _sessionManager.controllerDisplaying(*target.workspace))
         controller->focusActiveDisplay();
 }
 
@@ -4328,7 +4342,7 @@ std::expected<void, std::string> ContourGuiApp::showSwitchPick(remote::SwitchPic
     auto const daemon = _sessionManager.daemonTargetOf(pick.window);
     if (!daemon)
         return std::unexpected(std::string { "the window went away" });
-    auto const* const controller = _sessionManager.controllerFor(pick.window);
+    auto const* const controller = _sessionManager.controllerDisplaying(pick.window);
     return openSwitcher(
         window::SwitcherOpening {
             .window = pick.window,

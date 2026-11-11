@@ -406,7 +406,9 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            MoveNodeRefusedHandler onMoveNodeRefused,
                            LayoutBatchEndHandler onLayoutBatchEnd,
                            PanesReprojectedHandler onPanesReprojected,
-                           SwitchRequestHandler onSwitchRequest):
+                           SwitchRequestHandler onSwitchRequest,
+                           PaneSummaryHandler onPaneSummary,
+                           RaiseRoleHandler onRaiseRole):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -423,6 +425,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onLayoutBatchEnd(std::move(onLayoutBatchEnd)),
     _onPanesReprojected(std::move(onPanesReprojected)),
     _onSwitchRequest(std::move(onSwitchRequest)),
+    _onPaneSummary(std::move(onPaneSummary)),
+    _onRaiseRole(std::move(onRaiseRole)),
     _liveness(liveness)
 {
 }
@@ -657,11 +661,6 @@ void NativeClient::restateSessionSettings(std::optional<proto::WireSessionSettin
         proto::SessionSettingsChanged { .sessionSettings = _handshake.sessionSettings } });
 }
 
-void NativeClient::createWorkspace(std::string profileName)
-{
-    send(proto::DecodedPdu { proto::NewWorkspace { .profileName = profileForWire(std::move(profileName)) } });
-}
-
 void NativeClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName)
 {
     send(proto::DecodedPdu { proto::SplitPane { .session = session,
@@ -682,32 +681,23 @@ Delivery NativeClient::closePane(uint64_t session)
                                                                                     : Delivery::Unsupported;
 }
 
-Delivery NativeClient::followWorkspace(uint64_t workspace)
+std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace)
 {
-    if (!shares(proto::Capability::WorkspaceFollow))
-        return Delivery::Unsupported;
-    if (send(proto::DecodedPdu { proto::FollowWorkspace { .workspace = workspace } }) == 0)
-        return Delivery::Unsupported;
-    // A new workspace (0) is learnt of with its layout, which names it then.
-    if (workspace != 0)
-    {
-        _releasedWorkspaces.erase(workspace);
-        if (auto const at = std::ranges::lower_bound(_followedWorkspaces, workspace);
-            at == _followedWorkspaces.end() || *at != workspace)
-            _followedWorkspaces.insert(at, workspace);
-    }
-    return Delivery::Sent;
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::DaemonFollow))
+        return std::nullopt;
+    // Held only once the daemon states it with the layout batch that answers (handleNotice): a workspace it
+    // does not have leaves the selection as it was, and a new one (0) is named by that batch alone.
+    auto const serial = send(proto::DecodedPdu { proto::SelectWorkspace { .workspace = workspace } });
+    return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 
-Delivery NativeClient::releaseWorkspace(uint64_t workspace, proto::WorkspaceRelease reason)
+Delivery NativeClient::reportFocus(proto::WindowFocus focus)
 {
-    if (!shares(proto::Capability::WorkspaceFollow))
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::DaemonFollow)
+        || send(proto::DecodedPdu { proto::ReportFocus { .focus = focus } }) == 0)
         return Delivery::Unsupported;
-    if (send(proto::DecodedPdu { proto::ReleaseWorkspace { .workspace = workspace, .reason = reason } }) == 0)
-        return Delivery::Unsupported;
-    std::erase(_followedWorkspaces, workspace);
-    _shownWorkspaces.erase(workspace);
-    _releasedWorkspaces.insert(workspace);
     return Delivery::Sent;
 }
 
@@ -884,15 +874,6 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
 
 void NativeClient::handleLayout(proto::LayoutState const& layout)
 {
-    // Pushed before the daemon read the release: the workspace is no longer this connection's to show.
-    if (_releasedWorkspaces.contains(layout.workspace))
-        return;
-    // A daemon sends the layouts of the workspaces a connection follows, so one it pushes later -- a
-    // workspace this connection created -- is followed too, and a reconnect resumes it with the rest.
-    if (shares(proto::Capability::AttachIntent))
-        if (auto const at = std::ranges::lower_bound(_followedWorkspaces, layout.workspace);
-            at == _followedWorkspaces.end() || *at != layout.workspace)
-            _followedWorkspaces.insert(at, layout.workspace);
     if (_onLayout && _pendingEdits.empty())
         _onLayout(layout);
     else if (_onLayout)
@@ -901,17 +882,6 @@ void NativeClient::handleLayout(proto::LayoutState const& layout)
         _pendingEdits.apply(shown);
         _onLayout(shown);
     }
-    // Confirmed once handed on: the daemon now takes a lost connection for a window going away.
-    confirmShown(layout.workspace);
-}
-
-void NativeClient::confirmShown(uint64_t workspace)
-{
-    if (!shares(proto::Capability::WorkspaceShown)
-        || !std::ranges::binary_search(_followedWorkspaces, workspace))
-        return;
-    if (_shownWorkspaces.insert(workspace).second)
-        send(proto::DecodedPdu { proto::WorkspaceShown { .workspace = workspace } });
 }
 
 bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
@@ -919,8 +889,25 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     auto const& pdu = frame.pdu;
     if (auto const* end = std::get_if<proto::LayoutBatchEnd>(&pdu))
     {
+        // The daemon states the selection after each batch: a workspace it created for selectWorkspace(0), or
+        // one it selected instead of a workspace that closed. 0: it has no workspace left.
+        if (shares(proto::Capability::DaemonFollow))
+            _selectedWorkspace = end->selected;
         if (_onLayoutBatchEnd)
             _onLayoutBatchEnd(*end);
+        return true;
+    }
+    if (auto const* summary = std::get_if<proto::PaneSummary>(&pdu))
+    {
+        if (_onPaneSummary)
+            _onPaneSummary(*summary);
+        return true;
+    }
+    if (auto const* role = std::get_if<proto::NotifyRole>(&pdu))
+    {
+        _raiseRole = role->role;
+        if (_onRaiseRole)
+            _onRaiseRole(role->role);
         return true;
     }
     if (std::holds_alternative<proto::PanesReprojected>(pdu))
@@ -1025,7 +1012,7 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
                           ? std::nullopt
                           : std::optional { RestoredCounts { .workspaces = hello.restoredWorkspaces,
                                                              .tabs = hello.restoredTabs } };
-    _followedWorkspaces = hello.followedWorkspaces;
+    _selectedWorkspace = hello.selectedWorkspace;
     _negotiated = std::move(*outcome);
     _handshakeTimer.reset();
     clientLog()("attach: connected (protocol v{})", _negotiated->version);

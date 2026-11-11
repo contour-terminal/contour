@@ -382,3 +382,60 @@ TEST_CASE("a window says which daemon it is on, and stops when it moves to the d
         CHECK(window->windowTitle("vim") == "vim");
     }
 }
+
+TEST_CASE("NewWorkspace creates and selects a workspace in the same window, in-process or on its daemon",
+          "[session][workspace]")
+{
+    using namespace contour::actions;
+
+    SECTION("a window running its sessions in-process")
+    {
+        auto rig = SwitchRig { std::nullopt };
+        auto const first = rig.window->displayedWorkspace();
+        REQUIRE(rig.window->ownedWorkspaces().size() == 1);
+
+        rig.run(NewWorkspace {});
+        REQUIRE(rig.window->ownedWorkspaces().size() == 2);
+        auto const second = rig.window->ownedWorkspaces()[1];
+        CHECK(rig.window->displayedWorkspace() == second);
+        CHECK(rig.window->rowCount() == 1); // opened with a tab of its own
+        CHECK(rig.app.manager().controllerOwning(first) == rig.window.controller);
+
+        // It is the same OS window throughout, and the workspaces are positions among its own.
+        rig.run(NewWorkspace {});
+        CHECK(rig.window->ownedWorkspaces().size() == 3);
+        CHECK(rig.app.manager().controllerDisplaying(rig.window->ownedWorkspaces()[2])
+              == rig.window.controller);
+
+        // The session switching action picks among them by 1-based position, without asking any daemon.
+        // Run from the session of the first workspace, which now sits hidden.
+        rig.run(SwitchToWorkspace { 1 });
+        CHECK(rig.window->displayedWorkspace() == first);
+        CHECK(rig.requests().empty());
+    }
+    SECTION("a window a daemon serves has the daemon make the workspace, and selects it")
+    {
+        auto rig = SwitchRig { labelTarget("default") };
+        rig.run(NewWorkspace {});
+        CHECK(rig.window->ownedWorkspaces().size() == 1);
+        REQUIRE(rig.requests().size() == 1);
+        CHECK(rig.requests()[0].window == rig.window.id);
+        CHECK(rig.requests()[0].mode == SwitchMode::Switch);
+        CHECK(rig.requests()[0].target.kind == vthost::proto::SwitchDaemonKind::Same);
+        CHECK(std::holds_alternative<contour::session::NewWorkspace>(rig.requests()[0].target.workspace));
+        CHECK(rig.window->notices().toastText().isEmpty());
+    }
+    SECTION("a window bound to a tmux session's factory refuses, and says why")
+    {
+        auto rig = SwitchRig { std::nullopt };
+        auto tmux = contour::session::FactoryBinding { *rig.factory, "tmux-host" };
+        rig.app.manager().bindWindow(rig.window.id, tmux);
+        rig.run(NewWorkspace {});
+        CHECK(rig.window->ownedWorkspaces().size() == 1);
+        CHECK(rig.requests().empty());
+        CHECK(rig.window->notices().toastText()
+              == QStringLiteral(
+                  "Could not make a workspace: this window's workspaces come from what it is attached to."));
+        rig.app.manager().releaseBinding(tmux);
+    }
+}

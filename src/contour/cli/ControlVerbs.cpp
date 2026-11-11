@@ -500,10 +500,12 @@ namespace
             return std::unexpected("switch needs a destination: --to-label, --to-host or --to-workspace"s);
         if (auto const unusable = unusableSwitchHost(toHost))
             return std::unexpected(*unusable);
-        return vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .workspace = f.text("workspace"),
-                                                                         .toLabel = toLabel,
-                                                                         .toHost = toHost,
-                                                                         .toWorkspace = toWorkspace });
+        auto const& workspace = f.text("workspace");
+        return vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest {
+            .workspace = workspace.empty() ? std::nullopt : std::optional { workspace },
+            .toLabel = toLabel,
+            .toHost = toHost,
+            .toWorkspace = toWorkspace });
     }
 
     /// Prints what a switch came to: `switched`, `focused` or `picker`, then the window's note if it has
@@ -761,14 +763,16 @@ namespace
                 .method = "workspace.switch",
                 .usage = "switch [--workspace W] (--to-label L | --to-host H | --to-workspace W2) "
                          "[--to-workspace W2]",
-                .summary = "Switches the window showing a workspace to another workspace or daemon.",
+                .summary = "Asks one window to switch to another workspace or daemon.",
                 .options =
                     [] {
                         return withConnectionOptions({
                             CLI::Option { "workspace",
                                           CLI::Value { ""s },
-                                          "The workspace whose window switches. Defaults to the workspace of "
-                                          "$CONTOUR_PANE.",
+                                          "The workspace whose window switches: the window selecting it that "
+                                          "was focused last. Without it, the window selecting the workspace "
+                                          "of $CONTOUR_PANE, and without a pane the window that raises for "
+                                          "the daemon.",
                                           "W" },
                             CLI::Option { "to-label",
                                           CLI::Value { ""s },

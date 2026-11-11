@@ -163,7 +163,7 @@ struct SwitcherFixture
               .position = 3,
               .name = "scratch",
               .tabs = 1,
-              .state = SwitcherWorkspaceState::Left } } },
+              .state = SwitcherWorkspaceState::Hidden } } },
         { "admin",
           { { .ref = workspaceRef("a1"),
               .position = 1,
@@ -180,7 +180,7 @@ struct SwitcherFixture
               .position = 1,
               .name = "build",
               .tabs = 2,
-              .state = SwitcherWorkspaceState::Left } } },
+              .state = SwitcherWorkspaceState::Hidden } } },
     };
     QObject receiver; ///< Where a listing is answered from, later, as the real one is.
     std::unique_ptr<window::SwitcherController> switcher;
@@ -351,7 +351,7 @@ TEST_CASE("Switcher: the rows are grouped, with each workspace's tabs and state,
     CHECK(groupTitle(6) == "Saved hosts");
     CHECK(fixture.details().contains("running · 2 workspaces · this window"));
     CHECK(fixture.details().contains("4 tabs · this window"));
-    CHECK(fixture.details().contains("1 tab · not shown"));
+    CHECK(fixture.details().contains("1 tab · hidden"));
     CHECK(fixture.details().contains("running · 2 workspaces"));
     // A saved host not yet connected says so, and is not listed until expanded.
     CHECK(fixture.details().contains("not yet connected"));

@@ -879,7 +879,7 @@ TEST_CASE("switch builds workspace.switch from its destination flags", "[contour
           == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .toLabel = "admin" }));
     CHECK(build({ "switch", "--workspace", "w1", "--to-host", "box", "--to-workspace", "build" })
           == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest {
-              .workspace = "w1", .toHost = "box", .toWorkspace = "build" }));
+              .workspace = std::string { "w1" }, .toHost = "box", .toWorkspace = "build" }));
     CHECK(build({ "switch", "--to-workspace", "2" })
           == vtcontrol::encodeJson(vtcontrol::SwitchWorkspaceRequest { .toWorkspace = "2" }));
     // An ad-hoc ssh:// host is accepted, and travels as given.
@@ -933,17 +933,14 @@ TEST_CASE("switch sends the caller's pane and exits by the window's outcome",
     }
 }
 
-TEST_CASE("switch exits 3 when no window shows the workspace, 3 again when several do",
-          "[contour][cli][control][switch]")
+TEST_CASE("switch exits 3 when no window selects the workspace", "[contour][cli][control][switch]")
 {
-    for (auto const code: { vtcontrol::ControlErrorCode::NotFound, vtcontrol::ControlErrorCode::Ambiguous })
-    {
-        auto run = Run {};
-        auto channel = ScriptedChannel { std::unexpected(remoteError(code, "nobody")) };
-        CHECK(contour::cli::runControlVerb(
-                  verbNamed("switch"), parseFlags({ "switch", "--to-label", "admin" }), channel, run.io())
-              == 3);
-    }
+    auto run = Run {};
+    auto channel =
+        ScriptedChannel { std::unexpected(remoteError(vtcontrol::ControlErrorCode::NotFound, "nobody")) };
+    CHECK(contour::cli::runControlVerb(
+              verbNamed("switch"), parseFlags({ "switch", "--to-label", "admin" }), channel, run.io())
+          == 3);
 }
 
 TEST_CASE("--daemon and --label exclude each other, and --label names a local daemon",

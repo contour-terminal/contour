@@ -63,12 +63,7 @@ void ClientSupervisor::expireUpgradeHold()
 
 proto::AttachIntent ClientSupervisor::resumeIntent() const
 {
-    // A client that follows every workspace keeps doing so: Resume would narrow it to the workspaces it had,
-    // and a workspace another client creates later would never reach it. The daemon's followedWorkspaces
-    // still names which of its old workspaces came back.
-    if (_firstIntent.kind == proto::AttachIntentKind::AllWorkspaces)
-        return _firstIntent;
-    return proto::AttachIntent { .kind = proto::AttachIntentKind::Resume, .workspaces = _followed };
+    return proto::AttachIntent { .kind = proto::AttachIntentKind::Resume, .workspace = _selected };
 }
 
 void ClientSupervisor::stop()
@@ -171,8 +166,9 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
                             .error = { .kind = TransportErrorKind::Protocol,
                                        .message = _current->lossReason().value_or(
                                            "the connection closed before the daemon answered") } };
+    // What the lost connection selected now is what a reconnect resumes.
     if (_current->connected())
-        _followed = _current->followedWorkspaces();
+        _selected = _current->selectedWorkspace();
 
     // The client first, holding the socket, then what carries it.
     _current.reset();

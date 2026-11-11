@@ -287,10 +287,9 @@ struct WorkspaceInfo
     /// The daemon's native protocol id, which a window follows it by, in decimal: the extension vocabulary
     /// has no 64-bit integers.
     std::string native {};
-    /// `shown` (a window shows it), `left` (no window does, and a launch brings it back) or `hidden` (a
-    /// window switched away from it; a launch leaves it alone).
+    /// `shown` (some window selects it) or `hidden` (none does).
     std::string visibility {};
-    uint32_t clients = 0;         ///< How many windows show it now.
+    uint32_t clients = 0;         ///< How many windows select it now.
     std::vector<TabInfo> tabs {}; ///< Its tabs.
 };
 
@@ -477,12 +476,14 @@ struct CloseTabRequest
     std::string tab {}; ///< The tab to close.
 };
 
-/// `workspace.switch` request: where the window showing a workspace should go.
+/// `workspace.switch` request: where one window should go.
 struct SwitchWorkspaceRequest
 {
     using ApiRecordTag = void;
 
-    std::string workspace {};   ///< The workspace whose window switches; empty for the caller's.
+    /// The workspace whose selecting window switches (the one focused last, when several select it). Absent:
+    /// the caller's pane's workspace, and with no caller pane the window that raises for the daemon.
+    std::optional<std::string> workspace {};
     std::string toLabel {};     ///< A local daemon, by label.
     std::string toHost {};      ///< A saved host or `ssh://` URL.
     std::string toWorkspace {}; ///< A workspace spec the window resolves against the target daemon.

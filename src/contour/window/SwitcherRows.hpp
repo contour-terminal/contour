@@ -28,14 +28,13 @@ namespace contour::window
 /// Where a workspace is shown, as the window the popup is over sees it.
 enum class SwitcherWorkspaceState : uint8_t
 {
-    Left = 0,       ///< No window shows it, and none switched away from it.
-    Hidden,         ///< A window switched away from it, and none shows it since.
+    Hidden = 0,     ///< No window shows it.
     ShownElsewhere, ///< Another window shows it: one here, or another client's.
     ThisWindow,     ///< The window the popup is over shows it.
 };
 
 /// @param state A workspace's state.
-/// @return What its row says of it: `not shown`, `hidden`, `shown elsewhere`, `this window`.
+/// @return What its row says of it: `hidden`, `shown elsewhere`, `this window`.
 [[nodiscard]] std::string_view describe(SwitcherWorkspaceState state) noexcept;
 
 /// One workspace of a daemon, as the popup lists it.
@@ -46,7 +45,7 @@ struct SwitcherWorkspace
     uint32_t position = 0; ///< Its 1-based position among the daemon's workspaces.
     std::string name;      ///< Its label, else its active tab's title, else "workspace N".
     std::size_t tabs = 0;  ///< How many tabs it holds.
-    SwitcherWorkspaceState state = SwitcherWorkspaceState::Left; ///< Where it is shown.
+    SwitcherWorkspaceState state = SwitcherWorkspaceState::Hidden; ///< Where it is shown.
 };
 
 /// Which group a daemon is listed under.

@@ -32,15 +32,6 @@ namespace
         return text;
     }
 
-    /// @return @p workspaces as `[1,3]`.
-    [[nodiscard]] std::string formatWorkspaces(std::vector<uint64_t> const& workspaces)
-    {
-        auto text = std::string {};
-        for (auto const workspace: workspaces)
-            text += std::format("{}{}", text.empty() ? "" : ",", workspace);
-        return std::format("[{}]", text);
-    }
-
     /// @return @p cell as ` cell=9x18` (leading space), or nothing when the sender stated none, so a PDU
     ///         that states none reads as it always did.
     [[nodiscard]] std::string formatCell(std::optional<WireCellPixelSize> const& cell)
@@ -56,10 +47,9 @@ namespace
     };
 
     constexpr auto IntentNames = std::array {
-        IntentName { .kind = AttachIntentKind::AllWorkspaces, .name = "all-workspaces" },
-        IntentName { .kind = AttachIntentKind::Launch, .name = "launch" },
+        IntentName { .kind = AttachIntentKind::Default, .name = "default" },
         IntentName { .kind = AttachIntentKind::NewWorkspace, .name = "new-workspace" },
-        IntentName { .kind = AttachIntentKind::Workspaces, .name = "workspaces" },
+        IntentName { .kind = AttachIntentKind::Select, .name = "select" },
         IntentName { .kind = AttachIntentKind::Resume, .name = "resume" },
     };
 
@@ -71,10 +61,41 @@ namespace
         std::string_view name;
     };
 
-    constexpr auto ReleaseNames = std::array {
-        EnumName { .value = WorkspaceRelease::Closed, .name = "closed" },
-        EnumName { .value = WorkspaceRelease::SwitchedAway, .name = "switched-away" },
+    constexpr auto FocusNames = std::array {
+        EnumName { .value = WindowFocus::Unfocused, .name = "unfocused" },
+        EnumName { .value = WindowFocus::Focused, .name = "focused" },
     };
+
+    constexpr auto RoleNames = std::array {
+        EnumName { .value = RaiseRole::Quiet, .name = "quiet" },
+        EnumName { .value = RaiseRole::Raise, .name = "raise" },
+    };
+
+    constexpr auto ActivityNames = std::array {
+        EnumName { .value = OutputActivity::None, .name = "none" },
+        EnumName { .value = OutputActivity::Output, .name = "output" },
+    };
+
+    /// @return @p finished as ` finished=exit:0,ms:120`, with only the numbers it states -- never the command
+    ///         line, which is payload.
+    [[nodiscard]] std::string formatFinished(std::optional<FinishedCommand> const& finished)
+    {
+        if (!finished)
+            return {};
+        auto text = std::string {};
+        if (finished->exitCode)
+            text += std::format("{}exit:{}", text.empty() ? "" : ",", *finished->exitCode);
+        if (finished->durationMs)
+            text += std::format("{}ms:{}", text.empty() ? "" : ",", *finished->durationMs);
+        return std::format(" finished={}", text.empty() ? "yes" : text);
+    }
+
+    /// @return @p value's presence as ` name=yes` (leading space), or nothing when it is absent (unchanged);
+    ///         the text itself is payload and stays out of a trace.
+    [[nodiscard]] std::string formatPresence(std::string_view name, std::optional<std::string> const& value)
+    {
+        return value ? std::format(" {}=yes", name) : std::string {};
+    }
 
     constexpr auto SwitchDaemonNames = std::array {
         EnumName { .value = SwitchDaemonKind::Same, .name = "same" },
@@ -153,7 +174,7 @@ namespace
                        // session settings get the same treatment for a different reason -- they are
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
-                           "versions={} caps={} token={} settings={} role={} area={} intent={} workspaces={} "
+                           "versions={} caps={} token={} settings={} role={} area={} intent={} workspace={} "
                            "profile=\"{}\"{}{}{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
@@ -164,7 +185,7 @@ namespace
                                ? std::format("{}x{}", value.clientArea->columns, value.clientArea->lines)
                                : std::string { "none" },
                            std::ranges::find(IntentNames, value.attachIntent.kind, &IntentName::kind)->name,
-                           formatWorkspaces(value.attachIntent.workspaces),
+                           value.attachIntent.workspace,
                            value.profileName,
                            // Only a stated one, so a hello that states none reads as it always did.
                            value.colorPreference == WireColorPreference::Unstated
@@ -189,12 +210,12 @@ namespace
                            case HelloLayout::Negotiating: break;
                        }
                        return std::format("layout=negotiating agreed={} versions={} caps={} release={} "
-                                          "followed={} instance={:016x} restored={}/{}",
+                                          "selected={} instance={:016x} restored={}/{}",
                                           value.agreedVersion,
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
                                           value.releaseVersion.empty() ? "unknown" : value.releaseVersion,
-                                          formatWorkspaces(value.followedWorkspaces),
+                                          value.selectedWorkspace,
                                           value.daemonInstance,
                                           value.restoredWorkspaces,
                                           value.restoredTabs);
@@ -352,13 +373,6 @@ namespace
                    "ClosePane",
                    +[](DecodedPdu const& pdu) {
                        return std::format("session={}", std::get<ClosePane>(pdu).session);
-                   } },
-        TraceRow { PduType::NewWorkspace,
-                   "NewWorkspace",
-                   +[](DecodedPdu const& pdu) {
-                       // Empty for the connection's own profile, which keeps a plain NewWorkspace's trace
-                       // bare.
-                       return profileField(std::get<NewWorkspace>(pdu).profileName);
                    } },
         TraceRow { PduType::ResizeSplit,
                    "ResizeSplit",
@@ -535,7 +549,8 @@ namespace
         TraceRow { PduType::LayoutBatchEnd,
                    "LayoutBatchEnd",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("cause={}", std::get<LayoutBatchEnd>(pdu).causeSerial);
+                       auto const& value = std::get<LayoutBatchEnd>(pdu);
+                       return std::format("cause={} selected={}", value.causeSerial, value.selected);
                    } },
         TraceRow { PduType::SetSplitOrientation,
                    "SetSplitOrientation",
@@ -571,18 +586,6 @@ namespace
                                           value.generation,
                                           value.fonts.size());
                    } },
-        TraceRow { PduType::FollowWorkspace,
-                   "FollowWorkspace",
-                   +[](DecodedPdu const& pdu) {
-                       return std::format("workspace={}", std::get<FollowWorkspace>(pdu).workspace);
-                   } },
-        TraceRow { PduType::ReleaseWorkspace,
-                   "ReleaseWorkspace",
-                   +[](DecodedPdu const& pdu) {
-                       auto const& value = std::get<ReleaseWorkspace>(pdu);
-                       return std::format(
-                           "workspace={} reason={}", value.workspace, nameIn(ReleaseNames, value.reason));
-                   } },
         TraceRow { PduType::SwitchRequest,
                    "SwitchRequest",
                    +[](DecodedPdu const& pdu) {
@@ -605,10 +608,36 @@ namespace
                                           nameIn(SwitchOutcomeNames, value.outcome),
                                           core::escape(value.detail));
                    } },
-        TraceRow { PduType::WorkspaceShown,
-                   "WorkspaceShown",
+        TraceRow { PduType::SelectWorkspace,
+                   "SelectWorkspace",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("workspace={}", std::get<WorkspaceShown>(pdu).workspace);
+                       return std::format("workspace={}", std::get<SelectWorkspace>(pdu).workspace);
+                   } },
+        TraceRow { PduType::ReportFocus,
+                   "ReportFocus",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("focus={}", nameIn(FocusNames, std::get<ReportFocus>(pdu).focus));
+                   } },
+        TraceRow { PduType::NotifyRole,
+                   "NotifyRole",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("role={}", nameIn(RoleNames, std::get<NotifyRole>(pdu).role));
+                   } },
+        TraceRow { PduType::PaneSummary,
+                   "PaneSummary",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<PaneSummary>(pdu);
+                       // What the pane raised is told by count only: a notification's words are payload.
+                       return std::format("session={} activity={}{}{}{}{}{}",
+                                          value.session,
+                                          nameIn(ActivityNames, value.activity),
+                                          formatPresence("title", value.title),
+                                          formatPresence("cwd", value.cwd),
+                                          formatFinished(value.finished),
+                                          value.bell == PaneBell::Rang ? " bell=rang" : "",
+                                          value.notifications.empty()
+                                              ? std::string {}
+                                              : std::format(" notifications={}", value.notifications.size()));
                    } },
     };
 

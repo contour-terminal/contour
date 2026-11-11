@@ -297,7 +297,7 @@ TEST_CASE("focus: closing the focused window drops focus ownership and leaves no
     REQUIRE(manager.focusedWindow() == window.id);
 
     closeAllTabs(*window);
-    manager.removeWindowController(window.id);
+    manager.removeWindowController(window.windowId);
 
     CHECK_FALSE(manager.focusedWindow().has_value());
 }
@@ -353,18 +353,18 @@ TEST_CASE("focus: an application command never lands in the quick terminal",
     ScopedController const quick { app.manager() };
     std::ignore = contour::test::createSessionTabs(app.manager(), *quick, 1);
     REQUIRE(quick->role() == WindowRole::QuickTerminal);
-    REQUIRE(app.manager().focusedWindow() == quick->windowId());
+    REQUIRE(app.manager().focusedWindow() == quick->displayedWorkspace());
 
     // Focused, hidden after, or the last to hold the focus: the ordinary window is where it goes.
     CHECK(app.manager().applicationController() == normal.controller);
-    app.manager().clearFocusedWindow(quick->windowId());
+    app.manager().clearFocusedWindow(quick->displayedWorkspace());
     CHECK(app.manager().applicationController() == normal.controller);
 
     // It does not displace the window that held the focus before it.
-    app.manager().setFocusedWindow(normal->windowId());
-    app.manager().clearFocusedWindow(normal->windowId());
-    app.manager().setFocusedWindow(quick->windowId());
-    app.manager().clearFocusedWindow(quick->windowId());
+    app.manager().setFocusedWindow(normal->displayedWorkspace());
+    app.manager().clearFocusedWindow(normal->displayedWorkspace());
+    app.manager().setFocusedWindow(quick->displayedWorkspace());
+    app.manager().clearFocusedWindow(quick->displayedWorkspace());
     CHECK(app.manager().applicationController() == normal.controller);
 
     // With no ordinary window left there is none to run it in, rather than the hidden one.

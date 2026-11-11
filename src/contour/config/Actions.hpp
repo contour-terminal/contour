@@ -171,6 +171,7 @@ struct MovePaneUp{};        // re-parent the active pane past its upper neighbor
 struct MovePaneDown{};      // re-parent the active pane past its lower neighbor
 struct ToggleSplitOrientation{}; // flip the active pane's split axis (H<->V)
 struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding its siblings), and back
+struct NewWorkspace{};      // create a workspace (in-process, or on the window's daemon) and show it in this window
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
 struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
 struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
@@ -320,6 +321,7 @@ using ActionVariant = std::variant<CancelSelection,
                                    MovePaneDown,
                                    ToggleSplitOrientation,
                                    TogglePaneZoom,
+                                   NewWorkspace,
                                    ResizePane,
                                    LaunchLayout,
                                    SaveLayout,
@@ -507,6 +509,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MovePaneDown,
                                                     ToggleSplitOrientation,
                                                     TogglePaneZoom,
+                                                    NewWorkspace,
                                                     LaunchLayout,
                                                     SaveLayout,
                                                     AttachToHost,
@@ -872,6 +875,10 @@ namespace documentation
     constexpr inline std::string_view TogglePaneZoom {
         "Zooms the active pane so it alone fills the tab, hiding its siblings; toggles back to the "
         "tiled layout. While zoomed, moving pane focus keeps the zoom and shows the newly focused pane."
+    };
+    constexpr inline std::string_view NewWorkspace {
+        "Creates a workspace and shows it in this window; the one shown before keeps running, hidden. On a "
+        "window attached to a daemon the daemon creates it; a window attached to a tmux server refuses."
     };
     constexpr inline std::string_view ResizePane {
         "Grows or shrinks the active pane in the given direction (by an optional percent)."
