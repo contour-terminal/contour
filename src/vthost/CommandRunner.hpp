@@ -5,6 +5,7 @@
 /// Running an external command and reading what it printed: the seam `systemctl` and `launchctl`
 /// are reached through, so the service backends are tested without touching the host's init system.
 
+#include <chrono>
 #include <expected>
 #include <memory>
 #include <span>
@@ -40,6 +41,19 @@ class CommandRunner
     ///         `std::errc::no_such_file_or_directory` for a program that is not installed.
     [[nodiscard]] virtual std::expected<CommandOutcome, std::error_code> run(
         std::span<std::string const> argv) = 0;
+
+    /// Runs @p argv and waits for it, but not longer than @p deadline: a command still running then is killed
+    /// and reaped, and the run fails with `std::errc::timed_out`. A runner that cannot bound a command runs
+    /// it to completion, as run() does.
+    /// @param argv The program (looked up on PATH) followed by its arguments.
+    /// @param deadline How long the command may take.
+    /// @return As run(), or `std::errc::timed_out` for a command that outlived @p deadline.
+    [[nodiscard]] virtual std::expected<CommandOutcome, std::error_code> runWithin(
+        std::span<std::string const> argv, std::chrono::milliseconds deadline)
+    {
+        (void) deadline;
+        return run(argv);
+    }
 };
 
 /// @return A runner that starts real processes: `posix_spawnp` with standard output captured through a

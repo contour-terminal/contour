@@ -196,32 +196,40 @@ std::optional<std::filesystem::path> findGitHeadFile(GitFileSystem const& fileSy
     }
 }
 
-std::string describeGitHead(GitFileSystem const& fileSystem, std::filesystem::path const& directory)
+std::optional<GitHead> readGitHead(GitFileSystem const& fileSystem, std::filesystem::path const& directory)
 {
     auto const head = findGitHeadFile(fileSystem, directory);
     if (!head)
-        return {};
+        return std::nullopt;
     // A reftable repository keeps its refs, HEAD's target included, in <gitdir>/reftable/; its HEAD file is a
     // stub that never changes. Decoding reftable is left for later: such a repository shows no branch.
     if (fileSystem.status(head->parent_path() / "reftable").kind == GitPathKind::Directory)
-        return {};
+        return std::nullopt;
     auto const contents = fileSystem.readMetadata(*head);
     if (!contents)
-        return {};
-    auto const parsed = parseGitHead(*contents);
+        return std::nullopt;
+    auto parsed = parseGitHead(*contents);
     if (!parsed)
-        return {};
+        return std::nullopt;
     // A ref name may hold any byte git allows in a path, an escape included, and this text is written to
     // the status screen, which parses it.
-    auto name = sanitizeCommandLine(parsed->name, SanitizePurpose::Display);
-    switch (parsed->kind)
+    parsed->name = sanitizeCommandLine(parsed->name, SanitizePurpose::Display);
+    return parsed;
+}
+
+std::string describeGitHead(GitFileSystem const& fileSystem, std::filesystem::path const& directory)
+{
+    auto const head = readGitHead(fileSystem, directory);
+    if (!head)
+        return {};
+    switch (head->kind)
     {
         case GitHeadKind::Branch:
-        case GitHeadKind::OtherRef: return name;
+        case GitHeadKind::OtherRef: return head->name;
         // In parentheses, as git's own prompt shows one, so a commit does not read as a branch of that name.
-        case GitHeadKind::Detached: return std::format("({})", name);
+        case GitHeadKind::Detached: return std::format("({})", head->name);
     }
-    return name;
+    return head->name;
 }
 
 namespace

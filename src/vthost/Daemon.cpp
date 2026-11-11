@@ -13,6 +13,7 @@
 #include <vthost/Daemon.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
@@ -26,6 +27,7 @@
 #include <core/Utils.hpp>
 #include <core/WideString.hpp>
 #include <core/async/Cancellation.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -1182,25 +1184,36 @@ int runDaemon(DaemonConfig const& config, std::optional<handover::HandoverImage>
     // The same run of the daemon goes on across a live upgrade, one upgrade further.
     auto const lineage = lineageOf(config, image);
 
+    // The workspaces' git state: looked up by a `git` this daemon starts on a thread of its own, so a slow
+    // repository stalls the sidebar's branch and nothing else. Declared before the host, so the host goes
+    // first and the executor is joined next, while the probe it runs is still there. Started here, on the
+    // thread building the host, whose signal mask the thread inherits (as HostGitLookups does).
+    auto const gitFileSystem =
+        vtbackend::NativeGitFileSystem { core::platform::NativeFileSystem::instance() };
+    auto const gitCommands = makeNativeCommandRunner(gitProbeEnvironment(core::defaultEnvironment()));
+    auto const gitProbe = makeGitStatusProbe(gitFileSystem, *gitCommands);
+    auto gitExecutor = core::async::ThreadPoolExecutor { 1 };
+
     auto host = SessionHost {
         loop,
         makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
         config.settings,
         core::defaultEnvironment(),
-        SessionHostConfig { .pumping = SessionPumping::Threaded,
-                            .sizePolicy = config.sizePolicy,
-                            .defaultCellPixelSize = config.defaultCellPixelSize,
-                            .startupLayout = config.startupLayout,
-                            .identity = thisHostIdentity(),
-                            .extensions = config.extensions ? config.extensions() : nullptr,
-                            .profiles = config.profiles,
-                            .profilePtys =
-                                config.profiles
-                                    ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
-                                    : ProfilePtyFactory {},
-                            .instance = lineage.instance,
-                            .restore = std::move(restore),
-                            .handover = std::exchange(image, std::nullopt) }
+        SessionHostConfig {
+            .pumping = SessionPumping::Threaded,
+            .sizePolicy = config.sizePolicy,
+            .defaultCellPixelSize = config.defaultCellPixelSize,
+            .startupLayout = config.startupLayout,
+            .identity = thisHostIdentity(),
+            .workspaceGit = WorkspaceGitServices { .probe = *gitProbe, .executor = gitExecutor },
+            .extensions = config.extensions ? config.extensions() : nullptr,
+            .profiles = config.profiles,
+            .profilePtys = config.profiles
+                               ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
+                               : ProfilePtyFactory {},
+            .instance = lineage.instance,
+            .restore = std::move(restore),
+            .handover = std::exchange(image, std::nullopt) }
     };
     if (auto const outcome = host.handoverOutcome(); !outcome)
         errorLog()("the handover was taken over in part (error {})", std::to_underlying(outcome.error()));

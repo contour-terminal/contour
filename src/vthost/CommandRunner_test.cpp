@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <charconv>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <filesystem>
@@ -120,6 +121,35 @@ TEST_CASE("a command starts with no signal blocked or ignored", "[vthost][servic
     CHECK((maskOf(status->standardOutput, "SigIgn:\t") & ~valgrinds) == 0);
 }
     #endif
+
+TEST_CASE("a command that outlives its deadline is killed and reported as timed out",
+          "[vthost][service][command]")
+{
+    auto const runner = vthost::makeNativeCommandRunner();
+    auto const started = std::chrono::steady_clock::now();
+    auto const result =
+        runner->runWithin(std::vector<std::string> { "sleep", "10" }, std::chrono::milliseconds { 200 });
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == std::errc::timed_out);
+    CHECK(took < std::chrono::seconds { 5 });
+
+    // One that finishes in time is answered as run() would.
+    auto const quick =
+        runner->runWithin(std::vector<std::string> { "sh", "-c", "printf ok" }, std::chrono::seconds { 10 });
+    REQUIRE(quick.has_value());
+    CHECK(quick->standardOutput == "ok");
+}
+
+TEST_CASE("a command that closes its output and then hangs is killed at the deadline",
+          "[vthost][service][command]")
+{
+    auto const runner = vthost::makeNativeCommandRunner();
+    auto const result = runner->runWithin(std::vector<std::string> { "sh", "-c", "exec >&-; sleep 10" },
+                                          std::chrono::milliseconds { 200 });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == std::errc::timed_out);
+}
 
 TEST_CASE("the native runner refuses an empty command", "[vthost][service][command]")
 {

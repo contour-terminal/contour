@@ -83,6 +83,8 @@ add_library(vthost STATIC
     PduPump.hpp
     SessionHost.cpp
     SessionHost.hpp
+    WorkspaceGit.cpp
+    WorkspaceGit.hpp
     CommandRunner.hpp
     CommandRunner_posix.cpp
     CommandRunner_win32.cpp
@@ -324,6 +326,7 @@ if(VTHOST_TESTING)
         ConnectionAcceptor_test.cpp
         CommandBlockWire_test.cpp
         CommandRunner_test.cpp
+        WorkspaceGit_test.cpp
         DaemonControl_test.cpp
         DaemonRuntime_test.cpp
         ConnectionRegistry_test.cpp
