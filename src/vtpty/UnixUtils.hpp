@@ -282,7 +282,12 @@ struct UnixPipe
 {
     std::array<int, 2> pfd;
 
-    explicit UnixPipe(unsigned flags = 0);
+    /// @return A pipe that holds no descriptor yet, for one opened later (open()).
+    [[nodiscard]] static UnixPipe none() noexcept { return UnixPipe { NoPipe {} }; }
+
+    /// @param flags O_CLOEXEC and the like.
+    /// @return A new pipe; or why none could be made (the process is out of descriptors).
+    [[nodiscard]] static std::expected<UnixPipe, std::error_code> open(unsigned flags = 0);
     UnixPipe(UnixPipe&&) noexcept;
     UnixPipe& operator=(UnixPipe&&) noexcept;
     UnixPipe(UnixPipe const&) = delete;
@@ -298,6 +303,12 @@ struct UnixPipe
     void closeWriter() noexcept;
 
     void close();
+
+  private:
+    struct NoPipe
+    {
+    };
+    explicit UnixPipe(NoPipe /*none*/) noexcept: pfd { -1, -1 } {}
 };
 
 // {{{ UnixPipe

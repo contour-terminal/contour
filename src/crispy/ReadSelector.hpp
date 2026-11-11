@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <core/Assert.hpp>
 #include <core/log/LogStore.hpp>
 
 #include <algorithm>
@@ -11,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -40,24 +40,28 @@ namespace crispy
 class PosixReadSelector
 {
   public:
-    PosixReadSelector()
+    /// @return A selector; or why its descriptors could not be made (the process is out of them), never a
+    ///         throw.
+    [[nodiscard]] static std::expected<std::unique_ptr<PosixReadSelector>, std::error_code> create()
     {
         // Close-on-exec: a daemon's live upgrade execs itself, and a break pipe that crossed would leak into
         // the new image, two descriptors per session per upgrade.
-        auto pfd = std::array<int, 2> {};
+        auto pfd = std::array<int, 2> { -1, -1 };
 #ifdef __APPLE__
         // No pipe2() on macOS: the flags follow the pipe, which leaves a window for a concurrent fork.
-        Require(::pipe(pfd.data()) == 0);
+        if (::pipe(pfd.data()) != 0)
+            return std::unexpected { std::error_code { errno, std::generic_category() } };
         for (int const fd: pfd)
         {
             ::fcntl(fd, F_SETFD, ::fcntl(fd, F_GETFD) | FD_CLOEXEC);
             ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
         }
 #else
-        Require(::pipe2(pfd.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+        if (::pipe2(pfd.data(), O_CLOEXEC | O_NONBLOCK) != 0)
+            return std::unexpected { std::error_code { errno, std::generic_category() } };
 #endif
-        _breakPipeReader = FileDescriptor::fromNative(pfd[0]);
-        _breakPipeWriter = FileDescriptor::fromNative(pfd[1]);
+        return std::unique_ptr<PosixReadSelector> { new PosixReadSelector {
+            FileDescriptor::fromNative(pfd[0]), FileDescriptor::fromNative(pfd[1]) } };
     }
 
     void wantRead(int fd) noexcept
@@ -186,6 +190,11 @@ class PosixReadSelector
                                   //!< kernel, the posix backend must synchronize the vector itself.
     std::vector<int> _fds;
     std::deque<int> _pending;
+    PosixReadSelector(FileDescriptor reader, FileDescriptor writer) noexcept:
+        _breakPipeReader { std::move(reader) }, _breakPipeWriter { std::move(writer) }
+    {
+    }
+
     FileDescriptor _breakPipeReader;
     FileDescriptor _breakPipeWriter;
 };
@@ -198,7 +207,10 @@ class PosixReadSelector
 class EpollReadSelector
 {
   public:
-    EpollReadSelector();
+    /// @return A selector; or why its descriptors could not be made (the process is out of them), never a
+    ///         throw.
+    [[nodiscard]] static std::expected<std::unique_ptr<EpollReadSelector>, std::error_code> create();
+
     ~EpollReadSelector() = default;
 
     void wantRead(int fd) noexcept;
@@ -211,6 +223,7 @@ class EpollReadSelector
 
   private:
     std::optional<int> tryPopPending() noexcept;
+    EpollReadSelector(FileDescriptor epollFd, FileDescriptor eventFd) noexcept;
 
   private:
     FileDescriptor _epollFd;
@@ -220,15 +233,29 @@ class EpollReadSelector
     std::deque<int> _pending;
 };
 
-inline EpollReadSelector::EpollReadSelector()
+inline EpollReadSelector::EpollReadSelector(FileDescriptor epollFd, FileDescriptor eventFd) noexcept:
+    _epollFd { std::move(epollFd) }, _eventFd { std::move(eventFd) }
 {
-    _epollFd = FileDescriptor::fromNative(epoll_create1(EPOLL_CLOEXEC));
-    _eventFd = FileDescriptor::fromNative(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
-
     auto event = epoll_event {};
     event.events = EPOLLIN;
     event.data.fd = _eventFd;
     epoll_ctl(_epollFd, EPOLL_CTL_ADD, _eventFd, &event);
+}
+
+inline std::expected<std::unique_ptr<EpollReadSelector>, std::error_code> EpollReadSelector::create()
+{
+    auto const failure = [] {
+        return std::unexpected { std::error_code { errno, std::generic_category() } };
+    };
+    auto const epollFd = epoll_create1(EPOLL_CLOEXEC);
+    if (epollFd < 0)
+        return failure();
+    auto epoll = FileDescriptor::fromNative(epollFd);
+    auto const eventFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (eventFd < 0)
+        return failure();
+    return std::unique_ptr<EpollReadSelector> { new EpollReadSelector {
+        std::move(epoll), FileDescriptor::fromNative(eventFd) } };
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)

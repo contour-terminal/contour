@@ -12,7 +12,6 @@
 #include <fstream>
 #include <limits>
 #include <ranges>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -36,28 +35,23 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-using namespace std::string_literals;
-
 namespace vtpty
 {
 
-UnixPipe::UnixPipe(unsigned flags): pfd { -1, -1 }
+std::expected<UnixPipe, std::error_code> UnixPipe::open(unsigned flags)
 {
+    auto pipe = UnixPipe::none();
 #ifdef __linux__
-    if (pipe2(pfd.data(), static_cast<int>(flags)) < 0)
-        throw std::runtime_error { "Failed to create PTY pipe. "s + std::generic_category().message(errno) };
+    if (pipe2(pipe.pfd.data(), static_cast<int>(flags)) < 0)
+        return std::unexpected { std::error_code { errno, std::generic_category() } };
 #else
-    if (pipe(pfd.data()) < 0)
-        throw std::runtime_error { "Failed to create PTY pipe. "s + std::generic_category().message(errno) };
-    for (auto const fd: pfd)
-    {
+    if (::pipe(pipe.pfd.data()) < 0)
+        return std::unexpected { std::error_code { errno, std::generic_category() } };
+    for (auto const fd: pipe.pfd)
         if (auto const applied = util::applyCreationFlags(fd, flags); !applied)
-        {
-            close();
-            throw std::runtime_error { "Failed to configure PTY pipe. "s + applied.error().message() };
-        }
-    }
+            return std::unexpected { applied.error() };
 #endif
+    return pipe;
 }
 
 } // namespace vtpty

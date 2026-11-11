@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 
 #include <algorithm>
 #include <array>
@@ -502,4 +503,85 @@ TEST_CASE("UnixPty.start.ofAnAdoptedPtyKeepsItsDescriptors", "[vtpty][unixpty][h
     REQUIRE(process.has_value());
     (*process)->terminate(vtpty::Process::TerminationHint::Kill);
     CHECK((*process)->wait().has_value());
+}
+
+namespace
+{
+/// Holds the soft descriptor limit at the lowest free descriptor while it lives, so that nothing more opens.
+class DescriptorsExhausted
+{
+  public:
+    DescriptorsExhausted()
+    {
+        ::getrlimit(RLIMIT_NOFILE, &_original);
+        auto const lowestFree = ::dup(STDIN_FILENO);
+        ::close(lowestFree);
+        auto exhausted = _original;
+        exhausted.rlim_cur = static_cast<rlim_t>(lowestFree);
+        ::setrlimit(RLIMIT_NOFILE, &exhausted);
+    }
+    DescriptorsExhausted(DescriptorsExhausted const&) = delete;
+    DescriptorsExhausted& operator=(DescriptorsExhausted const&) = delete;
+    DescriptorsExhausted(DescriptorsExhausted&&) = delete;
+    DescriptorsExhausted& operator=(DescriptorsExhausted&&) = delete;
+    /// Restored before any assertion after it can unwind: every later test needs its descriptors.
+    ~DescriptorsExhausted() { ::setrlimit(RLIMIT_NOFILE, &_original); }
+
+  private:
+    rlimit _original {};
+};
+} // namespace
+
+TEST_CASE("a PTY that cannot be opened fails its start, not the process", "[vtpty][unixpty]")
+{
+    auto const pageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+    auto started = vtpty::StartResult {};
+    auto pty = std::optional<vtpty::UnixPty> {};
+    {
+        auto const exhausted = DescriptorsExhausted {};
+        // Constructed out of descriptors too: it holds none until it starts.
+        pty.emplace(pageSize, std::nullopt);
+        started = pty->start();
+    }
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error().error == vtpty::StartError::PtyAllocationFailed);
+    // And it starts once descriptors are to be had again.
+    CHECK(pty->start().has_value());
+}
+
+TEST_CASE("a PTY adopted out of descriptors is refused as such, not as a bad descriptor", "[vtpty][unixpty]")
+{
+    auto source =
+        vtpty::UnixPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }, std::nullopt };
+    REQUIRE(source.start().has_value());
+    auto const inherited = source.handover();
+    REQUIRE(inherited.has_value());
+    auto adopted = std::expected<std::unique_ptr<vtpty::UnixPty>, vtpty::AdoptError> {};
+    {
+        auto const exhausted = DescriptorsExhausted {};
+        adopted = vtpty::UnixPty::adopt(*inherited);
+    }
+    REQUIRE_FALSE(adopted.has_value());
+    CHECK(adopted.error() == vtpty::AdoptError::OutOfDescriptors);
+}
+
+TEST_CASE("waiting for a PTY to close outlasts running out of descriptors", "[vtpty][unixpty][threading]")
+{
+    auto pty =
+        vtpty::UnixPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }, std::nullopt };
+    REQUIRE(pty.start().has_value());
+    auto waited = std::future<void> {};
+    auto whileOpen = std::future_status::ready;
+    auto afterClose = std::future_status::timeout;
+    {
+        auto const exhausted = DescriptorsExhausted {};
+        waited = std::async(std::launch::async, [&] { pty.waitForClosed(); });
+        // Returning would mean "closed" to its caller: out of descriptors, it must keep waiting.
+        whileOpen = waited.wait_for(std::chrono::milliseconds(300));
+        // And a close while it has no selector still ends the wait.
+        pty.close();
+        afterClose = waited.wait_for(std::chrono::seconds(5));
+    }
+    CHECK(whileOpen == std::future_status::timeout);
+    CHECK(afterClose == std::future_status::ready);
 }

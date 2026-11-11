@@ -132,6 +132,11 @@ class UnixPty final: public Pty
     /// @return What ended the wait.
     [[nodiscard]] WriteWait awaitWritable();
 
+    /// Opens the pipes close() and interruptWrites() wake a waiting write through. In start() or adopt(),
+    /// not in the constructor: a process out of descriptors fails one PTY, and never throws.
+    /// @return Nothing; or why they could not be opened.
+    [[nodiscard]] std::expected<void, std::error_code> openSignalPipes();
+
     /// Whether the master descriptor is open, published by start() and close() for isClosed().
     enum class MasterState : uint8_t
     {
@@ -142,11 +147,12 @@ class UnixPty final: public Pty
     FileDescriptor _masterFd;
     UnixPipe _stdoutFastPipe;
     /// Written once by close(), and never read: it wakes a write waiting for the application to read.
-    UnixPipe _closeSignal { O_CLOEXEC | O_NONBLOCK };
+    UnixPipe _closeSignal = UnixPipe::none();
     /// Readable from interruptWrites() until allowWrites() drains it: it wakes a write waiting for the
     /// application to read, and stops every later one from waiting.
-    UnixPipe _interruptSignal { O_CLOEXEC | O_NONBLOCK };
-    crispy::ReadSelector _readSelector;
+    UnixPipe _interruptSignal = UnixPipe::none();
+    /// Made by start() or adopt(), as it holds descriptors of its own: none before.
+    std::unique_ptr<crispy::ReadSelector> _readSelector;
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;

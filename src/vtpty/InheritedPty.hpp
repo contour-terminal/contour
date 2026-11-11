@@ -102,6 +102,9 @@ enum class AdoptError : std::uint8_t
     /// and only it can be rebuilt from its handles (ConPty::adopt()).
     ForeignConsoleHost,
     Unsupported, ///< A device that cannot be handed over at all (a channel, SSH, a test double).
+    /// This process is out of descriptors (or the system of the objects behind them): what a PTY needs beside
+    /// the inherited ones could not be made. Passes once descriptors are to be had again.
+    OutOfDescriptors,
 };
 
 } // namespace vtpty
