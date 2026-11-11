@@ -213,6 +213,27 @@ A connection holds at most 64 subscriptions and 256 pending waits; one more is r
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
 
+## Reporting a pane's status
+
+An integration, such as a coding agent's hook, tells the daemon what a pane's program is doing with two
+methods. Both need the `input` grant, and both are reachable with `contour api call`:
+
+| Method | What it does |
+| --- | --- |
+| `pane.reportStatus` | Sets the integration's own record of a pane: `{"pane": "...", "integration": "claude-code", "state": "blocked", "kind": "permission", "title": "...", "message": "...", "progress": 40}`. `integration` is `[a-z0-9-]{1,32}` and becomes the record's id; `state` is `idle`, `working`, `done`, `blocked` or `error`; `kind` (`none`, `permission`, `question`, `auth`) is for `blocked` only. An empty `pane` is the caller's own. |
+| `pane.clearStatus` | Removes the record that integration set: `{"pane": "...", "integration": "claude-code"}`. Records a program sent by OSC 7501 are not touched. |
+
+The title and message are untrusted text: control and invisible formatting characters are removed, and each is cut
+to 200 bytes. Records the integration sets list as `origin: "integration"`, apart from a program's
+`origin: "program"`, with `since` (when the state or kind last changed) and a `generation` that rises whenever the state or kind
+changes (not when only the title, message or progress does).
+When someone types or pastes into the pane in a Contour window, the integration's `blocked` records become
+`working`: the person has answered. Input sent with `pane.send` does not do that, nor do the focus and mouse reports
+a window sends by itself, nor does input from a client too old to say which of its input was typed.
+
+These methods need a daemon. In-process mode (no `contour daemon`) has no control socket, so a hook finds none
+and does nothing.
+
 ## Upgrading the daemon
 
 `daemon.upgrade` replaces the running daemon with a newer release, keeping every program running
@@ -259,18 +280,59 @@ how targets resolve, every verb with its usage, the exit statuses, the run-the-t
 API. The skill is generated from the verb table and the API catalog, so it always matches the binary.
 
 ```sh
-contour agent setup            # Claude Code and ~/.agents
-contour agent setup --agent claude --dry-run
+contour agent setup            # every agent found, and ~/.agents
+contour agent setup --agent claude-code --dry-run
 ```
 
 | Agent | Skill file |
 | --- | --- |
-| `claude` (Claude Code) | `~/.claude/skills/contour/SKILL.md`, or beneath `$CLAUDE_CONFIG_DIR` when that is set |
+| `claude-code` (Claude Code) | `~/.claude/skills/contour/SKILL.md`, or beneath `$CLAUDE_CONFIG_DIR` when that is set |
 | `agents` (Codex, OpenCode and other agents reading `~/.agents`) | `~/.agents/skills/contour/SKILL.md` |
+
+Without `--agent`, an agent is set up only when its configuration directory exists (`~/.claude` or
+`$CLAUDE_CONFIG_DIR`; `~/.codex` or `$CODEX_HOME`), so nothing is created for an agent you do not use; the
+report says which were skipped. Naming an agent with `--agent` sets it up whether or not it is found. The names
+are the ones `contour agent report --agent` takes.
 
 Rerun it after upgrading Contour: a file it generated is updated, one that is already current is left alone,
 and a file it did not generate is kept unless you pass `--force`. `--dry-run` reports what would happen, and
 `--json` prints the outcomes as an array.
+
+### Status hooks
+
+`contour agent setup` also installs the hooks that let a coding agent tell Contour what it is doing, so that
+the pane shows a working, blocked (waiting for you) or done status. The hooks run
+`contour agent report --agent <claude-code|codex>`, which turns the agent's hook payload into
+`pane.reportStatus` or `pane.clearStatus` on the daemon hosting the pane. It prints nothing, always exits 0,
+gives up after two seconds (reading the payload included), ignores a payload larger than 1 MiB, and does nothing
+outside a pane of a Contour daemon (no `$CONTOUR_DAEMON` or `$CONTOUR_PANE`; a window running its sessions in
+process does not pass those on to its own shells). The `contour` binary is written into the hooks by its absolute path (under an AppImage, the
+AppImage's), so rerun `contour agent setup` after moving it.
+
+| Agent | Hook file | What is installed |
+| --- | --- | --- |
+| `claude-code` (Claude Code) | `~/.claude/settings.json`, or beneath `$CLAUDE_CONFIG_DIR` | one hook group for each of `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Notification`, `Elicitation`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure` and `SessionEnd` |
+| `codex` (Codex) | `~/.codex/hooks.json`, or beneath `$CODEX_HOME` (which must already exist) | one hook group for each of `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, `Interrupt` and `SessionEnd` |
+
+Your own hooks and settings are kept, and a file is replaced in one step (a symlinked one through its link, which
+stays). A hook of ours is one whose command is exactly the binary followed by
+`agent report --agent <claude-code|codex>`; a command of yours that merely mentions it is left alone. A hook file that is not valid JSON is left alone and reported, and so is a `$CODEX_HOME` that
+names a directory that does not exist (it is not created).
+
+Codex runs only hooks you have reviewed: after `contour agent setup`, open Codex once and trust the new hooks
+(its hooks review), or they never run and the pane shows no status.
+
+`contour agent setup --uninstall` removes exactly these hooks (and leaves the skill file as it is), and the groups
+and event arrays that held only them; `--dry-run` reports what would change.
+
+Limits:
+
+- Both agents show working (prompt, tool use), needs-you (a permission request; for Claude also a question)
+  and done. Claude also shows an error (`StopFailure`); Codex shows idle after an interrupt. Claude's
+  "idle, waiting for your input" notification is ignored.
+- The event names and payload fields were checked against the agents' hook documentation on 2026-11-11; a
+  renamed event shows up as a pane that never changes status.
+- The hooks need the daemon. In in-process mode there is no control socket, and the hooks do nothing.
 
 ## MCP
 
