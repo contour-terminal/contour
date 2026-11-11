@@ -52,13 +52,14 @@ namespace
 {
     for (auto* const action: menu.actions())
     {
+        // A submenu's own row is found by its title too, before what it holds.
+        if (action->text() == title)
+            return action;
         if (action->menu() != nullptr)
         {
             if (auto* const nested = findAction(*action->menu(), title); nested != nullptr)
                 return nested;
         }
-        else if (action->text() == title)
-            return action;
     }
     return nullptr;
 }
