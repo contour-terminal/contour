@@ -1004,8 +1004,9 @@ TEST_CASE("DaemonLink: closing its last window ends the link and stops its contr
     }));
 }
 
-// What the application's teardown relies on: a link whose last window just went has only posted its
-// controller's stop, and the teardown stops every link before that event may run.
+// What the application's teardown relies on: a link whose last window just went has only begun its
+// controller's stop, on a thread of its own, and the teardown stops every link before that stop may end.
+// Whether the background stop has ended by then is a race, which is why only the outcome is asserted.
 TEST_CASE("DaemonLink: stop() stops the controller of a link that just ended", "[attach][link]")
 {
     auto daemon = DaemonFixture {};
@@ -1019,11 +1020,11 @@ TEST_CASE("DaemonLink: stop() stops the controller of a link that just ended", "
     auto const* const controller = link.liveController();
     REQUIRE(controller != nullptr);
     boot.controller->closeWindow();
-    REQUIRE(controller->connectionState() == vthost::client::ConnectionState::Connected);
 
     link.stop();
 
-    CHECK(controller->connectionState() != vthost::client::ConnectionState::Connected);
+    CHECK_FALSE(controller->isWindingDown());
+    CHECK(controller->connectionState() == vthost::client::ConnectionState::Stopped);
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 }
 

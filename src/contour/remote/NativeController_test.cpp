@@ -1804,6 +1804,29 @@ void requireDelivered(DaemonFixture& daemon, AttachedGui& gui, std::string const
     REQUIRE(waitUntil([&] { return daemon.ptyInput(vtworkspace::SessionId { *remote }).contains(marker); }));
 }
 
+/// Waits until the daemon's terminals of @p left and @p right hold @p leftSize and @p rightSize. When they do
+/// not, the failure names what the daemon holds and has been sent instead, so that a flake carries the state
+/// that explains it.
+void requirePaneSizes(
+    DaemonFixture& daemon, uint64_t left, vtpty::PageSize leftSize, uint64_t right, vtpty::PageSize rightSize)
+{
+    auto const settled =
+        waitUntil([&] { return daemon.paneSize(left) == leftSize && daemon.paneSize(right) == rightSize; });
+    if (!settled)
+        FAIL(std::format(
+            "panes {} / {} hold {} / {}, wanted {} / {}; client area {}; ResizeRequest frames {}, "
+            "ResizePane frames {}",
+            left,
+            right,
+            daemon.paneSize(left),
+            daemon.paneSize(right),
+            leftSize,
+            rightSize,
+            daemon.clientArea(),
+            daemon.clientFrames.count(vthost::proto::PduType::ResizeRequest),
+            daemon.clientFrames.count(vthost::proto::PduType::ResizePane)));
+}
+
 /// Has the daemon retitle its active tab to @p title, waits until @p gui holds that push, and reconciles it:
 /// whatever the daemon pushed before has then been reconciled too.
 void requirePushed(DaemonFixture& daemon, AttachedGui& gui, std::string const& title)
@@ -1911,8 +1934,7 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
 
     // The client that stays: a 100-column window whose divider the user dragged to 70 | 29.
     auto const [left, right] = showPanes(stays, cells(70, 30), cells(29, 30));
-    REQUIRE(waitUntil(
-        [&] { return daemon.paneSize(left) == cells(70, 30) && daemon.paneSize(right) == cells(29, 30); }));
+    requirePaneSizes(daemon, left, cells(70, 30), right, cells(29, 30));
 
     // The client that departs: an 80-column window, the smaller, so the daemon's area is its.
     std::ignore = showPanes(*departs, cells(40, 30), cells(39, 30));
