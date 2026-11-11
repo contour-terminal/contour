@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/remote/SwitchPlan.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <expected>
 #include <format>
@@ -19,6 +22,16 @@ namespace contour::remote
 
 namespace
 {
+    /// @return A reference to the daemon's workspace @p id that only this process uses, to tell the rows of
+    ///         a directory apart: a directory carries no control ids (@see namesControlId()).
+    [[nodiscard]] vtcontrol::ObjectRef localRefOf(uint64_t id)
+    {
+        auto ref = vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace, .uuid = {} };
+        for (auto const index: std::views::iota(0, 8))
+            ref.uuid.bytes.at(static_cast<std::size_t>(15 - index)) = static_cast<uint8_t>(id >> (8 * index));
+        return ref;
+    }
+
     /// @return The row @p spec names among @p rows, or why none.
     [[nodiscard]] std::expected<WorkspaceRow const*, std::string> resolveSpec(
         std::string_view spec, std::span<WorkspaceRow const> rows)
@@ -51,15 +64,13 @@ SwitchDecision planSwitch(session::SwitchTarget const& target,
         [&](auto const& workspace) -> std::variant<WorkspaceRow const*, SwitchDecision> {
             using T = std::decay_t<decltype(workspace)>;
             if constexpr (std::is_same_v<T, session::NewWorkspace>)
-                return SwitchDecision { SwitchTo { .workspace = 0,
-                                                   .undo = vthost::proto::WorkspaceRelease::Closed } };
+                return SwitchDecision { SwitchTo { .workspace = 0 } };
             else if constexpr (std::is_same_v<T, session::AnyWorkspace>)
             {
                 if (daemonWorkspaces.size() > 1)
                     return SwitchDecision { SwitchPick {} };
                 if (daemonWorkspaces.empty())
-                    return SwitchDecision { SwitchTo { .workspace = 0,
-                                                       .undo = vthost::proto::WorkspaceRelease::Closed } };
+                    return SwitchDecision { SwitchTo { .workspace = 0 } };
                 return &daemonWorkspaces.front();
             }
             else if constexpr (std::is_same_v<T, session::WorkspaceAt>)
@@ -95,7 +106,7 @@ SwitchDecision planSwitch(session::SwitchTarget const& target,
         return SwitchNoop {};
     if (row->shownByWindowHere)
         return SwitchFocus { .window = *row->shownByWindowHere };
-    return SwitchTo { .workspace = row->id, .undo = undoReleaseFor(row->visibility) };
+    return SwitchTo { .workspace = row->id };
 }
 
 std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo const> workspaces,
@@ -103,7 +114,7 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
 {
     using vthost::WorkspaceVisibility;
     static constexpr auto Visibilities =
-        std::array { WorkspaceVisibility::Left, WorkspaceVisibility::Shown, WorkspaceVisibility::Hidden };
+        std::array { WorkspaceVisibility::Shown, WorkspaceVisibility::Hidden };
     auto rows = std::vector<WorkspaceRow> {};
     for (auto const& info: workspaces)
     {
@@ -127,12 +138,56 @@ std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo con
             .name = workspaceDisplayName(info.label,
                                          active != info.tabs.end() ? std::string_view { active->title } : "",
                                          info.position),
-            .visibility = visibility != Visibilities.end() ? *visibility : WorkspaceVisibility::Left,
+            .visibility = visibility != Visibilities.end() ? *visibility : WorkspaceVisibility::Hidden,
             .tabs = info.tabs.size(),
             .shownByWindowHere = shownHere(id),
         });
     }
     return rows;
+}
+
+std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& directory,
+                                          ShownHere const& shownHere)
+{
+    auto rows = std::vector<WorkspaceRow> {};
+    for (auto const [index, workspace]: core::views::enumerate(directory.workspaces))
+    {
+        // As a listing's: one holding no tab has nothing for a window to show.
+        if (workspace.tabs.empty())
+            continue;
+        auto const position = static_cast<uint32_t>(index + 1);
+        auto shown = shownHere(workspace.id);
+        rows.push_back(WorkspaceRow {
+            .id = workspace.id,
+            .ref = localRefOf(workspace.id),
+            .label = workspace.label,
+            .position = position,
+            .name = workspaceDisplayName(workspace.label, workspace.tabs.front().label, position),
+            .visibility = shown ? vthost::WorkspaceVisibility::Shown : vthost::WorkspaceVisibility::Hidden,
+            .tabs = workspace.tabs.size(),
+            .shownByWindowHere = shown,
+        });
+    }
+    return rows;
+}
+
+bool namesControlId(session::WorkspaceTarget const& workspace)
+{
+    if (std::holds_alternative<vtcontrol::ObjectRef>(workspace))
+        return true;
+    auto const* const named = std::get_if<session::WorkspaceNamed>(&workspace);
+    if (named == nullptr)
+        return false;
+    // A full id, or what may be the end of one: four hex digits or more that are no position.
+    auto const& spec = named->spec;
+    auto const isHex = [](char c) {
+        return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+    };
+    auto const isDigit = [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c)) != 0;
+    };
+    return vtcontrol::parseObjectRef(spec).has_value()
+           || (spec.size() >= 4 && std::ranges::all_of(spec, isHex) && !std::ranges::all_of(spec, isDigit));
 }
 
 std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceRow const> rows,
@@ -145,8 +200,7 @@ std::vector<window::SwitcherWorkspace> switcherWorkspacesOf(std::span<WorkspaceR
         // One a window here shows is shown, whether or not the daemon counted that window yet.
         if (row.shownByWindowHere || row.visibility == vthost::WorkspaceVisibility::Shown)
             return SwitcherWorkspaceState::ShownElsewhere;
-        return row.visibility == vthost::WorkspaceVisibility::Hidden ? SwitcherWorkspaceState::Hidden
-                                                                     : SwitcherWorkspaceState::Left;
+        return SwitcherWorkspaceState::Hidden;
     };
     return std::ranges::to<std::vector>(rows | std::views::transform([&](WorkspaceRow const& row) {
                                             return window::SwitcherWorkspace {

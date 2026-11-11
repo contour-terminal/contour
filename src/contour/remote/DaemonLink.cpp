@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
+#include <contour/platform/FinishNotification.hpp>
+#include <contour/platform/Notifier.hpp>
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/SwitchGrants.hpp>
@@ -7,7 +9,9 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/NoticeQueue.hpp>
+#include <contour/window/TaskbarAttentionTally.hpp>
 #include <contour/window/WindowController.hpp>
+#include <contour/window/WorkspaceDirectory.hpp>
 
 #include <core/Assert.hpp>
 
@@ -23,9 +27,10 @@
 #include <span>
 #include <utility>
 
+#include <vthost/NotifyWire.hpp>
 #include <vthost/RestoredCounts.hpp>
 #include <vthost/SocketPath.hpp>
-#include <vthost/SwitchClient.hpp>
+#include <vthost/ViewRouting.hpp>
 #include <vthost/client/ReleaseDrift.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -43,17 +48,108 @@ namespace
     /// @return Why a link built with @p config is started; its switch's callback is moved out of @p config.
     [[nodiscard]] LinkRole roleOf(DaemonLinkConfig& config)
     {
-        if (config.handOverFrom)
-            return HandOverRole { .from = *config.handOverFrom, .report = HandOverRole::Report::Due };
         if (config.arrival)
             return std::move(*config.arrival);
+        if (config.opening)
+            return OpeningRole { .opening = *config.opening };
         return BootRole {};
     }
 
-    /// What a window says when a further workspace could not get a connection of its own and opens on its
-    /// connection instead; {} is why.
-    constexpr auto WindowLinkFailedText =
-        std::string_view { "A workspace opened on this window's connection: {}" };
+    /// @return @p layouts' layout of @p workspace alone: a window displays one workspace, so a pane that
+    ///         layout no longer names went to another workspace, or ended, and leaves the window.
+    [[nodiscard]] LayoutSnapshot onlyLayoutOf(LayoutSnapshot const& layouts, uint64_t workspace)
+    {
+        auto const found = layouts.find(workspace);
+        return found != layouts.end() ? LayoutSnapshot { *found } : LayoutSnapshot {};
+    }
+
+    /// @return A command that finished in a pane this client does not mirror, as a finish notice reads one.
+    [[nodiscard]] vtbackend::CommandBlockSummary summaryOf(vthost::proto::FinishedCommand const& finished)
+    {
+        auto summary = vtbackend::CommandBlockSummary {};
+        summary.commandLine = vtbackend::CommandLineText { finished.commandLine };
+        summary.exitCode = finished.exitCode;
+        summary.duration = finished.durationMs.transform([](uint64_t ms) {
+            return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::milliseconds { ms });
+        });
+        return summary;
+    }
+
+    /// What every finish notice of a pane of another workspace is raised under: the pane's daemon session id
+    /// follows, so a pane's later finish replaces its earlier one.
+    constexpr auto FinishedElsewhereIdentifier = std::string_view { "contour-daemon-finished-{}" };
+
+    /// Whether a window rings for what was raised.
+    enum class RingBell : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+
+    /// @param directory What the window lists.
+    /// @param pane A daemon session.
+    /// @return The name of the tab holding @p pane; empty for none.
+    [[nodiscard]] std::string tabLabelOf(window::WorkspaceDirectory const& directory, uint64_t pane)
+    {
+        for (auto const& workspace: directory.workspaces)
+            for (auto const& tab: workspace.tabs)
+                if (std::ranges::contains(tab.panes, window::PaneKey { pane }, &window::DirectoryPane::key))
+                    return tab.label;
+        return {};
+    }
+
+    /// Notifies a command that finished in a pane of a workspace the window does not select, as a hidden
+    /// pane's finish is decided.
+    /// @param pane The pane's daemon session.
+    /// @param finished How the command finished.
+    /// @param tabName The name of the pane's tab.
+    /// @param notices What the finish is decided and raised with.
+    /// @return Whether the finish asks the window to ring too.
+    [[nodiscard]] RingBell noticeFinishedElsewhere(uint64_t pane,
+                                                   vthost::proto::FinishedCommand const& finished,
+                                                   std::string const& tabName,
+                                                   ElsewhereNotices const& notices)
+    {
+        auto const summary = summaryOf(finished);
+        auto const ending =
+            platform::finishNoticeKind(summary, notices.policy, platform::SessionVisibility::Hidden);
+        if (!ending)
+            return RingBell::No;
+        auto const request = platform::finishNotificationText(
+            summary, *ending, tabName, notices.homeDirectory, notices.policy.action);
+        auto const effects = platform::effectsOf(request.action);
+        if (effects.test(platform::FinishEffect::Notification))
+        {
+            auto notification = vtbackend::DesktopNotification {};
+            notification.identifier = std::format(FinishedElsewhereIdentifier, pane);
+            notification.title = request.title;
+            notification.body = request.body;
+            notification.sound = platform::finishNoticeSound(
+                request.action, platform::bellAudibilityOf(notices.bell.sound, notices.bell.volume));
+            notices.notifier.notify(notification);
+        }
+        return effects.test(platform::FinishEffect::Bell) ? RingBell::Yes : RingBell::No;
+    }
+
+    /// Raises a desktop notification of a pane of a workspace the window does not select, as a hidden pane's.
+    /// @param notice What the pane notified.
+    /// @param notifier Where it is raised.
+    void notifyElsewhere(vthost::proto::PaneNotification const& notice, platform::Notifier& notifier)
+    {
+        // As a mirrored pane raises one (ScreenMirror::applyEvent): one that stated no occasion takes the OSC
+        // 9 / OSC 777 rule.
+        auto const occasion =
+            vthost::displayOccasionOf(notice.occasion).value_or(platform::UnstatedNotificationOccasion);
+        if (!platform::isNoticeWanted(platform::notifyWhenOf(occasion), platform::SessionVisibility::Hidden))
+            return;
+        auto notification = vtbackend::DesktopNotification {};
+        notification.title = notice.title;
+        notification.body = notice.body;
+        notification.occasion = occasion;
+        notification.focusOnActivation = false;
+        notifier.notify(notification);
+    }
 
     /// @return @p failure, or what a connection lost without a word says.
     [[nodiscard]] std::string failureOrLost(std::string failure)
@@ -114,14 +210,14 @@ DaemonLink::DaemonLink(Id id,
     _upkeep(config.upkeep),
     _clientRelease(config.clientRelease),
     _controller(std::make_unique<NativeController>(config.controller)),
-    _handOverTemplate(std::move(config)),
-    _role(roleOf(_handOverTemplate))
+    _siblingTemplate(std::move(config)),
+    _role(roleOf(_siblingTemplate))
 {
-    // The links this one hands workspaces to take them from this one, and no switch started them. Nor do they
-    // open a tab in the directory a launch stated: that one is the launch's own link's alone.
-    _handOverTemplate.handOverFrom.reset();
-    _handOverTemplate.arrival.reset();
-    _handOverTemplate.controller.workingDirectory.clear();
+    // The links this one starts to its daemon open no window of this one's, and no switch started them. Nor
+    // do they open a tab in the directory a launch stated: that one is the launch's own link's alone.
+    _siblingTemplate.opening.reset();
+    _siblingTemplate.arrival.reset();
+    _siblingTemplate.controller.workingDirectory.clear();
     connectController();
 }
 
@@ -281,8 +377,7 @@ void DaemonLink::connectController()
             // Not once a connect that failed has been given up on (see pollAttached()).
             if (!isLive())
                 return;
-            // A link taking a workspace over that never showed it leaves it where it was; so does a switch.
-            reportHandOver(HandOverOutcome::Failed, _controller->failure());
+            // A switch whose link never showed its workspace leaves the window where it was.
             reportArrival(std::unexpected(failureOrLost(_controller->failure())));
             failSwitch(failureOrLost(_controller->failure()));
             // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
@@ -292,7 +387,10 @@ void DaemonLink::connectController()
             _controller->stop();
             // One that never got a window has nothing left to serve.
             if (!isBootLink() && _sessions.windowsBoundTo(*this).empty())
+            {
+                noteOpeningFailed(failureOrLost(_controller->failure()));
                 end();
+            }
         },
         Qt::QueuedConnection);
     // A drop the daemon refused did nothing there, and nothing local follows: say so.
@@ -322,6 +420,19 @@ void DaemonLink::connectController()
                 _sessions.postNoticeToWindowsOf(
                     *this,
                     window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { text } });
+        },
+        Qt::QueuedConnection);
+    // The raise-holding window rings and notifies for what the panes of the workspaces it does not select
+    // raised; and every window's taskbar count includes the tabs that wait there.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::directoryChanged,
+        &_receiver,
+        [this] {
+            if (isStopped())
+                return;
+            raiseElsewhere();
+            _sessions.refreshTaskbarAttention();
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -483,29 +594,12 @@ void DaemonLink::offerDaemonRestartIfDrifted()
 
 void DaemonLink::followLayout()
 {
-    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree: whenever a layout
+    // Reconcile the GUI against the daemon's authoritative workspace→tab→split tree whenever a layout
     // arrives or changes (GUI boot, or a workspace/tab/split authored on the daemon, here or by another
-    // client), map each daemon workspace onto an OS window and realize any tab not yet shown, each pane bound
-    // to its remote session. Incremental — what is already shown is left untouched. First, a workspace a
-    // given-up switch asked for is let go of, before a window is opened for it.
-    hideAbandonedWorkspace();
+    // client): the window displays the workspace its connection selects, each pane bound to its remote
+    // session. Incremental — what is already shown is left untouched.
     reconcile();
     expireRestoreSummaryAfterLayout();
-    // A link taking a workspace over has it shown once its connection has the layout: the link it came from
-    // may let it go now, and the workspace was followed by one of the two throughout.
-    if (auto const* const handOver = handOverRole();
-        handOver && isLive() && _controller->settledLayout(handOver->from.workspace) != nullptr)
-        reportHandOver(HandOverOutcome::Settled, {});
-    // A window switching to another workspace of this daemon is brought to it once its layout holds a tab.
-    if (_switch && isLive())
-    {
-        auto const layouts = _controller->settledLayouts();
-        auto const keys = layouts | std::views::keys;
-        if (auto const target = std::ranges::find_if(
-                keys, [this](uint64_t id) { return isSwitchTarget(id) && holdsTab(id); });
-            target != keys.end())
-            finishSwitch(*target);
-    }
     // Last: a link a switch started tells it once its connection shows the workspace, and may be handed the
     // window that asked right then. Not before the workspace holds a tab: the window would be emptied.
     if (arrivalDue() && isLive())
@@ -521,120 +615,118 @@ void DaemonLink::reportArrival(std::expected<uint64_t, std::string> landed)
     std::exchange(arrival()->landed, SwitchLanded {})(std::move(landed));
 }
 
-std::optional<uint64_t> DaemonLink::arrivalWorkspace() const
+WindowOpening const* DaemonLink::opening() const noexcept
 {
-    auto const& intent = _handOverTemplate.controller.intent;
-    if (intent.kind == vthost::proto::AttachIntentKind::Workspaces && !intent.workspaces.empty())
-        return intent.workspaces.front();
-    if (!isLive())
-        return std::nullopt;
-    // A new workspace's id is what the daemon pushes: the only one the connection follows.
-    auto const layouts = _controller->settledLayouts();
-    if (layouts.empty())
-        return std::nullopt;
-    return layouts.begin()->first;
+    if (auto const* const own = std::get_if<OpeningRole>(&_role))
+        return &own->opening;
+    static auto const openSwitch = WindowOpening {};
+    if (auto const* const switched = std::get_if<SwitchArrival>(&_role);
+        switched != nullptr && switched->mode == session::SwitchMode::Open)
+        return &openSwitch;
+    return nullptr;
 }
 
-bool DaemonLink::isSwitchTarget(uint64_t daemonWorkspace) const
+std::optional<uint64_t> DaemonLink::arrivalWorkspace() const
 {
-    if (!_switch)
-        return false;
-    if (_switch->to != 0)
-        return daemonWorkspace == _switch->to;
-    // One the daemon made: pushed since the follow, and shown by no window yet.
-    return !_switch->before.contains(daemonWorkspace) && !_attachWindowMap.contains(daemonWorkspace);
+    if (!isLive())
+        return std::nullopt;
+    auto const selected = _controller->selectedWorkspace();
+    return selected != 0 ? std::optional { selected } : std::nullopt;
+}
+
+uint64_t DaemonLink::followedSelection()
+{
+    auto const selected = _controller->selectedWorkspace();
+    if (!_revertTo)
+        return selected;
+    // What the switch was given up for has ended since: the daemon selects another in its place, and no batch
+    // will state it. The window follows what it selects rather than stay on a workspace that is gone.
+    if (!holdsTab(*_revertTo))
+    {
+        _revertTo.reset();
+        return selected;
+    }
+    // A batch still stating what a given-up switch selected is not followed: the window stays as it is
+    // until the daemon states the selection asked back.
+    if (selected != *_revertTo)
+        return _shown ? _shown->daemonWorkspace : selected;
+    _revertTo.reset();
+    return selected;
 }
 
 bool DaemonLink::holdsTab(uint64_t daemonWorkspace) const
 {
-    auto const layout = _controller->settledLayout(daemonWorkspace);
-    return layout != nullptr && !layout->tabs.empty();
+    // Bound, not copied: the reconcile's snapshot when one runs, else the controller's settled one.
+    auto const settled = _reconcilingLayouts != nullptr ? LayoutSnapshot {} : _controller->settledLayouts();
+    auto const& layouts = _reconcilingLayouts != nullptr ? *_reconcilingLayouts : settled;
+    auto const found = layouts.find(daemonWorkspace);
+    return found != layouts.end() && !found->second->tabs.empty();
 }
 
 std::optional<uint64_t> DaemonLink::workspaceOf(vtworkspace::WorkspaceId window) const
 {
-    auto const mapped =
-        std::ranges::find(_attachWindowMap, window, [](auto const& entry) { return entry.second; });
-    if (mapped == _attachWindowMap.end())
+    if (!_shown || _shown->local != window)
         return std::nullopt;
-    return mapped->first;
+    return _shown->daemonWorkspace;
 }
 
 std::optional<vtworkspace::WorkspaceId> DaemonLink::windowShowing(uint64_t daemonWorkspace) const
 {
-    auto const mapped = _attachWindowMap.find(daemonWorkspace);
-    if (mapped == _attachWindowMap.end())
+    if (!_shown || _shown->daemonWorkspace != daemonWorkspace)
         return std::nullopt;
-    return mapped->second;
+    return _shown->local;
 }
 
-std::expected<void, std::string> DaemonLink::switchWindow(vtworkspace::WorkspaceId window,
-                                                          uint64_t workspace,
-                                                          vthost::proto::WorkspaceRelease undo,
-                                                          SwitchLanded landed)
+std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace, SwitchLanded landed)
 {
     requireGuiThread();
     if (!isLive())
-        return std::unexpected(std::string { "the window's connection to its daemon is gone" });
-    if (_switch)
-        return std::unexpected(std::string { "a switch of this window is under way" });
-    if (!workspaceOf(window))
-        return std::unexpected(std::string { "the window shows no workspace of its daemon" });
-    auto before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys);
-    if (auto followed = _controller->follow(workspace); !followed)
-        return followed;
-    _switch = PendingSwitch { .window = window,
-                              .to = workspace,
-                              .undo = undo,
-                              .before = std::move(before),
-                              .landed = std::move(landed) };
+        return std::unexpected(std::string { "the connection to the daemon is gone" });
+    if (!_shown)
+        return std::unexpected(std::string { "the window shows no workspace of its daemon yet" });
+    if (workspace != 0 && workspace == _shown->daemonWorkspace && !_revertTo)
+    {
+        // Shown already: a switch away still under way is given up, as one that timed out is -- the shown
+        // workspace is selected again, and a batch stating the other one is not followed.
+        cancelSwitch(_shown->local, "another switch of this window replaced it");
+        if (landed)
+            landed(workspace);
+        return {};
+    }
+    auto const sent = _controller->select(workspace);
+    if (!sent)
+        return std::unexpected(sent.error());
+    // Only the latest switch of the window lands.
+    failSwitch("another switch of this window replaced it");
+    _revertTo.reset();
+    _switch = PendingSwitch {
+        .to = workspace,
+        .request = *sent,
+        .before = std::ranges::to<std::set>(_controller->settledLayouts() | std::views::keys),
+        .landed = std::move(landed),
+    };
     return {};
 }
 
-void DaemonLink::finishSwitch(uint64_t workspace)
+void DaemonLink::failRefusedSwitch()
 {
-    auto pending = *std::exchange(_switch, std::nullopt);
-    // Detach last: the old workspace stays in its daemon as hidden, and only now.
-    if (auto const from = workspaceOf(pending.window))
-    {
-        if (auto released = _controller->release(*from, vthost::proto::WorkspaceRelease::SwitchedAway);
-            !released)
-            errorLog()("switch: workspace {} stays followed: {}", *from, released.error());
-        _attachWindowMap.erase(*from);
-    }
-    // The old workspace's layout is gone with its release: the reconcile realizes the new one and closes
-    // (detaches) the panes no layout names any more, after the new ones exist.
-    bindDaemonWorkspace(workspace, pending.window);
-    pending.landed(workspace);
+    // Every answer is taken, whether a switch waits for it or not, so none is read for a later switch.
+    auto const answers = _controller->takeSelectAnswers();
+    if (!_switch)
+        return;
+    if (auto const refused = switchRefusal(_switch->request, _switch->to, _switch->before, answers))
+        failSwitch(std::string { *refused });
 }
 
 void DaemonLink::cancelSwitch(vtworkspace::WorkspaceId window, std::string const& reason)
 {
     requireGuiThread();
-    if (!_switch || _switch->window != window)
+    if (!_switch || !_shown || _shown->local != window)
         return;
-    if (_switch->to == 0)
-        _abandonedNewWorkspace = _switch->before;
+    // The daemon may still move the selection there: it is asked back to what the window displays.
+    if (isLive() && _controller->select(_shown->daemonWorkspace).has_value())
+        _revertTo = _shown->daemonWorkspace;
     failSwitch(reason);
-}
-
-void DaemonLink::hideAbandonedWorkspace()
-{
-    if (!_abandonedNewWorkspace || !isLive())
-        return;
-    auto const layouts = _controller->settledLayouts();
-    auto const keys = layouts | std::views::keys;
-    // The one the daemon made: pushed since the follow, and shown by no window (as isSwitchTarget() has it).
-    auto const made = std::ranges::find_if(keys, [this](uint64_t id) {
-        return !_abandonedNewWorkspace->contains(id) && !_attachWindowMap.contains(id)
-               && _pendingAttachWorkspace != id;
-    });
-    if (made == keys.end())
-        return;
-    _abandonedNewWorkspace.reset();
-    if (auto released = _controller->release(*made, vthost::proto::WorkspaceRelease::SwitchedAway); !released)
-        attachLog()(
-            "switch: workspace {} a given-up switch made stays followed: {}", *made, released.error());
 }
 
 void DaemonLink::failSwitch(std::string const& reason)
@@ -642,12 +734,8 @@ void DaemonLink::failSwitch(std::string const& reason)
     if (!_switch)
         return;
     auto pending = *std::exchange(_switch, std::nullopt);
-    // Undone, the target left as it was: a reconnect does not resume it, and the daemon is told when the
-    // connection is up.
-    if (pending.to != 0 && _controller)
-        if (auto released = _controller->release(pending.to, pending.undo); !released)
-            attachLog()("switch: the follow of workspace {} is not undone: {}", pending.to, released.error());
-    pending.landed(std::unexpected(reason));
+    if (pending.landed)
+        pending.landed(std::unexpected(reason));
 }
 
 void DaemonLink::noteConnectionForSwitch()
@@ -670,19 +758,15 @@ void DaemonLink::noteConnectionForSwitch()
 void DaemonLink::switchedAway(vtworkspace::WorkspaceId window)
 {
     requireGuiThread();
-    if (!isLive())
+    if (!isLive() || !_shown || _shown->local != window)
         return;
-    auto const from = workspaceOf(window);
-    if (!from)
-        return;
-    if (auto released = _controller->release(*from, vthost::proto::WorkspaceRelease::SwitchedAway); !released)
-        errorLog()("switch: workspace {} stays followed: {}", *from, released.error());
-    _attachWindowMap.erase(*from);
+    failSwitch("the window switched to another daemon");
+    _shown.reset();
 }
 
 std::expected<void, std::string> DaemonLink::canAdoptWindow(vtworkspace::WorkspaceId window) const
 {
-    auto const workspace = isLive() ? arrivalWorkspace() : std::nullopt;
+    auto const workspace = arrivalWorkspace();
     if (!workspace || _controller->settledLayout(*workspace) == nullptr)
         return std::unexpected(std::string { "the connection to the daemon shows no workspace yet" });
     if (!holdsTab(*workspace))
@@ -710,126 +794,73 @@ std::expected<void, std::string> DaemonLink::adoptWindow(vtworkspace::WorkspaceI
 void DaemonLink::abandon()
 {
     requireGuiThread();
-    auto const undo = arrival() != nullptr ? arrival()->undo : vthost::proto::WorkspaceRelease::Closed;
     if (auto* const switched = arrival())
         switched->landed = {};
-    if (auto const workspace = arrivalWorkspace(); workspace && isLive())
-        std::ignore = _controller->release(*workspace, undo);
     end();
-}
-
-void DaemonLink::reportHandOver(HandOverOutcome outcome, std::string const& reason)
-{
-    auto* const handOver = handOverRole();
-    if (handOver == nullptr || handOver->report == HandOverRole::Report::Told)
-        return;
-    handOver->report = HandOverRole::Report::Told;
-    _host.handOverSettled(handOver->from, outcome, reason);
-}
-
-void DaemonLink::completeHandOver(uint64_t workspace, HandOverOutcome outcome, std::string const& reason)
-{
-    requireGuiThread();
-    auto const found = _handOvers.find(workspace);
-    if (!isLive() || found == _handOvers.end())
-        return;
-    switch (outcome)
-    {
-        case HandOverOutcome::Settled:
-            _handOvers.erase(found);
-            // Closed, not SwitchedAway: no window switched away from it; another shows it now. Should the
-            // release not reach the daemon, the connection ending later leaves the workspace left all the
-            // same.
-            if (auto released = _controller->release(workspace, vthost::proto::WorkspaceRelease::Closed);
-                !released)
-                errorLog()("attach: workspace {} stays followed by the link it was handed from: {}",
-                           workspace,
-                           released.error());
-            return;
-        case HandOverOutcome::Failed:
-            found->second = HandOverState::Failed;
-            _sessions.postNoticeToWindowsOf(
-                *this,
-                window::Notice { .kind = window::NoticeKind::WindowLinkFailed,
-                                 .text = std::format(WindowLinkFailedText, reason) });
-            // The window it gets is this link's (the multi-window path).
-            reconcile();
-            return;
-    }
 }
 
 void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
 {
     requireGuiThread();
+    if (!_shown || _shown->local != window)
+        return;
+    // The daemon keeps the workspace for whichever window selects it next.
+    failSwitch("the window was closed");
+    _shown.reset();
+}
+
+void DaemonLink::reportFocus(vthost::proto::WindowFocus focus)
+{
+    requireGuiThread();
+    if (isLive())
+        _controller->reportFocus(focus);
+}
+
+vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
+{
+    return _controller != nullptr ? _controller->raiseRole() : vthost::proto::RaiseRole::Raise;
+}
+
+unsigned DaemonLink::tabsWaitingElsewhere() const
+{
     if (!isLive())
-        return;
-    // Given up as a timed-out one is: a new workspace the daemon makes for it later is hidden, not shown in
-    // a window of its own.
-    cancelSwitch(window, "the window was closed");
-    auto const mapped =
-        std::ranges::find(_attachWindowMap, window, [](auto const& entry) { return entry.second; });
-    if (mapped == _attachWindowMap.end())
-        return;
-    // Emptied by a move, the workspace may be filled again, and then gets a window of its own: kept.
-    auto const layout = _controller->settledLayout(mapped->first);
-    if (layout == nullptr || layout->tabs.empty())
-        return;
-    // The mapping goes with the closed window in the next reconcile; the workspace is not pushed any more.
-    if (auto released = _controller->release(mapped->first, vthost::proto::WorkspaceRelease::Closed);
-        !released)
-        attachLog()("attach: the daemon is not told window {} closed: {}", window.value, released.error());
+        return 0;
+    auto const directory = _controller->directory();
+    return window::tabsWaitingIn(directory, directory.selected);
 }
 
-void DaemonLink::spawnWindowFor(uint64_t daemonWorkspace, std::vector<uint64_t> const& sessions)
+std::optional<uint64_t> DaemonLink::daemonKey() const
 {
-    // Its Main.qml claims the staged id (consumeAttachWindow → bindPendingWindow), records the mapping and
-    // reconciles -- so it never creates a stray fresh tab. The QML load is synchronous, so the stage is
-    // consumed before this returns. A window a move of this process asked for opens where the pane was
-    // dropped.
-    _pendingAttachWorkspace = daemonWorkspace;
-    installAttachWindowBinder();
-    _host.openWindowFor(_sessions.stageRemoteMoveWindow(sessions));
+    // As onOneDaemon() tells two links of one daemon: by its name, or by the transport they share.
+    auto const& daemon = address();
+    if (daemon.kind != vthost::proto::SwitchDaemonKind::Same)
+        return std::hash<std::string> {}(std::format("{}:{}", std::to_underlying(daemon.kind), daemon.name));
+    return std::hash<vthost::ITransportFactory const*> {}(_siblingTemplate.controller.transport.get());
 }
 
-void DaemonLink::placeFurtherWorkspace(uint64_t daemonWorkspace,
-                                       std::vector<uint64_t> const& sessions,
-                                       std::size_t& replacementsDue)
+std::expected<void, std::string> DaemonLink::openWindowLike(vtworkspace::WorkspaceId window,
+                                                            std::optional<vtworkspace::TabId> activeTab,
+                                                            QScreen* screen)
 {
-    // What comes instead of a window the daemon lost opens at once, in this link: the lost one closes next,
-    // and were it the process's last, a window still to come would be too late.
-    if (replacementsDue > 0)
-    {
-        --replacementsDue;
-        spawnWindowFor(daemonWorkspace, sessions);
-        return;
-    }
-    auto const negotiated = _controller->negotiated();
-    auto const canHandOver =
-        negotiated && negotiated->shared.contains(vthost::proto::Capability::WorkspaceFollow);
-    auto const found = _handOvers.find(daemonWorkspace);
-    if (!canHandOver || (found != _handOvers.end() && found->second == HandOverState::Failed))
-    {
-        spawnWindowFor(daemonWorkspace, sessions);
-        return;
-    }
-    if (found != _handOvers.end())
-        return; // the link it is handed to is still connecting
-    _handOvers.emplace(daemonWorkspace, HandOverState::Pending);
-    auto config = _handOverTemplate;
-    config.controller.intent =
-        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                      .workspaces = { daemonWorkspace } };
+    requireGuiThread();
+    if (!isLive() || !_shown || _shown->local != window)
+        return std::unexpected(std::string { "this window shows no workspace of its daemon" });
+    auto config = _siblingTemplate;
+    config.controller.intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = _shown->daemonWorkspace };
     config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
-    config.handOverFrom = HandOver { .from = _id, .workspace = daemonWorkspace };
-    _host.startHandOverLink(std::move(config));
+    auto const* const asking = _sessions.controllerDisplaying(window);
+    config.opening = WindowOpening {
+        .activeTab =
+            activeTab.and_then([this](vtworkspace::TabId tab) { return _controller->pairedWireTab(tab); }),
+        .screen = screen,
+        .askedBy = asking != nullptr ? std::optional { asking->windowId() } : std::nullopt,
+    };
+    _host.startWindowLink(std::move(config));
+    return {};
 }
 
 void DaemonLink::reconcile()
-{
-    reconcileReplacing(0);
-}
-
-void DaemonLink::reconcileReplacing(std::size_t replacementsDue)
 {
     requireGuiThread();
     if (!isLive())
@@ -839,128 +870,202 @@ void DaemonLink::reconcileReplacing(std::size_t replacementsDue)
     auto const landedMoves = _controller->takeLandedMoves();
     _sessions.noteRemoteMovesLanded(landedMoves);
 
-    // Whether every window was placed: one whose OS window is still spawning is skipped, and a move landing
-    // in it is placed by the reconcile that gets to it.
-    auto reach = session::TerminalSessionManager::ReconcileReach::Whole;
-
-    // One snapshot of the layouts for every window: a move between two windows is then seen in both, however
-    // the push that made it is read meanwhile. As of the last push's end, as applyRemoteLayout realizes
-    // them: a window the next push's first frame adds would otherwise get an OS window that stays blank
-    // until that push ends.
+    // One snapshot of the layouts for the whole pass: as of the last push's end, as applyRemoteLayout
+    // realizes them, so that what the next push's first frame adds is not realized half.
     auto const layouts = _controller->settledLayouts();
     _reconcilingLayouts = &layouts;
-
-    // Daemon workspace ids come ascending, so the primary (lowest-id) workspace is handled
-    // first — it maps to the boot window; the rest each get their own OS window. One already shown is brought
-    // up to date; this places the others.
-    auto const openWindow = [&](ReconciledWorkspace const& workspace) {
-        auto const& [daemonWorkspace, tabs, sessions] = workspace;
-        if (_pendingAttachWorkspace == daemonWorkspace)
-        {
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return; // an OS window is already spawning for this daemon workspace
-        }
-
-        // The workspace a window switches to is that window's, once its first layout is here.
-        if (isSwitchTarget(daemonWorkspace))
-        {
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return;
-        }
-
-        if (auto const* const handOver = handOverRole();
-            _attachBoot == session::AttachBoot::Pending && handOver)
-        {
-            // A link taking a workspace over opens its own window for it, and places nothing else before.
-            if (daemonWorkspace == handOver->from.workspace)
-                spawnWindowFor(daemonWorkspace, sessions);
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return;
-        }
-
-        if (auto const* const switched = arrival(); _attachBoot == session::AttachBoot::Pending && switched)
-        {
-            // A link a switch started: one opening a workspace opens its own window for it; one switching a
-            // window waits to be handed that window. Neither places anything else before.
-            if (switched->mode == session::SwitchMode::Open && daemonWorkspace == arrivalWorkspace())
-                spawnWindowFor(daemonWorkspace, sessions);
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return;
-        }
-
-        if (_attachBoot == session::AttachBoot::Pending)
-        {
-            // The primary daemon workspace adopts the boot window (already created before
-            // the first layout arrived). A missing focused window (mid-boot) stages
-            // the daemon workspace so bindPendingWindow can bind it once the boot
-            // window becomes ready, instead of hoping for another layout push.
-            // Never the quick terminal, which is no daemon workspace: an ordinary window adopts it.
-            if (auto const* const boot = _sessions.applicationController())
-                bindDaemonWorkspace(daemonWorkspace, boot->windowId());
-            else if (!_pendingAttachWorkspace)
-                _pendingAttachWorkspace = daemonWorkspace;
-            reach = session::TerminalSessionManager::ReconcileReach::Partial;
-            return;
-        }
-
-        // A daemon workspace holding no tab is nothing to show yet -- one a reconnect found emptied, under a
-        // client that follows every window -- and gets its OS window once it holds one.
-        if (tabs == DaemonWorkspaceTabs::None)
-            return;
-
-        // A further daemon workspace: a window of its own, on a link of its own.
-        placeFurtherWorkspace(daemonWorkspace, sessions, replacementsDue);
-    };
-    reconcileAttachWindows(_sessions, *_controller, layouts, _attachWindowMap, openWindow);
+    auto const selected = followedSelection();
+    auto placement = Placement::Placed;
+    if (!_shown)
+        placement = placeWindow(selected);
+    else if (selected != 0 && selected != _shown->daemonWorkspace && holdsTab(selected))
+        switchTo(selected);
+    else
+    {
+        applyShownLayout();
+        // A switch to what the window shows already (asked while a revert was under way) has landed.
+        if (_switch && _shown && _switch->to == _shown->daemonWorkspace && selected == _switch->to)
+            if (auto pending = *std::exchange(_switch, std::nullopt); pending.landed)
+                pending.landed(pending.to);
+    }
+    failRefusedSwitch();
     _reconcilingLayouts = nullptr;
+    openWindowForMovedPanes();
     // A tab closed since it was paired names nothing: its pairing goes, whatever the daemon hands out next.
     forgetClosedTabPairings(_sessions, *_controller);
-    // Every window is reconciled: what a landing move moved is in place, to raise, focus and announce.
-    _sessions.completeRemoteMoves(reach);
+    // The window is reconciled: what a landing move moved is in place, to raise, focus and announce.
+    _sessions.completeRemoteMoves(placement == Placement::Placed
+                                      ? session::TerminalSessionManager::ReconcileReach::Whole
+                                      : session::TerminalSessionManager::ReconcileReach::Partial);
+}
+
+DaemonLink::Placement DaemonLink::placeWindow(uint64_t selected)
+{
+    if (selected == 0 || _controller->settledLayout(selected) == nullptr)
+        return Placement::Pending;
+    // The boot window, claimed before the first layout came.
+    if (auto const window = std::exchange(_pendingWindow, std::nullopt);
+        window && _sessions.model().workspace(*window) != nullptr)
+    {
+        bindDaemonWorkspace(selected, *window);
+        return Placement::Placed;
+    }
+    if (isBootLink())
+    {
+        if (_attachBoot != session::AttachBoot::Pending)
+            return Placement::Pending;
+        // The boot window, created before the first layout arrived, adopts the selected workspace; one that
+        // is not there yet binds it as it comes (bindPendingWindow()). Never the quick terminal, which is no
+        // daemon workspace, nor a window another link serves.
+        if (auto const* const boot = _sessions.applicationController();
+            boot != nullptr && _sessions.bindingOf(boot->displayedWorkspace()) == nullptr)
+        {
+            bindDaemonWorkspace(selected, boot->displayedWorkspace());
+            return Placement::Placed;
+        }
+        return Placement::Pending;
+    }
+    // A link that opens a window of its own opens it once the workspace has something to show; it claims the
+    // selection as it loads (bindPendingWindow()). One a switch started is handed its window (adoptWindow()).
+    auto const* const own = opening();
+    if (own == nullptr || !holdsTab(selected) || _ownWindow == OwnWindow::Opening)
+        return Placement::Pending;
+    _ownWindow = OwnWindow::Opening;
+    installAttachWindowBinder();
+    _host.openWindowFor(own->screen.data());
+    // The load is synchronous: a window that did not load, or did not take the workspace, never will, and
+    // the link has nothing to serve.
+    if (!_shown)
+    {
+        noteOpeningFailed("its window did not open");
+        reportArrival(std::unexpected(std::string { "its window did not open" }));
+        end();
+        return Placement::Pending;
+    }
+    return Placement::Placed;
+}
+
+void DaemonLink::switchTo(uint64_t workspace)
+{
+    auto* const controller = _sessions.controllerDisplaying(_shown->local);
+    if (controller == nullptr)
+        return;
+    auto const before = _shown->local;
+    // Watched: the window realizes the new workspace first, so it never empties, and the old panes go after,
+    // their sessions left running in the daemon.
+    auto previous = std::vector<QPointer<session::TerminalSession>> {};
+    for (auto* const session: _sessions.sessionsOfWindow(before))
+        previous.emplace_back(session);
+    auto const fresh = _sessions.createWorkspaceIn(controller->windowId());
+    bindDaemonWorkspace(workspace, fresh);
+    if (!_shown || _shown->local != fresh)
+        return; // the window went while it was realized
+    controller->displayWorkspace(fresh);
+    detachPanes(_sessions, previous);
+    controller->dropWorkspaceIfEmpty(before);
+    if (_switch && (_switch->to == workspace || (_switch->to == 0 && !_switch->before.contains(workspace))))
+    {
+        auto pending = *std::exchange(_switch, std::nullopt);
+        if (pending.landed)
+            pending.landed(workspace);
+    }
+}
+
+void DaemonLink::applyShownLayout()
+{
+    if (!_shown)
+        return;
+    auto const local = _shown->local;
+    auto const settled = _reconcilingLayouts != nullptr ? LayoutSnapshot {} : _controller->settledLayouts();
+    auto const only = onlyLayoutOf(_reconcilingLayouts != nullptr ? *_reconcilingLayouts : settled,
+                                   _shown->daemonWorkspace);
+    if (only.empty())
+        return;
+    auto const seeding = _shown->selection == TabSelection::Seed && !only.begin()->second->tabs.empty();
+    applyRemoteLayout(
+        _sessions, local, *_controller, only, _shown->daemonWorkspace, std::nullopt, _shown->selection);
+    // Its last pane closed with the layout, the window may have gone meanwhile.
+    if (!_shown || _shown->local != local)
+        return;
+    if (seeding)
+    {
+        _shown->selection = TabSelection::Keep;
+        // A window a tab was torn off to activates that tab, once.
+        if (auto* const own = std::get_if<OpeningRole>(&_role); own != nullptr && own->opening.activeTab)
+            if (auto const tab =
+                    _controller->tabPairedWith(*std::exchange(own->opening.activeTab, std::nullopt)))
+                _sessions.model().activateTab(local, *tab);
+    }
+    _sessions.deliverRestoreSummaryTo(local);
+}
+
+void DaemonLink::openWindowForMovedPanes()
+{
+    auto const* const pending = _sessions.livePendingRemoteMove();
+    if (pending == nullptr || pending->binding != this || pending->landing != window::MoveLanding::NewWindow
+        || pending->phase != session::TerminalSessionManager::PendingRemoteMove::Phase::Landing
+        || pending->request == _movedWindowRequest)
+        return;
+    // The workspace the daemon made for what was dropped outside every window: the one holding it all, and
+    // not the one this window displays.
+    auto const layouts = _controller->settledLayouts();
+    auto const holdsAll = [&](auto const& entry) {
+        auto sessions = std::vector<uint64_t> {};
+        for (auto const& tab: entry.second->tabs)
+            window::forEachLeaf(tab.root, [&sessions](vthost::proto::WirePane const& leaf) {
+                sessions.push_back(leaf.session);
+            });
+        return std::ranges::all_of(
+            pending->sessions, [&](uint64_t session) { return std::ranges::contains(sessions, session); });
+    };
+    auto const made = std::ranges::find_if(layouts, [&](auto const& entry) {
+        return (!_shown || entry.first != _shown->daemonWorkspace) && holdsAll(entry);
+    });
+    if (made == layouts.end())
+        return;
+    auto config = _siblingTemplate;
+    config.controller.intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = made->first };
+    config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
+    config.opening = WindowOpening { .activeTab = std::nullopt,
+                                     .screen = _sessions.stageRemoteMoveWindow(pending->sessions),
+                                     .askedBy = std::nullopt };
+    // Once: the new window's reconcile completes the move, raising and announcing it there.
+    _movedWindowRequest = pending->request;
+    _host.startWindowLink(std::move(config));
 }
 
 WindowAdoption DaemonLink::bindPendingWindow(window::WindowController& window)
 {
     requireGuiThread();
-    if (!isLive())
+    if (!isLive() || _shown || _pendingWindow)
         return WindowAdoption::Declined;
+    auto const local = window.displayedWorkspace();
 
-    // A reconcile-spawned OS window claims the daemon workspace staged for it.
-    if (_pendingAttachWorkspace)
+    // The window this link opened for itself claims the workspace its connection selects.
+    if (_ownWindow == OwnWindow::Opening)
     {
-        auto const daemonWorkspace = *_pendingAttachWorkspace;
-        _pendingAttachWorkspace.reset();
-        bindDaemonWorkspace(daemonWorkspace, window.windowId());
+        bindDaemonWorkspace(followedSelection(), local);
         return WindowAdoption::Adopted;
     }
 
-    // The boot (first) OS window in attach mode ADOPTS the daemon's primary workspace instead of
-    // authoring a fresh tab. Claiming it here makes Main.qml skip win.createNewTab(), which in
-    // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
-    // Bind the primary workspace now if the daemon already reported one; otherwise still claim the boot
-    // window and let reconcile() bind it once the first layout arrives.
+    // The boot (first) OS window in attach mode ADOPTS the selected workspace instead of authoring a fresh
+    // tab. Claiming it here makes Main.qml skip win.createNewTab(), which in attach mode would author a
+    // spurious extra tab on the daemon. Bound now when the daemon already selected one; otherwise still
+    // claimed, and the reconcile binds it once the first layout arrives.
     if (_attachBoot == session::AttachBoot::Pending && isBootLink())
     {
         // Before anything is realized in it: what it makes is made through this link.
-        _sessions.bindWindow(window.windowId(), *this);
-        // As of the last push's end, as every reconcile reads them: the next push's first frame may name a
-        // window whose layout is not complete yet.
-        auto const settled = std::ranges::to<std::vector>(_controller->settledLayouts() | std::views::keys);
-        if (auto const adopt = primaryDaemonWorkspaceToAdopt(settled))
-            bindDaemonWorkspace(*adopt, window.windowId());
+        _sessions.bindWindow(local, *this);
+        if (auto const selected = followedSelection();
+            selected != 0 && _controller->settledLayout(selected) != nullptr)
+            bindDaemonWorkspace(selected, local);
+        else
+            _pendingWindow = local;
         return WindowAdoption::Adopted;
     }
 
     return WindowAdoption::Declined;
-}
-
-session::RemoteRouting DaemonLink::requestBootWorkspace(session::RemoteSpawn const& spawn)
-{
-    requireGuiThread();
-    return isLive() && _attachBoot == session::AttachBoot::Pending
-                   && _controller->requestRemoteWorkspace(spawn)
-               ? session::RemoteRouting::Routed
-               : session::RemoteRouting::Local;
 }
 
 void DaemonLink::connectReconnectSignals()
@@ -975,11 +1080,9 @@ void DaemonLink::connectReconnectSignals()
             if (!isLive())
                 return;
             _sessions.setHostConnection(*this, _controller->connectionState());
-            // The workspace a given-up switch asked for is not resumed by the connection sought now (no
-            // layout of it arrived, or it would have been let go of already): whatever that connection is
-            // pushed later is some other one, and must not be taken for it.
+            // What a given-up switch selected again is the connection's own: the one sought now resumes it.
             if (_controller->connectionState() != vthost::client::ConnectionState::Connected)
-                _abandonedNewWorkspace.reset();
+                _revertTo.reset();
             // A switch fails when the connection goes before the workspace it waits for is shown.
             if (_switch || arrivalDue())
             {
@@ -987,14 +1090,14 @@ void DaemonLink::connectReconnectSignals()
                 if (!isLive())
                     return;
             }
-            // A link taking a workspace over awaits nobody's pollAttached(): it settles as it connects, or
-            // learns the daemon has no such workspace (NativeController's failed connect, which stays up). So
-            // does a link a switch started.
+            // A link opening a window of its own awaits nobody's pollAttached(): it settles as it connects,
+            // or learns the daemon has no such workspace (NativeController's failed connect, which stays up).
+            // So does a link a switch started.
             if (isBootLink() || _state != AttachState::Connecting)
                 return;
             if (auto const failure = _controller->failure(); !failure.empty())
             {
-                reportHandOver(HandOverOutcome::Failed, failure);
+                noteOpeningFailed(failure);
                 reportArrival(std::unexpected(failure));
                 _controller->stop();
                 end();
@@ -1020,39 +1123,92 @@ void DaemonLink::connectReconnectSignals()
 
 void DaemonLink::closeLostWindows(std::vector<std::uint64_t> const& daemonWorkspaces)
 {
-    if (!isLive())
+    if (!isLive() || !_shown || !std::ranges::contains(daemonWorkspaces, _shown->daemonWorkspace))
         return;
-    auto doomed = std::vector<vtworkspace::WorkspaceId> {};
-    for (auto const daemonWorkspace: daemonWorkspaces)
+    // The workspace the connection selects instead -- the daemon's choice, or a restarted daemon's own, which
+    // may even carry the lost one's id -- is displayed in its place: the window stays.
+    if (auto const selected = _controller->selectedWorkspace(); selected != 0 && holdsTab(selected))
     {
-        auto const mapped = _attachWindowMap.find(daemonWorkspace);
-        if (mapped == _attachWindowMap.end())
-            continue;
-        // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
-        // @see TerminalSession::noteTransportLost
-        for (auto* session: _sessions.sessionsOfWindow(mapped->second))
-            session->noteTransportLost();
-        doomed.push_back(mapped->second);
-        _attachWindowMap.erase(mapped);
+        switchTo(selected);
+        return;
     }
-    // The windows that came instead first: closing the last stale window before would end the application.
-    reconcileReplacing(doomed.size());
-    for (auto const window: doomed)
-        if (auto* const controller = _sessions.controllerFor(window))
-            controller->closeWindow();
+    // Nothing selected: the window has nothing left to display. Before the close, which closes their ptys:
+    // their shells did not exit, the connection to them went. @see TerminalSession::noteTransportLost
+    for (auto* session: _sessions.sessionsOfWindow(_shown->local))
+        session->noteTransportLost();
+    if (auto* const controller = _sessions.controllerDisplaying(_shown->local))
+        controller->closeWindow();
 }
 
 void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace::WorkspaceId local)
 {
     requireGuiThread();
     _attachBoot = session::AttachBoot::Adopted;
-    _attachWindowMap.emplace(daemonWorkspace, local);
+    _shown = Shown { .daemonWorkspace = daemonWorkspace, .local = local, .selection = TabSelection::Seed };
+    // The window is open: whatever becomes of the link now, the window it was asked from has nothing to hear.
+    if (auto* const own = std::get_if<OpeningRole>(&_role))
+        own->opening.askedBy.reset();
     _sessions.bindWindow(local, *this);
-    if (_reconcilingLayouts != nullptr)
-        applyRemoteLayout(_sessions, local, *_controller, *_reconcilingLayouts, daemonWorkspace);
-    else
-        applyRemoteLayout(_sessions, local, *_controller, daemonWorkspace);
-    _sessions.deliverRestoreSummaryTo(local);
+    applyShownLayout();
+    // The daemon names the window that raises by the focus each one reports: a window focused as it comes
+    // says so at once.
+    if (_shown && _sessions.focusedWindow() == local)
+        _controller->reportFocus(vthost::proto::WindowFocus::Focused);
+}
+
+void DaemonLink::noteOpeningFailed(std::string const& reason)
+{
+    auto* const own = std::get_if<OpeningRole>(&_role);
+    if (own == nullptr || _shown)
+        return;
+    auto const askedBy = std::exchange(own->opening.askedBy, std::nullopt);
+    auto* const asking = askedBy ? _sessions.controllerOf(*askedBy) : nullptr;
+    if (asking == nullptr)
+        return;
+    asking->notices().post(window::windowLinkFailedNotice(reason));
+}
+
+void DaemonLink::raiseElsewhere()
+{
+    if (!isLive())
+        return;
+    // Judged as each arrived (NativeController::takeRaised), so each is raised here once, by the window that
+    // held the role then, whatever the role is now.
+    auto const raised = _controller->takeRaised();
+    if (raised.empty())
+        return;
+    auto const notices = _host.elsewhereNotices();
+    auto const directory = _controller->directory();
+    auto ring = RingBell::No;
+    // Out of every window's sight by definition: decided as a hidden pane's are.
+    for (auto const& summary: raised)
+    {
+        if (summary.bell == vthost::proto::PaneBell::Rang)
+            ring = RingBell::Yes;
+        for (auto const& notice: summary.notifications)
+            notifyElsewhere(notice, notices.notifier);
+        if (summary.finished
+            && noticeFinishedElsewhere(
+                   summary.session, *summary.finished, tabLabelOf(directory, summary.session), notices)
+                   == RingBell::Yes)
+            ring = RingBell::Yes;
+    }
+    // Once per turn, however many rang, as a pane coalesces its own bells.
+    if (ring == RingBell::Yes)
+        ringWindowBell(notices.bell);
+}
+
+void DaemonLink::ringWindowBell(config::Bell const& bell)
+{
+    auto* const controller = _shown ? _sessions.controllerDisplaying(_shown->local) : nullptr;
+    if (controller == nullptr)
+        return;
+    // The window rings, as it does for a finish in one of its own background tabs: the pane has no
+    // SessionChrome here to ring it.
+    controller->requestBell(QString::fromStdString(platform::bellSourceOf(bell.sound)),
+                            static_cast<double>(bell.volume));
+    if (bell.alert)
+        controller->requestAlert();
 }
 
 void DaemonLink::expireRestoreSummaryAfterLayout()
@@ -1062,7 +1218,8 @@ void DaemonLink::expireRestoreSummaryAfterLayout()
         return;
     auto const layout = _controller->workspaceIds().empty() ? session::LayoutWorkspaces::None
                                                             : session::LayoutWorkspaces::Some;
-    auto const spawn = _pendingAttachWorkspace ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
+    auto const spawn = _ownWindow == OwnWindow::Opening && !_shown ? session::AttachSpawn::Spawning
+                                                                   : session::AttachSpawn::Idle;
     if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
         == session::RestoreSummaryFate::Keep)
         return;
@@ -1149,7 +1306,7 @@ void DaemonLink::answerSwitchRequests()
 namespace
 {
     /// @return Whether @p a and @p b reach one daemon: by the name a switch gives it, or, for one no switch
-    ///         can name (`--connect-tcp`), by the transport they share -- every link a hand-over starts
+    ///         can name (`--connect-tcp`), by the transport they share -- every further link to a daemon
     ///         copies its template's. Not by the run each connection met, which differs between the links of
     ///         one daemon while they reconnect to a restarted one.
     [[nodiscard]] bool onOneDaemon(DaemonLink& a, DaemonLink& b)
@@ -1177,14 +1334,6 @@ void passOnLaunchResume(std::span<DaemonLink* const> links)
                                  [](DaemonLink* each) { return each->resumeFallback() == Fallback::Launch; }))
             link->resumeAsLaunch();
     }
-}
-
-std::optional<std::uint64_t> primaryDaemonWorkspaceToAdopt(
-    std::vector<std::uint64_t> const& daemonWorkspaceIds)
-{
-    if (daemonWorkspaceIds.empty())
-        return std::nullopt;
-    return daemonWorkspaceIds.front(); // workspaceIds() is ascending, so front() is the primary workspace
 }
 
 } // namespace contour::remote

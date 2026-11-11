@@ -14,6 +14,7 @@
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/Audio.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/FinishNotification.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
@@ -645,18 +646,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] vtbackend::ColumnCount foldChipHitColumns() const;
 
   public:
-    QString getBellSource() const noexcept
+    QString getBellSource() const
     {
-        if (_profile.bell.value().sound == "default")
-        {
-            return { "qrc:/contour/bell.wav" };
-        }
-        if (_profile.bell.value().sound == "off")
-        {
-            return {};
-        }
-
-        return QString::fromStdString(_profile.bell.value().sound);
+        return QString::fromStdString(platform::bellSourceOf(_profile.bell.value().sound));
     }
 
     int getFontSize() const noexcept { return static_cast<int>(_profile.fonts.value().size.pt); }
@@ -1874,6 +1866,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::MovePaneDown);
     bool operator()(actions::ToggleSplitOrientation);
     bool operator()(actions::TogglePaneZoom);
+    bool operator()(actions::NewWorkspace);
     bool operator()(actions::ResizePane const& action);
     bool operator()(actions::LaunchLayout const& event);
     bool operator()(actions::SaveLayout const& event);
@@ -2404,6 +2397,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// this session is now, and wires the reports it asked for. GUI thread.
     /// @param notification The notification, with the occasion it is decided by.
     void raiseDesktopNotification(vtbackend::DesktopNotification const& notification);
+
+    /// The GUI thread's half of bell(): sounds, alerts and announces the bell, unless this session's window
+    /// is not the one that raises (TerminalSessionManager::raises).
+    /// @param volume The bell's volume.
+    void ringBell(float volume);
 
     /// Decides on, and delivers, the finish notification for @p summary. GUI thread.
     /// @param summary The finished block.
@@ -3139,6 +3137,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The origins of the bells gathered for the queued bell notice, like @ref _pendingOutputOrigins
     /// (@see noteBellForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingBellOrigins = 0;
+    /// Whether a ring of the bell is queued for the GUI thread (@see bell()): one at a time.
+    enum class BellRing : uint8_t
+    {
+        None = 0,
+        Pending,
+    };
+    std::atomic<BellRing> _bellRing = BellRing::None;
+    /// The volume the queued ring sounds at: the latest bell's.
+    std::atomic<float> _pendingBellVolume = 0.0f;
 
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;

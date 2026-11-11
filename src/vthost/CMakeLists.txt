@@ -5,7 +5,6 @@ add_library(vthost STATIC
     AttachBudget.hpp
     AttachPlan.cpp
     AttachPlan.hpp
-    SwitchClient.hpp
     WorkspaceVisibility.hpp
     ByteStream.cpp
     ByteStream.hpp
@@ -286,6 +285,7 @@ if(VTHOST_TESTING)
         test_main.cpp
         AccessFile_test.cpp
         AttachPlan_test.cpp
+        ViewRouting_test.cpp
         ByteStream_test.cpp
         CellPixelBounds_test.cpp
         TabEdits_test.cpp
@@ -306,7 +306,6 @@ if(VTHOST_TESTING)
         HistorySeed_test.cpp
         RerunPolicy_test.cpp
         WorkspaceRestore_test.cpp
-        SwitchClient_test.cpp
         WorkspaceVisibility_test.cpp
         SnapshotSchedule_test.cpp
         WorkspacePersistence_test.cpp

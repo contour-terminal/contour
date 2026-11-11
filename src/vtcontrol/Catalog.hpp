@@ -305,10 +305,10 @@ inline constexpr auto Methods = std::tuple {
     },
     Method<SwitchWorkspaceRequest, SwitchWorkspaceReply> {
         "workspace.switch",
-        "Switch the window showing a workspace to another workspace or daemon.",
+        "Ask one window to switch to another workspace or daemon.",
         Permission::Write,
         Exposure::SocketOnly,
-        R"({"workspace":"","toLabel":"admin","toHost":"","toWorkspace":"build"})",
+        R"({"toLabel":"admin","toHost":"","toWorkspace":"build"})",
         R"({"outcome":"switched","detail":""})",
     },
     Method<SetLabelRequest, EmptyReply> {

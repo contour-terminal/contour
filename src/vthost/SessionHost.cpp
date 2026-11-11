@@ -991,9 +991,6 @@ SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRest
         realized.panes += inWorkspace.panes;
         if (inWorkspace.tabs > 0)
         {
-            // A workspace put away stays put away; one a client showed was left by that client's end.
-            if (workspace.visibility == WorkspaceVisibility::Hidden)
-                noteWorkspaceReleased(id, proto::WorkspaceRelease::SwitchedAway);
             realized.workspaces.push_back(
                 RestoredWorkspace { .workspace = id.value, .tabs = inWorkspace.tabs });
         }
@@ -1226,8 +1223,7 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
     return tab;
 }
 
-vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& request,
-                                                     SessionStreamEvents const* creator)
+vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& request)
 {
     auto const pane = paneUuidFor(request);
     auto const tabUuid = tabUuidFor(request);
@@ -1238,7 +1234,7 @@ vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& 
     if (!seeded)
         return nullptr;
 
-    auto* workspace = &createEmptyWorkspace(creator, newWorkspace);
+    auto* workspace = &createEmptyWorkspace(newWorkspace);
     if (request.presetIds)
         _objects.setLabel(ObjectRef { ObjectKind::Workspace, newWorkspace },
                           request.presetIds->workspaceLabel);
@@ -1260,20 +1256,15 @@ vtworkspace::Workspace* SessionHost::createWorkspace(SessionSpawnRequest const& 
     return workspace;
 }
 
-vtworkspace::Workspace& SessionHost::createEmptyWorkspace(SessionStreamEvents const* creator)
+vtworkspace::Workspace& SessionHost::createEmptyWorkspace()
 {
-    return createEmptyWorkspace(creator, _objects.mint());
+    return createEmptyWorkspace(_objects.mint());
 }
 
-vtworkspace::Workspace& SessionHost::createEmptyWorkspace(SessionStreamEvents const* creator,
-                                                          vtcontrol::Uuid name)
+vtworkspace::Workspace& SessionHost::createEmptyWorkspace(vtcontrol::Uuid name)
 {
     auto* workspace = _model.createWorkspace();
     _objects.bind(workspace->id(), name);
-    // Claimed before any event names the workspace -- every client re-decides what it follows on its first
-    // tab -- so the primary viewer does not take an unclaimed workspace that is this creator's own.
-    if (creator != nullptr)
-        _workspaceCreators.insert_or_assign(workspace->id().value, creator);
     return *workspace;
 }
 
@@ -1282,26 +1273,12 @@ void SessionHost::discardWorkspace(WorkspaceId workspace)
     auto const* found = _model.workspace(workspace);
     if (found == nullptr || found->tabCount() != 0)
         return;
-    _workspaceCreators.erase(workspace.value);
-    _lastReleases.erase(workspace.value);
-    std::erase_if(_unshownFollows,
-                  [workspace](UnshownFollow const& follow) { return follow.workspace == workspace.value; });
     _objects.forget(workspace);
     _model.removeWorkspace(workspace);
     // The host's own workspace is what a creation naming no workspace lands in: another takes its place. A
     // move empties a workspace only by filling another, so one is left.
     if (workspace == _workspace && _model.workspaceCount() > 0)
         _workspace = _model.workspaceAt(0)->id();
-}
-
-WorkspaceClaim SessionHost::workspaceClaim(WorkspaceId workspace,
-                                           SessionStreamEvents const* client) const noexcept
-{
-    auto const creator = _workspaceCreators.find(workspace.value);
-    if (creator == _workspaceCreators.end())
-        return WorkspaceClaim::Unclaimed;
-    return creator->second != nullptr && creator->second == client ? WorkspaceClaim::Yours
-                                                                   : WorkspaceClaim::Others;
 }
 
 void SessionHost::settleSwitch(uint32_t request, proto::SwitchReply reply)
@@ -1326,16 +1303,19 @@ void SessionHost::completeSwitch(ConnectionId const& client, proto::SwitchReply 
 
 void SessionHost::noteClientAttached(SessionStreamEvents* client)
 {
-    if (!std::ranges::contains(_attachedClients, client))
-        _attachedClients.push_back(client);
+    if (std::ranges::contains(_attachedClients, client))
+        return;
+    _attachedClients.push_back(client);
+    settleRaiseRole();
 }
 
 void SessionHost::noteClientDetached(SessionStreamEvents const* client)
 {
     auto const counted = std::erase(_attachedClients, client) != 0;
-    restoreUnshownFollows(client);
     if (!counted)
         return;
+    _focusSerials.erase(client);
+    settleRaiseRole();
     // A switch asked of a window that is gone will never be answered.
     auto const gone = client->connectionId();
     auto abandoned = std::vector<uint32_t> {};
@@ -1346,112 +1326,81 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
         settleSwitch(
             request,
             proto::SwitchReply { .outcome = proto::SwitchOutcome::Failed, .detail = "the window went away" });
-    if (_primaryViewer == client)
-        _primaryViewer = nullptr;
-    // Still claimed, by nobody present: a workspace a GUI left behind waits for the next launch that takes
-    // every workspace, rather than appearing in another GUI. The address is forgotten, so a connection
-    // constructed where this one was is not taken for its creator. Windows gone from the model go too.
-    std::erase_if(_workspaceCreators, [this](auto const& entry) {
-        return _model.workspace(WorkspaceId { entry.first }) == nullptr;
-    });
-    for (auto& [workspace, creator]: _workspaceCreators)
-        if (creator == client)
-            creator = nullptr;
 }
 
-void SessionHost::restoreUnshownFollows(SessionStreamEvents const* client)
+void SessionHost::noteSelected(SessionStreamEvents const& client, uint64_t workspace)
 {
-    auto const isClients = [client](UnshownFollow const& follow) {
-        return follow.follower == client;
-    };
-    for (auto const& follow: _unshownFollows | std::views::filter(isClients))
-    {
-        // A newer release, a workspace gone or one another window shows is what stands now.
-        auto const workspace = WorkspaceId { follow.workspace };
-        if (_model.workspace(workspace) != nullptr && !followedByAttachedClient(workspace))
-            _lastReleases.try_emplace(follow.workspace, follow.release);
-    }
-    std::erase_if(_unshownFollows, isClients);
-}
-
-bool SessionHost::followedByAttachedClient(WorkspaceId workspace) const
-{
-    return std::ranges::any_of(_attachedClients, [workspace](SessionStreamEvents const* client) {
-        return client->follows(workspace);
-    });
-}
-
-void SessionHost::noteWorkspaceReleased(WorkspaceId workspace, proto::WorkspaceRelease reason)
-{
-    // A follow the releasing window had not been shown yet ends with this release, which is newer.
-    std::erase_if(_unshownFollows, [workspace](UnshownFollow const& follow) {
-        return follow.workspace == workspace.value && !follow.follower->follows(workspace);
-    });
-    // Only the last window showing it decides: while another still follows it, a window switching away
-    // does not hide it, and the other quitting later leaves it, as quitting does.
-    if (followedByAttachedClient(workspace))
-        _lastReleases.erase(workspace.value);
-    else
-        _lastReleases.insert_or_assign(workspace.value, reason);
-}
-
-std::optional<proto::WorkspaceRelease> SessionHost::releaseUntilShown(
-    WorkspaceId workspace, SessionStreamEvents const* follower) const
-{
-    if (auto const recorded = lastRelease(workspace))
-        return recorded;
-    // Made for this follower, which never saw it: put away, as a switch that gave up on it leaves it, rather
-    // than left for the next launch to bring back.
-    if (workspaceClaim(workspace, follower) == WorkspaceClaim::Yours)
-        return proto::WorkspaceRelease::SwitchedAway;
-    return std::nullopt;
-}
-
-void SessionHost::noteWorkspaceFollowed(WorkspaceId workspace, SessionStreamEvents const* follower)
-{
-    auto const release = releaseUntilShown(workspace, follower).or_else([&] {
-        // Another unshown follow took the record first: this follower holds it as well, so that whichever of
-        // them goes last, unshown, puts it back.
-        auto const held = std::ranges::find(_unshownFollows, workspace.value, &UnshownFollow::workspace);
-        return held != _unshownFollows.end() ? std::optional { held->release } : std::nullopt;
-    });
-    _lastReleases.erase(workspace.value);
-    if (!release)
+    if (!std::ranges::contains(_attachedClients, &client))
         return;
-    auto const isThisFollow = [&](UnshownFollow const& follow) {
-        return follow.follower == follower && follow.workspace == workspace.value;
+    _lastSelected = workspace;
+    settleRaiseRole();
+}
+
+void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus)
+{
+    if (!std::ranges::contains(_attachedClients, &client))
+        return;
+    if (focus == proto::WindowFocus::Focused)
+        _focusSerials[&client] = ++_focusCounter;
+    settleRaiseRole();
+}
+
+std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionId session) const
+{
+    auto const [workspace, tab, leaf] = _model.findSessionLeaf(session);
+    if (workspace == nullptr)
+        return std::nullopt;
+    auto const views = connectionViews();
+    return clipboardTarget(views, workspace->id().value);
+}
+
+std::optional<ConnectionId> SessionHost::raiseHolderNow() const
+{
+    auto const views = connectionViews();
+    return raiseHolder(views);
+}
+
+void SessionHost::settleRaiseRole()
+{
+    auto const holder = raiseHolderNow();
+    if (holder == _raiseHolder)
+        return;
+    auto const previous = std::exchange(_raiseHolder, holder);
+    auto const tell = [this](std::optional<ConnectionId> const& connection, proto::RaiseRole role) {
+        if (!connection)
+            return;
+        if (auto const found = std::ranges::find_if(
+                _attachedClients,
+                [&](SessionStreamEvents const* client) { return client->connectionId() == *connection; });
+            found != _attachedClients.end())
+            (*found)->raiseRoleChanged(role);
     };
-    if (!std::ranges::any_of(_unshownFollows, isThisFollow))
-        _unshownFollows.push_back(
-            UnshownFollow { .follower = follower, .workspace = workspace.value, .release = *release });
+    tell(previous, proto::RaiseRole::Quiet);
+    tell(holder, proto::RaiseRole::Raise);
 }
 
-void SessionHost::noteWorkspaceShown(WorkspaceId workspace)
+WorkspaceVisibility SessionHost::visibility(uint64_t workspace) const
 {
-    // Shown to one window, it is no longer hidden for any: every follow still unshown forgets the record.
-    std::erase_if(_unshownFollows,
-                  [&](UnshownFollow const& follow) { return follow.workspace == workspace.value; });
+    return std::ranges::any_of(_attachedClients,
+                               [workspace](SessionStreamEvents const* client) {
+                                   return client->selectedWorkspace() == workspace;
+                               })
+               ? WorkspaceVisibility::Shown
+               : WorkspaceVisibility::Hidden;
 }
 
-WorkspaceVisibility SessionHost::visibility(WorkspaceId workspace) const
+std::vector<ConnectionView> SessionHost::connectionViews() const
 {
-    auto const followers = static_cast<std::size_t>(
-        std::ranges::count_if(_attachedClients, [workspace](SessionStreamEvents const* client) {
-            return client->follows(workspace);
-        }));
-    return visibilityOf(followers, lastRelease(workspace));
-}
-
-std::optional<proto::WorkspaceRelease> SessionHost::lastRelease(WorkspaceId workspace) const noexcept
-{
-    auto const found = _lastReleases.find(workspace.value);
-    return found != _lastReleases.end() ? std::optional { found->second } : std::nullopt;
-}
-
-void SessionHost::claimPrimaryViewer(SessionStreamEvents const* client)
-{
-    if (_primaryViewer == nullptr)
-        _primaryViewer = client;
+    // A client that is never told its role, nor asked to switch, must not hold either.
+    return std::ranges::to<std::vector>(
+        _attachedClients
+        | std::views::filter([](SessionStreamEvents const* client) { return client->followsDaemon(); })
+        | std::views::transform([this](SessionStreamEvents const* client) {
+              auto const stamped = _focusSerials.find(client);
+              return ConnectionView { .connection = client->connectionId(),
+                                      .selected = client->selectedWorkspace(),
+                                      .focusSerial = stamped != _focusSerials.end() ? stamped->second : 0 };
+          }));
 }
 
 void SessionHost::splitActivePane(TabId tab,
@@ -1946,27 +1895,11 @@ std::optional<ConnectionId> SessionHost::lastInputFrom(SessionId session) const
     return std::nullopt;
 }
 
-std::optional<ConnectionId> SessionHost::lastTypistIn(WorkspaceId workspace) const
-{
-    auto const* found = _model.workspace(workspace);
-    if (found == nullptr)
-        return std::nullopt;
-    auto newest = std::optional<LastInput> {};
-    for (auto const index: std::views::iota(0, found->tabCount()))
-        for (auto const session: found->tabAt(index)->leafSessions())
-        {
-            auto const input = _lastInput.find(session.value);
-            if (input != _lastInput.end() && (!newest || input->second.at > newest->at))
-                newest = input->second;
-        }
-    return newest ? newest->from : std::nullopt;
-}
-
-std::vector<ConnectionId> SessionHost::clientsShowing(WorkspaceId workspace) const
+std::vector<ConnectionId> SessionHost::clientsShowing(uint64_t workspace) const
 {
     auto showing = std::vector<ConnectionId> {};
     for (auto const* client: _attachedClients)
-        if (client->follows(workspace))
+        if (client->selectedWorkspace() == workspace)
             showing.push_back(client->connectionId());
     return showing;
 }
@@ -2375,7 +2308,12 @@ void SessionHost::endSession(SessionId session, SessionEnd cause)
     // still exists; only then destroy the terminal. The session may live in ANY
     // workspace (a client-created secondary workspace included).
     if (auto const [workspace, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
-        _model.closePane(workspace->id(), tab->id(), leaf->id());
+    {
+        auto const id = workspace->id();
+        _model.closePane(id, tab->id(), leaf->id());
+        if (auto const* const left = _model.workspace(id); left != nullptr && left->tabCount() == 0)
+            _endedWorkspaces.insert(id.value);
+    }
 
     auto const hadExtensions = it->second->hasExtensions();
     eraseSession(session.value);
@@ -2716,6 +2654,9 @@ void SessionHost::tabAdded(WorkspaceId workspace, TabId tab, int index)
     // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every
     // workspace was, a move's own included (MoveWorkspaceHooks).
     bindUnnamed(tab);
+    // A workspace that ended and holds a tab again (a creation naming no workspace lands in the host's own)
+    // is a workspace to select again.
+    _endedWorkspaces.erase(workspace.value);
     // Re-fitted first: the pane may come from a split and be half the size its new tab gives it.
     reprojectTab(tab);
     fanOut(&vtworkspace::ModelEvents::tabAdded, workspace, tab, index);
@@ -2742,6 +2683,7 @@ void SessionHost::tabMovedToWorkspace(WorkspaceId from, TabId tab, int fromIndex
 {
     // The tab lands in a workspace of another size: its shells are resized before observers advertise it.
     reprojectTab(tab);
+    _endedWorkspaces.erase(to.value);
     fanOut(&vtworkspace::ModelEvents::tabMovedToWorkspace, from, tab, fromIndex, to, toIndex);
 }
 

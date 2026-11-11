@@ -42,7 +42,7 @@ pane.
 | `contour label OBJECT LABEL` | Labels a workspace, tab or pane (`contour label pane:018f logs`); an empty label clears it. |
 | `contour block list [--pane P] [--limit N]` | Lists a pane's recent command blocks, newest first: `id  exit  duration  command`. |
 | `contour block read [BLOCK] [--pane P] [--prompt \| --output]` | Prints a block's text; without `BLOCK`, the pane's last finished block. With neither flag, the prompt and then the output. |
-| `contour switch [--workspace W] (--to-label L \| --to-host H \| --to-workspace W2) [--to-workspace W2]` | Switches the window showing a workspace to another workspace or daemon, in place. See [Switching a window](#switching-a-window). |
+| `contour switch [--workspace W] (--to-label L \| --to-host H \| --to-workspace W2) [--to-workspace W2]` | Asks one window to switch to another workspace or daemon, in place. See [Switching a window](#switching-a-window). |
 | `contour wait [BLOCK] [--pane P] [--timeout SECONDS]` | Waits for a block to finish and exits with the command's own status. |
 | `contour events [--follow] [--kind K[,K...]] [--pane P]` | Prints the first matching event and exits, or with `--follow` every event until Ctrl+C (exit status 130). |
 | `contour api list [-q]` | Lists the API's methods and events; `-q` prints names only. |
@@ -81,22 +81,23 @@ A bare word (`--daemon homepc`) names a saved host of the configuration's `hosts
 
 ### Workspaces opened by `contour new --new-workspace`
 
-A workspace created by a control connection is followed by the primary viewer, the GUI whose launch took every
-workspace, and so appears in the open GUI. With no GUI attached it appears at the next launch.
+A workspace created by a control connection is selected by no window yet. It appears in the open GUI's
+workspace list as `hidden`, and any window can select it. With no GUI attached it is there for the next
+launch to find.
 
 ## Switching a window
 
-`workspace.switch` asks the window that shows a workspace to switch to another workspace, or to another
-daemon, in place. It is a socket method (an extension cannot call it) and needs `write`; it is not an MCP tool,
-because an agent in a pane must not re-point the window it runs in.
+`workspace.switch` asks one window to switch to another workspace, or to another daemon, in place: a window shows one workspace at a time and moves between a daemon's workspaces without opening another window. It is a
+socket method (an extension cannot call it) and needs `write`; it is not an MCP tool, because an agent in a
+pane must not re-point the window it runs in.
 
 ```json
-{"workspace":"","toLabel":"admin","toHost":"","toWorkspace":"build"}
+{"toLabel":"admin","toHost":"","toWorkspace":"build"}
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `workspace` | The workspace whose window switches (id, label, position or suffix). Empty: the caller's pane's workspace. |
+| `workspace` | Optional. The workspace whose window switches (id, label, position or suffix): the window selecting it that was focused last. Absent: the window selecting the caller's pane's workspace, and from outside any pane the window that rings and raises for the daemon (the most recently focused one). |
 | `toLabel` | A local daemon, by label. |
 | `toHost` | A saved host, or an `ssh://` URL. Not together with `toLabel`; with neither, the window stays on this daemon. |
 | `toWorkspace` | The destination workspace, as a spec the window resolves against the destination daemon (id, label, position or suffix). Empty lets the window decide. |
@@ -107,17 +108,18 @@ From the command line:
 contour switch --to-label admin                       # this pane's window goes to the daemon labelled admin
 contour switch --to-host homepc --to-workspace build  # a saved host, and its workspace build
 contour switch --to-workspace 2                       # another workspace of the same daemon
-contour switch --label work --workspace w1 --to-label admin   # from outside any pane
+contour switch --label work --workspace w1 --to-label admin   # the window selecting w1, from outside any pane
 ```
 
-`--daemon`/`--label` choose the daemon the window is on now, and `--workspace` which of its workspaces
-(default: the workspace of `$CONTOUR_PANE`, so inside a pane no flags are needed). `--to-host` takes a saved
+`--daemon`/`--label` choose the daemon the window is on now, and `--workspace`, optionally, the workspace its
+window selects (default: the workspace of `$CONTOUR_PANE`, so inside a pane no flags are needed; outside a
+pane, the window focused last). `--to-host` takes a saved
 host's name or an `ssh://` URL; any other URL is refused with exit status 2, and must be saved in the
 configuration's `hosts:` section first. Without `--to-workspace`, a destination with exactly one workspace (or none, which
 creates one) is used; with several, the window asks which in its switcher popup (outcome `picker`). `contour switch` waits for the window's answer and prints the outcome; `switched`, `focused` and `picker`
 exit 0, `refused`
-exits 5, `failed` exits 1, and a workspace shown by no window (or by several, none known to have typed last)
-exits 3 with the reason. To open a window on another daemon instead of re-pointing one, use
+exits 5, `failed` exits 1, and a workspace that no window selects (or a daemon with no window attached) exits 3 with the
+reason. To open a window on another daemon instead of re-pointing one, use
 `contour client --label L --workspace W` or `contour client --host H --workspace W` (see
 [Remote hosts](remote-hosts.md)).
 
@@ -136,18 +138,20 @@ wait; the window takes at most 5 minutes of it. A destination given as an `ssh:/
 The reply is `{"outcome":"switched","detail":""}`. `outcome` is `switched`, `focused` (another window already
 shows the destination, and was focused), `picker` (the window asked its user which workspace), `refused` (the
 user declined: "the user declined the switch") or `failed`; `detail` says why in a sentence. A window that
-does not show the workspace (any more) answers `failed` ("no window here shows workspace N"). A window that does not answer within 30 seconds
+no longer selects the workspace answers `failed` ("no window here shows workspace N"). A window that does not answer within 30 seconds
 is reported as `failed` ("no answer from the window"), and one whose client predates switching as `failed`
 ("the window cannot switch (client too old)").
 
-Which window switches is decided by the daemon: the client that typed last into the workspace's panes. With
-no input recorded, a workspace shown by one window switches that one; by several, the call fails as
-`ambiguous` and lists them (`native#3`); by none, as `notFound` ("no client shows workspace ...").
+Which window switches is decided by the daemon, always to exactly one. With `workspace`, it is the window
+selecting that workspace that was focused last; without it, the window selecting the workspace of the
+caller's pane; without a pane either, the window that rings and raises. When no window selects the named
+workspace the call fails as `notFound` ("no window selects workspace ..."), and with no window attached at all
+as `notFound` ("no window is attached"). Two windows selecting the same workspace therefore never make a call
+fail: the one focused last is asked.
 
-`workspace.list` tells what a switch can act on. Each workspace carries `visibility` (`shown`: a window shows
-it; `left`: none does, and a launch brings it back; `hidden`: a window switched away from it, and a launch
-leaves it alone), `clients` (how many windows show it) and `native` (the daemon's own id for it, in decimal,
-which a window follows it by).
+`workspace.list` tells what a switch can act on. Each workspace carries `visibility` (`shown`: some window
+selects it; `hidden`: none does), `clients` (how many windows select it) and `native` (the daemon's own id for
+it, in decimal, which a window selects it by).
 
 ## Waiting
 

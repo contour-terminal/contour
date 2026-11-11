@@ -118,12 +118,11 @@ std::string_view describe(SwitcherWorkspaceState state) noexcept
 {
     switch (state)
     {
-        case SwitcherWorkspaceState::Left: return "not shown";
         case SwitcherWorkspaceState::Hidden: return "hidden";
         case SwitcherWorkspaceState::ShownElsewhere: return "shown elsewhere";
         case SwitcherWorkspaceState::ThisWindow: return "this window";
     }
-    return "not shown";
+    return "hidden";
 }
 
 std::string switcherDaemonName(session::SwitchTarget const& address)

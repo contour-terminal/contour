@@ -74,13 +74,13 @@ TEST_CASE("Settings… opens Settings while the last focused window is minimised
     contour::test::ScopedControllerWithOsWindow const window { app.manager() };
     window->bindWindow(window.osWindow.get());
     std::ignore = createSessionTabs(app.manager(), *window, 1);
-    app.manager().setFocusedWindow(window->windowId());
+    app.manager().setFocusedWindow(window->displayedWorkspace());
     window.osWindow->setWindowStates(Qt::WindowMinimized);
     auto const tree = contour::command::buildMenuTree(
         contour::command::buildMenuBar(window->menuBarState()), {}, contour::command::ShortcutStyle::Text);
 
     // As after ⌘M: the minimised window no longer holds focus.
-    app.manager().clearFocusedWindow(window->windowId());
+    app.manager().clearFocusedWindow(window->displayedWorkspace());
     REQUIRE_FALSE(app.manager().focusedWindow().has_value());
 
     runMenuBarRow(app, tree, "Settings…");

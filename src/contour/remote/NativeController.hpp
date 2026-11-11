@@ -21,8 +21,10 @@
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
+#include <contour/remote/SelectAnswer.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/window/WorkspaceDirectory.hpp>
 
 #include <vtbackend/screen/Settings.hpp>
 
@@ -46,6 +48,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -54,6 +57,7 @@
 #include <vector>
 
 #include <vthost/Transport.hpp>
+#include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
@@ -125,7 +129,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     {
         Launch = 0, ///< What a launch follows (proto::AttachIntentKind::Resume): the launch's link.
         /// Nothing: its window's workspace is gone, and the window closes
-        /// (proto::AttachIntentKind::Workspaces). A link that took its workspace over from another, which
+        /// (proto::AttachIntentKind::Select). A link that took its workspace over from another, which
         /// must not take what other windows resume.
         Nothing,
     };
@@ -260,12 +264,6 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param spawn What the tab's session runs: its profile, by the name the daemon resolves.
     void requestCreateTab(vtpty::Pty const* actingPty, contour::session::RemoteSpawn const& spawn);
 
-    /// Asks the daemon to create a new workspace (B4). The daemon honors it and pushes
-    /// that workspace's LayoutState; the GUI opens a matching OS window and reconciles
-    /// the workspace's tabs into it. A no-op once detached.
-    /// @param spawn What the workspace's first session runs: its profile, by the name the daemon resolves.
-    void requestCreateWorkspace(contour::session::RemoteSpawn const& spawn);
-
     /// Asks the daemon to split the pane hosting the remote session bound to local
     /// pty @p actingPty (@p vertical orientation). The daemon honors it and
     /// re-pushes its layout, which reconciles into a local split. A no-op if the pty
@@ -309,9 +307,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param reply The request's id, what came of it, and why.
     void replySwitch(vthost::proto::SwitchReply reply);
 
-    /// @return The daemon workspace ids currently known, ascending. The daemon starts
-    ///         with one workspace and grows via NewWorkspace; the GUI maps one OS window to
-    ///         each (B4). A thread-safe snapshot.
+    /// @return The daemon workspace ids currently known, ascending: every workspace the daemon lists, the
+    ///         selected one and the others. A thread-safe snapshot.
     [[nodiscard]] std::vector<uint64_t> workspaceIds() const;
 
     /// @return The daemon's most recent tab/pane layout for @p daemonWorkspace, or
@@ -373,26 +370,37 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// a session settings source.
     void restateSessionSettings();
 
-    /// GUI thread. Has the connection show @p workspace as well (proto::FollowWorkspace), and every later
-    /// connection resume it: its layout arrives as any other, through layoutChanged(). While the connection
-    /// is sought again the PDU is not sent, and the reconnect resumes the workspace instead.
-    /// @param workspace The daemon workspace; 0 asks the daemon for a new one, which this connection claims.
-    /// @return Nothing once asked; why not when the daemon does not share Capability::WorkspaceFollow, or no
-    ///         connection was accepted yet.
-    [[nodiscard]] std::expected<void, std::string> follow(uint64_t workspace);
+    /// GUI thread. Has this connection select @p workspace: the daemon pushes its layout and its sessions'
+    /// screens in full from then on and the other workspaces' panes as summaries (directory()), and a
+    /// reconnect resumes it. Takes effect when the daemon's next layout batch states the selection
+    /// (selectedWorkspace()).
+    /// @param workspace The daemon workspace; 0 asks the daemon to create one and select it.
+    /// @return The request's number, which its answer names (takeSelectAnswers()); why nothing was sent
+    ///         otherwise: the connection is not up, or the daemon predates the selection.
+    [[nodiscard]] std::expected<uint64_t, std::string> select(uint64_t workspace);
 
-    /// GUI thread. Has the connection stop showing @p workspace (proto::ReleaseWorkspace): its layout is
-    /// forgotten at once, one still on its way is dropped, and no later connection -- a reconnect, the return
-    /// from a live upgrade -- resumes it. While the connection is sought again the PDU is not sent; the
-    /// daemon then learns the workspace went with the connection that showed it, which leaves it left, never
-    /// hidden.
-    /// @param workspace The daemon workspace.
-    /// @param reason Why: Closed for a window closed, SwitchedAway for one that moved on.
-    /// @return Nothing once released; why not when the daemon does not share Capability::WorkspaceFollow, or
-    /// no
-    ///         connection was accepted yet.
-    [[nodiscard]] std::expected<void, std::string> release(uint64_t workspace,
-                                                           vthost::proto::WorkspaceRelease reason);
+    /// GUI thread. Tells the daemon whether this window has the user's focus; it decides from the reports of
+    /// every attached window which one raises for a bell (raiseRole()). Stated again to every connection that
+    /// replaces a lost one.
+    /// @param focus The window's focus now.
+    void reportFocus(vthost::proto::WindowFocus focus);
+
+    /// GUI thread.
+    /// @return Whether this window rings and raises for a bell or notification, as the daemon decided it for
+    ///         what the GUI thread handles now: a role change takes effect behind the events sent before it,
+    ///         so a pane's bell is judged by the role it arrived under. Quiet until the daemon says. A
+    ///         session folds the bells of one GUI-loop turn into one post (TerminalSession::bell), so of two
+    ///         bells straddling a role change within that turn, the second is judged by the first's role.
+    [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept;
+
+    /// @return The daemon workspace this window selects, 0 for none: as the daemon stated it with the last
+    ///         layout batch. Takes _mutex.
+    [[nodiscard]] uint64_t selectedWorkspace() const noexcept;
+
+    /// @return Every workspace of the daemon this window can list, with the tabs and panes of each and what
+    ///         is known of them: the layouts the daemon pushes for every workspace, and the status it
+    ///         pushes for every pane, mirrored or not. Takes _mutex.
+    [[nodiscard]] window::WorkspaceDirectory directory() const;
 
     /// @return Whether any pty this controller made is still alive, bound to a remote session or detached
     ///         from one: the controller must outlive it, as the pty calls back into it until its destruction
@@ -511,18 +519,51 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return Their request numbers, oldest first.
     [[nodiscard]] std::vector<uint64_t> takeLandedMoves();
 
-    /// The moves in flight, by the serial each went out under, as requestRemoteMove() numbers them.
-    using MovesInFlight = std::map<uint64_t, uint64_t>;
+    /// A select() in flight.
+    struct SelectRequest
+    {
+        uint64_t request = 0; ///< Its request number, as select() returned it.
+        uint64_t asked = 0;   ///< The workspace it asked for; 0 for a new one.
+        bool operator==(SelectRequest const&) const = default;
+    };
 
-    /// Takes out of @p inFlight the moves a push ended with @p causeSerial completes. The daemon names one
-    /// cause per push, the last move it served before the push's end was sent, and serials only grow per
-    /// connection: every move with a serial up to it was served by then, so it is complete as well -- one
+    /// The selections select() asked for whose answering pushes have ended since the last call: one that
+    /// states another workspace than it asked for was not taken (the daemon has no such workspace, or could
+    /// not make a new one). Any thread.
+    /// @return The answers, oldest first.
+    [[nodiscard]] std::vector<SelectAnswer> takeSelectAnswers();
+
+    /// What the panes of the workspaces this connection does not select raised -- a bell, a desktop
+    /// notification, a command that finished -- while this connection held the raise role
+    /// (proto::RaiseRole::Raise) as each arrived: the window rings and notifies for them. Each is handed out
+    /// once. Any thread.
+    /// @return Their summaries, carrying only what was raised, oldest first.
+    [[nodiscard]] std::vector<vthost::proto::PaneSummary> takeRaised();
+
+    /// The moves in flight, by the serial each went out under: each move's request number, as
+    /// requestRemoteMove() numbers it.
+    using RequestsInFlight = std::map<uint64_t, uint64_t>;
+
+    /// Takes out of @p inFlight the requests a push ended with @p causeSerial completes. The daemon names one
+    /// cause per push, the last request it served before the push's end was sent, and serials only grow per
+    /// connection: every request with a serial up to it was served by then, so it is complete as well -- one
     /// that pushed nothing would otherwise wait for the next reconnect.
-    /// @param inFlight    The moves in flight; the completed ones are erased.
+    /// @param inFlight    The requests in flight, by serial; the completed ones are erased.
     /// @param causeSerial LayoutBatchEnd::causeSerial; 0 when no request of this client caused the push.
-    /// @return Their request numbers, oldest first.
-    [[nodiscard]] static std::vector<uint64_t> takeCompletedMoves(MovesInFlight& inFlight,
-                                                                  uint64_t causeSerial);
+    /// @return What each request stands for, oldest first.
+    template <typename Request>
+    [[nodiscard]] static std::vector<Request> takeCompletedRequests(std::map<uint64_t, Request>& inFlight,
+                                                                    uint64_t causeSerial)
+    {
+        auto completed = std::vector<Request> {};
+        if (causeSerial == 0)
+            return completed;
+        auto const end = inFlight.upper_bound(causeSerial);
+        for (auto const& request: std::ranges::subrange(inFlight.begin(), end) | std::views::values)
+            completed.push_back(request);
+        inFlight.erase(inFlight.begin(), end);
+        return completed;
+    }
 
     /// SessionFactory: the run of the daemon the last accepted connection reached.
     /// @return The daemon's instance; std::nullopt before a connection was accepted, and from a daemon that
@@ -545,18 +586,6 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// controller holds for the tab (vthost::client::tabEditsToReport). Dropped while realizing a layout,
     /// whose changes came from the daemon, and for a tab the daemon has not pushed.
     void reportTabPresentation(contour::session::LocalTabPresentation const& presentation) override;
-
-    /// SessionFactory: a GUI "new window" is authored on the daemon as a new workspace
-    /// (requestCreateWorkspace); the daemon's new-workspace layout push maps it onto a
-    /// fresh OS window. A window spawned BY the reconciler itself (while realizing) is
-    /// not re-authored — it is the local half of a daemon workspace that already exists.
-    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
-    {
-        if (isRealizingLayout())
-            return false;
-        requestCreateWorkspace(spawn);
-        return true;
-    }
 
     /// SessionFactory: the user ended the pane backed by @p pty, so close it on the daemon too
     /// rather than leave the session running there with nothing showing it. The counterpart of
@@ -644,6 +673,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The daemon's tab/pane layout changed (fires on the reactor thread; connect
     /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
     void layoutChanged();
+
+    /// What directory() holds changed: once per layout batch the daemon ended, and once per flush of the
+    /// status that arrived since the last one -- never once per PDU (fires on the reactor thread for a layout
+    /// batch and on the GUI thread for a status flush; connect queued).
+    void directoryChanged();
 
     /// A daemon's status-line extension asks this client's user something (fires on the reactor thread;
     /// connect queued). The GUI takes the questions with takePermissionRequests().
@@ -810,6 +844,28 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// a daemon built while it was sent on departures sends); re-asserts the panes from the GUI thread.
     void onPanesReprojected();
 
+    /// Reactor thread. Merges what the daemon says changed about a pane field by field into the status store.
+    void onPaneSummary(vthost::proto::PaneSummary const& summary);
+
+    /// Reactor thread. Takes the role the daemon gives this connection.
+    void onRaiseRole(vthost::proto::RaiseRole role);
+
+    /// _mutex held. Has the GUI thread announce directoryChanged() once for every change of
+    /// the status store until then.
+    void scheduleStatusFlush();
+
+    /// GUI thread. Announces the status that arrived since the last flush.
+    void flushStatus();
+
+    /// _mutex held. Forgets the status of sessions no layout names any more.
+    void pruneStatus();
+
+    /// _mutex held. The panes of the selected workspace are shown, so they have no output unseen.
+    void clearSelectedActivity();
+
+    /// Fails the attach with @p reason and ends the supervisor, so that nothing of the daemon arrives after.
+    void failAttach(std::string reason);
+
     /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
     [[nodiscard]] bool layoutBatchShared() const;
 
@@ -952,9 +1008,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
     bool _realizingLayout = false; ///< canCreateSession() is true while a layout is being realized.
     /// The request number of each move in flight, by the serial it went out under (@see requestRemoteMove).
     /// Reactor thread only.
-    MovesInFlight _moveRequests;
+    RequestsInFlight _moveRequests;
     /// The request numbers of the moves whose pushes ended, for takeLandedMoves(). Under _mutex.
     std::vector<uint64_t> _landedMoves;
+    /// Each select() in flight, by the serial it went out under. Reactor thread only.
+    std::map<uint64_t, SelectRequest> _selectRequests;
+    /// The request number the next select() gets. Under _mutex.
+    uint64_t _nextSelectRequest = 1;
+    /// The answers to the selections whose pushes ended, for takeSelectAnswers(). Under _mutex.
+    std::vector<SelectAnswer> _selectAnswers;
     /// The daemon tab each local tab shows, by local TabId value (@see pairTab).
     /// Written by the GUI thread, cleared by the connection thread when the daemon restarted (its tab ids
     /// count from 1 again): under _mutex.
@@ -1080,16 +1142,33 @@ class NativeController final: public QObject, public contour::session::SessionFa
         uint64_t daemonInstance = 0; ///< 0 for unknown.
     };
     ShownWorkspaces _shownWorkspaces;
-    /// What follow() and release() changed since the first connection: every later one resumes the
-    /// workspaces followed since and not the ones released (makeClient()), and a layout of a released one
-    /// is dropped. Forgotten for a restarted daemon, whose ids name other workspaces. Under _mutex.
-    struct FollowChanges
+    /// The workspace the window selects, 0 for none: a stand-in for the first connection's resume
+    /// (makeClient()); the client and the supervisor hold the live selection. Refreshed from the client with
+    /// each connection and layout batch; forgotten for a restarted daemon, whose ids name other workspaces.
+    /// Under _mutex.
+    uint64_t _selected = 0;
+    /// What is known of each pane of each workspace, by daemon session: the program-status records the daemon
+    /// pushes for every session, and the fields of its PaneSummary for the panes of the workspaces this
+    /// window does not select. Under _mutex.
+    std::map<uint64_t, window::PaneStatus> _paneStatus;
+    /// Whether a flush of _paneStatus is queued for the GUI thread. Under _mutex.
+    enum class StatusFlush : uint8_t
     {
-        std::set<uint64_t> followed; ///< Asked to be shown since; possibly not pushed yet.
-        /// Asked to be shown no more since, each with why: a release a reconnect raced is sent again on it.
-        std::map<uint64_t, vthost::proto::WorkspaceRelease> released;
+        Idle,
+        Queued,
     };
-    FollowChanges _followChanges;
+    StatusFlush _statusFlush = StatusFlush::Idle;
+    /// What the daemon last said this connection does for raising, as the reactor has it: what a summary is
+    /// judged by as it arrives. Under _mutex.
+    vthost::proto::RaiseRole _raiseRole = vthost::proto::RaiseRole::Quiet;
+    /// The same, as the GUI thread has it: updated through the GUI thread's queue, behind the events posted
+    /// before the change (@see raiseRole()). GUI thread only.
+    vthost::proto::RaiseRole _guiRaiseRole = vthost::proto::RaiseRole::Quiet;
+    /// What the panes this connection does not mirror raised while it held the raise role, for takeRaised():
+    /// judged by the role as it stood when each arrived. Under _mutex.
+    std::vector<vthost::proto::PaneSummary> _raised;
+    /// The focus last reported, stated again to each connection that replaces a lost one. Under _mutex.
+    vthost::proto::WindowFocus _focus = vthost::proto::WindowFocus::Unfocused;
     /// ResumeFallback::Nothing: the workspaces a reconnect resumed whose first layout is still to come. One
     /// that comes with no tab is lost, as Resume would have judged it: its session ended meanwhile. Under
     /// _mutex.

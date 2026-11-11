@@ -372,6 +372,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteController.hpp
         remote/ReactorThread.hpp
         remote/RemoteLayout.hpp
+        remote/SelectAnswer.hpp
         remote/SwitchGrants.hpp
         remote/SwitchGuard.hpp
         remote/SwitchHost.hpp
@@ -1661,6 +1662,7 @@ if(CONTOUR_TESTING)
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
+        window/WorkspaceDirectory_test.cpp
         window/TabBadge_test.cpp
         window/ShellIntegrationOffer_test.cpp
         window/ShellInstallRows_test.cpp

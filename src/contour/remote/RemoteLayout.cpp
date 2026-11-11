@@ -3,6 +3,7 @@
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/WorkspaceDirectory.hpp>
 
 #include <core/Utils.hpp>
 #include <core/log/LogStore.hpp>
@@ -46,23 +47,12 @@ namespace
         return node->session;
     }
 
-    /// Appends every leaf session of @p pane to @p out, in tree order.
-    void collectSessions(vthost::proto::WirePane const& pane, std::vector<uint64_t>& out)
-    {
-        if (!pane.isSplit())
-        {
-            out.push_back(pane.session);
-            return;
-        }
-        for (auto const& child: pane.children)
-            collectSessions(child, out);
-    }
-
     /// @return Every leaf session of @p pane, in tree order.
     [[nodiscard]] std::vector<uint64_t> sessionsOf(vthost::proto::WirePane const& pane)
     {
         auto out = std::vector<uint64_t> {};
-        collectSessions(pane, out);
+        window::forEachLeaf(pane,
+                            [&out](vthost::proto::WirePane const& leaf) { out.push_back(leaf.session); });
         return out;
     }
 
@@ -503,6 +493,13 @@ namespace
         applyRatios(manager, tab, wire.children[1], *local.second());
     }
 
+    /// @return Whether @p kind makes a tab or pane the active one, rather than changing how one looks.
+    [[nodiscard]] constexpr bool isActivation(vthost::proto::TabEditKind kind) noexcept
+    {
+        return kind == vthost::proto::TabEditKind::ActivatePane
+               || kind == vthost::proto::TabEditKind::ActivateTab;
+    }
+
     /// Brings how @p local is presented -- its active and zoomed pane, title, colour, and whether it is its
     /// window's active tab -- in line with how the daemon presents @p wire, so a change another client made
     /// arrives here too. @pre sameTree(), so every leaf of @p wire has its local session in @p bound.
@@ -512,12 +509,14 @@ namespace
     /// daemon's own table (vthost::applyTabEdit) once their sessions are translated to this model's: the two
     /// ends then cannot disagree on what an edit means. Each compares first, so a converged push writes
     /// nothing; and none is echoed back, as this runs while the controller realizes a layout, during which
-    /// NativeController::reportTabPresentation drops what the manager reports.
+    /// NativeController::reportTabPresentation drops what the manager reports. With @p selection Keep, the
+    /// daemon's active tab and pane are not taken: the window activated its own.
     void applyPresentation(vtworkspace::SessionModel& model,
                            BoundSessions const& bound,
                            vthost::proto::WireTab const& wire,
                            vthost::client::TabActivity activity,
-                           vtworkspace::Tab const& local)
+                           vtworkspace::Tab const& local,
+                           TabSelection selection)
     {
         auto const remoteOf = [&](vtworkspace::Pane const* leaf) -> uint64_t {
             return leaf != nullptr ? bound.remoteOf(leaf->session()).value_or(0) : 0;
@@ -537,6 +536,10 @@ namespace
         for (auto edit:
              vthost::client::tabEditsToReport(vthost::client::presentationOf(wire, activity), here))
         {
+            // Once the window shows the workspace, which tab and pane are active is its own: the daemon's are
+            // the last any window activated.
+            if (selection == TabSelection::Keep && isActivation(edit.kind))
+                continue;
             auto const session = bound.localOf(edit.session);
             if (!session)
                 continue;
@@ -594,72 +597,6 @@ namespace
     }
 } // namespace
 
-std::vector<ReconciledWorkspace> workspacesToReconcile(LayoutSnapshot const& layouts)
-{
-    return std::ranges::to<std::vector>(
-        layouts | std::views::transform([](auto const& entry) {
-            auto sessions = std::vector<uint64_t> {};
-            for (auto const& tab: entry.second->tabs)
-                collectSessions(tab.root, sessions);
-            return ReconciledWorkspace {
-                .daemonWorkspace = entry.first,
-                .tabs = entry.second->tabs.empty() ? DaemonWorkspaceTabs::None : DaemonWorkspaceTabs::Some,
-                .sessions = std::move(sessions),
-            };
-        }));
-}
-
-std::vector<ReconciledWorkspace> workspacesToReconcile(NativeController const& controller)
-{
-    return workspacesToReconcile(controller.settledLayouts());
-}
-
-void reconcileAttachWindows(contour::session::TerminalSessionManager& manager,
-                            NativeController& controller,
-                            LayoutSnapshot const& layouts,
-                            AttachWindowMap& windows,
-                            std::function<void(ReconciledWorkspace const&)> const& openWindow)
-{
-    auto const isOpen = [&](vtworkspace::WorkspaceId window) {
-        return manager.model().workspace(window) != nullptr;
-    };
-    auto const wereOpen = std::ranges::to<std::vector>(
-        windows | std::views::filter([&](auto const& entry) { return isOpen(entry.second); })
-        | std::views::keys);
-    {
-        auto const hold = manager.holdEmptiedWindows();
-        auto const reconciled = workspacesToReconcile(layouts);
-        for (auto const& window: reconciled)
-        {
-            if (auto const mapped = windows.find(window.daemonWorkspace); mapped != windows.end())
-            {
-                applyRemoteLayout(manager, mapped->second, controller, layouts, window.daemonWorkspace);
-                manager.deliverRestoreSummaryTo(mapped->second);
-                continue;
-            }
-            openWindow(window);
-        }
-        // A window a pass emptied that shows a daemon workspace holding tabs is the next reconcile's to fill.
-        for (auto const& window: reconciled)
-            if (auto const mapped = windows.find(window.daemonWorkspace);
-                window.tabs == DaemonWorkspaceTabs::Some && mapped != windows.end())
-                hold.keep(mapped->second);
-    }
-    // A window this pass closed goes with its mapping, and so does one closed before -- by its user -- once
-    // its daemon workspace is pushed empty: the daemon workspace filled again then gets an OS window of its
-    // own, where a mapping to the closed one would show it nowhere. One whose daemon workspace still holds
-    // tabs, or is merely absent from this snapshot (a reconnect settles windows frame by frame, a partial
-    // snapshot lacks some), keeps its mapping, so that the window its user closed does not open again.
-    auto const isPushedEmpty = [&](uint64_t daemonWorkspace) {
-        auto const found = layouts.find(daemonWorkspace);
-        return found != layouts.end() && found->second->tabs.empty();
-    };
-    std::erase_if(windows, [&](auto const& entry) {
-        return !isOpen(entry.second)
-               && (std::ranges::contains(wereOpen, entry.first) || isPushedEmpty(entry.first));
-    });
-}
-
 void forgetClosedTabPairings(contour::session::TerminalSessionManager const& manager,
                              NativeController& controller)
 {
@@ -683,7 +620,8 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                        NativeController& controller,
                        LayoutSnapshot const& layouts,
                        std::optional<uint64_t> daemonWorkspace,
-                       std::optional<vtbackend::PageSize> pageSize)
+                       std::optional<vtbackend::PageSize> pageSize,
+                       TabSelection selection)
 {
     // Select the daemon workspace to reconcile: the caller's, or the primary (lowest-id)
     // window for the single-window path.
@@ -810,7 +748,8 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
                           wireTab,
                           std::cmp_equal(index, layout.activeTab) ? vthost::client::TabActivity::Active
                                                                   : vthost::client::TabActivity::Inactive,
-                          *tab);
+                          *tab,
+                          selection);
     }
 
     controller.setRealizingLayout(false);

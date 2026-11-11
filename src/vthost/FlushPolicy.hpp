@@ -34,6 +34,9 @@ struct FlushPolicy
     /// How long after the connection attached, a followed session's output, or an input, the idle check
     /// keeps itself armed. Past it the connection is quiet and wakes nothing; the next activity re-arms it.
     core::platform::SteadyDuration inputEchoWindow = std::chrono::seconds { 2 };
+    /// The least time between two output marks of a pane the connection does not mirror: a pane printing
+    /// without pause costs its window one small PDU per interval, not one per flush.
+    core::platform::SteadyDuration activityMarkInterval = std::chrono::seconds { 1 };
 };
 
 /// Why a flush is scheduled.

@@ -532,6 +532,8 @@ TEST_CASE("TerminalSession: things with no place in the accessibility tree are a
     {
         // A bell changes no object's state, so without this nothing reaches an assistive client at all.
         session->bell();
+        // Rung on the GUI thread's next turn, once it is decided this window raises.
+        QCoreApplication::processEvents();
         REQUIRE(recorder->said.size() == 1);
         CHECK(recorder->said.front().message == "Bell");
         CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);

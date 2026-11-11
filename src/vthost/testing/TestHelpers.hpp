@@ -203,16 +203,15 @@ inline void reportDirectory(vtbackend::Terminal& terminal, std::filesystem::path
 
 /// @param host The host a client attaches to.
 /// @param hello What the client says of itself besides which workspaces it shows.
-/// @return @p hello, stating that it shows every workspace @p host holds, by name. A plain launch of a client
-///         that finds another one showing them is given a workspace of its own, so a test of two clients
-///         sharing a session attaches the second one like this.
+/// @return @p hello, stating that it selects the first workspace @p host holds, by name. A plain launch of a
+///         client that finds another one showing it is given a workspace of its own, so a test of two clients
+///         sharing a session attaches the second one like this. (Task 3: a connection selects one workspace.)
 [[nodiscard]] inline proto::ClientHello showingAll(SessionHost& host, proto::ClientHello hello = {})
 {
     hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::AttachIntent));
-    hello.attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} };
-    auto& model = host.model();
-    for (auto const index: std::views::iota(0, model.workspaceCount()))
-        hello.attachIntent.workspaces.push_back(model.workspaceAt(index)->id().value);
+    hello.attachIntent = { .kind = proto::AttachIntentKind::Select, .workspace = 0 };
+    if (auto const& model = host.model(); model.workspaceCount() > 0)
+        hello.attachIntent.workspace = model.workspaceAt(0)->id().value;
     return hello;
 }
 

@@ -154,7 +154,7 @@ TEST_CASE("NeedMoreData is not a protocol error", "[vthost][pdupump]")
 TEST_CASE("the pump decodes several frames from one write", "[vthost][pdupump]")
 {
     auto bytes = encoded(proto::DecodedPdu { proto::CreateTab {} }, 1);
-    auto const second = encoded(proto::DecodedPdu { proto::NewWorkspace {} }, 2);
+    auto const second = encoded(proto::DecodedPdu { proto::ClosePane {} }, 2);
     bytes.insert(bytes.end(), second.begin(), second.end());
 
     auto seen = std::vector<proto::PduType> {};
@@ -164,5 +164,5 @@ TEST_CASE("the pump decodes several frames from one write", "[vthost][pdupump]")
     });
 
     CHECK(outcome.stop == PumpStop::PeerClosed);
-    CHECK(seen == std::vector { proto::PduType::CreateTab, proto::PduType::NewWorkspace });
+    CHECK(seen == std::vector { proto::PduType::CreateTab, proto::PduType::ClosePane });
 }

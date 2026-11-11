@@ -17,7 +17,7 @@
 #include <functional>
 #include <string>
 
-#include <vthost/SwitchClient.hpp>
+#include <vthost/ViewRouting.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Primitives.hpp>
 

@@ -4,7 +4,7 @@
 /// @file
 /// `ClientSupervisor` — keeps a native client attached across a lost connection: it connects through a
 /// transport factory, runs one `NativeClient` per connection, and after a loss reconnects with backoff,
-/// resuming the workspaces the lost connection followed.
+/// resuming the workspace the lost connection selected.
 
 #include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
@@ -73,15 +73,14 @@ using ClientFactory = std::function<std::unique_ptr<NativeClient>(std::unique_pt
 using StateHandler = std::function<void(ConnectionState state, std::string const& reason)>;
 
 /// Runs one native connection after another: the first with the caller's intent, every later one resuming
-/// the workspaces the connection before it followed -- or, for a client that attached with AllWorkspaces,
-/// following every workspace again.
+/// the workspace the connection before it selected.
 class ClientSupervisor
 {
   public:
     /// @param loop The loop everything runs on.
     /// @param transport Opens each connection.
     /// @param makeClient Builds the client of each connection.
-    /// @param firstIntent What the first connection asks to follow.
+    /// @param firstIntent What the first connection asks for.
     /// @param backoff How long to wait before each reconnect attempt.
     /// @param onState Told every state change.
     ClientSupervisor(core::net::EventLoop& loop,
@@ -148,7 +147,7 @@ class ClientSupervisor
     [[nodiscard]] core::async::Task<void> untilStopped();
 
     /// Opens one connection and serves it to its end.
-    /// @param intent What this connection asks to follow.
+    /// @param intent What this connection asks for.
     /// @return How it ended.
     [[nodiscard]] core::async::Task<Outcome> attempt(proto::AttachIntent intent);
 
@@ -157,9 +156,7 @@ class ClientSupervisor
     ///         supervisor.
     [[nodiscard]] core::async::Task<Outcome> reconnect();
 
-    /// @return What a reconnect asks to follow: every workspace again for a client that followed every
-    /// workspace,
-    ///         else Resume of the workspaces the lost connection followed.
+    /// @return What a reconnect asks for: Resume of the workspace the lost connection selected.
     [[nodiscard]] proto::AttachIntent resumeIntent() const;
 
     /// Tells the handler of a state change.
@@ -199,8 +196,8 @@ class ClientSupervisor
     core::async::StopSource _retry;
     /// When the UpgradeHold under way ends, on the loop's clock; nullopt while none is.
     std::optional<core::platform::SteadyTimePoint> _upgradeHoldUntil;
-    /// The workspaces the last accepted connection followed: what the next one resumes.
-    std::vector<uint64_t> _followed;
+    /// The workspace the last accepted connection selected, 0 for none: what the next one resumes.
+    uint64_t _selected = 0;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client
     /// holding the socket it carries.
     std::shared_ptr<void> _currentLifetime;

@@ -28,18 +28,16 @@ inline constexpr auto HostExclusions = std::array {
     OptionPresence { .name = "tls-ca", .givenAs = GivenAs::Text },
 };
 
-/// What a launch's first connection follows, on any daemon: exactly the workspace `--workspace` names, else
-/// the launch rule -- the workspaces left by the windows that closed, each in a window of its own, or one new
-/// workspace when none is left. Never every workspace: what another client shows, or a window switched away
-/// from, is not pulled in.
+/// What a launch's first connection selects, on any daemon: exactly the workspace `--workspace` names, else
+/// whichever the daemon picks (AttachIntentKind::Default).
 /// @param workspace `--workspace`: the daemon workspace to show; none for a plain launch.
 /// @return The attach intent.
 [[nodiscard]] inline vthost::proto::AttachIntent launchIntent(std::optional<uint64_t> workspace)
 {
     if (workspace)
-        return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                             .workspaces = { *workspace } };
-    return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} };
+        return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                             .workspace = *workspace };
+    return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 };
 }
 
 } // namespace contour::cli

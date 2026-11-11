@@ -48,10 +48,10 @@ Then attach in any of these ways:
 
   An ad-hoc `tls://` URL is refused: a TLS host needs its `token_file`, so save it first.
 
-Attaching to a host works like launching Contour against that daemon: the window brings back the
-workspaces nobody there shows, and a workspace someone switched away from stays hidden (see
-[shown, hidden and left workspaces](persistent-sessions.md#shown-hidden-and-left-workspaces)). Attaching from
-a second machine therefore gets the workspaces the first one left, not a mirror of what the first one shows.
+Attaching to a host works like launching Contour against that daemon: the window selects the workspace the
+daemon had selected last, or its first one (see
+[shown and hidden workspaces](persistent-sessions.md#shown-and-hidden-workspaces)). Attaching from a second
+machine selects a workspace of its own choosing, not a mirror of what the first one shows.
 To look at one particular workspace, name it:
 
 ```sh

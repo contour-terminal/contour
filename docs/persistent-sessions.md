@@ -185,10 +185,9 @@ contour --daemon-mode required     # this launch only: fail rather than fall bac
 
 ### What a launch opens
 
-A launch brings back the workspaces of the daemon that nobody shows, one window each. A workspace that
-another window already shows is not mirrored: a second machine attaching to a daemon gets the
-workspaces the first one left, not a copy of what the first one is looking at. When every workspace is
-shown or hidden (see below), the launch opens one new workspace in one new window. A fresh daemon gets its
+A launch opens one window, which selects the workspace the daemon had selected last, or its first one when
+none was. It does not copy what another window shows: a second machine attaching to a daemon gets the same
+choice, and can select any other workspace from its window. A fresh daemon gets its
 first tab in the first window, as before.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
@@ -233,6 +232,14 @@ window already shows the destination workspace, that window is focused and nothi
 actions and their palette rows are listed in [Key Mapping](configuration/key-mapping.md#switching-daemons-and-workspaces);
 none is bound to a key by default.
 
+A window stays on one connection while it moves between a daemon's workspaces, so switching, creating
+(`NewWorkspace`) and cycling are immediate and open no window. A window attached to a daemon that predates this
+is refused, with a hint to run `contour daemon upgrade` or to pick **Upgrade daemon** in the command palette.
+
+Bells and desktop notifications come from one window only: the most recently focused one. A command that
+finishes in a workspace no window shows is noticed once, by that window. A program's clipboard write (OSC 52)
+reaches only a window that shows its pane.
+
 A switch that cannot finish leaves the window as it was and says why in a notice: the destination is not
 reachable, it has no such workspace, or it did not show the workspace within 10 seconds.
 
@@ -250,20 +257,18 @@ cannot tell a script outside any pane from you typing `contour switch`, so that 
 
     Windows of the in-process mode have no daemon behind them and cannot switch.
 
-### Shown, hidden and left workspaces
+### Shown and hidden workspaces
 
-The daemon keeps one of three states per workspace:
+Every window selects exactly one workspace of the daemon, and the daemon keeps one of two states per workspace:
 
-| State | Meaning | Does a launch bring it back? |
-| --- | --- | --- |
-| `shown` | A window shows it right now. | No: that window already has it. |
-| `left` | No window shows it: its window was closed, or its machine went away. | Yes. |
-| `hidden` | A window was switched away from it, and none shows it since. | No. |
+| State | Meaning |
+| --- | --- |
+| `shown` | Some window selects it right now. |
+| `hidden` | No window selects it. |
 
-Closing a window, or losing its connection, leaves the workspace `left`, so reopening Contour finds your
-sessions where you left them. Switching a window away from a workspace hides it instead: you moved on
-on purpose, so the next launch does not drag it back. A hidden workspace keeps running and keeps its state,
-also across a daemon restart and a [live upgrade](#live-upgrade); show it again by switching to it
+Closing a window, or losing its connection, leaves its workspace `hidden`; it keeps running and keeps its state,
+so reopening Contour finds your sessions where you left them. The same holds across a daemon restart and a
+[live upgrade](#live-upgrade). Select a hidden workspace from a window to show it again
 (`contour ls --json` reports each workspace's state as `visibility`, see the
 [control API](control-api.md#switching-a-window)).
 

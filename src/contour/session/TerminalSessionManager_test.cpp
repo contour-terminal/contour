@@ -937,7 +937,7 @@ void drainPosted()
 [[nodiscard]] contour::session::TerminalSession* sessionAtRow(
     contour::session::TerminalSessionManager& manager, contour::window::WindowController& window, int row)
 {
-    auto const* tab = manager.model().workspace(window.windowId())->tabAt(row);
+    auto const* tab = manager.model().workspace(window.displayedWorkspace())->tabAt(row);
     return tab != nullptr ? manager.sessionForId(tab->activePane()->session()) : nullptr;
 }
 
@@ -1025,12 +1025,12 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         // forgotten.
         window->activateTab(0);
         window->activateTab(1);
-        REQUIRE(manager.tabAttention().of(background->modelSessionId()).activity
+        REQUIRE(manager.attentionOf(background->modelSessionId()).activity
                 == contour::window::TabActivity::None);
 
         // The program-status path alone, as Step 2's pane properties call it.
         manager.refreshTabBadgeForSession(background->modelSessionId());
-        CHECK(manager.tabAttention().of(background->modelSessionId()).activity
+        CHECK(manager.attentionOf(background->modelSessionId()).activity
               == contour::window::TabActivity::None);
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
     }
@@ -1085,7 +1085,7 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         manager.removeSession(*background);
         // What a queued handlePendingBlockEvents() delivers between the removal and the deletion.
         manager.noteCommandFinished(*background, vtbackend::CommandEnding::Failed);
-        CHECK(manager.tabAttention().of(id) == contour::window::SessionAttention {});
+        CHECK(manager.attentionOf(id) == contour::window::SessionAttention {});
     }
 
     SECTION("a closed session's marks go with it")
@@ -1093,11 +1093,11 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         background->terminal().writeToScreen("x");
         drainPosted();
         auto const id = background->modelSessionId();
-        REQUIRE(manager.tabAttention().of(id).activity == contour::window::TabActivity::UnseenOutput);
+        REQUIRE(manager.attentionOf(id).activity == contour::window::TabActivity::UnseenOutput);
         // Mock PTYs are not started: drive the sessionClosed endpoint rather than waiting for an exit
         // watcher.
         manager.removeSession(*background);
-        CHECK(manager.tabAttention().of(id) == contour::window::SessionAttention {});
+        CHECK(manager.attentionOf(id) == contour::window::SessionAttention {});
     }
 
     contour::test::closeAllTabs(*window);
@@ -1128,7 +1128,7 @@ TEST_CASE("badge.doneOnVisibleTabIsSeenAtOnce", "[manager][tabbadge][badge][tabs
     active->terminal().writeToScreen(DoneStatus);
     drainPosted();
     CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
-    CHECK(manager.tabAttention().of(active->modelSessionId()).seenStatusGeneration > 0);
+    CHECK(manager.attentionOf(active->modelSessionId()).seenStatusGeneration > 0);
 
     // Out of sight it shows until the tab is seen, and stays gone once it is sent back.
     background->terminal().writeToScreen(ErrorStatus);
@@ -1360,6 +1360,90 @@ void settle()
 
 } // namespace
 
+TEST_CASE(
+    "TerminalSessionManager: an application taskbar counts a daemon once, as its window focused last does",
+    "[manager][taskbarattention]")
+{
+    using contour::platform::TaskbarAttention;
+
+    auto sink = std::make_unique<contour::test::RecordingTaskbar>(
+        contour::test::RecordingTaskbar::Support::Available,
+        contour::platform::TaskbarProgressScope::Application);
+    auto* const recording = sink.get();
+    auto app = appWithTaskbar(std::move(sink));
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto const target = contour::session::SwitchTarget { .kind = vthost::proto::SwitchDaemonKind::Label,
+                                                         .daemon = "work",
+                                                         .workspace = {} };
+    // Two windows on one daemon, each counting the workspaces it does not display from its own directory --
+    // which one of them read later than the other.
+    auto first = contour::test::DaemonNamedBinding { factory, target };
+    auto second = contour::test::DaemonNamedBinding { factory, target };
+    first.key = 7;
+    second.key = 7;
+    first.waitingElsewhere = 3;
+    second.waitingElsewhere = 2;
+    contour::test::ScopedController const windowA { manager };
+    contour::test::ScopedController const windowB { manager };
+    contour::test::ScopedController const local { manager };
+    manager.bindWindow(windowA.id, first);
+    manager.bindWindow(windowB.id, second);
+    local->createNewTab();
+    auto* const inLocal = sessionAtRow(manager, *local, 0);
+    REQUIRE(inLocal != nullptr);
+    inLocal->terminal().writeToScreen(BlockedStatus);
+
+    // The daemon once, as the window focused last counts it, plus the in-process window's own.
+    manager.setFocusedWindow(windowB.id);
+    manager.refreshTaskbarAttention();
+    settle();
+    REQUIRE_FALSE(recording->applicationAttention.empty());
+    CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 3 });
+    manager.setFocusedWindow(windowA.id);
+    manager.refreshTaskbarAttention();
+    settle();
+    CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 4 });
+
+    // Two daemons count each.
+    second.key = 9;
+    manager.refreshTaskbarAttention();
+    settle();
+    CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 6 });
+
+    contour::test::closeAllTabs(*local);
+    manager.releaseBinding(first);
+    manager.releaseBinding(second);
+}
+
+TEST_CASE(
+    "TerminalSessionManager: a window's taskbar button counts the daemon workspaces it does not display",
+    "[manager][taskbarattention]")
+{
+    using contour::platform::TaskbarAttention;
+
+    auto sink = std::make_unique<contour::test::RecordingTaskbar>(
+        contour::test::RecordingTaskbar::Support::Available, contour::platform::TaskbarProgressScope::Window);
+    auto* const recording = sink.get();
+    auto app = appWithTaskbar(std::move(sink));
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto daemon = contour::test::DaemonNamedBinding {
+        factory, { .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = "work", .workspace = {} }
+    };
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, daemon);
+    daemon.waitingElsewhere = 2;
+
+    manager.refreshTaskbarAttention();
+    settle();
+    REQUIRE_FALSE(recording->windowAttention.empty());
+    CHECK(recording->windowAttention.back()
+          == std::pair { window->windowId().value, TaskbarAttention { .waiting = 2 } });
+
+    manager.releaseBinding(daemon);
+}
+
 TEST_CASE("TerminalSessionManager: an application taskbar is told how many tabs are Blocked",
           "[manager][taskbarattention]")
 {
@@ -1506,7 +1590,7 @@ TEST_CASE("TerminalSessionManager: a window bound again is told its Blocked coun
 
     // The sink drops a window's overlay when it is bound to a new native window.
     auto nativeWindow = QWindow {};
-    manager.bindTaskbarWindow(window.id, nativeWindow);
+    manager.bindTaskbarWindow(window.windowId, nativeWindow);
     settle();
     REQUIRE(told() == 2);
     CHECK(recording->windowAttention.back()
@@ -2144,7 +2228,7 @@ namespace
 {
     auto sessions = std::vector<contour::session::TerminalSession*> {};
     manager.model()
-        .workspace(window.windowId())
+        .workspace(window.displayedWorkspace())
         ->tabAt(row)
         ->rootPane()
         ->walkTree([&](vtworkspace::Pane& pane) {
@@ -2383,7 +2467,7 @@ TEST_CASE("TerminalSessionManager: a pane header's button acts on its own pane",
     REQUIRE(added != nullptr);
     CHECK(added != left);
     CHECK(added != right);
-    auto const* const tab = manager.model().workspace(window->windowId())->tabAt(0);
+    auto const* const tab = manager.model().workspace(window->displayedWorkspace())->tabAt(0);
     auto const* const addedLeaf = tab->rootPane()->findLeaf(added->modelSessionId());
     REQUIRE(addedLeaf != nullptr);
     CHECK(addedLeaf->parent() == tab->rootPane()->findLeaf(left->modelSessionId())->parent());
@@ -3838,7 +3922,7 @@ TEST_CASE("TerminalSessionManager: closing the prompt's pane, its window, or the
         promptWith(*prompt, vtpty::InputEcho::Hidden);
         REQUIRE(doubles.record.enables == 1);
 
-        manager.removeWindowController(window.id);
+        manager.removeWindowController(window.windowId);
         CHECK(doubles.record.disables == 1);
     }
 
@@ -3851,7 +3935,7 @@ TEST_CASE("TerminalSessionManager: closing the prompt's pane, its window, or the
             // would be what turned secure input off.
             auto* const window = manager.createWindowController();
             window->createNewTab();
-            manager.setFocusedWindow(window->windowId());
+            manager.setFocusedWindow(window->displayedWorkspace());
             auto* const prompt = window->activeSession();
             REQUIRE(prompt != nullptr);
             promptWith(*prompt, vtpty::InputEcho::Hidden);
@@ -4187,11 +4271,11 @@ TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and t
     CHECK(first->notices().toastText().isEmpty());
     CHECK(second->notices().toastText().isEmpty());
 
-    manager.deliverRestoreSummaryTo(first->windowId());
+    manager.deliverRestoreSummaryTo(first->displayedWorkspace());
     CHECK(first->notices().toastText() == "Restored 2 windows, 7 tabs");
 
     // Told once: a second window shows nothing.
-    manager.deliverRestoreSummaryTo(second->windowId());
+    manager.deliverRestoreSummaryTo(second->displayedWorkspace());
     CHECK(second->notices().toastText().isEmpty());
 }
 
@@ -4203,7 +4287,7 @@ TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "
     contour::test::ScopedController const window { app.manager() };
     app.manager().bindWindow(window.id, link);
     app.manager().noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 1, .tabs = 1 });
-    app.manager().deliverRestoreSummaryTo(window->windowId());
+    app.manager().deliverRestoreSummaryTo(window->displayedWorkspace());
     CHECK(window->notices().toastText() == "Restored 1 window, 1 tab");
 }
 
@@ -4219,7 +4303,7 @@ TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not
 
     contour::test::ScopedController const later { manager };
     manager.bindWindow(later.id, link);
-    manager.deliverRestoreSummaryTo(later->windowId());
+    manager.deliverRestoreSummaryTo(later->displayedWorkspace());
     CHECK(later->notices().toastText().isEmpty());
 }
 
@@ -4234,7 +4318,7 @@ TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still he
     manager.noteWorkspaceRestored(link, vthost::RestoredCounts { .workspaces = 2, .tabs = 7 });
     contour::test::ScopedController const window { manager };
     manager.bindWindow(window.id, link);
-    manager.deliverRestoreSummaryTo(window->windowId());
+    manager.deliverRestoreSummaryTo(window->displayedWorkspace());
     CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");
 }
 
@@ -4318,7 +4402,7 @@ TEST_CASE("TerminalSessionManager: a window's only tab merged into another windo
 
     // The source window held only that tab: it is gone, model and controller both.
     CHECK(manager.model().workspace(windowA.id) == nullptr);
-    CHECK(manager.controllerFor(windowA.id) == nullptr);
+    CHECK(manager.controllerDisplaying(windowA.id) == nullptr);
 
     // Both sessions live in B's tab, which has one pane more; nothing was re-created.
     CHECK(factory->createdPtys.size() == ptyCountBefore);
@@ -4783,28 +4867,37 @@ TEST_CASE("TerminalSessionManager: each remote request goes to its window's fact
     }
 }
 
-TEST_CASE("TerminalSessionManager: a new window is the host's to author from a window it serves only",
+TEST_CASE("TerminalSessionManager: New Window opens on the daemon only from a window it serves",
           "[manager][link]")
 {
     using contour::session::RemoteRouting;
-    auto links = TwoLinks {};
-    auto& manager = links.manager;
-    CHECK(manager.requestRemoteWorkspace(*links.leftB, contour::session::RemoteSpawn { .profileName = "p" })
-          == RemoteRouting::Routed);
-    REQUIRE(links.hostB.requestedRemoteWorkspaces.size() == 1);
-    CHECK(links.hostB.requestedRemoteWorkspaces.front().profileName == "p");
-    CHECK(links.hostA.requestedRemoteWorkspaces.empty());
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    auto daemon = contour::test::DaemonNamedBinding {
+        factory, { .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = "work", .workspace = {} }
+    };
+    auto const onDaemon = contour::test::ScopedController { manager };
+    manager.bindWindow(onDaemon.id, daemon);
+    auto* const pane = manager.createSession(onDaemon.id);
+    REQUIRE(pane != nullptr);
 
-    // A host that cannot author one leaves it to the caller, as a window no host serves does.
-    links.hostB.remoteTabs = contour::test::MockPtySessionFactory::RemoteTabRouting::Local;
-    CHECK(manager.requestRemoteWorkspace(*links.leftB, {}) == RemoteRouting::Local);
+    // A window on a daemon: a window of a connection of its own, selecting what this one displays.
+    CHECK(manager.requestRemoteWindow(*pane, nullptr) == RemoteRouting::Routed);
+    REQUIRE(daemon.openedLike.size() == 1);
+    CHECK(daemon.openedLike.front().first == onDaemon.id);
+    CHECK_FALSE(daemon.openedLike.front().second.has_value());
+
+    // A binding with no daemon, and a window none serves, leave it to the caller.
+    auto links = TwoLinks {};
+    CHECK(links.manager.requestRemoteWindow(*links.leftB, nullptr) == RemoteRouting::Local);
     auto const local = contour::test::ScopedController { manager };
     auto* const localPane = manager.createSession(local.id);
     REQUIRE(localPane != nullptr);
-    CHECK(manager.requestRemoteWorkspace(*localPane, {}) == RemoteRouting::Local);
-    CHECK(links.hostA.requestedRemoteWorkspaces.empty());
-    CHECK(links.hostB.requestedRemoteWorkspaces.size() == 2);
+    CHECK(manager.requestRemoteWindow(*localPane, nullptr) == RemoteRouting::Local);
+    CHECK(daemon.openedLike.size() == 1);
     contour::test::closeAllTabs(*local);
+    contour::test::closeAllTabs(*onDaemon);
 }
 
 TEST_CASE("TerminalSessionManager: a daemon session is found only in the pane that shows it",
@@ -4977,7 +5070,7 @@ TEST_CASE("TerminalSessionManager: a pane between the quick terminal and a daemo
         auto const drag = manager.paneDragOf(*from);
         REQUIRE(drag.has_value());
         auto const resolved = manager.resolveNodeDrag(*drag);
-        CHECK(manager.moveRefusalIn(resolved, into->windowId(), MovePlace::EdgeOtherWindow)
+        CHECK(manager.moveRefusalIn(resolved, into->displayedWorkspace(), MovePlace::EdgeOtherWindow)
               == MoveRefusal::OtherHost);
         CHECK(into->refusalText(outOf->paneDragPayload(from)).toStdString()
               == contour::window::refusalTextOf(MoveRefusal::OtherHost));
@@ -5042,13 +5135,13 @@ TEST_CASE("TerminalSessionManager: a binding is told when its last window closes
         manager.bindWindow(fourth.id, counting);
         CHECK(windowsOf(manager, counting) == std::vector { third.id, fourth.id });
 
-        manager.removeWindowController(third.id);
+        manager.removeWindowController(third.windowId);
         CHECK(counting.closed == std::vector { third.id });
         CHECK(counting.releases == 0);
         CHECK(windowsOf(manager, counting) == std::vector { fourth.id });
         CHECK(manager.bindingOf(third.id) == nullptr);
 
-        manager.removeWindowController(fourth.id);
+        manager.removeWindowController(fourth.windowId);
         CHECK(counting.closed == std::vector { third.id, fourth.id });
         CHECK(counting.releases == 1);
         CHECK(manager.windowsBoundTo(counting).empty());
@@ -5165,6 +5258,301 @@ TEST_CASE("TerminalSessionManager: a lost link marks only its own sessions recon
         manager.deliverRestoreSummaryTo(links.windowA.id);
         CHECK(links.windowA->notices().toastText() == "Restored 1 window, 1 tab");
     }
+}
+
+// }}}
+
+// {{{ A window displays one of several workspaces
+
+TEST_CASE("an in-process window holds two workspaces and switches between them",
+          "[manager][window][workspace]")
+{
+    using contour::window::TabActivity;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    auto const first = window->displayedWorkspace();
+    auto* const hidden = sessionAtRow(manager, *window, 0);
+    REQUIRE(hidden != nullptr);
+    drainPosted();
+
+    auto const second = manager.createWorkspaceIn(window->windowId());
+    REQUIRE(window->ownedWorkspaces().size() == 2);
+    CHECK(window->ownedWorkspaces()[0] == first);
+    CHECK(window->ownedWorkspaces()[1] == second);
+    CHECK(window->displayedWorkspace() == first); // created hidden
+
+    auto const resets = QSignalSpy { window.controller, &contour::window::WindowController::modelReset };
+    manager.selectWorkspace(window->windowId(), 1);
+    CHECK(resets.count() == 1);
+    CHECK(window->displayedWorkspace() == second);
+    CHECK(manager.controllerDisplaying(second) == window.controller);
+    CHECK(manager.controllerDisplaying(first) == nullptr);
+    CHECK(manager.controllerOwning(first) == window.controller);
+    CHECK(window->rowCount() == 0);
+
+    window->createNewTab();
+    CHECK(window->rowCount() == 1);
+    CHECK(manager.model().workspace(first)->tabCount() == 1);
+
+    // The hidden workspace's session keeps running, and its output marks the window's ledger.
+    REQUIRE(manager.sessionForId(hidden->modelSessionId()) == hidden);
+    hidden->terminal().writeToScreen("x");
+    drainPosted();
+    CHECK(window->tabAttention().of(manager.paneKeyOf(hidden->modelSessionId())).activity
+          == TabActivity::UnseenOutput);
+    CHECK(manager.attentionOf(hidden->modelSessionId()).activity == TabActivity::UnseenOutput);
+    CHECK(window->tabBadgeKinds().size() == 2); // the tab of the hidden workspace counts for the window
+
+    // Showing it again sees it.
+    manager.selectWorkspace(window->windowId(), 0);
+    CHECK(window->displayedWorkspace() == first);
+    CHECK(manager.attentionOf(hidden->modelSessionId()) == contour::window::SessionAttention {});
+
+    // What the window does not own is not shown, and an index past the end changes nothing.
+    manager.selectWorkspace(window->windowId(), 2);
+    CHECK(window->displayedWorkspace() == first);
+    window->displayWorkspace(contour::test::ScopedController { manager }.id);
+    CHECK(window->displayedWorkspace() == first);
+}
+
+TEST_CASE("closing an in-process window ends the sessions of all its workspaces",
+          "[manager][window][workspace]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const survivor { manager };
+    survivor->createNewTab(); // keeps the registries from being cleared with the last window
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    auto* const shown = sessionAtRow(manager, *window, 0);
+    auto const second = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    window->createNewTab();
+    auto* const other = sessionAtRow(manager, *window, 0);
+    REQUIRE(shown != nullptr);
+    REQUIRE(other != nullptr);
+    REQUIRE_FALSE(shown->terminal().device().isClosed());
+    REQUIRE_FALSE(other->terminal().device().isClosed());
+    CHECK_FALSE(window->canCloseWindow());
+
+    auto const windowId = window->windowId();
+    window->closeWindow();
+
+    // Each workspace's sessions have their pty closed: the shown one and the hidden one alike.
+    CHECK(shown->terminal().device().isClosed());
+    CHECK(other->terminal().device().isClosed());
+    CHECK(manager.controllerOf(windowId) == nullptr);
+    CHECK(manager.model().workspace(second) == nullptr);
+}
+
+TEST_CASE("seen marks are per window", "[manager][window][tabattention]")
+{
+    using contour::window::PaneKey;
+    using contour::window::TabActivity;
+    using Visibility = contour::platform::SessionVisibility;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const windowA { manager };
+    contour::test::ScopedController const windowB { manager };
+
+    // Two windows showing the same pane (as two windows do of one daemon session) each keep their own marks
+    // under its key: one seeing it leaves the other's unseen.
+    auto const key = PaneKey { 42 };
+    REQUIRE(&windowA->tabAttention() != &windowB->tabAttention());
+    std::ignore =
+        windowA->tabAttention().noteOutput(key, Visibility::Hidden, contour::window::OutputOrigin::Live);
+    std::ignore =
+        windowB->tabAttention().noteOutput(key, Visibility::Hidden, contour::window::OutputOrigin::Live);
+    REQUIRE(windowA->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+    REQUIRE(windowB->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+
+    std::ignore = windowA->tabAttention().noteSeen(key, 0);
+    CHECK(windowA->tabAttention().of(key).activity == TabActivity::None);
+    CHECK(windowB->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+
+    // And a local session's output marks the window that holds it alone.
+    windowA->createNewTab();
+    windowA->createNewTab();
+    windowB->createNewTab();
+    auto* const background = sessionAtRow(manager, *windowA, 0);
+    REQUIRE(background != nullptr);
+    background->terminal().writeToScreen("x");
+    drainPosted();
+    auto const backgroundKey = manager.paneKeyOf(background->modelSessionId());
+    CHECK(windowA->tabAttention().of(backgroundKey).activity == TabActivity::UnseenOutput);
+    CHECK(windowB->tabAttention().of(backgroundKey).activity == TabActivity::None);
+}
+
+TEST_CASE("a torn-off in-process tab carries its unseen mark", "[manager][window][tabattention]")
+{
+    using contour::window::TabActivity;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const source { manager };
+    source->bindWindow(source.osWindow.get());
+    contour::test::ScopedControllerWithOsWindow const target { manager };
+    target->bindWindow(target.osWindow.get());
+    // Out of sight where it lands, so that arriving does not count as seeing it.
+    target.osWindow->setWindowStates(Qt::WindowMinimized);
+
+    source->createNewTab();
+    source->createNewTab();
+    target->createNewTab();
+    drainPosted();
+    auto* const moved = sessionAtRow(manager, *source, 0);
+    REQUIRE(moved != nullptr);
+    moved->terminal().writeToScreen("x");
+    drainPosted();
+    auto const key = manager.paneKeyOf(moved->modelSessionId());
+    REQUIRE(source->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+
+    auto const* const tab = manager.model().workspace(source->displayedWorkspace())->tabAt(0);
+    auto const result = manager.applyNodeMove(
+        vtworkspace::TabSource { .workspace = source->displayedWorkspace(), .tab = tab->id() },
+        vtworkspace::TabWellTarget { .workspace = target->displayedWorkspace(), .index = 0 });
+    REQUIRE(result.has_value());
+
+    CHECK(source->tabAttention().of(key) == contour::window::SessionAttention {});
+    CHECK(target->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+}
+
+TEST_CASE("an in-process window drops a workspace that lost its last tab and shows the next",
+          "[manager][window][workspace]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    auto const first = window->displayedWorkspace();
+    auto* const kept = sessionAtRow(manager, *window, 0);
+    REQUIRE(kept != nullptr);
+    auto const second = manager.createWorkspaceIn(window->windowId());
+    manager.selectWorkspace(window->windowId(), 1);
+    window->createNewTab();
+    auto* const exiting = sessionAtRow(manager, *window, 0);
+    REQUIRE(exiting != nullptr);
+
+    // The program in the last pane of the shown workspace exits.
+    manager.removeSession(*exiting);
+    drainPosted();
+
+    CHECK(window->displayedWorkspace() == first);
+    CHECK(window->ownedWorkspaces().size() == 1);
+    CHECK(manager.model().workspace(second) == nullptr);
+    CHECK(manager.controllerOf(window->windowId()) == window.controller);
+    CHECK_FALSE(kept->terminal().device().isClosed());
+    CHECK(window->rowCount() == 1);
+}
+
+TEST_CASE("dragging the last tab of a window's shown workspace away leaves the window on its other workspace",
+          "[manager][window][workspace]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const windowA { manager };
+    windowA->bindWindow(windowA.osWindow.get());
+    contour::test::ScopedControllerWithOsWindow const windowB { manager };
+    windowB->bindWindow(windowB.osWindow.get());
+
+    windowA->createNewTab();
+    auto const first = windowA->displayedWorkspace();
+    auto* const shell = sessionAtRow(manager, *windowA, 0);
+    REQUIRE(shell != nullptr);
+    auto const second = manager.createWorkspaceIn(windowA->windowId());
+    manager.selectWorkspace(windowA->windowId(), 1);
+    windowA->createNewTab();
+    windowB->createNewTab();
+    auto const* const lastTab = manager.model().workspace(second)->tabAt(0);
+    REQUIRE(lastTab != nullptr);
+
+    auto const moved = manager.applyNodeMove(
+        vtworkspace::TabSource { .workspace = second, .tab = lastTab->id() },
+        vtworkspace::TabWellTarget { .workspace = windowB->displayedWorkspace(), .index = 0 });
+    REQUIRE(moved.has_value());
+    drainPosted();
+
+    CHECK(manager.controllerOf(windowA->windowId()) == windowA.controller);
+    CHECK(windowA->displayedWorkspace() == first);
+    CHECK(windowA->ownedWorkspaces().size() == 1);
+    // The emptied workspace left the model, and nothing the manager keeps per workspace still names it.
+    CHECK(manager.model().workspace(second) == nullptr);
+    CHECK(manager.focusedWindow() != std::optional { second });
+    CHECK(manager.bindingOf(second) == nullptr);
+    CHECK_FALSE(shell->terminal().device().isClosed());
+    CHECK(windowB->rowCount() == 2);
+}
+
+TEST_CASE("one window seeing a pane leaves another window's mark of the same pane unseen",
+          "[manager][window][tabattention]")
+{
+    using contour::window::TabActivity;
+    using Visibility = contour::platform::SessionVisibility;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const windowA { manager };
+    windowA->bindWindow(windowA.osWindow.get());
+    contour::test::ScopedController const windowB { manager };
+
+    windowA->createNewTab();
+    windowA->createNewTab();
+    drainPosted();
+    auto* const background = sessionAtRow(manager, *windowA, 0);
+    REQUIRE(background != nullptr);
+    background->terminal().writeToScreen("x");
+    drainPosted();
+    auto const key = manager.paneKeyOf(background->modelSessionId());
+    REQUIRE(windowA->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+    // Window B shows the same pane too (as it would a daemon session), and has not seen it either.
+    std::ignore =
+        windowB->tabAttention().noteOutput(key, Visibility::Hidden, contour::window::OutputOrigin::Live);
+
+    // Window A shows it: its own ledger clears through the manager's seen path, B's does not.
+    windowA->activateTab(0);
+    manager.markVisibleSessionsSeen(windowA->displayedWorkspace());
+    CHECK(windowA->tabAttention().of(key).activity == TabActivity::None);
+    CHECK(windowB->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+}
+
+TEST_CASE("tearing a tab off to a new window carries its unseen mark", "[manager][window][tabattention]")
+{
+    using contour::window::TabActivity;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const source { manager };
+    source->bindWindow(source.osWindow.get());
+    source->createNewTab();
+    source->createNewTab();
+    drainPosted();
+    auto* const torn = sessionAtRow(manager, *source, 0);
+    REQUIRE(torn != nullptr);
+    torn->terminal().writeToScreen("x");
+    drainPosted();
+    auto const key = manager.paneKeyOf(torn->modelSessionId());
+    REQUIRE(source->tabAttention().of(key).activity == TabActivity::UnseenOutput);
+
+    // The tear-off stages the tab; the window that opens for it takes it, minimised so that arriving is not
+    // seeing it.
+    manager.tearOffTabToNewWindow(source->displayedWorkspace(), 0, nullptr);
+    contour::test::ScopedControllerWithOsWindow const target { manager };
+    target->bindWindow(target.osWindow.get());
+    target.osWindow->setWindowStates(Qt::WindowMinimized);
+    REQUIRE(manager.consumePendingTransplant(target.controller));
+
+    CHECK(source->tabAttention().of(key) == contour::window::SessionAttention {});
+    CHECK(target->tabAttention().of(key).activity == TabActivity::UnseenOutput);
 }
 
 // }}}

@@ -5499,8 +5499,8 @@ struct AttachedClient
             std::move(pair.second),
             NativeClient::HandshakeOptions {
                 .capabilities = proto::CapabilitySet::of({ proto::Capability::AttachIntent }),
-                .attachIntent = { .kind = proto::AttachIntentKind::Workspaces,
-                                  .workspaces = { host.workspaceId().value } } },
+                .attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                  .workspace = host.workspaceId().value } },
             vtbackend::CommandBlockStoreLimits {},
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {

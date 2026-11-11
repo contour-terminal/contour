@@ -29,14 +29,14 @@ namespace
     constexpr auto SwitchTooLateText =
         std::string_view { "too little time was left before the program that asked for it stopped waiting" };
 
-    /// @return What a link's first connection follows to show @p workspace: it, or a new one for 0.
+    /// @return What a link's first connection selects to show @p workspace: it, or a new one for 0.
     [[nodiscard]] vthost::proto::AttachIntent intentFor(uint64_t workspace)
     {
         if (workspace == 0)
             return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::NewWorkspace,
-                                                 .workspaces = {} };
-        return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                             .workspaces = { workspace } };
+                                                 .workspace = 0 };
+        return vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                             .workspace = workspace };
     }
 
 } // namespace
@@ -142,6 +142,19 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         return;
     }
     request.config.emplace(*std::move(destination.config));
+    // The window's own daemon: its connection holds the directory of every workspace, so nothing is listed --
+    // but for a workspace named by its control id, which only the daemon's listing knows.
+    if (request.sameDaemon == SameDaemon::Yes && !namesControlId(request.target.workspace))
+    {
+        auto const rows =
+            workspaceRowsOf(own->liveController() != nullptr ? own->liveController()->directory()
+                                                             : window::WorkspaceDirectory {},
+                            [&](uint64_t daemonWorkspace) {
+                                return shownHere(SameDaemon::Yes, request.address, *own, daemonWorkspace);
+                            });
+        resolve(std::move(request), rows);
+        return;
+    }
     auto list = ListTarget { .address = request.address, .transport = request.config->controller.transport };
     _lister->list(std::move(list),
                   [alive = std::weak_ptr { _alive }, request = std::move(request)](auto listed) mutable {
@@ -152,7 +165,7 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
                       if (!listed)
                           switcher.fail(request, listed.error());
                       else
-                          switcher.resolve(std::move(request), *listed);
+                          switcher.resolveListed(std::move(request), *listed);
                   });
 }
 
@@ -218,7 +231,7 @@ void WindowSwitcher::listWorkspaces(vtworkspace::WorkspaceId window,
                   });
 }
 
-void WindowSwitcher::resolve(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces)
+void WindowSwitcher::resolveListed(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces)
 {
     // The window may have closed, or moved to another link, while the daemon was asked.
     auto* const own = linkOf(request.window);
@@ -230,6 +243,17 @@ void WindowSwitcher::resolve(Request request, std::vector<vtcontrol::WorkspaceIn
     auto const rows = workspaceRowsOf(workspaces, [&](uint64_t daemonWorkspace) {
         return shownHere(request.sameDaemon, request.address, *own, daemonWorkspace);
     });
+    resolve(std::move(request), rows);
+}
+
+void WindowSwitcher::resolve(Request request, std::vector<WorkspaceRow> const& rows)
+{
+    auto* const own = linkOf(request.window);
+    if (own == nullptr)
+    {
+        fail(request, "the window went away");
+        return;
+    }
     auto const decision =
         planSwitch(request.target, rows, own->workspaceOf(request.window), request.sameDaemon);
     std::visit(
@@ -240,13 +264,13 @@ void WindowSwitcher::resolve(Request request, std::vector<vtcontrol::WorkspaceIn
             {
                 // Open shows it in a new window, but this window shows it already: that is the one to focus.
                 if (request.mode == session::SwitchMode::Open)
-                    if (auto* const controller = _sessions.controllerFor(request.window))
+                    if (auto* const controller = _sessions.controllerDisplaying(request.window))
                         controller->raiseAndActivate();
                 succeed(request, vthost::proto::SwitchOutcome::FocusedExisting);
             }
             else if constexpr (std::is_same_v<T, SwitchFocus>)
             {
-                if (auto* const controller = _sessions.controllerFor(decided.window))
+                if (auto* const controller = _sessions.controllerDisplaying(decided.window))
                     controller->raiseAndActivate();
                 succeed(request, vthost::proto::SwitchOutcome::FocusedExisting);
             }
@@ -296,8 +320,8 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
             fail(*take(), "the window went away");
             return;
         }
-        auto followed = own->switchWindow(
-            window, workspace, to.undo, [alive = std::weak_ptr { _alive }, take](auto landed) {
+        auto selected = own->selectWorkspace(
+            workspace, [alive = std::weak_ptr { _alive }, take](std::expected<uint64_t, std::string> landed) {
                 auto const self = alive.lock();
                 auto taken = take();
                 if (!self || !taken)
@@ -307,13 +331,13 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
                 else
                     (*self)->fail(*taken, landed.error());
             });
-        if (!followed)
+        if (!selected)
         {
-            fail(*take(), followed.error());
+            fail(*take(), selected.error());
             return;
         }
-        // Undone as a lost connection undoes it: the follow is released, and the link tells the callback
-        // above, which fails the request.
+        // Undone as a lost connection undoes it: the window's own workspace is selected again, and the link
+        // tells the callback above, which fails the request.
         armDeadline(window, serial, landBy, [this, window, take] {
             if (auto* const link = linkOf(window))
                 link->cancelSwitch(window, std::string { SwitchTimedOut });
@@ -326,7 +350,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
     auto config = *(*pending)->config;
     config.controller.intent = intentFor(workspace);
     config.controller.resumeFallback = NativeController::ResumeFallback::Nothing;
-    config.handOverFrom.reset();
+    config.opening.reset();
     // The link's id is known once it is made, which is after its callback was: shared with the callback.
     auto const madeAs = std::make_shared<DaemonLinkId>();
     config.arrival = SwitchArrival {
@@ -344,10 +368,9 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
                 else
                     (*self)->handOver(*taken, *madeAs);
             },
-        .undo = to.undo,
     };
     *madeAs = _host.startSwitchLink(std::move(config)).id();
-    // The link is not wanted any more: its connection releases what it follows, and it ends, telling nothing.
+    // The link is not wanted any more: it ends, telling nothing, and its selection goes with its connection.
     armDeadline(window, serial, landBy, [this, madeAs, take] {
         auto const links = _host.switchableLinks();
         if (auto const found = std::ranges::find(links, *madeAs, &DaemonLink::id); found != links.end())
@@ -403,8 +426,8 @@ void WindowSwitcher::handOver(Request const& request, DaemonLinkId to)
     // Told first, while the window is still the old link's: a switch a program asked for is answered on the
     // old link's connection, which the rebinding below ends.
     succeed(request, vthost::proto::SwitchOutcome::Switched);
-    // Detach last: the old workspace stays in its daemon as hidden, the window is the new link's, and the old
-    // link ends when the window was its last.
+    // Detach last: the old workspace stays in its daemon for whichever window selects it next, the window is
+    // the new link's, and the old link ends with it.
     own->switchedAway(request.window);
     if (auto adopted = target->adoptWindow(request.window); !adopted)
         errorLog()("switch: window {} stays as it was: {}", request.window.value, adopted.error());
@@ -424,7 +447,7 @@ void WindowSwitcher::fail(Request const& request, std::string const& reason)
                     session::daemonPhrase(request.address.kind, request.address.name, "this daemon"),
                     reason);
     errorLog()("switch: {}", text);
-    if (auto* const controller = _sessions.controllerFor(request.window))
+    if (auto* const controller = _sessions.controllerDisplaying(request.window))
         controller->notices().post(window::Notice { .kind = window::NoticeKind::SwitchFailed, .text = text });
     request.done(std::unexpected(reason));
 }

@@ -8,6 +8,7 @@
 
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/SwitcherRows.hpp>
+#include <contour/window/WorkspaceDirectory.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -66,8 +67,8 @@ struct WorkspaceRow
     std::string label;           ///< Its label; empty for none.
     uint32_t position = 0;       ///< Its 1-based position among the daemon's workspaces.
     std::string name;            ///< How it is shown: @see workspaceDisplayName().
-    vthost::WorkspaceVisibility visibility = vthost::WorkspaceVisibility::Left; ///< Shown, left or hidden.
-    std::size_t tabs = 0;                                                       ///< How many tabs it holds.
+    vthost::WorkspaceVisibility visibility = vthost::WorkspaceVisibility::Hidden; ///< Shown or hidden.
+    std::size_t tabs = 0;                                                         ///< How many tabs it holds.
     /// The window of this process that shows it; none when no window here does.
     std::optional<vtworkspace::WorkspaceId> shownByWindowHere;
 };
@@ -87,20 +88,7 @@ struct SwitchPick
 struct SwitchTo
 {
     uint64_t workspace = 0; ///< The daemon's native id; 0 for a new workspace.
-    /// How it is let go of again should the switch not land: as it was before (@see undoReleaseFor()).
-    vthost::proto::WorkspaceRelease undo = vthost::proto::WorkspaceRelease::Closed;
 };
-
-/// How a switch that did not land lets its target go again, so that the target is as it was: a hidden one is
-/// released as switched away from and stays hidden; any other as closed, which leaves a left one left and one
-/// another window shows shown (vthost::visibilityOf).
-/// @param before The target's visibility before the switch followed it.
-/// @return The release that undoes the follow.
-[[nodiscard]] constexpr vthost::proto::WorkspaceRelease undoReleaseFor(vthost::WorkspaceVisibility before)
-{
-    return before == vthost::WorkspaceVisibility::Hidden ? vthost::proto::WorkspaceRelease::SwitchedAway
-                                                         : vthost::proto::WorkspaceRelease::Closed;
-}
 
 /// The window shows the workspace already: nothing to do.
 struct SwitchNoop
@@ -150,6 +138,20 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
 /// @return The rows, in the daemon's order.
 [[nodiscard]] std::vector<WorkspaceRow> workspaceRowsOf(std::span<vtcontrol::WorkspaceInfo const> workspaces,
                                                         ShownHere const& shownHere);
+
+/// The rows a switch on the window's own daemon decides on, from the directory its connection holds: no
+/// listing of the daemon is asked for. A workspace holding no tab is left out, as workspaceRowsOf() leaves it
+/// out; each carries a reference only this process uses, as a directory carries no control ids (@see
+/// namesControlId()).
+/// @param directory Every workspace of the daemon, in its order.
+/// @param shownHere Which window here shows each.
+/// @return The rows, in the daemon's order.
+[[nodiscard]] std::vector<WorkspaceRow> workspaceRowsOf(window::WorkspaceDirectory const& directory,
+                                                        ShownHere const& shownHere);
+
+/// @param workspace What a switch names.
+/// @return Whether it names the workspace by its control id, which only the daemon's listing resolves.
+[[nodiscard]] bool namesControlId(session::WorkspaceTarget const& workspace);
 
 /// The switcher popup's rows of a daemon's workspaces (@see window::switcherRows).
 /// @param rows The daemon's workspaces, as workspaceRowsOf() made them.

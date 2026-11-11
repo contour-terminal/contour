@@ -318,6 +318,13 @@ class NativeClient final
     /// Handler invoked when the daemon asks this client to switch the window showing a workspace
     /// (proto::SwitchRequest, Capability::WorkspaceSwitch); answered with replySwitch().
     using SwitchRequestHandler = std::function<void(proto::SwitchRequest const&)>;
+
+    /// Told of what changed about a pane of a workspace this connection does not select.
+    using PaneSummaryHandler = std::function<void(proto::PaneSummary const&)>;
+
+    /// Told of the role the daemon gives this connection for raising, at the start of the connection and on
+    /// every change.
+    using RaiseRoleHandler = std::function<void(proto::RaiseRole)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -341,8 +348,8 @@ class NativeClient final
         /// The client area, in cells, the first session should spawn at; absent means "the daemon's
         /// default". The ResizeRequest the client sends once its window is realized still corrects it.
         std::optional<proto::WireClientArea> clientArea = std::nullopt;
-        /// Which of the daemon's workspaces to follow; honoured by a daemon sharing Capability::AttachIntent,
-        /// which every other daemon reads as AllWorkspaces.
+        /// Which of the daemon's workspaces to select; honoured by a daemon sharing Capability::AttachIntent.
+        /// Its kinds take values no older daemon gave a meaning (@see proto::AttachIntentKind).
         proto::AttachIntent attachIntent = {};
         /// The host profile this client's sessions run under; empty for the daemon's default. Honoured by a
         /// daemon sharing Capability::ProfileByName; @ref sessionSettings is still sent, for one that does
@@ -383,6 +390,9 @@ class NativeClient final
     ///        built while it asked on every departure of another client does).
     /// @param onSwitchRequest Told when the daemon asks for a window switch; none for a client that switches
     ///        nothing, which answers every such request Failed itself.
+    /// @param onPaneSummary Told what changed about a pane of a workspace this connection does not select
+    ///        (Capability::DaemonFollow).
+    /// @param onRaiseRole Told the role this connection has for raising (Capability::DaemonFollow).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -397,7 +407,9 @@ class NativeClient final
                  MoveNodeRefusedHandler onMoveNodeRefused = {},
                  LayoutBatchEndHandler onLayoutBatchEnd = {},
                  PanesReprojectedHandler onPanesReprojected = {},
-                 SwitchRequestHandler onSwitchRequest = {});
+                 SwitchRequestHandler onSwitchRequest = {},
+                 PaneSummaryHandler onPaneSummary = {},
+                 RaiseRoleHandler onRaiseRole = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -461,8 +473,6 @@ class NativeClient final
     ///        workspace. Named by session because workspace ids are per model (@see proto::CreateTab).
     /// @param profileName The host profile the new session runs; empty for this client's.
     void createTab(uint64_t beside, std::string profileName);
-    /// @param profileName The host profile the new workspace's session runs; empty for this client's.
-    void createWorkspace(std::string profileName);
     /// @param profileName The host profile the new pane's session runs; empty for this client's.
     void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName);
     /// Asks the daemon to close @p session's pane.
@@ -471,23 +481,25 @@ class NativeClient final
     ///         the request.
     Delivery closePane(uint64_t session);
 
-    /// Has this connection show @p workspace too (proto::FollowWorkspace): the daemon pushes its layout and
-    /// its sessions' screens from then on, and followedWorkspaces() names it.
-    /// @param workspace The daemon workspace; 0 asks the daemon for a new one, which this connection claims
-    /// and
-    ///        learns of with its layout.
-    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
-    /// Capability::WorkspaceFollow.
-    Delivery followWorkspace(uint64_t workspace);
+    /// Has this connection select @p workspace: the daemon pushes its layout and its sessions' screens in
+    /// full from then on, the other workspaces' panes as summaries only, and a reconnect resumes it.
+    /// @param workspace The daemon workspace; 0 asks the daemon for a new one, which the connection selects
+    ///        and learns of with the end of the layout batch that announces it.
+    /// @return The serial it went out under, which the LayoutBatchEnd answering it names as its causeSerial
+    ///         (stating the selection the daemon kept, should it have no such workspace); std::nullopt when
+    ///         nothing was written, unless the daemon shares Capability::DaemonFollow.
+    std::optional<uint64_t> selectWorkspace(uint64_t workspace);
 
-    /// Has this connection stop showing @p workspace (proto::ReleaseWorkspace): followedWorkspaces() no
-    /// longer names it, and a layout of it still on its way is dropped, so that a reconnect does not resume
-    /// it.
-    /// @param workspace The daemon workspace.
-    /// @param reason Why: the daemon keeps a workspace switched away from hidden from later launches.
+    /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
+    /// window raises for a bell or a notification.
+    /// @param focus The window's focus now.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
-    /// Capability::WorkspaceFollow.
-    Delivery releaseWorkspace(uint64_t workspace, proto::WorkspaceRelease reason);
+    ///         Capability::DaemonFollow.
+    Delivery reportFocus(proto::WindowFocus focus);
+
+    /// @return What this connection does with a bell or notification, as the daemon last stated it; Quiet
+    ///         until it does.
+    [[nodiscard]] proto::RaiseRole raiseRole() const noexcept { return _raiseRole; }
 
     /// Tells the daemon how the user changed a tab's presentation, so its model and every other client
     /// follow. Where the daemon shares Capability::TabEditAcks, an activation is kept in force over the
@@ -528,14 +540,11 @@ class NativeClient final
     ///         what the sessions run and how they emulate, and this client names profiles instead.
     [[nodiscard]] bool namesProfiles() const noexcept { return shares(proto::Capability::ProfileByName); }
 
-    /// @return The daemon workspaces this connection follows, ascending: those its ServerHello named, plus
-    /// every
-    ///         workspace whose layout the daemon pushed since (one this connection created). Empty until
-    ///         connected(), and from a daemon that predates attach intents.
-    [[nodiscard]] std::vector<uint64_t> const& followedWorkspaces() const noexcept
-    {
-        return _followedWorkspaces;
-    }
+    /// @return The daemon workspace this connection selects: the one its ServerHello named, or the one the
+    ///         daemon states at the end of each layout batch (the answer to selectWorkspace(), a workspace it
+    ///         created, one it selected as the selected one closed); 0 until connected(), when the daemon has
+    ///         none left, and from a daemon that predates the selection.
+    [[nodiscard]] uint64_t selectedWorkspace() const noexcept { return _selectedWorkspace; }
 
     /// Reports a divider the user moved, so the ratio lives in the daemon's model and a re-attaching
     /// client rebuilds the tree at it. The split is named by the leftmost leaf session of each of its
@@ -663,11 +672,6 @@ class NativeClient final
     /// @param layout The layout the daemon pushed.
     void handleLayout(proto::LayoutState const& layout);
 
-    /// Tells a daemon sharing Capability::WorkspaceShown that @p workspace's first layout arrived, once per
-    /// follow.
-    /// @param workspace The workspace a layout was handed on for.
-    void confirmShown(uint64_t workspace);
-
     /// Hands a PDU that only reaches a handler -- a push's end, a permission request, a refusal -- to it.
     /// @return Whether @p frame was one.
     bool handleNotice(proto::DecodedFrame const& frame);
@@ -742,7 +746,10 @@ class NativeClient final
     LayoutBatchEndHandler _onLayoutBatchEnd;
     PanesReprojectedHandler _onPanesReprojected;
     SwitchRequestHandler _onSwitchRequest;
-    HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
+    PaneSummaryHandler _onPaneSummary;
+    RaiseRoleHandler _onRaiseRole;
+    proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
+    HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
@@ -756,15 +763,9 @@ class NativeClient final
     std::string _daemonRelease;                       ///< @see daemonRelease()
     uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
     std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
-    std::vector<uint64_t> _followedWorkspaces;        ///< @see followedWorkspaces()
-    /// The workspaces releaseWorkspace() let go of since, until followed again: a layout of one still on its
-    /// way is dropped.
-    std::set<uint64_t> _releasedWorkspaces;
-    /// The followed workspaces whose first layout this connection confirmed (proto::WorkspaceShown), until
-    /// released.
-    std::set<uint64_t> _shownWorkspaces;
-    std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
+    uint64_t _selectedWorkspace = 0;                  ///< @see selectedWorkspace()
+    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason;  ///< @see lossReason()
     std::optional<std::string> _upgradingTo; ///< @see upgradingTo()

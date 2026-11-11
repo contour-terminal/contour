@@ -234,7 +234,7 @@ TEST_CASE("first startup in every presentation mode saves a normal placement wit
     controller->seedTitleBarVisible(true);
     REQUIRE(window.screen());
     window.setPosition(window.screen()->availableGeometry().topLeft() + QPoint(80, 80));
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session);
     contour::test::FakeDisplaySurface surface;
     surface.attachedSession = session;
@@ -283,7 +283,7 @@ TEST_CASE("native startup clamps the decorated window inside its monitor",
     QQuickWindow window;
     controller->bindWindow(&window);
     controller->seedTitleBarVisible(true);
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session);
     contour::test::FakeDisplaySurface surface;
     surface.attachedSession = session;
@@ -317,7 +317,7 @@ TEST_CASE("startup row snapping respects an off-grid minimum before focus", "[co
     QQuickWindow window;
     controller->bindWindow(&window);
     controller->setChromeHeight(38);
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session != nullptr);
     contour::test::FakeDisplaySurface surface;
     surface.cellSizeValue = { vtbackend::Width(11), vtbackend::Height(21) };
@@ -345,7 +345,7 @@ TEST_CASE("changing row snapping refreshes live size hints", "[contour][sizing][
     QQuickWindow window;
     controller->bindWindow(&window);
     window.resize(800, 600);
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session != nullptr);
     contour::test::FakeDisplaySurface surface;
     surface.attachedSession = session;
@@ -457,8 +457,8 @@ TEST_CASE("tab switching never touches window geometry", "[contour][sizing]")
     QQuickWindow window;
     controller->bindWindow(&window);
 
-    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
-    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
+    REQUIRE(manager.model().createTab(controller->displayedWorkspace()) != nullptr);
+    REQUIRE(manager.model().createTab(controller->displayedWorkspace()) != nullptr);
 
     window.resize(640, 480);
     window.setSizeIncrement(QSize(10, 20));
@@ -490,8 +490,8 @@ TEST_CASE("a maximized window survives a tab switch", "[contour][sizing]")
     window.show();
     QCoreApplication::processEvents();
 
-    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
-    REQUIRE(manager.model().createTab(controller->windowId()) != nullptr);
+    REQUIRE(manager.model().createTab(controller->displayedWorkspace()) != nullptr);
+    REQUIRE(manager.model().createTab(controller->displayedWorkspace()) != nullptr);
 
     contour::display::TerminalDisplay requester;
     controller->setWindowMaximized(requester);
@@ -567,7 +567,7 @@ TEST_CASE("DPI settlement restores rows after the native suggested resize",
     QQuickWindow window;
     controller->bindWindow(&window);
     controller->setChromeHeight(34);
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session);
     contour::test::FakeDisplaySurface surface;
     surface.attachedSession = session;
@@ -635,7 +635,7 @@ TEST_CASE("DPI settlement waits for the native move loop to end", "[contour][siz
     QQuickWindow window;
     controller->bindWindow(&window);
     controller->setChromeHeight(34);
-    auto* session = app.manager().createSession(controller->windowId());
+    auto* session = app.manager().createSession(controller->displayedWorkspace());
     REQUIRE(session);
     contour::test::FakeDisplaySurface surface;
     surface.attachedSession = session;

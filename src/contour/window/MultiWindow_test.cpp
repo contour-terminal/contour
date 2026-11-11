@@ -74,7 +74,7 @@ void createTabs(contour::session::TerminalSessionManager& manager,
                 int n)
 {
     for (int i = 0; i < n; ++i)
-        REQUIRE(manager.model().createTab(controller.windowId()) != nullptr);
+        REQUIRE(manager.model().createTab(controller.displayedWorkspace()) != nullptr);
 }
 
 [[nodiscard]] QString rawTitleAt(contour::window::WindowController& controller, int row)
@@ -119,12 +119,11 @@ TEST_CASE("a window says its notices only while accessibility_announcements allo
         return announcer;
     };
     auto const* backing = manager.model().createWorkspace();
-    auto controller = contour::window::WindowController { manager,
-                                                          backing->id(),
-                                                          contour::config::MenuPresentation::InScene,
-                                                          std::nullopt,
-                                                          core::platform::defaultSteadyClock(),
-                                                          recording };
+    auto controller =
+        contour::window::WindowController { manager,       contour::window::WindowId { 9000 },
+                                            backing->id(), contour::config::MenuPresentation::InScene,
+                                            std::nullopt,  core::platform::defaultSteadyClock(),
+                                            recording };
     REQUIRE(said != nullptr);
     using contour::window::Notice;
     using contour::window::NoticeKind;
@@ -231,7 +230,7 @@ TEST_CASE("unsupported taskbar adapters do not schedule updates", "[contour][mul
                            now);
     QCoreApplication::processEvents();
     CHECK(recording->windows.empty());
-    CHECK(manager.taskbarProgress(window.id, now).state == vtbackend::ProgressState::Normal);
+    CHECK(manager.taskbarProgress(window.windowId, now).state == vtbackend::ProgressState::Normal);
 }
 
 TEST_CASE("taskbar progress follows background panes across window moves and closure",
@@ -358,8 +357,8 @@ TEST_CASE("two controllers adapt distinct model windows with independent tab row
     REQUIRE(windowA.controller != nullptr);
     REQUIRE(windowB.controller != nullptr);
     CHECK(windowA.id != windowB.id);
-    CHECK(manager.controllerFor(windowA.id) == windowA.controller);
-    CHECK(manager.controllerFor(windowB.id) == windowB.controller);
+    CHECK(manager.controllerDisplaying(windowA.id) == windowA.controller);
+    CHECK(manager.controllerDisplaying(windowB.id) == windowB.controller);
 
     createTabs(manager, *windowA, 2);
     createTabs(manager, *windowB, 3);
@@ -679,19 +678,19 @@ TEST_CASE("removeWindowController prunes exactly the closed window's controller"
     createTabs(manager, *windowB, 1);
 
     // Not-last: A's controller unregisters; B keeps working (its rows survive).
-    manager.removeWindowController(windowA.id);
-    CHECK(manager.controllerFor(windowA.id) == nullptr);
-    CHECK(manager.controllerFor(windowB.id) == windowB.controller);
+    manager.removeWindowController(windowA.windowId);
+    CHECK(manager.controllerDisplaying(windowA.id) == nullptr);
+    CHECK(manager.controllerDisplaying(windowB.id) == windowB.controller);
     CHECK(windowB->count() == 1);
     // With no backing sessions, B's window may close at any time.
     CHECK(windowB->canCloseWindow());
 
     // Last: B unregisters too; the registry is empty.
-    manager.removeWindowController(windowB.id);
-    CHECK(manager.controllerFor(windowB.id) == nullptr);
+    manager.removeWindowController(windowB.windowId);
+    CHECK(manager.controllerDisplaying(windowB.id) == nullptr);
 
     // Unknown ids are a no-op (idempotent close path; the guards replay it once more on scope exit).
-    manager.removeWindowController(windowA.id);
+    manager.removeWindowController(windowA.windowId);
 }
 
 TEST_CASE("WindowController projects real-session tabs and routes rename/color to the model",
@@ -1585,7 +1584,7 @@ TEST_CASE("moving a window's LAST tab into another window closes the now-empty s
     windowB->createNewTab(); // B: [b0]
     REQUIRE(windowA->count() == 1);
     REQUIRE(windowB->count() == 1);
-    REQUIRE(manager.controllerFor(windowA.id) != nullptr);
+    REQUIRE(manager.controllerDisplaying(windowA.id) != nullptr);
 
     // Drag A's only tab into window B.
     manager.moveTabToWorkspace(windowA.id, 0, windowB.id, 1);
@@ -1593,9 +1592,9 @@ TEST_CASE("moving a window's LAST tab into another window closes the now-empty s
 
     // B now holds both tabs; A is empty and its window has been closed (model + controller + OS window).
     CHECK(windowB->count() == 2);
-    CHECK(manager.model().workspace(windowA.id) == nullptr); // model window gone
-    CHECK(manager.controllerFor(windowA.id) == nullptr);     // controller dropped
-    CHECK_FALSE(osWindowA.isVisible());                      // the OS window is gone, not a ghost
+    CHECK(manager.model().workspace(windowA.id) == nullptr);    // model window gone
+    CHECK(manager.controllerDisplaying(windowA.id) == nullptr); // controller dropped
+    CHECK_FALSE(osWindowA.isVisible());                         // the OS window is gone, not a ghost
 
     // Drain the deferred controller delete so LeakSanitizer sees a clean teardown; ScopedController's
     // own removeWindowController(windowA) is then an idempotent no-op.
@@ -1707,7 +1706,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     manager.splitActivePane(/*vertical*/ true, acting);
     QCoreApplication::processEvents();
 
-    auto* tab = manager.model().workspace(window->windowId())->activeTab();
+    auto* tab = manager.model().workspace(window->displayedWorkspace())->activeTab();
     REQUIRE(tab != nullptr);
     CHECK(tab->hasMultiplePanes());
 
@@ -1883,7 +1882,7 @@ struct TwoWindows
         factory->reportedHosting = contour::session::SessionHosting::Local;
         // A move may have closed either window.
         for (auto const id: { a.id, b.id })
-            if (auto* const window = manager.controllerFor(id))
+            if (auto* const window = manager.controllerDisplaying(id))
                 contour::test::closeAllTabs(*window);
     }
 
@@ -1896,7 +1895,7 @@ struct TwoWindows
     [[nodiscard]] QString paneOf(contour::session::TerminalSession const* session) const
     {
         auto const [window, tab] = placeOf(manager, session);
-        auto* const controller = manager.controllerFor(window);
+        auto* const controller = manager.controllerDisplaying(window);
         REQUIRE(controller != nullptr);
         auto const json = controller->paneDragPayload(session);
         REQUIRE_FALSE(json.isEmpty());
@@ -1938,7 +1937,7 @@ struct TwoWindows
         contour::session::TerminalSessionManager& manager, contour::session::TerminalSession* session)
     {
         manager.splitActivePane(/*vertical*/ true, session);
-        return manager.controllerFor(placeOf(manager, session).first)->activeSession();
+        return manager.controllerDisplaying(placeOf(manager, session).first)->activeSession();
     }
 
     [[nodiscard]] std::unique_ptr<contour::session::SessionFactory> makeFactory()
@@ -2486,8 +2485,8 @@ TEST_CASE("moving out the last pane closes its window, and the app keeps running
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
     CHECK(f.manager.model().workspace(f.b.id) == nullptr);
-    CHECK(f.manager.controllerFor(f.b.id) == nullptr);
-    CHECK(f.manager.controllerFor(f.a.id) != nullptr);
+    CHECK(f.manager.controllerDisplaying(f.b.id) == nullptr);
+    CHECK(f.manager.controllerDisplaying(f.a.id) != nullptr);
     CHECK(placeOf(f.manager, f.other).first == f.a.id);
     requireAlive(f.other, pty, "still running");
     f.requireNothingRespawned();

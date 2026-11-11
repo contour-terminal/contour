@@ -327,6 +327,18 @@ enum class BellAudibility : uint8_t
     return sound == "off" || volume <= 0.0f ? BellAudibility::Muted : BellAudibility::Audible;
 }
 
+/// What a bell with the given sound plays.
+/// @param sound The profile's `bell.sound`.
+/// @return The built-in bell for `default`, nothing for `off`, else @p sound itself (a file).
+[[nodiscard]] inline std::string bellSourceOf(std::string_view sound)
+{
+    if (sound == "default")
+        return "qrc:/contour/bell.wav";
+    if (sound == "off")
+        return {};
+    return std::string { sound };
+}
+
 /// The prefix of every finish notification's identifier. An application's OSC 99 notifications share the
 /// session notifier's identifier space, so this must be one no `i=` can spell -- and none can contain a
 /// `:`, which separates OSC 99's metadata entries. An application can therefore neither close, replace

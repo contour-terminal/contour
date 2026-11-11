@@ -27,6 +27,14 @@ namespace
         && !std::same_as<std::remove_cv_t<T>, char8_t> && !std::same_as<std::remove_cv_t<T>, char16_t>
         && !std::same_as<std::remove_cv_t<T>, char32_t>;
 
+    /// @return @p byte as the enumerator it names, or @p fallback for a byte no enumerator of @p E names (a
+    ///         newer peer's), up to and including @p last.
+    template <typename E>
+    [[nodiscard]] constexpr E enumOrElse(uint8_t byte, E last, E fallback) noexcept
+    {
+        return byte <= std::to_underlying(last) ? static_cast<E>(byte) : fallback;
+    }
+
     /// Assigns a checked read into @p out, or records the error.
     ///
     /// A read that does not FIT @p out is a protocol error, not something to truncate. Every
@@ -188,10 +196,6 @@ namespace
     {
         return std::to_underlying(PduType::ClosePane);
     }
-    [[nodiscard]] constexpr uint64_t tagOf(NewWorkspace const&) noexcept
-    {
-        return std::to_underlying(PduType::NewWorkspace);
-    }
     [[nodiscard]] constexpr uint64_t tagOf(ResizeSplit const&) noexcept
     {
         return std::to_underlying(PduType::ResizeSplit);
@@ -301,14 +305,6 @@ namespace
     {
         return std::to_underlying(PduType::SoftFontState);
     }
-    [[nodiscard]] constexpr uint64_t tagOf(FollowWorkspace const&) noexcept
-    {
-        return std::to_underlying(PduType::FollowWorkspace);
-    }
-    [[nodiscard]] constexpr uint64_t tagOf(ReleaseWorkspace const&) noexcept
-    {
-        return std::to_underlying(PduType::ReleaseWorkspace);
-    }
     [[nodiscard]] constexpr uint64_t tagOf(SwitchRequest const&) noexcept
     {
         return std::to_underlying(PduType::SwitchRequest);
@@ -317,9 +313,21 @@ namespace
     {
         return std::to_underlying(PduType::SwitchReply);
     }
-    [[nodiscard]] constexpr uint64_t tagOf(WorkspaceShown const&) noexcept
+    [[nodiscard]] constexpr uint64_t tagOf(SelectWorkspace const&) noexcept
     {
-        return std::to_underlying(PduType::WorkspaceShown);
+        return std::to_underlying(PduType::SelectWorkspace);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ReportFocus const&) noexcept
+    {
+        return std::to_underlying(PduType::ReportFocus);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(NotifyRole const&) noexcept
+    {
+        return std::to_underlying(PduType::NotifyRole);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(PaneSummary const&) noexcept
+    {
+        return std::to_underlying(PduType::PaneSummary);
     }
 
     // --- body encoders ------------------------------------------------------
@@ -438,9 +446,7 @@ namespace
             fields.varint(pdu.clientArea->lines);
         }
         fields.u8(std::to_underlying(pdu.attachIntent.kind));
-        fields.varint(pdu.attachIntent.workspaces.size());
-        for (auto const workspace: pdu.attachIntent.workspaces)
-            fields.varint(workspace);
+        fields.varint(pdu.attachIntent.workspace);
         fields.string(pdu.profileName);
         fields.u8(std::to_underlying(pdu.colorPreference));
         encodeCellPixelSize(fields, pdu.cellPixelSize);
@@ -483,9 +489,7 @@ namespace
         fields.string(pdu.machineId);
         fields.string(pdu.hostname);
         fields.string(pdu.releaseVersion);
-        fields.varint(pdu.followedWorkspaces.size());
-        for (auto const workspace: pdu.followedWorkspaces)
-            fields.varint(workspace);
+        fields.varint(pdu.selectedWorkspace);
         fields.varint(pdu.daemonInstance);
         fields.varint(pdu.restoredWorkspaces);
         fields.varint(pdu.restoredTabs);
@@ -822,11 +826,6 @@ namespace
         out.string(pdu.profileName);
     }
 
-    void encodeBody(Writer& out, NewWorkspace const& pdu)
-    {
-        out.string(pdu.profileName);
-    }
-
     void encodeBody(Writer& out, SplitPane const& pdu)
     {
         out.varint(pdu.session);
@@ -968,6 +967,7 @@ namespace
     void encodeBody(Writer& out, LayoutBatchEnd const& pdu)
     {
         out.varint(pdu.causeSerial);
+        out.varint(pdu.selected);
     }
 
     void encodeBody(Writer& out, UpgradeDaemon const& pdu)
@@ -1022,20 +1022,74 @@ namespace
         }
     }
 
-    void encodeBody(Writer& out, FollowWorkspace const& pdu)
+    void encodeBody(Writer& out, SelectWorkspace const& pdu)
     {
         out.varint(pdu.workspace);
     }
 
-    void encodeBody(Writer& out, WorkspaceShown const& pdu)
+    void encodeBody(Writer& out, ReportFocus const& pdu)
     {
-        out.varint(pdu.workspace);
+        out.u8(std::to_underlying(pdu.focus));
     }
 
-    void encodeBody(Writer& out, ReleaseWorkspace const& pdu)
+    void encodeBody(Writer& out, NotifyRole const& pdu)
     {
-        out.varint(pdu.workspace);
-        out.u8(std::to_underlying(pdu.reason));
+        out.u8(std::to_underlying(pdu.role));
+    }
+
+    /// The presence bits of a PaneSummary's optionals, in the order its fields follow the mask.
+    enum PaneSummaryPresence : uint8_t
+    {
+        SummaryHasTitle = 0b0001,
+        SummaryHasCwd = 0b0010,
+        SummaryHasFinished = 0b0100,
+        SummaryHasNotifications = 0b1000,
+    };
+
+    /// The presence bits of a FinishedCommand's optionals.
+    enum FinishedPresence : uint8_t
+    {
+        FinishedHasExitCode = 0b01,
+        FinishedHasDuration = 0b10,
+    };
+
+    void encodeBody(Writer& out, PaneSummary const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(std::to_underlying(pdu.activity));
+        out.u8(std::to_underlying(pdu.bell));
+        auto mask = uint8_t { 0 };
+        mask |= pdu.title ? SummaryHasTitle : 0;
+        mask |= pdu.cwd ? SummaryHasCwd : 0;
+        mask |= pdu.finished ? SummaryHasFinished : 0;
+        mask |= !pdu.notifications.empty() ? SummaryHasNotifications : 0;
+        out.u8(mask);
+        if (pdu.title)
+            out.string(*pdu.title);
+        if (pdu.cwd)
+            out.string(*pdu.cwd);
+        if (pdu.finished)
+        {
+            auto finishedMask = uint8_t { 0 };
+            finishedMask |= pdu.finished->exitCode ? FinishedHasExitCode : 0;
+            finishedMask |= pdu.finished->durationMs ? FinishedHasDuration : 0;
+            out.u8(finishedMask);
+            if (pdu.finished->exitCode)
+                out.svarint(*pdu.finished->exitCode);
+            if (pdu.finished->durationMs)
+                out.varint(*pdu.finished->durationMs);
+            out.string(pdu.finished->commandLine);
+        }
+        if (!pdu.notifications.empty())
+        {
+            out.varint(pdu.notifications.size());
+            for (auto const& notification: pdu.notifications)
+            {
+                out.string(notification.title);
+                out.string(notification.body);
+                out.u8(std::to_underlying(notification.occasion));
+            }
+        }
     }
 
     void encodeBody(Writer& out, SwitchRequest const& pdu)
@@ -1279,17 +1333,13 @@ namespace
         auto kind = uint8_t {};
         if (!assign(in.u8(), kind, error))
             return false;
-        auto workspaces =
-            decodeVector(in, pdu.attachIntent.workspaces, [](Reader& reader) { return reader.varint(); });
-        if (!workspaces)
-        {
-            error = workspaces.error();
+        if (!assign(in.varint(), pdu.attachIntent.workspace, error))
             return false;
-        }
-        // A kind no enumerator names is what a daemon without the capability does anyway.
-        pdu.attachIntent.kind = kind <= std::to_underlying(AttachIntentKind::Resume)
-                                    ? static_cast<AttachIntentKind>(kind)
-                                    : AttachIntentKind::AllWorkspaces;
+        // A kind no enumerator names, a retired one among them, is what a daemon without the capability does
+        // anyway.
+        pdu.attachIntent.kind = kind >= std::to_underlying(AttachIntentKind::Default)
+                                    ? enumOrElse(kind, AttachIntentKind::Resume, AttachIntentKind::Default)
+                                    : AttachIntentKind::Default;
         return true;
     }
 
@@ -1411,13 +1461,8 @@ namespace
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.string(), pdu.releaseVersion, error))
             return std::unexpected(error);
-        if (inner.remaining() != 0)
-        {
-            if (auto const followed = decodeVector(
-                    inner, pdu.followedWorkspaces, [](Reader& reader) { return reader.varint(); });
-                !followed)
-                return std::unexpected(followed.error());
-        }
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.selectedWorkspace, error))
+            return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.daemonInstance, error))
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredWorkspaces, error))
@@ -1819,15 +1864,6 @@ namespace
         return pdu;
     }
 
-    DecodeResult decodeNewWorkspace(Reader& in)
-    {
-        auto pdu = NewWorkspace {};
-        auto error = DecodeError {};
-        if (in.remaining() != 0 && !assign(in.string(), pdu.profileName, error))
-            return std::unexpected(error);
-        return pdu;
-    }
-
     DecodeResult decodeSplitPane(Reader& in)
     {
         auto pdu = SplitPane {};
@@ -2056,7 +2092,7 @@ namespace
     {
         auto pdu = LayoutBatchEnd {};
         auto error = DecodeError {};
-        if (!assign(in.varint(), pdu.causeSerial, error))
+        if (!assign(in.varint(), pdu.causeSerial, error) || !assign(in.varint(), pdu.selected, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -2147,41 +2183,112 @@ namespace
         return PanesReprojected {};
     }
 
-    /// @return @p byte as the enumerator it names, or @p fallback for a byte no enumerator of @p E names (a
-    ///         newer peer's), up to and including @p last.
-    template <typename E>
-    [[nodiscard]] constexpr E enumOrElse(uint8_t byte, E last, E fallback) noexcept
+    DecodeResult decodeSelectWorkspace(Reader& in)
     {
-        return byte <= std::to_underlying(last) ? static_cast<E>(byte) : fallback;
-    }
-
-    DecodeResult decodeFollowWorkspace(Reader& in)
-    {
-        auto pdu = FollowWorkspace {};
+        auto pdu = SelectWorkspace {};
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.workspace, error))
             return std::unexpected(error);
         return pdu;
     }
 
-    DecodeResult decodeWorkspaceShown(Reader& in)
+    DecodeResult decodeReportFocus(Reader& in)
     {
-        auto pdu = WorkspaceShown {};
+        auto pdu = ReportFocus {};
         auto error = DecodeError {};
-        if (!assign(in.varint(), pdu.workspace, error))
+        auto focus = uint8_t { 0 };
+        if (!assign(in.u8(), focus, error))
             return std::unexpected(error);
+        // A state a newer peer knows is the weaker claim: the window does not have the focus.
+        pdu.focus = enumOrElse(focus, WindowFocus::Focused, WindowFocus::Unfocused);
         return pdu;
     }
 
-    DecodeResult decodeReleaseWorkspace(Reader& in)
+    DecodeResult decodeNotifyRole(Reader& in)
     {
-        auto pdu = ReleaseWorkspace {};
+        auto pdu = NotifyRole {};
         auto error = DecodeError {};
-        auto reason = uint8_t { 0 };
-        if (!assign(in.varint(), pdu.workspace, error) || !assign(in.u8(), reason, error))
+        auto role = uint8_t { 0 };
+        if (!assign(in.u8(), role, error))
             return std::unexpected(error);
-        // A reason a newer peer knows is the weaker claim: the workspace is left, not hidden.
-        pdu.reason = enumOrElse(reason, WorkspaceRelease::SwitchedAway, WorkspaceRelease::Closed);
+        // A role a newer peer knows is the quieter one.
+        pdu.role = enumOrElse(role, RaiseRole::Raise, RaiseRole::Quiet);
+        return pdu;
+    }
+
+    /// Reads the optional string that @p bit announces in @p mask.
+    [[nodiscard]] bool decodeOptionalString(
+        Reader& in, uint8_t mask, uint8_t bit, std::optional<std::string>& out, DecodeError& error)
+    {
+        if ((mask & bit) == 0)
+            return true;
+        auto text = std::string {};
+        if (!assign(in.string(), text, error))
+            return false;
+        out = std::move(text);
+        return true;
+    }
+
+    [[nodiscard]] bool decodeFinishedCommand(Reader& in, FinishedCommand& finished, DecodeError& error)
+    {
+        auto mask = uint8_t { 0 };
+        if (!assign(in.u8(), mask, error))
+            return false;
+        if ((mask & FinishedHasExitCode) != 0)
+        {
+            auto exitCode = int32_t { 0 };
+            if (!assign(in.svarint(), exitCode, error))
+                return false;
+            finished.exitCode = exitCode;
+        }
+        if ((mask & FinishedHasDuration) != 0)
+        {
+            auto duration = uint64_t { 0 };
+            if (!assign(in.varint(), duration, error))
+                return false;
+            finished.durationMs = duration;
+        }
+        return assign(in.string(), finished.commandLine, error);
+    }
+
+    /// One notification of a PaneSummary; its occasion carried, not judged, as SessionNotify's is.
+    [[nodiscard]] std::expected<PaneNotification, DecodeError> decodePaneNotification(Reader& in)
+    {
+        auto notification = PaneNotification {};
+        auto error = DecodeError {};
+        auto occasion = uint8_t { 0 };
+        if (!assign(in.string(), notification.title, error) || !assign(in.string(), notification.body, error)
+            || !assign(in.u8(), occasion, error))
+            return std::unexpected(error);
+        notification.occasion = static_cast<NotifyOccasion>(occasion);
+        return notification;
+    }
+
+    DecodeResult decodePaneSummary(Reader& in)
+    {
+        auto pdu = PaneSummary {};
+        auto error = DecodeError {};
+        auto activity = uint8_t { 0 };
+        auto bell = uint8_t { 0 };
+        auto mask = uint8_t { 0 };
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), activity, error)
+            || !assign(in.u8(), bell, error) || !assign(in.u8(), mask, error))
+            return std::unexpected(error);
+        pdu.activity = enumOrElse(activity, OutputActivity::Output, OutputActivity::None);
+        pdu.bell = enumOrElse(bell, PaneBell::Rang, PaneBell::Silent);
+        if (!decodeOptionalString(in, mask, SummaryHasTitle, pdu.title, error)
+            || !decodeOptionalString(in, mask, SummaryHasCwd, pdu.cwd, error))
+            return std::unexpected(error);
+        if ((mask & SummaryHasFinished) != 0)
+        {
+            auto finished = FinishedCommand {};
+            if (!decodeFinishedCommand(in, finished, error))
+                return std::unexpected(error);
+            pdu.finished = std::move(finished);
+        }
+        if ((mask & SummaryHasNotifications) != 0)
+            if (auto const decoded = decodeVector(in, pdu.notifications, decodePaneNotification); !decoded)
+                return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -2411,7 +2518,6 @@ namespace
         DecodeRow { PduType::CreateTab, decodeCreateTab },
         DecodeRow { PduType::SplitPane, decodeSplitPane },
         DecodeRow { PduType::ClosePane, decodeClosePane },
-        DecodeRow { PduType::NewWorkspace, decodeNewWorkspace },
         DecodeRow { PduType::ResizeSplit, decodeResizeSplit },
         DecodeRow { PduType::SessionSettingsChanged, decodeSessionSettingsChanged },
         DecodeRow { PduType::PerformOperation, decodePerformOperation },
@@ -2439,11 +2545,12 @@ namespace
         DecodeRow { PduType::DaemonUpgrading, decodeDaemonUpgrading },
         DecodeRow { PduType::PanesReprojected, decodePanesReprojected },
         DecodeRow { PduType::SoftFontState, decodeSoftFontState },
-        DecodeRow { PduType::FollowWorkspace, decodeFollowWorkspace },
-        DecodeRow { PduType::ReleaseWorkspace, decodeReleaseWorkspace },
         DecodeRow { PduType::SwitchRequest, decodeSwitchRequest },
         DecodeRow { PduType::SwitchReply, decodeSwitchReply },
-        DecodeRow { PduType::WorkspaceShown, decodeWorkspaceShown },
+        DecodeRow { PduType::SelectWorkspace, decodeSelectWorkspace },
+        DecodeRow { PduType::ReportFocus, decodeReportFocus },
+        DecodeRow { PduType::NotifyRole, decodeNotifyRole },
+        DecodeRow { PduType::PaneSummary, decodePaneSummary },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

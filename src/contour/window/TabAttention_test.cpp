@@ -16,8 +16,15 @@ using vtworkspace::SessionId;
 
 namespace
 {
-constexpr auto Shell = SessionId { 1 };
-constexpr auto Editor = SessionId { 2 };
+constexpr auto ShellSession = SessionId { 1 };
+constexpr auto EditorSession = SessionId { 2 };
+constexpr auto Shell = PaneKey { 1 };
+constexpr auto Editor = PaneKey { 2 };
+
+/// The key a window keeps a session's marks under here: the local id.
+constexpr auto keyOf = [](SessionId session) {
+    return PaneKey { session.value };
+};
 } // namespace
 
 TEST_CASE("tabAttention.offScreenLiveOutputMarksOnce", "[tabattention]")
@@ -142,12 +149,14 @@ TEST_CASE("tabAttention.seeingClearsTheBell", "[tabattention]")
 
 TEST_CASE("tabAttention.pooledPoolsTheBell", "[tabattention]")
 {
-    auto tab = vtworkspace::Tab { vtworkspace::TabId { 1 }, vtworkspace::PaneId { 1 }, Shell };
-    std::ignore = tab.rootPane()->split(
-        vtworkspace::SplitState::Vertical, vtworkspace::PaneId { 2 }, vtworkspace::PaneId { 3 }, Editor);
+    auto tab = vtworkspace::Tab { vtworkspace::TabId { 1 }, vtworkspace::PaneId { 1 }, ShellSession };
+    std::ignore = tab.rootPane()->split(vtworkspace::SplitState::Vertical,
+                                        vtworkspace::PaneId { 2 },
+                                        vtworkspace::PaneId { 3 },
+                                        EditorSession);
     auto ledger = TabAttention {};
     std::ignore = ledger.noteBell(Editor, SessionVisibility::Hidden, OutputOrigin::Live);
-    CHECK(pooledAttention(tab, ledger).bell == BellMark::Rang);
+    CHECK(pooledAttention(tab, ledger, keyOf).bell == BellMark::Rang);
 }
 
 TEST_CASE("tabAttention.forgetDropsTheEntry", "[tabattention]")
@@ -161,24 +170,26 @@ TEST_CASE("tabAttention.forgetDropsTheEntry", "[tabattention]")
 
 TEST_CASE("tabAttention.pooledOverEveryLeaf", "[tabattention]")
 {
-    auto tab = vtworkspace::Tab { vtworkspace::TabId { 1 }, vtworkspace::PaneId { 1 }, Shell };
-    std::ignore = tab.rootPane()->split(
-        vtworkspace::SplitState::Vertical, vtworkspace::PaneId { 2 }, vtworkspace::PaneId { 3 }, Editor);
+    auto tab = vtworkspace::Tab { vtworkspace::TabId { 1 }, vtworkspace::PaneId { 1 }, ShellSession };
+    std::ignore = tab.rootPane()->split(vtworkspace::SplitState::Vertical,
+                                        vtworkspace::PaneId { 2 },
+                                        vtworkspace::PaneId { 3 },
+                                        EditorSession);
 
     auto ledger = TabAttention {};
-    CHECK(pooledAttention(tab, ledger) == SessionAttention {});
+    CHECK(pooledAttention(tab, ledger, keyOf) == SessionAttention {});
 
     std::ignore = ledger.noteOutput(Editor, SessionVisibility::Hidden, OutputOrigin::Live);
-    CHECK(pooledAttention(tab, ledger).activity == TabActivity::UnseenOutput);
+    CHECK(pooledAttention(tab, ledger, keyOf).activity == TabActivity::UnseenOutput);
 
     std::ignore = ledger.noteFinished(Shell, SessionVisibility::Hidden, CommandEnding::Failed);
     std::ignore = ledger.noteFinished(Editor, SessionVisibility::Hidden, CommandEnding::Succeeded);
-    CHECK(pooledAttention(tab, ledger)
+    CHECK(pooledAttention(tab, ledger, keyOf)
           == SessionAttention { .activity = TabActivity::UnseenOutput,
                                 .finished = FinishedBlockBadge::Failed });
 
     std::ignore = ledger.noteSeen(Editor, 0);
-    CHECK(pooledAttention(tab, ledger) == SessionAttention { .finished = FinishedBlockBadge::Failed });
+    CHECK(pooledAttention(tab, ledger, keyOf) == SessionAttention { .finished = FinishedBlockBadge::Failed });
 }
 
 TEST_CASE("tabAttention.outputOrigin", "[tabattention]")

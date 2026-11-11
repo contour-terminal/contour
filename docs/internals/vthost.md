@@ -132,7 +132,7 @@ with any other value is a pre-negotiation peer's, decoded no further than that v
 | PDU | Layout |
 |-----|--------|
 | `ClientHello` | `u32 4`, one blob of `varint min, varint max, varint count + varint idents, string token, optional session settings` and whatever a later version appends, then one zero byte |
-| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint count + varint followedWorkspaces, varint daemonInstance` and whatever a later version appends |
+| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint selectedWorkspace, varint daemonInstance` and whatever a later version appends |
 | `ServerHello` (version alone) | the `u32` alone: the refusal a pre-negotiation client (0.7.0 on codec 1, 0.8.0 on codec 2, or codec 3) reads |
 
 Each stays readable to contour 0.7.0, whose daemon decodes a hello whole before it checks the version
@@ -161,11 +161,10 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `TabMerge` | 13 | `tab-merge` | `MergeTabIntoSplit`: the daemon grafts a whole tab, sessions and all, beside a pane of another tab. A client offers a drop-to-split only to a daemon sharing it; against an older one the tab is left to tear off into its own window, as before |
 | `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
 | `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a workspace's tab well, or into a new workspace, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
-| `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every workspace the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one workspace may be in flight to another |
+| `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every workspace, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one workspace may be in flight to another |
 | `PanesReprojected` | 19 | `panes-reprojected` | `PanesReprojected`: a client re-sends every pane's size when asked. The daemon no longer offers it (it restores the survivors' pane sizes itself, see "One grid, several clients"); the client keeps offering and answering it for daemons built while it was sent |
-| `WorkspaceFollow` | 23 | `workspace-follow` | `FollowWorkspace` / `ReleaseWorkspace`: a connection starts or stops showing a workspace at runtime, so a window moves from one workspace to another without reconnecting. The daemon records why a workspace was released, which decides whether later launches bring it back (see [workspace follow](#workspace-follow-and-switch)) |
-| `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks the client showing a workspace to switch that window to another daemon or workspace, and the client answers with the outcome |
-| `WorkspaceShown` | 25 | `workspace-shown` | `WorkspaceShown`: the client confirms each followed workspace's first layout, and until then the daemon keeps the workspace's hidden or left record aside, giving it back if the connection ends first. Without it a follow counts as shown once its layout is sent |
+| `WorkspaceSwitch` | 24 | `workspace-switch` | `SwitchRequest` / `SwitchReply`: the daemon asks one window (the caller's, else the raise holder) to switch to another daemon or workspace, and the client answers with the outcome |
+| `DaemonFollow` | 28 | `daemon-follow` | `SelectWorkspace` / `ReportFocus` / `NotifyRole` / `PaneSummary`: a connection selects one workspace and is sent it in full, the others as summaries, and the daemon routes bells, clipboard writes and switch requests by the windows' focus (see [which workspace a client selects](#which-workspace-a-client-selects)) |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -327,13 +326,12 @@ in half, a swap trades two places and each keeps its ratio.
 
 A `NewWorkspace` move is not made by the model alone. The daemon makes the workspace itself, through
 `MoveWorkspaceHooks` (`SessionHost::createEmptyWorkspace`): the workspace gets its UUID binding like any
-other, and **the requesting connection is recorded as its creator**, so that the requester's follow scope
-adopts it (`WorkspaceClaim::Yours`) and another attached GUI does not claim a workspace that is this client's own.
+other, and the requesting window selects it once its first layout is pushed.
 The workspace then is the well of an ordinary tab-well move, and a refused move takes it away again
 (`discardWorkspace`) so a refusal leaves no empty workspace behind. A source that is already all of its workspace -- its
 only tab, or that tab's only pane -- is refused as the model's `NoOp` before any workspace is made
 (`SessionModel::fillsItsWorkspace`): moved, it would only tear its workspace down and build it again for every client. The same hook removes the workspace a move took
-its last tab out of, once every client was pushed it empty — its UUID and creator go with it, and when it was
+its last tab out of, once every client was pushed it empty -- its UUID goes with it, and when it was
 the host's primary workspace, the lowest-id workspace left takes that role.
 
 A refusal is answered with **`MoveNodeRefused`** (tag 38, under the request's serial, only to a client that
@@ -362,12 +360,13 @@ pushed once the frame that made the change has handed control back to the loop: 
 follows, once, as the change left it -- a marked workspace the change removed goes out with no tab, so the client
 closes its own window for it -- and then one `LayoutBatchEnd`. The PTYs are resized as each event is fanned
 out, before that, for every client alike, so they have their sizes before the client sees the layout. Its field `causeSerial` is the serial of the
-`MoveNode` whose effects the batch completes, 0 when no request of this client caused it. A client therefore
+latest `MoveNode` or `SelectWorkspace` whose effects the batch completes, 0 when no request of this client caused
+it. A client therefore
 reconciles one **settled snapshot** per batch (`NativeController::layoutsSettled`): the layouts it holds when
 the end arrives are the state the change left, across every workspace, and a session that none of them names is
 gone, not in flight. The client that asked completes its move on the batch: the serials only grow per
 connection, so a batch ended by serial S completes every move it has in flight up to S
-(`NativeController::takeCompletedMoves`), including one that pushed nothing: the batch of a move is ended
+(`NativeController::takeCompletedRequests`), including one that pushed nothing: the batch of a move is ended
 to the client that asked for it even when it follows none of the workspaces the move changed. A move whose workspace is never
 placed expires after five seconds instead of waiting for ever.
 
@@ -388,34 +387,30 @@ pushed the layout in the same batch machinery a move uses; there is no reply PDU
 layout push would revert a local flip; against an older daemon it keeps the local toggle.
 
 <a id="workspace-follow-and-switch"></a>
-**Workspace follow and switch** (tags 46 to 50). `FollowWorkspace` (tag 46, client→server, gated on
-`Capability::WorkspaceFollow`) names a daemon workspace to show in addition to the ones already followed; `0`
-asks the daemon to create a new workspace, which the connection claims. The daemon pushes that workspace's
-`LayoutState` and its sessions' screens. `ReleaseWorkspace` (tag 47, same gate) stops showing one and states
-why, as a `WorkspaceRelease`: `Closed` (the window closed; the workspace is left) or `SwitchedAway` (the
-window moved on; the workspace stays hidden). The daemon keeps the last reason per workspace until a client
-follows it again. `SwitchRequest` (tag 48, server→client, gated on `Capability::WorkspaceSwitch`) asks the
-client to switch the window showing a workspace, named by its id, to a `SwitchTargetWire`: a daemon (`Same`, a
-local `Label`, or a saved `Host`) and a workspace spec the client resolves against the target daemon, empty to
-let it decide; appended after it, `answerWithinMs` says how long the daemon waits for the reply
-(`SwitchAnswerTimeout`, 30 s; `0`, as from a daemon that predates it, reads as that; the client takes at most
-5 minutes of it). The client asks its user first (the `SwitchWindow` guarded role) -- only while an allowed
-switch could still land before that deadline, and refusing the request at once when it no longer could -- and
-the switch it allows carries that deadline, counted from the request's arrival, through the listing of the
-destination's workspaces to its landing: it does not start once past it, and gives up at it. The client
-answers `Failed` when no window of its own shows that workspace.
-`SwitchReply` (tag 49, client→server) answers under the same `request` with a `SwitchOutcome` (`Switched`,
+**Workspace selection and switch.** `SelectWorkspace` (client->server, gated on `Capability::DaemonFollow`) names
+the one daemon workspace the connection displays in full; `0` asks the daemon to create a workspace and select
+it. `ReportFocus` (client->server, same gate) states whether the window has the user's focus, and `NotifyRole`
+(server->client) tells it whether it is the raise holder (see above). `PaneSummary` (server->client) carries
+what changed about a pane of an unselected workspace, and what it raised there: a bell mark and each desktop
+notification, which a connection that does not mirror the pane is sent in place of `SessionBell` and
+`SessionNotify`. The `LayoutBatchEnd` answering a `SelectWorkspace` names it as its `causeSerial`, so a client
+that asked for a workspace the daemon does not have learns so at once. `SwitchRequest` (tag 48, server->client, gated on
+`Capability::WorkspaceSwitch`) asks one window to switch to a `SwitchTargetWire`: a daemon (`Same`, a local
+`Label`, or a saved `Host`) and a workspace spec the client resolves against the target daemon, empty to let it
+decide; `workspace` names the workspace the window selects now. Appended after it, `answerWithinMs` says how
+long the daemon waits for the reply (`SwitchAnswerTimeout`, 30 s; `0`, as from a daemon that predates it, reads
+as that; the client takes at most 5 minutes of it). The client asks its user first (the `SwitchWindow` guarded
+role) -- only while an allowed switch could still land before that deadline, and refusing the request at once
+when it no longer could -- and the switch it allows carries that deadline, counted from the request's arrival,
+through the listing of the destination's workspaces to its landing: it does not start once past it, and gives
+up at it. The client answers `Failed` when no window of its own selects that workspace.
+`SwitchReply` (tag 49, client->server) answers under the same `request` with a `SwitchOutcome` (`Switched`,
 `FocusedExisting`, `PickerShown`, `Refused`, `Failed`) and a sentence. A peer that did not negotiate the
 capability has the PDU refused as one this daemon does not know (`Unsupported`).
-`WorkspaceShown` (tag 50, client→server, gated on `Capability::WorkspaceShown`) confirms that the first
-`LayoutState` of a workspace the connection follows arrived; it is sent once per follow, again after a release
-and a new follow.
 
-The GUI keeps one connection per window: the launch connection follows every left workspace, and for each one
-beyond the first the process starts a link of its own that follows only that workspace and opens its own window,
-after which the launch connection releases it (`Closed`). A switch to another daemon likewise starts a link on
-the destination, hands the window over once its first layout settles, and releases the old workspace
-`SwitchedAway` on the old connection.
+The GUI keeps one connection per window. A switch to another workspace of the same daemon is a `SelectWorkspace`
+on that connection; a switch to another daemon starts a link on the destination and moves the window over to it once
+its first layout settles.
 
 **`PanesReprojected`** (tag 44, server→client, no fields, gated on `Capability::PanesReprojected`) asks a
 client to re-assert its pane sizes. The daemon no longer sends it, nor offers the capability: it once did on
@@ -808,7 +803,7 @@ break to remove.
 profile (history depth, reported terminal identity, reflow, grapheme clustering, frozen modes, image
 registers, sixel scrolling; never the page size, which `ResizeRequest` negotiates). The daemon applies it over its own
 settings, validating every field, and hands the result to the sessions *that connection* creates:
-`CreateTab`, `SplitPane`, `NewWorkspace`, and the first session an attach to an empty daemon spawns.
+`CreateTab`, `SplitPane`, `SelectWorkspace 0`, and the first session an attach to an empty daemon spawns.
 Sessions that already exist are never re-emulated, which is what makes two clients on different
 profiles conflict-free rather than a race — an application that already read DA1 cannot be told its
 terminal changed identity. A client whose configuration changed restates its preference with
@@ -821,7 +816,8 @@ cannot disagree about what a profile means.
 
 Transient session events — bell, desktop notification, OSC 52 clipboard write — are one PDU each
 (`SessionBell`, `SessionNotify`, `SessionClipboard`), projected for consumers as
-`proto::SessionEventPdu`. They were briefly a single PDU with a `kind` byte and two anonymous
+`proto::SessionEventPdu`. A bell or notification of a pane the connection does not mirror travels in the pane's
+`PaneSummary` instead (see [which workspace a client selects](#which-workspace-a-client-selects)). They were briefly a single PDU with a `kind` byte and two anonymous
 strings, which forced every payload into the union of all of them and left nothing but a comment
 saying which field meant what.
 
@@ -1022,7 +1018,7 @@ include `remote/`), so everything the GUI reads of "the host" is read per window
   shell" guess read `TerminalSessionManager::hostLabelOf(window)` -- the window's binding's label, empty for
   a local window. `WindowController::hostLabel` is therefore no longer `CONSTANT`: binding a window, or
   releasing its binding, emits `hostLabelChanged`. A new OS window is authored on the daemon of the
-  window it is asked from (`TerminalSessionManager::requestRemoteWorkspace`); asked with no window open,
+  window it is asked from (`TerminalSessionManager::requestRemoteWindow`); asked with no window open,
   it is local.
 - **Configuration reload.** `ContourGuiApp::onConfigurationReloaded()` tells every link, which has its
   controller re-resolve the session settings (`NativeController::restateSessionSettings`): stated to the
@@ -1042,33 +1038,59 @@ having stopped releases its windows itself; `ContourGuiApp`'s teardown stops eve
 still exists. Outcomes reported off the GUI thread (a daemon upgrade or restart) name the link by its id,
 for it may be gone by then.
 
-**One link per window.** A link serves one OS window, over a connection of its own. A launch attaches with
-`Launch` (a saved host and `--connect-tcp` alike; `--workspace W` with `Workspaces{W}`), and the daemon names
-the left workspaces it now follows. The first adopts the boot window; each further one -- and any workspace
-pushed later, as a New Window asks the daemon for one -- is handed to a link of its own
-(`IDaemonLinkHost::startHandOverLink`, intent `Workspaces{id}`), which opens its window as its connection
-shows the workspace and reports back (`handOverSettled` → `DaemonLink::completeHandOver`). Only then does the
-first link release the workspace (`ReleaseWorkspace(Closed)`), so it is followed by one of the two connections
-throughout: a launch started meanwhile finds it shown and does not take it. A hand-over link that fails to
-connect leaves the workspace on the first link, which shows it in a second window of its own with a notice;
-so does a daemon without `Capability::WorkspaceFollow`. Closing a window releases its workspace as `Closed`
-(`WindowBinding::windowClosed`), leaving it *left* for the next launch; one a move emptied stays followed, as
-the daemon may fill it again.
+**One link per window.** A link (`remote::DaemonLink`) serves one OS window, over a connection of its own,
+and that connection selects one workspace (see [which workspace a client selects](#which-workspace-a-client-selects)).
+The window displays the selected workspace, realized into a local workspace of the window's; every other workspace
+of the daemon is an entry of the window's directory (`NativeController::directory()`), fed by the layouts pushed
+for every workspace and the status stream of the panes the connection does not mirror. A launch opens one window,
+whose connection's `Default` intent selects the daemon's most recently selected workspace, else its first;
+`--workspace W` states `Select{W}`. New Window starts a link of its own to the same daemon target, selecting the
+workspace its window displays (`WindowBinding::openWindowLike`); so does a tab torn off a window, whose new window
+activates that tab once it has realized the workspace. Nothing moves for either: both windows show the daemon's
+one workspace, each through local sessions of its own, and closing one leaves the other as it was.
 
-What a reconnect or the return from a live upgrade follows is what the window shows now:
-`NativeController::follow()` and `release()` send the PDUs and record the change, and every later
-connection's `Resume` set is the lost one's plus what was followed since, less what was released
-(`NativeController::makeClient`); a layout of a released workspace still on its way is dropped, by the
-client and by the controller. Reconnects state `Resume`, never `Launch`, so a daemon that still counts the
-lost connection's follow does not hand the window a new workspace.
+A window switches workspaces in place. `DaemonLink::selectWorkspace()` sends `SelectWorkspace`; once a
+`LayoutBatchEnd` states the new selection and that workspace holds a tab, the link realizes it into a fresh local
+workspace of the window, has the window display it (`WindowController::displayWorkspace`), and detaches the panes
+of the one it displayed before, whose sessions run on in the daemon; the emptied local workspace leaves the model
+and the manager (`TerminalSessionManager::forgetWorkspace`). The same happens when the daemon moves the selection
+itself, as it does when the selected workspace's last tab closes: the window never closes for it, only when
+nothing is left to select. `SwitchToWorkspace{index}`, `NewWorkspace` (`SelectWorkspace 0`) and a switch within
+the window's own daemon resolve against the directory and select directly, with no listing round trip. Which tab
+and pane are active is the window's own: `LayoutState.activeTab` and `WireTab.activePane` seed them only when the
+window first realizes a workspace (`remote::TabSelection`), so another window activating a tab moves nothing here.
+
+What a reconnect or the return from a live upgrade selects is what the window selected last. The client holds the
+selection: `NativeClient::selectedWorkspace()` starts as the one the `ServerHello` named and follows the
+`selected` field of each `LayoutBatchEnd` (a workspace the daemon created for `SelectWorkspace 0`, or chose when
+the selected one closed). `ClientSupervisor` states it in every later connection's `Resume`;
+`NativeController::makeClient` keeps that intent and falls back to its own record (`_selected`, refreshed with each
+connection and batch) only where the intent names none. Reconnects state `Resume`, never `Default`, so a daemon
+that still counts the lost connection's selection does not hand the window a new workspace. A window whose
+workspace a reconnect lost displays what the connection selects instead, and closes only when that is nothing.
+The panes' seen and activity marks are kept per window under the daemon's session ids (`window::PaneKey`), so a
+reconnect, which realizes no new key, keeps them.
+
+Each link reports its window's focus (`WindowBinding::reportFocus`), and the daemon names the most recently focused
+connection the raise holder (`NotifyRole`). `TerminalSessionManager::raises()` asks the window's binding: a
+daemon's session rings its bell, alerts, and shows its desktop and finish notifications only in the window
+holding `RaiseRole::Raise`; every window still marks the pane's tab. The raise holder also rings, alerts and
+notifies for what panes of workspaces it does not select raised -- a bell (`PaneSummary.bell`), a desktop
+notification (`PaneSummary.notifications`), a command that finished (`PaneSummary.finished`, through
+`platform::finishNoticeKind` with the visibility `Hidden`). Whether it raises is judged by the role the
+connection held as each summary arrived (`NativeController::takeRaised`), so a focus change in flight neither
+drops nor repeats one, and each is raised once. The taskbar counts a daemon window's waiting tabs over
+its directory, and, for an application-wide count, each daemon once, as its most recently focused window counts
+it.
 
 The attach-window binder a spawned window's `Main.qml` consults is installed by the link that opens a window,
 just before it does; a window spawned with nothing staged is declined and stays local. A pane or tab moves
 between two windows of one daemon though each is its own binding: windows are judged by their daemon's
 instance, the move goes through the source window's link, and the daemon pushes the result to the connection
-showing the target workspace. A move between windows of two daemons is refused.
+selecting the target workspace. A pane dropped outside every window lands in a workspace the daemon makes for it,
+and a link of its own opens a window selecting that workspace. A move between windows of two daemons is refused.
 `DaemonLink_test.cpp` drives two links against two in-process daemons in one process -- typing, a split and a
-lost daemon each stay with their own window -- and the hand-overs against one.
+lost daemon each stay with their own window -- and two windows of one process against one daemon.
 
 ### One grid, several clients
 
@@ -1136,91 +1158,89 @@ history. The mirror terminal adds the origin to every cell it reports in a mouse
 release (`vtbackend::Terminal::setReportedCellOrigin`), so a click lands on the cell the application
 drew there, not on the client's own cell.
 
-### Which workspaces a client sees
+### Which workspace a client selects
 
-A grid is shared; a *workspace* need not be. A client states an attach intent in its `ClientHello`
-(`proto::AttachIntent`, honoured only when both ends share `Capability::AttachIntent`), and the
-daemon decides with the pure `vthost::planAttach` what that connection follows and what attaching
-creates:
+A grid is shared; what a window displays need not be. Every connection **selects exactly one workspace** and
+is sent that workspace in full: its layout, its sessions' screens, resizes and deltas. It is also sent the
+layout of every other workspace (so a workspace list can be drawn) and, for each pane of an unselected
+workspace, a `PaneSummary` (title, working directory, an activity mark throttled to one per second per
+session, a finished command, a bell mark and the desktop notifications it raised) and its `ProgramStatus` --
+never its screen. A pane that has a mirror on the
+connection has no summary. Selecting another workspace (`SelectWorkspace`, gated on
+`Capability::DaemonFollow`; `0` creates a workspace and selects it) moves the mirror: the old workspace's panes
+turn into summaries, the new one's are sent in full.
 
-| Intent | Follows | Creates |
+A client states an attach intent in its `ClientHello` (`proto::AttachIntent`, honoured only when both ends
+share `Capability::AttachIntent`), and the daemon decides with the pure `vthost::planAttach` which workspace
+that connection selects and what attaching creates:
+
+| Intent | Selects | Creates |
 | --- | --- | --- |
-| `AllWorkspaces` (no capability: every client before intents), `Launch` | the workspaces with a tab that are *left* (see below), wherever else clients are attached | the first tab, on a daemon with no tab at all; a workspace of its own when every workspace is shown or hidden; for a `Launch` with a working directory stated, a tab in the first workspace followed otherwise |
+| `Default` (no capability: every client before intents) | the workspace some connection selected last, else the first with a tab | the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
 | `NewWorkspace` | a new workspace of its own | that workspace |
-| `Workspaces` | the listed workspaces that exist (possibly none) | nothing |
-| `Resume` | the listed workspaces that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
+| `Select` | the named workspace, if it exists; else as `Default` | nothing |
+| `Resume` | the named workspace, if it survived holding a tab; else as `Default` | as `Default` when it did not survive |
+
+Their wire values start at 5: 0 to 4 named the retired intents of a connection that mirrored several
+workspaces, whose workspace field was a list, and are never reused, so that no daemon takes one of these for
+one of those. A value no intent names, a retired one among them, is read as `Default`. A daemon that predates
+them still reads each as its old default and the workspace as the list's length, so a `Select` or `Resume`
+naming a workspace ends there in a generic protocol error; daemon mode is experimental.
 
 A `ClientHello` may state a `workingDirectory` (`contour working-directory DIR`, the first connection
 only): an absolute directory the session the attach creates starts in, laid over the profile's shell
 as a directory-only `commandOverride`. A relative one is ignored, as it names a place under the
-client's directory, which the daemon cannot see. Only a `Launch` that would otherwise create nothing
-creates a tab for it; following named workspaces, the `AllWorkspaces` of a client predating intents or a
-reconnect's survivors never adds one.
+client's directory, which the daemon cannot see. Only a `Default` that would otherwise create nothing
+creates a tab for it; a `Select` or `Resume` that finds its workspace never adds one.
 
-Every workspace is *shown* (a connection follows it), *hidden* (the last client to show it switched away,
-`ReleaseWorkspace(SwitchedAway)`, and none shows it since) or *left* (neither: its client closed it or went
-away without a word). `vthost::visibilityOf` decides, and `SessionHost` keeps the last release per workspace
-until a follow clears it, so a hidden workspace shown again and then dropped by a quit is left, not hidden.
-A follow clears it only provisionally, though: until the follower is shown the workspace -- it confirms the
-first layout (`WorkspaceShown`), or, for a client without that capability, the layout is sent -- the record is
-kept aside for that connection, and it comes back should the connection end first, unless another client
-follows the workspace or released it since. Two connections following it unshown both hold the record, so the
-last of them to go puts it back, and the workspace shown to either drops it for both. A switch whose new
-connection is lost before its first layout therefore leaves a hidden target hidden, although the client's own
-undo had no connection to travel on. A connection that goes half-open after the layout reached its window but
-before the confirmation came back counts as never shown: a `--new-workspace` its user saw is then hidden, found
-again in the switcher or by a Resume.
-A workspace made for the connection (`NewWorkspace`, `FollowWorkspace 0`) and never shown to it is hidden
-the same way, so a switch to `+new` on another daemon that gave up before the first layout leaves the
-workspace it made put away -- as the same daemon's given-up switch does -- not left for the next launch. A
-launch brings back the left workspaces only: a second machine attaching gets the ones nobody shows, and a
-workspace a user switched away from stays away. The state rides in the workspace snapshot, and in the live
-upgrade's handover image (`HandoverImage::releases`), so a hidden workspace is still hidden after a restart or a
-live upgrade; one that was shown comes back left, its clients having gone with the daemon. The primary viewer
-takes up no unclaimed workspace another connection follows, so a workspace another window switched to shows
-there only.
+A workspace is *shown* when some connection selects it and *hidden* when none does
+(`vthost::visibilityOf`; `SessionHost::visibility`, reported by `workspace.list` as `visibility`). There is
+nothing else to remember: no connection owns a workspace, nothing is claimed, and a window that goes away
+simply stops selecting. `SessionHost` keeps the workspace some connection selected last
+(`lastSelectedWorkspace()`) for the next `Default`, and it rides in the workspace snapshot and the live
+upgrade's handover image. A workspace the control API creates is selected by nobody until a window selects
+it.
 
-"Another client" for the primary viewer and the first-launch rule is `SessionHost::connectedClients()`:
-handshaken native `Attach` connections, counted after the plan (so a connection never counts against itself)
-and uncounted as the connection is destroyed. It is deliberately not the daemon's `ClientCensus`, which
-counts tmux and imsg clients too, for idle exit: a tmux gateway attached must not turn the first GUI's
-launch into a second workspace.
-
-The handshake runs negotiate → plan → create → `ServerHello` (whose `followedWorkspaces` names the
-workspaces followed) → `LayoutState` per followed workspace → snapshots of their sessions. The plan runs
+The handshake runs negotiate -> plan -> create -> `ServerHello` (whose `selectedWorkspace` names the
+selection) -> `LayoutState` per workspace -> snapshots of the selected workspace's sessions. The plan runs
 after the hello's client area is applied, so whatever it spawns spawns at the client's size. Nothing
-reaches the peer before its `ServerHello`. From then on a connection is sent the layout, screens,
-resizes, bells, notifications and clipboard writes of followed workspaces only; a workspace that closes
-leaves the set.
+reaches the peer before its `ServerHello`.
 
-A workspace gains followers in two ways. One a connection creates (its `NewWorkspace`, or the workspace a
-launch made for it) is *claimed* for it in `SessionHost` before its first tab is announced, and that
-connection follows it. A workspace nobody claims — one the control API creates — is followed by the
-**primary viewer**, the connection whose launch (`AllWorkspaces`, `Launch` or `Resume`) found no other client attached: `contour
-new` then appears in the GUI the user launched first, not in none. A claimed workspace stays claimed
-after its creator leaves, so a second GUI never inherits the first one's workspace; it waits for the
-next launch that finds it left. Each workspace joining a connection's set is sent its sessions'
-snapshots, since a quiet session would otherwise produce nothing to send.
+The daemon routes what no single workspace owns by the windows' focus. A window reports `ReportFocus`
+(`Focused` or `Unfocused`) and the host stamps each report with a rising counter; `vthost::ViewRouting`
+holds the pure decisions over those stamps:
 
-A client that loses its connection keeps its workspaces. `vthost::client::ClientSupervisor` opens every
+- the **raise holder** is the window focused most recently (ties, all never focused, go to the one attached
+  last). It is told `NotifyRole{Raise}`, the others `Quiet`, and the role passes on at once when its holder
+  detaches. Only the raise holder rings the bell and raises for a bell or notification of a pane in a
+  workspace it does not select, the window that selects that workspace included;
+- a pane's clipboard write (OSC 52) goes to the window selecting the pane's workspace that was focused last,
+  and is dropped when none does;
+- `workspace.switch` asks one window (`switchTarget`): among the windows selecting the named workspace, the
+  one focused last; else, from a pane, among those selecting the caller's workspace; else the raise holder.
+  Two windows on one workspace never make it ambiguous, and no error names several candidates.
+
+Only windows take part: a connection without `Capability::DaemonFollow` (a bench, an older client) is in none
+of these decisions (`SessionStreamEvents::followsDaemon`), since it is never told its role nor asked to switch;
+it lands the clipboard writes of the panes it mirrors.
+
+A client that loses its connection keeps its selection. `vthost::client::ClientSupervisor` opens every
 connection through an `ITransportFactory` (`Transport.hpp`), and after a loss reconnects with backoff
-(250 ms doubling to 5 s), each new connection stating `Resume` of the workspaces the lost one followed —
-or `AllWorkspaces` again for a client that attached with it.
+(250 ms doubling to 5 s), each new connection stating `Resume` of the workspace the lost one selected
+(`NativeClient::selectedWorkspace()`: the one its `ServerHello` named, or the one `selectWorkspace()` asked for
+since). A daemon that no longer has it falls back to `Default`.
 Workspace and session ids count from 1 in every run of a daemon, so the ids alone cannot tell a restarted
 daemon's workspace 1 from the one the client showed: the `ServerHello` states `daemonInstance`, drawn at
-random as the daemon starts, and a client that meets another instance takes every workspace it showed for
-lost. That is also why `Resume` does not take an empty workspace for a survivor — a restarted daemon's own
-primary workspace holds no tab yet. A reconnect's intent states the run its ids are of
+random as the daemon starts, and a client that meets another instance takes the workspace it showed for
+lost. That is also why `Resume` does not take an empty workspace for a survivor -- a restarted daemon's own
+primary workspace holds no tab yet. A reconnect's intent states the run its id is of
 (`AttachIntent::daemonInstance`, appended to the hello after `workingDirectory`, which it then states
-empty): a daemon of another run takes them for naming none of its workspaces, so `Workspaces` follows
-nothing and `Resume` is a launch, rather than following whichever new workspace shares a lost one's id. Of
-each daemon's links the GUI keeps exactly one resuming as a launch (`remote::passOnLaunchResume`): the
-launch's own, then, once it ends, the first live one left. That link takes back what a restore brought back
-and the others close their lost windows, so a restart neither leaves a restored workspace unshown nor closes
-the application's last window. The GUI (`contour::remote::NativeController`) keeps every pane and pty
+empty): a daemon of another run takes it for naming none of its workspaces, so `Select` and `Resume` are a
+`Default`, rather than selecting whichever new workspace shares a lost one's id. The GUI
+(`contour::remote::NativeController`) keeps every pane and pty
 while reconnecting, drops what is typed meanwhile rather than replaying it into whatever shell answers
-next, restarts each pane's mirror for the new connection's snapshots, and reports the lost workspaces
-(`workspacesLost`) with the first workspace that came instead, so it can close them without closing the last
+next, restarts each pane's mirror for the new connection's snapshots, and reports the lost workspace
+(`workspacesLost`) with the one that came instead, so it can close it without closing the last
 one.
 
 A connection gone half-open (a laptop that changed networks, a host that vanished) produces no EOF, so
@@ -1369,7 +1389,7 @@ echo there, so the lock appears without waiting for output. A value the client d
 
 The host's configuration owns what runs; the client's owns how it looks. A client names a
 **profile** — in its `ClientHello` (`profileName`), or on a spawning verb (`CreateTab`, `SplitPane`,
-`NewWorkspace`, whose name overrides the connection's for that one spawn) — and the daemon resolves the
+whose name overrides the connection's for that one spawn) — and the daemon resolves the
 name in its own configuration through `vthost::ProfileCatalog` (`contour::cli::ConfigProfileCatalog`
 for `contour daemon`). The resolved profile supplies the session's settings and its whole shell:
 program, arguments, working directory and environment — the shell the in-process GUI spawns for that

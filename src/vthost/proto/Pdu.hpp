@@ -61,7 +61,7 @@ enum class PduType : uint8_t
     CreateTab = 14,
     SplitPane = 15,
     ClosePane = 16,
-    NewWorkspace = 17,
+    // 17 was NewWorkspace: retired (SelectWorkspace with no workspace creates one), never reused.
     ResizePane = 18,
     ResizeSplit = 19,
     SessionSettingsChanged = 20,
@@ -90,11 +90,13 @@ enum class PduType : uint8_t
     DaemonUpgrading = 43,
     PanesReprojected = 44,
     SoftFontState = 45,
-    FollowWorkspace = 46,
-    ReleaseWorkspace = 47,
+    // 46, 47 and 50 were FollowWorkspace, ReleaseWorkspace and WorkspaceShown: retired, never reused.
     SwitchRequest = 48,
     SwitchReply = 49,
-    WorkspaceShown = 50,
+    SelectWorkspace = 51,
+    ReportFocus = 52,
+    NotifyRole = 53,
+    PaneSummary = 54,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -227,28 +229,33 @@ struct WireCellPixelSize
     bool operator==(WireCellPixelSize const&) const = default;
 };
 
-/// Which of the daemon's workspaces a connection wants to follow, and whether attaching creates one.
-/// Decoding is lenient: a byte no enumerator names reads as AllWorkspaces, which is what a daemon without
+/// Which workspace a connection selects when it attaches, and whether attaching creates one.
+/// Decoding is lenient: a byte no enumerator names reads as Default, which is what a daemon without
 /// Capability::AttachIntent does anyway.
+///
+/// 0 to 4 were the intents of a connection that mirrored several workspaces (AllWorkspaces, Launch,
+/// NewWorkspace, Workspaces, Resume), whose workspace field was a list: retired, never reused, so that a
+/// daemon that still reads them never takes one of these for one of those. That is all it buys: such a daemon
+/// reads every value here as AllWorkspaces, and reads the workspace field as that list's length, so a Select
+/// or Resume naming a workspace misdecodes the rest of the hello and ends in a generic protocol error rather
+/// than the client's upgrade message. Accepted while daemon mode is experimental.
 enum class AttachIntentKind : uint8_t
 {
-    /// Every workspace, including those created later: the behaviour before intents existed.
-    AllWorkspaces = 0,
-    Launch = 1,       ///< A fresh launch: every workspace when no other client is attached, else a new one.
-    NewWorkspace = 2, ///< A new workspace of its own, mirroring none of the existing ones.
-    Workspaces = 3,   ///< Exactly the listed workspaces (those that exist).
-    Resume = 4,       ///< The listed workspaces after a reconnect; when none survives, as Launch.
+    Default = 5,      ///< The daemon picks: the workspace of the last selection if any, else the first.
+    NewWorkspace = 6, ///< A new workspace of its own, selected at once.
+    Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace.
+    Resume = 8,       ///< The workspace named after a reconnect; when it is gone, as Default.
 };
 
 /// What a ClientHello asks to be shown.
 struct AttachIntent
 {
-    AttachIntentKind kind = AttachIntentKind::AllWorkspaces;
-    /// The daemon workspaces named; meaningful for Workspaces and Resume only.
-    std::vector<uint64_t> workspaces = {};
-    /// Which run of the daemon (ServerHello::daemonInstance) @c workspaces are ids of; 0 when unstated. Ids
-    /// count from 1 in every run, so a reconnect states the run it showed them in: a daemon that restarted
-    /// meanwhile then knows they name none of its workspaces, rather than whichever of its own share an id.
+    AttachIntentKind kind = AttachIntentKind::Default;
+    /// The daemon workspace named; meaningful for Select and Resume only.
+    uint64_t workspace = 0;
+    /// Which run of the daemon (ServerHello::daemonInstance) @c workspace is an id of; 0 when unstated. Ids
+    /// count from 1 in every run, so a reconnect states the run it showed it in: a daemon that restarted
+    /// meanwhile then knows it names none of its workspaces, rather than whichever of its own shares an id.
     uint64_t daemonInstance = 0;
     bool operator==(AttachIntent const&) const = default;
 };
@@ -338,9 +345,9 @@ struct ServerHello
     std::string hostname = {}; ///< The daemon's host name; empty when unknown.
     /// The daemon's release (e.g. "0.8.1"); empty when unknown, and in every refusal.
     std::string releaseVersion = {};
-    /// The daemon workspaces this connection follows, ascending; empty in a refusal and from a daemon that
-    /// predates attach intents.
-    std::vector<uint64_t> followedWorkspaces = {};
+    /// The daemon workspace this connection selected; 0 in a refusal and from a daemon that predates attach
+    /// intents.
+    uint64_t selectedWorkspace = 0;
     /// Which run of the daemon answers: drawn at random as the daemon starts, so it differs across a
     /// restart. Workspace and session ids count from 1 in every run, so this is how a reconnecting client
     /// tells a daemon that restarted -- whose workspace 1 is not the workspace 1 it showed -- from the one it
@@ -1208,7 +1215,7 @@ struct CreateTab
     /// Which WINDOW to create the tab in, named — like every other client→server verb — by a
     /// session it hosts; 0 means "the daemon's own first workspace".
     ///
-    /// The daemon really does host several workspaces (@see NewWorkspace), so a request naming none put
+    /// The daemon really does host several workspaces (@see SelectWorkspace), so a request naming none put
     /// every client's "+" into the first one: click it in a second workspace and the tab appeared in
     /// the first, while the workspace clicked in gained nothing. Named by session rather than by
     /// workspace id for the reason SplitPane is: workspace ids are minted per model and the two ends
@@ -1219,16 +1226,6 @@ struct CreateTab
     /// The profile the new tab's session runs under; empty means the connection's profile.
     std::string profileName = {};
     bool operator==(CreateTab const&) const = default;
-};
-
-/// Client→server: create a new daemon workspace (with a first tab + session). The
-/// daemon then pushes that workspace's LayoutState; the client opens a GUI window for
-/// it (B4).
-struct NewWorkspace
-{
-    /// The profile the new workspace's first session runs under; empty means the connection's profile.
-    std::string profileName = {};
-    bool operator==(NewWorkspace const&) const = default;
 };
 
 /// Client→server: split the pane hosting @p session (the daemon activates it
@@ -1592,9 +1589,13 @@ struct MoveNodeRefused
 /// flight.
 struct LayoutBatchEnd
 {
-    /// The serial of the MoveNode request whose effects this batch completes, so the client that asked can
-    /// tell its own move landing from any other push; 0 when no request of this client caused it.
+    /// The serial of the latest MoveNode or SelectWorkspace request whose effects this batch completes, so
+    /// the client that asked can tell its own move landing, or its selection answered, from any other push; 0
+    /// when no request of this client caused it.
     uint64_t causeSerial = 0;
+    /// The workspace this connection selects as of this batch, so a client learns a daemon-side reselection
+    /// (its workspace closed) explicitly rather than inferring it from which snapshots arrive.
+    uint64_t selected = 0;
     bool operator==(LayoutBatchEnd const&) const = default;
 };
 
@@ -1607,40 +1608,102 @@ struct PanesReprojected
     bool operator==(PanesReprojected const&) const = default;
 };
 
-/// Why a client stopped showing a workspace.
-enum class WorkspaceRelease : uint8_t
+/// Whether a window has the user's focus, as ReportFocus states it.
+enum class WindowFocus : uint8_t
 {
-    Closed = 0,       ///< The window showing it closed (or the client went away): the workspace is left.
-    SwitchedAway = 1, ///< The window moved on to another workspace or daemon: the workspace stays, hidden.
+    Unfocused = 0, ///< The window lost focus.
+    Focused = 1,   ///< The window gained focus.
 };
 
-/// Client→server (Capability::WorkspaceFollow): show another workspace of this daemon in addition to the
-/// ones already followed. The daemon pushes that workspace's LayoutState and its sessions' screens.
-struct FollowWorkspace
+/// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
+/// The daemon pushes that workspace's layout and screens in full, and the other workspaces' panes as
+/// PaneSummary only.
+struct SelectWorkspace
 {
-    /// The daemon workspace to follow; 0 asks the daemon to create a new one, which this connection claims.
+    /// The daemon workspace to select; 0 asks the daemon to create one and select it.
     uint64_t workspace = 0;
-    bool operator==(FollowWorkspace const&) const = default;
+    bool operator==(SelectWorkspace const&) const = default;
 };
 
-/// Client→server (Capability::WorkspaceFollow): stop showing a workspace. The daemon remembers why, so a
-/// workspace switched away from stays hidden from later launches while a closed one is left for them.
-struct ReleaseWorkspace
+/// Client→server (Capability::DaemonFollow): the window gained or lost focus. The daemon routes bells,
+/// clipboard writes and switch requests by the most recently focused window.
+struct ReportFocus
 {
-    uint64_t workspace = 0;                             ///< The workspace no longer shown.
-    WorkspaceRelease reason = WorkspaceRelease::Closed; ///< Why.
-    bool operator==(ReleaseWorkspace const&) const = default;
+    WindowFocus focus = WindowFocus::Unfocused; ///< The window's focus now.
+    bool operator==(ReportFocus const&) const = default;
 };
 
-/// Client→server (Capability::WorkspaceShown): the first layout of a workspace this connection follows
-/// reached it. Until then the daemon keeps aside the release the follow forgot, and gives it back should
-/// the connection end first -- so a switch whose new connection drops before it showed its target leaves a
-/// hidden target hidden. Sent once per follow; a release and a later follow ask for it again.
-struct WorkspaceShown
+/// What a window does with a bell or notification of a pane.
+enum class RaiseRole : uint8_t
 {
-    uint64_t workspace = 0; ///< The followed workspace whose layout arrived.
-    bool operator==(WorkspaceShown const&) const = default;
+    Quiet = 0, ///< Another window rings and raises; this one only marks the pane.
+    Raise = 1, ///< This window rings and raises.
 };
+
+/// Server→client (Capability::DaemonFollow): the role this connection has for raising, as the daemon
+/// decided it from the focus reports of all attached windows.
+struct NotifyRole
+{
+    RaiseRole role = RaiseRole::Quiet; ///< The connection's role now.
+    bool operator==(NotifyRole const&) const = default;
+};
+
+/// Whether a pane produced output since its last summary.
+enum class OutputActivity : uint8_t
+{
+    None = 0,   ///< No output.
+    Output = 1, ///< The pane printed something.
+};
+
+/// How a command finished, as a PaneSummary reports it.
+struct FinishedCommand
+{
+    std::optional<int32_t> exitCode = std::nullopt;    ///< The exit status, when known.
+    std::optional<uint64_t> durationMs = std::nullopt; ///< How long it ran, when known.
+    std::string commandLine = {}; ///< The command line in its display form (sanitized), empty when unknown.
+    bool operator==(FinishedCommand const&) const = default;
+};
+
+/// Whether a pane rang the bell since its last summary.
+enum class PaneBell : uint8_t
+{
+    Silent = 0, ///< No bell.
+    Rang = 1,   ///< The pane rang the bell at least once.
+};
+
+/// A desktop notification a pane raised (OSC 9 / OSC 777 / OSC 99), as a PaneSummary carries it: what a
+/// SessionNotify says, without the session the summary already names.
+struct PaneNotification
+{
+    std::string title = {};
+    std::string body = {};
+    NotifyOccasion occasion = NotifyOccasion::Unstated; ///< When the notification asks to be shown.
+    bool operator==(PaneNotification const&) const = default;
+};
+
+/// Server→client (Capability::DaemonFollow): what changed about a pane of a workspace this connection does
+/// not select. Absent optionals mean "unchanged", so one PDU carries every field that changed.
+///
+/// It also carries what the pane raised, which a connection that does not mirror the pane is not sent as a
+/// SessionBell or SessionNotify: the window that raises (RaiseRole::Raise) rings and notifies for it.
+struct PaneSummary
+{
+    uint64_t session = 0;                                   ///< The pane's session.
+    std::optional<std::string> title = std::nullopt;        ///< The new title, if it changed.
+    std::optional<std::string> cwd = std::nullopt;          ///< The new working directory, if it changed.
+    OutputActivity activity = OutputActivity::None;         ///< Whether the pane printed something.
+    std::optional<FinishedCommand> finished = std::nullopt; ///< A command that finished, if one did.
+    PaneBell bell = PaneBell::Silent;                       ///< Whether the pane rang the bell.
+    std::vector<PaneNotification> notifications = {};       ///< What the pane notified, oldest first.
+    bool operator==(PaneSummary const&) const = default;
+};
+
+/// @param summary A pane's summary.
+/// @return Whether it carries something a window raises for: a finished command, a bell, a notification.
+[[nodiscard]] inline bool carriesRaise(PaneSummary const& summary) noexcept
+{
+    return summary.finished || summary.bell == PaneBell::Rang || !summary.notifications.empty();
+}
 
 /// Which daemon a switch names, relative to the one asked.
 enum class SwitchDaemonKind : uint8_t
@@ -1755,7 +1818,6 @@ using DecodedPdu = std::variant<Invalid,
                                 CreateTab,
                                 SplitPane,
                                 ClosePane,
-                                NewWorkspace,
                                 ResizePane,
                                 ResizeSplit,
                                 SessionSettingsChanged,
@@ -1784,11 +1846,12 @@ using DecodedPdu = std::variant<Invalid,
                                 DaemonUpgrading,
                                 PanesReprojected,
                                 SoftFontState,
-                                FollowWorkspace,
-                                ReleaseWorkspace,
                                 SwitchRequest,
                                 SwitchReply,
-                                WorkspaceShown>;
+                                SelectWorkspace,
+                                ReportFocus,
+                                NotifyRole,
+                                PaneSummary>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.
