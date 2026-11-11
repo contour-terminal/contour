@@ -22,6 +22,7 @@ target_include_directories(vthost_keeper PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 target_link_libraries(vthost_keeper PUBLIC
+    vthost_image
     core::base
     core::codec
     core::platform

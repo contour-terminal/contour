@@ -9,6 +9,28 @@ target_include_directories(vthost_wire PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 
+# The daemon's images and where its state lives: the image store, its leases and the paths, which the PTY
+# keeper reaches too (it restarts a crashed daemon from the newest image). Nothing of the terminal engine.
+add_library(vthost_image STATIC
+    DaemonBinary.cpp
+    DaemonBinary.hpp
+    DaemonImage.cpp
+    DaemonImage.hpp
+    DaemonImageLeases_posix.cpp
+    DaemonImageLeases_win32.cpp
+    StatePath.hpp
+)
+target_include_directories(vthost_image PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
+target_link_libraries(vthost_image PUBLIC
+    core::base
+    core::log
+    core::platform
+    vtpty
+)
+
 add_subdirectory(keeper)
 
 add_library(vthost STATIC
@@ -40,12 +62,6 @@ add_library(vthost STATIC
     DaemonControlWire.hpp
     DaemonIdentity.cpp
     DaemonIdentity.hpp
-    DaemonBinary.cpp
-    DaemonBinary.hpp
-    DaemonImage.cpp
-    DaemonImage.hpp
-    DaemonImageLeases_posix.cpp
-    DaemonImageLeases_win32.cpp
     DaemonLifecycle.hpp
     RelocationRequest.hpp
     ConnectionRegistry.cpp
@@ -134,7 +150,6 @@ add_library(vthost STATIC
     SpawnEnvironment.hpp
     SshTransport.cpp
     SshTransport.hpp
-    StatePath.hpp
     StderrTail.hpp
     StdioAttach.cpp
     StdioAttach.hpp
@@ -265,6 +280,7 @@ add_library(vthost STATIC
 )
 target_link_libraries(vthost PUBLIC
     vthost_wire
+    vthost_image
     vtcontrol
     core::async
     core::base
