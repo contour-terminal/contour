@@ -100,8 +100,7 @@ struct ControllerOptions
     /// Which of the daemon's workspaces it shows; a launch of everything left by default. A test of two
     /// clients that share a session names the workspace in each: a second plain launch is given a workspace
     /// of its own.
-    vthost::proto::AttachIntent intent = { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                           .workspaces = {} };
+    vthost::proto::AttachIntent intent = { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 };
     /// Whether the daemon may ask it to switch its windows; it may, as the GUI's.
     contour::remote::NativeController::SwitchRequests switchRequests =
         contour::remote::NativeController::SwitchRequests::Answered;
@@ -118,7 +117,7 @@ struct ControllerOptions
 {
     return contour::remote::NativeController::Config {
         .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
-        .intent = std::move(options.intent),
+        .intent = options.intent,
         .profileName = std::string {},
         .workingDirectory = std::move(options.workingDirectory),
         .attachSettings = std::move(options.attachSettings),
@@ -142,6 +141,35 @@ struct ControllerOptions
 {
     return std::make_unique<contour::remote::NativeController>(
         controllerConfig(std::move(endpoint), timeline, std::move(options)));
+}
+
+/// Stops a controller when it goes out of scope, so the reactor thread is gone before any local declared
+/// before this guard -- a signal handler's captures, a log -- is destroyed, whether the case ends or a
+/// failing REQUIRE unwinds it. Declare it after everything a handler connected to the controller captures.
+class StopOnExit
+{
+  public:
+    explicit StopOnExit(contour::remote::NativeController& controller): _controller(controller) {}
+    ~StopOnExit() { _controller.stop(); }
+
+    StopOnExit(StopOnExit const&) = delete;
+    StopOnExit& operator=(StopOnExit const&) = delete;
+    StopOnExit(StopOnExit&&) = delete;
+    StopOnExit& operator=(StopOnExit&&) = delete;
+
+  private:
+    contour::remote::NativeController& _controller;
+};
+
+/// The services of a daemon that predates the window's selection: it does not offer
+/// Capability::DaemonFollow, so a controller cannot attach to it.
+/// @return The services to give a DaemonFixture.
+[[nodiscard]] inline vthost::NativeSessionServices servicesWithoutDaemonFollow()
+{
+    auto services = vthost::NativeSessionServices {};
+    std::erase(services.handshake.capabilities.idents,
+               std::to_underlying(vthost::proto::Capability::DaemonFollow));
+    return services;
 }
 
 /// A daemon end of a connection that the fixture can drop, as a crashing daemon would: it is listed in
@@ -362,6 +390,13 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     /// Lets every frame through up to the next LayoutState, and holds it and the rest: the connection is up,
     /// and no layout of it has come in.
     void holdAtNextLayout() { _holdAtLayout = true; }
+
+    /// Holds everything written from now on: the client hears nothing more of the daemon until release().
+    void holdNow()
+    {
+        _holdAtLayout = true;
+        _holding = true;
+    }
 
     /// Sends what was held, in order, and holds nothing more.
     void release(core::net::EventLoop& loop)
@@ -697,6 +732,17 @@ struct DaemonFixture
         });
     }
 
+    /// Has every connection hold everything the daemon writes from now on, until releaseHeld(): what the
+    /// daemon does meanwhile, it does with no client having heard of it.
+    void holdEverything()
+    {
+        onDaemon([this] {
+            for (auto* socket: gated)
+                socket->holdNow();
+            return 0;
+        });
+    }
+
     /// Has every connection accepted from now on let its frames through up to its first layout, and hold
     /// that and the rest until releaseHeld().
     void holdNewConnectionsAtLayout()
@@ -756,6 +802,36 @@ struct DaemonFixture
         });
     }
 };
+
+/// A workspace added to a daemon, holding one tab of one pane.
+struct AddedWorkspace
+{
+    uint64_t id = 0;                ///< The daemon's workspace id.
+    vtworkspace::SessionId session; ///< The session of its one pane.
+};
+
+/// Adds a workspace of one tab to @p daemon, as the control API's workspace verbs do.
+/// @return The workspace and its pane.
+[[nodiscard]] inline AddedWorkspace addWorkspace(DaemonFixture& daemon)
+{
+    return daemon.onDaemon([&daemon] {
+        auto const* workspace = daemon.host->createWorkspace();
+        return AddedWorkspace { .id = workspace->id().value,
+                                .session = workspace->activeTab()->rootPane()->session() };
+    });
+}
+
+/// Seeds @p daemon with @p count workspaces of one tab each.
+/// @return Their ids, ascending.
+inline std::vector<uint64_t> seedWorkspaces(DaemonFixture& daemon, int count)
+{
+    std::ignore = daemon.seedSession("first");
+    auto ids =
+        std::vector<uint64_t> { daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; }) };
+    for ([[maybe_unused]] auto const each: std::views::iota(1, count))
+        ids.push_back(addWorkspace(daemon).id);
+    return ids;
+}
 
 /// Whether a wait runs the GUI thread's queued work meanwhile.
 enum class GuiEvents : uint8_t

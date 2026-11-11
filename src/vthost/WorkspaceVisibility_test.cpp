@@ -1,35 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
-#include <optional>
-
 #include <vthost/WorkspaceVisibility.hpp>
 
 using namespace vthost;
-using proto::WorkspaceRelease;
 
-TEST_CASE("visibilityOf names a workspace Shown, Hidden or Left", "[vthost][visibility]")
+TEST_CASE("a visibility is named as the control API spells it", "[vthost][visibility]")
 {
-    struct Row
-    {
-        std::size_t followers = 0;
-        std::optional<WorkspaceRelease> lastRelease = std::nullopt;
-        WorkspaceVisibility expected = WorkspaceVisibility::Left;
-    };
-    constexpr auto Rows = std::array {
-        Row { 0, std::nullopt, WorkspaceVisibility::Left },
-        Row { 0, WorkspaceRelease::Closed, WorkspaceVisibility::Left },
-        Row { 0, WorkspaceRelease::SwitchedAway, WorkspaceVisibility::Hidden },
-        Row { 1, std::nullopt, WorkspaceVisibility::Shown },
-        Row { 2, WorkspaceRelease::SwitchedAway, WorkspaceVisibility::Shown },
-        Row { 2, WorkspaceRelease::Closed, WorkspaceVisibility::Shown },
-    };
-    for (auto const& row: Rows)
-        CHECK(visibilityOf(row.followers, row.lastRelease) == row.expected);
+    CHECK(nameOf(WorkspaceVisibility::Shown) == "shown");
+    CHECK(nameOf(WorkspaceVisibility::Hidden) == "hidden");
 }
 
-TEST_CASE("the visibility enumerators keep zero for Left", "[vthost][visibility]")
+TEST_CASE("the visibility enumerators keep zero for Hidden", "[vthost][visibility]")
 {
-    STATIC_CHECK(WorkspaceVisibility {} == WorkspaceVisibility::Left);
+    STATIC_CHECK(WorkspaceVisibility {} == WorkspaceVisibility::Hidden);
 }

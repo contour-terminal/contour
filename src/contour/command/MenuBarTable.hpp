@@ -145,6 +145,9 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },
+    MenuReachabilityExemption { .action = "NewWorkspace",
+                                .reason = "reached from the palette and key bindings; a window a daemon "
+                                          "serves says it takes none" },
     MenuReachabilityExemption { .action = "SwitchToWorkspace",
                                 .reason = "reached from the palette, the switcher and key bindings; a window "
                                           "with no daemon has nothing to switch" },

@@ -1130,18 +1130,6 @@ Task<void> driveCreateTab(core::net::EventLoop* loop, NativeClient* client, int 
     client->detach();
 }
 
-/// Awaits the initial single-workspace layout, authors a new workspace, and waits for
-/// the daemon to push a layout for the SECOND workspace before detaching.
-Task<void> driveCreateWorkspace(core::net::EventLoop* loop,
-                                NativeClient* client,
-                                std::set<uint64_t>* workspaces)
-{
-    co_await core::net::testing::waitUntil(loop, [workspaces] { return workspaces->size() == 1; });
-    client->createWorkspace({});
-    co_await core::net::testing::waitUntil(loop, [workspaces] { return workspaces->size() == 2; });
-    client->detach();
-}
-
 } // namespace
 
 TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]")
@@ -1464,44 +1452,6 @@ TEST_CASE("a dark client's hello has the host build its sessions dark from the f
         for (auto const& background: observation.seen)
             CHECK(background == FakeDualPaletteCatalog::LightBackground);
     }
-}
-
-TEST_CASE("a client authors a new workspace, honored by the daemon (B4)", "[vthost][attach]")
-{
-    auto const source = core::net::makeDefaultBackend();
-    auto loop = core::net::EventLoop { *source };
-    auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
-                                  return std::make_unique<vtpty::MockPty>(size);
-                              },
-                              vtbackend::Settings {},
-                              core::defaultEnvironment(),
-                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
-    host.createTab(); // the daemon starts with one workspace (with one tab)
-
-    auto pair = *core::net::testing::makeSocketPair(loop);
-    auto server = NativeSession {
-        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
-    };
-    // Every LayoutState the client receives names its workspace; collect the ids.
-    auto workspaces = std::set<uint64_t> {};
-    auto client =
-        NativeClient { loop,
-                       std::move(pair.second),
-                       NativeClient::HandshakeOptions {},
-                       vtbackend::CommandBlockStoreLimits {},
-                       NativeClient::UpdateHandler {},
-                       NativeClient::ImageHandler {},
-                       NativeClient::SessionEventHandler {},
-                       NativeClient::LayoutHandler { [&workspaces](proto::LayoutState const& received) {
-                           workspaces.insert(received.workspace);
-                       } } };
-
-    loop.blockOn(core::net::testing::allOf(
-        server.run(), client.run(), driveCreateWorkspace(&loop, &client, &workspaces)));
-
-    CHECK(workspaces.size() == 2);             // the client saw two distinct workspaces' layouts
-    CHECK(host.model().workspaceCount() == 2); // the daemon really created a second workspace
 }
 
 TEST_CASE("RemoteScreen replaces its block table on a snapshot and stamps only what changed",
@@ -2510,146 +2460,215 @@ TEST_CASE("the client states its intent and profile and learns its workspaces", 
 {
     auto services = vthost::NativeSessionServices {};
     services.handshake.capabilities = thinClientCapabilities();
-    auto h =
-        IntentHarness { std::move(services),
-                        NativeClient::HandshakeOptions {
-                            .capabilities = thinClientCapabilities(),
-                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
-                            .profileName = "main" },
-                        mainOnly() };
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions {
+                                 .capabilities = thinClientCapabilities(),
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Default, .workspace = 0 },
+                                 .profileName = "main" },
+                             mainOnly() };
     h.drive(detachOnLayout(&h));
 
-    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
+    CHECK(h.client->selectedWorkspace() == h.host.workspaceId().value);
     CHECK(h.client->namesProfiles());
     CHECK(h.profiles() == std::vector<std::string> { "main" }); // the attach's first session, under it
 }
 
-TEST_CASE("a client follows and releases a workspace at runtime, and resumes what it follows now",
-          "[vthost][attach][workspace-follow]")
+TEST_CASE("a resumed connection selects the workspace it had", "[vthost][attach][intent]")
 {
-    auto const capabilities = [] {
-        return proto::CapabilitySet::of({ proto::Capability::AttachIntent,
-                                          proto::Capability::ProfileByName,
-                                          proto::Capability::TabEdits,
-                                          proto::Capability::WorkspaceFollow });
-    };
-    auto services = vthost::NativeSessionServices {};
-    services.handshake.capabilities = capabilities();
-    auto h =
-        IntentHarness { std::move(services),
-                        NativeClient::HandshakeOptions {
-                            .capabilities = capabilities(),
-                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
-                            .profileName = "main" },
-                        mainOnly() };
-    auto const first = h.host.workspaceId().value;
-    auto second = uint64_t {};
-    auto followDelivery = vthost::client::Delivery::Unsupported;
-    auto releaseDelivery = vthost::client::Delivery::Unsupported;
-    auto followedAfterFollow = std::vector<uint64_t> {};
-    auto layoutsBeforeRelease = std::size_t {};
-    h.drive([](IntentHarness* h,
-               uint64_t first,
-               uint64_t* second,
-               vthost::client::Delivery* followed,
-               vthost::client::Delivery* released,
-               std::vector<uint64_t>* followedAfterFollow,
-               std::size_t* layoutsBeforeRelease) -> Task<void> {
-        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
-        *second = h->host.createWorkspace()->id().value;
-        *followed = h->client->followWorkspace(*second);
-        *followedAfterFollow = h->client->followedWorkspaces();
-        co_await core::net::testing::waitUntil(&h->loop, [h, second] {
-            return std::ranges::any_of(h->layouts,
-                                       [second](auto const& layout) { return layout.workspace == *second; });
-        });
-        *released = h->client->releaseWorkspace(first, proto::WorkspaceRelease::SwitchedAway);
-        *layoutsBeforeRelease = h->layouts.size();
-        // Pushed before the daemon reads the release, which is still on its way: a layout of the released
-        // workspace is not this client's any more.
-        std::ignore = h->host.createTab();
-        co_await core::net::testing::waitUntil(&h->loop, [h, first] {
-            return h->host.visibility(vtworkspace::WorkspaceId { first })
-                   == vthost::WorkspaceVisibility::Hidden;
-        });
-        h->client->detach();
-    }(&h, first, &second, &followDelivery, &releaseDelivery, &followedAfterFollow, &layoutsBeforeRelease));
-
-    CHECK(followDelivery == vthost::client::Delivery::Sent);
-    CHECK(releaseDelivery == vthost::client::Delivery::Sent);
-    CHECK(followedAfterFollow == std::vector<uint64_t> { first, second });
-    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { second });
-    CHECK(std::ranges::none_of(h.layouts | std::views::drop(layoutsBeforeRelease),
-                               [first](auto const& layout) { return layout.workspace == first; }));
-}
-
-TEST_CASE(
-    "a client confirms the first layout of a workspace it follows, so its daemon keeps it shown-then-left",
-    "[vthost][attach][workspace-follow][visibility]")
-{
-    auto const capabilities = [] {
-        return proto::CapabilitySet::of({ proto::Capability::AttachIntent,
-                                          proto::Capability::ProfileByName,
-                                          proto::Capability::WorkspaceFollow,
-                                          proto::Capability::WorkspaceShown });
-    };
-    auto services = vthost::NativeSessionServices {};
-    services.handshake.capabilities = capabilities();
-    auto h =
-        IntentHarness { std::move(services),
-                        NativeClient::HandshakeOptions {
-                            .capabilities = capabilities(),
-                            .attachIntent = { .kind = proto::AttachIntentKind::Workspaces, .workspaces = {} },
-                            .profileName = "main" },
-                        mainOnly() };
-    REQUIRE(h.host.createTab() != nullptr);
-    auto const* hidden = h.host.createWorkspace();
-    REQUIRE(hidden != nullptr);
-    auto const workspace = hidden->id();
-    h.host.noteWorkspaceReleased(workspace, proto::WorkspaceRelease::SwitchedAway);
-    REQUIRE(h.host.visibility(workspace) == vthost::WorkspaceVisibility::Hidden);
-
-    h.drive([](IntentHarness* h, uint64_t workspace) -> Task<void> {
-        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
-        std::ignore = h->client->followWorkspace(workspace);
-        co_await core::net::testing::waitUntil(&h->loop, [h, workspace] {
-            return std::ranges::any_of(
-                h->layouts, [workspace](auto const& layout) { return layout.workspace == workspace; });
-        });
-        // Read in order: the daemon has the confirmation before it sees the connection end.
-        h->client->detach();
-    }(&h, workspace.value));
-    h.server.reset();
-
-    CHECK(h.host.visibility(workspace) == vthost::WorkspaceVisibility::Left);
-}
-
-TEST_CASE("against a daemon without WorkspaceFollow no follow or release is written",
-          "[vthost][attach][workspace-follow][compat]")
-{
+    // The workspaces count from 1, so the one made below is 2: the hello is built before the host holds it.
+    constexpr auto Had = uint64_t { 2 };
     auto services = vthost::NativeSessionServices {};
     services.handshake.capabilities = thinClientCapabilities();
     auto h =
         IntentHarness { std::move(services),
                         NativeClient::HandshakeOptions {
                             .capabilities = thinClientCapabilities(),
-                            .attachIntent = { .kind = proto::AttachIntentKind::Launch, .workspaces = {} },
+                            .attachIntent = { .kind = proto::AttachIntentKind::Resume, .workspace = Had },
                             .profileName = "main" },
                         mainOnly() };
-    auto followDelivery = vthost::client::Delivery::Sent;
-    auto releaseDelivery = vthost::client::Delivery::Sent;
-    h.drive([](IntentHarness* h,
-               vthost::client::Delivery* followed,
-               vthost::client::Delivery* released) -> Task<void> {
-        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
-        *followed = h->client->followWorkspace(0);
-        *released = h->client->releaseWorkspace(h->host.workspaceId().value, proto::WorkspaceRelease::Closed);
-        h->client->detach();
-    }(&h, &followDelivery, &releaseDelivery));
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.createWorkspace()->id().value == Had);
+    h.drive(detachOnLayout(&h));
 
-    CHECK(followDelivery == vthost::client::Delivery::Unsupported);
-    CHECK(releaseDelivery == vthost::client::Delivery::Unsupported);
-    CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
+    CHECK(h.client->selectedWorkspace() == Had);
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { Had });
+}
+
+TEST_CASE("a client selects a workspace at runtime, and resumes the one it selects now",
+          "[vthost][attach][intent]")
+{
+    // The batch end is what states the selection, so both ends offer it.
+    auto const offered = proto::CapabilitySet::of(
+        { proto::Capability::AttachIntent, proto::Capability::DaemonFollow, proto::Capability::LayoutBatch });
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = offered;
+    auto h =
+        IntentHarness { std::move(services), NativeClient::HandshakeOptions { .capabilities = offered } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const second = h.host.createWorkspace()->id().value;
+    auto delivery = std::optional<uint64_t> {};
+    auto scenario = [](IntentHarness* h, std::optional<uint64_t>* delivery, uint64_t second) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *delivery = h->client->selectWorkspace(second);
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, second] { return h->client->selectedWorkspace() == second; });
+        h->client->detach();
+    }(&h, &delivery, second);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery.has_value());
+    CHECK(h.client->selectedWorkspace() == second);
+    CHECK(second != first);
+}
+
+namespace
+{
+/// What both ends of a selecting connection offer: the selection and the batch end that states it.
+[[nodiscard]] proto::CapabilitySet selectingCapabilities()
+{
+    return proto::CapabilitySet::of(
+        { proto::Capability::AttachIntent, proto::Capability::DaemonFollow, proto::Capability::LayoutBatch });
+}
+} // namespace
+
+TEST_CASE("a client learns the workspace the daemon selects instead of one that closed",
+          "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    // The workspaces count from 1, so the one made below is 2: the hello is built before the host holds it.
+    constexpr auto Doomed = uint64_t { 2 };
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions {
+                                 .capabilities = selectingCapabilities(),
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Select,
+                                                   .workspace = Doomed } } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto const* other = h.host.createWorkspace();
+    REQUIRE((other != nullptr && other->id().value == Doomed));
+    auto const doomedSession = other->activeTab()->rootPane()->session();
+    auto scenario = [](IntentHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        h->host.closeSession(session);
+        co_await core::net::testing::waitUntil(&h->loop,
+                                               [h] { return h->client->selectedWorkspace() != Doomed; });
+        h->client->detach();
+    }(&h, doomedSession);
+    h.drive(std::move(scenario));
+
+    CHECK(h.client->selectedWorkspace() == first);
+}
+
+TEST_CASE("selecting workspace 0 names the created workspace once its batch ends", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = selectingCapabilities() } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto delivery = std::optional<uint64_t> {};
+    auto scenario = [](IntentHarness* h, std::optional<uint64_t>* delivery, uint64_t first) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *delivery = h->client->selectWorkspace(0);
+        co_await core::net::testing::waitUntil(&h->loop, [h, first] {
+            return h->client->selectedWorkspace() != 0 && h->client->selectedWorkspace() != first;
+        });
+        h->client->detach();
+    }(&h, &delivery, first);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery.has_value());
+    CHECK(h.client->selectedWorkspace() != first);
+    CHECK(h.host.lastSelectedWorkspace() == std::optional<uint64_t> { h.client->selectedWorkspace() });
+}
+
+TEST_CASE("the selection arrives in ServerHello and LayoutBatchEnd", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = selectingCapabilities() } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const first = h.host.workspaceId().value;
+    auto selectedByHello = uint64_t { 0 };
+    auto scenario = [](IntentHarness* h, uint64_t* selectedByHello, uint64_t first) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *selectedByHello = h->client->selectedWorkspace();
+        // A created workspace is named by nothing but the batch end that announces it.
+        std::ignore = h->client->selectWorkspace(0);
+        co_await core::net::testing::waitUntil(&h->loop, [h, first] {
+            return h->client->selectedWorkspace() != 0 && h->client->selectedWorkspace() != first;
+        });
+        h->client->detach();
+    }(&h, &selectedByHello, first);
+    h.drive(std::move(scenario));
+
+    CHECK(selectedByHello == first);
+    CHECK(h.client->selectedWorkspace() == h.host.lastSelectedWorkspace());
+    CHECK(h.client->selectedWorkspace() != first);
+}
+
+TEST_CASE("a client reports its focus and is told the role the daemon gives it", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = selectingCapabilities() } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto delivery = vthost::client::Delivery::Unsupported;
+    auto scenario = [](IntentHarness* h, vthost::client::Delivery* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        *delivery = h->client->reportFocus(proto::WindowFocus::Focused);
+        // The only window attached is the one that raises: the daemon says so with a NotifyRole.
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h] { return h->client->raiseRole() == proto::RaiseRole::Raise; });
+        h->client->detach();
+    }(&h, &delivery);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery == vthost::client::Delivery::Sent);
+    CHECK(h.client->raiseRole() == proto::RaiseRole::Raise);
+}
+
+TEST_CASE("against a daemon without DaemonFollow no select is written", "[vthost][attach][compat]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions { .capabilities = thinClientCapabilities() },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto delivery = std::optional<uint64_t> { 0 };
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen,
+                       std::optional<uint64_t>* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        *delivery = client->selectWorkspace(1);
+        // A PDU written after the select would arrive behind it: this one proves the stream was read on.
+        client->createTab(0, "y");
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+        client->detach();
+    }(&loop, &client, &seen, &delivery);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(
+            &loop, daemonSocket, answeringHello(Script { { std::nullopt, acceptingHello() } }), &seen),
+        std::move(scenario)));
+
+    CHECK_FALSE(delivery.has_value());
+    CHECK_FALSE(std::ranges::any_of(seen, carries<proto::SelectWorkspace>));
 }
 
 TEST_CASE("against a daemon without the capabilities nothing new is written", "[vthost][attach][compat]")
@@ -2679,7 +2698,6 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
             co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
             *delivery = client->editTab({ .session = 1, .kind = proto::TabEditKind::SetTitle, .title = "x" });
             client->createTab(0, "x");
-            client->createWorkspace("y");
             client->splitPane(1, 1, 5000, "z");
             co_await core::net::testing::waitUntil(
                 loop, [&] { return std::ranges::any_of(*seen, carries<proto::SplitPane>); });
@@ -2697,9 +2715,6 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
         auto const created = std::ranges::find_if(seen, carries<proto::CreateTab>);
         REQUIRE(created != seen.end());
         CHECK(std::get<proto::CreateTab>(created->pdu).profileName.empty());
-        auto const workspace = std::ranges::find_if(seen, carries<proto::NewWorkspace>);
-        REQUIRE(workspace != seen.end());
-        CHECK(std::get<proto::NewWorkspace>(workspace->pdu).profileName.empty());
         auto const split = std::ranges::find_if(seen, carries<proto::SplitPane>);
         REQUIRE(split != seen.end());
         CHECK(std::get<proto::SplitPane>(split->pdu).profileName.empty());
@@ -2721,7 +2736,7 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
         h.drive(detachOnLayout(&h));
         auto const session = h.host.model().workspace(h.host.workspaceId())->tabAt(0)->rootPane()->session();
         CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
-        CHECK(h.client->followedWorkspaces() == std::vector<uint64_t> { h.host.workspaceId().value });
+        CHECK(h.client->selectedWorkspace() == h.host.workspaceId().value);
     }
 }
 

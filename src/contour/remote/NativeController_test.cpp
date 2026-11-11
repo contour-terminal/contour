@@ -3,6 +3,7 @@
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/testing/DaemonFixture.hpp>
+#include <contour/remote/testing/NativeControllerTestAccess.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
@@ -68,6 +69,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <expected>
+#include <iterator>
 #include <span>
 
 #include <vthost/Askpass.hpp>
@@ -1618,8 +1620,11 @@ TEST_CASE("a tab dropped against a daemon without TabMerge is not offered a spli
     std::ignore = daemon.seedSession("one");
     std::ignore = daemon.seedSession("two");
     daemon.whileDisconnected([&] {
-        daemon.services.handshake.capabilities = vthost::proto::CapabilitySet::of(
-            { Capability::ExtensionPermissions, Capability::InitialClientArea, Capability::AttachIntent });
+        daemon.services.handshake.capabilities =
+            vthost::proto::CapabilitySet::of({ Capability::ExtensionPermissions,
+                                               Capability::InitialClientArea,
+                                               Capability::AttachIntent,
+                                               Capability::DaemonFollow });
     });
 
     auto timeline = TestTimeline {};
@@ -1755,8 +1760,8 @@ struct AttachedGui
             timeline,
             ControllerOptions {
                 .intent = vthost::proto::AttachIntent {
-                    .kind = vthost::proto::AttachIntentKind::Workspaces,
-                    .workspaces = { daemon.onDaemon([&] { return daemon.host->workspaceId().value; }) } } }) }
+                    .kind = vthost::proto::AttachIntentKind::Select,
+                    .workspace = daemon.onDaemon([&] { return daemon.host->workspaceId().value; }) } }) }
     {
     }
 
@@ -2280,9 +2285,8 @@ TEST_CASE("a session the client creates gets the profile the GUI holds in memory
     controller.stop();
 }
 
-// B4: a second daemon workspace (authored via requestRemoteWorkspace) is reconciled into
-// its OWN GUI window — the client maps one OS window per daemon workspace, each mirroring
-// only that window's tabs, with no cross-window session bleed.
+// B4: a second daemon workspace is reconciled into its OWN GUI window — each GUI window mirrors only its
+// workspace's tabs, with no cross-window session bleed.
 TEST_CASE("attach maps each daemon workspace onto its own GUI window", "[attach][controller]")
 {
     auto daemon = DaemonFixture {};
@@ -2299,10 +2303,8 @@ TEST_CASE("attach maps each daemon workspace onto its own GUI window", "[attach]
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 1);
 
-    // A GUI "new window" in attach mode authors it on the daemon (requestRemoteWorkspace
-    // -> requestCreateWorkspace) rather than opening a stray local one; wait for the
-    // daemon to grow and push the second window's layout.
-    REQUIRE(ac->requestRemoteWorkspace({}));
+    // The daemon grows a second workspace; wait for it to push its layout.
+    std::ignore = addWorkspace(daemon);
     for (auto i = 0; i < 200 && settledWindows(*ac).size() < 2; ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 2);
@@ -2355,7 +2357,7 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     requireConnected(*ac);
     for (auto i = 0; i < 200 && settledWindows(*ac).empty(); ++i)
         std::this_thread::sleep_for(5ms);
-    REQUIRE(ac->requestRemoteWorkspace({}));
+    std::ignore = addWorkspace(daemon);
     for (auto i = 0; i < 200 && settledWindows(*ac).size() < 2; ++i)
         std::this_thread::sleep_for(5ms);
     REQUIRE(settledWindows(*ac).size() == 2);
@@ -2444,7 +2446,7 @@ TEST_CASE("a pane the daemon moves into another window keeps its TerminalSession
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
+    std::ignore = addWorkspace(daemon);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -2566,7 +2568,7 @@ TEST_CASE("a moved pane whose new window's layout comes first is adopted, never 
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
+    std::ignore = addWorkspace(daemon);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -2626,6 +2628,52 @@ namespace
     return services;
 }
 
+namespace
+{
+    /// Whether a pushed workspace holds a tab.
+    enum class PushedTabs : uint8_t
+    {
+        None = 0,
+        Some,
+    };
+
+    /// A daemon workspace as the controller's settled layouts hold it: its id, whether it holds a tab, and
+    /// the daemon sessions its panes show, tab by tab.
+    struct PushedWorkspace
+    {
+        uint64_t daemonWorkspace = 0;
+        PushedTabs tabs = PushedTabs::None;
+        std::vector<uint64_t> sessions;
+    };
+
+    /// Appends the daemon sessions of @p pane's leaves to @p sessions.
+    void collectPushedSessions(vthost::proto::WirePane const& pane, std::vector<uint64_t>& sessions)
+    {
+        if (!pane.isSplit())
+            sessions.push_back(pane.session);
+        for (auto const& child: pane.children)
+            collectPushedSessions(child, sessions);
+    }
+
+    /// @return The workspaces of @p controller's settled layouts, ascending by id.
+    [[nodiscard]] std::vector<PushedWorkspace> pushedWorkspaces(
+        contour::remote::NativeController const& controller)
+    {
+        auto pushed = std::vector<PushedWorkspace> {};
+        for (auto const& [id, layout]: controller.settledLayouts())
+        {
+            auto workspace =
+                PushedWorkspace { .daemonWorkspace = id,
+                                  .tabs = layout->tabs.empty() ? PushedTabs::None : PushedTabs::Some,
+                                  .sessions = {} };
+            for (auto const& tab: layout->tabs)
+                collectPushedSessions(tab.root, workspace.sessions);
+            pushed.push_back(std::move(workspace));
+        }
+        return pushed;
+    }
+} // namespace
+
 /// A daemon with two windows, the second showing one pane, and a client showing both: the pane @c moved, in
 /// the first window, is what each test moves beside @c target in the second.
 struct TwoWindowMove
@@ -2654,7 +2702,7 @@ struct TwoWindowMove
         requireConnected(*ac);
         REQUIRE(waitUntil(
             [&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 2; }));
-        REQUIRE(ac->requestRemoteWorkspace({}));
+        std::ignore = addWorkspace(daemon);
         REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
         ids = settledWindows(*ac);
         app.app().config().accessibilityAnnouncements = true;
@@ -2720,7 +2768,7 @@ struct TwoWindowMove
     }
 
     /// The moves whose pushes have ended, waited for until @p request is among them: what the reconcile takes
-    /// first (ContourGuiApp::reconcileAttachWindows).
+    /// first (DaemonLink::reconcile).
     [[nodiscard]] std::vector<uint64_t> landedMoves(uint64_t request) const
     {
         auto landed = std::vector<uint64_t> {};
@@ -2854,16 +2902,15 @@ TEST_CASE("a window a push still arriving adds is reconciled once the push has e
 {
     auto f = TwoWindowMove {};
     auto const reconciled = [&] {
-        return std::ranges::to<std::vector>(
-            contour::remote::workspacesToReconcile(*f.ac)
-            | std::views::transform(&contour::remote::ReconciledWorkspace::daemonWorkspace));
+        return std::ranges::to<std::vector>(pushedWorkspaces(*f.ac)
+                                            | std::views::transform(&PushedWorkspace::daemonWorkspace));
     };
     REQUIRE(reconciled() == f.ids);
 
     // Window ids count up: the new window is the next one.
     auto const added = f.ids.back() + 1;
     f.daemon.holdAfterLayoutOf(added);
-    REQUIRE(f.ac->requestRemoteWorkspace({}));
+    std::ignore = addWorkspace(f.daemon);
     REQUIRE(waitUntil([&] { return f.ac->workspaceIds().size() == 3; }, 400, GuiEvents::Held));
     CHECK(reconciled() == f.ids);
 
@@ -2871,13 +2918,12 @@ TEST_CASE("a window a push still arriving adds is reconciled once the push has e
     REQUIRE(waitUntil([&] { return reconciled().size() == 3; }));
     auto const all = reconciled();
     CHECK(all.back() == added);
-    CHECK(contour::remote::workspacesToReconcile(*f.ac).back().tabs
-          == contour::remote::DaemonWorkspaceTabs::Some);
+    CHECK(pushedWorkspaces(*f.ac).back().tabs == PushedTabs::Some);
 }
 
 // The GUI's own move, made by the daemon: once the push that makes it has ended, the reconcile places it, and
 // the receiving window says so and takes focus, the moved pane focused in it. The calls are the ones
-// ContourGuiApp::reconcileAttachWindows makes, in its order.
+// DaemonLink::reconcile makes, in its order.
 TEST_CASE("a pane moved beside another window's pane by the daemon is announced there, and focused",
           "[attach][controller][move][daemon]")
 {
@@ -2896,6 +2942,7 @@ TEST_CASE("a pane moved beside another window's pane by the daemon is announced 
         f.ac,
         [&refusals](int, int, quint64) { ++refusals; },
         Qt::DirectConnection);
+    auto const stopOnExit = StopOnExit { *f.ac };
     REQUIRE(f.manager.moveNode(*drag,
                                vtworkspace::EdgeTarget { .pane = targetSession->modelSessionId(),
                                                          .side = vtworkspace::SplitSide::Right },
@@ -2940,7 +2987,7 @@ TEST_CASE("a pane the GUI moves into a new window over a daemon opens where it w
 
     auto said3 = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
     auto win3 = std::optional<contour::test::ScopedController> {};
-    for (auto const& [daemonWorkspace, tabs, sessions]: contour::remote::workspacesToReconcile(*f.ac))
+    for (auto const& [daemonWorkspace, tabs, sessions]: pushedWorkspaces(*f.ac))
     {
         if (daemonWorkspace == f.ids[0])
             contour::remote::applyRemoteLayout(f.manager, f.win1.id, *f.ac, daemonWorkspace);
@@ -2974,18 +3021,19 @@ TEST_CASE("a pane the GUI moves into a new window over a daemon opens where it w
 TEST_CASE("a push ended by a move completes every move asked before it", "[attach][controller][move][daemon]")
 {
     auto inFlight =
-        contour::remote::NativeController::MovesInFlight { { 3, 30 }, { 5, 50 }, { 8, 80 }, { 9, 90 } };
+        contour::remote::NativeController::RequestsInFlight { { 3, 30 }, { 5, 50 }, { 8, 80 }, { 9, 90 } };
 
-    CHECK(contour::remote::NativeController::takeCompletedMoves(inFlight, 0).empty());
+    CHECK(contour::remote::NativeController::takeCompletedRequests(inFlight, 0).empty());
     CHECK(inFlight.size() == 4);
 
-    CHECK(contour::remote::NativeController::takeCompletedMoves(inFlight, 8)
+    CHECK(contour::remote::NativeController::takeCompletedRequests(inFlight, 8)
           == std::vector<uint64_t> { 30, 50, 80 });
-    CHECK(inFlight == contour::remote::NativeController::MovesInFlight { { 9, 90 } });
+    CHECK(inFlight == contour::remote::NativeController::RequestsInFlight { { 9, 90 } });
 
     // A cause naming no move in flight still completes the older ones, and keeps the newer.
-    CHECK(contour::remote::NativeController::takeCompletedMoves(inFlight, 4).empty());
-    CHECK(contour::remote::NativeController::takeCompletedMoves(inFlight, 9) == std::vector<uint64_t> { 90 });
+    CHECK(contour::remote::NativeController::takeCompletedRequests(inFlight, 4).empty());
+    CHECK(contour::remote::NativeController::takeCompletedRequests(inFlight, 9)
+          == std::vector<uint64_t> { 90 });
     CHECK(inFlight.empty());
 }
 
@@ -3014,7 +3062,7 @@ TEST_CASE("a landed move whose window is not open yet waits for the reconcile th
     // Once the window is there, the move is placed.
     auto said3 = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
     auto win3 = std::optional<contour::test::ScopedController> {};
-    for (auto const& [daemonWorkspace, tabs, sessions]: contour::remote::workspacesToReconcile(*f.ac))
+    for (auto const& [daemonWorkspace, tabs, sessions]: pushedWorkspaces(*f.ac))
         if (daemonWorkspace != f.ids[0] && daemonWorkspace != f.ids[1])
         {
             std::ignore = f.manager.stageRemoteMoveWindow(sessions);
@@ -3044,6 +3092,7 @@ TEST_CASE("a move the daemon refuses is no longer waited for", "[attach][control
         f.ac,
         [&refused](int, int, quint64 request) { refused = request; },
         Qt::DirectConnection);
+    auto const stopOnExit = StopOnExit { *f.ac };
 
     REQUIRE(f.manager.moveNode(*stale, vtworkspace::NewWorkspaceTarget {}, nullptr, {}));
     REQUIRE((f.manager.livePendingRemoteMove() != nullptr));
@@ -3346,7 +3395,7 @@ TEST_CASE("a window's last pane moved by the daemon closes the window and keeps 
     requireConnected(*ac);
     REQUIRE(
         waitUntil([&] { return ac->settledLayout() != nullptr && ac->settledLayout()->tabs.size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
+    std::ignore = addWorkspace(daemon);
     REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
     auto const ids = settledWindows(*ac);
     contour::test::ScopedController const win2 { manager };
@@ -3533,8 +3582,8 @@ TEST_CASE("a swap across two tabs pushed by the daemon keeps every TerminalSessi
 
 namespace
 {
-/// A GUI process following exactly one daemon workspace -- what a second launch beside a first is given --
-/// whose screen reader records what it is told.
+/// A GUI process whose one window selects exactly one daemon workspace, whose screen reader records what it
+/// is told.
 struct FollowingGui
 {
     TestTimeline timeline;
@@ -3563,10 +3612,16 @@ struct FollowingGui
     [[nodiscard]] contour::session::TerminalSessionManager& manager() { return app.manager(); }
     [[nodiscard]] vtworkspace::WorkspaceId windowId() const { return window->id; }
 
-    /// Reconciles the window it follows, as of the last push's end.
+    /// Reconciles the window against the workspace it selects alone, as of the last push's end, as its link
+    /// does: every workspace's layout is pushed, and a pane the selected one no longer names left the window.
     void reconcile()
     {
-        contour::remote::applyRemoteLayout(manager(), windowId(), *controller, daemonWorkspace);
+        auto const layouts = controller->settledLayouts();
+        auto const selected = layouts.find(daemonWorkspace);
+        auto only = contour::remote::LayoutSnapshot {};
+        if (selected != layouts.end())
+            only.insert(*selected);
+        contour::remote::applyRemoteLayout(manager(), windowId(), *controller, only, daemonWorkspace);
     }
 
     /// @return The local session showing the daemon's @p remote; null for none.
@@ -3582,8 +3637,8 @@ struct FollowingGui
         auto owned =
             std::make_unique<contour::remote::NativeController>(contour::remote::NativeController::Config {
                 .transport = std::make_shared<vthost::TlsTransportFactory>(daemon.endpoint()),
-                .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Workspaces,
-                                                        .workspaces = { followed } },
+                .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Select,
+                                                        .workspace = followed },
                 .profileName = std::string {},
                 .workingDirectory = {},
                 .attachSettings = std::nullopt,
@@ -3699,7 +3754,7 @@ TEST_CASE("a pane moved into another GUI process's window appears there, on ever
                           });
             }));
 
-            // As ContourGuiApp::reconcileAttachWindows does it, in each process.
+            // As DaemonLink::reconcile does it, in each process.
             from.reconcile();
             into.manager().noteRemoteMovesLanded(landed);
             into.reconcile();
@@ -3868,308 +3923,6 @@ TEST_CASE("a split orientation toggled over a daemon is kept by the next layout 
           == vtworkspace::SplitState::Horizontal);
 }
 
-// Two moves in one push: a pane out of the keeping window's split into a new tab of the losing window, and
-// the losing window's only tab into the keeping window. A pass over the keeping window, made first, takes the
-// losing window's every tab; the losing window must stay open for its own pass, which takes the pane in. Made
-// through the reconcile ContourGuiApp runs, over the windows in either order.
-TEST_CASE("a window a pass empties stays open for the pass that fills it again",
-          "[attach][controller][move][daemon]")
-{
-    for (auto const losingFirst: { true, false })
-        DYNAMIC_SECTION((losingFirst ? "the window losing its tab has the lower id" : "it has the higher id"))
-        {
-            auto daemon = DaemonFixture {};
-            struct Seeded
-            {
-                uint64_t losing;              ///< The window whose only tab moves out.
-                uint64_t keeping;             ///< The window it moves into.
-                vtworkspace::SessionId lone;  ///< The pane of the losing window's tab.
-                vtworkspace::SessionId kept;  ///< The keeping window's pane that stays.
-                vtworkspace::SessionId taken; ///< The keeping window's pane that moves into the losing one.
-            };
-            auto const seeded = daemon.onDaemon([&daemon, losingFirst]() -> Seeded {
-                auto& host = *daemon.host;
-                auto* const firstTab = host.createTab();
-                auto* const second = host.createWorkspace();
-                auto* const secondTab = second->tabAt(0);
-                auto* const keepingTab = losingFirst ? secondTab : firstTab;
-                auto* const losingTab = losingFirst ? firstTab : secondTab;
-                host.splitActivePane(keepingTab->id(), vtworkspace::SplitState::Vertical, 0.5);
-                auto const firstWindow = host.workspaceId().value;
-                return Seeded { .losing = losingFirst ? firstWindow : second->id().value,
-                                .keeping = losingFirst ? second->id().value : firstWindow,
-                                .lone = losingTab->rootPane()->session(),
-                                .kept = keepingTab->leafSessions().front(),
-                                .taken = keepingTab->activePane()->session() };
-            });
-
-            auto timeline = TestTimeline {};
-            auto acOwned = makeNativeController(daemon.endpoint(), timeline);
-            auto* ac = acOwned.get();
-            contour::test::TestApp app { std::move(acOwned) };
-            auto& manager = app.manager();
-            contour::test::ScopedController const losingWindow { manager };
-            contour::test::ScopedController const keepingWindow { manager };
-            requireConnected(*ac);
-            REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
-
-            auto windows = contour::remote::AttachWindowMap { { seeded.losing, losingWindow.id },
-                                                              { seeded.keeping, keepingWindow.id } };
-            auto opened = 0;
-            auto const reconcile = [&] {
-                contour::remote::reconcileAttachWindows(
-                    manager, *ac, ac->settledLayouts(), windows, [&](auto const&) { ++opened; });
-            };
-            reconcile();
-            REQUIRE(mirrors(manager, *ac, losingWindow.id, seeded.losing));
-            REQUIRE(mirrors(manager, *ac, keepingWindow.id, seeded.keeping));
-            auto const before = shownSessions(manager);
-
-            REQUIRE(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
-                                            .sourceSessions = { seeded.taken.value },
-                                            .target = vtworkspace::MoveTargetKind::TabWell,
-                                            .targetSession = seeded.lone.value,
-                                            .side = vtworkspace::SplitSide::Left,
-                                            .index = 1,
-                                            .request = 31 })
-                    == contour::session::RemoteRouting::Routed);
-            REQUIRE(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
-                                            .sourceSessions = { seeded.lone.value },
-                                            .target = vtworkspace::MoveTargetKind::TabWell,
-                                            .targetSession = seeded.kept.value,
-                                            .side = vtworkspace::SplitSide::Left,
-                                            .index = 1,
-                                            .request = 32 })
-                    == contour::session::RemoteRouting::Routed);
-            auto landed = std::vector<uint64_t> {};
-            REQUIRE(waitUntil([&] {
-                std::ranges::copy(ac->takeLandedMoves(), std::back_inserter(landed));
-                return std::ranges::contains(landed, uint64_t { 32 });
-            }));
-
-            reconcile();
-            drainGuiEvents();
-
-            REQUIRE(shownSessions(manager) == before);
-            REQUIRE(manager.model().workspace(losingWindow.id) != nullptr);
-            CHECK(mirrors(manager, *ac, losingWindow.id, seeded.losing));
-            CHECK(mirrors(manager, *ac, keepingWindow.id, seeded.keeping));
-            CHECK(windows
-                  == contour::remote::AttachWindowMap { { seeded.losing, losingWindow.id },
-                                                        { seeded.keeping, keepingWindow.id } });
-            CHECK(opened == 0);
-
-            // Converged: the next reconcile changes nothing.
-            reconcile();
-            CHECK(shownSessions(manager) == before);
-            CHECK(mirrors(manager, *ac, losingWindow.id, seeded.losing));
-            CHECK(mirrors(manager, *ac, keepingWindow.id, seeded.keeping));
-            ac->stop();
-        }
-}
-
-// The last pane of a window moved out through the reconcile ContourGuiApp runs: the window closes once every
-// window had its pass, and its mapping goes with it, so a daemon workspace that held tabs again would get an
-// OS window of its own.
-TEST_CASE("a window a move leaves with no daemon tab closes after the reconcile, and is unmapped",
-          "[attach][controller][move][daemon]")
-{
-    auto daemon = DaemonFixture {};
-    auto const moved = daemon.seedSession("moved");
-    auto timeline = TestTimeline {};
-    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
-    auto* ac = acOwned.get();
-    contour::test::TestApp app { std::move(acOwned) };
-    auto& manager = app.manager();
-    contour::test::ScopedController const win1 { manager };
-    requireConnected(*ac);
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
-    auto const ids = settledWindows(*ac);
-    contour::test::ScopedController const win2 { manager };
-    auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], win2.id } };
-    auto const reconcile = [&] {
-        contour::remote::reconcileAttachWindows(
-            manager, *ac, ac->settledLayouts(), windows, [](auto const&) {});
-    };
-    reconcile();
-    auto* const movedSession = sessionMirroring(manager, *ac, moved.value);
-    REQUIRE(movedSession != nullptr);
-    auto const before = shownSessions(manager);
-
-    REQUIRE(ac->requestRemoteMove({ .source = vtworkspace::MoveSourceKind::Pane,
-                                    .sourceSessions = { moved.value },
-                                    .target = vtworkspace::MoveTargetKind::Edge,
-                                    .targetSession = ac->settledLayout(ids[1])->tabs.front().root.session,
-                                    .side = vtworkspace::SplitSide::Left,
-                                    .index = 0,
-                                    .request = 33 })
-            == contour::session::RemoteRouting::Routed);
-    auto landed = std::vector<uint64_t> {};
-    REQUIRE(waitUntil([&] {
-        std::ranges::copy(ac->takeLandedMoves(), std::back_inserter(landed));
-        return std::ranges::contains(landed, uint64_t { 33 });
-    }));
-    reconcile();
-    drainGuiEvents();
-
-    CHECK(manager.model().workspace(win1.id) == nullptr);
-    CHECK(windows == contour::remote::AttachWindowMap { { ids[1], win2.id } });
-    CHECK(windowShowing(manager, movedSession) == win2.id);
-    CHECK(shownSessions(manager) == before);
-    ac->stop();
-}
-
-// A window its user closed keeps its mapping while its daemon workspace holds tabs, so it does not open
-// again; once the daemon workspace holds none the mapping goes, and the daemon workspace filled again opens a
-// window of its own instead of being shown in the closed one, which is to say nowhere.
-TEST_CASE("a closed window's daemon workspace, emptied and filled again, gets a window of its own",
-          "[attach][controller][move][daemon]")
-{
-    auto daemon = DaemonFixture {};
-    std::ignore = daemon.seedSession("first");
-    auto timeline = TestTimeline {};
-    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
-    auto* ac = acOwned.get();
-    contour::test::TestApp app { std::move(acOwned) };
-    auto& manager = app.manager();
-    contour::test::ScopedController const win1 { manager };
-    requireConnected(*ac);
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
-    auto const ids = settledWindows(*ac);
-    // The second daemon workspace was shown in a window its user has closed since: one the model no longer
-    // has.
-    auto const closed = vtworkspace::WorkspaceId { 4242 };
-    REQUIRE(manager.model().workspace(closed) == nullptr);
-    auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
-    auto opened = std::vector<uint64_t> {};
-    auto const reconcile = [&] {
-        contour::remote::reconcileAttachWindows(
-            manager, *ac, ac->settledLayouts(), windows, [&](auto const& window) {
-                opened.push_back(window.daemonWorkspace);
-            });
-    };
-
-    // Still holding its tab: the closed window is not opened again.
-    reconcile();
-    CHECK(opened.empty());
-    CHECK(windows.contains(ids[1]));
-
-    // Emptied on the daemon: the mapping goes.
-    auto const lone = ac->settledLayout(ids[1])->tabs.front().root.session;
-    daemon.onDaemon([&daemon, lone] {
-        daemon.host->closeSession(vtworkspace::SessionId { lone });
-        return 0;
-    });
-    REQUIRE(waitUntil([&] {
-        auto const layout = ac->settledLayout(ids[1]);
-        return layout == nullptr || layout->tabs.empty();
-    }));
-    reconcile();
-    CHECK(opened.empty());
-    CHECK_FALSE(windows.contains(ids[1]));
-
-    // Filled again: it gets a window of its own.
-    auto const refilled = daemon.onDaemon([&daemon, &ids] {
-        auto* const window = daemon.host->model().workspace(vtworkspace::WorkspaceId { ids[1] });
-        if (window == nullptr)
-            return false;
-        std::ignore = daemon.host->model().createTab(window->id());
-        return true;
-    });
-    REQUIRE(refilled);
-    REQUIRE(waitUntil([&] {
-        auto const layout = ac->settledLayout(ids[1]);
-        return layout != nullptr && !layout->tabs.empty();
-    }));
-    reconcile();
-    CHECK(opened == std::vector { ids[1] });
-    ac->stop();
-}
-
-// A snapshot that lacks a daemon workspace (a reconnect settling one window per frame, or a partial one) says
-// nothing about that window: only an explicit empty layout does. The window its user closed stays closed.
-TEST_CASE("a closed window stays closed when a snapshot lacks its daemon workspace",
-          "[attach][controller][move][daemon]")
-{
-    auto daemon = DaemonFixture {};
-    std::ignore = daemon.seedSession("first");
-    auto timeline = TestTimeline {};
-    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
-    auto* ac = acOwned.get();
-    contour::test::TestApp app { std::move(acOwned) };
-    auto& manager = app.manager();
-    contour::test::ScopedController const win1 { manager };
-    requireConnected(*ac);
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
-    auto const ids = settledWindows(*ac);
-    auto const closed = vtworkspace::WorkspaceId { 4242 };
-    REQUIRE(manager.model().workspace(closed) == nullptr);
-    auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
-    auto opened = std::vector<uint64_t> {};
-    auto const reconcile = [&](contour::remote::LayoutSnapshot const& layouts) {
-        contour::remote::reconcileAttachWindows(manager, *ac, layouts, windows, [&](auto const& window) {
-            opened.push_back(window.daemonWorkspace);
-        });
-    };
-
-    auto partial = ac->settledLayouts();
-    partial.erase(ids[1]);
-    reconcile(partial);
-    CHECK(opened.empty());
-    CHECK(windows.contains(ids[1]));
-
-    reconcile(ac->settledLayouts());
-    CHECK(opened.empty());
-    CHECK(windows.contains(ids[1]));
-    ac->stop();
-}
-
-// The same across a real reconnect to a daemon that settles one window per frame.
-TEST_CASE("a closed window stays closed across a reconnect that settles one window per frame",
-          "[attach][controller][move][compat][reconnect]")
-{
-    auto daemon = DaemonFixture { {}, servicesWithoutLayoutBatch() };
-    std::ignore = daemon.seedSession("first");
-    auto timeline = TestTimeline {};
-    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
-    auto* ac = acOwned.get();
-    contour::test::TestApp app { std::move(acOwned) };
-    auto& manager = app.manager();
-    contour::test::ScopedController const win1 { manager };
-    requireConnected(*ac);
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 1; }));
-    REQUIRE(ac->requestRemoteWorkspace({}));
-    REQUIRE(waitUntil([&] { return settledWindows(*ac).size() == 2; }));
-    auto const ids = settledWindows(*ac);
-    auto const closed = vtworkspace::WorkspaceId { 4242 };
-    REQUIRE(manager.model().workspace(closed) == nullptr);
-    auto windows = contour::remote::AttachWindowMap { { ids[0], win1.id }, { ids[1], closed } };
-    auto opened = std::vector<uint64_t> {};
-    auto const reconcile = [&] {
-        contour::remote::reconcileAttachWindows(
-            manager, *ac, ac->settledLayouts(), windows, [&](auto const& window) {
-                opened.push_back(window.daemonWorkspace);
-            });
-    };
-
-    daemon.dropConnections();
-    // Reconciled after every frame the new connection settles, until both windows are back.
-    REQUIRE(waitUntil([&] {
-        reconcile();
-        return settledWindows(*ac).size() == 2;
-    }));
-    reconcile();
-    CHECK(opened.empty());
-    CHECK(windows.contains(ids[1]));
-    ac->stop();
-}
-
 // A daemon that does not end its pushes (one predating Capability::LayoutBatch) is reconciled frame by frame,
 // as before there were moves: the GUI asks it for none, and a pane its layout drops is closed right away.
 TEST_CASE("a daemon that does not end its pushes is reconciled frame by frame, and moves nothing",
@@ -4218,8 +3971,11 @@ TEST_CASE("a move the daemon cannot take is refused, never made here", "[attach]
     auto const one = daemon.seedSession("one");
     auto const two = daemon.seedSession("two");
     daemon.whileDisconnected([&] {
-        daemon.services.handshake.capabilities = vthost::proto::CapabilitySet::of(
-            { Capability::ExtensionPermissions, Capability::InitialClientArea, Capability::AttachIntent });
+        daemon.services.handshake.capabilities =
+            vthost::proto::CapabilitySet::of({ Capability::ExtensionPermissions,
+                                               Capability::InitialClientArea,
+                                               Capability::AttachIntent,
+                                               Capability::DaemonFollow });
     });
 
     auto timeline = TestTimeline {};
@@ -4374,7 +4130,7 @@ namespace
 /// The connection states a controller went through, as connectionStateChanged() announced them.
 struct StateLog
 {
-    explicit StateLog(contour::remote::NativeController& controller)
+    explicit StateLog(contour::remote::NativeController& controller): stopOnExit(controller)
     {
         // Direct: it runs on the reactor, where the state changed, so no state is missed.
         QObject::connect(
@@ -4407,6 +4163,8 @@ struct StateLog
     mutable std::mutex mutex;
     std::vector<vthost::client::ConnectionState> states;
     std::vector<std::vector<uint64_t>> lost;
+    /// Last, so it is destroyed first: the reactor that writes the members above is stopped before they go.
+    StopOnExit stopOnExit;
 };
 
 } // namespace
@@ -4490,12 +4248,11 @@ TEST_CASE("reconnect to the same instance keeps pane bindings", "[attach][contro
     controller.stop();
     pane.terminal.reset();
 }
-// Review focus 2 (PR 3): what a reconnect or a live upgrade resumes is what the window shows now -- not
-// the workspace of the launch, which a switch released. A reconnect also states it as Resume, so a daemon
-// that still counts the lost connection's follow does not give the window a workspace of its own instead.
-TEST_CASE(
-    "after a follow and a release, a reconnect and a live upgrade come back on what the window shows now",
-    "[attach][controller][reconnect][upgrade][workspace-follow]")
+// What a reconnect or a live upgrade resumes is what the window shows now -- not the workspace of the
+// launch, which a select left. A reconnect also states it as Resume, so a daemon that still counts the lost
+// connection's selection does not give the window a workspace of its own instead.
+TEST_CASE("after a select, a reconnect and a live upgrade come back on what the window shows now",
+          "[attach][controller][reconnect][upgrade][workspace-follow]")
 {
     using vthost::WorkspaceVisibility;
     using vthost::client::ConnectionState;
@@ -4518,20 +4275,18 @@ TEST_CASE(
     };
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned = makeNativeController(
-        daemon.endpoint(),
-        timeline,
-        ControllerOptions {
-            .intent = { .kind = vthost::proto::AttachIntentKind::Workspaces, .workspaces = { first } } });
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = first } });
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    REQUIRE(waitUntil([&] { return controller.workspaceIds() == std::vector { first }; }));
+    REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == first; }));
 
-    REQUIRE(controller.follow(second).has_value());
-    REQUIRE(waitUntil([&] { return controller.settledLayout(second) != nullptr; }));
-    REQUIRE(controller.release(first, vthost::proto::WorkspaceRelease::SwitchedAway).has_value());
-    CHECK(controller.workspaceIds() == std::vector { second });
+    REQUIRE(controller.select(second).has_value());
+    REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == second; }));
     REQUIRE(daemon.waitUntilOnDaemon([&] { return showing(first) == 0 && showing(second) == 1; }));
     REQUIRE(visibility(first) == WorkspaceVisibility::Hidden);
 
@@ -4555,32 +4310,294 @@ TEST_CASE(
     CHECK(daemon.waitUntilOnDaemon([&] { return showing(first) == 0 && showing(second) == 1; }));
     CHECK(visibility(first) == WorkspaceVisibility::Hidden);
     CHECK(daemon.onDaemon([&daemon] { return daemon.host->model().workspaceCount(); }) == 2);
-    CHECK(waitUntil([&] { return controller.workspaceIds() == std::vector { second }; }));
+    CHECK(waitUntil([&] { return controller.selectedWorkspace() == second; }));
     CHECK(log.workspacesLost().empty());
     controller.stop();
 }
 
-TEST_CASE("a daemon without workspace-follow refuses follow and release with a reason",
+TEST_CASE("an old daemon without DaemonFollow is refused with the upgrade message",
           "[attach][controller][workspace-follow][compat]")
 {
-    auto services = vthost::NativeSessionServices {};
-    std::erase(services.handshake.capabilities.idents,
-               std::to_underlying(vthost::proto::Capability::WorkspaceFollow));
-    auto daemon = DaemonFixture { {}, std::move(services) };
+    auto daemon = DaemonFixture { {}, servicesWithoutDaemonFollow() };
     std::ignore = daemon.seedSession("first");
     auto timeline = TestTimeline {};
     auto const controller = makeNativeController(daemon.endpoint(), timeline);
-    // Not yet connected: nothing to ask.
-    CHECK_FALSE(controller->follow(1).has_value());
-    requireConnected(*controller);
-
-    auto const followed = controller->follow(1);
-    auto const released = controller->release(1, vthost::proto::WorkspaceRelease::Closed);
-    REQUIRE_FALSE(followed.has_value());
-    REQUIRE_FALSE(released.has_value());
-    CHECK(followed.error().contains("workspace-follow"));
-    CHECK(released.error().contains("workspace-follow"));
+    auto const connected = controller->connectAndWait(10s);
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(connected.error().contains("predates this Contour"));
+    CHECK(connected.error().contains("contour daemon upgrade"));
+    CHECK(connected.error().contains("Upgrade daemon in the palette"));
+    CHECK(connected.error().contains("127.0.0.1"));
+    // The refused attach ends: no layout of that daemon arrives after it.
+    CHECK(
+        waitUntil([&] { return controller->connectionState() == vthost::client::ConnectionState::Stopped; }));
+    // Nothing is sent to it, whatever the window asks.
+    CHECK_FALSE(controller->select(1).has_value());
     controller->stop();
+}
+
+namespace
+{
+
+/// @return The first pane of the first tab of @p workspace as the controller's directory lists it; an empty
+///         pane (no key) when the directory has none.
+[[nodiscard]] contour::window::DirectoryPane paneOf(contour::remote::NativeController const& controller,
+                                                    uint64_t workspace)
+{
+    auto const directory = controller.directory();
+    auto const found =
+        std::ranges::find(directory.workspaces, workspace, &contour::window::DirectoryWorkspace::id);
+    if (found == directory.workspaces.end() || found->tabs.empty() || found->tabs[0].panes.empty())
+        return contour::window::DirectoryPane {};
+    return found->tabs[0].panes[0];
+}
+
+} // namespace
+
+TEST_CASE("every workspace's layout reaches the directory", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    auto const firstSession = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    // Direct, so each runs on the thread that announced: the layout batches come from the reactor, the status
+    // flushes from this thread. The directory is announced once for each batch, however many layouts it
+    // pushed, and the batch is what layoutChanged() announces.
+    auto const guiThread = std::this_thread::get_id();
+    auto batchLayouts = std::atomic<int> { 0 };
+    auto batchDirectories = std::atomic<int> { 0 };
+    QObject::connect(
+        &controller,
+        &contour::remote::NativeController::layoutChanged,
+        &controller,
+        [&batchLayouts] { ++batchLayouts; },
+        Qt::DirectConnection);
+    QObject::connect(
+        &controller,
+        &contour::remote::NativeController::directoryChanged,
+        &controller,
+        [&batchDirectories, guiThread] {
+            if (std::this_thread::get_id() != guiThread)
+                ++batchDirectories;
+        },
+        Qt::DirectConnection);
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    auto const directory = controller.directory();
+    CHECK(directory.selected == std::optional<uint64_t> { first });
+    CHECK(controller.selectedWorkspace() == first);
+    REQUIRE(directory.workspaces.size() == 2);
+    CHECK(directory.workspaces[0].id == first);
+    CHECK(directory.workspaces[1].id == second.id);
+    REQUIRE(directory.workspaces[0].tabs.size() == 1);
+    REQUIRE(directory.workspaces[0].tabs[0].panes.size() == 1);
+    CHECK(directory.workspaces[0].tabs[0].panes[0].key.value == firstSession.value);
+    REQUIRE(directory.workspaces[1].tabs.size() == 1);
+    REQUIRE(directory.workspaces[1].tabs[0].panes.size() == 1);
+    CHECK(directory.workspaces[1].tabs[0].panes[0].key.value == second.session.value);
+    // The attach pushed both workspaces in one batch: one announcement for it, not one per layout.
+    CHECK(batchLayouts.load() == 1);
+    CHECK(batchDirectories.load() == 1);
+
+    // And a further workspace is one more.
+    std::ignore = addWorkspace(daemon);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 3; }));
+    CHECK(batchLayouts.load() == 2);
+    CHECK(batchDirectories.load() == 2);
+}
+
+TEST_CASE("a PaneSummary updates the directory without a mirror", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).key.value == second.session.value; }));
+
+    // The pane of a workspace the window does not select: it is never mirrored, and says what happened.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("\033]2;building\033\\output\r\n");
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).title == "building"; }));
+    CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output);
+    CHECK(controller.pendingCount() == 1); // the selected workspace's session alone: second is no mirror
+    controller.stop();
+}
+
+TEST_CASE("the program status of an unmirrored pane reaches the directory", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).key.value == second.session.value; }));
+
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("\033]7501;state=working:id=build\033\\");
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return !paneOf(controller, second.id).status.empty(); }));
+    auto const pane = paneOf(controller, second.id);
+    REQUIRE(pane.status.size() == 1);
+    CHECK(pane.status[0].id == "build");
+    CHECK(pane.status[0].state == vtbackend::ProgramState::Working);
+    controller.stop();
+}
+
+TEST_CASE("select() moves the mirrored sessions", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("in the first");
+    auto const second = addWorkspace(daemon);
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("in the second");
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+    // Output of a pane nobody shows is marked, until its workspace is selected.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("\r\nmore");
+        return 0;
+    });
+    REQUIRE(waitUntil(
+        [&] { return paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output; }));
+
+    REQUIRE(controller.select(second.id).has_value());
+    REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == second.id; }));
+    CHECK(controller.directory().selected == std::optional<uint64_t> { second.id });
+    CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::None);
+    // Its sessions are mirrored in full now: its screen reaches a pane beside the first workspace's.
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
+    auto paneA = MirrorPane { controller, controller.createPty(std::nullopt) };
+    auto paneB = MirrorPane { controller, controller.createPty(std::nullopt) };
+    CHECK((paneA.shows("in the second") || paneB.shows("in the second")));
+
+    // A mirrored pane says its title in its own stream, and the directory has it.
+    daemon.onDaemon([&] {
+        daemon.host->terminal(second.session)->writeToScreen("\033]2;mirrored title\033\\");
+        return 0;
+    });
+    CHECK(waitUntil([&] { return paneOf(controller, second.id).title == "mirrored title"; }));
+    controller.stop();
+    paneA.terminal.reset();
+    paneB.terminal.reset();
+}
+
+TEST_CASE("selecting a workspace the daemon does not have keeps the selection, and a later select works",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const first = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.directory().workspaces.size() == 2; }));
+
+    auto const request = controller.select(999);
+    REQUIRE(request.has_value());
+    // The daemon answers, naming the request, with the selection it kept; the request is no unknown PDU, so
+    // the next one is sent.
+    auto answers = std::vector<contour::remote::SelectAnswer> {};
+    REQUIRE(waitUntil([&] {
+        std::ranges::move(controller.takeSelectAnswers(), std::back_inserter(answers));
+        return !answers.empty();
+    }));
+    CHECK(answers
+          == std::vector {
+              contour::remote::SelectAnswer { .request = *request, .asked = 999, .selected = first } });
+    CHECK(controller.selectedWorkspace() == first);
+    CHECK(controller.directory().selected == std::optional<uint64_t> { first });
+
+    REQUIRE(controller.select(second.id).has_value());
+    CHECK(waitUntil([&] { return controller.selectedWorkspace() == second.id; }));
+    controller.stop();
+}
+
+TEST_CASE("a restarted daemon's session does not show the old daemon's status",
+          "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("before");
+    daemon.onDaemon([&] {
+        daemon.host->terminal(vtworkspace::SessionId { 1 })->writeToScreen("\033]2;old title\033\\");
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto const workspaceOf = [&] {
+        auto const directory = controller.directory();
+        return directory.workspaces.empty() ? uint64_t { 0 } : directory.workspaces[0].id;
+    };
+    REQUIRE(waitUntil([&] { return paneOf(controller, workspaceOf()).title == "old title"; }));
+
+    // The new run: its first session has the old one's id, and a title of its own, none yet.
+    daemon.whileDisconnected([&daemon] {
+        if (daemon.instance != 0)
+            ++daemon.instance;
+        daemon.host = daemon.makeHost();
+        daemon.host->createTab();
+    });
+    REQUIRE(waitUntil(
+        [&] { return controller.connectionState() == vthost::client::ConnectionState::Connected; }, 3000));
+    REQUIRE(waitUntil([&] { return paneOf(controller, workspaceOf()).key.value == 1; }, 3000));
+    CHECK(paneOf(controller, workspaceOf()).title != "old title");
+    controller.stop();
+}
+
+TEST_CASE("the raise role follows reportFocus across two controllers", "[attach][controller][directory]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("shell");
+    auto firstTimeline = TestTimeline {};
+    auto secondTimeline = TestTimeline {};
+    auto const firstOwned = makeNativeController(daemon.endpoint(), firstTimeline);
+    auto const secondOwned = makeNativeController(daemon.endpoint(), secondTimeline);
+    auto& first = *firstOwned;
+    auto& second = *secondOwned;
+    auto const stopFirst = StopOnExit { first };
+    auto const stopSecond = StopOnExit { second };
+    requireConnected(first);
+    requireConnected(second);
+
+    // Whichever window was focused last raises, and only that one.
+    first.reportFocus(vthost::proto::WindowFocus::Focused);
+    REQUIRE(waitUntil([&] {
+        return first.raiseRole() == vthost::proto::RaiseRole::Raise
+               && second.raiseRole() == vthost::proto::RaiseRole::Quiet;
+    }));
+
+    second.reportFocus(vthost::proto::WindowFocus::Focused);
+    REQUIRE(waitUntil([&] {
+        return second.raiseRole() == vthost::proto::RaiseRole::Raise
+               && first.raiseRole() == vthost::proto::RaiseRole::Quiet;
+    }));
 }
 
 TEST_CASE("a remote controller's windows say the daemon is upgrading, and reassess its drift after",
@@ -4616,6 +4633,8 @@ TEST_CASE("a remote controller's windows say the daemon is upgrading, and reasse
             drift.show(vthost::client::DriftNotice {}, contour::window::DriftOffer::None);
         }
     });
+
+    auto const stopOnExit = StopOnExit { controller };
 
     daemon.onDaemon([&control] {
         control.announceUpgrade("9.9.10");
@@ -4819,78 +4838,39 @@ TEST_CASE("a pane closed while reconnecting is closed on the daemon once it answ
     pane.terminal.reset();
 }
 
-namespace contour::remote
+TEST_CASE("what a pane raised is judged by the raise role it arrived under", "[attach][controller][raise]")
 {
+    using vthost::proto::RaiseRole;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto const raised = vthost::proto::PaneSummary { .session = second.session.value,
+                                                     .bell = vthost::proto::PaneBell::Rang,
+                                                     .notifications = { vthost::proto::PaneNotification {
+                                                         .title = "agent", .body = "needs input" } } };
 
-/// Reaches the reactor-owned client of a controller (@see NativeController's friend declaration).
-struct NativeControllerTestAccess
-{
-    /// Runs @p action on the reactor thread with the controller's current client, and waits for it.
-    template <typename F>
-    static void onReactor(contour::remote::NativeController& controller, F action)
-    {
-        auto done = std::promise<void> {};
-        controller._reactor.post([&] {
-            action(*controller._client);
-            done.set_value();
-        });
-        done.get_future().wait();
-    }
+    // Arrived while this window raised: raised by it, though it is quiet by the time the GUI asks.
+    contour::remote::NativeControllerTestAccess::roleThenSummary(controller, RaiseRole::Raise, raised);
+    contour::remote::NativeControllerTestAccess::roleThenSummary(
+        controller, RaiseRole::Quiet, vthost::proto::PaneSummary { .session = second.session.value });
+    auto const taken = controller.takeRaised();
+    REQUIRE(taken.size() == 1);
+    CHECK(taken.front().bell == vthost::proto::PaneBell::Rang);
+    CHECK(taken.front().notifications == raised.notifications);
+    // Each once.
+    CHECK(controller.takeRaised().empty());
 
-    /// Waits until the controller's reactor thread ran everything posted to it before this call.
-    /// @param timeout How long to wait.
-    /// @return Whether it did within @p timeout.
-    [[nodiscard]] static bool drainReactor(contour::remote::NativeController& controller,
-                                           std::chrono::milliseconds timeout)
-    {
-        // Shared, so a reactor that runs it after a timed-out wait still sets a live promise.
-        auto const drained = std::make_shared<std::promise<void>>();
-        controller._reactor.post([drained] { drained->set_value(); });
-        return drained->get_future().wait_for(timeout) == std::future_status::ready;
-    }
-
-    /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.
-    static void killReactor(contour::remote::NativeController& controller)
-    {
-        controller._reactor.post([] { throw std::runtime_error("reactor died"); });
-    }
-
-    /// Makes the connection up one that has pushed no layout frame yet, its reconnect having lost @p lost,
-    /// and has the daemon end a push with no frame in it (one a move request alone caused).
-    static void endFramelessPushOfFreshConnection(contour::remote::NativeController& controller,
-                                                  std::vector<uint64_t> lost)
-    {
-        onReactor(controller, [&](auto& /*client*/) {
-            {
-                auto const lock = std::lock_guard { controller._mutex };
-                controller._connectionLayouts = NativeController::ConnectionLayouts::Awaited;
-                controller._lostWorkspaces = std::move(lost);
-            }
-            controller.onLayoutBatchEnd(vthost::proto::LayoutBatchEnd {});
-        });
-    }
-
-    /// Has the daemon push @p layout and end the push, on the reactor, as it would.
-    static void pushAndEnd(contour::remote::NativeController& controller,
-                           vthost::proto::LayoutState const& layout)
-    {
-        onReactor(controller, [&](auto& /*client*/) {
-            controller.onLayout(layout);
-            controller.onLayoutBatchEnd(vthost::proto::LayoutBatchEnd {});
-        });
-    }
-
-    /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.
-    static void closeWhileEnding(contour::remote::NativeController& controller, uint64_t session)
-    {
-        onReactor(controller, [&](auto& client) {
-            client.detach();
-            controller.closePaneOnReactor(session);
-        });
-    }
-};
-
-} // namespace contour::remote
+    // Arrived while it was quiet: another window raised it, and this one never does.
+    contour::remote::NativeControllerTestAccess::roleThenSummary(controller, RaiseRole::Quiet, raised);
+    contour::remote::NativeControllerTestAccess::roleThenSummary(
+        controller, RaiseRole::Raise, vthost::proto::PaneSummary { .session = second.session.value });
+    CHECK(controller.takeRaised().empty());
+    controller.stop();
+}
 
 TEST_CASE("a controller subscribes to power events for its lifetime", "[attach][controller][power]")
 {
@@ -5159,6 +5139,7 @@ TEST_CASE("a pty a restarted daemon detached still keeps its controller", "[atta
     auto& controller = *controllerOwned;
     auto unbound = 0;
     QObject::connect(&controller, &contour::remote::NativeController::paneUnbound, [&unbound] { ++unbound; });
+    auto const stopOnExit = StopOnExit { controller };
     requireConnected(controller);
     auto old = std::make_unique<MirrorPane>(controller, controller.createPty(std::nullopt));
     REQUIRE(old->shows("old run"));
@@ -5197,6 +5178,7 @@ TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attac
             vthost::proto::CapabilitySet::of({ Capability::ExtensionPermissions,
                                                Capability::InitialClientArea,
                                                Capability::AttachIntent,
+                                               Capability::DaemonFollow,
                                                Capability::Heartbeat });
     });
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
@@ -5285,6 +5267,7 @@ TEST_CASE("workspaces lost to a restart are reported once what came instead has 
                          auto const lock = std::lock_guard { mutex };
                          settledAtAnnouncements.push_back(settled);
                      });
+    auto const stopOnExit = StopOnExit { controller };
     auto const announcements = [&] {
         auto const lock = std::lock_guard { mutex };
         return settledAtAnnouncements;
@@ -5332,18 +5315,16 @@ TEST_CASE("workspaces lost to a reconnect wait out a push that ended with no fra
     controller.stop();
 }
 
-TEST_CASE("a launching client still gets a new unclaimed workspace after a reconnect",
-          "[attach][controller][reconnect]")
+TEST_CASE("a workspace made on the daemon after a reconnect is listed", "[attach][controller][reconnect]")
 {
-    // A reconnect must not narrow the view: AllWorkspaces comes back as AllWorkspaces, not as Resume of the
-    // workspaces it had, so it is the primary viewer again and a workspace no client claims, created
-    // afterwards, still reaches it.
+    // A reconnect resumes the selected workspace, and the connection still sees every workspace's layout: one
+    // made on the daemon afterwards reaches it, though it selects another.
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline); // AllWorkspaces
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline); // the daemon's choice
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
@@ -5353,8 +5334,7 @@ TEST_CASE("a launching client still gets a new unclaimed workspace after a recon
     REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
     REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 1; }));
 
-    // Claimed by no client, as a control connection's is: a client following only listed windows would never
-    // see it.
+    // Made by no client, as a control connection's is.
     auto const created = daemon.onDaemon([&] { return daemon.host->createWorkspace()->id().value; });
     CHECK(waitUntil([&] { return std::ranges::contains(controller.workspaceIds(), created); }));
     CHECK(log.workspacesLost().empty());
@@ -5365,8 +5345,8 @@ TEST_CASE("a launching client still gets a new unclaimed workspace after a recon
 TEST_CASE("a window gone from the same daemon is reported lost, the others kept",
           "[attach][controller][reconnect]")
 {
-    // Same instance: the ids still mean what they meant, and the lost windows are the ones not followed
-    // again.
+    // Same instance: the ids still mean what they meant. The workspace the connection selected is gone, so
+    // its resume selects another, and the one it selected is lost.
     using vthost::client::ConnectionState;
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("kept");
@@ -5374,11 +5354,15 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
     auto const gone = daemon.onDaemon([&] { return daemon.host->createWorkspace()->id().value; });
 
     auto timeline = TestTimeline {};
-    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             ControllerOptions { .intent = { .kind = vthost::proto::AttachIntentKind::Select,
+                                                             .workspace = gone } });
     auto& controller = *controllerOwned;
     auto const log = StateLog { controller };
     requireConnected(controller);
-    REQUIRE(waitUntil([&] { return controller.workspaceIds().size() == 2; }));
+    REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == gone; }));
 
     // Closed on the daemon while this client was away: its only session ended.
     daemon.whileDisconnected([&] {
@@ -5388,10 +5372,9 @@ TEST_CASE("a window gone from the same daemon is reported lost, the others kept"
     REQUIRE(waitUntil([&] { return !log.workspacesLost().empty(); }, 1000));
     CHECK(log.workspacesLost() == std::vector<std::vector<uint64_t>> { { gone } });
     CHECK(controller.connectionState() == ConnectionState::Connected);
-    // Still followed (every window is), but with nothing in it: no OS window is opened for it.
+    // The other one is selected now; every workspace's layout is still pushed.
+    CHECK(waitUntil([&] { return controller.selectedWorkspace() == kept; }));
     CHECK(controller.layout(kept).has_value());
-    auto const emptied = controller.layout(gone);
-    CHECK((!emptied || emptied->tabs.empty()));
 
     controller.stop();
 }
@@ -5436,7 +5419,7 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
     auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
         .transport = transport,
         .intent =
-            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .workspaces = {} },
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 },
         .profileName = std::string {},
         .workingDirectory = {},
         .attachSettings = std::nullopt,
@@ -5557,6 +5540,7 @@ TEST_CASE("NativeController.reconnect.afterTheReactorDied", "[attach][controller
         &controller,
         [&] { ++closed; },
         Qt::DirectConnection);
+    auto const stopOnExit = StopOnExit { controller };
 
     contour::remote::NativeControllerTestAccess::killReactor(controller);
     REQUIRE(waitUntil([&] { return closed.load() == 1; }));
@@ -5589,6 +5573,7 @@ TEST_CASE("NativeController.reconnect.restartedReactorDiesBeforeConnecting",
         &controller,
         [&] { ++closed; },
         Qt::DirectConnection);
+    auto const stopOnExit = StopOnExit { controller };
 
     contour::remote::NativeControllerTestAccess::killReactor(controller);
     REQUIRE(waitUntil([&] { return closed.load() == 1; }));
@@ -5764,8 +5749,8 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
         auto timeline = TestTimeline {};
         auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
             .transport = std::make_shared<FailingTransportFactory>("ssh://me@homepc", row.message),
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                    .workspaces = {} },
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default,
+                                                    .workspace = 0 },
             .profileName = std::string {},
             .workingDirectory = {},
             .attachSettings = std::nullopt,
@@ -5908,8 +5893,8 @@ TEST_CASE("with prompts answered there is no connect clock, but a wedged handsha
             std::make_shared<QuietAskpassBroker>(),
             vthost::SshConnectTimeout,
             std::make_shared<vthost::SshVersionProbe>()),
-        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                .workspaces = {} },
+        .intent =
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 },
         .profileName = std::string {},
         .workingDirectory = {},
         .attachSettings = std::nullopt,
@@ -5943,8 +5928,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
             nullptr,
             TransportBound,
             std::make_shared<vthost::SshVersionProbe>()),
-        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                .workspaces = {} },
+        .intent =
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default, .workspace = 0 },
         .profileName = std::string {},
         .workingDirectory = {},
         .attachSettings = std::nullopt,
@@ -6224,8 +6209,8 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
                     gate->enterAndWait();
                     return {};
                 }),
-            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
-                                                    .workspaces = {} },
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Default,
+                                                    .workspace = 0 },
             .profileName = std::string {},
             .workingDirectory = {},
             .attachSettings = std::nullopt,

@@ -66,7 +66,7 @@ namespace vthost::testing
               .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
               // Every field stated, the run the ids are of last of them.
               .attachIntent = { .kind = proto::AttachIntentKind::Resume,
-                                .workspaces = { 1, 7 },
+                                .workspace = 7,
                                 .daemonInstance = 5 },
               .profileName = "work",
               .cellPixelSize = proto::WireCellPixelSize { .width = 9, .height = 18 },
@@ -77,7 +77,7 @@ namespace vthost::testing
                                                    .capabilities = { .idents = { 1 } },
                                                    .machineId = "secret-machine-id",
                                                    .hostname = "secret-host",
-                                                   .followedWorkspaces = { 1, 3 } } } },
+                                                   .selectedWorkspace = 3 } } },
         { proto::PduType::Input,
           proto::DecodedPdu { proto::Input {
               .session = 4, .data = { std::byte { 'h' }, std::byte { 'i' }, std::byte { '!' } } } } },
@@ -115,7 +115,6 @@ namespace vthost::testing
         { proto::PduType::SplitPane,
           proto::DecodedPdu { proto::SplitPane { .session = 4, .orientation = 1, .ratio = 5000 } } },
         { proto::PduType::ClosePane, proto::DecodedPdu { proto::ClosePane { .session = 4 } } },
-        { proto::PduType::NewWorkspace, proto::DecodedPdu { proto::NewWorkspace {} } },
         { proto::PduType::ResizeSplit,
           proto::DecodedPdu { proto::ResizeSplit { .firstSession = 4, .secondSession = 7, .ratio = 6000 } } },
         { proto::PduType::SessionSettingsChanged,
@@ -197,7 +196,8 @@ namespace vthost::testing
                                                 .index = 0 } } },
         { proto::PduType::MoveNodeRefused,
           proto::DecodedPdu { proto::MoveNodeRefused { .reason = 4, .modelReason = 4 } } },
-        { proto::PduType::LayoutBatchEnd, proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = 6 } } },
+        { proto::PduType::LayoutBatchEnd,
+          proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = 6, .selected = 3 } } },
         { proto::PduType::SetSplitOrientation,
           proto::DecodedPdu { proto::SetSplitOrientation { .anchorSession = 9, .state = 1 } } },
         { proto::PduType::UpgradeDaemon,
@@ -210,10 +210,6 @@ namespace vthost::testing
         { proto::PduType::PanesReprojected, proto::DecodedPdu { proto::PanesReprojected {} } },
         { proto::PduType::SoftFontState,
           proto::DecodedPdu { proto::SoftFontState { .session = 3, .generation = 2 } } },
-        { proto::PduType::FollowWorkspace, proto::DecodedPdu { proto::FollowWorkspace { .workspace = 2 } } },
-        { proto::PduType::ReleaseWorkspace,
-          proto::DecodedPdu {
-              proto::ReleaseWorkspace { .workspace = 2, .reason = proto::WorkspaceRelease::SwitchedAway } } },
         { proto::PduType::SwitchRequest,
           proto::DecodedPdu { proto::SwitchRequest {
               .request = 7,
@@ -223,7 +219,24 @@ namespace vthost::testing
         { proto::PduType::SwitchReply,
           proto::DecodedPdu { proto::SwitchReply {
               .request = 7, .outcome = proto::SwitchOutcome::Failed, .detail = "no such host" } } },
-        { proto::PduType::WorkspaceShown, proto::DecodedPdu { proto::WorkspaceShown { .workspace = 2 } } },
+        { proto::PduType::SelectWorkspace, proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2 } } },
+        { proto::PduType::ReportFocus,
+          proto::DecodedPdu { proto::ReportFocus { .focus = proto::WindowFocus::Focused } } },
+        { proto::PduType::NotifyRole,
+          proto::DecodedPdu { proto::NotifyRole { .role = proto::RaiseRole::Raise } } },
+        { proto::PduType::PaneSummary,
+          proto::DecodedPdu { proto::PaneSummary {
+              .session = 4,
+              .title = "build",
+              .cwd = "/home/user/secret",
+              .activity = proto::OutputActivity::Output,
+              .finished =
+                  proto::FinishedCommand { .exitCode = 1, .durationMs = 250, .commandLine = "make secret" },
+              .bell = proto::PaneBell::Rang,
+              .notifications = { proto::PaneNotification { .title = "secret title",
+                                                           .body = "secret body",
+                                                           .occasion =
+                                                               proto::NotifyOccasion::Unfocused } } } } },
     };
 }
 

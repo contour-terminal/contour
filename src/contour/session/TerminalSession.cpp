@@ -905,15 +905,35 @@ void TerminalSession::bell()
     }(terminal().settings().warningBellVolume);
 
     // Ahead of the alert: the badge is the part of a bell that stays once the Dock has stopped bouncing.
+    // Marked in every window, whichever of them rings.
     noteBellForTab();
+
+    // Whether this window rings is the GUI thread's to say (TerminalSessionManager::raises): on a daemon,
+    // only the window it names rings, so that a bell sounds once. Coalesced as noteBellForTab() is: a program
+    // ringing in a loop rings once per turn of the GUI thread's loop. The fold has a known gap (a listed
+    // follow-up): a second bell that arrives after a raise-role change but before the first one's post has
+    // run joins that post, and is judged by the role the first arrived under -- one that should ring, rung
+    // only under the new role, is lost.
+    _pendingBellVolume.store(volume, std::memory_order_relaxed);
+    if (_bellRing.exchange(BellRing::Pending, std::memory_order_acq_rel) == BellRing::Pending)
+        return;
+    platform::postToObject(this, [this]() {
+        _bellRing.store(BellRing::None, std::memory_order_release);
+        ringBell(_pendingBellVolume.load(std::memory_order_relaxed));
+    });
+}
+
+void TerminalSession::ringBell(float volume)
+{
+    if (_manager != nullptr && !_manager->raises(*this))
+        return;
 
     emit onBell(volume);
 
     if (_profile.bell.value().alert)
         emit onAlert();
 
-    // A bell has no object whose state changed, so nothing reaches a screen reader unless it is said.
-    // Runs on the TERMINAL thread, possibly with the state mutex held -- the announcer posts, and this
+    // A bell has no object whose state changed, so nothing reaches a screen reader unless it is said. The
     // message is a literal, so nothing here reads the terminal.
     announce(QObject::tr("Bell"));
 }
@@ -2232,7 +2252,9 @@ void TerminalSession::raiseDesktopNotification(vtbackend::DesktopNotification co
     // A standalone session is placed nowhere, so nothing puts it in sight.
     auto const visibility =
         _manager != nullptr ? _manager->sessionVisibility(*this) : platform::SessionVisibility::Hidden;
-    if (!platform::isNoticeWanted(platform::notifyWhenOf(notification.occasion), visibility))
+    // On a daemon, only the window it names raises: another window showing the pane shows nothing.
+    auto const raises = _manager == nullptr || _manager->raises(*this);
+    if (!raises || !platform::isNoticeWanted(platform::notifyWhenOf(notification.occasion), visibility))
     {
         // Never shown, so not live either: the terminal listed it as it arrived.
         core::locked(_terminal, [&]() {
@@ -3288,6 +3310,10 @@ void TerminalSession::handleCommandBlockFinished(vtbackend::CommandBlockSummary 
 
     // The tab hears of every ending first, whatever the notice policy below makes of it.
     _manager->noteCommandFinished(*this, vtbackend::commandEndingOf(summary.exitCode, summary.outcome));
+
+    // On a daemon, only the window it names raises: another window showing the pane only marks its tab.
+    if (!_manager->raises(*this))
+        return;
 
     auto const& policy = _profile.notifyOnCommandFinish.value();
 
@@ -7441,6 +7467,12 @@ bool TerminalSession::operator()(actions::ToggleSplitOrientation)
     return true;
 }
 
+bool TerminalSession::operator()(actions::NewWorkspace)
+{
+    _manager->newWorkspace(*this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::TogglePaneZoom)
 {
     _manager->toggleActivePaneZoom(/*acting*/ this);
@@ -7736,14 +7768,11 @@ void TerminalSession::spawnNewTerminal(std::optional<std::string> const& request
     }
     else
     {
-        // Attach mode: author a workspace on the daemon (B4); its new-workspace layout push spawns and
-        // binds the matching OS window. A local factory returns false and we open an ordinary window.
-        // The profile the action named, else none: the daemon then runs the one this client named in its
-        // hello, where a local window would run this session's own -- a name the daemon may not have.
-        if (_manager != nullptr
-            && _manager->requestRemoteWorkspace(*this,
-                                                RemoteSpawn { .profileName = requestedProfile.value_or("") })
-                   == RemoteRouting::Routed)
+        // Attach mode: a window of a connection of its own opens on the daemon, selecting the workspace this
+        // window displays. A local window opens an ordinary window.
+        auto* const screen =
+            _display != nullptr && _display->window() != nullptr ? _display->window()->screen() : nullptr;
+        if (_manager != nullptr && _manager->requestRemoteWindow(*this, screen) != RemoteRouting::Local)
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory =
@@ -7752,8 +7781,7 @@ void TerminalSession::spawnNewTerminal(std::optional<std::string> const& request
         // so no session-staging handshake is needed.
         // A window spawned from an existing one should open on that window's screen (the best
         // pre-show DPR predictor); the new window's bindWindow() consumes it.
-        _app.newWindow(_display != nullptr && _display->window() != nullptr ? _display->window()->screen()
-                                                                            : nullptr);
+        _app.newWindow(screen);
     }
 }
 

@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <ranges>
 
+#include <vthost/ViewRouting.hpp>
+
 namespace vthost
 {
 
 namespace
 {
-    /// @return The ids of the workspaces holding at least one tab.
+    /// @return The ids of the workspaces holding at least one tab, ascending.
     [[nodiscard]] std::vector<uint64_t> workspacesWithTabs(AttachContext const& context)
     {
         return std::ranges::to<std::vector>(
@@ -18,56 +20,29 @@ namespace
             | std::views::transform(&WorkspaceSummary::id));
     }
 
-    /// @return The ids in @p wanted that name an existing workspace, ascending.
-    [[nodiscard]] std::vector<uint64_t> existing(std::vector<uint64_t> const& wanted,
-                                                 AttachContext const& context)
+    /// @return Whether the intent's workspace id is of this run of the daemon: a restarted daemon's ids count
+    ///         from 1 again, so one of another run would name another workspace than the one the client
+    ///         showed.
+    [[nodiscard]] bool namesThisRun(proto::AttachIntent const& intent, AttachContext const& context)
     {
-        return std::ranges::to<std::vector>(
-            context.workspaces | std::views::transform(&WorkspaceSummary::id)
-            | std::views::filter([&](uint64_t id) { return std::ranges::contains(wanted, id); }));
+        return intent.daemonInstance == 0 || context.instance == 0
+               || intent.daemonInstance == context.instance;
     }
 
-    /// @return The ids @p intent names, unless they are of another run of the daemon than this one: a
-    ///         restarted daemon's ids count from 1 again, so they would name other workspaces than the ones
-    ///         the client showed.
-    [[nodiscard]] std::vector<uint64_t> namedInThisRun(proto::AttachIntent const& intent,
-                                                       AttachContext const& context)
-    {
-        if (intent.daemonInstance != 0 && context.instance != 0 && intent.daemonInstance != context.instance)
-            return {};
-        return intent.workspaces;
-    }
-
-    [[nodiscard]] AttachPlan newWorkspace()
-    {
-        return { .follow = {}, .creation = AttachCreation::NewWorkspace };
-    }
-
-    /// What a launch brings back: the workspaces with tabs that are Left, wherever else clients are attached.
-    /// A daemon with no tab at all gets its first one in the primary workspace; one whose workspaces are all
-    /// shown or hidden gets a workspace of its own.
-    [[nodiscard]] AttachPlan takeLeft(AttachContext const& context)
-    {
-        auto follow = std::ranges::to<std::vector>(
-            context.workspaces | std::views::filter([](WorkspaceSummary const& workspace) {
-                return workspace.tabCount > 0 && workspace.visibility == WorkspaceVisibility::Left;
-            })
-            | std::views::transform(&WorkspaceSummary::id));
-        if (!follow.empty())
-            return { .follow = std::move(follow), .creation = AttachCreation::None };
-        if (workspacesWithTabs(context).empty())
-            return { .follow = { context.primaryWorkspace }, .creation = AttachCreation::FirstTabInPrimary };
-        return newWorkspace();
-    }
-
-    /// What takeLeft() brings back; a launch that names a working directory also opens a tab in it, when what
-    /// is brought back leaves it nothing to create.
+    /// What a launch selects: the workspace selected last, else the first one with a tab. A daemon with no
+    /// tab at all gets its first one in the primary workspace, which is then the selection.
     [[nodiscard]] AttachPlan launch(AttachContext const& context)
     {
-        auto plan = takeLeft(context);
-        if (plan.creation == AttachCreation::None && context.workingDirectory == WorkingDirectoryStated::Yes)
-            plan.creation = AttachCreation::TabInFirstFollowed;
-        return plan;
+        auto const ids = workspacesWithTabs(context);
+        auto const selection = defaultSelection(ids, context.lastSelected);
+        if (!selection)
+            return { .select = context.primaryWorkspace, .creation = AttachCreation::FirstTabInPrimary };
+        // A launch that names a working directory also opens a tab in it: the workspaces it brings back
+        // leave it nothing to create.
+        return { .select = selection,
+                 .creation = context.workingDirectory == WorkingDirectoryStated::Yes
+                                 ? AttachCreation::TabInSelected
+                                 : AttachCreation::None };
     }
 } // namespace
 
@@ -75,26 +50,30 @@ AttachPlan planAttach(proto::AttachIntent const& intent, AttachContext const& co
 {
     switch (intent.kind)
     {
-        case proto::AttachIntentKind::AllWorkspaces: return takeLeft(context);
-        case proto::AttachIntentKind::Launch: return launch(context);
-        case proto::AttachIntentKind::NewWorkspace: return newWorkspace();
-        case proto::AttachIntentKind::Workspaces:
-            return { .follow = existing(namedInThisRun(intent, context), context),
-                     .creation = AttachCreation::None };
+        case proto::AttachIntentKind::Default: return launch(context);
+        case proto::AttachIntentKind::NewWorkspace:
+            return { .select = std::nullopt, .creation = AttachCreation::NewWorkspace };
+        case proto::AttachIntentKind::Select: {
+            // A connection selects something: a workspace that is not there is a launch's choice.
+            auto const named =
+                std::ranges::any_of(context.workspaces, [&](WorkspaceSummary const& workspace) {
+                    return workspace.id == intent.workspace;
+                });
+            if (named && namesThisRun(intent, context))
+                return { .select = intent.workspace, .creation = AttachCreation::None };
+            return launch(context);
+        }
         case proto::AttachIntentKind::Resume: {
-            // Review focus 2: the workspaces are gone (a restarted daemon), so this is a fresh launch. A
-            // workspace holding no tab is no survivor: it is a restarted daemon's own empty primary
-            // workspace, whose id is the lost one's only because every run counts from 1.
-            auto const named = namedInThisRun(intent, context);
-            auto follow = std::ranges::to<std::vector>(
-                workspacesWithTabs(context)
-                | std::views::filter([&](uint64_t id) { return std::ranges::contains(named, id); }));
-            if (follow.empty())
-                return launch(context);
-            return { .follow = std::move(follow), .creation = AttachCreation::None };
+            // The workspace is gone (a restarted daemon), so this is a fresh launch. A workspace holding no
+            // tab is no survivor: it is a restarted daemon's own empty primary workspace, whose id is the
+            // lost one's only because every run counts from 1.
+            if (namesThisRun(intent, context)
+                && std::ranges::contains(workspacesWithTabs(context), intent.workspace))
+                return { .select = intent.workspace, .creation = AttachCreation::None };
+            return launch(context);
         }
     }
-    return newWorkspace();
+    return { .select = std::nullopt, .creation = AttachCreation::NewWorkspace };
 }
 
 } // namespace vthost

@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <ranges>
 #include <string>
@@ -128,7 +129,7 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
 
     SECTION("payloadless PDUs summarize to nothing")
     {
-        CHECK(summaryOf(PduType::NewWorkspace).empty());
+        CHECK(summaryOf(PduType::PanesReprojected).empty());
     }
 
     SECTION("PerformOperation names its session and operation and sizes its text")
@@ -184,23 +185,26 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
     CHECK(summarize(DecodedPdu {
               ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" } })
           == "versions=4-6 caps=1,4711 token=yes settings=no role=attach area=none "
-             "intent=all-workspaces workspaces=[] profile=\"\"");
+             "intent=default workspace=0 profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello {} })
-          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=all-workspaces "
-             "workspaces=[] profile=\"\"");
-    CHECK(summarize(DecodedPdu { ClientHello { .attachIntent = { .kind = AttachIntentKind::Launch },
+          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=default "
+             "workspace=0 profile=\"\"");
+    CHECK(summarize(DecodedPdu { ClientHello { .attachIntent = { .kind = AttachIntentKind::NewWorkspace },
                                                .profileName = "main" } })
-              .ends_with("intent=launch workspaces=[] profile=\"main\""));
+              .ends_with("intent=new-workspace workspace=0 profile=\"main\""));
     CHECK(summarize(DecodedPdu { ClientHello {
-                        .attachIntent = { .kind = AttachIntentKind::Resume, .workspaces = { 1, 7 } } } })
-              .contains("intent=resume workspaces=[1,7]"));
+                        .attachIntent = { .kind = AttachIntentKind::Select, .workspace = 7 } } })
+              .contains("intent=select workspace=7"));
+    CHECK(summarize(DecodedPdu { ClientHello {
+                        .attachIntent = { .kind = AttachIntentKind::Resume, .workspace = 7 } } })
+              .contains("intent=resume workspace=7"));
     CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
-          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown followed=[] "
+          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown selected=0 "
              "instance=0000000000000000 restored=0/0");
-    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .followedWorkspaces = { 1, 3 } } })
-              .contains("followed=[1,3]"));
+    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .selectedWorkspace = 3 } })
+              .contains("selected=3"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .daemonInstance = 0xC0FFEE } })
               .contains("instance=0000000000c0ffee"));
     CHECK(summarize(
@@ -267,11 +271,11 @@ TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")
     CHECK_FALSE(summarize(DecodedPdu { ClientHello {} }).contains("cwd="));
 
     // A payloadless PDU must not leave a dangling separator before the byte count.
-    CHECK(traceLine(Direction::Send, 0, DecodedPdu { NewWorkspace {} }, 4)
-          == "send #0 NewWorkspace (4 bytes)");
+    CHECK(traceLine(Direction::Send, 0, DecodedPdu { PanesReprojected {} }, 4)
+          == "send #0 PanesReprojected (4 bytes)");
 }
 
-TEST_CASE("the catalog's tags are contiguous from zero", "[vthost][proto]")
+TEST_CASE("the catalog's tags are contiguous from zero, but for the retired ones", "[vthost][proto]")
 {
     // While the protocol is unreleased a retired PDU leaves no gap -- a gap only earns its keep
     // against a deployed peer that still remembers the old meaning, and there is none. Retiring
@@ -286,9 +290,14 @@ TEST_CASE("the catalog's tags are contiguous from zero", "[vthost][proto]")
         tags.push_back(static_cast<std::size_t>(std::to_underlying(tag)));
     std::ranges::sort(tags);
 
-    REQUIRE(tags.size() == std::variant_size_v<DecodedPdu>);
-    for (auto const expected: std::views::iota(std::size_t { 0 }, tags.size()))
-        CHECK(tags[expected] == expected);
+    // The tags NewWorkspace, FollowWorkspace, ReleaseWorkspace and WorkspaceShown held: reserved, never
+    // reused.
+    constexpr auto Retired = std::array<std::size_t, 4> { 17, 46, 47, 50 };
+    auto expectedTags = std::vector<std::size_t> {};
+    for (auto const tag: std::views::iota(std::size_t { 0 }, tags.size() + Retired.size()))
+        if (!std::ranges::contains(Retired, tag))
+            expectedTags.push_back(tag);
+    CHECK(tags == expectedTags);
 }
 
 TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][proto]")
@@ -315,13 +324,10 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
           == "anchor=9 state=1");
     CHECK(toString(PduType::SetSplitOrientation) == "SetSplitOrientation");
     CHECK(toString(PduType::LayoutBatchEnd) == "LayoutBatchEnd");
-    CHECK(summarize(DecodedPdu { LayoutBatchEnd { .causeSerial = 6 } }) == "cause=6");
+    CHECK(summarize(DecodedPdu { LayoutBatchEnd { .causeSerial = 6, .selected = 3 } })
+          == "cause=6 selected=3");
     CHECK(toString(PduType::PanesReprojected) == "PanesReprojected");
     CHECK(summarize(DecodedPdu { PanesReprojected {} }).empty());
-    CHECK(summarize(DecodedPdu { FollowWorkspace { .workspace = 2 } }) == "workspace=2");
-    CHECK(summarize(
-              DecodedPdu { ReleaseWorkspace { .workspace = 2, .reason = WorkspaceRelease::SwitchedAway } })
-          == "workspace=2 reason=switched-away");
     CHECK(summarize(DecodedPdu {
               SwitchRequest { .request = 7,
                               .workspace = 2,
@@ -332,11 +338,30 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
               DecodedPdu { SwitchReply { .request = 7, .outcome = SwitchOutcome::Failed, .detail = "x" } })
           == "request=7 outcome=failed detail=\"x\"");
     CHECK(toString(PduType::SwitchReply) == "SwitchReply");
-    CHECK(summarize(DecodedPdu { WorkspaceShown { .workspace = 2 } }) == "workspace=2");
-    CHECK(toString(PduType::WorkspaceShown) == "WorkspaceShown");
+    CHECK(summarize(DecodedPdu { SelectWorkspace { .workspace = 2 } }) == "workspace=2");
+    CHECK(toString(PduType::SelectWorkspace) == "SelectWorkspace");
+    CHECK(summarize(DecodedPdu { ReportFocus { .focus = WindowFocus::Focused } }) == "focus=focused");
+    CHECK(summarize(DecodedPdu { ReportFocus { .focus = WindowFocus::Unfocused } }) == "focus=unfocused");
+    CHECK(toString(PduType::ReportFocus) == "ReportFocus");
+    CHECK(summarize(DecodedPdu { NotifyRole { .role = RaiseRole::Raise } }) == "role=raise");
+    CHECK(toString(PduType::NotifyRole) == "NotifyRole");
+    CHECK(summarize(DecodedPdu { PaneSummary { .session = 4 } }) == "session=4 activity=none");
+    CHECK(summarize(DecodedPdu { PaneSummary {
+              .session = 4,
+              .title = "t",
+              .cwd = "/x",
+              .activity = OutputActivity::Output,
+              .finished = FinishedCommand { .exitCode = 1, .durationMs = 20, .commandLine = "ls" } } })
+          == "session=4 activity=output title=yes cwd=yes finished=exit:1,ms:20");
+    // What a pane raised is counted, never quoted.
+    CHECK(summarize(DecodedPdu {
+              PaneSummary { .session = 4,
+                            .bell = PaneBell::Rang,
+                            .notifications = { PaneNotification { .title = "secret", .body = "secret" } } } })
+          == "session=4 activity=none bell=rang notifications=1");
+    CHECK(toString(PduType::PaneSummary) == "PaneSummary");
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
-    CHECK(summarize(DecodedPdu { NewWorkspace { .profileName = "y" } }) == "profile=\"y\"");
 }
 
 TEST_CASE("a ControlRequest's trace names the method but not the params", "[vthost][proto][control]")

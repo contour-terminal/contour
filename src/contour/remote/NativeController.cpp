@@ -17,6 +17,7 @@
 #include <vthost/HostIdentity.hpp>
 #include <vthost/InputEchoWire.hpp>
 #include <vthost/SessionSettings.hpp>
+#include <vthost/control/ProgramStatusConvert.hpp>
 
 namespace contour::remote
 {
@@ -85,12 +86,31 @@ namespace
             vthost::proto::Capability::CellPixelSize,
             vthost::proto::Capability::ClipboardTargets,
             vthost::proto::Capability::SoftFonts,
-            vthost::proto::Capability::WorkspaceFollow,
-            vthost::proto::Capability::WorkspaceShown,
+            vthost::proto::Capability::DaemonFollow,
         });
         if (switchRequests == NativeController::SwitchRequests::Answered)
             offered.idents.push_back(std::to_underlying(vthost::proto::Capability::WorkspaceSwitch));
         return offered;
+    }
+} // namespace
+
+namespace
+{
+    /// @param negotiated What a connection agreed on, if it did.
+    /// @return Whether the daemon follows the window's selection (Capability::DaemonFollow), which every
+    ///         window needs of it.
+    [[nodiscard]] bool followsSelection(std::optional<vthost::proto::Negotiated> const& negotiated)
+    {
+        return negotiated && negotiated->shared.contains(vthost::proto::Capability::DaemonFollow);
+    }
+
+    /// @param where The daemon's address, as the transport describes it.
+    /// @return What the user is told of a daemon that cannot follow a window.
+    [[nodiscard]] std::string predatesMessage(std::string const& where)
+    {
+        return std::format("the daemon at {} predates this Contour; upgrade it (`contour daemon upgrade`, or "
+                           "Upgrade daemon in the palette)",
+                           where);
     }
 } // namespace
 
@@ -123,7 +143,7 @@ NativeController::NativeController(Config config):
     // Told when the transport returns its connection, which is when an AttachBudget's handshake bound starts.
     _transport(std::make_shared<vthost::ConnectObservingFactory>(std::move(config.transport),
                                                                  [this] { noteTransportReturned(); })),
-    _intent(std::move(config.intent)),
+    _intent(config.intent),
     _resumeFallback(config.resumeFallback),
     _switchRequests(config.switchRequests),
     _profileName(std::move(config.profileName)),
@@ -248,20 +268,18 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
 {
     if (_acceptedConnections == 0)
         _timeline.mark(vthost::latency::StartupMark::Connected);
-    // A reconnect resumes what the window shows now: the workspaces followed since, not the ones released.
+    // A reconnect resumes the workspace the supervisor's intent names: the one the lost connection selected.
+    // The controller's own record only stands in where that names none.
     if (intent.kind == vthost::proto::AttachIntentKind::Resume)
     {
         auto const lock = std::lock_guard { _mutex };
-        auto resumed = std::set<uint64_t>(intent.workspaces.begin(), intent.workspaces.end());
-        resumed.insert(_followChanges.followed.begin(), _followChanges.followed.end());
-        for (auto const released: _followChanges.released | std::views::keys)
-            resumed.erase(released);
-        intent.workspaces.assign(resumed.begin(), resumed.end());
+        if (intent.workspace == 0)
+            intent.workspace = _selected;
         // Ids of the run they were shown in: a daemon that restarted since knows they name none of its own.
         intent.daemonInstance = _daemonInstance;
         // Exactly these, or none: no launch rule takes over what other windows of this process resume.
         if (_resumeFallback == ResumeFallback::Nothing)
-            intent.kind = vthost::proto::AttachIntentKind::Workspaces;
+            intent.kind = vthost::proto::AttachIntentKind::Select;
     }
     // The area the hello states: what the window composes to now, else what was last stated, else the
     // profile's. Reactor thread, no lock held: both are taken here, _mutex first.
@@ -313,8 +331,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // whole: a pane a move took out of one workspace is then always seen in the workspace it went to.
             // LiveUpgrade so that a daemon replacing itself in place says so first, and the supervisor waits
             // for that same daemon to come back rather than starting another one into the gap.
-            // WorkspaceFollow so that a window closed, or handed to a link of its own, lets its workspace go
-            // (follow(), release()), and the daemon tells a workspace left from one switched away from.
+            // DaemonFollow so that the window selects one workspace and the daemon routes bells, clipboard
+            // writes and switch requests to the window that shows it.
             // WorkspaceSwitch, unless declined, so that `workspace.switch` reaches this client's windows
             // (onSwitchRequest()).
             .capabilities = offeredCapabilities(_switchRequests),
@@ -324,7 +342,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                 return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(size.columns),
                                                        .lines = unbox<uint32_t>(size.lines) };
             }),
-            .attachIntent = std::move(intent),
+            .attachIntent = intent,
             .profileName = _profileName,
             .colorPreference = shownColors(),
             .cellPixelSize = toWireCell(helloCell),
@@ -361,7 +379,10 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             [this](vthost::proto::LayoutBatchEnd const& end) { onLayoutBatchEnd(end); } },
         NativeClient::PanesReprojectedHandler { [this] { onPanesReprojected(); } },
         NativeClient::SwitchRequestHandler {
-            [this](vthost::proto::SwitchRequest const& request) { onSwitchRequest(request); } });
+            [this](vthost::proto::SwitchRequest const& request) { onSwitchRequest(request); } },
+        NativeClient::PaneSummaryHandler {
+            [this](vthost::proto::PaneSummary const& summary) { onPaneSummary(summary); } },
+        NativeClient::RaiseRoleHandler { [this](vthost::proto::RaiseRole role) { onRaiseRole(role); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -371,7 +392,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         *loop,
         _transport,
         [this, loop](std::unique_ptr<vthost::Connection> connection, vthost::proto::AttachIntent intent) {
-            return makeClient(*loop, std::move(connection), std::move(intent));
+            return makeClient(*loop, std::move(connection), intent);
         },
         _intent,
         _backoff,
@@ -419,6 +440,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     auto const where = _transport->describe();
     auto closed = false;
     auto missingWorkspaces = false;
+    auto predatesFollow = false;
     auto lostAtOnce = std::vector<uint64_t> {};
     auto restored = std::optional<vthost::RestoredCounts> {};
     {
@@ -453,11 +475,12 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 {
                     adoptReconnect(lock);
                     if (_client != nullptr && _resumeFallback == ResumeFallback::Nothing)
-                        _resumedAwaitingLayout = std::set<uint64_t>(_client->followedWorkspaces().begin(),
-                                                                    _client->followedWorkspaces().end());
-                    // A reconnect that follows nothing gets no layout to announce its losses with: they are
+                        _resumedAwaitingLayout = _client->selectedWorkspace() != 0
+                                                     ? std::set { _client->selectedWorkspace() }
+                                                     : std::set<uint64_t> {};
+                    // A reconnect that selects nothing gets no layout to announce its losses with: they are
                     // told now, as no window comes instead.
-                    if (_client != nullptr && _client->followedWorkspaces().empty() && _client->negotiated()
+                    if (_client != nullptr && _client->selectedWorkspace() == 0 && _client->negotiated()
                         && _client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
                     {
                         lostAtOnce = std::exchange(_lostWorkspaces, {});
@@ -470,9 +493,16 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                     _daemonInstance = _client->daemonInstance();
                     // Asked for workspaces the daemon does not have, a first attach would wait out its budget
                     // for a session that never comes: it ends now, saying which.
-                    missingWorkspaces = _intent.kind == vthost::proto::AttachIntentKind::Workspaces
-                                        && _client->followedWorkspaces().empty();
+                    missingWorkspaces = _intent.kind == vthost::proto::AttachIntentKind::Select
+                                        && _client->selectedWorkspace() == 0;
                 }
+                if (_client != nullptr)
+                    _selected = _client->selectedWorkspace();
+                // A daemon that cannot follow a window's selection cannot serve a window of this version.
+                predatesFollow = _client != nullptr && !followsSelection(_client->negotiated());
+                // The new connection knows nothing of the focus the lost one was told.
+                if (_client != nullptr && _focus == vthost::proto::WindowFocus::Focused)
+                    std::ignore = _client->reportFocus(_focus);
                 ++_acceptedConnections;
                 _inputConnection = _acceptedConnections;
                 attachLog()("Attached to {}.", where);
@@ -518,8 +548,9 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     _connected.notify_all();
     emit attachProgressed();
     if (missingWorkspaces)
-        failConnect(
-            std::format("the daemon has no workspace {}", core::joinHumanReadable(_intent.workspaces)));
+        failAttach(std::format("the daemon has no workspace {}", _intent.workspace));
+    else if (predatesFollow)
+        failAttach(predatesMessage(where));
     // After the lock is released, and ahead of the layout that follows the hello, so the GUI holds the
     // summary by the time it realizes the workspaces it is for.
     if (restored)
@@ -575,31 +606,31 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     auto const restarted = restartedSince(_daemonInstance);
     auto const sameInstance = _daemonInstance != 0 && _daemonInstance == client->daemonInstance();
     _daemonInstance = client->daemonInstance();
-    // Lost: what the GUI's windows show and this connection does not follow. Computed against the windows,
+    // Lost: what the GUI's windows show and this connection does not select. Computed against the windows,
     // not against the last connection's layouts: one lost before its push settled showed the GUI nothing, and
     // its frames may name another run's workspaces than the windows do (its own, after a restart).
     auto const& shown = _shownWorkspaces;
     if (restartedSince(shown.daemonInstance))
         _lostWorkspaces = shown.ids;
-    // A daemon that predates attach intents names no workspaces, and every workspace is followed.
-    else if (client->negotiated()
+    // The resume fell back to another workspace: the one the window selected is gone. A daemon that predates
+    // attach intents names no workspace, and nothing is lost.
+    else if (_selected != 0 && client->selectedWorkspace() != _selected && client->negotiated()
              && client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
-        _lostWorkspaces = std::ranges::to<std::vector>(
-            shown.ids | std::views::filter([&](uint64_t workspace) {
-                return !std::ranges::contains(client->followedWorkspaces(), workspace);
-            }));
+        _lostWorkspaces = { _selected };
     else
         _lostWorkspaces.clear();
     _connectionLayouts = ConnectionLayouts::Awaited;
     if (restarted)
     {
-        // The new run's workspace ids name other workspaces than the ones followed or released.
-        _followChanges = {};
+        // The new run's workspace ids name other workspaces than the one selected.
+        _selected = 0;
         // Every binding is detached, its pty left to the window closing it: a new session with the same id
         // must not reach the old pane, nor the old pane's input the new session.
         _bindings.clear();
         // The new run's sessions count from 1 again: an old Hidden is no pane's of this run.
         _inputEchoes.clear();
+        // The new run's sessions count from 1 again: an old status is no session's of this run.
+        _paneStatus.clear();
         _closedSessions.clear();
         // The new run's tab ids count from 1 again: an old pairing would name another tab of this run.
         _wireTabOf.clear();
@@ -631,6 +662,8 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
     // A move asked of the lost connection is answered on it or not at all.
     _moveRequests.clear();
     _landedMoves.clear();
+    _selectRequests.clear();
+    _selectAnswers.clear();
     _reportedPresentations.clear();
     {
         auto const geometryLock = std::lock_guard { _geometryMutex };
@@ -713,6 +746,13 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
 {
     auto lock = std::unique_lock { _mutex };
     captureHandshake();
+    // A mirrored pane says its title and directory in its own stream, not in summaries.
+    if (auto& status = _paneStatus[screen.session]; status.title != screen.title || status.cwd != screen.cwd)
+    {
+        status.title = screen.title;
+        status.cwd = screen.cwd;
+        scheduleStatusFlush();
+    }
 
     // Ordered by precedence: a live binding always consumes the delta, a
     // tombstoned session is ignored, a pending one refreshes its geometry, and
@@ -762,18 +802,6 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     auto batched = false;
     {
         auto const lock = std::lock_guard { _mutex };
-        // Pushed before the daemon read the release: no window of this client shows it any more. Or pushed
-        // to a connection that never sent it -- one a reconnect made while the release was asked, which the
-        // daemon has join the workspace all the same (its primary viewer): told now, on this connection.
-        if (auto const released = _followChanges.released.find(layout.workspace);
-            released != _followChanges.released.end())
-        {
-            _reactor.post([this, workspace = released->first, reason = released->second] {
-                if (_client != nullptr)
-                    std::ignore = _client->releaseWorkspace(workspace, reason);
-            });
-            return;
-        }
         captureHandshake();
         // A daemon that ends its pushes settles them itself (onLayoutBatchEnd); one that does not settles
         // each frame as it comes, as before there were batches.
@@ -829,7 +857,10 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     // deltas that follow set State::Ready via onUpdate.) A push the daemon ends is reconciled at its end
     // only: until then the layouts held mix this push's workspaces with the last one's.
     if (!batched)
+    {
         emit layoutChanged();
+        emit directoryChanged();
+    }
 }
 
 void NativeController::onMoveNodeRefused(vthost::proto::MoveNodeRefused const& refused, uint64_t serial)
@@ -849,16 +880,16 @@ std::vector<uint64_t> NativeController::takeLandedMoves()
     return std::exchange(_landedMoves, {});
 }
 
-std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlight, uint64_t causeSerial)
+std::vector<SelectAnswer> NativeController::takeSelectAnswers()
 {
-    auto completed = std::vector<uint64_t> {};
-    if (causeSerial == 0)
-        return completed;
-    auto const end = inFlight.upper_bound(causeSerial);
-    for (auto const& [serial, request]: std::ranges::subrange(inFlight.begin(), end))
-        completed.push_back(request);
-    inFlight.erase(inFlight.begin(), end);
-    return completed;
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_selectAnswers, {});
+}
+
+std::vector<vthost::proto::PaneSummary> NativeController::takeRaised()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_raised, {});
 }
 
 void NativeController::onPanesReprojected()
@@ -878,17 +909,27 @@ void NativeController::onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end
 {
     // The moves whose effects this push completes, if this client asked for any: named with the layouts it
     // settles, so a reconcile that takes them reads them.
-    auto const landed = takeCompletedMoves(_moveRequests, end.causeSerial);
+    auto const landed = takeCompletedRequests(_moveRequests, end.causeSerial);
+    auto const answered = takeCompletedRequests(_selectRequests, end.causeSerial);
     auto lost = std::vector<uint64_t> {};
     {
         auto const lock = std::lock_guard { _mutex };
         _landedMoves.insert(_landedMoves.end(), landed.begin(), landed.end());
+        // The client holds the selection the daemon stated with this batch.
+        if (_client != nullptr)
+            _selected = _client->selectedWorkspace();
+        for (auto const& [request, asked]: answered)
+            _selectAnswers.push_back(
+                SelectAnswer { .request = request, .asked = asked, .selected = _selected });
         _settledLayouts = _layouts; // pointers: the layouts themselves are shared, never changed
         lost = settle(lock);
+        pruneStatus();
+        clearSelectedActivity();
     }
     if (!lost.empty())
         emit workspacesLost(std::move(lost));
     emit layoutChanged();
+    emit directoryChanged();
 }
 
 bool NativeController::layoutBatchShared() const
@@ -968,78 +1009,191 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
         return std::unexpected(isConnecting() ? ReconnectError::AlreadyConnected
                                               : ReconnectError::ConnectionEnding);
     {
-        // The workspaces this client showed, as a reconnect inside one run resumes them; a client that
-        // follows every workspace keeps doing so (@see ClientSupervisor::resumeIntent).
+        // The workspace this client selects, as a reconnect inside one run resumes it.
         auto const lock = std::lock_guard { _mutex };
         // The new run is Connecting from here on: a reactor that dies before it enters Connecting itself
         // must not find the previous run's Failed and swallow its own death (@see reactorDied).
         _connection = vthost::client::ConnectionState::Connecting;
-        if (_intent.kind != vthost::proto::AttachIntentKind::AllWorkspaces)
-            _intent = vthost::proto::AttachIntent {
-                .kind = vthost::proto::AttachIntentKind::Resume,
-                .workspaces = std::ranges::to<std::vector>(_layouts | std::views::keys),
-            };
+        _intent = vthost::proto::AttachIntent {
+            .kind = vthost::proto::AttachIntentKind::Resume,
+            .workspace = _selected,
+        };
     }
     restartConnecting();
     return {};
 }
 
-namespace
+std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace)
 {
-    /// @param negotiated What the last accepted connection agreed on; none before the first.
-    /// @return Why the connection cannot change what it shows at runtime; nothing when it can.
-    [[nodiscard]] std::expected<void, std::string> followRefusal(
-        std::optional<vthost::proto::Negotiated> const& negotiated)
-    {
-        if (!negotiated)
-            return std::unexpected(std::string { "not connected to the daemon yet" });
-        if (!negotiated->shared.contains(vthost::proto::Capability::WorkspaceFollow))
-            return std::unexpected(std::string {
-                "the daemon cannot change what a window shows (it predates workspace-follow)" });
-        return {};
-    }
-} // namespace
-
-std::expected<void, std::string> NativeController::follow(uint64_t workspace)
-{
+    auto request = uint64_t { 0 };
     {
         auto const lock = std::lock_guard { _mutex };
-        if (auto refused = followRefusal(_negotiated); !refused)
-            return refused;
-        // A new workspace (0) is resumed once its layout named it.
-        if (workspace != 0)
-        {
-            _followChanges.followed.insert(workspace);
-            _followChanges.released.erase(workspace);
-        }
+        if (_state != State::Ready || _client == nullptr)
+            return std::unexpected(std::string { "the connection to the daemon is not up" });
+        if (!followsSelection(_negotiated))
+            return std::unexpected(predatesMessage(_transport->describe()));
+        request = _nextSelectRequest++;
     }
-    // The client's send verbs must run on the reactor thread that owns it; none while the connection is
-    // sought again, whose reconnect resumes the workspace instead.
-    _reactor.post([this, workspace] {
-        if (_client != nullptr)
-            std::ignore = _client->followWorkspace(workspace);
+    // The selection is the one the daemon states with the batch that answers: a workspace it does not have
+    // leaves it as it was.
+    _reactor.post([this, workspace, request] {
+        if (_client == nullptr)
+            return;
+        // Answered by the batch naming it as its cause (onLayoutBatchEnd).
+        if (auto const serial = _client->selectWorkspace(workspace))
+            _selectRequests.insert_or_assign(*serial,
+                                             SelectRequest { .request = request, .asked = workspace });
     });
-    return {};
+    return request;
 }
 
-std::expected<void, std::string> NativeController::release(uint64_t workspace,
-                                                           vthost::proto::WorkspaceRelease reason)
+void NativeController::reportFocus(vthost::proto::WindowFocus focus)
 {
     {
         auto const lock = std::lock_guard { _mutex };
-        if (auto refused = followRefusal(_negotiated); !refused)
-            return refused;
-        _followChanges.released.insert_or_assign(workspace, reason);
-        _followChanges.followed.erase(workspace);
-        // Forgotten now, so that neither a reconcile nor reconnect() resumes it.
-        _layouts.erase(workspace);
-        _settledLayouts.erase(workspace);
+        _focus = focus;
     }
-    _reactor.post([this, workspace, reason] {
+    _reactor.post([this, focus] {
         if (_client != nullptr)
-            std::ignore = _client->releaseWorkspace(workspace, reason);
+            std::ignore = _client->reportFocus(focus);
     });
-    return {};
+}
+
+vthost::proto::RaiseRole NativeController::raiseRole() const noexcept
+{
+    return _guiRaiseRole;
+}
+
+uint64_t NativeController::selectedWorkspace() const noexcept
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _selected;
+}
+
+namespace
+{
+    /// A directory's view of the status store.
+    class StoreLookup final: public window::PaneStatusLookup
+    {
+      public:
+        explicit StoreLookup(std::map<uint64_t, window::PaneStatus> const& store): _store(store) {}
+
+        [[nodiscard]] std::optional<window::PaneStatus> statusOf(window::PaneKey pane) const override
+        {
+            auto const found = _store.find(pane.value);
+            return found != _store.end() ? std::optional { found->second } : std::nullopt;
+        }
+
+      private:
+        std::map<uint64_t, window::PaneStatus> const& _store;
+    };
+
+    /// The labels of workspaces, none of which a daemon states yet.
+    class NoLabels final: public window::LabelLookup
+    {
+      public:
+        [[nodiscard]] std::string labelOf(uint64_t /*workspace*/) const override { return {}; }
+    };
+} // namespace
+
+window::WorkspaceDirectory NativeController::directory() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    // std::map keeps the keys ascending: the daemon's workspaces in the order it numbered them.
+    auto const layouts =
+        std::ranges::to<std::vector>(_settledLayouts | std::views::values
+                                     | std::views::transform([](auto const& layout) { return *layout; }));
+    return window::directoryFromLayouts(layouts,
+                                        StoreLookup { _paneStatus },
+                                        NoLabels {},
+                                        _selected != 0 ? std::optional { _selected } : std::nullopt);
+}
+
+void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto& status = _paneStatus[summary.session];
+    // Field by field: an absent one is unchanged, and the activity and the bell stay marked until the pane is
+    // shown.
+    if (summary.title)
+        status.title = *summary.title;
+    if (summary.cwd)
+        status.cwd = *summary.cwd;
+    if (summary.activity == vthost::proto::OutputActivity::Output)
+        status.activity = vthost::proto::OutputActivity::Output;
+    if (summary.bell == vthost::proto::PaneBell::Rang)
+        status.bell = vthost::proto::PaneBell::Rang;
+    if (summary.finished)
+        status.finished = *summary.finished;
+    // What it raised is judged by the role as it stands now, in the order the daemon decided both: a focus
+    // change on its way to the GUI thread cannot leave the raise to no window.
+    if (vthost::proto::carriesRaise(summary) && _raiseRole == vthost::proto::RaiseRole::Raise)
+        _raised.push_back(vthost::proto::PaneSummary { .session = summary.session,
+                                                       .finished = summary.finished,
+                                                       .bell = summary.bell,
+                                                       .notifications = summary.notifications });
+    scheduleStatusFlush();
+}
+
+void NativeController::onRaiseRole(vthost::proto::RaiseRole role)
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _raiseRole = role;
+    }
+    // The GUI thread's copy changes in line with the events: a bell or notification this connection was sent
+    // before the change was posted to the GUI thread before this is, so it is judged by the role it arrived
+    // under there too (raiseRole()), as a summary is (takeRaised()).
+    platform::postToObject(this, [this, role] { _guiRaiseRole = role; });
+}
+
+void NativeController::failAttach(std::string reason)
+{
+    failConnect(std::move(reason));
+    auto const lock = std::lock_guard { _mutex };
+    if (_supervisor != nullptr)
+        _supervisor->stop();
+}
+
+void NativeController::clearSelectedActivity()
+{
+    auto const selected = _layouts.find(_selected);
+    if (selected == _layouts.end())
+        return;
+    for (auto const& tab: selected->second->tabs)
+        window::forEachLeaf(tab.root, [this](vthost::proto::WirePane const& leaf) {
+            if (auto const found = _paneStatus.find(leaf.session); found != _paneStatus.end())
+            {
+                found->second.activity = vthost::proto::OutputActivity::None;
+                found->second.bell = vthost::proto::PaneBell::Silent;
+            }
+        });
+}
+
+void NativeController::scheduleStatusFlush()
+{
+    if (std::exchange(_statusFlush, StatusFlush::Queued) == StatusFlush::Queued)
+        return;
+    platform::postToObject(this, [this] { flushStatus(); });
+}
+
+void NativeController::flushStatus()
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _statusFlush = StatusFlush::Idle;
+    }
+    emit directoryChanged();
+}
+
+void NativeController::pruneStatus()
+{
+    auto named = std::set<uint64_t> {};
+    for (auto const& layout: _layouts | std::views::values)
+        for (auto const& tab: layout->tabs)
+            window::forEachLeaf(
+                tab.root, [&named](vthost::proto::WirePane const& leaf) { named.insert(leaf.session); });
+    std::erase_if(_paneStatus, [&named](auto const& entry) { return !named.contains(entry.first); });
 }
 
 namespace
@@ -1155,13 +1309,6 @@ void NativeController::requestCreateTab(vtpty::Pty const* actingPty,
     // The client's send verbs must run on the reactor thread that owns it.
     postSessionCreation([beside, profile = spawn.profileName](NativeClient& client) mutable {
         client.createTab(beside, std::move(profile));
-    });
-}
-
-void NativeController::requestCreateWorkspace(contour::session::RemoteSpawn const& spawn)
-{
-    postSessionCreation([profile = spawn.profileName](NativeClient& client) mutable {
-        client.createWorkspace(std::move(profile));
     });
 }
 
@@ -1692,6 +1839,17 @@ void NativeController::onImage(RemoteScreen const& screen, uint32_t imageId)
 void NativeController::onSessionEvent(RemoteScreen const& screen, vthost::proto::SessionEventPdu const& event)
 {
     auto const lock = std::lock_guard { _mutex };
+    // The program-status set of every session, mirrored or not: what a directory lists of the panes of the
+    // workspaces this window does not select.
+    if (auto const* status = std::get_if<vthost::proto::ProgramStatus>(&event))
+    {
+        auto& records = _paneStatus[status->session].status;
+        records.clear();
+        for (auto const& wire: status->records)
+            if (auto record = vthost::control::fromWire(wire))
+                records.push_back(std::move(*record));
+        scheduleStatusFlush();
+    }
     // On the reactor thread. Stored on the pane's device, which the session reads on the GUI thread when the
     // output that follows it lands (TerminalSession::refreshInputEcho); never applied to the grid.
     if (auto const* echo = std::get_if<vthost::proto::SessionInputEcho>(&event))

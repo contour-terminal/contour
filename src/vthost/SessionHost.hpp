@@ -45,6 +45,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -72,7 +73,7 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
-#include <vthost/SwitchClient.hpp>
+#include <vthost/ViewRouting.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/handover/HandoverCodec.hpp>
 #include <vthost/handover/HandoverImage.hpp>
@@ -206,17 +207,19 @@ class SessionStreamEvents
     ///         for repaints although it shows no indicator row.
     [[nodiscard]] virtual bool mirrorsScreens() const noexcept { return true; }
 
-    /// @param workspace A daemon workspace.
-    /// @return Whether the observer shows @p workspace: its layout and its sessions' screens. Only a client
-    ///         attached through SessionHost::noteClientAttached does, so the default says no.
-    [[nodiscard]] virtual bool follows(vtworkspace::WorkspaceId /*workspace*/) const noexcept
-    {
-        return false;
-    }
+    /// @return The workspace whose sessions' screens the observer mirrors; 0 for none. Only a client attached
+    ///         through SessionHost::noteClientAttached selects one, so the default says none.
+    [[nodiscard]] virtual uint64_t selectedWorkspace() const noexcept { return 0; }
 
     /// @return The connection this observer is. Meaningful only for an observer attached through
     ///         SessionHost::noteClientAttached; the default is an empty id.
     [[nodiscard]] virtual ConnectionId connectionId() const { return {}; }
+
+    /// @return Whether the observer is a window that selects one workspace and reports its focus, as a client
+    ///         sharing Capability::DaemonFollow is: only such a one takes part in deciding which window
+    ///         rings, lands a clipboard write or is asked to switch (SessionHost::connectionViews()), for
+    ///         only it is told.
+    [[nodiscard]] virtual bool followsDaemon() const noexcept { return false; }
 
     /// @return Whether the observer's window can be asked to switch (SwitchRequest), as the client offered
     ///         Capability::WorkspaceSwitch. Only an attached native client does.
@@ -258,6 +261,11 @@ class SessionStreamEvents
     /// Fires with the terminal lock RELEASED, because an observer will take it to snapshot.
     virtual void sessionResized(vtworkspace::SessionId /*session*/) {}
 
+    /// The daemon decided whether this connection's window rings and raises for bells and notifications, as
+    /// the most recently focused window does. Fires on the connection whose role changed, once per change.
+    /// @param role The role the connection has now.
+    virtual void raiseRoleChanged(proto::RaiseRole /*role*/) {}
+
     /// @p session rang the bell (BEL).
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
 
@@ -291,18 +299,6 @@ class SessionStreamEvents
                                             proto::PermissionRequest const& /*request*/)
     {
     }
-};
-
-/// Whose a workspace is, as one attached client asks about it.
-///
-/// A workspace an Attach connection's attach or NewWorkspace created is that connection's own — and stays
-/// claimed after it leaves, so a second GUI never inherits a first one's workspace. A workspace anything else
-/// created (the startup layout, a control connection) is unclaimed: the primary viewer follows it.
-enum class WorkspaceClaim : uint8_t
-{
-    Unclaimed = 0, ///< No client's: created by the host itself, or through a control connection.
-    Yours = 1,     ///< Created for the client asking.
-    Others = 2,    ///< Created for another client, attached or gone.
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
@@ -1193,40 +1189,28 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Creates a NEW workspace with a first tab (an empty workspace is useless), backed by
     /// a fresh session — the daemon side of a client "new workspace" (B4).
     /// @param request What this creation overrides about the session it spawns.
-    /// @param creator The attached client the workspace is created for, which then claims it (@see
-    ///        workspaceClaim) before its first tab is announced; null for a workspace no client claims.
     /// @return The created workspace, or nullptr on failure (nothing is leaked).
-    vtworkspace::Workspace* createWorkspace(SessionSpawnRequest const& request = {},
-                                            SessionStreamEvents const* creator = nullptr);
+    vtworkspace::Workspace* createWorkspace(SessionSpawnRequest const& request = {});
 
-    /// Creates a NEW workspace with no tab and no session, named and claimed: the one way every workspace of
-    /// this host is made -- createWorkspace() fills it with its first tab, a move lands its source in it. The
+    /// Creates a NEW workspace with no tab and no session, and named: the one way every workspace of this
+    /// host is made -- createWorkspace() fills it with its first tab, a move lands its source in it. The
     /// caller either fills it or hands it back to discardWorkspace().
-    /// @param creator The attached client the workspace is created for, which then claims it; null for none.
     /// @return The created, empty workspace.
-    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace(SessionStreamEvents const* creator = nullptr);
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace();
 
     /// Removes a workspace that holds no tab -- one createEmptyWorkspace() made and nothing filled, or one a
-    /// move emptied -- forgetting its name and claim. The host's own workspace (workspaceId()) removed, the
+    /// move emptied -- forgetting its name. The host's own workspace (workspaceId()) removed, the
     /// first workspace left becomes it.
     /// @param workspace The workspace; one that holds a tab is left alone.
     void discardWorkspace(vtworkspace::WorkspaceId workspace);
-
-    /// @param workspace The workspace asked about.
-    /// @param client The attached client asking.
-    /// @return Whether @p workspace was created for @p client, for another client, or for none.
-    [[nodiscard]] WorkspaceClaim workspaceClaim(vtworkspace::WorkspaceId workspace,
-                                                SessionStreamEvents const* client) const noexcept;
 
     /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
     /// Idempotent.
     /// @param client The connection, by its stream observer.
     void noteClientAttached(SessionStreamEvents* client);
 
-    /// Stops counting @p client, releases its primary-viewer role, and leaves the workspaces it claimed
-    /// claimed by nobody present (still not unclaimed). A workspace @p client followed but was never shown
-    /// (@see noteWorkspaceFollowed) gets back the release its follow set aside, unless another client
-    /// follows it or released it since. Idempotent, and a no-op for a client never counted.
+    /// Stops counting @p client, and fails the switches asked of its window. Idempotent, and a no-op for a
+    /// client never counted.
     /// @param client The connection, by its stream observer.
     void noteClientDetached(SessionStreamEvents const* client);
 
@@ -1234,57 +1218,48 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
     [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
 
-    /// Records why the last client showing @p workspace stopped: a client that releases a workspace it was
-    /// shown tells the host, which keeps the reason until some client follows the workspace again. A release
-    /// while another attached client still follows it is not the last one and forgets any reason recorded.
-    /// @param workspace The workspace released.
-    /// @param reason Why it was released.
-    void noteWorkspaceReleased(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason);
+    /// Records that the window on @p client selected @p workspace, which is then what a launch selects when
+    /// no other is asked for (@see lastSelectedWorkspace).
+    /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
+    /// @param workspace The workspace it selected.
+    void noteSelected(SessionStreamEvents const& client, uint64_t workspace);
 
-    /// Forgets the release recorded for @p workspace, because a client follows it again -- provisionally:
-    /// until the follow delivers its first layout (noteWorkspaceShown), the record is kept aside for
-    /// @p follower, and the follower detaching first puts it back (noteClientDetached). A window whose new
-    /// connection drops before it showed anything therefore leaves a hidden workspace hidden; a workspace
-    /// made for @p follower (WorkspaceClaim::Yours) and never shown to it is hidden too. A follow while
-    /// another one is still unshown holds the record that one set aside as well, so the last of them to go
-    /// unshown puts it back. A connection that went half-open after the layout reached its window, before
-    /// its confirmation came back, is taken for one never shown: a `--new-workspace` the user saw is then
-    /// hidden, and found again in the switcher or by a Resume.
-    /// @param workspace The workspace a client now follows.
-    /// @param follower The attached client following it.
-    void noteWorkspaceFollowed(vtworkspace::WorkspaceId workspace, SessionStreamEvents const* follower);
+    /// Records that the window on @p client reported its focus. Gaining focus stamps the window with the
+    /// next value of the host's counter, which the routing decisions order windows by; the raise role is
+    /// then settled again.
+    /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
+    /// @param focus The window's focus now.
+    void noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus);
 
-    /// Confirms a follow of @p workspace: its first layout went out, so a client shows it, and the release
-    /// every follow of @p workspace still unshown set aside is forgotten for good -- shown to one window, it
-    /// is hidden for none. Idempotent.
-    /// @param workspace The workspace whose layout went out.
-    void noteWorkspaceShown(vtworkspace::WorkspaceId workspace);
+    /// @param session A hosted session.
+    /// @return The connection a clipboard write of @p session goes to: the one focused last among those
+    ///         selecting the session's workspace; nullopt when none does, or the session is in none.
+    [[nodiscard]] std::optional<ConnectionId> clipboardTargetOf(vtworkspace::SessionId session) const;
+
+    /// @return The workspace some window selected last; nullopt when none ever did.
+    [[nodiscard]] std::optional<uint64_t> lastSelectedWorkspace() const noexcept { return _lastSelected; }
 
     /// @param workspace A workspace.
-    /// @return Whether a client shows it, was shown it and switched away, or neither (@see
-    ///         visibilityOf).
-    [[nodiscard]] WorkspaceVisibility visibility(vtworkspace::WorkspaceId workspace) const;
-
-    /// @param workspace A workspace.
-    /// @return Whether an attached client follows it.
-    [[nodiscard]] bool followedByAttachedClient(vtworkspace::WorkspaceId workspace) const;
-
-    /// @param workspace A workspace.
-    /// @return Why it was last released, nullopt when never, or when a client followed it since.
-    [[nodiscard]] std::optional<proto::WorkspaceRelease> lastRelease(
-        vtworkspace::WorkspaceId workspace) const noexcept;
-
-    /// Makes @p client the primary viewer — the client whose launch took every workspace, which also follows
-    /// the workspaces no client claims, created later — unless another client holds that role.
-    /// @param client An attached client.
-    void claimPrimaryViewer(SessionStreamEvents const* client);
-
-    /// @param client An attached client.
-    /// @return Whether @p client is the primary viewer.
-    [[nodiscard]] bool isPrimaryViewer(SessionStreamEvents const* client) const noexcept
+    /// @return Whether it ended: its last session ended and left it without a tab, and none was added or
+    ///         moved there since. The model may keep it, but it is no workspace to select, unlike an empty
+    ///         one that never held a tab (createEmptyWorkspace()).
+    [[nodiscard]] bool hasEnded(vtworkspace::WorkspaceId workspace) const
     {
-        return client != nullptr && _primaryViewer == client;
+        return _endedWorkspaces.contains(workspace.value);
     }
+
+    /// @param workspace A workspace.
+    /// @return Shown while some attached client selects it, else Hidden.
+    [[nodiscard]] WorkspaceVisibility visibility(uint64_t workspace) const;
+
+    /// @return One view per attached client that follows the daemon (SessionStreamEvents::followsDaemon), in
+    ///         attach order: the connection and what it selects. The input of the routing decisions in
+    ///         ViewRouting.hpp.
+    [[nodiscard]] std::vector<ConnectionView> connectionViews() const;
+
+    /// @return The connection holding the raise role: the window focused last, else the one attached last;
+    ///         nullopt with none attached. @see raiseHolder
+    [[nodiscard]] std::optional<ConnectionId> raiseHolderNow() const;
 
     /// Splits @p tab's active pane, backing the new leaf with a fresh session.
     /// @param tab The tab whose active pane splits.
@@ -1360,20 +1335,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<ConnectionId> lastInputFrom(vtworkspace::SessionId session) const;
 
     /// @param workspace A workspace.
-    /// @return The connection that typed the most recent input into any session of @p workspace; nullopt when
-    ///         none did.
-    [[nodiscard]] std::optional<ConnectionId> lastTypistIn(vtworkspace::WorkspaceId workspace) const;
+    /// @return The connections of the attached clients that select it, in attach order.
+    [[nodiscard]] std::vector<ConnectionId> clientsShowing(uint64_t workspace) const;
 
-    /// @param workspace A workspace.
-    /// @return The connections of the attached clients that show it, in attach order.
-    [[nodiscard]] std::vector<ConnectionId> clientsShowing(vtworkspace::WorkspaceId workspace) const;
-
-    /// Asks the window of the client on @p client that shows @p workspace to switch to @p target, and tells
+    /// Asks the window of the client on @p client to switch to @p target, and tells
     /// @p done what came of it: the client's SwitchReply, or a Failed one when the client cannot switch, goes
     /// away, or stays silent for SwitchAnswerTimeout. @p done runs exactly once, on the loop thread, possibly
     /// before this returns.
     /// @param client An attached client, by connection.
-    /// @param workspace The workspace whose window should switch.
+    /// @param workspace The workspace @p client's window selects, and so leaves.
     /// @param target Where the window should go.
     /// @param done Told the outcome.
     void requestSwitch(ConnectionId const& client,
@@ -1643,8 +1613,7 @@ class SessionHost final: public vtworkspace::ModelEvents
 
   private:
     /// createEmptyWorkspace(), named @p name.
-    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace(SessionStreamEvents const* creator,
-                                                               vtcontrol::Uuid name);
+    [[nodiscard]] vtworkspace::Workspace& createEmptyWorkspace(vtcontrol::Uuid name);
     /// Gives @p tab a name if no creation path did, as for a tab a move made.
     void bindUnnamed(vtworkspace::TabId tab);
 
@@ -2259,35 +2228,23 @@ class SessionHost final: public vtworkspace::ModelEvents
                       std::string_view bytes,
                       std::optional<ConnectionId> from,
                       proto::InputKind kind);
-    /// The client whose launch took every workspace; null while none is attached. @see claimPrimaryViewer
-    SessionStreamEvents const* _primaryViewer = nullptr;
+    /// The workspace some window selected last. @see noteSelected
+    std::optional<uint64_t> _lastSelected;
+    /// The workspaces whose last session ended and that hold no tab since (@see hasEnded); a tab added or
+    /// moved there takes it out. Ids are not reused within a run. Not carried across a live upgrade: the new
+    /// process sees an ended workspace as an empty one, selectable again, which shows nothing worse than an
+    /// empty window.
+    std::set<uint64_t> _endedWorkspaces;
+    /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
+    void settleRaiseRole();
+    /// The value the last focus report was stamped with. @see noteFocus
+    uint64_t _focusCounter = 0;
+    /// The stamp of each attached client's last `Focused` report; absent for one never focused.
+    std::unordered_map<SessionStreamEvents const*, uint64_t> _focusSerials;
+    /// The connection holding the raise role now; nullopt while none is attached.
+    std::optional<ConnectionId> _raiseHolder;
     /// What serves the extensions' control calls. @see attachExtensionControl
     std::reference_wrapper<vtcontrol::ControlApi> _extensionControl;
-    /// Every workspace created for a client, by workspace id: that client while it is attached, null once it
-    /// left. A workspace absent here is unclaimed. @see workspaceClaim
-    std::unordered_map<uint64_t, SessionStreamEvents const*> _workspaceCreators;
-    /// @param workspace A workspace @p follower now follows.
-    /// @param follower The client following it.
-    /// @return What the workspace gets back should @p follower go before it was shown it: its recorded
-    ///         release; SwitchedAway for one made for @p follower; nullopt for neither.
-    [[nodiscard]] std::optional<proto::WorkspaceRelease> releaseUntilShown(
-        vtworkspace::WorkspaceId workspace, SessionStreamEvents const* follower) const;
-
-    /// Puts back the releases @p client's unshown follows set aside, and forgets those follows.
-    /// @param client A client detaching.
-    void restoreUnshownFollows(SessionStreamEvents const* client);
-
-    /// Why each workspace was last released by a client, until one follows it again. @see lastRelease
-    std::unordered_map<uint64_t, proto::WorkspaceRelease> _lastReleases;
-    /// A release a follow set aside until the follower is shown the workspace. @see noteWorkspaceFollowed
-    struct UnshownFollow
-    {
-        SessionStreamEvents const* follower = nullptr; ///< The client following, attached.
-        uint64_t workspace = 0;                        ///< The workspace followed.
-        proto::WorkspaceRelease release {};            ///< The release its follow forgot.
-    };
-    /// Every follow not yet shown that forgot a release, in the order they were made.
-    std::vector<UnshownFollow> _unshownFollows;
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;

@@ -1971,6 +1971,47 @@ TEST_CASE("TerminalSession: closing a session leaves a clear_on: never notice to
     CHECK(h.recorder->closed.empty());
 }
 
+TEST_CASE("TerminalSession: a window that does not raise for its daemon shows no notice, but marks its tab",
+          "[contour][session][notification][manager]")
+{
+    using contour::window::FinishedBlockBadge;
+    auto recorders = std::vector<RecordingNotifier*> {};
+    auto const factory = makeRecordingFactory(recorders);
+    TestApp testApp;
+    auto* const profile = testApp.app().config().profile(testApp.app().profileName());
+    REQUIRE(profile != nullptr);
+    profile->notifyOnCommandFinish = FinishNotificationConfig { .minDuration = 0s };
+    auto& manager = testApp.manager();
+    // Another window on the same daemon raises: this one is quiet.
+    auto daemon = contour::test::DaemonNamedBinding {
+        *factory, { .kind = vthost::proto::SwitchDaemonKind::Label, .daemon = "work", .workspace = {} }
+    };
+    daemon.role = vthost::proto::RaiseRole::Quiet;
+    contour::test::ScopedController const window { manager };
+    manager.bindWindow(window.id, daemon);
+    window->createNewTab();
+    auto* const background = window->activeSession();
+    window->createNewTab();
+    REQUIRE(background != nullptr);
+    REQUIRE(recorders.size() == 2);
+    auto* const recorder = recorders.front();
+
+    runAndDeliverShellCommand(*background, "make", 2);
+    background->terminal().writeToScreen("\033]777;notify;Title;Body\033\\");
+    QCoreApplication::processEvents();
+    CHECK(recorder->raised.empty());
+    CHECK(manager.attentionOf(background->modelSessionId()).finished == FinishedBlockBadge::Failed);
+    CHECK_FALSE(manager.raises(*background));
+
+    // The daemon names it the window that raises: the next finish is told.
+    daemon.role = vthost::proto::RaiseRole::Raise;
+    runAndDeliverShellCommand(*background, "make", 2);
+    CHECK(recorder->raised.size() == 1);
+
+    contour::test::closeAllTabs(*window);
+    manager.releaseBinding(daemon);
+}
+
 TEST_CASE("TerminalSession: a click on a finish notice brings its session's tab forward",
           "[contour][session][notification][manager]")
 {

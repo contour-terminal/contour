@@ -5,12 +5,16 @@
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
 
+#include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Primitives.hpp>
+
+class QScreen;
 
 namespace contour::window
 {
@@ -80,7 +84,7 @@ class WindowBinding
     }
 
     /// Tells the binding that @p window, which it served, was closed: what it showed is no longer shown here
-    /// (a daemon is told so, and keeps the workspace as left). Told before lastWindowReleased() when it was
+    /// (a daemon's workspace runs on in the daemon). Told before lastWindowReleased() when it was
     /// the last; not told for a window bound elsewhere, whose rebinding says what became of it. GUI thread.
     /// @param window The closed window.
     virtual void windowClosed(vtworkspace::WorkspaceId window) = 0;
@@ -90,6 +94,44 @@ class WindowBinding
     /// the binding releases its windows itself (TerminalSessionManager::releaseBinding). Which windows it
     /// serves is the manager's to know (TerminalSessionManager::windowsBoundTo). GUI thread.
     virtual void lastWindowReleased() = 0;
+
+    /// Tells the daemon behind the binding whether the window bound here has the user's focus: of every
+    /// window on a daemon, the one focused most recently raises (raiseRole()). Nothing for a binding with no
+    /// daemon. GUI thread.
+    /// @param focus Whether the window gained or lost the focus.
+    virtual void reportFocus(vthost::proto::WindowFocus /*focus*/) {}
+
+    /// @return Whether a window bound here rings, alerts and notifies for its panes, or only marks them: the
+    ///         daemon names one window of all those on it, so that a bell sounds once. Raise for a binding
+    ///         with no daemon, whose window is the only one that sees its panes. GUI thread.
+    [[nodiscard]] virtual vthost::proto::RaiseRole raiseRole() const noexcept
+    {
+        return vthost::proto::RaiseRole::Raise;
+    }
+
+    /// @return How many tabs wait for the user in the daemon's workspaces the window bound here does not
+    ///         display; none for a binding with no daemon, whose window displays all it has. GUI thread.
+    [[nodiscard]] virtual unsigned tabsWaitingElsewhere() const { return 0; }
+
+    /// @return What every binding to the same daemon shares, so that a count over windows takes that daemon
+    ///         once; none for a binding with no daemon. GUI thread.
+    [[nodiscard]] virtual std::optional<uint64_t> daemonKey() const { return std::nullopt; }
+
+    /// Opens another window on the daemon behind the binding, selecting the workspace @p window displays:
+    /// New Window, or a tab torn off @p window, which the new window shows as its active tab. Nothing moves:
+    /// both windows show the daemon's workspace. GUI thread.
+    /// @param window The window bound here that asks.
+    /// @param activeTab The tab of @p window the new window activates once it shows the workspace; none for
+    ///        the daemon's own choice.
+    /// @param screen Where the window opens; null for the default placement.
+    /// @return Nothing once the window's connection is under way; why not, for a binding with no daemon.
+    [[nodiscard]] virtual std::expected<void, std::string> openWindowLike(
+        vtworkspace::WorkspaceId /*window*/,
+        std::optional<vtworkspace::TabId> /*activeTab*/,
+        QScreen* /*screen*/)
+    {
+        return std::unexpected(std::string { "this window has no daemon to open another window on" });
+    }
 };
 
 } // namespace contour::session

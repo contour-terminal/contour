@@ -415,14 +415,6 @@ class SessionFactory
     /// @param presentation How the tab is presented here.
     virtual void reportTabPresentation(LocalTabPresentation const& /*presentation*/) {}
 
-    /// Attach mode: authors a new workspace on the DAEMON rather than opening a purely
-    /// local window — the daemon honors it and pushes the new workspace's layout, which the
-    /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
-    /// opens an ordinary window.
-    /// @param spawn What the new workspace's first session runs, as the host is asked for it.
-    /// @return true if routed to the daemon; false for a local factory.
-    [[nodiscard]] virtual bool requestRemoteWorkspace(RemoteSpawn const& /*spawn*/) { return false; }
-
     /// Attach mode: authors the CLOSE of the pane backed by @p pty on the DAEMON, so a session the
     /// user really ended does not linger there headless.
     ///

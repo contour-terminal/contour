@@ -23,11 +23,13 @@
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/PaneKey.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
+#include <contour/window/WindowId.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 #include <contour/window/WindowRole.hpp>
 
@@ -393,6 +395,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Opens the daemon and workspace switcher popup over the window hosting @p acting.
     /// @param acting The session that triggered the action.
     void showSwitcher(TerminalSession const& acting);
+
+    /// (In-process) Gives the window hosting @p acting a workspace of its own with one new tab and shows it;
+    /// the workspace shown until now keeps running, hidden. Does nothing for a window a daemon serves, which
+    /// has its workspaces from the daemon.
+    /// @param acting The session that triggered the action.
+    void newWorkspace(TerminalSession const& acting);
 
     /// Asks for a label (the switcher popup's label prompt), starts a new local daemon under it, and opens a
     /// new window on it, for the window hosting @p acting.
@@ -1142,6 +1150,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return Its visibility.
     [[nodiscard]] platform::SessionVisibility sessionVisibility(TerminalSession const& session) const;
 
+    /// @param session A session of this manager.
+    /// @return Whether @p session's bell sounds and alerts, and its desktop and finish notifications are
+    ///         shown, rather than only marking its tab: always in-process; for a daemon's session only while
+    ///         its window holds the daemon's raise role (WindowBinding::raiseRole), so that a bell rings
+    ///         once across the windows on that daemon. GUI thread.
+    [[nodiscard]] bool raises(TerminalSession const& session) const;
+
     /// The label the tab strip shows for the tab hosting @p session -- read back through the strip's
     /// own TitleRole, so a notification names the tab exactly as the user sees it.
     /// @param session The session whose tab to name.
@@ -1260,8 +1275,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window.
     void notifyDisplaysExposureChanged(vtworkspace::WorkspaceId window) const;
 
-    /// @return Every session's unseen output and finished commands, which the tab strips' badges pool.
-    [[nodiscard]] window::TabAttention const& tabAttention() const noexcept { return _attention; }
+    /// @param session The session asked about.
+    /// @return What it has to tell, in the ledger of the window that owns it; nothing when no window does.
+    [[nodiscard]] window::SessionAttention attentionOf(vtworkspace::SessionId session) const;
 
     /// What the OS taskbar should show right now, aggregated across every reporting session.
     ///
@@ -1275,16 +1291,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
 
     /// Resolves progress only from panes and tabs belonging to the requested OS window.
-    /// @param window Workspace window identity.
+    /// @param window The OS window; every workspace it owns counts.
     /// @param now Current monotonic time.
     /// @return Window-scoped aggregate, including background tabs and panes.
-    [[nodiscard]] platform::TaskbarProgress taskbarProgress(vtworkspace::WorkspaceId window,
+    [[nodiscard]] platform::TaskbarProgress taskbarProgress(window::WindowId window,
                                                             std::chrono::steady_clock::time_point now) const;
 
     /// Attaches the native taskbar before the OS window is first shown.
-    /// @param window Workspace window identity.
+    /// @param window The OS window.
     /// @param nativeWindow The Qt window backing it.
-    void bindTaskbarWindow(vtworkspace::WorkspaceId window, QWindow& nativeWindow);
+    void bindTaskbarWindow(window::WindowId window, QWindow& nativeWindow);
 
     /// Records @p progress for @p session, for the taskbar aggregate above.
     ///
@@ -1440,14 +1456,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         for a session no window holds.
     [[nodiscard]] std::string_view hostLabelOf(TerminalSession const& session) const noexcept;
 
-    /// Asks the host serving @p acting's window to author a new workspace, whose layout push then opens the
-    /// OS window showing it, instead of a local window opening.
+    /// New Window from @p acting's window: on a daemon, a window of a connection of its own opens, selecting
+    /// the workspace @p acting's window displays (WindowBinding::openWindowLike), instead of a local window
+    /// opening.
     /// @param acting The session the new window is asked from.
-    /// @param spawn What the new workspace's first session runs.
-    /// @return Routed when the host took the request; Local for a local window, which then opens a local
-    ///         one, and for a host that cannot author workspaces.
-    [[nodiscard]] RemoteRouting requestRemoteWorkspace(TerminalSession const& acting,
-                                                       RemoteSpawn const& spawn);
+    /// @param screen Where the window opens; null for the default placement.
+    /// @return Routed when the daemon's binding took the request; Local for a local window, which then opens
+    ///         a local one, and for a binding with no daemon.
+    [[nodiscard]] RemoteRouting requestRemoteWindow(TerminalSession const& acting, QScreen* screen);
 
     /// Installs the attach-mode window binder, in place of any installed before. It decides whether a
     /// freshly-spawned OS window should adopt a pending daemon workspace's layout instead of creating the
@@ -1486,9 +1502,59 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return true if the window was bound to a pending daemon workspace; false otherwise.
     Q_INVOKABLE bool consumeAttachWindow(contour::window::WindowController* controller);
 
-    /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
-    /// row/signal emission to the owning window's controller.
-    [[nodiscard]] window::WindowController* controllerFor(vtworkspace::WorkspaceId window) const noexcept;
+    /// The controller whose window displays @p workspace, or nullptr: none when no window shows it, a hidden
+    /// workspace of a window included. Used by the ModelEvents router to forward each Qt row/signal emission
+    /// to the controller whose tab strip lists the event's tabs. In daemon mode each window realizes its own
+    /// local copy of a daemon workspace, so a local workspace is displayed by at most one window.
+    /// @param workspace The workspace.
+    /// @return The controller displaying it, or nullptr.
+    [[nodiscard]] window::WindowController* controllerDisplaying(
+        vtworkspace::WorkspaceId workspace) const noexcept;
+
+    /// The controller whose window owns @p workspace, shown or not, or nullptr.
+    /// @param workspace The workspace.
+    /// @return The controller owning it, or nullptr.
+    [[nodiscard]] window::WindowController* controllerOwning(
+        vtworkspace::WorkspaceId workspace) const noexcept;
+
+    /// @param window A window id.
+    /// @return Its controller, or nullptr when the window is gone.
+    [[nodiscard]] window::WindowController* controllerOf(window::WindowId window) const noexcept;
+
+    /// (In-process) Creates a workspace owned by @p window and leaves it hidden; the window keeps showing
+    /// what it showed.
+    /// @param window The owning window; must exist.
+    /// @return The new workspace's id.
+    [[nodiscard]] vtworkspace::WorkspaceId createWorkspaceIn(window::WindowId window);
+
+    /// (In-process) Makes @p window show the @p index-th (0-based) workspace it owns; out of range, or an
+    /// unknown window, changes nothing.
+    /// @param window The window.
+    /// @param index  The position among its owned workspaces.
+    void selectWorkspace(window::WindowId window, std::size_t index) const;
+
+    /// Tells the manager that @p controller now shows another workspace than @p previous: the focus follows
+    /// the window, and what just came into view counts as seen. Called by WindowController::displayWorkspace.
+    /// @param controller The window that switched.
+    /// @param previous   The workspace it showed until now.
+    void windowDisplayChanged(window::WindowController& controller, vtworkspace::WorkspaceId previous);
+
+    /// Forgets what the manager keeps per workspace for @p workspace, which a window dropped from the model:
+    /// its binding to a daemon, and any close it waited for. The window that held it stays. Called by
+    /// WindowController::dropWorkspaceIfEmpty.
+    /// @param workspace The workspace gone from the model.
+    void forgetWorkspace(vtworkspace::WorkspaceId workspace);
+
+    /// The taskbar's count of waiting tabs may have changed outside the windows' own tabs -- a daemon's
+    /// directory of the workspaces a window does not display: it is published anew. GUI thread.
+    void refreshTaskbarAttention();
+
+    /// The key @p session's seen-state is kept under in a window's ledger: the daemon's id for a session
+    /// bound to a daemon session (@see hostSessionIdOf), the local id otherwise, and for a session this
+    /// manager does not know.
+    /// @param session The session.
+    /// @return Its key.
+    [[nodiscard]] window::PaneKey paneKeyOf(vtworkspace::SessionId session) const;
 
     /// The controller owning @p display's OS window, for routing focus. Matches the controller that has
     /// adopted this display's QQuickWindow (ownsOSWindow); falls back to the sole controller before any
@@ -1512,7 +1578,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// window" is _controllersByWindow.size() == 1; when it is, the manager clears residual session
     /// registries. deleteLater()s the controller.
     /// @param windowId The window whose controller is being removed.
-    void removeWindowController(vtworkspace::WorkspaceId windowId);
+    void removeWindowController(window::WindowId windowId);
 
     // Narrow SERVICE interface the WindowController reads through (the manager stays the SessionModel host
     // + SessionId<->TerminalSession registry). These expose the shared model/registry without moving
@@ -1915,8 +1981,30 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         auto* win = tab != nullptr ? _model->workspace(_model->workspaceOfTab(tab->id())) : nullptr;
         return SessionHost { .tab = tab,
                              .window = win,
-                             .controller = win != nullptr ? controllerFor(win->id()) : nullptr };
+                             .controller = win != nullptr ? controllerOwning(win->id()) : nullptr };
     }
+
+    /// @param session A session of the model.
+    /// @return The seen-state ledger of the window owning the workspace that holds it; nullptr when none
+    /// does.
+    [[nodiscard]] window::TabAttention* ledgerOf(vtworkspace::SessionId session) const noexcept;
+
+    /// The seen-state of panes about to change windows, as a move notes it before it happens.
+    struct AttentionCarry
+    {
+        vtworkspace::SessionId session; ///< The pane's session.
+        window::PaneKey key;            ///< What it is kept under.
+        window::TabAttention* from;     ///< The ledger that holds it now.
+    };
+
+    /// @param sessions The sessions a move is about to relocate.
+    /// @return Where each one's seen-state is now, to hand to carryAttention() once the move is done.
+    [[nodiscard]] std::vector<AttentionCarry> beginCarryingAttention(
+        std::span<vtworkspace::SessionId const> sessions) const;
+
+    /// Moves each carried pane's marks from the ledger it was in to the one of the window that now owns it.
+    /// @param carried What beginCarryingAttention() noted.
+    void carryAttention(std::span<AttentionCarry const> carried);
 
     /// The leaf of @p tab that @p session backs.
     /// @param tab     The tab to search.
@@ -2011,6 +2099,19 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] static std::optional<window::WindowPosition> spawnPositionFor(QScreen* screen, QPoint at);
     /// Stages @p pending for the next window, spawned on @p screen at @p at (@see consumePendingTransplant).
     void spawnWindowFor(PendingTransplant const& pending, QScreen* screen, QPoint at);
+    /// Opens a window of a connection of its own on @p binding's daemon, showing what @p asking shows (New
+    /// Window, a tab torn off); one that cannot open is logged under @p what and told in @p asking.
+    /// @param binding The daemon binding @p asking is bound to.
+    /// @param asking The window asked from.
+    /// @param activeTab The tab the new window activates; none for the daemon's own choice.
+    /// @param screen Where the window opens; null for the default placement.
+    /// @param what What asked, for the log.
+    /// @return Routed once the window's connection is under way; Refused otherwise.
+    RemoteRouting openDaemonWindowLike(WindowBinding& binding,
+                                       vtworkspace::WorkspaceId asking,
+                                       std::optional<vtworkspace::TabId> activeTab,
+                                       QScreen* screen,
+                                       std::string_view what) const;
     /// Tells the screen reader of the window @p moved landed in what happened.
     void announceMove(vtworkspace::MoveResult const& moved,
                       window::DropPayload payload,
@@ -2115,6 +2216,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // application-wide command runs in while no window is focused. @see applicationController.
     std::optional<vtworkspace::WorkspaceId> _lastFocusedWindow;
 
+    /// When each window last gained focus, by a counter: the most recently focused window of a daemon speaks
+    /// for it in the application's taskbar count (window::applicationWaiting).
+    std::unordered_map<window::WindowId, uint64_t> _focusOrder;
+    uint64_t _focusCounter = 0; ///< The last value handed to _focusOrder.
+
     bool _multimediaReady = false;
 
     /// What one binding's connection is in, as its link reports it. A binding absent from _linkStates is in
@@ -2136,18 +2242,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The live sessions of every window bound to @p binding.
     [[nodiscard]] std::vector<TerminalSession*> sessionsBoundTo(WindowBinding const& binding) const;
 
-    /// Every session's unseen output and finished commands. Keyed by session, so the marks follow a session
-    /// from window to window. @see noteSessionOutput
-    window::TabAttention _attention;
-
     // {{{ vtworkspace model integration
     // The Qt-free layout model: the authoritative window/tab/pane tree. The model owns the
     // authoritative tab title and color; _sessionsById maps each leaf's SessionId to its backing
     // TerminalSession.
     std::unique_ptr<vtworkspace::SessionModel> _model;
-    // Per-OS-window QML adapters, keyed by vtworkspace::WorkspaceId. The ModelEvents router forwards each Qt
+    // Per-OS-window QML adapters, keyed by window::WindowId. The ModelEvents router forwards each Qt
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
-    std::unordered_map<uint64_t, window::WindowController*> _controllersByWindow;
+    std::unordered_map<window::WindowId, window::WindowController*> _controllersByWindow;
+    uint64_t _nextWindowId = 1; ///< The next WindowId to mint.
     /// What the next createWindowController() window is for. @see stageWindowRole
     window::WindowRole _stagedRole = window::WindowRole::Normal;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse

@@ -146,21 +146,6 @@ struct HandoverSession
     }
 };
 
-/// Why a workspace was last released (SessionHost::lastRelease()): what keeps a workspace switched away from
-/// hidden, and one whose window closed left, across the exec.
-struct HandoverRelease
-{
-    uint64_t workspace = 0;                                            ///< The workspace's id in the model.
-    proto::WorkspaceRelease release = proto::WorkspaceRelease::Closed; ///< Why it was last released.
-
-    /// Lists the fields for the handover codec.
-    void visitFields(this auto& self, auto& visitor)
-    {
-        visitor(1, self.workspace);
-        visitor(2, self.release);
-    }
-};
-
 /// Everything the old image hands the new one.
 struct HandoverImage
 {
@@ -185,13 +170,10 @@ struct HandoverImage
     /// until a client reports.
     /// Unchecked: the host that adopts the image bounds it first.
     std::optional<vtpty::ImageSize> cellPixelSize {};
-    /// Why each workspace released since a client last followed it was released, as captured once every
-    /// client was closed: a follow never shown has put back what it set aside by then. Empty for an image
-    /// from before the field, whose successor finds every workspace no client shows left.
-    std::vector<HandoverRelease> releases;
 
     /// Lists the fields for the handover codec. Field 12 carried the Windows lease handle apart from the
-    /// descriptor in format 1; retired, never to be reused.
+    /// descriptor in format 1, and field 14 the release records of the follow model; both retired, never to
+    /// be reused. The decoder skips a field it does not list, so an image from before reads on.
     void visitFields(this auto& self, auto& visitor)
     {
         visitor(1, self.daemonInstance);
@@ -206,7 +188,6 @@ struct HandoverImage
         visitor(10, self.defaultColorPreference);
         visitor(11, self.upgradeGeneration);
         visitor(13, self.cellPixelSize);
-        visitor(14, self.releases);
     }
 };
 

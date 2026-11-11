@@ -38,6 +38,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
+#include <concepts>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -46,9 +47,9 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -102,9 +103,8 @@ struct HandshakePolicy
                                                                    proto::Capability::ColorPreference,
                                                                    proto::Capability::ClipboardTargets,
                                                                    proto::Capability::SoftFonts,
-                                                                   proto::Capability::WorkspaceFollow,
                                                                    proto::Capability::WorkspaceSwitch,
-                                                                   proto::Capability::WorkspaceShown });
+                                                                   proto::Capability::DaemonFollow });
 };
 
 /// When a connection sends a session's program-status set.
@@ -258,6 +258,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// A session's program-status records changed: marked, and pushed whole by the next debounced flush to a
     /// viewer sharing Capability::ProgramStatus. Every other signal is the control service's.
     void sessionSignal(vtworkspace::SessionId session, SessionSignal const& signal) override;
+    void raiseRoleChanged(proto::RaiseRole role) override;
 
     /// Asks this client's user, whose GUI shows the prompt in @p session's pane. Sent as the question opens;
     /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
@@ -344,14 +345,18 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     ///         the matched token otherwise; none before a hello is accepted.
     [[nodiscard]] vtcontrol::ControlGrants grants() const noexcept { return _grants; }
 
-    /// @param workspace A daemon workspace.
-    /// @return Whether this connection is shown @p workspace: its layout, its sessions' screens and events.
-    ///         The attach plan's workspaces and those it gained since (its own NewWorkspace and
-    ///         FollowWorkspace, and -- for the primary viewer -- the workspaces no client claims).
-    [[nodiscard]] bool follows(vtworkspace::WorkspaceId workspace) const noexcept override
-    {
-        return _followedWorkspaces.contains(workspace.value);
-    }
+    /// @return The one workspace this connection mirrors: its sessions' screens and events. The attach
+    ///         plan's, then whatever SelectWorkspace chose (or the daemon, when the selected one ended); 0
+    ///         before the attach and when none could be.
+    [[nodiscard]] uint64_t selectedWorkspace() const noexcept override { return _selectedWorkspace; }
+
+    /// @return Whether the connection shares Capability::DaemonFollow.
+    [[nodiscard]] bool followsDaemon() const noexcept override { return summarizesPanes(); }
+
+    /// @param session A hosted session.
+    /// @return Whether @p session sits in the workspace this connection selects; false for one in no
+    ///         workspace.
+    [[nodiscard]] bool mirrorsSession(vtworkspace::SessionId session) const;
 
     /// @return This connection's id.
     [[nodiscard]] ConnectionId connectionId() const override { return _id; }
@@ -371,43 +376,40 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
 
-    /// Adds @p workspace to the ones this connection shows, tells the host so, and pushes its layout and
-    /// its sessions' screens; a workspace this connection already shows, or none, changes nothing.
+    /// Makes @p workspace the one this connection mirrors: tells the host, forgets the sessions of the
+    /// workspace left and queues a snapshot of every session of the new one. A workspace already selected
+    /// only tells the host; one the model does not hold changes nothing.
     /// @param workspace The daemon workspace.
-    void followWorkspace(vtworkspace::WorkspaceId workspace);
+    void selectWorkspace(vtworkspace::WorkspaceId workspace);
 
     /// Requests a snapshot of every session @p workspace shows.
     /// @param workspace The workspace.
     void requestWorkspaceSnapshots(vtworkspace::Workspace& workspace);
 
-    /// Sends the layout of @p workspace, a workspace this client follows, and has every session it shows
-    /// not yet mirrored to this client streamed after it (@see requestArrivedSnapshots).
+    /// Sends the layout of @p workspace and, when it is the selected one, has every session it shows not yet
+    /// mirrored to this client streamed after it (@see requestArrivedSnapshots).
     /// @param workspace The workspace.
-    void sendFollowedLayout(vtworkspace::Workspace& workspace);
+    void sendWorkspaceLayout(vtworkspace::Workspace& workspace);
 
     /// Requests a snapshot of every session @p workspace shows that a move brought in from a workspace
     /// another client shows: one not yet mirrored to this client, already in the model as its last layout
     /// batch ended, and with no snapshot pending. Its shell may say nothing more for a long time. A session
     /// spawned since is mirrored as its first output comes, as before.
-    /// @param workspace A workspace this client follows.
+    /// @param workspace The selected workspace.
     void requestArrivedSnapshots(vtworkspace::Workspace& workspace);
 
     /// Records every session the host's model shows now (@ref _sessionsAtLastLayout).
     void noteModelSessions();
 
-    /// Forgets every session mirrored to this client that no workspace it follows shows any more: one a move
-    /// took to a workspace another client shows. One that comes back is then mirrored anew, from a snapshot,
-    /// and not by increments against what this client was sent before it left.
-    void forgetUnfollowedSessions();
+    /// Forgets every session mirrored to this client that the selected workspace does not show any more: one
+    /// a move took to another workspace, or one left behind by a selection. One that comes back is then
+    /// mirrored anew, from a snapshot, and not by increments against what this client was sent before it
+    /// left.
+    void forgetUnmirroredSessions();
 
     /// Drops every per-session state this connection keeps for @p session.
     /// @param session The session.
     void forgetSession(vtworkspace::SessionId session);
-
-    /// Stops showing @p workspace and tells the host why.
-    /// @param workspace The daemon workspace.
-    /// @param reason Why the client stopped showing it.
-    void releaseWorkspace(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason);
 
     friend struct NativeSessionFlushTester; ///< Test-only view of the armed flush deadline.
 
@@ -610,18 +612,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @return Whether it was such a verb.
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
-    /// Serves @p frame if it is a FollowWorkspace or ReleaseWorkspace (gated on Capability::WorkspaceFollow),
-    /// a WorkspaceShown (Capability::WorkspaceShown) or a SwitchReply (Capability::WorkspaceSwitch), refusing
-    /// it when the capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
+    /// Serves @p frame if it is a SelectWorkspace or ReportFocus (Capability::DaemonFollow; ReportFocus is
+    /// read and ignored) or a SwitchReply (Capability::WorkspaceSwitch), refusing it when the
+    /// capability was not negotiated. Reported as a TabVerb: it is dispatched the same way.
     /// @param frame The frame read.
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
-
-    /// @return Whether the client confirms each followed workspace's first layout (WorkspaceShown).
-    [[nodiscard]] bool confirmsShownWorkspaces() const noexcept
-    {
-        return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::WorkspaceShown);
-    }
 
     /// What requireGrant() decided.
     enum class GrantCheck : uint8_t
@@ -712,28 +708,24 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     [[nodiscard]] bool batchesLayouts() const noexcept;
 
     /// The model changed in @p workspace. A client sharing Capability::LayoutBatch has the workspace marked,
-    /// and pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every followed
-    /// workspace's layout now, as a client of the release before it always was.
+    /// and pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every workspace's
+    /// layout now, as a client of the release before it always was.
     /// @param workspace The workspace the change is in.
     void layoutChanged(vtworkspace::WorkspaceId workspace);
 
-    /// Pushes the layout of each workspace changed since the batch opened (@see layoutChanged) that this
-    /// client follows, each once, as it is now; a workspace the batch removed is pushed with no tab to a
-    /// client that followed it, which closes its own workspace for it.
+    /// Pushes the layout of each workspace changed since the batch opened (@see layoutChanged), each once, as
+    /// it is now; a workspace the batch removed is pushed with no tab, which closes the client's own
+    /// workspace for it. Settles first the selection of a connection whose workspace the batch removed.
     /// @return Whether any LayoutState went out.
     bool flushChangedLayouts();
 
     /// Opens a layout batch if none is: spawns the endLayoutBatch() that ends it.
     void openLayoutBatch();
 
-    /// Brings the followed workspaces in line with the model before a layout push: closed workspaces leave
-    /// the set; this connection's own new workspaces, and — for the primary viewer — unclaimed ones, join it,
-    /// and each joining workspace's sessions are queued a snapshot.
-    void refreshFollowedWorkspaces();
-
-    /// @param session A hosted session.
-    /// @return Whether @p session sits in a workspace this connection follows; false for one in no workspace.
-    [[nodiscard]] bool followsSession(vtworkspace::SessionId session) const;
+    /// Selects another workspace when the selected one ended (left the model, or lost its last tab), before
+    /// a layout push: the one a launch would (@see defaultSelection), none when none is left. A connection
+    /// that selected none stays so.
+    void refreshSelection();
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
@@ -898,6 +890,34 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// Whether this connection is a viewer that mirrors program status (shares Capability::ProgramStatus).
     [[nodiscard]] bool mirrorsProgramStatus() const noexcept;
+
+    /// Whether this connection is told what changed in the panes it does not mirror (its client shares
+    /// Capability::DaemonFollow).
+    [[nodiscard]] bool summarizesPanes() const noexcept;
+    /// @param session A hosted session.
+    /// @return Whether a bell or notification of @p session reaches this connection in the pane's summary
+    ///         rather than as a SessionBell or SessionNotify: it summarizes panes and does not mirror this
+    ///         one.
+    [[nodiscard]] bool summarizesRaise(vtworkspace::SessionId session) const;
+
+    /// Queues the status of an unmirrored pane for the next flush.
+    /// @param session The pane's session.
+    /// @param note Adds what changed to the pane's pending summary.
+    template <std::invocable<proto::PaneSummary&> Note>
+    void queueSummary(vtworkspace::SessionId session, Note&& note);
+
+    /// Notes that an unmirrored @p session printed, at most once per FlushPolicy::activityMarkInterval.
+    void noteActivity(vtworkspace::SessionId session);
+
+    /// Sends the pending summaries, and forgets them.
+    void flushSummaries();
+
+    /// Queues each unmirrored pane's title and working directory now, and any program status it holds, for
+    /// the next flush: what a window starts a pane's row from, as it attaches or selects another workspace.
+    void announceUnmirroredPanes();
+
+    /// @return Whether @p session has program-status records to tell.
+    [[nodiscard]] bool holdsProgramStatus(vtworkspace::SessionId session) const;
 
     /// Sends @p session's whole program-status set, read under its terminal lock.
     /// @param session The session.
@@ -1076,7 +1096,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// What every session THIS connection creates is spawned with.
     ///
-    /// One spelling for all four creation paths (the attach-time first session, CreateTab, NewWorkspace,
+    /// One spelling for all four creation paths (the attach-time first session, CreateTab, SelectWorkspace 0,
     /// SplitPane), so a fifth cannot quietly forget the client's preference.
     /// @param verbProfile The profile the spawning verb names; empty for the connection's. Honoured only
     ///        with Capability::ProfileByName shared.
@@ -1192,8 +1212,15 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// The host profile this client's sessions run under, as its hello named it with
     /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
     std::string _profileName;
-    /// The workspaces this connection shows, by id: the attach plan's, and those gained since. @see follows
-    std::set<uint64_t> _followedWorkspaces;
+    /// The workspace this connection mirrors; 0 for none. @see selectedWorkspace
+    uint64_t _selectedWorkspace = 0;
+    /// Whether the selected workspace was seen holding a tab: only one that did can end by losing them.
+    enum class SelectedTabs : uint8_t
+    {
+        NeverHeld = 0, ///< It has held none since selected (an empty workspace made for a first tab).
+        Held,          ///< It held at least one.
+    };
+    SelectedTabs _selectedTabs = SelectedTabs::NeverHeld;
     /// Every session the host's model showed as this connection's last layout batch ended, in any workspace:
     /// a session of a followed workspace that is among them and is not mirrored to this client yet came in by
     /// a move (@see requestArrivedSnapshots), and one that is not was spawned since.
@@ -1205,6 +1232,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     std::unordered_set<uint64_t> _pendingSessions;
     /// Sessions whose program-status records changed since the last flush. @see sessionSignal
     std::unordered_set<uint64_t> _programStatusPending;
+    /// What changed in each unmirrored pane since the last flush, merged into one summary per pane.
+    std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
+    /// When each unmirrored pane last had its output marked, which paces the next mark.
+    std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _activityMarkedAt;
+    /// The role the daemon gave this window. @see raiseRoleChanged
+    proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet;
     /// Sessions whose echo state is to be read at the next flush, beside those with new output: one that took
     /// typed input, whose program may have turned echo back on without printing. @see pushInputEcho
     std::unordered_set<uint64_t> _inputEchoPending;
@@ -1233,9 +1266,17 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
+    /// Whether the attached client shares Capability::DaemonFollow: it selects one workspace, is told the
+    /// others' panes as summaries, and takes part in routing (followsDaemon()). Set as it attaches.
+    enum class DaemonFollowing : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+    DaemonFollowing _following = DaemonFollowing::No;
     /// Whether an endLayoutBatch() is live, which @ref run waits out before it lets `this` go.
     LayoutBatch _layoutBatch = LayoutBatch::Closed;
-    /// The serial of the MoveNode whose pushes the open layout batch carries, sent as its
+    /// The serial of the latest MoveNode or SelectWorkspace the open layout batch answers, sent as its
     /// LayoutBatchEnd::causeSerial; 0 when no request of this client caused it.
     uint64_t _layoutBatchCause = 0;
     /// The serial of the MoveNode being applied while its model events push; 0 outside that call.

@@ -111,10 +111,6 @@ namespace
     image.defaultColorPreference = vtbackend::ColorPreference::Dark;
     image.upgradeGeneration = 4;
     image.cellPixelSize = vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) };
-    image.releases = {
-        HandoverRelease { .workspace = 3, .release = vthost::proto::WorkspaceRelease::SwitchedAway },
-        HandoverRelease { .workspace = 5, .release = vthost::proto::WorkspaceRelease::Closed }
-    };
     return image;
 }
 
@@ -152,12 +148,6 @@ void requireSame(HandoverImage const& actual, HandoverImage const& expected)
     CHECK(actual.objects.labels.at(0).ref == expected.objects.labels.at(0).ref);
     CHECK(actual.defaultColorPreference == expected.defaultColorPreference);
     CHECK(actual.cellPixelSize == expected.cellPixelSize);
-    REQUIRE(actual.releases.size() == expected.releases.size());
-    for (auto const& [got, want]: std::views::zip(actual.releases, expected.releases))
-    {
-        CHECK(got.workspace == want.workspace);
-        CHECK(got.release == want.release);
-    }
     CHECK(actual.listeners.size() == 2);
     CHECK(actual.listeners.at(1).name == "native-tcp");
     CHECK(actual.listeners.at(1).handle == vtpty::CrossingHandle { 21 });
@@ -323,6 +313,38 @@ TEST_CASE("an unknown field is skipped and a missing one is defaulted", "[handov
     CHECK(decoded->lease.isNone());
     // An image from before the upgrade generation: its writer had completed none.
     CHECK(decoded->upgradeGeneration == 0);
+}
+
+TEST_CASE("a handover image carrying release records still restores", "[handover][golden]")
+{
+    // Field 14 held the follow model's release records, one list of framed records, one per workspace (field
+    // 1 the workspace, field 2 why: 0 Closed, 1 SwitchedAway). The model is gone; an image from the daemon
+    // that wrote them is still read, the records skipped, and everything else in it kept.
+    auto const record = [](uint64_t workspace, uint64_t why) {
+        auto fields = vtbackend::StateWriter::payload();
+        fields.varint(vtbackend::detail::fieldKey(1, vtbackend::detail::WireKind::Varint));
+        fields.varint(workspace);
+        fields.varint(vtbackend::detail::fieldKey(2, vtbackend::detail::WireKind::Varint));
+        fields.varint(why);
+        return std::move(fields).take();
+    };
+    auto payload = vtbackend::StateWriter::payload();
+    payload.varint(vtbackend::detail::fieldKey(1, vtbackend::detail::WireKind::Varint));
+    payload.varint(7);
+    payload.varint(vtbackend::detail::fieldKey(2, vtbackend::detail::WireKind::Framed));
+    payload.string("0.9.0");
+    auto releases = vtbackend::StateWriter::payload();
+    releases.bytes(record(3, 1));
+    releases.bytes(record(5, 0));
+    payload.varint(vtbackend::detail::fieldKey(14, vtbackend::detail::WireKind::Framed));
+    payload.bytes(std::move(releases).take());
+    payload.varint(vtbackend::detail::fieldKey(11, vtbackend::detail::WireKind::Varint));
+    payload.varint(4);
+    auto const decoded = decodeHandover(framed(std::move(payload).take(), HandoverFormatVersion));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->daemonInstance == 7);
+    CHECK(decoded->fromRelease == "0.9.0");
+    CHECK(decoded->upgradeGeneration == 4);
 }
 
 TEST_CASE("a field of the wrong kind is Malformed", "[handover]")

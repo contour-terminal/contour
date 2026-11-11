@@ -12,6 +12,7 @@ add_library(contour_config STATIC
     ChromeTokenGroups.hpp
     ChromeTokenRows.hpp
     HighlightPair.hpp
+    BellConfig.hpp
     Config.cpp Config.hpp
     ConfigFwd.hpp
     ConfigDocumentation.hpp

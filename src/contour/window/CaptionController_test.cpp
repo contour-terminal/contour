@@ -278,7 +278,7 @@ TEST_CASE("a closing controller detaches its window", "[contour][caption]")
     fixture.bindClientWindow();
     REQUIRE(fixture.record.attached.size() == 1);
 
-    fixture.app.manager().removeWindowController(fixture.window.id);
+    fixture.app.manager().removeWindowController(fixture.window.windowId);
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
     REQUIRE(fixture.record.detached.size() == 1);

@@ -238,6 +238,28 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     }
     void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
     void lastWindowReleased() override {}
+    /// Records what a new window was asked for.
+    [[nodiscard]] std::expected<void, std::string> openWindowLike(vtworkspace::WorkspaceId window,
+                                                                  std::optional<vtworkspace::TabId> activeTab,
+                                                                  QScreen* /*screen*/) override
+    {
+        openedLike.emplace_back(window, activeTab);
+        return {};
+    }
+
+    [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override { return role; }
+    [[nodiscard]] unsigned tabsWaitingElsewhere() const override { return waitingElsewhere; }
+    [[nodiscard]] std::optional<uint64_t> daemonKey() const override { return key; }
+
+    /// What raiseRole() reports: whether the daemon names the bound window the one that raises.
+    vthost::proto::RaiseRole role = vthost::proto::RaiseRole::Raise;
+    /// What tabsWaitingElsewhere() reports.
+    unsigned waitingElsewhere = 0;
+    /// What daemonKey() reports: bindings sharing one count their daemon once.
+    std::optional<uint64_t> key = std::nullopt;
+
+    /// Every openWindowLike() call: the window asked from, and the tab it was to activate.
+    std::vector<std::pair<vtworkspace::WorkspaceId, std::optional<vtworkspace::TabId>>> openedLike;
 
     /// Says the daemon the binding names runs on another machine, as a saved host's or a `--connect-tcp` one
     /// does.
@@ -389,13 +411,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     }
 
     /// Records the request; routes it to the host when remoteTabs says so.
-    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
-    {
-        requestedRemoteWorkspaces.push_back(spawn);
-        return remoteTabs == RemoteTabRouting::ToHost;
-    }
-
-    /// Records the request; routes it to the host when remoteTabs says so.
     [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* /*actingPty*/,
                                           bool /*vertical*/,
                                           contour::session::RemoteSpawn const& /*spawn*/) override
@@ -438,8 +453,7 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// How often requestRemoteSplitOrientation() was called.
     int requestedSplitOrientations = 0;
 
-    /// Whether requestRemoteTab(), requestRemoteSplit() and requestRemoteWorkspace() hand the request to the
-    /// host.
+    /// Whether requestRemoteTab() and requestRemoteSplit() hand the request to the host.
     enum class RemoteTabRouting : uint8_t
     {
         Local = 0, ///< No: the manager builds the tab or split itself.
@@ -448,8 +462,6 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     RemoteTabRouting remoteTabs = RemoteTabRouting::Local;
     /// Every requestRemoteTab() call, in order.
     std::vector<contour::session::RemoteSpawn> requestedRemoteTabs;
-    /// Every requestRemoteWorkspace() call, in order.
-    std::vector<contour::session::RemoteSpawn> requestedRemoteWorkspaces;
     /// How often requestRemoteSplit() was asked.
     int requestedRemoteSplits = 0;
     /// How often requestRemoteClose() was called.
@@ -695,11 +707,6 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
     void reportTabPresentation(contour::session::LocalTabPresentation const& presentation) override
     {
         _factory->reportTabPresentation(presentation);
-    }
-
-    [[nodiscard]] bool requestRemoteWorkspace(contour::session::RemoteSpawn const& spawn) override
-    {
-        return _factory->requestRemoteWorkspace(spawn);
     }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { _factory->requestRemoteClose(pty); }
@@ -999,16 +1006,23 @@ struct ScopedController
 {
     contour::session::TerminalSessionManager& manager;
     contour::window::WindowController* controller;
-    vtworkspace::WorkspaceId id;
+    vtworkspace::WorkspaceId id;        ///< The workspace the window displayed at first.
+    contour::window::WindowId windowId; ///< The window.
 
     explicit ScopedController(contour::session::TerminalSessionManager& m):
-        manager(m), controller(m.createWindowController()), id(controller->windowId())
+        manager(m),
+        controller(m.createWindowController()),
+        id(controller->displayedWorkspace()),
+        windowId(controller->windowId())
     {
     }
     /// A controller whose menus open as @p menuPresentation says, whatever the app's style says.
     ScopedController(contour::session::TerminalSessionManager& m,
                      contour::config::MenuPresentation menuPresentation):
-        manager(m), controller(m.createWindowController(menuPresentation)), id(controller->windowId())
+        manager(m),
+        controller(m.createWindowController(menuPresentation)),
+        id(controller->displayedWorkspace()),
+        windowId(controller->windowId())
     {
     }
     /// A controller whose notices are said through what @p noticeAnnouncer builds.
@@ -1016,12 +1030,13 @@ struct ScopedController
                      contour::window::NoticeAnnouncerFactory const& noticeAnnouncer):
         manager(m),
         controller(m.createWindowController(contour::config::MenuPresentation::InScene, noticeAnnouncer)),
-        id(controller->windowId())
+        id(controller->displayedWorkspace()),
+        windowId(controller->windowId())
     {
     }
     ~ScopedController()
     {
-        manager.removeWindowController(id); // no-op if the test already removed it
+        manager.removeWindowController(windowId); // no-op if the test already removed it
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     }
     ScopedController(ScopedController const&) = delete;
@@ -1089,7 +1104,7 @@ struct SessionTabs
     for ([[maybe_unused]] auto const _: std::views::iota(0, n))
     {
         controller.createNewTab();
-        auto const* tab = manager.model().workspace(controller.windowId())->activeTab();
+        auto const* tab = manager.model().workspace(controller.displayedWorkspace())->activeTab();
         REQUIRE(tab != nullptr);
         REQUIRE(controller.activeSession() != nullptr);
         result.tabs.push_back(tab->id());

@@ -2097,7 +2097,7 @@ TEST_CASE("display: focus in/out toggle the terminal's focus state on the live d
     // A Qt focus-in on a display routes through the manager, which is the single VT-focus authority:
     // it focuses this session AND records the display's window as the focus owner.
     CHECK(h.session->terminal().focused());
-    CHECK(manager.focusedWindow() == controller.windowId());
+    CHECK(manager.focusedWindow() == controller.displayedWorkspace());
 
     QFocusEvent focusOut(QEvent::FocusOut);
     QCoreApplication::sendEvent(h.display.get(), &focusOut);
@@ -2124,9 +2124,9 @@ TEST_CASE("display: revoking the window's focus ownership leaves its live sessio
     QCoreApplication::sendEvent(h.display.get(), &focusIn);
     h.pump();
     REQUIRE(h.session->terminal().focused());
-    REQUIRE(manager.focusedWindow() == controller.windowId());
+    REQUIRE(manager.focusedWindow() == controller.displayedWorkspace());
 
-    manager.clearFocusedWindow(controller.windowId());
+    manager.clearFocusedWindow(controller.displayedWorkspace());
     h.pump();
     CHECK_FALSE(manager.focusedWindow().has_value());
     CHECK_FALSE(h.session->terminal().focused());
@@ -2340,7 +2340,7 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
 
     // Register the harness session as the active tab's leaf: mint a model tab in the controller's window
     // and adopt its leaf's SessionId so activeModelTab()->findLeaf(session.modelSessionId()) resolves.
-    auto* tab = model.createTab(controller.windowId());
+    auto* tab = model.createTab(controller.displayedWorkspace());
     REQUIRE(tab != nullptr);
     REQUIRE(tab->rootPane() != nullptr);
     h.session->setModelSessionId(tab->rootPane()->session());

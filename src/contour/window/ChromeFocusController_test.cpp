@@ -64,7 +64,7 @@ struct ChromeFixture
     /// waits for the session's exit watcher, which headless sessions never start).
     void closeNow(vtworkspace::TabId tab) const
     {
-        app->manager().model().closeTab(controller().windowId(), tab);
+        app->manager().model().closeTab(controller().displayedWorkspace(), tab);
     }
 
     [[nodiscard]] ChromeArea area() const { return static_cast<ChromeArea>(controller().chromeFocusArea()); }
@@ -134,7 +134,7 @@ TEST_CASE("keys move, activate and reorder in the tab well", "[windowcontroller]
     CHECK(controller.activeTabIndex() == 1);
     // The tab that moved is the one the keyboard is still on, and the one it left behind took its row.
     CHECK(controller.focusedTab() == f.tabs.tabs[2]);
-    CHECK(f.app->manager().model().workspace(controller.windowId())->indexOf(f.tabs.tabs[1]) == 2);
+    CHECK(f.app->manager().model().workspace(controller.displayedWorkspace())->indexOf(f.tabs.tabs[1]) == 2);
 }
 
 TEST_CASE("the focus stays on its tab when another tab is reordered or closed",
@@ -241,7 +241,7 @@ TEST_CASE("a tab inserted before the focused one leaves the focus on its tab",
     REQUIRE_FALSE(announced.empty());
 
     CHECK(announced.front() == f.tabs.tabs[2]);
-    CHECK(f.app->manager().model().workspace(controller.windowId())->indexOf(f.tabs.tabs[2]) == 3);
+    CHECK(f.app->manager().model().workspace(controller.displayedWorkspace())->indexOf(f.tabs.tabs[2]) == 3);
     QObject::disconnect(connection);
 }
 
@@ -414,7 +414,7 @@ TEST_CASE("Backspace on a tab running a program asks first", "[windowcontroller]
 
     // Nothing closed, focus stays, and the question names the tab and the program.
     REQUIRE(asked.count() == 1);
-    auto const* tab = f.app->manager().model().workspace(controller.windowId())->tabAt(0);
+    auto const* tab = f.app->manager().model().workspace(controller.displayedWorkspace())->tabAt(0);
     REQUIRE(tab != nullptr);
     CHECK(asked.first().at(0).toULongLong() == tab->id().value);
     CHECK(asked.first().at(2).toString() == QStringLiteral("make"));
@@ -444,10 +444,10 @@ TEST_CASE("a confirmed close reaches the tab that was asked about, not the row i
     SECTION("a tab before it closes while the question is open")
     {
         auto& model = f.app->manager().model();
-        auto const* first = f.app->manager().model().workspace(controller.windowId())->tabAt(0);
+        auto const* first = f.app->manager().model().workspace(controller.displayedWorkspace())->tabAt(0);
         REQUIRE(first != nullptr);
         auto const firstId = first->id();
-        model.closeTab(controller.windowId(), firstId);
+        model.closeTab(controller.displayedWorkspace(), firstId);
         REQUIRE(controller.count() == 2);
 
         controller.confirmCloseTab(askedAbout);
@@ -464,7 +464,7 @@ TEST_CASE("a confirmed close reaches the tab that was asked about, not the row i
     SECTION("the tab asked about goes while the question is open")
     {
         auto& model = f.app->manager().model();
-        model.closeTab(controller.windowId(), vtworkspace::TabId { askedAbout });
+        model.closeTab(controller.displayedWorkspace(), vtworkspace::TabId { askedAbout });
         REQUIRE(controller.count() == 2);
         REQUIRE(withdrawn.count() == 1);
         CHECK(withdrawn.first().at(0).toULongLong() == askedAbout);

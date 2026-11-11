@@ -51,17 +51,16 @@ using SwitchPicker = std::function<std::expected<void, std::string>(SwitchPickRe
 
 /// Switches windows between daemons and workspaces (spec §Behaviour, Switch and Open).
 ///
-/// Resolve first: the target daemon's workspaces are listed and the target resolved to one of them
-/// (planSwitch()), or to the user's pick, a window to focus, or nothing to do. Detach last: a switch on the
-/// window's own daemon has the window's connection follow the new workspace, and one to another daemon
-/// connects a link of its own to it; only once that connection has the workspace's first layout is the old
-/// workspace released (proto::WorkspaceRelease::SwitchedAway) and the window rebound, which ends the old link
-/// when the window was its last. Anything failing before that leaves the window as it was, undoes a follow
-/// already sent, and is said in the window -- as does a target whose first layout does not arrive within the
-/// deadline (SwitchDeadline), which leaves the window free for the next switch. A switch that must land by a
-/// time (session::SwitchLandBy) is refused when that time passed before it followed or connected anything,
-/// and gives up at that time at the latest. GUI thread only; nothing it
-/// does waits.
+/// Resolve first: the target is resolved to one of the target daemon's workspaces (planSwitch()), or to the
+/// user's pick, a window to focus, or nothing to do -- against the directory the window's own connection
+/// holds for its own daemon, and against the listing of any other. Detach last: a switch on the window's own
+/// daemon has the window's connection select the new workspace, which the window then displays in place; one
+/// to another daemon connects a link of its own to it, and only once that connection shows the workspace is
+/// the window rebound, which ends the old link. Anything failing before that leaves the window as it was and
+/// is said in the window -- as does a target that does not show within the deadline (SwitchDeadline), which
+/// leaves the window free for the next switch. A switch that must land by a time (session::SwitchLandBy) is
+/// refused when that time passed before it selected or connected anything, and gives up at that time at the
+/// latest. GUI thread only; nothing it does waits.
 class WindowSwitcher final: public SwitchingService
 {
   public:
@@ -130,7 +129,10 @@ class WindowSwitcher final: public SwitchingService
                                                                     DaemonAddress const& address,
                                                                     DaemonLink& own,
                                                                     uint64_t daemonWorkspace);
-    void resolve(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces);
+    /// Decides on @p request against the target daemon's listing.
+    void resolveListed(Request request, std::vector<vtcontrol::WorkspaceInfo> const& workspaces);
+    /// Decides on @p request against the target daemon's workspaces, @p rows (planSwitch()).
+    void resolve(Request request, std::vector<WorkspaceRow> const& rows);
     /// Shows the workspace @p to names: over the window's own connection, or a link of its own.
     void land(Request request, SwitchTo const& to);
     /// Gives @p window's switch @p serial up once the deadline passed -- the switch's own, or its landing

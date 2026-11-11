@@ -29,9 +29,9 @@ TEST_CASE("resolveWorkspaceSpec takes what the control verbs take", "[cli][switc
     auto const listed = contour::cli::decodeWorkspaceList(
         R"({"workspaces":[)"
         R"({"id":"workspace:00000000-0000-0000-0000-0000018f3c2a","label":"ops","position":1,"native":"7",)"
-        R"("visibility":"left","clients":0,"tabs":[]},)"
+        R"("visibility":"hidden","clients":0,"tabs":[]},)"
         R"({"id":"workspace:00000000-0000-0000-0000-00000000beef","label":"","position":2,"native":"9",)"
-        R"("visibility":"left","clients":0,"tabs":[]}]})");
+        R"("visibility":"hidden","clients":0,"tabs":[]}]})");
     REQUIRE(listed.has_value());
     using contour::cli::resolveWorkspaceSpec;
     CHECK(resolveWorkspaceSpec("018f3c2a", *listed) == 7); // an id suffix

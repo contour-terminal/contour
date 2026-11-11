@@ -2,11 +2,12 @@
 #pragma once
 
 /// @file
-/// What each session has to tell its tab's badge: output its user has not seen, and how its last unseen
-/// command ended. Marked only while the session is off screen, cleared once it is seen. Qt-free and keyed
-/// by session, so a session's marks follow it from window to window, and the decisions are table-tested.
+/// What each pane has to tell its tab's badge: output its user has not seen, and how its last unseen
+/// command ended. Marked only while the pane is off screen, cleared once it is seen. Qt-free; every window
+/// keeps one ledger of its own, keyed by PaneKey, and the decisions are table-tested.
 
 #include <contour/platform/SessionVisibility.hpp>
+#include <contour/window/PaneKey.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <vtbackend/shell/CommandBlock.hpp>
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <tuple>
 #include <unordered_map>
 
 #include <vthost/client/ConnectionState.hpp>
@@ -86,7 +88,9 @@ inline constexpr auto ResyncGracePeriod = std::chrono::milliseconds { 500 };
     return std::nullopt;
 }
 
-/// The marks of every session, by id. Not thread-safe: the GUI thread's alone.
+/// The marks of every pane one window shows, by PaneKey. Each window keeps its own, so the same daemon
+/// session shown in two windows is seen in one and still unseen in the other. Not thread-safe: the GUI
+/// thread's alone.
 ///
 /// Output is every frame the session's terminal reports, whatever its bytes said: an OSC 7501 status
 /// report is a write like any other, so a background program that only reports its status marks unseen
@@ -105,7 +109,7 @@ class TabAttention
     /// @param visibility Where it is; only a Hidden session is marked.
     /// @param origin     Where the output came from; only Live output is news.
     /// @return Changed when the session was not marked before.
-    [[nodiscard]] AttentionChange noteOutput(vtworkspace::SessionId session,
+    [[nodiscard]] AttentionChange noteOutput(PaneKey session,
                                              platform::SessionVisibility visibility,
                                              OutputOrigin origin)
     {
@@ -121,7 +125,7 @@ class TabAttention
     /// @param visibility Where it is; only a Hidden session is marked.
     /// @param ending     How the command ended.
     /// @return Changed when the stronger of the held and the new verdict differs from the held one.
-    [[nodiscard]] AttentionChange noteFinished(vtworkspace::SessionId session,
+    [[nodiscard]] AttentionChange noteFinished(PaneKey session,
                                                platform::SessionVisibility visibility,
                                                vtbackend::CommandEnding ending)
     {
@@ -137,7 +141,7 @@ class TabAttention
     /// @param visibility Where it is; only a Hidden session is marked.
     /// @param origin     Where the BEL came from; only Live output is news (a replay never badges).
     /// @return Changed when the session was not marked before.
-    [[nodiscard]] AttentionChange noteBell(vtworkspace::SessionId session,
+    [[nodiscard]] AttentionChange noteBell(PaneKey session,
                                            platform::SessionVisibility visibility,
                                            OutputOrigin origin)
     {
@@ -154,7 +158,7 @@ class TabAttention
     /// @param session The session now on screen.
     /// @param statusGeneration The newest generation among the session's program-status records.
     /// @return Changed when it held a mark or the seen generation grew.
-    [[nodiscard]] AttentionChange noteSeen(vtworkspace::SessionId session, uint64_t statusGeneration)
+    [[nodiscard]] AttentionChange noteSeen(PaneKey session, uint64_t statusGeneration)
     {
         auto const held = of(session);
         auto const next = SessionAttention { .seenStatusGeneration =
@@ -164,11 +168,16 @@ class TabAttention
 
     /// Drops @p session's marks: it is gone.
     /// @param session The closed session.
-    void forget(vtworkspace::SessionId session) { _marks.erase(session.value); }
+    void forget(PaneKey session) { _marks.erase(session.value); }
+
+    /// Holds @p marks as @p session's, as a pane moved here from another window's ledger brings them.
+    /// @param session The pane that arrived.
+    /// @param marks   What the ledger it left held for it.
+    void adopt(PaneKey session, SessionAttention marks) { std::ignore = store(session, marks); }
 
     /// @param session The session asked about.
     /// @return Its marks; none for a session never marked.
-    [[nodiscard]] SessionAttention of(vtworkspace::SessionId session) const
+    [[nodiscard]] SessionAttention of(PaneKey session) const
     {
         auto const found = _marks.find(session.value);
         return found != _marks.end() ? found->second : SessionAttention {};
@@ -176,7 +185,7 @@ class TabAttention
 
   private:
     /// Holds @p next as @p session's marks; an unmarked session holds no entry.
-    [[nodiscard]] AttentionChange store(vtworkspace::SessionId session, SessionAttention next)
+    [[nodiscard]] AttentionChange store(PaneKey session, SessionAttention next)
     {
         if (next == of(session))
             return AttentionChange::Unchanged;
@@ -192,17 +201,21 @@ class TabAttention
 
 /// What a tab's panes have to tell it, pooled.
 /// @param tab    The tab.
-/// @param ledger Every session's marks.
+/// @param ledger The marks of the window showing it.
+/// @param keyOf  Resolves a leaf's session to the PaneKey the ledger holds it under.
 /// @return Unseen output when any leaf has some, the strongest finished verdict of any leaf, and a bell when
 ///         any leaf rang.
-[[nodiscard]] inline SessionAttention pooledAttention(vtworkspace::Tab const& tab, TabAttention const& ledger)
+template <typename KeyOf>
+[[nodiscard]] SessionAttention pooledAttention(vtworkspace::Tab const& tab,
+                                               TabAttention const& ledger,
+                                               KeyOf const& keyOf)
 {
     auto pooled = SessionAttention {};
     if (auto* root = tab.rootPane())
         root->walkTree([&](vtworkspace::Pane& pane) {
             if (!pane.isLeaf())
                 return;
-            auto const own = ledger.of(pane.session());
+            auto const own = ledger.of(keyOf(pane.session()));
             if (own.activity == TabActivity::UnseenOutput)
                 pooled.activity = TabActivity::UnseenOutput;
             pooled.finished = strongerFinishedBlock(pooled.finished, own.finished);

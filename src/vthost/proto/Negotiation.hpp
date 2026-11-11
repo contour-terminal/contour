@@ -43,7 +43,7 @@ enum class Capability : uint8_t
     /// gate on it. A daemon applies a present client area regardless; a client sends it regardless. Do not
     /// make either end require it -- that breaks every peer from before it.
     InitialClientArea = 3,
-    AttachIntent = 4,  ///< The peer honours the ClientHello's attach intent (which workspaces to follow).
+    AttachIntent = 4,  ///< The peer honours the ClientHello's attach intent (which workspace to select).
     ProfileByName = 5, ///< The peer resolves the profile name a hello or spawning verb carries.
     TabEdits = 6,      ///< The peer serves EditTab.
     Heartbeat = 7,     ///< The peer echoes Heartbeat.
@@ -103,16 +103,11 @@ enum class Capability : uint8_t
     /// and the soft-glyph cells beside each Delta's rows (`softGlyphCells`). Without it a client shows the
     /// cells' real characters, which the rows carry either way.
     SoftFonts = 22,
-    /// The peer follows and releases workspaces at runtime (FollowWorkspace, ReleaseWorkspace), so one
-    /// connection can move a window from one workspace to another without reconnecting.
-    WorkspaceFollow = 23,
+    // 23 was WorkspaceFollow: retired, never reused.
     /// The peer serves a daemon-initiated switch of the window showing a workspace (SwitchRequest,
     /// SwitchReply).
     WorkspaceSwitch = 24,
-    /// The peer confirms each followed workspace's first layout (WorkspaceShown). A daemon sharing it treats
-    /// a follow as provisional until then, and gives the workspace back its hidden or left record when the
-    /// connection ends first; without it a follow counts as shown once its layout is sent.
-    WorkspaceShown = 25,
+    // 25 was WorkspaceShown: retired, never reused.
     /// The peer carries each program-status record's origin, `since` instant and generation (the trailing
     /// timing block of ProgramStatus). Without it a record travels as before and reads as the program's own,
     /// with no instant and no generation.
@@ -121,6 +116,10 @@ enum class Capability : uint8_t
     /// user's keys and paste, and the daemon lets only those answer an integration that waits on the user.
     /// Without it every Input reads as Other, which answers nothing.
     InputKinds = 27,
+    /// The peer serves a connection that selects one workspace of the daemon (SelectWorkspace) and is sent
+    /// every other workspace's panes as status only (PaneSummary), reports its focus (ReportFocus) and is
+    /// told its raise role (NotifyRole).
+    DaemonFollow = 28,
 };
 
 /// One row of the table naming a Capability.
@@ -154,11 +153,10 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::CellPixelSize, .name = "cell-pixel-size" },
     CapabilityRow { .capability = Capability::ClipboardTargets, .name = "clipboard-targets" },
     CapabilityRow { .capability = Capability::SoftFonts, .name = "soft-fonts" },
-    CapabilityRow { .capability = Capability::WorkspaceFollow, .name = "workspace-follow" },
     CapabilityRow { .capability = Capability::WorkspaceSwitch, .name = "workspace-switch" },
-    CapabilityRow { .capability = Capability::WorkspaceShown, .name = "workspace-shown" },
     CapabilityRow { .capability = Capability::ProgramStatusTiming, .name = "program-status-timing" },
     CapabilityRow { .capability = Capability::InputKinds, .name = "input-kinds" },
+    CapabilityRow { .capability = Capability::DaemonFollow, .name = "daemon-follow" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

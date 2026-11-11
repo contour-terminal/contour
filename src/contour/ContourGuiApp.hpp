@@ -731,10 +731,8 @@ class ContourGuiApp:
     [[nodiscard]] remote::UpgradeStart upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
     void linkEnded() override;
-    void startHandOverLink(remote::DaemonLinkConfig config) override;
-    void handOverSettled(remote::HandOver handOver,
-                         remote::HandOverOutcome outcome,
-                         std::string const& reason) override;
+    void startWindowLink(remote::DaemonLinkConfig config) override;
+    [[nodiscard]] remote::ElsewhereNotices elsewhereNotices() override;
     [[nodiscard]] remote::SwitchGrants& switchGrants() override { return _switchGrants; }
     [[nodiscard]] remote::SwitchDeadline const& switchDeadline() override { return _switchDeadline; }
 
@@ -1586,6 +1584,9 @@ class ContourGuiApp:
     std::unique_ptr<display::FirstFrameWatchdog> _firstFrameWatchdog;
     /// Raises the "could not render" notification; created on first use.
     std::unique_ptr<platform::Notifier> _gpuNotifier;
+    /// Raises the notifications and finish notices of the panes of daemon workspaces a window does not select
+    /// (@see elsewhereNotices()); made with the first.
+    std::unique_ptr<platform::Notifier> _elsewhereNotifier;
 
     int _argc = 0;
     char const** _argv = nullptr;

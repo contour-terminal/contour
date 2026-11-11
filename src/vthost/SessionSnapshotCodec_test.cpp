@@ -238,17 +238,24 @@ TEST_CASE("a workspace round-trips through the codec", "[vthost][snapshot]")
     CHECK(pane.history->commandBlocks[0].exitCode == 2);
 }
 
-TEST_CASE("a workspace's visibility round-trips, and a snapshot without one reads Left",
+TEST_CASE("a workspace's trailing visibility byte, written by an older daemon, is skipped",
           "[vthost][snapshot][visibility]")
 {
-    auto original = sampleWorkspace();
-    original.workspaces.at(1).visibility = WorkspaceVisibility::Hidden;
-    original.workspaces.at(0).visibility = WorkspaceVisibility::Shown;
-    auto const decoded = decodeSnapshot(encodeSnapshot(original));
+    // The daemon no longer records what its clients showed: a snapshot written before carries one byte
+    // after the tabs, and what follows the tabs of a workspace's record is never read.
+    auto workspace = proto::Writer {};
+    workspace.u8(0); // identity
+    workspace.varint(2);
+    workspace.varint(0);
+    workspace.u8(1); // the retired visibility byte (Hidden)
+    auto body = proto::Writer {};
+    body.svarint(5);
+    body.varint(1);
+    body.blob(workspace.view());
+    auto const decoded = decodeSnapshot(fileAround(body.view()));
     REQUIRE(decoded);
-    CHECK(decoded->snapshot.workspaces.at(1).visibility == WorkspaceVisibility::Hidden);
-    CHECK(decoded->snapshot.workspaces.at(0).visibility == WorkspaceVisibility::Shown);
-    CHECK(decoded->snapshot == original);
+    CHECK(decoded->snapshot.workspaces.at(0).activeTab == 2);
+    CHECK(decoded->snapshot.workspaces.at(0).tabs.empty());
 }
 
 TEST_CASE("a learned cell size round-trips, and a file without one decodes to none", "[vthost][snapshot]")

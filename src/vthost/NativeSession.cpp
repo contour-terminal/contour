@@ -398,9 +398,12 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
 
 void NativeSession::sessionScreenUpdated(SessionId session)
 {
-    if (_phase != ConnectionPhase::Viewing || _closed || !followsSession(session))
+    if (_phase != ConnectionPhase::Viewing || _closed)
         return;
-    queueIncrement(session);
+    if (mirrorsSession(session))
+        queueIncrement(session);
+    else
+        noteActivity(session);
 }
 
 void NativeSession::queueIncrement(SessionId session)
@@ -455,6 +458,8 @@ void NativeSession::forgetSession(SessionId session)
     std::erase(_snapshotQueue, session.value);
     _recordsAwaitingRoom.erase(session.value);
     _programStatusPending.erase(session.value);
+    _pendingSummaries.erase(session.value);
+    _activityMarkedAt.erase(session.value);
     _inputEchoPending.erase(session.value);
     _inputEchoSent.erase(session.value);
     _softFontsSent.erase(session.value);
@@ -468,16 +473,24 @@ void NativeSession::sessionResized(SessionId session)
     // pane of every workspace, so this arrives once PER PANE within a single callback. Pushing each
     // one inline is the same burst the attach walk used to be, with the same outcome.
     if (_phase != ConnectionPhase::Viewing || _closed || !_followed.contains(session.value)
-        || !followsSession(session))
+        || !mirrorsSession(session))
         return;
     requestSnapshot(session);
 }
 
+bool NativeSession::summarizesRaise(SessionId session) const
+{
+    return _phase == ConnectionPhase::Viewing && !_closed && summarizesPanes() && !mirrorsSession(session);
+}
+
 void NativeSession::sessionBell(SessionId session)
 {
-    if (!followsSession(session))
-        return;
-    emitSessionEvent(proto::SessionBell { .session = session.value });
+    // Every window is told, whichever workspace it shows: one mirroring the pane by the pane's own event, any
+    // other by its summary. The pane's marks and the raise role say what each does with the bell.
+    if (summarizesRaise(session))
+        queueSummary(session, [](proto::PaneSummary& summary) { summary.bell = proto::PaneBell::Rang; });
+    else
+        emitSessionEvent(proto::SessionBell { .session = session.value });
 }
 
 void NativeSession::sessionNotify(SessionId session,
@@ -485,17 +498,27 @@ void NativeSession::sessionNotify(SessionId session,
                                   std::string const& body,
                                   std::optional<vtbackend::DisplayOccasion> occasion)
 {
-    if (!followsSession(session))
-        return;
-    emitSessionEvent(proto::SessionNotify {
-        .session = session.value, .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
+    // As a bell is: summarized for a window that does not mirror the pane, each notification kept.
+    if (summarizesRaise(session))
+        queueSummary(session, [&](proto::PaneSummary& summary) {
+            summary.notifications.push_back(proto::PaneNotification {
+                .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
+        });
+    else
+        emitSessionEvent(proto::SessionNotify {
+            .session = session.value, .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
 }
 
 void NativeSession::sessionCopyToClipboard(SessionId session,
                                            std::string const& data,
                                            vtbackend::ClipboardTargets targets)
 {
-    if (!followsSession(session) || !_negotiated)
+    // One window lands a write: the one focused last among those showing the pane's workspace. A client that
+    // does not follow the daemon takes no part in that choice, and lands the writes of the panes it mirrors.
+    if (!_negotiated)
+        return;
+    if (summarizesPanes() ? _host.clipboardTargetOf(session) != std::optional { _id }
+                          : !mirrorsSession(session))
         return;
     auto const forwarded = forwardedClipboardTargets(targets, _negotiated->shared);
     if (!forwarded)
@@ -520,14 +543,139 @@ std::optional<vtbackend::ClipboardTargets> forwardedClipboardTargets(vtbackend::
 
 void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal)
 {
-    if (!std::holds_alternative<ProgramStatusChangedSignal>(signal) || _phase != ConnectionPhase::Viewing
-        || _closed || !mirrorsProgramStatus() || !followsSession(session))
+    if (_phase != ConnectionPhase::Viewing || _closed)
         return;
-    // Debounced like an increment: a loop reporting progress sends one set per coalescing window, not one
-    // per report, and the set is read when it goes, so it is the newest.
-    _programStatusPending.insert(session.value);
+    if (std::holds_alternative<ProgramStatusChangedSignal>(signal))
+    {
+        if (!mirrorsProgramStatus())
+            return;
+        // Debounced like an increment: a loop reporting progress sends one set per coalescing window, not
+        // one per report, and the set is read when it goes, so it is the newest.
+        _programStatusPending.insert(session.value);
+        auto const now = _loop.clock().now();
+        scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, now));
+        return;
+    }
+    // What a pane of another workspace did is summarized; a mirrored pane says it in its own stream.
+    if (!summarizesPanes() || mirrorsSession(session))
+        return;
+    if (auto const* title = std::get_if<TitleChangedSignal>(&signal))
+        queueSummary(session, [title](proto::PaneSummary& summary) { summary.title = title->title; });
+    else if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
+        queueSummary(session, [this, session](proto::PaneSummary& summary) {
+            if (auto const directory = _host.workingDirectoryOf(session))
+                summary.cwd = directory->string();
+        });
+    else if (auto const* finished = std::get_if<CommandBlockFinishedSignal>(&signal))
+        queueSummary(session, [finished](proto::PaneSummary& summary) {
+            auto const& block = finished->summary;
+            summary.finished = proto::FinishedCommand {
+                .exitCode = block.exitCode,
+                .durationMs = block.duration
+                                  ? std::optional { static_cast<uint64_t>(
+                                        std::chrono::duration_cast<std::chrono::milliseconds>(*block.duration)
+                                            .count()) }
+                                  : std::nullopt,
+                .commandLine = block.commandLine.display(),
+            };
+        });
+}
+
+void NativeSession::raiseRoleChanged(proto::RaiseRole role)
+{
+    _raiseRole = role;
+    // Before the hello the role waits for it, which states the role once the connection can be told.
+    if (_phase != ConnectionPhase::Viewing || _closed || !summarizesPanes())
+        return;
+    // What was summarized under the old role goes first: the client judges each raise by the role it arrived
+    // under, so a summary sent behind the change would be raised by the new holder and by none or two
+    // windows. Without the send-room check the coalesced flush makes: what is pending is a few small
+    // summaries, at most one per pane, which the role must not overtake whatever the room.
+    flushSummaries();
+    send(0, proto::DecodedPdu { proto::NotifyRole { .role = role } });
+}
+
+bool NativeSession::summarizesPanes() const noexcept
+{
+    return _following == DaemonFollowing::Yes;
+}
+
+template <std::invocable<proto::PaneSummary&> Note>
+void NativeSession::queueSummary(SessionId session, Note&& note)
+{
+    auto& summary =
+        _pendingSummaries.try_emplace(session.value, proto::PaneSummary { .session = session.value })
+            .first->second;
+    std::forward<Note>(note)(summary);
+    scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, _loop.clock().now()));
+}
+
+void NativeSession::noteActivity(SessionId session)
+{
+    if (!summarizesPanes())
+        return;
     auto const now = _loop.clock().now();
-    scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, now));
+    auto const [marked, first] = _activityMarkedAt.try_emplace(session.value, now);
+    if (!first)
+    {
+        if (now - marked->second < _services.flush.activityMarkInterval)
+            return;
+        marked->second = now;
+    }
+    queueSummary(session,
+                 [](proto::PaneSummary& summary) { summary.activity = proto::OutputActivity::Output; });
+}
+
+void NativeSession::flushSummaries()
+{
+    for (auto& [session, summary]: std::exchange(_pendingSummaries, {}))
+    {
+        if (!mirrorsSession(SessionId { session }))
+        {
+            send(0, proto::DecodedPdu { std::move(summary) });
+            continue;
+        }
+        // Mirrored since: the pane's own stream says what it is now, but what it raised while it was not
+        // mirrored was told to this connection nowhere else.
+        auto raised = proto::PaneSummary { .session = session,
+                                           .finished = std::move(summary.finished),
+                                           .bell = summary.bell,
+                                           .notifications = std::move(summary.notifications) };
+        if (proto::carriesRaise(raised))
+            send(0, proto::DecodedPdu { std::move(raised) });
+    }
+}
+
+void NativeSession::announceUnmirroredPanes()
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !summarizesPanes())
+        return;
+    for (auto const session: _host.sessionIds())
+    {
+        if (mirrorsSession(session))
+            continue;
+        // Merge into a pending entry: it may already carry a finished command or an activity mark that
+        // this announcement must not drop.
+        auto& summary =
+            _pendingSummaries.try_emplace(session.value, proto::PaneSummary { .session = session.value })
+                .first->second;
+        if (auto const* terminal = _host.terminal(session))
+            summary.title = terminal->resolvedWindowTitle();
+        if (auto const directory = _host.workingDirectoryOf(session))
+            summary.cwd = directory->string();
+        if (mirrorsProgramStatus() && holdsProgramStatus(session))
+            _programStatusPending.insert(session.value);
+    }
+    scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, _loop.clock().now()));
+}
+
+bool NativeSession::holdsProgramStatus(SessionId session) const
+{
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+        return false;
+    auto const guard = std::lock_guard { std::as_const(*terminal) };
+    return !terminal->programStatus().records().empty();
 }
 
 bool NativeSession::mirrorsProgramStatus() const noexcept
@@ -637,7 +785,7 @@ void NativeSession::sessionPermissionRequested(SessionId session, proto::Permiss
 {
     // A question is asked in its pane: one in a workspace this client does not show waits for a client that
     // does.
-    if (!asks(request) || _closed || !followsSession(session))
+    if (!asks(request) || _closed || !mirrorsSession(session))
         return;
     send(0, proto::DecodedPdu { request });
 }
@@ -654,16 +802,16 @@ void NativeSession::pushLayout()
 {
     if (_phase != ConnectionPhase::Viewing || _closed)
         return;
-    refreshFollowedWorkspaces();
-    forgetUnfollowedSessions();
-    // One LayoutState per followed daemon workspace (B4) — the client opens a GUI window for
-    // each and reconciles its tabs/splits independently.
+    refreshSelection();
+    forgetUnmirroredSessions();
+    // One LayoutState per daemon workspace, the selected one and every other: the client lists them all and
+    // opens the one it selected, and the sessions of the rest stay unmirrored.
     auto& model = _host.model();
     auto pushed = false;
     for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto* workspace = model.workspaceAt(i); workspace != nullptr && follows(workspace->id()))
+        if (auto* workspace = model.workspaceAt(i); workspace != nullptr)
         {
-            sendFollowedLayout(*workspace);
+            sendWorkspaceLayout(*workspace);
             pushed = true;
         }
     noteModelSessions();
@@ -674,16 +822,12 @@ void NativeSession::pushLayout()
     }
 }
 
-void NativeSession::sendFollowedLayout(vtworkspace::Workspace& workspace)
+void NativeSession::sendWorkspaceLayout(vtworkspace::Workspace& workspace)
 {
     // Asked before the layout goes out, and streamed after it: the client has the pane by then.
-    requestArrivedSnapshots(workspace);
+    if (workspace.id().value == _selectedWorkspace)
+        requestArrivedSnapshots(workspace);
     sendLayout(serializeLayout(workspace));
-    // A client that confirms what it was shown does so itself (WorkspaceShown); for any other the follow is
-    // confirmed once its layout is on its way. A drop from then on is the window going away, not a switch
-    // failing to land.
-    if (!_closed && !confirmsShownWorkspaces())
-        _host.noteWorkspaceShown(workspace.id());
 }
 
 void NativeSession::sendLayout(proto::LayoutState layout)
@@ -707,12 +851,11 @@ void NativeSession::layoutChanged(vtworkspace::WorkspaceId workspace)
     }
     if (_phase != ConnectionPhase::Viewing || _closed)
         return;
-    // Whether this client follows the workspace is decided as the batch ends: a workspace it joins meanwhile
-    // (its own NewWorkspace) is pushed as well.
+    // Every workspace changed is pushed as the batch ends, whichever one this client selects.
     if (workspace != vtworkspace::WorkspaceId {})
         _changedWorkspaces.insert(workspace.value);
-    // A change the move being served made is part of what that move's batch completes, followed or not: the
-    // client that asked is told its move landed even when it shows none of what moved.
+    // A change the move being served made is part of what that move's batch completes: the client that asked
+    // is told its move landed even when it mirrors none of what moved.
     if (_servingMove != 0)
         _layoutBatchCause = _servingMove;
     openLayoutBatch();
@@ -728,20 +871,19 @@ bool NativeSession::flushChangedLayouts()
 {
     auto& model = _host.model();
     auto const changed = std::exchange(_changedWorkspaces, {});
-    // Asked before the followed set drops them: a workspace the batch emptied, which the host then removed.
-    auto const removed =
-        std::ranges::to<std::vector>(changed | std::views::filter([&](uint64_t workspace) {
-                                         auto const id = vtworkspace::WorkspaceId { workspace };
-                                         return model.workspace(id) == nullptr && follows(id);
-                                     }));
-    refreshFollowedWorkspaces();
-    forgetUnfollowedSessions();
+    // Asked before the selection moves on: a workspace the batch emptied, which the host then removed.
+    auto const removed = std::ranges::to<std::vector>(
+        changed | std::views::filter([&](uint64_t workspace) {
+            return model.workspace(vtworkspace::WorkspaceId { workspace }) == nullptr;
+        }));
+    refreshSelection();
+    forgetUnmirroredSessions();
     auto pushed = false;
     for (auto const i: std::views::iota(0, model.workspaceCount()))
         if (auto* workspace = model.workspaceAt(i);
-            workspace != nullptr && changed.contains(workspace->id().value) && follows(workspace->id()))
+            workspace != nullptr && changed.contains(workspace->id().value))
         {
-            sendFollowedLayout(*workspace);
+            sendWorkspaceLayout(*workspace);
             pushed = true;
         }
     for (auto const workspace: removed)
@@ -766,41 +908,52 @@ core::async::Task<void> NativeSession::endLayoutBatch(SpawnedFlowClaim claim)
         if (flushChangedLayouts())
             _layoutBatch = LayoutBatch::Pushed;
         if (_layoutBatch == LayoutBatch::Pushed || _layoutBatchCause != 0)
-            send(0, proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = _layoutBatchCause } });
+            // The batch states the connection's selection, which a workspace it ended may have moved.
+            send(0,
+                 proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = _layoutBatchCause,
+                                                             .selected = _selectedWorkspace } });
     }
     _changedWorkspaces.clear();
     _layoutBatchCause = 0;
     co_return;
 }
 
-void NativeSession::refreshFollowedWorkspaces()
+void NativeSession::refreshSelection()
 {
+    if (_selectedWorkspace == 0)
+        return;
     auto& model = _host.model();
-    std::erase_if(_followedWorkspaces, [&model](uint64_t workspace) {
-        return model.workspace(vtworkspace::WorkspaceId { workspace }) == nullptr;
-    });
-    for (auto const i: std::views::iota(0, model.workspaceCount()))
+    auto const* selected = model.workspace(vtworkspace::WorkspaceId { _selectedWorkspace });
+    // A workspace ends by leaving the model, or by losing its last tab. One that never held a tab (the
+    // empty one SelectWorkspace 0 creates before its first) has not ended.
+    if (selected != nullptr && selected->tabCount() > 0)
     {
-        auto* workspace = model.workspaceAt(i);
-        // An empty workspace is nothing to show yet; it is taken up once it holds a tab.
-        if (workspace == nullptr || workspace->tabCount() == 0 || follows(workspace->id()))
-            continue;
-        // Index override 6: a workspace no client claims — one a control connection made — appears in the
-        // GUI whose launch took every workspace, rather than in none. Not one a client let go of: a window
-        // closed leaves it for the next launch, one switched away from keeps it hidden. Nor one another
-        // window shows: a follow clears the release, and a workspace another client switched to is shown
-        // there.
-        auto const claim = _host.workspaceClaim(workspace->id(), this);
-        auto const unclaimedHere = claim == WorkspaceClaim::Unclaimed && _host.isPrimaryViewer(this)
-                                   && !_host.lastRelease(workspace->id()).has_value()
-                                   && !_host.followedByAttachedClient(workspace->id());
-        auto const joins = claim == WorkspaceClaim::Yours || unclaimedHere;
-        if (!joins)
-            continue;
-        _followedWorkspaces.insert(workspace->id().value);
-        _host.noteWorkspaceFollowed(workspace->id(), this);
-        requestWorkspaceSnapshots(*workspace);
+        _selectedTabs = SelectedTabs::Held;
+        return;
     }
+    if (selected != nullptr && _selectedTabs == SelectedTabs::NeverHeld)
+        return;
+    // The connection moves on to the one a launch would take; with none left it selects none, which
+    // its window takes as the end of what it showed.
+    auto const ids = std::ranges::to<std::vector>(
+        std::views::iota(0, model.workspaceCount())
+        | std::views::transform([&model](int index) { return model.workspaceAt(index); })
+        | std::views::filter([](vtworkspace::Workspace const* workspace) {
+              return workspace != nullptr && workspace->tabCount() > 0;
+          })
+        | std::views::transform(
+            [](vtworkspace::Workspace const* workspace) { return workspace->id().value; }));
+    auto const next = defaultSelection(ids, _host.lastSelectedWorkspace());
+    connectionLog()("{}: workspace {} ended; selecting {}", _id, _selectedWorkspace, next.value_or(0));
+    if (!next)
+    {
+        _selectedWorkspace = 0;
+        _selectedTabs = SelectedTabs::NeverHeld;
+        forgetUnmirroredSessions();
+        announceUnmirroredPanes();
+        return;
+    }
+    selectWorkspace(vtworkspace::WorkspaceId { *next });
 }
 
 void NativeSession::requestWorkspaceSnapshots(vtworkspace::Workspace& workspace)
@@ -827,41 +980,38 @@ void NativeSession::noteModelSessions()
                 _sessionsAtLastLayout.insert(session.value);
 }
 
-void NativeSession::forgetUnfollowedSessions()
+void NativeSession::forgetUnmirroredSessions()
 {
     auto const gone = std::ranges::to<std::vector>(
         _followed | std::views::keys
-        | std::views::filter([this](uint64_t session) { return !followsSession(SessionId { session }); }));
+        | std::views::filter([this](uint64_t session) { return !mirrorsSession(SessionId { session }); }));
     for (auto const session: gone)
         forgetSession(SessionId { session });
 }
 
-void NativeSession::followWorkspace(vtworkspace::WorkspaceId workspace)
+void NativeSession::selectWorkspace(vtworkspace::WorkspaceId workspace)
 {
     auto* found = _host.model().workspace(workspace);
     if (found == nullptr)
     {
-        errorLog()("{}: not following workspace {}: there is none", _id, workspace.value);
+        errorLog()("{}: not selecting workspace {}: there is none", _id, workspace.value);
         return;
     }
-    if (!_followedWorkspaces.insert(workspace.value).second)
+    _host.noteSelected(*this, workspace.value);
+    if (_selectedWorkspace == workspace.value)
         return;
-    _host.noteWorkspaceFollowed(workspace, this);
+    _selectedWorkspace = workspace.value;
+    _selectedTabs = found->tabCount() > 0 ? SelectedTabs::Held : SelectedTabs::NeverHeld;
+    // What the old workspace's sessions were sent is not what the new selection continues from.
+    forgetUnmirroredSessions();
+    announceUnmirroredPanes();
     requestWorkspaceSnapshots(*found);
-    layoutChanged(workspace);
 }
 
-void NativeSession::releaseWorkspace(vtworkspace::WorkspaceId workspace, proto::WorkspaceRelease reason)
-{
-    if (_followedWorkspaces.erase(workspace.value) == 0)
-        return;
-    _host.noteWorkspaceReleased(workspace, reason);
-}
-
-bool NativeSession::followsSession(SessionId session) const
+bool NativeSession::mirrorsSession(SessionId session) const
 {
     auto const [workspace, tab, leaf] = _host.model().findSessionLeaf(session);
-    return workspace != nullptr && follows(workspace->id());
+    return workspace != nullptr && workspace->id().value == _selectedWorkspace;
 }
 
 core::async::Task<void> NativeSession::flushAt(SpawnedFlowClaim claim,
@@ -904,10 +1054,12 @@ core::async::Task<void> NativeSession::flushAt(SpawnedFlowClaim claim,
     if (hasSendRoom())
         for (auto const session: std::exchange(_programStatusPending, {}))
             pushProgramStatus(SessionId { session }, ProgramStatusPush::Always);
+    if (hasSendRoom())
+        flushSummaries();
     // Something was held back and nothing else will re-arm the flush: a session whose output
     // has stopped raises no further screen update, so without this its last increment would wait
     // for one that never comes.
-    if (!_pendingSessions.empty() || !_programStatusPending.empty())
+    if (!_pendingSessions.empty() || !_programStatusPending.empty() || !_pendingSummaries.empty())
         scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
 }
 
@@ -1700,6 +1852,10 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
         if (!co_await awaitSendRoom())
             co_return;
 
+        // A selection made while this waited left the session's workspace: it is no longer mirrored, and
+        // building its snapshot would bring its state back.
+        if (!mirrorsSession(session))
+            continue;
         auto built = buildPush(session, SnapshotMode::Forced);
         if (!built)
             continue; // the host stopped hosting it while this waited its turn
@@ -1717,6 +1873,9 @@ core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
         // A snapshot that stated only the newest records that fit had buildPush queue the older
         // remainder as increments, which the debounce holds back until this run is off the wire.
         co_await sendSnapshotPieces(std::move(built->delta), session);
+        // Left behind by a selection made while the pieces went out.
+        if (!mirrorsSession(session))
+            forgetSession(session);
 
         // The session is let go once the backlog is back under a piece, not the moment its last
         // piece joined it. Letting go releases the increment flushAt held back for the whole run —
@@ -1936,12 +2095,6 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         std::ignore = _host.createTab(spawnRequest(createTab->profileName, beside), beside);
         return;
     }
-    if (auto const* newWorkspace = std::get_if<proto::NewWorkspace>(&frame.pdu))
-    {
-        // Claimed for this connection, which follows it from its first LayoutState on.
-        std::ignore = _host.createWorkspace(spawnRequest(newWorkspace->profileName), this);
-        return;
-    }
     if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))
     {
         // The decoder guarantees the orientation is Horizontal or Vertical (any
@@ -2074,13 +2227,14 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         // answer: the moved sessions keep running and none is spawned or closed. The batch those pushes
         // open names this request, so the client can tell its move landed.
         _servingMove = frame.serial;
-        auto const moved = applyMoveNode(
-            _host.model(),
-            *move,
-            MoveWorkspaceHooks {
-                .create = [this] { return _host.createEmptyWorkspace(this).id(); },
-                .discard =
-                    [this](vtworkspace::WorkspaceId workspace) { _host.discardWorkspace(workspace); } });
+        auto const moved =
+            applyMoveNode(_host.model(),
+                          *move,
+                          MoveWorkspaceHooks { .create = [this] { return _host.createEmptyWorkspace().id(); },
+                                               .discard =
+                                                   [this](vtworkspace::WorkspaceId workspace) {
+                                                       _host.discardWorkspace(workspace);
+                                                   } });
         _servingMove = 0;
         if (!moved)
         {
@@ -2116,37 +2270,47 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
 
 NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame const& frame)
 {
-    if (auto const* follow = std::get_if<proto::FollowWorkspace>(&frame.pdu))
+    if (auto const* select = std::get_if<proto::SelectWorkspace>(&frame.pdu))
     {
-        if (!_negotiated->shared.contains(proto::Capability::WorkspaceFollow))
+        if (!_negotiated->shared.contains(proto::Capability::DaemonFollow))
         {
             refuse(frame);
             return TabVerb::Served;
         }
-        if (follow->workspace != 0)
-            followWorkspace(vtworkspace::WorkspaceId { follow->workspace });
-        else if (auto const* created = _host.createWorkspace(spawnRequest({}), this))
-            followWorkspace(created->id());
+        // A workspace whose last session ended is gone, though the model may keep it: selected, it would read
+        // as one the connection never held a tab of, which it would keep showing empty.
+        auto const asked = vtworkspace::WorkspaceId { select->workspace };
+        auto const known =
+            select->workspace != 0 && _host.model().workspace(asked) != nullptr && !_host.hasEnded(asked);
+        if (known)
+            selectWorkspace(asked);
+        else if (select->workspace == 0)
+        {
+            // A workspace of its own, which the connection selects as it creates it.
+            if (auto const* created = _host.createWorkspace(spawnRequest({})))
+                selectWorkspace(created->id());
+            else
+                errorLog()("{}: the workspace this client asked to select could not be created", _id);
+        }
         else
-            errorLog()("{}: the workspace this client asked to follow could not be created", _id);
-        return TabVerb::Served;
-    }
-    if (auto const* release = std::get_if<proto::ReleaseWorkspace>(&frame.pdu))
-    {
-        if (!_negotiated->shared.contains(proto::Capability::WorkspaceFollow))
+            errorLog()("{}: not selecting {}: there is no such workspace", _id, proto::describe(frame.pdu));
+        // Answered whatever came of it, with the selection as it stands and the request named as the batch's
+        // cause: a client that asked for a workspace the daemon does not have learns at once that it kept the
+        // old one, and the request is not one the daemon does not understand.
+        if (batchesLayouts())
         {
-            refuse(frame);
-            return TabVerb::Served;
+            _layoutBatchCause = std::max(_layoutBatchCause, frame.serial);
+            openLayoutBatch();
+            _layoutBatch = LayoutBatch::Pushed;
         }
-        releaseWorkspace(vtworkspace::WorkspaceId { release->workspace }, release->reason);
         return TabVerb::Served;
     }
-    if (auto const* shown = std::get_if<proto::WorkspaceShown>(&frame.pdu))
+    if (std::holds_alternative<proto::ReportFocus>(frame.pdu))
     {
-        if (!_negotiated->shared.contains(proto::Capability::WorkspaceShown))
+        if (!_negotiated->shared.contains(proto::Capability::DaemonFollow))
             refuse(frame);
-        else if (follows(vtworkspace::WorkspaceId { shown->workspace }))
-            _host.noteWorkspaceShown(vtworkspace::WorkspaceId { shown->workspace });
+        else
+            _host.noteFocus(*this, std::get<proto::ReportFocus>(frame.pdu).focus);
         return TabVerb::Served;
     }
     if (auto const* reply = std::get_if<proto::SwitchReply>(&frame.pdu))
@@ -2500,6 +2664,10 @@ void NativeSession::attachClient(uint64_t serial,
                                  proto::ServerHello reply,
                                  proto::Negotiated negotiated)
 {
+    // Known before the host counts the client (executeAttachPlan): its routing decides who raises from the
+    // first view it takes, and a client that does not follow the daemon is in none.
+    _following = negotiated.shared.contains(proto::Capability::DaemonFollow) ? DaemonFollowing::Yes
+                                                                             : DaemonFollowing::No;
     // Counted, and subscribed, first: the spawn below fans out to the subscribers, as it did when every
     // connection subscribed before its hello.
     _clientTicket = _services.daemon.get().admitClient();
@@ -2570,12 +2738,11 @@ void NativeSession::attachClient(uint64_t serial,
                                                                                   : proto::AttachIntent {},
                       workingDirectory);
 
-    reply.followedWorkspaces.assign(_followedWorkspaces.begin(), _followedWorkspaces.end());
+    reply.selectedWorkspace = _selectedWorkspace;
     reply.daemonInstance = _host.instance();
-    // Told to the first attaching client only, whichever workspaces it follows: the host forgets it with the
-    // answer.
-    if (auto const restored = _host.takeRestoreAnnouncement(
-            [this](uint64_t workspace) { return follows(vtworkspace::WorkspaceId { workspace }); }))
+    // Told to the first attaching client only, whichever workspace it selects: the host forgets it with the
+    // answer. Every workspace is listed to it.
+    if (auto const restored = _host.takeRestoreAnnouncement([](uint64_t) { return true; }))
     {
         reply.restoredWorkspaces = restored->workspaces;
         reply.restoredTabs = restored->tabs;
@@ -2583,6 +2750,10 @@ void NativeSession::attachClient(uint64_t serial,
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
+    // The role is stated once, whatever it is, so a window never has to assume one; a change is sent as it
+    // happens.
+    if (summarizesPanes())
+        send(0, proto::DecodedPdu { proto::NotifyRole { .role = _raiseRole } });
     // The idle check of the echo state starts one interval from now, and runs for the activity window.
     _nextInputEchoCheck = _loop.clock().now() + _services.flush.inputEchoCheck;
     noteInputEchoActivity();
@@ -2592,22 +2763,23 @@ void NativeSession::attachClient(uint64_t serial,
     // The workspace/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.
     pushLayout();
+    announceUnmirroredPanes();
 
-    // A live upgrade that could not bring a session's screen back says so to the first client that shows the
-    // session: what it sees is a fresh screen, the program behind it untouched.
+    // A live upgrade that could not bring a session's screen back says so to the first client that mirrors
+    // the session: what it sees is a fresh screen, the program behind it untouched.
     for (auto const session:
-         _host.takeUnrestoredScreens([this](vtworkspace::SessionId id) { return followsSession(id); }))
+         _host.takeUnrestoredScreens([this](vtworkspace::SessionId id) { return mirrorsSession(id); }))
         emitSessionEvent(proto::SessionNotify { .session = session.value,
                                                 .title = std::string { handover::UnrestoredScreenTitle },
                                                 .body = std::string { handover::UnrestoredScreenNotice },
                                                 .occasion = proto::NotifyOccasion::Always });
 
     // What the daemon could not start as configured after an upgrade, told on the first session this client
-    // shows -- the notice is the daemon's, a session only where a client shows it -- and kept for a client
-    // that shows one when this one shows none.
+    // mirrors -- the notice is the daemon's, a session only where a client mirrors it -- and kept for a
+    // client that mirrors one when this one mirrors none.
     auto const sessions = _host.sessionIds();
     if (auto const shown =
-            std::ranges::find_if(sessions, [this](vtworkspace::SessionId id) { return followsSession(id); });
+            std::ranges::find_if(sessions, [this](vtworkspace::SessionId id) { return mirrorsSession(id); });
         shown != sessions.end())
         for (auto& notice: _host.takeDegradations())
             emitSessionEvent(proto::SessionNotify { .session = shown->value,
@@ -2619,7 +2791,7 @@ void NativeSession::attachClient(uint64_t serial,
     // only, so what a program set on one survives.
     if (colorPreference)
         _host.model().forEachTab([&](vtworkspace::Workspace& workspace, vtworkspace::Tab& tab) {
-            if (!follows(workspace.id()))
+            if (workspace.id().value != _selectedWorkspace)
                 return;
             tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
                 if (pane.isLeaf())
@@ -2627,11 +2799,11 @@ void NativeSession::attachClient(uint64_t serial,
             });
         });
 
-    // The attach snapshot: every hosted session of every followed workspace, full state. QUEUED, not pushed:
+    // The attach snapshot: every hosted session of the selected workspace, full state. QUEUED, not pushed:
     // this runs inside the PDU pump's handler, which cannot suspend, so pushing here would put
     // every pane's whole grid into the send queue before the drain coroutine had run once.
     _host.model().forEachTab([this](vtworkspace::Workspace& workspace, vtworkspace::Tab& tab) {
-        if (!follows(workspace.id()))
+        if (workspace.id().value != _selectedWorkspace)
             return;
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
@@ -2644,7 +2816,7 @@ void NativeSession::attachClient(uint64_t serial,
     // failing as pending meanwhile. A client is sent each once, as it opens or as the client attaches --
     // one that cannot answer is sent none, and they wait for another, as with no client attached.
     for (auto const& request: _host.pendingPermissionRequests())
-        if (asks(request) && followsSession(SessionId { request.session }))
+        if (asks(request) && mirrorsSession(SessionId { request.session }))
             send(0, proto::DecodedPdu { request });
 }
 
@@ -2652,31 +2824,31 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
                                       std::filesystem::path const& workingDirectory)
 {
     auto& model = _host.model();
-    auto context = AttachContext { .otherClients = _host.connectedClients(),
-                                   .primaryWorkspace = _host.workspaceId().value,
+    auto context = AttachContext { .primaryWorkspace = _host.workspaceId().value,
                                    .workspaces = {},
                                    .workingDirectory = workingDirectory.empty() ? WorkingDirectoryStated::No
                                                                                 : WorkingDirectoryStated::Yes,
-                                   .instance = _host.instance() };
+                                   .instance = _host.instance(),
+                                   .lastSelected = _host.lastSelectedWorkspace() };
+    // A workspace whose last session ended is not listed: a Select naming it is then a launch's choice, as a
+    // SelectWorkspace of it is refused (serveWorkspaceVerb), and the connection never lands on it empty.
     for (auto const i: std::views::iota(0, model.workspaceCount()))
-        if (auto const* workspace = model.workspaceAt(i))
+        if (auto const* workspace = model.workspaceAt(i);
+            workspace != nullptr && !_host.hasEnded(workspace->id()))
             context.workspaces.push_back(
-                WorkspaceSummary { .id = workspace->id().value,
-                                   .tabCount = workspace->tabCount(),
-                                   .visibility = _host.visibility(workspace->id()) });
+                WorkspaceSummary { .id = workspace->id().value, .tabCount = workspace->tabCount() });
     std::ranges::sort(context.workspaces, {}, &WorkspaceSummary::id);
 
     auto const plan = planAttach(intent, context);
     _host.noteClientAttached(this);
     _services.control.get().clientAttached(std::format("{}", _id));
-    _followedWorkspaces = std::set<uint64_t>(plan.follow.begin(), plan.follow.end());
-    for (auto const workspace: _followedWorkspaces)
-        _host.noteWorkspaceFollowed(vtworkspace::WorkspaceId { workspace }, this);
-    // The first client of a fresh launch is the primary viewer: workspaces no client claims appear there.
-    auto const launched = intent.kind != proto::AttachIntentKind::NewWorkspace
-                          && intent.kind != proto::AttachIntentKind::Workspaces;
-    if (launched && context.otherClients == 0)
-        _host.claimPrimaryViewer(this);
+    // Set directly: the attach walk queues the snapshots of the selected workspace once the hello is sent.
+    if (plan.select)
+    {
+        _selectedWorkspace = *plan.select;
+        _selectedTabs = SelectedTabs::NeverHeld;
+        _host.noteSelected(*this, _selectedWorkspace);
+    }
 
     switch (plan.creation)
     {
@@ -2686,20 +2858,19 @@ void NativeSession::executeAttachPlan(proto::AttachIntent const& intent,
             std::ignore = _host.createTab(attachSpawnRequest(workingDirectory));
             break;
         case AttachCreation::NewWorkspace:
-            if (auto const* workspace = _host.createWorkspace(attachSpawnRequest(workingDirectory), this))
+            if (auto const* workspace = _host.createWorkspace(attachSpawnRequest(workingDirectory)))
             {
                 connectionLog()("{}: attaching to a new workspace {}", _id, workspace->id().value);
-                _followedWorkspaces.insert(workspace->id().value);
-                _host.noteWorkspaceFollowed(workspace->id(), this);
+                _selectedWorkspace = workspace->id().value;
+                _host.noteSelected(*this, _selectedWorkspace);
             }
             else
                 errorLog()("{}: the workspace this attach asked for could not be created", _id);
             break;
-        case AttachCreation::TabInFirstFollowed: {
-            // The workspaces brought back create nothing, so the terminal asked for in the stated directory
-            // joins them, as a tab of the first: named by a session it hosts, which is how createTab finds a
-            // workspace.
-            auto const workspace = vtworkspace::WorkspaceId { plan.follow.front() };
+        case AttachCreation::TabInSelected: {
+            // The workspace selected gets the terminal asked for in the stated directory as one more tab,
+            // named by a session it hosts, which is how createTab finds a workspace.
+            auto const workspace = vtworkspace::WorkspaceId { _selectedWorkspace };
             auto const* shown = model.workspace(workspace);
             auto const* tab = shown != nullptr ? shown->activeTab() : nullptr;
             auto const beside =

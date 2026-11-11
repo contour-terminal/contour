@@ -11,12 +11,12 @@
 using contour::cli::launchIntent;
 using vthost::proto::AttachIntentKind;
 
-TEST_CASE("launchIntent: a launch follows the left workspaces, --workspace exactly one", "[cli][client]")
+TEST_CASE("launchIntent: a launch lets the daemon pick, --workspace selects exactly one", "[cli][client]")
 {
-    CHECK(launchIntent(std::nullopt).kind == AttachIntentKind::Launch);
-    CHECK(launchIntent(std::nullopt).workspaces.empty());
-    CHECK(launchIntent(uint64_t { 7 }).kind == AttachIntentKind::Workspaces);
-    CHECK(launchIntent(uint64_t { 7 }).workspaces == std::vector<uint64_t> { 7 });
+    CHECK(launchIntent(std::nullopt).kind == AttachIntentKind::Default);
+    CHECK(launchIntent(std::nullopt).workspace == 0);
+    CHECK(launchIntent(uint64_t { 7 }).kind == AttachIntentKind::Select);
+    CHECK(launchIntent(uint64_t { 7 }).workspace == 7);
 }
 
 TEST_CASE("HostExclusions: --workspace may be given beside --host", "[cli][client]")

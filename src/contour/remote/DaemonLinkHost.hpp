@@ -5,6 +5,9 @@
 /// What a remote::DaemonLink needs from the application; light, so that the composition root can implement
 /// it without including the link.
 
+#include <contour/config/BellConfig.hpp>
+#include <contour/config/FinishNotificationConfig.hpp>
+
 #include <core/platform/Clock.hpp>
 
 #include <chrono>
@@ -15,6 +18,11 @@
 #include <boxed-cpp/boxed.hpp>
 
 class QScreen;
+
+namespace contour::platform
+{
+class Notifier;
+}
 
 namespace contour::remote
 {
@@ -33,14 +41,6 @@ namespace detail::tags
 /// Names a link among the application's.
 using DaemonLinkId = boxed::boxed<uint32_t, detail::tags::DaemonLinkId>;
 
-/// A daemon workspace a link hands to a link of its own: one OS window, one link (@see
-/// DaemonLinkConfig::handOverFrom).
-struct HandOver
-{
-    DaemonLinkId from; ///< The link that followed the workspace, and lets it go once the new one shows it.
-    uint64_t workspace = 0; ///< The daemon workspace handed over.
-};
-
 /// Runs @p fire once, on the GUI thread, @p delay from now: the time source of a switch's deadline and of a
 /// switch question's expiry, injected so that a test fires it by hand. Nothing cancels a fire: one for a
 /// switch that ended meanwhile finds nothing to give up.
@@ -57,17 +57,20 @@ inline constexpr auto DefaultSwitchTimeout = std::chrono::milliseconds { std::ch
 /// question (switchQuestionExpiry()) leaves the switch it allows the time this gives it.
 struct SwitchDeadline
 {
-    /// How long after its follow is sent, or its link started, a switch waits for the first layout.
+    /// How long after its selection is sent, or its link started, a switch waits for the first layout.
     std::chrono::milliseconds timeout = DefaultSwitchTimeout;
     SwitchTimer timer;                   ///< What tells it the time is up.
     core::platform::IClock const& clock; ///< What tells how much time a switch with a landing time has left.
 };
 
-/// How a hand-over ended.
-enum class HandOverOutcome : uint8_t
+/// What a bell, a desktop notification or a finished command of a pane in a workspace the window does not
+/// select is decided and raised with: as one of a pane out of sight would be.
+struct ElsewhereNotices
 {
-    Settled = 0, ///< The new link's connection follows the workspace and has its layout: the old one lets go.
-    Failed,      ///< The new link did not connect, or the daemon has no such workspace: the old one keeps it.
+    config::FinishNotificationConfig policy; ///< The profile's `notify_on_command_finish`.
+    config::Bell bell;                       ///< The profile's `bell`: how the window rings.
+    std::string homeDirectory;               ///< What a directory shortens to `~` against.
+    platform::Notifier& notifier;            ///< Where a notice is raised. Borrowed from the application.
 };
 
 /// Whether the application started the upgrade a link asked for.
@@ -77,9 +80,9 @@ enum class UpgradeStart : uint8_t
     Started,             ///< Under way, or answered at once: the outcome reaches DaemonLink::drift().
 };
 
-/// What a link needs from the application: OS windows opened, and the local daemon restarted or upgraded by
-/// the process resources the application owns. What the link does with its windows once they are open it
-/// does through the session manager.
+/// What a link needs from the application: OS windows opened, links of their own started for further windows,
+/// and the local daemon restarted or upgraded by the process resources the application owns. What the link
+/// does with its window once it is open it does through the session manager.
 class IDaemonLinkHost
 {
   public:
@@ -91,7 +94,7 @@ class IDaemonLinkHost
     IDaemonLinkHost(IDaemonLinkHost&&) = delete;
     IDaemonLinkHost& operator=(IDaemonLinkHost&&) = delete;
 
-    /// Opens an OS window for the daemon workspace the link has staged. The window claims it as it loads,
+    /// Opens an OS window for the workspace the link selects. The window claims it as it loads,
     /// through the attach-window binder the link installed
     /// (session::TerminalSessionManager::consumeAttachWindow
     /// -> DaemonLink::bindPendingWindow()), before this returns (the QML load is synchronous).
@@ -118,19 +121,16 @@ class IDaemonLinkHost
     /// again as each of those panes goes.
     virtual void linkEnded() = 0;
 
-    /// Starts a link of its own for a further daemon workspace a link was pushed -- a launch brings back
-    /// several, a new window asks for one -- for each OS window has a connection of its own. The new link
-    /// opens its window once its connection shows the workspace, and reports to handOverSettled().
-    /// @param config What the new link is built with: its intent names the workspace, and its
-    ///        DaemonLinkConfig::handOverFrom the link it takes it from.
-    virtual void startHandOverLink(DaemonLinkConfig config) = 0;
+    /// Starts a link to the daemon @p config names that opens a window of its own once its connection's
+    /// selected workspace holds a tab: New Window, a tab torn off, a pane dropped outside every window. One
+    /// OS window has one connection; the new link is the application's, and awaited by nobody.
+    /// @param config What the new link is built with: its intent names what it selects, and its
+    ///        DaemonLinkConfig::opening says how the window opens.
+    virtual void startWindowLink(DaemonLinkConfig config) = 0;
 
-    /// A link started by startHandOverLink() reports how the hand-over went, for the application to tell the
-    /// link it took the workspace from (DaemonLink::completeHandOver), if that one still exists.
-    /// @param handOver What was handed over, and by which link.
-    /// @param outcome How it went.
-    /// @param reason Why it failed; empty when it settled.
-    virtual void handOverSettled(HandOver handOver, HandOverOutcome outcome, std::string const& reason) = 0;
+    /// @return What a link whose window raises (proto::RaiseRole::Raise) rings and notifies with for what a
+    ///         pane of a workspace it does not select raised.
+    [[nodiscard]] virtual ElsewhereNotices elsewhereNotices() = 0;
 
     /// @return The answers that stand for the switches programs ask for, one memory for every link of the
     ///         process and for its lifetime (spec §Safety): a link asks it before prompting.
