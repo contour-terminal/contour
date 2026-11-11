@@ -1800,11 +1800,14 @@ void requireRealizedSplit(AttachedGui& gui)
 
 /// Types @p marker into the active pane of @p gui and waits until the daemon's session read it: everything
 /// the client wrote on the connection before has then been handled by the daemon too.
+/// @param marker Text the session has not read yet. Two clients showing one session type into the same pty,
+///        so a marker another client already delivered would satisfy the wait before this one's arrived.
 void requireDelivered(DaemonFixture& daemon, AttachedGui& gui, std::string const& marker)
 {
     auto const& leaf = *gui.tab().activePane();
     auto const remote = gui.remoteOf(leaf);
     REQUIRE(remote.has_value());
+    REQUIRE_FALSE(daemon.ptyInput(vtworkspace::SessionId { *remote }).contains(marker));
     std::ignore = gui.app.manager().sessionForId(leaf.session())->terminal().device().write(marker);
     REQUIRE(waitUntil([&] { return daemon.ptyInput(vtworkspace::SessionId { *remote }).contains(marker); }));
 }
@@ -1925,8 +1928,8 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
     // last: each client's first report (sent as its displays were created) must have landed before the panes
     // are sized below, or a late one undoes them.
     drainGuiEvents();
-    for (auto* gui: { &stays, departs.get() })
-        requireDelivered(daemon, *gui, "realized");
+    requireDelivered(daemon, stays, "stays realized");
+    requireDelivered(daemon, *departs, "departs realized");
 
     // Sizes the panes of @p gui, as its SplitView would, and @return the daemon's sessions behind them.
     auto const showPanes = [](AttachedGui& gui, vtpty::PageSize left, vtpty::PageSize right) {
@@ -1947,8 +1950,8 @@ TEST_CASE("a client that departs with the client area leaves the survivor's pane
         [&] { return daemon.clientArea() == cells(80, 30) && daemon.paneSize(left) == cells(40, 30); }));
 
     // Everything either client sent so far has landed, so whatever is counted from here on was sent after.
-    for (auto* gui: { &stays, departs.get() })
-        requireDelivered(daemon, *gui, "sized");
+    requireDelivered(daemon, stays, "stays sized");
+    requireDelivered(daemon, *departs, "departs sized");
     auto const resizePanesBefore = daemon.clientFrames.count(vthost::proto::PduType::ResizePane);
     departs.reset();
     REQUIRE(waitUntil([&] { return daemon.clientArea() == cells(100, 30); }));
