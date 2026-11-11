@@ -111,7 +111,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     {
         auto const decoded = vtbackend::parseProgramStatus(report);
         REQUIRE(decoded.has_value());
-        std::ignore = _programStatus[session.value].apply(std::get<vtbackend::ProgramStatusRecord>(*decoded));
+        std::ignore =
+            _programStatus[session.value].apply(std::get<vtbackend::ProgramStatusRecord>(*decoded), {});
         if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); tab != nullptr)
             notifyRow(tab->id(), { Roles::BadgeRole, Roles::BadgeTextRole });
     }
@@ -328,14 +329,18 @@ class TabListModel: public QAbstractListModel, public ModelEvents
 
     [[nodiscard]] contour::window::ProgramStatusBadge programStatusBadge(Tab const& tab, int row) const
     {
-        auto const focus = _window != nullptr && row == _window->activeTabIndex()
-                               ? contour::window::TabFocus::Foreground
-                               : contour::window::TabFocus::Background;
-        return contour::window::badgeForTab(tab, focus, [this](SessionId id) {
-            auto const found = _programStatus.find(id.value);
-            return found != _programStatus.end() ? contour::window::resolvedRecords(found->second)
-                                                 : std::vector<vtbackend::ProgramStatusRecord> {};
-        });
+        // Stands in for the manager noting what is in front seen as it arrives.
+        auto const seen = _window != nullptr && row == _window->activeTabIndex()
+                              ? contour::window::AllRecordsSeen
+                              : uint64_t { 0 };
+        return contour::window::badgeForTab(
+            tab,
+            [this](SessionId id) {
+                auto const found = _programStatus.find(id.value);
+                return found != _programStatus.end() ? contour::window::resolvedRecords(found->second)
+                                                     : std::vector<vtbackend::ProgramStatusRecord> {};
+            },
+            [seen](SessionId) { return seen; });
     }
 
     uint64_t _nextSession = 1;

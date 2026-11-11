@@ -81,9 +81,27 @@ TEST_CASE("tabAttention.seenClearsBoth", "[tabattention]")
     auto ledger = TabAttention {};
     std::ignore = ledger.noteOutput(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
     std::ignore = ledger.noteFinished(Shell, SessionVisibility::Hidden, CommandEnding::Failed);
-    CHECK(ledger.noteSeen(Shell) == AttentionChange::Changed);
+    CHECK(ledger.noteSeen(Shell, 0) == AttentionChange::Changed);
     CHECK(ledger.of(Shell) == SessionAttention {});
-    CHECK(ledger.noteSeen(Shell) == AttentionChange::Unchanged);
+    CHECK(ledger.noteSeen(Shell, 0) == AttentionChange::Unchanged);
+}
+
+TEST_CASE("TabAttention.noteSeenKeepsGeneration", "[tabattention]")
+{
+    auto ledger = TabAttention {};
+    std::ignore = ledger.noteOutput(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
+    CHECK(ledger.noteSeen(Shell, 7) == AttentionChange::Changed);
+    CHECK(ledger.of(Shell).activity == TabActivity::None);
+    CHECK(ledger.of(Shell).seenStatusGeneration == 7);
+    // Marks made after keep the generation; clearing them again keeps it too, and it never shrinks.
+    std::ignore = ledger.noteOutput(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
+    CHECK(ledger.of(Shell).seenStatusGeneration == 7);
+    CHECK(ledger.noteSeen(Shell, 3) == AttentionChange::Changed);
+    CHECK(ledger.of(Shell).seenStatusGeneration == 7);
+    CHECK(ledger.noteSeen(Shell, 7) == AttentionChange::Unchanged);
+    CHECK(ledger.noteSeen(Shell, 9) == AttentionChange::Changed);
+    ledger.forget(Shell);
+    CHECK(ledger.of(Shell) == SessionAttention {});
 }
 
 TEST_CASE("tabAttention.hiddenBellMarksOnce", "[tabattention]")
@@ -118,7 +136,7 @@ TEST_CASE("tabAttention.seeingClearsTheBell", "[tabattention]")
 {
     auto ledger = TabAttention {};
     std::ignore = ledger.noteBell(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
-    CHECK(ledger.noteSeen(Shell) == AttentionChange::Changed);
+    CHECK(ledger.noteSeen(Shell, 0) == AttentionChange::Changed);
     CHECK(ledger.of(Shell) == SessionAttention {});
 }
 
@@ -138,7 +156,7 @@ TEST_CASE("tabAttention.forgetDropsTheEntry", "[tabattention]")
     std::ignore = ledger.noteOutput(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
     ledger.forget(Shell);
     CHECK(ledger.of(Shell) == SessionAttention {});
-    CHECK(ledger.noteSeen(Shell) == AttentionChange::Unchanged);
+    CHECK(ledger.noteSeen(Shell, 0) == AttentionChange::Unchanged);
 }
 
 TEST_CASE("tabAttention.pooledOverEveryLeaf", "[tabattention]")
@@ -159,7 +177,7 @@ TEST_CASE("tabAttention.pooledOverEveryLeaf", "[tabattention]")
           == SessionAttention { .activity = TabActivity::UnseenOutput,
                                 .finished = FinishedBlockBadge::Failed });
 
-    std::ignore = ledger.noteSeen(Editor);
+    std::ignore = ledger.noteSeen(Editor, 0);
     CHECK(pooledAttention(tab, ledger) == SessionAttention { .finished = FinishedBlockBadge::Failed });
 }
 

@@ -112,6 +112,29 @@ TEST_CASE("format v2 golden decodes and restores to the recorded screen", "[Stat
     CHECK(test::describeTerminal(*target) == *expected);
 }
 
+TEST_CASE("a format v2 stream from before the program-status generation still decodes", "[StateGolden]")
+{
+    // terminal-state-v2-prior.bin is the v2 golden as released daemons wrote it, before session field 14
+    // (programStatusLastGeneration) joined the format: decode-only, since the encoder writes the field now.
+    // A live upgrade from such a daemon hands over exactly these bytes.
+    auto const path = std::filesystem::path { VTBACKEND_GOLDEN_DIR } / "terminal-state-v2-prior.bin";
+    auto file = std::ifstream { path, std::ios::binary };
+    REQUIRE(file);
+    auto const bytes =
+        std::vector<uint8_t> { std::istreambuf_iterator<char> { file }, std::istreambuf_iterator<char> {} };
+    CHECK(bytes != goldenBytes(2));
+    auto const decoded = decodeTerminalState(bytes);
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->session.programStatusLastGeneration == 0);
+
+    auto const setup = test::goldenSetup();
+    auto target = setup.makeTerminal(*settingsFor(*decoded, setup.settings()));
+    REQUIRE(target->terminal.restoreState(*decoded).has_value());
+    auto const expected = readGolden(2, "txt");
+    REQUIRE(expected.has_value());
+    CHECK(test::describeTerminal(*target) == *expected);
+}
+
 TEST_CASE("the encoder still writes the format v2 golden byte for byte", "[StateGolden]")
 {
     // The current format is the one the checked-in stream was written in; a change of its bytes is a new

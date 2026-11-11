@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/AgentSkill.hpp>
 #include <contour/cli/ControlVerbs.hpp>
+#include <contour/config/AtomicFileWrite.hpp>
 
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
@@ -29,6 +30,7 @@ namespace
             case SkillState::Updated: return "updated";
             case SkillState::Unchanged: return "unchanged";
             case SkillState::Foreign: return "foreign (kept; use --force to replace)";
+            case SkillState::Untouched: return "untouched";
         }
         return {};
     }
@@ -43,22 +45,202 @@ namespace
             case SkillState::Updated: return "updated";
             case SkillState::Unchanged: return "unchanged";
             case SkillState::Foreign: return "foreign";
+            case SkillState::Untouched: return "untouched";
         }
         return {};
     }
 
-    /// @param target An agent.
+    /// @param result What a hook edit did.
+    /// @return Its name for reports.
+    [[nodiscard]] std::string_view nameOf(HookMergeResult result) noexcept
+    {
+        switch (result)
+        {
+            case HookMergeResult::Unchanged: return "unchanged";
+            case HookMergeResult::Changed: return "changed";
+            case HookMergeResult::Malformed: return "malformed (kept; fix the file first)";
+            case HookMergeResult::DirectoryMissing: return "directory missing (not created)";
+        }
+        return {};
+    }
+
+    /// @param result What a hook edit did.
+    /// @return Its name in JSON.
+    [[nodiscard]] std::string_view jsonNameOf(HookMergeResult result) noexcept
+    {
+        switch (result)
+        {
+            case HookMergeResult::Unchanged: return "unchanged";
+            case HookMergeResult::Changed: return "changed";
+            case HookMergeResult::Malformed: return "malformed";
+            case HookMergeResult::DirectoryMissing: return "directory-missing";
+        }
+        return {};
+    }
+
+    /// @param selection Why an agent was set up, or not.
+    /// @return Its name in JSON.
+    [[nodiscard]] std::string_view jsonNameOf(AgentSelection selection) noexcept
+    {
+        switch (selection)
+        {
+            case AgentSelection::Skipped: return "skipped";
+            case AgentSelection::Detected: return "detected";
+            case AgentSelection::Named: return "named";
+        }
+        return {};
+    }
+
+    /// @param integration The agent whose hooks they are.
+    /// @param action Install or uninstall.
+    /// @param text The agent's hook file, empty when there is none.
+    /// @param exe The `contour` binary.
+    /// @return The edited text.
+    [[nodiscard]] HookMerge editHooks(AgentIntegration const& integration,
+                                      HookAction action,
+                                      std::string_view text,
+                                      std::string_view exe)
+    {
+        return action == HookAction::Install ? mergeHooks(integration, text, exe)
+                                             : removeHooks(integration, text);
+    }
+
+    /// Whether a variable moved a directory away from its default.
+    enum class Relocated : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+
+    /// @param path A file setup reads and replaces.
+    /// @return What to read and replace: the file a symlink at @p path points to, so the link survives the
+    ///         replacement; else @p path.
+    [[nodiscard]] std::filesystem::path replacedFileOf(core::platform::FileSystem const& fileSystem,
+                                                       std::filesystem::path const& path)
+    {
+        return fileSystem.isSymlink(path) ? fileSystem.weaklyCanonical(path) : path;
+    }
+
+    /// Reads a file setup may replace.
+    /// @return Its text, empty when there is none; or why it cannot be read.
+    [[nodiscard]] std::expected<std::string, std::string> readReplaced(
+        core::platform::FileSystem const& fileSystem, std::filesystem::path const& path)
+    {
+        auto const file = replacedFileOf(fileSystem, path);
+        if (!fileSystem.exists(file))
+            return std::string {};
+        return fileSystem.readFile(file).transform_error([&](std::string const& error) {
+            return std::format("cannot read {}: {}", core::pathToUtf8(path), error);
+        });
+    }
+
+    /// Replaces a file durably: a crash or a full disk leaves the old text or the new, never a torn file.
+    /// @return Nothing, or why it cannot be written.
+    [[nodiscard]] std::expected<void, std::string> replace(core::platform::FileSystem const& fileSystem,
+                                                           std::filesystem::path const& path,
+                                                           std::string_view text)
+    {
+        return config::writeFileDurably(fileSystem, replacedFileOf(fileSystem, path), text)
+            .transform_error([&](std::string const& error) {
+                return std::format("cannot write {}: {}", core::pathToUtf8(path), error);
+            });
+    }
+
+    /// Sets up one agent's hooks.
+    /// @return What happened, or why the file cannot be read or written.
+    [[nodiscard]] std::expected<HookFileOutcome, std::string> setupHooks(
+        core::platform::FileSystem& fileSystem,
+        AgentTarget const& target,
+        std::filesystem::path const& directory,
+        Relocated relocated,
+        HookSetup const& hookSetup,
+        SetupMode mode)
+    {
+        auto const path = directory / target.hookFile;
+        if (relocated == Relocated::Yes && target.relocatedHookDirectory == RelocatedHookDirectory::MustExist
+            && !fileSystem.isDirectory(directory))
+            return HookFileOutcome { .path = path,
+                                     .result = HookMergeResult::DirectoryMissing,
+                                     .detail = std::format("${} names a directory that does not exist: {}",
+                                                           target.configDirEnv,
+                                                           core::pathToUtf8(directory)) };
+        return readReplaced(fileSystem, path)
+            .and_then([&](std::string const& existing) -> std::expected<HookFileOutcome, std::string> {
+                auto const edit = editHooks(
+                    integrationOf(*target.hookAgent), hookSetup.action, existing, hookSetup.contourExe);
+                if (edit.result == HookMergeResult::Changed && mode == SetupMode::Write)
+                    if (auto written = replace(fileSystem, path, edit.text); !written)
+                        return std::unexpected(std::move(written.error()));
+                return HookFileOutcome { .path = path, .result = edit.result, .detail = edit.detail };
+            });
+    }
+
+    /// Sets up one agent's skill.
+    /// @return What happened, or why the file cannot be read or written.
+    [[nodiscard]] std::expected<SkillFileOutcome, std::string> setupSkill(
+        core::platform::FileSystem& fileSystem,
+        std::filesystem::path const& path,
+        SetupMode mode,
+        ForeignSkill foreign,
+        std::string_view skillText)
+    {
+        auto const existing = readReplaced(fileSystem, path);
+        if (!existing)
+            return std::unexpected(existing.error());
+        auto state = SkillState::Created;
+        if (fileSystem.exists(replacedFileOf(fileSystem, path)))
+        {
+            if (!existing->contains(AgentSkillMarker))
+                state = foreign == ForeignSkill::Replace ? SkillState::Updated : SkillState::Foreign;
+            else
+                state = *existing == skillText ? SkillState::Unchanged : SkillState::Updated;
+        }
+        auto const writes = state == SkillState::Created || state == SkillState::Updated;
+        if (writes && mode == SetupMode::Write)
+            if (auto written = replace(fileSystem, path, skillText); !written)
+                return std::unexpected(std::move(written.error()));
+        return SkillFileOutcome { .path = path, .state = state };
+    }
+
+    /// @param relocatingEnv The variable that relocates a directory; empty for none.
+    /// @param env The environment.
+    /// @return Yes when the variable is set to something.
+    [[nodiscard]] Relocated relocationOf(std::string_view relocatingEnv, core::Environment const& env)
+    {
+        if (relocatingEnv.empty())
+            return Relocated::No;
+        auto const relocated = env.get(relocatingEnv);
+        return relocated && !relocated->empty() ? Relocated::Yes : Relocated::No;
+    }
+
+    /// @param relocatingEnv The variable that relocates the directory; empty for none.
+    /// @param defaultDir The directory beneath the home directory.
     /// @param env The environment.
     /// @param home The home directory.
-    /// @return The agent's configuration directory.
-    [[nodiscard]] std::filesystem::path configDirOf(AgentTarget const& target,
+    /// @return The directory: the variable's value when it is set, else the default beneath home.
+    [[nodiscard]] std::filesystem::path configDirOf(std::string_view relocatingEnv,
+                                                    std::string_view defaultDir,
                                                     core::Environment const& env,
                                                     std::filesystem::path const& home)
     {
-        if (!target.configDirEnv.empty())
-            if (auto const relocated = env.get(target.configDirEnv); relocated && !relocated->empty())
-                return core::pathFromUtf8(*relocated).value_or(home / target.defaultDir);
-        return home / target.defaultDir;
+        if (relocationOf(relocatingEnv, env) == Relocated::Yes)
+            return core::pathFromUtf8(*env.get(relocatingEnv)).value_or(home / defaultDir);
+        return home / defaultDir;
+    }
+
+    /// @return Whether, and why, @p target is set up.
+    [[nodiscard]] AgentSelection selectionOf(AgentTarget const& target,
+                                             std::span<std::string const> named,
+                                             core::platform::FileSystem const& fileSystem,
+                                             std::filesystem::path const& configDir)
+    {
+        if (std::ranges::contains(named, target.name))
+            return AgentSelection::Named;
+        if (!named.empty())
+            return AgentSelection::Skipped;
+        if (target.detection == AgentDetection::Always || fileSystem.isDirectory(configDir))
+            return AgentSelection::Detected;
+        return AgentSelection::Skipped;
     }
 
 } // namespace
@@ -163,13 +345,24 @@ std::vector<std::string> parseAgentList(std::string_view commaList)
         | std::views::transform([](auto part) { return std::string { part }; }));
 }
 
-std::expected<std::vector<SkillOutcome>, std::string> setupAgentSkills(core::platform::FileSystem& fileSystem,
+std::expected<std::filesystem::path, std::string> hookExecutable(
+    core::Environment const& env,
+    std::function<std::expected<std::filesystem::path, std::string>()> const& runningBinary)
+{
+    if (auto const appImage = env.get("APPIMAGE"); appImage && !appImage->empty())
+        if (auto path = core::pathFromUtf8(*appImage))
+            return *std::move(path);
+    return runningBinary();
+}
+
+std::expected<std::vector<AgentOutcome>, std::string> setupAgentSkills(core::platform::FileSystem& fileSystem,
                                                                        core::Environment const& env,
                                                                        std::filesystem::path const& home,
                                                                        std::span<std::string const> agents,
                                                                        SetupMode mode,
                                                                        ForeignSkill foreign,
-                                                                       std::string_view skillText)
+                                                                       std::string_view skillText,
+                                                                       HookSetup const& hookSetup)
 {
     for (auto const& name: agents)
         if (!std::ranges::contains(AgentTargets, name, &AgentTarget::name))
@@ -180,49 +373,75 @@ std::expected<std::vector<SkillOutcome>, std::string> setupAgentSkills(core::pla
             return std::unexpected(std::format("unknown agent '{}'; known agents: {}", name, known));
         }
 
-    auto outcomes = std::vector<SkillOutcome> {};
+    auto outcomes = std::vector<AgentOutcome> {};
     for (auto const& target: AgentTargets)
     {
-        if (!agents.empty() && !std::ranges::contains(agents, target.name))
+        auto const configDir = configDirOf(target.configDirEnv, target.defaultDir, env, home);
+        auto outcome = AgentOutcome { .agent = target.name,
+                                      .selection = selectionOf(target, agents, fileSystem, configDir),
+                                      .configDir = configDir,
+                                      .skill = std::nullopt,
+                                      .hooks = std::nullopt };
+        // An agent a named list leaves out is not reported; one found missing is, with how to set it up.
+        if (outcome.selection == AgentSelection::Skipped && !agents.empty())
             continue;
-        auto const path = configDirOf(target, env, home) / target.skillPath;
-        auto outcome = SkillOutcome { .agent = target.name, .path = path, .state = SkillState::Created };
-        if (fileSystem.exists(path))
+        if (outcome.selection != AgentSelection::Skipped)
         {
-            auto const existing = fileSystem.readFile(path);
-            if (!existing)
-                return std::unexpected(
-                    std::format("cannot read {}: {}", core::pathToUtf8(path), existing.error()));
-            if (!existing->contains(AgentSkillMarker))
-                outcome.state = foreign == ForeignSkill::Replace ? SkillState::Updated : SkillState::Foreign;
-            else
-                outcome.state = *existing == skillText ? SkillState::Unchanged : SkillState::Updated;
-        }
-        auto const writes = outcome.state == SkillState::Created || outcome.state == SkillState::Updated;
-        if (writes && mode == SetupMode::Write)
-        {
-            auto written = fileSystem.createDirectories(path.parent_path()).and_then([&] {
-                return fileSystem.writeFile(path, skillText);
-            });
-            if (!written)
-                return std::unexpected(
-                    std::format("cannot write {}: {}", core::pathToUtf8(path), written.error()));
+            if (target.hookAgent && hookSetup.action != HookAction::Skip)
+            {
+                auto hooks = setupHooks(
+                    fileSystem, target, configDir, relocationOf(target.configDirEnv, env), hookSetup, mode);
+                if (!hooks)
+                    return std::unexpected(std::move(hooks.error()));
+                outcome.hooks = *std::move(hooks);
+            }
+            if (!target.skillPath.empty())
+            {
+                if (hookSetup.action == HookAction::Uninstall)
+                    outcome.skill = SkillFileOutcome { .path = configDir / target.skillPath,
+                                                       .state = SkillState::Untouched };
+                else
+                {
+                    auto skill =
+                        setupSkill(fileSystem, configDir / target.skillPath, mode, foreign, skillText);
+                    if (!skill)
+                        return std::unexpected(std::move(skill.error()));
+                    outcome.skill = *std::move(skill);
+                }
+            }
         }
         outcomes.emplace_back(std::move(outcome));
     }
     return outcomes;
 }
 
-std::string formatSkillOutcomes(std::span<SkillOutcome const> outcomes, SetupMode mode, OutcomeFormat format)
+std::string formatSkillOutcomes(std::span<AgentOutcome const> outcomes,
+                                SetupMode mode,
+                                HookAction action,
+                                OutcomeFormat format)
 {
     if (format == OutcomeFormat::Json)
     {
         auto rows = std::vector<std::string> {};
         for (auto const& outcome: outcomes)
-            rows.emplace_back(std::format(R"({{"agent":{},"path":{},"state":{}}})",
+        {
+            auto const skill =
+                outcome.skill ? std::format(R"(,"skill":{{"path":{},"state":{}}})",
+                                            vtcontrol::quoteJsonString(core::pathToUtf8(outcome.skill->path)),
+                                            vtcontrol::quoteJsonString(jsonNameOf(outcome.skill->state)))
+                              : std::string {};
+            auto const hooks =
+                outcome.hooks ? std::format(R"(,"hooks":{{"path":{},"state":{},"detail":{}}})",
+                                            vtcontrol::quoteJsonString(core::pathToUtf8(outcome.hooks->path)),
+                                            vtcontrol::quoteJsonString(jsonNameOf(outcome.hooks->result)),
+                                            vtcontrol::quoteJsonString(outcome.hooks->detail))
+                              : std::string {};
+            rows.emplace_back(std::format(R"({{"agent":{},"selection":{}{}{}}})",
                                           vtcontrol::quoteJsonString(outcome.agent),
-                                          vtcontrol::quoteJsonString(core::pathToUtf8(outcome.path)),
-                                          vtcontrol::quoteJsonString(jsonNameOf(outcome.state))));
+                                          vtcontrol::quoteJsonString(jsonNameOf(outcome.selection)),
+                                          skill,
+                                          hooks));
+        }
         return std::format("[{}]\n", core::joinHumanReadable(rows, ","));
     }
 
@@ -233,14 +452,34 @@ std::string formatSkillOutcomes(std::span<SkillOutcome const> outcomes, SetupMod
     auto width = std::size_t { 0 };
     for (auto const& outcome: outcomes)
         width = std::max(width, labelOf(outcome.agent).size());
+    auto const dryRun = mode == SetupMode::DryRun ? " (dry run)" : "";
     auto text = std::string {};
     for (auto const& outcome: outcomes)
-        text += std::format("{:<{}}  skill  {}{}  {}\n",
-                            labelOf(outcome.agent),
-                            width,
-                            nameOf(outcome.state),
-                            mode == SetupMode::DryRun ? " (dry run)" : "",
-                            core::pathToUtf8(outcome.path));
+    {
+        if (outcome.selection == AgentSelection::Skipped)
+            text += std::format("{:<{}}  skipped  {} not found; {}\n",
+                                labelOf(outcome.agent),
+                                width,
+                                core::pathToUtf8(outcome.configDir),
+                                action == HookAction::Uninstall
+                                    ? std::string { "nothing to remove" }
+                                    : std::format("name it with --agent {} to set it up", outcome.agent));
+        if (outcome.skill)
+            text += std::format("{:<{}}  skill  {}{}  {}\n",
+                                labelOf(outcome.agent),
+                                width,
+                                nameOf(outcome.skill->state),
+                                dryRun,
+                                core::pathToUtf8(outcome.skill->path));
+        if (outcome.hooks)
+            text += std::format("{:<{}}  hooks  {}{}  {}{}\n",
+                                labelOf(outcome.agent),
+                                width,
+                                nameOf(outcome.hooks->result),
+                                dryRun,
+                                core::pathToUtf8(outcome.hooks->path),
+                                outcome.hooks->detail.empty() ? ""s : ": " + outcome.hooks->detail);
+    }
     return text;
 }
 

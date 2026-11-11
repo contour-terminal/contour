@@ -25,6 +25,13 @@ namespace
         return record.state == ProgramState::Working || record.state == ProgramState::Blocked;
     }
 
+    /// Whether a new prompt or the process's exit ends @p record: what it reports is transient, or an
+    /// integration, which speaks for a run of an agent that the prompt or the exit has just ended.
+    [[nodiscard]] bool endsWithPrompt(ProgramStatusRecord const& record) noexcept
+    {
+        return isTransient(record) || record.origin == ProgramStatusOrigin::Integration;
+    }
+
     /// The parent of @p id: its path less the last segment, or the root.
     [[nodiscard]] string_view parentOf(string_view id) noexcept
     {
@@ -44,11 +51,13 @@ ProgramStatusRecord const* ProgramStatusSet::find(string_view id) const noexcept
     return found == _records.end() ? nullptr : &*found;
 }
 
-ProgramStatusChange ProgramStatusSet::apply(ProgramStatusRecord record)
+ProgramStatusChange ProgramStatusSet::apply(ProgramStatusRecord record,
+                                            std::chrono::system_clock::time_point now)
 {
     auto change = ProgramStatusChange { .updated = { record.id },
                                         .removed = {},
                                         .reason = ProgramStatusReason::Report };
+    stamp(record, now);
     std::erase_if(_records, [&](ProgramStatusRecord const& existing) { return existing.id == record.id; });
     if (_records.size() >= _maxRecords)
     {
@@ -76,14 +85,62 @@ ProgramStatusChange ProgramStatusSet::clear(string_view id)
                     ProgramStatusReason::Report);
 }
 
+ProgramStatusChange ProgramStatusSet::clearIntegration(string_view id)
+{
+    return removeIf(
+        [id](ProgramStatusRecord const& record) {
+            return record.origin == ProgramStatusOrigin::Integration && record.id == id;
+        },
+        ProgramStatusReason::Report);
+}
+
 ProgramStatusChange ProgramStatusSet::promptStarted()
 {
-    return removeIf(isTransient, ProgramStatusReason::Prompt);
+    return removeIf(endsWithPrompt, ProgramStatusReason::Prompt);
 }
 
 ProgramStatusChange ProgramStatusSet::processExited()
 {
-    return removeIf(isTransient, ProgramStatusReason::ProcessExit);
+    return removeIf(endsWithPrompt, ProgramStatusReason::ProcessExit);
+}
+
+ProgramStatusChange ProgramStatusSet::noteUserInput(std::chrono::system_clock::time_point now)
+{
+    auto change =
+        ProgramStatusChange { .updated = {}, .removed = {}, .reason = ProgramStatusReason::UserInput };
+    for (auto& record: _records)
+    {
+        if (record.origin != ProgramStatusOrigin::Integration || record.state != ProgramState::Blocked)
+            continue;
+        record.state = ProgramState::Working;
+        record.kind = BlockedKind::None;
+        record.since = now;
+        record.generation = _nextGeneration++;
+        change.updated.push_back(record.id);
+    }
+    if (change.updated.empty())
+        return change;
+    // Updated is updated: the unblocked records move to the end, as apply() moves the one it stores, so that
+    // the set stays least recently updated first.
+    std::ranges::stable_partition(_records, [&](ProgramStatusRecord const& record) {
+        return std::ranges::find(change.updated, record.id) == change.updated.end();
+    });
+    return change;
+}
+
+void ProgramStatusSet::stamp(ProgramStatusRecord& record, std::chrono::system_clock::time_point now)
+{
+    if (auto const* const before = find(record.id);
+        before && before->state == record.state && before->kind == record.kind)
+    {
+        record.since = before->since;
+        record.generation = before->generation;
+    }
+    else
+    {
+        record.since = now;
+        record.generation = _nextGeneration++;
+    }
 }
 
 ProgramStatusChange ProgramStatusSet::reset()
@@ -91,10 +148,17 @@ ProgramStatusChange ProgramStatusSet::reset()
     return removeIf([](ProgramStatusRecord const&) { return true; }, ProgramStatusReason::Reset);
 }
 
-ProgramStatusChange ProgramStatusSet::replaceAll(std::vector<ProgramStatusRecord> records)
+ProgramStatusChange ProgramStatusSet::replaceAll(std::vector<ProgramStatusRecord> records,
+                                                 ProgramStatusTiming timing,
+                                                 std::chrono::system_clock::time_point now)
 {
     if (records.size() > _maxRecords)
         records.erase(records.begin(), records.end() - static_cast<std::ptrdiff_t>(_maxRecords));
+
+    // Before the comparison below, which would otherwise see every unstamped record as changed.
+    if (timing == ProgramStatusTiming::Absent)
+        for (auto& record: records)
+            stamp(record, now);
 
     auto change = ProgramStatusChange { .updated = {}, .removed = {}, .reason = ProgramStatusReason::Mirror };
     for (auto const& record: records)
@@ -103,6 +167,8 @@ ProgramStatusChange ProgramStatusSet::replaceAll(std::vector<ProgramStatusRecord
     for (auto const& record: _records)
         if (std::ranges::find(records, record.id, &ProgramStatusRecord::id) == records.end())
             change.removed.push_back(record.id);
+    for (auto const& record: records)
+        _nextGeneration = std::max(_nextGeneration, record.generation + 1);
     _records = std::move(records);
     return change;
 }

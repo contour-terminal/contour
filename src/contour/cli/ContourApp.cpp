@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/AgentReport.hpp>
 #include <contour/cli/AgentSkill.hpp>
 #include <contour/cli/BackgroundExecutor.hpp>
 #include <contour/cli/CaptureScreen.hpp>
@@ -448,24 +449,44 @@ namespace
             .name = "agent",
             .helpText = "Sets up coding agents to operate Contour.",
             .options = {},
-            .children = CLI::CommandList { CLI::Command {
-                .name = "setup",
-                .helpText = "Writes the Contour skill into the agents' skill directories "
-                            "(~/.claude/skills/contour, ~/.agents/skills/contour); rerun it after upgrading.",
-                .options =
-                    CLI::OptionList {
-                        CLI::Option {
+            .children =
+                CLI::CommandList {
+                    CLI::Command {
+                        .name = "report",
+                        .helpText =
+                            "Called by a coding agent's hook: turns its payload (JSON on standard input) "
+                            "into the pane's status. Prints nothing and always succeeds.",
+                        .options = CLI::OptionList { CLI::Option {
                             "agent",
                             CLI::Value { ""s },
-                            "Sets up only these agents, a comma-separated list of claude and agents; "
-                            "all by default.",
-                            "NAME" },
-                        CLI::Option { "dry-run", CLI::Value { false }, "Reports what would be written." },
-                        CLI::Option { "force",
-                                      CLI::Value { false },
-                                      "Replaces a skill file that Contour did not generate." },
-                        CLI::Option { "json", CLI::Value { false }, "Prints the outcomes as JSON." },
-                    } } },
+                            "The agent whose hook this is: claude-code or codex.",
+                            "NAME" } } },
+                    CLI::Command {
+                        .name = "setup",
+                        .helpText =
+                            "Writes the Contour skill into the agents' skill directories "
+                            "(~/.claude/skills/contour, ~/.agents/skills/contour) and their status hooks "
+                            "into Claude Code's settings.json and Codex's hooks.json, for each agent whose "
+                            "configuration directory exists; rerun it after upgrading.",
+                        .options =
+                            CLI::OptionList {
+                                CLI::Option {
+                                    "agent",
+                                    CLI::Value { ""s },
+                                    "Sets up only these agents, found or not: a comma-separated list of "
+                                    "claude-code, codex and agents. By default every agent found.",
+                                    "NAME" },
+                                CLI::Option {
+                                    "dry-run", CLI::Value { false }, "Reports what would be written." },
+                                CLI::Option { "force",
+                                              CLI::Value { false },
+                                              "Replaces a skill file that Contour did not write." },
+                                CLI::Option {
+                                    "uninstall",
+                                    CLI::Value { false },
+                                    "Removes the status hooks instead; the skill is left as it is." },
+                                CLI::Option { "json", CLI::Value { false }, "Prints the outcomes as JSON." },
+                            } } },
         };
     }
 
@@ -574,6 +595,7 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
+    link("contour.agent.report", bind(&ContourApp::agentReportAction, this));
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
     link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
@@ -1660,6 +1682,17 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
                                   vthost::makeLocalDaemonConnector(socketPath, *spawner, std::move(starter)));
 }
 
+int ContourApp::agentReportAction()
+{
+    auto const* integration = findIntegration(parameters().get<string>("contour.agent.report.agent"));
+    if (integration == nullptr)
+        return exitCode(ExitStatus::Ok); // A hook never fails its agent, not even for a misspelled name.
+    auto const clock = core::platform::SteadyClock {};
+    auto const payload = makeHandlePayloadReader(core::platform::standardInput(), clock);
+    auto const& env = processEnvironment();
+    return runAgentReport(*integration, *payload, env, makeDaemonChannelFactory(env), clock);
+}
+
 int ContourApp::agentSetupAction()
 {
     constexpr auto Prefix = "contour.agent.setup"sv;
@@ -1678,20 +1711,41 @@ int ContourApp::agentSetupAction()
     auto const mode = parameters().get<bool>(key("dry-run")) ? SetupMode::DryRun : SetupMode::Write;
     auto const foreign = parameters().get<bool>(key("force")) ? ForeignSkill::Replace : ForeignSkill::Keep;
     auto const agents = parseAgentList(parameters().get<string>(key("agent")));
+    auto const hookAction =
+        parameters().get<bool>(key("uninstall")) ? HookAction::Uninstall : HookAction::Install;
+    // Only an install writes the binary into the hooks; an uninstall recognizes them without it.
+    auto exeText = std::string {};
+    if (hookAction == HookAction::Install)
+    {
+        auto const exe = hookExecutable(env, [] {
+            return vtpty::currentExecutablePath().transform_error(
+                [](auto const& error) { return error.message(); });
+        });
+        if (!exe)
+        {
+            cerr << "Error: cannot tell where the contour binary is: " << exe.error() << '\n';
+            return exitCode(ExitStatus::Failed);
+        }
+        exeText = core::pathToUtf8(*exe);
+    }
     auto const outcomes = setupAgentSkills(core::platform::NativeFileSystem::instance(),
                                            env,
                                            home,
                                            agents,
                                            mode,
                                            foreign,
-                                           renderAgentSkill(CONTOUR_VERSION_STRING));
+                                           renderAgentSkill(CONTOUR_VERSION_STRING),
+                                           HookSetup { .action = hookAction, .contourExe = exeText });
     if (!outcomes)
     {
         cerr << "Error: " << outcomes.error() << '\n';
         return exitCode(ExitStatus::Failed);
     }
-    cout << formatSkillOutcomes(
-        *outcomes, mode, parameters().get<bool>(key("json")) ? OutcomeFormat::Json : OutcomeFormat::Text);
+    cout << formatSkillOutcomes(*outcomes,
+                                mode,
+                                hookAction,
+                                parameters().get<bool>(key("json")) ? OutcomeFormat::Json
+                                                                    : OutcomeFormat::Text);
     return exitCode(ExitStatus::Ok);
 }
 

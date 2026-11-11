@@ -31,13 +31,33 @@ TEST_CASE("tabBadge.priority", "[tabbadge]")
     CHECK(resolveTabBadge({ .activity = Unseen }) == TabBadge { TabBadgeKind::Output });
     CHECK(resolveTabBadge({}) == TabBadge {});
 
-    // The bell: louder than new output, quieter than a verdict, and never above a blocked program.
+    // The bell: an explicit request for attention, above every verdict and below a blocked program.
     constexpr auto Rang = BellMark::Rang;
     CHECK(resolveTabBadge({ .bell = Rang }) == TabBadge { TabBadgeKind::Bell });
     CHECK(resolveTabBadge({ .activity = Unseen, .bell = Rang }) == TabBadge { TabBadgeKind::Bell });
-    CHECK(resolveTabBadge({ .finishedBlock = Succeeded, .bell = Rang }) == TabBadge { TabBadgeKind::Done });
+    CHECK(resolveTabBadge({ .finishedBlock = Succeeded, .bell = Rang }) == TabBadge { TabBadgeKind::Bell });
     CHECK(resolveTabBadge({ .programStatus = BadgeKind::Blocked, .bell = Rang })
           == TabBadge { TabBadgeKind::Blocked });
+}
+
+TEST_CASE("tabBadge.priority.newOrder", "[tabbadge]")
+{
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Working, .bell = BellMark::Rang })
+          == TabBadge { TabBadgeKind::Bell });
+    CHECK(
+        resolveTabBadge({ .programStatus = BadgeKind::Error, .finishedBlock = FinishedBlockBadge::Succeeded })
+        == TabBadge { TabBadgeKind::Error });
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Done, .progressPercent = 10 })
+          == TabBadge { TabBadgeKind::Done });
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Working, .progressPercent = 10 })
+          == TabBadge { TabBadgeKind::Working, 10 });
+    CHECK(resolveTabBadge(
+              { .finishedBlock = FinishedBlockBadge::Succeeded, .activity = TabActivity::UnseenOutput })
+          == TabBadge { TabBadgeKind::Done });
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Error, .bell = BellMark::Rang })
+          == TabBadge { TabBadgeKind::Bell });
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Working, .activity = TabActivity::UnseenOutput })
+          == TabBadge { TabBadgeKind::Working });
 }
 
 TEST_CASE("tabBadge.everyAdjacentPairResolvesToTheHigher", "[tabbadge]")
@@ -52,18 +72,20 @@ TEST_CASE("tabBadge.everyAdjacentPairResolvesToTheHigher", "[tabbadge]")
     // One row per adjacent pair of TabBadgeRules, each input selecting both rules through different fields.
     auto const pairs = std::array {
         Pair { TabBadgeKind::Blocked,
-               TabBadgeKind::Error,
-               { .programStatus = BadgeKind::Blocked, .finishedBlock = FinishedBlockBadge::Failed } },
-        Pair { TabBadgeKind::Error,
-               TabBadgeKind::Working,
-               { .programStatus = BadgeKind::Working, .finishedBlock = FinishedBlockBadge::Failed } },
-        Pair { TabBadgeKind::Working,
-               TabBadgeKind::Done,
-               { .programStatus = BadgeKind::Working, .finishedBlock = FinishedBlockBadge::Succeeded } },
-        Pair { TabBadgeKind::Done,
                TabBadgeKind::Bell,
-               { .finishedBlock = FinishedBlockBadge::Succeeded, .bell = BellMark::Rang } },
-        Pair { TabBadgeKind::Bell, TabBadgeKind::Output, { .activity = Unseen, .bell = BellMark::Rang } },
+               { .programStatus = BadgeKind::Blocked, .bell = BellMark::Rang } },
+        Pair { TabBadgeKind::Bell,
+               TabBadgeKind::Error,
+               { .finishedBlock = FinishedBlockBadge::Failed, .bell = BellMark::Rang } },
+        Pair { TabBadgeKind::Error,
+               TabBadgeKind::Done,
+               { .programStatus = BadgeKind::Error, .finishedBlock = FinishedBlockBadge::Succeeded } },
+        Pair { TabBadgeKind::Done,
+               TabBadgeKind::Working,
+               { .programStatus = BadgeKind::Working, .finishedBlock = FinishedBlockBadge::Succeeded } },
+        Pair { TabBadgeKind::Working,
+               TabBadgeKind::Output,
+               { .programStatus = BadgeKind::Working, .activity = Unseen } },
     };
     REQUIRE(pairs.size() + 1 == TabBadgeRules.size());
     for (auto const i: std::views::iota(size_t { 0 }, pairs.size()))
@@ -75,7 +97,7 @@ TEST_CASE("tabBadge.everyAdjacentPairResolvesToTheHigher", "[tabbadge]")
         CHECK(tabBadgeRuleMatches(TabBadgeRules[i + 1], pair.inputs));
         CHECK(resolveTabBadge(pair.inputs).kind == pair.higher);
     }
-    CHECK(resolveTabBadge({ BadgeKind::Working, 40, FinishedBlockBadge::Succeeded, TabActivity::None })
+    CHECK(resolveTabBadge({ BadgeKind::Working, 40, FinishedBlockBadge::None, TabActivity::None })
           == TabBadge { TabBadgeKind::Working, 40 });
     CHECK(resolveTabBadge({ BadgeKind::Done, std::nullopt, FinishedBlockBadge::None, Unseen })
           == TabBadge { TabBadgeKind::Done });

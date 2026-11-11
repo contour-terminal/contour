@@ -101,7 +101,8 @@ TEST_CASE("Terminal stores OSC 7501 and raises programStatusChanged", "[vtbacken
         } };
         {
             auto const _ = std::lock_guard { mock.terminal };
-            mock.terminal.replaceProgramStatus(std::move(replacement));
+            mock.terminal.replaceProgramStatus(std::move(replacement),
+                                               vtbackend::ProgramStatusTiming::Carried);
         }
         REQUIRE(status.records().size() == 1);
         CHECK(status.records().front().id == "host");
@@ -182,4 +183,18 @@ TEST_CASE("Terminal: program status read under the lock while the parser writes 
     }
     writer.join();
     CHECK(largest <= vtbackend::MaxProgramStatusRecords);
+}
+
+TEST_CASE("Terminal.programStatus.oscPromptClearsIntegrationRecord", "[vtbackend][programstatus]")
+{
+    auto mock = MockTerm<> { ColumnCount(40), LineCount(5) };
+    mock.writeToScreen("\033]7501;state=done\033\\");
+    REQUIRE(mock.terminal.programStatus().records().size() == 1);
+    // The record's origin is the daemon's to set; MockTerm has no control API, so replace the set.
+    auto record = mock.terminal.programStatus().records().front();
+    record.origin = vtbackend::ProgramStatusOrigin::Integration;
+    mock.terminal.replaceProgramStatus({ record }, vtbackend::ProgramStatusTiming::Carried);
+
+    mock.writeToScreen("\033]133;A\033\\");
+    CHECK(mock.terminal.programStatus().records().empty());
 }

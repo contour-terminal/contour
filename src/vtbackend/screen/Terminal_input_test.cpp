@@ -1224,3 +1224,48 @@ TEST_CASE("Terminal.composing does not race the render thread", "[terminal][thre
 // }}}
 
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("Terminal.input tells its device which writes the user typed", "[terminal][input]")
+{
+    // A daemon's client forwards the kind, and only typed input answers an agent that waits on the user: a
+    // focus report as a tab is switched to must not.
+    class KindRecordingPty final: public vtpty::MockPty
+    {
+      public:
+        using MockPty::MockPty;
+
+        [[nodiscard]] int writeInput(std::string_view buf, vtpty::InputKind kind) override
+        {
+            kinds.push_back(kind);
+            return MockPty::writeInput(buf, kind);
+        }
+
+        std::vector<vtpty::InputKind> kinds;
+    };
+
+    using namespace vtbackend;
+    using vtpty::InputKind;
+    auto mc = MockTerm<KindRecordingPty> { PageSize { LineCount(5), ColumnCount(10) } };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mc.writeToScreen("\033[?1004h\033[?1000h\033[?1006h"sv);
+    auto& kinds = mc.mockPty().kinds;
+    kinds.clear();
+
+    std::ignore = mc.terminal.sendFocusInEvent();
+    std::ignore =
+        mc.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, CellLocation {}, NoPixel, false);
+    CHECK(kinds == std::vector { InputKind::Other, InputKind::Other });
+
+    kinds.clear();
+    mc.sendCharEvent(U'y');
+    mc.sendKeyEvent(Key::Enter);
+    mc.terminal.sendPaste("pasted");
+    mc.terminal.sendRawInput("raw");
+    REQUIRE_FALSE(kinds.empty());
+    CHECK(std::ranges::all_of(kinds, [](InputKind kind) { return kind == InputKind::Keyboard; }));
+
+    // Once what was typed is sent, a reply is no longer marked as typed.
+    kinds.clear();
+    std::ignore = mc.terminal.sendFocusOutEvent();
+    CHECK(kinds == std::vector { InputKind::Other });
+}

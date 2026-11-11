@@ -65,6 +65,7 @@ set(vtbackend_HEADERS
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
+    core/UntrustedText.hpp
     core/Image.hpp
     input/ClickCounter.hpp
     input/InputBinding.hpp
@@ -359,6 +360,7 @@ if(LIBTERMINAL_TESTING)
         core/Color_test.cpp
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
+        core/UntrustedText_test.cpp
         vt/HierarchicalContext_test.cpp
         vt/ProgramStatus_test.cpp
         vt/UserVar_test.cpp

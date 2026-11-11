@@ -2146,6 +2146,29 @@ TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][p
         CHECK(sets.front().records.front().progress == 40);
     }
 
+    SECTION("the timing block rides only a viewer that shares ProgramStatusTiming")
+    {
+        auto const timingHello =
+            proto::ClientHello { .capabilities =
+                                     proto::CapabilitySet::of({ proto::Capability::ProgramStatus,
+                                                                proto::Capability::ProgramStatusTiming }) };
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { timingHello } },
+            [&](auto const& got) { return hasProgramStatus(got); },
+            writeOnce(&h,
+                      sessionId,
+                      "\033]7501;state=working\033\\",
+                      holdsFrames(&h.received, AttachSnapshotFrames)));
+        auto const sets = programStatusFrames(received);
+        REQUIRE(sets.size() == 1);
+        CHECK(sets.front().timing == proto::StatusTimingBlock::Included);
+        REQUIRE(sets.front().records.size() == 1);
+        CHECK(sets.front().records.front().generation != 0);
+        CHECK(sets.front().records.front().sinceNs != 0);
+    }
+
     SECTION("a viewer without the capability gets none")
     {
         auto h = NativeHarness { HarnessOptions { .collectBudget = std::chrono::milliseconds { 300 } } };

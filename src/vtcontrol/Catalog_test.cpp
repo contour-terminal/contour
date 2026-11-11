@@ -29,7 +29,7 @@ bool isMethodName(std::string_view name)
 
 TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][catalog]")
 {
-    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 18);
+    STATIC_REQUIRE(std::tuple_size_v<decltype(vtcontrol::Methods)> == 20);
 
     auto names = std::set<std::string_view> {};
     std::apply(
@@ -53,7 +53,7 @@ TEST_CASE("every catalog row is unique and its examples decode", "[vtcontrol][ca
                 ...);
         },
         vtcontrol::Methods);
-    CHECK(names.size() == 18);
+    CHECK(names.size() == 20);
 }
 
 TEST_CASE("daemon.upgrade needs write and is for sockets only", "[vtcontrol][catalog]")
@@ -116,4 +116,19 @@ TEST_CASE("a permission that can type or open shells can run commands", "[vtcont
     // One row per permission, in enumerator order: the static_assert beside the table holds it.
     for (auto const& row: vtcontrol::PermissionPhrases)
         CHECK(consentWeightOf(row.permission) == row.weight);
+}
+
+TEST_CASE("pane.reportStatus and pane.clearStatus need input", "[vtcontrol][catalog]")
+{
+    constexpr auto Report =
+        std::get<vtcontrol::Method<vtcontrol::ReportStatusRequest, vtcontrol::EmptyReply>>(
+            vtcontrol::Methods);
+    STATIC_REQUIRE(Report.name == "pane.reportStatus");
+    STATIC_REQUIRE(Report.permission == vtcontrol::Permission::Input);
+    STATIC_REQUIRE(Report.exposure == vtcontrol::Exposure::Everywhere);
+    constexpr auto Clear =
+        std::get<vtcontrol::Method<vtcontrol::ClearStatusRequest, vtcontrol::EmptyReply>>(vtcontrol::Methods);
+    STATIC_REQUIRE(Clear.name == "pane.clearStatus");
+    STATIC_REQUIRE(Clear.permission == vtcontrol::Permission::Input);
+    STATIC_REQUIRE(Clear.exposure == vtcontrol::Exposure::Everywhere);
 }

@@ -1706,6 +1706,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Repaints the badge of the tab hosting @p session, as the output path does: its pane's own status is
     /// left alone, since output changes no record. @param session The session.
     void refreshTabBadgeOf(vtworkspace::SessionId session);
+    /// @return The newest generation among @p session's program-status records, read under its terminal's
+    ///         lock; 0 when it has none.
+    [[nodiscard]] static uint64_t statusGenerationOf(TerminalSession const& session);
 
     /// Recomputes @p session's pane status from its own records (window::paneStatusBadgeOf), under its
     /// terminal's lock, and hands it to the session. @param session The session.

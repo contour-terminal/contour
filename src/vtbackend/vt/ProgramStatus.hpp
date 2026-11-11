@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -39,6 +40,13 @@ enum class BlockedKind : uint8_t
     Auth,       ///< Waiting for a password or another credential.
 };
 
+/// Who put a program-status record into the set.
+enum class ProgramStatusOrigin : uint8_t
+{
+    Program = 0, ///< The program itself, by OSC 7501.
+    Integration, ///< An agent integration hook, through the control API.
+};
+
 /// One enumerator and its spelling in the sequence.
 /// @tparam E The enum the row belongs to.
 template <typename E>
@@ -64,6 +72,12 @@ inline constexpr auto BlockedKindNames = std::array {
     ProgramStatusName { BlockedKind::Auth, "auth" },
 };
 
+/// The origins, in enumerator order; the wire and the control API spell them so.
+inline constexpr auto ProgramStatusOriginNames = std::array {
+    ProgramStatusName { ProgramStatusOrigin::Program, "program" },
+    ProgramStatusName { ProgramStatusOrigin::Integration, "integration" },
+};
+
 /// The longest payload (everything after `7501;`): the spec's 4096-byte sequence less `ESC ] 7501 ;`
 /// and `ESC \`.
 inline constexpr std::size_t MaxProgramStatusPayloadLength = 4096 - 9;
@@ -86,6 +100,9 @@ struct ProgramStatusRecord
     std::string app;                         ///< Its own program identifier; empty to inherit an ancestor's.
     std::string title;                       ///< A short label, decoded UTF-8.
     std::string message;                     ///< One line describing the status, decoded UTF-8.
+    ProgramStatusOrigin origin = ProgramStatusOrigin::Program; ///< Who reported it.
+    std::chrono::system_clock::time_point since {}; ///< When the record last changed state or kind.
+    uint64_t generation = 0; ///< Raised whenever the record is new or its state or kind changes.
 
     bool operator==(ProgramStatusRecord const&) const = default;
 };

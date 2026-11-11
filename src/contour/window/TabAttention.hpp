@@ -11,6 +11,7 @@
 
 #include <vtbackend/shell/CommandBlock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -44,6 +45,7 @@ struct SessionAttention
     TabActivity activity = TabActivity::None;               ///< Output the user has not seen.
     FinishedBlockBadge finished = FinishedBlockBadge::None; ///< The strongest unseen finished command.
     BellMark bell = BellMark::None;                         ///< A bell the user has not seen.
+    uint64_t seenStatusGeneration = 0; ///< The newest program-status generation the user has seen.
 
     bool operator==(SessionAttention const&) const = default;
 };
@@ -146,12 +148,18 @@ class TabAttention
         return store(session, next);
     }
 
-    /// Notes that the user sees @p session: every mark clears.
+    /// Notes that the user sees @p session: every mark clears, and the program-status records up to
+    /// @p statusGeneration count as seen (Done and Error show only while newer). The seen generation only
+    /// grows.
     /// @param session The session now on screen.
-    /// @return Changed when it held a mark.
-    [[nodiscard]] AttentionChange noteSeen(vtworkspace::SessionId session)
+    /// @param statusGeneration The newest generation among the session's program-status records.
+    /// @return Changed when it held a mark or the seen generation grew.
+    [[nodiscard]] AttentionChange noteSeen(vtworkspace::SessionId session, uint64_t statusGeneration)
     {
-        return _marks.erase(session.value) != 0 ? AttentionChange::Changed : AttentionChange::Unchanged;
+        auto const held = of(session);
+        auto const next = SessionAttention { .seenStatusGeneration =
+                                                 std::max(held.seenStatusGeneration, statusGeneration) };
+        return store(session, next);
     }
 
     /// Drops @p session's marks: it is gone.

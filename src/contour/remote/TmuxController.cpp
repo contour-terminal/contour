@@ -695,7 +695,7 @@ std::unique_ptr<vtpty::Pty> TmuxController::createPty(std::optional<std::string>
 
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(record.lines), vtpty::ColumnCount(record.columns) },
-        [this, pane = record.pane](std::string_view bytes) {
+        [this, pane = record.pane](std::string_view bytes, vtpty::InputKind /*kind*/) {
             _reactor.post([this, pane, copy = std::string { bytes }] {
                 if (_gateway != nullptr)
                     _gateway->sendRawInput(pane, copy);

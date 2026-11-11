@@ -61,6 +61,7 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     vtpty::Process::applyCommandOverride(shell, commandOverride);
     // Variables Contour set to choose its own GPU must not steer the programs run inside it.
     std::ranges::copy(_app.selfOnlyEnvironment(), std::back_inserter(shell.removedEnvironment));
+    dropHostingDaemonVariables(shell);
     if (cwd)
         if (auto directory = core::pathFromUtf8(*cwd))
             shell.workingDirectory = *std::move(directory);

@@ -113,6 +113,14 @@ enum class Capability : uint8_t
     /// a follow as provisional until then, and gives the workspace back its hidden or left record when the
     /// connection ends first; without it a follow counts as shown once its layout is sent.
     WorkspaceShown = 25,
+    /// The peer carries each program-status record's origin, `since` instant and generation (the trailing
+    /// timing block of ProgramStatus). Without it a record travels as before and reads as the program's own,
+    /// with no instant and no generation.
+    ProgramStatusTiming = 26,
+    /// The peer marks each Input with what it carries (`Input::kind`): the client says which bytes are the
+    /// user's keys and paste, and the daemon lets only those answer an integration that waits on the user.
+    /// Without it every Input reads as Other, which answers nothing.
+    InputKinds = 27,
 };
 
 /// One row of the table naming a Capability.
@@ -149,6 +157,8 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::WorkspaceFollow, .name = "workspace-follow" },
     CapabilityRow { .capability = Capability::WorkspaceSwitch, .name = "workspace-switch" },
     CapabilityRow { .capability = Capability::WorkspaceShown, .name = "workspace-shown" },
+    CapabilityRow { .capability = Capability::ProgramStatusTiming, .name = "program-status-timing" },
+    CapabilityRow { .capability = Capability::InputKinds, .name = "input-kinds" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

@@ -40,9 +40,9 @@ class ChannelPty: public Pty
 {
   public:
     /// Receives every chunk the terminal writes to its "stdin" (keyboard and
-    /// mouse encodings, replies). Invoked on the writing thread, outside the
-    /// pty's lock. When unset, writes accumulate in a buffer instead.
-    using WriteSink = std::function<void(std::string_view)>;
+    /// mouse encodings, replies), with what the terminal says it carries (@see Pty::writeInput). Invoked on
+    /// the writing thread, outside the pty's lock. When unset, writes accumulate in a buffer instead.
+    using WriteSink = std::function<void(std::string_view, InputKind)>;
 
     /// Receives every resize request the terminal issues. Invoked on the
     /// resizing thread, outside the pty's lock.
@@ -101,6 +101,7 @@ class ChannelPty: public Pty
                                                  size_t size) override;
     void wakeupReader() override;
     [[nodiscard]] int write(std::string_view data) override;
+    [[nodiscard]] int writeInput(std::string_view data, InputKind kind) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
     /// Nothing to start: there is no child process. Reported as a plain success so the device

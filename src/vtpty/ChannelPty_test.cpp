@@ -92,12 +92,22 @@ TEST_CASE("writes buffer when no sink is set and route to the sink otherwise", "
     CHECK(pty.stdinSnapshot() == "buffered");
 
     auto sunk = std::vector<std::string> {};
-    pty.setWriteSink([&sunk](std::string_view data) { sunk.emplace_back(data); });
+    auto kinds = std::vector<vtpty::InputKind> {};
+    pty.setWriteSink([&sunk, &kinds](std::string_view data, vtpty::InputKind kind) {
+        sunk.emplace_back(data);
+        kinds.push_back(kind);
+    });
     CHECK(pty.write("routed") == 6);
     REQUIRE(sunk.size() == 1);
     CHECK(sunk.front() == "routed");
     // Sink-routed writes do not accumulate in the buffer.
     CHECK(pty.stdinSnapshot() == "buffered");
+
+    // A plain write carries nothing; writeInput() hands its kind to the sink.
+    CHECK(pty.writeInput("typed", vtpty::InputKind::Keyboard) == 5);
+    REQUIRE(kinds.size() == 2);
+    CHECK(kinds[0] == vtpty::InputKind::Other);
+    CHECK(kinds[1] == vtpty::InputKind::Keyboard);
 }
 
 TEST_CASE("resize updates the page size and notifies the sink", "[vtpty][channelpty]")

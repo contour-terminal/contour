@@ -496,6 +496,8 @@ namespace
     {
         out.varint(pdu.session);
         out.blob(pdu.data);
+        if (pdu.kind != InputKind::Other)
+            out.u8(static_cast<uint8_t>(pdu.kind));
     }
 
     void encodeBody(Writer& out, ResizeRequest const& pdu)
@@ -1093,6 +1095,15 @@ namespace
             out.string(record.title);
             out.string(record.message);
         }
+        if (pdu.timing == StatusTimingBlock::Omitted)
+            return;
+        out.varint(pdu.records.size());
+        for (auto const& record: pdu.records)
+        {
+            out.u8(record.origin);
+            out.svarint(record.sinceNs);
+            out.varint(record.generation);
+        }
     }
 
     void encodeBody(Writer& out, SessionInputEcho const& pdu)
@@ -1426,6 +1437,15 @@ namespace
         if (!data)
             return std::unexpected(data.error());
         pdu.data.assign(data->begin(), data->end());
+        // Capability::InputKinds. An unknown kind, from a newer peer, says nothing this end knows of.
+        if (in.remaining() != 0)
+        {
+            auto const kind = in.u8();
+            if (!kind)
+                return std::unexpected(kind.error());
+            pdu.kind =
+                *kind == static_cast<uint8_t>(InputKind::Keyboard) ? InputKind::Keyboard : InputKind::Other;
+        }
         return pdu;
     }
 
@@ -2256,6 +2276,20 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.records, decodeProgramStatusRecord); !decoded)
             return std::unexpected(decoded.error());
+        // The timing block, one entry per record, only from a peer that shares the capability.
+        if (in.remaining() != 0)
+        {
+            pdu.timing = StatusTimingBlock::Included;
+            auto entries = uint64_t {};
+            if (!assign(in.varint(), entries, error))
+                return std::unexpected(error);
+            if (entries != pdu.records.size())
+                return std::unexpected(DecodeError::MalformedPdu);
+            for (auto& record: pdu.records)
+                if (!assign(in.u8(), record.origin, error) || !assign(in.svarint(), record.sinceNs, error)
+                    || !assign(in.varint(), record.generation, error))
+                    return std::unexpected(error);
+        }
         return pdu;
     }
 

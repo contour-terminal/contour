@@ -697,6 +697,7 @@ namespace
                                                        proto::Capability::Heartbeat,
                                                        proto::Capability::ControlApi,
                                                        proto::Capability::ProgramStatus,
+                                                       proto::Capability::ProgramStatusTiming,
                                                        proto::Capability::ControlPermissions,
                                                        proto::Capability::InputEcho,
                                                        proto::Capability::TabMerge,

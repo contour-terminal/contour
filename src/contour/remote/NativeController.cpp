@@ -72,6 +72,8 @@ namespace
             vthost::proto::Capability::ProfileByName,
             vthost::proto::Capability::TabEdits,
             vthost::proto::Capability::ProgramStatus,
+            vthost::proto::Capability::ProgramStatusTiming,
+            vthost::proto::Capability::InputKinds,
             vthost::proto::Capability::InputEcho,
             vthost::proto::Capability::TabMerge,
             vthost::proto::Capability::MoveNode,
@@ -101,6 +103,18 @@ namespace
     {
         return preference == vtbackend::ColorPreference::Dark ? vthost::proto::WireColorPreference::Dark
                                                               : vthost::proto::WireColorPreference::Light;
+    }
+
+    /// @param kind What the terminal says the bytes it wrote carry.
+    /// @return Its wire form.
+    [[nodiscard]] constexpr vthost::proto::InputKind wireInputKind(vtpty::InputKind kind) noexcept
+    {
+        switch (kind)
+        {
+            case vtpty::InputKind::Keyboard: return vthost::proto::InputKind::Keyboard;
+            case vtpty::InputKind::Other: break;
+        }
+        return vthost::proto::InputKind::Other;
     }
 } // namespace
 
@@ -1900,7 +1914,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     auto const serial = _nextBindingSerial++;
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },
-        [this, session, serial](std::string_view bytes) {
+        [this, session, serial](std::string_view bytes, vtpty::InputKind kind) {
             // Typed while no connection is up: dropped here, never queued for whatever answers next.
             auto const connection = _inputConnection.load();
             if (connection == 0)
@@ -1908,7 +1922,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
                 _droppedInputBytes += bytes.size();
                 return;
             }
-            _reactor.post([this, session, serial, connection, copy = std::string { bytes }] {
+            _reactor.post([this, session, serial, connection, kind, copy = std::string { bytes }] {
                 // Lost meanwhile, or this pane's binding was detached and its session id is another's now.
                 if (_client == nullptr || _inputConnection.load() != connection
                     || !isBinding(session, serial))
@@ -1916,7 +1930,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
                     _droppedInputBytes += copy.size();
                     return;
                 }
-                _client->sendInput(session, copy);
+                _client->sendInput(session, copy, wireInputKind(kind));
             });
         },
         // A pane's grid is NOT the client area: reporting it as one made the daemon project the

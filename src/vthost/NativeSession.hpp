@@ -91,6 +91,8 @@ struct HandshakePolicy
                                                                    proto::Capability::TabEdits,
                                                                    proto::Capability::Heartbeat,
                                                                    proto::Capability::ProgramStatus,
+                                                                   proto::Capability::ProgramStatusTiming,
+                                                                   proto::Capability::InputKinds,
                                                                    proto::Capability::ControlPermissions,
                                                                    proto::Capability::InputEcho,
                                                                    proto::Capability::TabMerge,

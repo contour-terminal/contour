@@ -732,17 +732,17 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         // The three badge roles share one program-status computation per tab, which takes every pane's
         // terminal lock; the attention they weigh it against is the manager's, and takes none.
         case Roles::BadgeRole:
-            return tab != nullptr ? static_cast<int>(std::to_underlying(tabBadge(*tab, row).kind)) : 0;
+            return tab != nullptr ? static_cast<int>(std::to_underlying(tabBadge(*tab).kind)) : 0;
         case Roles::BadgeTextRole: {
             if (tab == nullptr)
                 return QString {};
-            auto const& program = cachedProgramStatusBadge(*tab, row);
-            return isProgramStatusBadge(tabBadge(*tab, row).kind, program.kind)
+            auto const& program = cachedProgramStatusBadge(*tab);
+            return isProgramStatusBadge(tabBadge(*tab).kind, program.kind)
                        ? QString::fromStdString(program.text)
                        : QString {};
         }
         case Roles::BadgeProgressRole:
-            return tab != nullptr ? tabBadge(*tab, row).progressPercent.value_or(-1) : -1;
+            return tab != nullptr ? tabBadge(*tab).progressPercent.value_or(-1) : -1;
         case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
         default: return {};
     }
@@ -768,29 +768,32 @@ int WindowController::activeTabIndex() const noexcept
     return win != nullptr ? win->activeTabIndex() : -1;
 }
 
-ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& tab, int row) const
+ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& tab) const
 {
-    // In front exactly when the strip highlights it.
-    auto const focus = row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
-    return badgeForTab(tab, focus, [this](vtworkspace::SessionId id) {
-        auto const* session = _manager.sessionForId(id);
-        if (session == nullptr)
-            return std::vector<vtbackend::ProgramStatusRecord> {};
-        // The lock the parser thread holds while it changes the records; one hold per pane.
-        auto const& terminal = session->terminal();
-        auto const _ = std::lock_guard { terminal };
-        return resolvedRecords(terminal.programStatus());
-    });
+    // What is in front is noted seen as it shows (TerminalSessionManager), so the tab's own seen
+    // generations decide what is left to show; the row does not.
+    return badgeForTab(
+        tab,
+        [this](vtworkspace::SessionId id) {
+            auto const* session = _manager.sessionForId(id);
+            if (session == nullptr)
+                return std::vector<vtbackend::ProgramStatusRecord> {};
+            // The lock the parser thread holds while it changes the records; one hold per pane.
+            auto const& terminal = session->terminal();
+            auto const _ = std::lock_guard { terminal };
+            return resolvedRecords(terminal.programStatus());
+        },
+        [this](vtworkspace::SessionId id) { return _manager.tabAttention().of(id).seenStatusGeneration; });
 }
 
-ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const
+ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab) const
 {
-    return _badges.get(tab.id(), [&] { return programStatusBadge(tab, row); });
+    return _badges.get(tab.id(), [&] { return programStatusBadge(tab); });
 }
 
-TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab, int row) const
+TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab) const
 {
-    auto const program = cachedProgramStatusBadge(tab, row);
+    auto const program = cachedProgramStatusBadge(tab);
     auto const pooled = pooledAttention(tab, _manager.tabAttention());
     // The model holds a percentage as uint8_t; the badge decision speaks int (§3.4), widened here.
     return resolveTabBadge({
@@ -1854,7 +1857,7 @@ std::vector<TabBadgeKind> WindowController::tabBadgeKinds() const
     if (auto const* win = window())
         for (auto const row: std::views::iota(0, win->tabCount()))
             if (auto const* tab = win->tabAt(row))
-                kinds.push_back(tabBadge(*tab, row).kind);
+                kinds.push_back(tabBadge(*tab).kind);
     return kinds;
 }
 
@@ -3412,7 +3415,8 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
 
 void WindowController::refreshActiveTabHighlight()
 {
-    // The badges too: a done or failed program shows only in a tab the user is not looking at.
+    // The badges too: the tab now in front has its panes' records seen, and a seen done or failed program
+    // shows no more.
     _badges.clear();
     if (auto const rows = rowCount(); rows > 0)
         emit dataChanged(index(0),
