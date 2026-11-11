@@ -556,16 +556,19 @@ TEST_CASE("awaitConnected counts its budget from startConnecting", "[remote][mux
     auto clock = core::platform::ManualClock {};
     auto controller = ConnectingController { clock };
     controller.startConnecting();
-    clock.advance(5s); // booting the GUI took the whole budget
+    constexpr auto Budget = std::chrono::milliseconds { 5s };
+    clock.advance(Budget); // booting the GUI took the whole budget
 
     auto const started = std::chrono::steady_clock::now();
-    auto const connected = controller.awaitConnected(5s);
+    auto const connected = controller.awaitConnected(Budget);
     auto const took = std::chrono::steady_clock::now() - started;
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "timed out");
     CHECK(controller.stopped());
     CHECK(took >= contour::remote::MinimumConnectAwait); // the floor, not zero
-    CHECK(took < 4s);                                    // and not a fresh 5 s
+    // And not a fresh budget, which would take all of it. Measured against the budget itself, not a
+    // tighter bound: the 3 s between the floor and it are what a loaded CI runner may need (4.7 s seen).
+    CHECK(took < Budget);
 }
 
 TEST_CASE("a connect that comes up within the floor succeeds although the budget is spent",
