@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Utils.hpp>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,6 +11,8 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <vtworkspace/ModelEvents.hpp>
@@ -2612,3 +2616,73 @@ TEST_CASE("SessionModel: removing a workspace announces it with the place it had
     f.model.removeWorkspace(second);
     CHECK(f.events.sawPrefix(std::format("workspaceRemoved:{}:1", second.value)));
 }
+
+// {{{ Tab indices as observers see them
+
+namespace
+{
+/// Checks, at every completed change, that every workspace's active and previous tab indices are in range:
+/// what an observer that reads the model from inside an event (a structure capture) relies on.
+struct IndexChecker: ModelEvents
+{
+    SessionModel const* model = nullptr;
+    int checked = 0;
+    std::vector<std::string> outOfRange;
+
+    void check(std::string_view event)
+    {
+        ++checked;
+        for (auto const index: std::views::iota(0, model->workspaceCount()))
+        {
+            auto const* const workspace = model->workspaceAt(index);
+            auto const count = workspace->tabCount();
+            auto const active = workspace->activeTabIndex();
+            auto const previous = workspace->previousActiveTabIndex();
+            if (active < -1 || active >= count || (count > 0 && active < 0) || previous < -1
+                || previous >= count)
+                outOfRange.push_back(
+                    std::format("{}: active {} previous {} of {}", event, active, previous, count));
+        }
+    }
+
+    void tabAdded(WorkspaceId, TabId, int) override { check("tabAdded"); }
+    void tabClosed(WorkspaceId, TabId, int) override { check("tabClosed"); }
+    void tabMoved(WorkspaceId, TabId, int, int) override { check("tabMoved"); }
+    void tabMovedToWorkspace(WorkspaceId, TabId, int, WorkspaceId, int) override
+    {
+        check("tabMovedToWorkspace");
+    }
+    void activeTabChanged(WorkspaceId, TabId, int) override { check("activeTabChanged"); }
+    void paneSplit(TabId, PaneId, PaneId) override { check("paneSplit"); }
+    void paneClosed(TabId, PaneId, PaneId) override { check("paneClosed"); }
+    void activePaneChanged(TabId, PaneId) override { check("activePaneChanged"); }
+    void paneRatioChanged(TabId, PaneId, double) override { check("paneRatioChanged"); }
+    void tabTitleChanged(TabId) override { check("tabTitleChanged"); }
+    void tabColorChanged(TabId) override { check("tabColorChanged"); }
+};
+} // namespace
+
+TEST_CASE("SessionModel: tab indices are in range at every event", "[vtworkspace][model][events]")
+{
+    IndexChecker events;
+    uint64_t nextSession = 1;
+    SessionModel model { events, [&] { return SessionId { nextSession++ }; } };
+    events.model = &model;
+
+    auto* first = model.createWorkspace();
+    auto* second = model.createWorkspace();
+    auto* a = model.createTab(first->id());
+    auto* b = model.createTab(first->id());
+    auto* c = model.createTab(first->id());
+    std::ignore = model.createTab(second->id());
+    model.moveTab(first->id(), a->id(), 2);
+    model.moveTabToWorkspace(first->id(), b->id(), second->id(), 0);
+    model.closeTab(first->id(), c->id());
+    model.closeTab(first->id(), a->id());
+    model.closeTab(second->id(), b->id());
+
+    CHECK(events.checked > 0);
+    INFO(core::joinHumanReadable(events.outOfRange, "; ")); // libc++ (macOS) has no views::join_with
+    CHECK(events.outOfRange.empty());
+}
+// }}}

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/keeper/KeeperProcess.hpp>
 
+#ifdef __linux__
+    #include <sys/prctl.h>
+#endif
+
 #include <core/log/LogStore.hpp>
 
 #include <charconv>
@@ -86,6 +90,14 @@ std::expected<int, KeeperStartError> runKeeperProcess(KeeperProcessConfig config
             "the keeper runs {} threads, not one: {}", *threads, describe(KeeperStartError::MultiThreaded));
         return std::unexpected { KeeperStartError::MultiThreaded };
     }
+
+#ifdef __linux__
+    // Not dumpable: /proc/<keeper>/fd and /proc/<keeper>/mem become root's, so that no other process of the
+    // user's -- every hosted shell among them -- can open what the keeper holds through them: each PTY
+    // master, and the structure's memory object, which carries the private key of the daemon's self-signed
+    // TLS identity. The daemon and the shells it forks are dumpable again by their exec.
+    ::prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+#endif
 
     // A second keeper on the label fails here, before any daemon is started or any socket touched.
     auto lock = lockLabel(config.socketPath);

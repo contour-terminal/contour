@@ -130,8 +130,13 @@ struct PersistenceHarness
 
     void persist()
     {
-        persistence = std::make_unique<WorkspacePersistence>(
-            loop, *host, writer, WorkspacePersistenceConfig { .interval = Interval }, wallClock);
+        persistence =
+            std::make_unique<WorkspacePersistence>(loop,
+                                                   *host,
+                                                   writer,
+                                                   WorkspacePersistenceConfig { .interval = Interval },
+                                                   wallClock,
+                                                   PendingRestoreCopy::Kept);
     }
 
     void pass(std::chrono::milliseconds duration)

@@ -92,9 +92,39 @@ namespace
 
 void ChildExit::record(vtpty::ExitStatus status)
 {
-    auto const _ = std::scoped_lock { _lock };
-    if (!_status)
-        _status = status;
+    settle(status);
+}
+
+void ChildExit::abandon()
+{
+    settle(std::nullopt);
+}
+
+void ChildExit::settle(std::optional<vtpty::ExitStatus> status)
+{
+    auto waiting = std::vector<std::function<void()>> {};
+    {
+        auto const _ = std::scoped_lock { _lock };
+        if (!_status)
+            _status = status;
+        _settlement = Settlement::Settled;
+        waiting = std::exchange(_waiting, {});
+    }
+    for (auto& then: waiting)
+        then();
+}
+
+void ChildExit::whenKnown(std::function<void()> then)
+{
+    {
+        auto const _ = std::scoped_lock { _lock };
+        if (_settlement == Settlement::Awaited)
+        {
+            _waiting.push_back(std::move(then));
+            return;
+        }
+    }
+    then();
 }
 
 std::optional<vtpty::ExitStatus> ChildExit::status() const
@@ -112,15 +142,33 @@ std::shared_ptr<ChildExit> KeeperExits::watch(keeper::KeeperSessionId session)
     return exit;
 }
 
+void KeeperExits::abandonAll()
+{
+    auto watched = std::vector<std::shared_ptr<ChildExit>> {};
+    {
+        auto const _ = std::scoped_lock { _lock };
+        for (auto const& entry: _watched)
+            if (auto exit = entry.second.lock())
+                watched.push_back(std::move(exit));
+    }
+    for (auto const& exit: watched)
+        exit->abandon();
+}
+
 void KeeperExits::exited(keeper::KeeperSessionId session, vtpty::ExitStatus status)
 {
-    auto const _ = std::scoped_lock { _lock };
-    auto const found = _watched.find(session);
-    if (found == _watched.end())
-        return;
-    if (auto const exit = found->second.lock())
+    auto exit = std::shared_ptr<ChildExit> {};
+    {
+        auto const _ = std::scoped_lock { _lock };
+        auto const found = _watched.find(session);
+        if (found == _watched.end())
+            return;
+        exit = found->second.lock();
+        _watched.erase(found);
+    }
+    // Outside the lock: what waits for it may end a session, and ask for another's exit.
+    if (exit)
         exit->record(status);
-    _watched.erase(found);
 }
 
 // }}}
@@ -137,9 +185,35 @@ KeeperChild::KeeperChild(KeeperLink& link,
     Require(_pty != nullptr);
 }
 
+KeeperChild::KeeperChild(KeeperLink& link,
+                         std::shared_ptr<KeeperExits> exits,
+                         KeeperChildConfig config,
+                         std::unique_ptr<vtpty::Pty> pty,
+                         KeptChild kept):
+    KeeperChild { link, std::move(exits), std::move(config), std::move(pty) }
+{
+    _session = std::to_underlying(kept.session);
+    _pid = kept.pid;
+    if (auto const terminal = _pty->handover())
+        _master = terminal->masterFd;
+    _exit = _exits->watch(kept.session);
+    if (kept.exited)
+        _exit->record(*kept.exited);
+    _settle = std::move(kept.settle);
+}
+
 KeeperChild::~KeeperChild()
 {
     close();
+}
+
+std::expected<vtpty::InheritedPty, vtpty::AdoptError> KeeperChild::releaseHandover()
+{
+    auto released = _pty->releaseHandover();
+    // The next image holds the session from here: its close is the one that releases it.
+    if (released)
+        std::call_once(_released, [] {});
+    return released;
 }
 
 std::optional<keeper::KeeperSessionId> KeeperChild::session() const noexcept
@@ -248,6 +322,16 @@ vtpty::SpawnProgress KeeperChild::spawnProgress() const
     return vtpty::settleProgressOf(_settle);
 }
 
+void KeeperChild::whenStatusKnown(std::function<void()> then)
+{
+    if (!_exit)
+    {
+        then();
+        return;
+    }
+    _exit->whenKnown(std::move(then));
+}
+
 std::optional<vtpty::ExitStatus> KeeperChild::checkStatus() const
 {
     return _exit ? _exit->status() : std::nullopt;
@@ -290,8 +374,17 @@ void KeeperChild::terminate(vtpty::TerminationHint hint)
 
 vtpty::ChildCrossing KeeperChild::crossing() const
 {
+    // The pid travels for the image that binds the child again (KeptChild), not to be adopted.
+    auto child = std::optional<vtpty::AdoptedChild> {};
+    if (_pid > 0)
+        child = vtpty::AdoptedChild { .pid = _pid,
+                                      .executable = _config.exec.program,
+                                      .args = _config.exec.arguments,
+                                      .cwd = _config.exec.workingDirectory,
+                                      .hangupGrace = vtpty::HangupGrace { .duration = _config.hangupGrace },
+                                      .processHandle = {} };
     return vtpty::ChildCrossing { .kind = vtpty::CrossingKind::Keeper,
-                                  .child = std::nullopt,
+                                  .child = std::move(child),
                                   .keeperSession = _session };
 }
 

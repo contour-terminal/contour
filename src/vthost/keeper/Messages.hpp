@@ -263,7 +263,11 @@ struct Launch
     static constexpr std::size_t MaxDescriptors = 0;
     LaunchContinuity continuity = LaunchContinuity::Fresh;
     std::vector<uint8_t> options;
-    void visitFields(this auto& self, auto& visitor) { visitor(1, self.continuity); visitor(2, self.options); }
+    /// The soft descriptor limit (RLIMIT_NOFILE) the keeper started with, which the daemon runs above (the
+    /// keeper raised it for both) and gives each program it starts back; 0 for unknown (a keeper from before
+    /// the field), which leaves the daemon's children at its own.
+    uint64_t originalDescriptorLimit = 0;
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self.continuity); visitor(2, self.options); visitor(3, self.originalDescriptorLimit); }
     [[nodiscard]] bool operator==(Launch const&) const = default;
 };
 

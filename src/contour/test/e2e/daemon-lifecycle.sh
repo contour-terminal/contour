@@ -124,11 +124,13 @@ done
 # ELF survives, so the daemon is not re-executed from a per-version copy and nothing is staged. (The
 # staging and re-exec path is covered by vthost_test's [relocate] cases, and for an AppImage by the
 # manual check in docs/internals/vthost.md.)
-# Both the keeper ($DAEMON_PID) and the daemon it started, its child, run from the binary started.
-if [ -e "/proc/$DAEMON_PID/exe" ]; then
+# Both the keeper ($DAEMON_PID) and the daemon it started, its child, run from the binary started. The keeper
+# is not dumpable, so its /proc/<pid>/exe is root's and unreadable: it is known by its command line, which
+# stays readable; the daemon, dumpable again by its exec, by its executable.
+if [ -d "/proc/$DAEMON_PID" ]; then
     STARTED="$(readlink -f "$CONTOUR")"
-    RUNNING="$(readlink "/proc/$DAEMON_PID/exe")"
-    [ "$RUNNING" = "$STARTED" ] || fail "the keeper runs from $RUNNING, not from $STARTED"
+    LAUNCHED="$(tr '\0' '\n' < "/proc/$DAEMON_PID/cmdline" | head -n 1)"
+    [ "$(readlink -f "$LAUNCHED")" = "$STARTED" ] || fail "the keeper was started as $LAUNCHED, not as $STARTED"
     KEPT="$(cat "/proc/$DAEMON_PID/task/$DAEMON_PID/children")"
     [ -n "$KEPT" ] || fail "the keeper $DAEMON_PID runs no daemon"
     for child in $KEPT; do

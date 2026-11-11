@@ -4,14 +4,17 @@
 #include <vtpty/ExecutablePath.hpp>
 
 #include <core/codec/Stream.hpp>
+#include <core/log/LogSink.hpp>
 #include <core/platform/Clock.hpp>
 
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -56,33 +59,6 @@ namespace
 {
     constexpr auto KeeperMode = std::string_view { "--keeper" };
     constexpr auto ServeMode = std::string_view { "--keeper-serve" };
-
-    /// How each HarnessStart is spelled on the harness keeper's command line.
-    struct StartWord
-    {
-        HarnessStart start;
-        std::string_view word;
-    };
-
-    constexpr auto StartWords = std::array {
-        StartWord { .start = HarnessStart::Serves, .word = "serves" },
-        StartWord { .start = HarnessStart::Fails, .word = "fails" },
-        StartWord { .start = HarnessStart::Relays, .word = "relays" },
-    };
-    static_assert(StartWords.size() == core::codec::EnumWire<HarnessStart>::Values.size());
-
-    /// @return How @p start is spelled.
-    [[nodiscard]] std::string_view wordOf(HarnessStart start)
-    {
-        return std::ranges::find(StartWords, start, &StartWord::start)->word;
-    }
-
-    /// @return What @p word spells; Serves for a word no start is spelled as.
-    [[nodiscard]] HarnessStart startOf(std::string_view word)
-    {
-        auto const row = std::ranges::find(StartWords, word, &StartWord::word);
-        return row != StartWords.end() ? row->start : HarnessStart::Serves;
-    }
 
     /// The status the harness daemon exits with when the handshake with its keeper failed.
     constexpr auto AttachFailureStatus = 2;
@@ -152,6 +128,44 @@ namespace
         }
     }
 
+    /// @return How many daemon processes @p launchLog names.
+    [[nodiscard]] std::size_t launchCount(std::string const& launchLog)
+    {
+        auto file = std::ifstream { launchLog };
+        return static_cast<std::size_t>(std::ranges::distance(std::views::istream<int>(file)));
+    }
+
+    /// @return The daemon @p launch describes.
+    [[nodiscard]] DaemonConfig daemonConfigOf(HarnessLaunch const& launch)
+    {
+        auto config = DaemonConfig {};
+        config.socketPath = launch.socketPath;
+        config.releaseVersion = "keeper-harness";
+        // A run of its own, as `contour daemon` draws it; a daemon restarted after a crash serves as the run
+        // its structure names.
+        config.instance = (uint64_t { std::random_device {}() } << 32U) | std::random_device {}() | 1U;
+        for (auto const& command: launch.panes)
+        {
+            auto tab = vtworkspace::LayoutTab {};
+            tab.root.command = "/bin/sh";
+            tab.root.arguments = { "-c", command };
+            config.startupLayout.tabs.push_back(std::move(tab));
+        }
+        if (!launch.snapshotPath.empty())
+        {
+            config.persistence.snapshotPath = launch.snapshotPath;
+            config.persistence.interval = std::chrono::seconds { 1 };
+        }
+        if (launch.tcp == HarnessTcp::Loopback)
+        {
+            config.nativeTcp = NativeTcpListenerConfig {};
+            config.nativeTcp->host = "127.0.0.1";
+            config.nativeTcp->port = 0;
+            config.nativeTcp->token = "harness";
+        }
+        return config;
+    }
+
     /// The daemon behind the keeper: the handshake on its channel, then runDaemon().
     [[nodiscard]] int serveBehindKeeper()
     {
@@ -169,26 +183,32 @@ namespace
             std::cerr << "keeper-serve: the launch record is unreadable\n";
             return AttachFailureStatus;
         }
+        auto const first = launchCount(launch.launchLog) == 0;
         std::ofstream { launch.launchLog, std::ios::app } << ::getpid() << '\n';
         if (launch.start == HarnessStart::Fails)
             return HarnessStartFailureStatus;
-        if (launch.start == HarnessStart::Relays)
-            return relayChannel(launch.socketPath, *std::move(attachment));
-
-        auto config = DaemonConfig {};
-        config.socketPath = launch.socketPath;
-        config.releaseVersion = "keeper-harness";
-        return runDaemon(config, std::nullopt, *std::move(attachment));
+        if (launch.start == HarnessStart::Relays || (launch.start == HarnessStart::RelaysThenServes && first))
+            return relayChannel(launch.relayPath, *std::move(attachment));
+        // What the daemon says goes to the keeper's output, for a test to read (KeeperFixture::log()).
+        auto const logging = core::log::ScopedOutput::create(
+            { .filter = "vthost.daemon,vthost.session", .file = std::nullopt, .showProcessId = true });
+        return runDaemon(daemonConfigOf(launch), std::nullopt, *std::move(attachment));
     }
 
-    /// The keeper: keeps `vthost_test --keeper-serve` on @p socket.
-    [[nodiscard]] int keepHarnessDaemon(std::string_view socket,
-                                        std::string_view launchLog,
-                                        std::string_view start)
+    [[nodiscard]] std::string readFile(std::filesystem::path const& path);
+
+    /// The keeper: keeps `vthost_test --keeper-serve` as the HarnessLaunch in @p record says.
+    [[nodiscard]] int keepHarnessDaemon(std::string_view record)
     {
-        auto const launch = HarnessLaunch { .socketPath = std::string { socket },
-                                            .launchLog = std::string { launchLog },
-                                            .start = startOf(start) };
+        auto const content = readFile(std::filesystem::path { std::string { record } });
+        auto const bytes = std::span { reinterpret_cast<uint8_t const*>(content.data()), content.size() };
+        auto launch = HarnessLaunch {};
+        if (!core::codec::decodeFields(bytes, launch))
+        {
+            std::cerr << "keeper: the launch record is unreadable\n";
+            return HarnessKeeperStartFailureStatus;
+        }
+        auto const socket = launch.socketPath;
         auto writer = core::codec::Writer {};
         core::codec::encodeFields(writer, launch);
         auto const ran = keeper::runKeeperProcess(keeper::KeeperProcessConfig {
@@ -210,6 +230,35 @@ namespace
             return HarnessKeeperStartFailureStatus;
         }
         return *ran;
+    }
+
+    /// @return @p panes with `@DIR@` replaced by @p directory.
+    [[nodiscard]] std::vector<std::string> panesIn(std::vector<std::string> panes,
+                                                   std::filesystem::path const& directory)
+    {
+        constexpr auto Placeholder = std::string_view { "@DIR@" };
+        for (auto& command: panes)
+        {
+            auto at = command.find(Placeholder);
+            while (at != std::string::npos)
+            {
+                command.replace(at, Placeholder.size(), directory.string());
+                at = command.find(Placeholder, at);
+            }
+        }
+        return panes;
+    }
+
+    /// Writes @p launch, encoded, to @p path.
+    /// @return @p path.
+    [[nodiscard]] std::filesystem::path writeRecord(std::filesystem::path path, HarnessLaunch const& launch)
+    {
+        auto writer = core::codec::Writer {};
+        core::codec::encodeFields(writer, launch);
+        auto const bytes = std::move(writer).take();
+        std::ofstream { path, std::ios::binary }.write(reinterpret_cast<char const*>(bytes.data()),
+                                                       static_cast<std::streamsize>(bytes.size()));
+        return path;
     }
 
     /// @return A new directory of the test's own, owner-only, as a daemon's socket directory must be.
@@ -276,24 +325,46 @@ std::optional<int> runKeeperHarnessIfRequested(int argc, char const* argv[])
     auto const arguments = std::span { argv, static_cast<std::size_t>(argc) };
     if (arguments.size() >= 2 && arguments[1] == ServeMode)
         return serveBehindKeeper();
-    constexpr auto KeeperArgumentCount = std::size_t { 5 };
+    constexpr auto KeeperArgumentCount = std::size_t { 3 };
     if (arguments.size() >= KeeperArgumentCount && arguments[1] == KeeperMode)
-        return keepHarnessDaemon(arguments[2], arguments[3], arguments[4]);
+        return keepHarnessDaemon(arguments[2]);
     return std::nullopt;
 }
 
 KeeperFixture::KeeperFixture(HarnessStart start):
+    KeeperFixture { HarnessSetup { .start = start,
+                                   .panes = {},
+                                   .snapshot = HarnessSnapshot::None,
+                                   .tcp = HarnessTcp::Off,
+                                   .softDescriptorLimit = std::nullopt } }
+{
+}
+
+KeeperFixture::KeeperFixture(HarnessSetup const& setup):
     _directory { makeOwnerOnlyDirectory() },
     _socket { _directory / "control" },
     _launchLog { _directory / "launches" },
     _output { _directory / "output" },
-    _relayListener { start == HarnessStart::Relays ? unixSocket(_socket.string(), ::bind)
-                                                   : keeper::UniqueFd {} },
-    _keeper { spawnKeeper(start) }
+    _record { writeRecord(_directory / "launch-record",
+                          HarnessLaunch { .socketPath = _socket.string(),
+                                          .launchLog = _launchLog.string(),
+                                          .start = setup.start,
+                                          .panes = panesIn(setup.panes, _directory),
+                                          .snapshotPath = setup.snapshot == HarnessSnapshot::Kept
+                                                              ? (_directory / "workspace.snapshot").string()
+                                                              : std::string {},
+                                          .tcp = setup.tcp,
+                                          .relayPath = (_directory / "relay").string() }) },
+    _softDescriptorLimit { setup.softDescriptorLimit },
+    _relayListener { setup.start == HarnessStart::Relays || setup.start == HarnessStart::RelaysThenServes
+                         ? unixSocket((_directory / "relay").string(), ::bind)
+                         : keeper::UniqueFd {} },
+    _keeper { spawnKeeper() }
 {
+    auto const start = setup.start;
     if (start == HarnessStart::Fails)
         return;
-    if (start == HarnessStart::Relays)
+    if (start == HarnessStart::Relays || start == HarnessStart::RelaysThenServes)
     {
         acceptRelay();
         return;
@@ -375,7 +446,7 @@ void KeeperFixture::end(Ending ending)
     std::filesystem::remove_all(_directory, ignored);
 }
 
-int KeeperFixture::spawnKeeper(HarnessStart start) const
+int KeeperFixture::spawnKeeper() const
 {
     auto actions = ::posix_spawn_file_actions_t {};
     ::posix_spawn_file_actions_init(&actions);
@@ -384,16 +455,22 @@ int KeeperFixture::spawnKeeper(HarnessStart start) const
         &actions, STDOUT_FILENO, _output.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
     ::posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
     auto const image = ownExecutable().string();
-    auto const socket = _socket.string();
-    auto const launchLog = _launchLog.string();
-    auto const startWord = std::string { wordOf(start) };
-    auto arguments =
-        std::array<std::string, 5> { image, std::string { KeeperMode }, socket, launchLog, startWord };
-    auto argv = std::array<char*, 6> {};
+    auto arguments = std::array<std::string, 3> { image, std::string { KeeperMode }, _record.string() };
+    auto argv = std::array<char*, 4> {};
     for (auto&& [slot, argument]: std::views::zip(argv, arguments))
         slot = argument.data();
     auto pid = ::pid_t {};
+    // The keeper inherits the soft limit asked for; this process has its own back at once.
+    auto original = rlimit {};
+    ::getrlimit(RLIMIT_NOFILE, &original);
+    if (_softDescriptorLimit)
+    {
+        auto lowered = original;
+        lowered.rlim_cur = std::min<rlim_t>(static_cast<rlim_t>(*_softDescriptorLimit), original.rlim_max);
+        ::setrlimit(RLIMIT_NOFILE, &lowered);
+    }
     auto const spawned = ::posix_spawn(&pid, image.c_str(), &actions, nullptr, argv.data(), environ);
+    ::setrlimit(RLIMIT_NOFILE, &original);
     ::posix_spawn_file_actions_destroy(&actions);
     if (spawned != 0)
         throw std::runtime_error { std::format("cannot start the keeper: {}",
@@ -435,7 +512,7 @@ std::optional<int> KeeperFixture::awaitKeeperExit(std::chrono::milliseconds boun
 
 std::optional<int> KeeperFixture::runSecondKeeper(std::chrono::milliseconds bound) const
 {
-    auto const second = spawnKeeper(HarnessStart::Serves);
+    auto const second = spawnKeeper();
     auto const waited = awaitProcess(second, bound);
     if (!waited)
     {
@@ -448,6 +525,32 @@ std::optional<int> KeeperFixture::runSecondKeeper(std::chrono::milliseconds boun
 std::string KeeperFixture::log() const
 {
     return readFile(_output);
+}
+
+int KeeperFixture::awaitNewDaemon(int previous, std::chrono::milliseconds bound) const
+{
+    auto const deadline = std::chrono::steady_clock::now() + bound;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (auto const pid = daemonPid(); pid > 0 && pid != previous)
+            return pid;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+    }
+    return 0;
+}
+
+uint16_t KeeperFixture::nativeTcpPort() const
+{
+    // The last daemon's word for it: "native TCP listener on 127.0.0.1:<port>".
+    constexpr auto Marker = std::string_view { "native TCP listener on 127.0.0.1:" };
+    auto const output = log();
+    auto const at = output.rfind(Marker);
+    if (at == std::string::npos)
+        return 0;
+    auto port = 0U;
+    auto const* const first = output.data() + at + Marker.size();
+    std::ignore = std::from_chars(first, output.data() + output.size(), port);
+    return static_cast<uint16_t>(port);
 }
 
 } // namespace vthost::testing

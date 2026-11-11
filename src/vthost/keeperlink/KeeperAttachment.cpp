@@ -91,12 +91,16 @@ std::expected<KeeperAttachment, AttachError> attachToKeeper(keeper::UniqueFd soc
         early.push_back(std::move(*received));
     }
 
-    auto attachment = KeeperAttachment { .channel = std::move(channel),
-                                         .continuity = launch->continuity,
-                                         .options = std::move(launch->options),
-                                         .version = keeper::negotiate(OwnVersion, *peerVersion),
-                                         .keeperProcessId = static_cast<int64_t>(::getppid()),
-                                         .inventory = {} };
+    auto attachment =
+        KeeperAttachment { .channel = std::move(channel),
+                           .continuity = launch->continuity,
+                           .options = std::move(launch->options),
+                           .version = keeper::negotiate(OwnVersion, *peerVersion),
+                           .keeperProcessId = static_cast<int64_t>(::getppid()),
+                           .childDescriptorLimit = launch->originalDescriptorLimit != 0
+                                                       ? std::optional { launch->originalDescriptorLimit }
+                                                       : std::nullopt,
+                           .inventory = {} };
 
     if (attachment.continuity == keeper::LaunchContinuity::Recovered)
     {

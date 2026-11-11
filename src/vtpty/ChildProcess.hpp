@@ -13,9 +13,11 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 namespace vtpty
@@ -65,6 +67,15 @@ struct ChildCrossing
     uint64_t keeperSession = 0; ///< The keeper's name for the child, for CrossingKind::Keeper.
 };
 
+/// How a child's exit status becomes known, measured from its terminal's hangup.
+enum class StatusArrival : std::uint8_t
+{
+    WithHangup = 0, ///< By the hangup, or moments after it: this process reaps the child itself.
+    /// When whoever reaps it says so (a PTY keeper), which may be well after the hangup: wait for
+    /// ChildProcess::whenStatusKnown() rather than for a moment.
+    Announced,
+};
+
 /// A shell's process, as the daemon manages it: spawned by this process, or held by someone else.
 class ChildProcess
 {
@@ -96,6 +107,19 @@ class ChildProcess
 
     /// @return How the child crosses a live upgrade.
     [[nodiscard]] virtual ChildCrossing crossing() const = 0;
+
+    /// @return How the child's exit status becomes known; WithHangup unless someone else reaps it.
+    [[nodiscard]] virtual StatusArrival statusArrival() const { return StatusArrival::WithHangup; }
+
+    /// Runs @p then once checkStatus() is final: the status known, or known never to come. At once by
+    /// default, as for a child this process reaps; later for a StatusArrival::Announced one. On the thread
+    /// that learns it (a daemon's loop).
+    /// @param then What to run; at most once.
+    virtual void whenStatusKnown(std::function<void()> then)
+    {
+        auto const run = std::move(then);
+        run();
+    }
 };
 
 #ifndef _WIN32

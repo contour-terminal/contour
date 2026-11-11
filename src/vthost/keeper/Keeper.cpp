@@ -106,7 +106,9 @@ void Keeper::launchDaemon(LaunchContinuity continuity)
     _ports.events.watchPid(
         WatchedProcess { .pid = _daemon->pid, .role = WatchedRole::Daemon, .processHandle = -1 });
     send(Hello {});
-    send(Launch { .continuity = continuity, .options = _launchOptions });
+    send(Launch { .continuity = continuity,
+                  .options = _launchOptions,
+                  .originalDescriptorLimit = _ports.budget.originalSoftLimit() });
 }
 
 void Keeper::onEnded(int pid, WireExitStatus status)
@@ -462,7 +464,14 @@ void Keeper::handle(Hello const& message, std::vector<UniqueFd>& /*fds*/)
     // is owed a Launch of its own. It takes the sessions over from the handover, not from an inventory.
     keeperLog()("the daemon (pid {}) runs a new image; it carries on from its handover", _daemon->pid);
     send(Hello {});
-    send(Launch { .continuity = LaunchContinuity::HandedOver, .options = _launchOptions });
+    send(Launch { .continuity = LaunchContinuity::HandedOver,
+                  .options = _launchOptions,
+                  .originalDescriptorLimit = _ports.budget.originalSoftLimit() });
+    // An exit the previous image may have heard and not acted on is the new image's to hear: the handover
+    // image carries no status, so the sessions that ended and are still held are told again.
+    for (auto const& entry: _sessions.inventory())
+        if (entry.message.exited)
+            send(Exited { .session = entry.message.session, .status = *entry.message.exited });
 }
 
 void Keeper::handle(Listener const& message, std::vector<UniqueFd>& fds)

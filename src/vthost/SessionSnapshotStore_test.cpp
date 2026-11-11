@@ -382,3 +382,29 @@ TEST_CASE("discard empties the snapshot and drops a pending restore", "[vthost][
         CHECK(fresh.load().verdict == LoadVerdict::Empty);
     }
 }
+
+TEST_CASE("peek reads the newer of the snapshot and its restored copy, and moves neither",
+          "[vthost][snapshot][store]")
+{
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
+    auto privacy = RecordingFilePrivacy { files };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
+    REQUIRE(store.write(sample(100)));
+    REQUIRE(store.beginRestore(RestoreSource::Snapshot));
+
+    SECTION("only the restored copy")
+    {
+        auto const peeked = store.peek();
+        CHECK(peeked.source == RestoreSource::PendingRestore);
+        CHECK(peeked.snapshot == sample(100));
+    }
+    SECTION("a newer snapshot beside it")
+    {
+        REQUIRE(store.write(sample(300)));
+        auto const peeked = store.peek();
+        CHECK(peeked.source == RestoreSource::Snapshot);
+        CHECK(peeked.snapshot == sample(300));
+    }
+    CHECK(files.exists(restoredFile()));
+}

@@ -35,6 +35,15 @@ struct SpawnReply
     keeper::UniqueFd processHandle;
 };
 
+/// What the link hands the session layer that spawned through it (KeeperLink::attachChildren()).
+struct ChildEvents
+{
+    /// An Exited: the session, and how its child ended. On the loop.
+    std::function<void(keeper::KeeperSessionId, vtpty::ExitStatus)> exited;
+    /// The keeper's end is gone, so no Exited comes from now on. On the loop, before onLost.
+    std::function<void()> orphaned;
+};
+
 /// The daemon's link to its PTY keeper, on the daemon's event loop.
 ///
 /// It reads the channel on the loop and hands each message to its handler there; it writes through one
@@ -89,10 +98,11 @@ class KeeperLink
     /// @param fds Descriptors that ride with it; duplicated before this returns, so they stay the caller's.
     void post(keeper::Message const& message, std::vector<int> const& fds = {});
 
-    /// Sets what an Exited is handed to. Loop thread. The session layer that spawns through the keeper sets
-    /// it once it exists, which is after the link: the two know each other (cyclic wiring).
-    /// @param handler Called on the loop with the session and how its child ended.
-    void onExited(std::function<void(keeper::KeeperSessionId, vtpty::ExitStatus)> handler);
+    /// Sets what the session layer that spawns through the keeper hears of its children: an Exited, and the
+    /// keeper's loss, after which none comes. Loop thread. Set once, as that layer exists, which is after the
+    /// link: the two know each other (cyclic wiring, this one call).
+    /// @param events The handlers.
+    void attachChildren(ChildEvents events);
 
     /// @return The channel's descriptor: what a live upgrade's exec keeps across, for the new image.
     [[nodiscard]] int channelHandle() const noexcept;

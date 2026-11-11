@@ -65,6 +65,18 @@ namespace
         return pty.handover().transform_error(handoverErrorOfAdopt);
     }
 
+    /// @return What a session whose child crosses as @p kind is to the image that takes it over.
+    [[nodiscard]] constexpr SessionDevice deviceOf(vtpty::CrossingKind kind) noexcept
+    {
+        switch (kind)
+        {
+            case vtpty::CrossingKind::Adoptable: return SessionDevice::ChildOnPty;
+            case vtpty::CrossingKind::Keeper: return SessionDevice::KeeperChild;
+            case vtpty::CrossingKind::None: break;
+        }
+        return SessionDevice::PtyOnly;
+    }
+
     /// Reads what of @p session crosses the exec, giving up nothing: the host keeps owning it.
     /// @return It; or UnsupportedSession for a session whose device is no PTY of this process, or a process
     /// on
@@ -83,28 +95,19 @@ namespace
                                              .device = SessionDevice::PtyOnly,
                                              .keeperSession = 0 };
                 auto crossing = process->crossing();
-                switch (crossing.kind)
-                {
-                    case vtpty::CrossingKind::Adoptable:
-                        if (!crossing.child)
-                            return std::unexpected(HandoverError::UnsupportedSession);
-                        return SessionCrossing { .pty = std::move(pty),
-                                                 .child = *std::move(crossing.child),
-                                                 .device = SessionDevice::ChildOnPty,
-                                                 .keeperSession = 0 };
-                    case vtpty::CrossingKind::None:
-                        return SessionCrossing { .pty = std::move(pty),
-                                                 .child = {},
-                                                 .device = SessionDevice::PtyOnly,
-                                                 .keeperSession = 0 };
-                    case vtpty::CrossingKind::Keeper:
-                        // The keeper holds the child across the exec; the new image names it again.
-                        return SessionCrossing { .pty = std::move(pty),
-                                                 .child = {},
-                                                 .device = SessionDevice::KeeperChild,
-                                                 .keeperSession = crossing.keeperSession };
-                }
-                return std::unexpected(HandoverError::UnsupportedSession);
+                if (crossing.kind == vtpty::CrossingKind::Adoptable && !crossing.child)
+                    return std::unexpected(HandoverError::UnsupportedSession);
+                // A keeper's child crosses by the keeper's name for it and its pid, which the new image names
+                // again rather than adopts.
+                auto const device = deviceOf(crossing.kind);
+                return SessionCrossing {
+                    .pty = std::move(pty),
+                    .child = device == SessionDevice::PtyOnly
+                                 ? vtpty::AdoptedChild {}
+                                 : std::move(crossing.child).value_or(vtpty::AdoptedChild {}),
+                    .device = device,
+                    .keeperSession = device == SessionDevice::KeeperChild ? crossing.keeperSession : 0,
+                };
             });
     }
 
@@ -128,38 +131,78 @@ namespace
         return HandoverError::InFlightTailOverflowed;
     }
 
-    /// @return Session @p quiesced of @p host as it crosses the exec.
-    [[nodiscard]] HandoverSession handoverSessionOf(SessionHost& host,
+    /// @return Session @p quiesced of @p host as it crosses the exec: its structure, and what of it crosses.
+    [[nodiscard]] HandoverSession handoverSessionOf(SessionHost const& host,
                                                     QuiescedHostSession quiesced,
                                                     SessionCrossing crossing)
     {
-        auto& hosted = *host.hostedSession(quiesced.id);
-        // Every hosted session is bound as it is spawned: a missing UUID is the zero one, never a refusal.
-        auto const uuid = host.objects().uuidOf(quiesced.id).value_or(vtcontrol::Uuid {});
-        auto statedSettings = [&] {
-            auto& terminal = hosted.terminal();
-            auto const _ = std::lock_guard { terminal };
-            return toWireSessionSettings(terminal.settings());
-        }();
-        return HandoverSession {
-            .id = quiesced.id,
-            .uuid = uuid,
-            .label = std::string { host.objects().labelOf(
-                vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Pane, .uuid = uuid }) },
-            .profileName = hosted.profileName(),
-            .origin = hosted.settingsOrigin(),
-            .statedSettings = std::move(statedSettings),
-            .pty = std::move(crossing.pty),
-            .child = std::move(crossing.child),
-            .terminalState = vtbackend::encodeTerminalState(quiesced.state.terminal),
-            .carried = std::move(quiesced.state.carried),
-            .colorPreference = host.colorPreferenceOf(quiesced.id),
-            .interruption = host.interruptionOf(quiesced.id),
-            .device = crossing.device,
-            .keeperSession = crossing.keeperSession,
-        };
+        auto session = sessionStructureOf(host, quiesced.id);
+        session.pty = std::move(crossing.pty);
+        session.child = std::move(crossing.child);
+        session.terminalState = vtbackend::encodeTerminalState(quiesced.state.terminal);
+        session.carried = std::move(quiesced.state.carried);
+        session.device = crossing.device;
+        session.keeperSession = crossing.keeperSession;
+        return session;
     }
 } // namespace
+
+HandoverSession sessionStructureOf(SessionHost const& host, vtworkspace::SessionId id)
+{
+    auto const& hosted = *host.hostedSession(id);
+    // Every hosted session is bound as it is spawned: a missing UUID is the zero one, never a refusal.
+    auto const uuid = host.objects().uuidOf(id).value_or(vtcontrol::Uuid {});
+    auto session = HandoverSession {
+        .id = id,
+        .uuid = uuid,
+        .label = std::string { host.objects().labelOf(
+            vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Pane, .uuid = uuid }) },
+        .profileName = hosted.profileName(),
+        .origin = hosted.settingsOrigin(),
+        .statedSettings = hosted.statedSettings(),
+        .pty = {},
+        .child = {},
+        .terminalState = {},
+        .carried = {},
+        .colorPreference = host.colorPreferenceOf(id),
+        .interruption = host.interruptionOf(id),
+        .device = SessionDevice::PtyOnly,
+        .keeperSession = 0,
+    };
+    if (auto const* const process = hosted.process(); process != nullptr)
+    {
+        auto crossing = process->crossing();
+        session.device = deviceOf(crossing.kind);
+        if (session.device == SessionDevice::KeeperChild)
+        {
+            session.keeperSession = crossing.keeperSession;
+            session.child = std::move(crossing.child).value_or(vtpty::AdoptedChild {});
+        }
+    }
+    return session;
+}
+
+HandoverImage hostStructureOf(SessionHost const& host)
+{
+    auto image = HandoverImage {
+        .daemonInstance = 0,
+        .fromRelease = {},
+        .tree = host.model().captureTree(),
+        .modelIds = host.model().idState(),
+        .nextSessionId = host.nextSessionId(),
+        .defaultWorkspace = host.workspaceId().value,
+        .objects = host.objects().snapshot(),
+        .sessions = {},
+        .listeners = {},
+        .lease = {},
+        .defaultColorPreference = host.defaultColorPreference(),
+        .upgradeGeneration = 0,
+        .cellPixelSize = host.learnedCellPixelSize(),
+    };
+    for (auto const id: host.sessionIds())
+        image.sessions.push_back(sessionStructureOf(host, id));
+    return image;
+}
 
 std::expected<void, HandoverError> checkCapturable(SessionHost& host)
 {
@@ -209,20 +252,17 @@ std::expected<HandoverImage, HandoverError> captureHandover(SessionHost& host,
     }
 
     return host.quiesceAll().transform_error(handoverErrorOf).transform([&](QuiescedHost quiesced) {
-        auto image = HandoverImage {
-            .daemonInstance = daemonInstance,
-            .fromRelease = std::string { release },
-            .tree = std::move(quiesced.tree),
-            .modelIds = quiesced.modelIds,
-            .nextSessionId = quiesced.nextSessionId,
-            .defaultWorkspace = quiesced.defaultWorkspace.value,
-            .objects = host.objects().snapshot(),
-            .sessions = {},
-            .listeners = { listeners.begin(), listeners.end() },
-            .lease = lease,
-            .defaultColorPreference = host.defaultColorPreference(),
-            .cellPixelSize = host.learnedCellPixelSize(),
-        };
+        // The structure as of the quiesce, which the sessions below are captured at.
+        auto image = hostStructureOf(host);
+        image.daemonInstance = daemonInstance;
+        image.fromRelease = std::string { release };
+        image.tree = std::move(quiesced.tree);
+        image.modelIds = quiesced.modelIds;
+        image.nextSessionId = quiesced.nextSessionId;
+        image.defaultWorkspace = quiesced.defaultWorkspace.value;
+        image.sessions.clear();
+        image.listeners = { listeners.begin(), listeners.end() };
+        image.lease = lease;
         // A session that ended meanwhile is not among the quiesced ones: its crossing is dropped.
         for (auto& session: quiesced.sessions)
         {

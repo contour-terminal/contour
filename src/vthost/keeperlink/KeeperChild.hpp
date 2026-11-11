@@ -10,11 +10,13 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <vthost/keeper/Messages.hpp>
 
@@ -28,15 +30,34 @@ class KeeperLink;
 class ChildExit
 {
   public:
-    /// Records @p status; the first record stands.
+    /// Records @p status, the first record standing, and runs what waits for it.
     void record(vtpty::ExitStatus status);
+
+    /// Settles the wait without a status: the keeper that would have told is gone. Runs what waits for it.
+    void abandon();
+
+    /// Runs @p then once the status is known, or known never to come: at once when it is already.
+    /// @param then What to run.
+    void whenKnown(std::function<void()> then);
 
     /// @return How the child ended; nullopt while the keeper has not said.
     [[nodiscard]] std::optional<vtpty::ExitStatus> status() const;
 
   private:
+    /// Whether the wait for the status is over.
+    enum class Settlement : uint8_t
+    {
+        Awaited = 0,
+        Settled, ///< Recorded, or abandoned.
+    };
+
+    /// Settles, and runs what waited, outside the lock.
+    void settle(std::optional<vtpty::ExitStatus> status);
+
     mutable std::mutex _lock;
     std::optional<vtpty::ExitStatus> _status;
+    Settlement _settlement = Settlement::Awaited;
+    std::vector<std::function<void()>> _waiting;
 };
 
 /// Hands each Exited the keeper sends to the ChildExit of its session. Loop thread, but for watch()'s
@@ -51,6 +72,9 @@ class KeeperExits
     /// Records an Exited.
     /// @param session The session. @param status How its child ended.
     void exited(keeper::KeeperSessionId session, vtpty::ExitStatus status);
+
+    /// Settles every wait without a status: the keeper is gone, and no Exited will come.
+    void abandonAll();
 
   private:
     std::mutex _lock;
@@ -68,6 +92,17 @@ struct KeeperChildConfig
     std::shared_ptr<vtpty::ProcessPlacement> placement;
     /// How long the keeper gives the program to end on the hangup of close() before it kills it.
     std::chrono::milliseconds hangupGrace = vtpty::HangupGrace::Default;
+};
+
+/// A child the keeper holds that no daemon object held a moment ago: what a daemon restarted after a crash,
+/// or the new image of a live upgrade, binds a KeeperChild to again.
+struct KeptChild
+{
+    keeper::KeeperSessionId session {}; ///< The keeper's name for it.
+    int64_t pid = 0;                    ///< Its process id, as the keeper spawned it; 0 for unknown.
+    std::optional<vtpty::ExitStatus>
+        exited {};            ///< How it ended while no daemon held it; nullopt for running.
+    vtpty::OwnedFd settle {}; ///< Its settle descriptor; none for one known settled.
 };
 
 /// A shell whose parent is the PTY keeper, not the daemon: the daemon prepares the spawn, the keeper forks
@@ -97,6 +132,19 @@ class KeeperChild final: public vtpty::Pty, public vtpty::ChildProcess
     /// Closes, as close() does; never blocks.
     ~KeeperChild() override;
 
+    /// Binds a child the keeper held while no daemon object did (a recovery, a live upgrade) to the PTY it
+    /// runs on. Started already: start() spawns nothing.
+    /// @param link The keeper's link (not owned; outlives this).
+    /// @param exits Where the keeper's Exited for this child lands.
+    /// @param config How it is closed; nothing of it is spawned.
+    /// @param pty The child's terminal, adopted.
+    /// @param kept The child.
+    KeeperChild(KeeperLink& link,
+                std::shared_ptr<KeeperExits> exits,
+                KeeperChildConfig config,
+                std::unique_ptr<vtpty::Pty> pty,
+                KeptChild kept);
+
     /// @return The keeper's name for the child; nullopt before start() spawned it.
     [[nodiscard]] std::optional<keeper::KeeperSessionId> session() const noexcept;
 
@@ -112,6 +160,13 @@ class KeeperChild final: public vtpty::Pty, public vtpty::ChildProcess
     void terminate(vtpty::TerminationHint hint) override;
     /// @return CrossingKind::Keeper with the keeper's name for the child.
     [[nodiscard]] vtpty::ChildCrossing crossing() const override;
+    /// @return StatusArrival::Announced: the keeper reaps it, and says so through the link.
+    [[nodiscard]] vtpty::StatusArrival statusArrival() const override
+    {
+        return vtpty::StatusArrival::Announced;
+    }
+    /// Runs @p then on the loop once the keeper said how it ended, or is gone.
+    void whenStatusKnown(std::function<void()> then) override;
 
     // Pty
     /// Starts the terminal and spawns the program through the keeper: the one channel round trip a
@@ -121,6 +176,9 @@ class KeeperChild final: public vtpty::Pty, public vtpty::ChildProcess
     void close() override;
     /// Returns at once: the child's end is the keeper's to wait for.
     void waitForClosed() override {}
+    /// Gives the terminal up to the image an exec hands it to, which binds the child again: nothing here
+    /// releases the session to the keeper any more.
+    [[nodiscard]] std::expected<vtpty::InheritedPty, vtpty::AdoptError> releaseHandover() override;
     // clang-format off
     [[nodiscard]] vtpty::PtySlave& slave() noexcept override { return _pty->slave(); }
     [[nodiscard]] bool isClosed() const noexcept override { return _pty->isClosed(); }
@@ -131,7 +189,6 @@ class KeeperChild final: public vtpty::Pty, public vtpty::ChildProcess
     void interruptWrites() override { _pty->interruptWrites(); }
     void allowWrites() override { _pty->allowWrites(); }
     [[nodiscard]] std::expected<vtpty::InheritedPty, vtpty::AdoptError> handover() const override { return _pty->handover(); }
-    [[nodiscard]] std::expected<vtpty::InheritedPty, vtpty::AdoptError> releaseHandover() override { return _pty->releaseHandover(); }
     [[nodiscard]] std::optional<SpawnDescriptors> spawnDescriptors() const noexcept override { return _pty->spawnDescriptors(); }
     void closeSpawnDescriptors() override { _pty->closeSpawnDescriptors(); }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _pty->pageSize(); }

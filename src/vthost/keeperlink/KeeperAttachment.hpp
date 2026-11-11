@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -29,6 +30,9 @@ struct KeeperAttachment
     std::vector<uint8_t> options; ///< The Launch's options record, opaque to the keeper.
     uint32_t version = 0;         ///< The channel version both speak.
     int64_t keeperProcessId = 0;  ///< The keeper: the daemon's parent.
+    /// The soft descriptor limit the keeper started with, which every program the daemon starts is given
+    /// back (keeper::Launch::originalDescriptorLimit); nullopt for none stated.
+    std::optional<uint64_t> childDescriptorLimit;
     /// Recovered only: InventoryBegin … InventoryEnd, in order, each with its descriptors.
     std::vector<ReceivedMessage> inventory;
 };

@@ -150,8 +150,21 @@ namespace
             return _current > open ? static_cast<std::size_t>(_current - open) : 0;
         }
 
-        /// @return The limit this process started with, which every child is given back.
+        /// @return The limit this process started with, which every child but the daemon is given back.
         [[nodiscard]] rlimit const& original() const noexcept { return _original; }
+
+        [[nodiscard]] uint64_t originalSoftLimit() const override
+        {
+            return _original.rlim_cur == RLIM_INFINITY ? 0 : static_cast<uint64_t>(_original.rlim_cur);
+        }
+
+        /// @return The limit this process runs with: the daemon's too.
+        [[nodiscard]] rlimit raised() const noexcept
+        {
+            auto limit = _original;
+            limit.rlim_cur = _current;
+            return limit;
+        }
 
       private:
         [[nodiscard]] static rlimit currentLimit() noexcept
@@ -296,7 +309,15 @@ namespace
                     ///< run so: its descriptor is close-on-exec.
     };
 
-    /// What a child is started as.
+    /// Which descriptor limit a forked child gets.
+    enum class ChildLimit : uint8_t
+    {
+        Original = 0, ///< The one the keeper started with: a shell's, as any program of the user's has.
+        /// The keeper's raised one: the daemon's, which holds a master and a fast pipe for every session it
+        /// hosts, as many as the keeper holds.
+        Raised,
+    };
+
     struct ChildRequest
     {
         std::string const& path;
@@ -308,6 +329,7 @@ namespace
         /// For ExecBy::Descriptor: the program, opened already (it stays the caller's); none to open the
         /// path.
         std::optional<int> executable = std::nullopt;
+        ChildLimit limit = ChildLimit::Original;
     };
 
     /// The pipe a forked child reports a failed exec through.
@@ -321,8 +343,14 @@ namespace
     class ChildForker
     {
       public:
-        ChildForker(std::vector<std::string> environment, rlimit limit):
-            _environment { std::move(environment) }, _envp { pointersTo(_environment) }, _limit { limit }
+        /// @param environment What every child runs under.
+        /// @param original The descriptor limit the keeper started with (ChildLimit::Original).
+        /// @param raised The keeper's own, raised (ChildLimit::Raised).
+        ChildForker(std::vector<std::string> environment, rlimit original, rlimit raised):
+            _environment { std::move(environment) },
+            _envp { pointersTo(_environment) },
+            _limit { original },
+            _raisedLimit { raised }
         {
         }
 
@@ -367,7 +395,7 @@ namespace
                 .moved = moved,
                 .errorPipe = writer.get(),
                 .descriptorLimit = vtpty::util::openDescriptorLimit(),
-                .limit = _limit,
+                .limit = request.limit == ChildLimit::Raised ? _raisedLimit : _limit,
                 .parentDeath = request.parentDeath,
                 .parent = ::getpid(),
             };
@@ -424,6 +452,7 @@ namespace
         std::vector<std::string> _environment;
         std::vector<char*> _envp; ///< Into _environment.
         rlimit _limit;
+        rlimit _raisedLimit;
     };
 
     // }}}
@@ -677,7 +706,9 @@ namespace
                                               .sources = sources,
                                               .targets = targets,
                                               .parentDeath = ParentDeath::Terminate,
-                                              .execBy = ExecBy::Descriptor });
+                                              .execBy = ExecBy::Descriptor,
+                                              .executable = std::nullopt,
+                                              .limit = ChildLimit::Raised });
             if (!pid)
                 return std::unexpected { pid.error() };
             return LaunchedDaemon { .pid = *pid, .channel = makePosixChannel(std::move(keeperEnd)) };
@@ -1144,7 +1175,8 @@ std::expected<PosixKeeperPorts, std::error_code> makePosixKeeperPorts(KeeperPort
         return std::unexpected { signals.error() };
     auto budget = std::make_unique<PosixDescriptorBudget>();
     auto clock = std::make_unique<core::platform::SteadyClock>();
-    auto forker = std::make_shared<ChildForker>(std::move(config.environment), budget->original());
+    auto forker =
+        std::make_shared<ChildForker>(std::move(config.environment), budget->original(), budget->raised());
     auto events = std::make_unique<PosixEventSource>(*clock, config.processWatch, std::move(*signals));
     return PosixKeeperPorts {
         .clock = std::move(clock),

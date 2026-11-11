@@ -23,6 +23,9 @@
 
     #include <windows.h>
 #else
+    #include <sys/resource.h>
+
+    #include <algorithm>
     #include <csignal>
 
     #include <pthread.h>
@@ -441,5 +444,43 @@ TEST_CASE("ProgramCommandCapture.spawnFailure", "[commandcapture]")
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().kind == CommandCaptureError::Kind::SpawnFailed);
     CHECK(result.error().cause);
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("SystemCommandCapture.runsUnderTheDescriptorLimitItIsGiven", "[commandcapture]")
+{
+    // Below this process's own, as a keeper's daemon gives its commands the limit the keeper started with.
+    auto own = rlimit {};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &own) == 0);
+    auto const given = std::min<rlim_t>(own.rlim_cur, 512);
+    auto capture =
+        vtpty::SystemCommandCapture { vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()),
+                                      {},
+                                      static_cast<std::uint64_t>(given) };
+    CHECK(capture.run("ulimit -S -n", 5s, {}) == std::to_string(given));
+    // The command is parsed as it is without the limit: a leading comment, and an `||` that runs its right.
+    CHECK(capture.run("# x\necho after", 5s, {}) == "after");
+    CHECK(capture.run("false || echo y", 5s, {}) == "y");
+    // This process's own is untouched.
+    auto after = rlimit {};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &after) == 0);
+    CHECK(after.rlim_cur == own.rlim_cur);
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("SystemCommandCapture.runsItsCommandWhereTheLimitCannotBeSet", "[commandcapture]")
+{
+    // Above the hard limit: the shell cannot set it, and the command runs all the same.
+    auto own = rlimit {};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &own) == 0);
+    if (own.rlim_max == RLIM_INFINITY)
+        SKIP("no hard descriptor limit to exceed");
+    auto capture =
+        vtpty::SystemCommandCapture { vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()),
+                                      {},
+                                      static_cast<std::uint64_t>(own.rlim_max) + 1 };
+    CHECK(capture.run("echo ran", 5s, {}) == "ran");
 }
 #endif

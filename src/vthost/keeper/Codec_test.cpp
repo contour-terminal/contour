@@ -22,7 +22,8 @@ std::vector<Message> samples()
     return {
         Hello { .version = 2, .capabilities = 0xDEAD'BEEF'0000ULL },
         Unsupported { .tag = 99 },
-        Launch { .continuity = LaunchContinuity::HandedOver, .options = blob },
+        Launch {
+            .continuity = LaunchContinuity::HandedOver, .options = blob, .originalDescriptorLimit = 1024 },
         Listener { .name = "native", .tlsIdentity = blob, .path = "/run/contour/native" },
         Serving { .hungRestart = HungRestart::Off, .heartbeatTimeoutMs = 12'345 },
         Spawn { .request = 7,

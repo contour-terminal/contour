@@ -32,6 +32,23 @@ enum class HarnessStart : uint8_t
     /// and lives until the test lets it go: the keeper's daemon in name, so that the test's own process
     /// spawns through the keeper as a daemon would.
     Relays,
+    /// The first daemon relays, as Relays; every daemon the keeper starts after it serves, as Serves: what a
+    /// test that plays a daemon to its crash, and then watches the real one recover, starts.
+    RelaysThenServes,
+};
+
+/// Whether the harness daemon keeps a workspace snapshot.
+enum class HarnessSnapshot : uint8_t
+{
+    None = 0,
+    Kept, ///< At KeeperFixture::snapshotPath(), written every second.
+};
+
+/// Whether the harness daemon serves the native protocol over TCP too.
+enum class HarnessTcp : uint8_t
+{
+    Off = 0,
+    Loopback, ///< On 127.0.0.1, on a port the system picks, with a self-signed certificate.
 };
 
 } // namespace vthost::testing
@@ -43,6 +60,25 @@ struct core::codec::EnumWire<vthost::testing::HarnessStart>
         vthost::testing::HarnessStart::Serves,
         vthost::testing::HarnessStart::Fails,
         vthost::testing::HarnessStart::Relays,
+        vthost::testing::HarnessStart::RelaysThenServes,
+    };
+};
+
+template <>
+struct core::codec::EnumWire<vthost::testing::HarnessSnapshot>
+{
+    static constexpr auto Values = std::array {
+        vthost::testing::HarnessSnapshot::None,
+        vthost::testing::HarnessSnapshot::Kept,
+    };
+};
+
+template <>
+struct core::codec::EnumWire<vthost::testing::HarnessTcp>
+{
+    static constexpr auto Values = std::array {
+        vthost::testing::HarnessTcp::Off,
+        vthost::testing::HarnessTcp::Loopback,
     };
 };
 
@@ -64,10 +100,16 @@ inline constexpr int HarnessStartFailureStatus = 3;
 /// daemon`'s DaemonLaunch is.
 struct HarnessLaunch
 {
-    std::string
-        socketPath;        ///< The daemon's control socket; for HarnessStart::Relays, where the test listens.
-    std::string launchLog; ///< The file each daemon process appends its pid to, as it starts.
+    std::string socketPath; ///< The daemon's control socket.
+    std::string launchLog;  ///< The file each daemon process appends its pid to, as it starts.
     HarnessStart start = HarnessStart::Serves;
+    /// The startup layout: a tab per command, each run as `/bin/sh -c <command>`.
+    std::vector<std::string> panes;
+    /// The workspace snapshot, written every second; empty for none.
+    std::string snapshotPath;
+    HarnessTcp tcp = HarnessTcp::Off;
+    /// Where a relaying daemon hands its channel over.
+    std::string relayPath;
 
     /// Lists the fields.
     void visitFields(this auto& self, auto& visitor)
@@ -75,7 +117,24 @@ struct HarnessLaunch
         visitor(1, self.socketPath);
         visitor(2, self.launchLog);
         visitor(3, self.start);
+        visitor(4, self.panes);
+        visitor(5, self.snapshotPath);
+        visitor(6, self.tcp);
+        visitor(7, self.relayPath);
     }
+};
+
+/// What a KeeperFixture's daemon runs beside how it starts.
+struct HarnessSetup
+{
+    HarnessStart start = HarnessStart::Serves;
+    /// As HarnessLaunch::panes; `@DIR@` in a command stands for KeeperFixture::directory().
+    std::vector<std::string> panes;
+    HarnessSnapshot snapshot = HarnessSnapshot::None;
+    HarnessTcp tcp = HarnessTcp::Off;
+    /// The soft descriptor limit the keeper is started under, as a user's session may have it; nullopt keeps
+    /// the test's own.
+    std::optional<uint64_t> softDescriptorLimit = std::nullopt;
 };
 
 /// @param pid A process.
@@ -98,6 +157,10 @@ class KeeperFixture
     /// HarnessStart::Relays, until its daemon handed over its channel.
     /// @param start Whether the daemon serves, fails, or relays.
     explicit KeeperFixture(HarnessStart start = HarnessStart::Serves);
+
+    /// Starts the keeper as KeeperFixture(HarnessStart) does, its daemon set up as @p setup says.
+    /// @param setup What the daemon runs.
+    explicit KeeperFixture(HarnessSetup const& setup);
     KeeperFixture(KeeperFixture const&) = delete;
     KeeperFixture& operator=(KeeperFixture const&) = delete;
     KeeperFixture(KeeperFixture&&) = delete;
@@ -128,6 +191,21 @@ class KeeperFixture
     /// @return The pid of every daemon process started so far, in order.
     [[nodiscard]] std::vector<int> launches() const;
 
+    /// Waits until a daemon other than @p previous serves.
+    /// @param previous The daemon that served before.
+    /// @param bound How long to wait.
+    /// @return The new daemon's pid; 0 when none served in time.
+    [[nodiscard]] int awaitNewDaemon(int previous, std::chrono::milliseconds bound) const;
+
+    /// @return The directory the fixture keeps its files in, removed with it.
+    [[nodiscard]] std::filesystem::path const& directory() const noexcept { return _directory; }
+
+    /// @return The daemon's workspace snapshot, for HarnessSetup::keepsSnapshot.
+    [[nodiscard]] std::filesystem::path snapshotPath() const { return _directory / "workspace.snapshot"; }
+
+    /// @return The port the daemon's native TCP listener is on, as its log names it; 0 for none yet.
+    [[nodiscard]] uint16_t nativeTcpPort() const;
+
     /// Waits for the keeper to end, and reaps it.
     /// @param bound How long to wait.
     /// @return Its exit status; nullopt when it is still running, or ended by a signal.
@@ -155,12 +233,13 @@ class KeeperFixture
     /// Ends what the fixture started and reaps the keeper, by recorded pid, and removes the directory.
     void end(Ending ending);
 
-    [[nodiscard]] int spawnKeeper(HarnessStart start) const;
+    [[nodiscard]] int spawnKeeper() const;
 
     std::filesystem::path _directory;
     std::filesystem::path _socket;
     std::filesystem::path _launchLog;
     std::filesystem::path _output;
+    std::filesystem::path _record; ///< The encoded HarnessLaunch the keeper is started with.
     /// Whether the keeper process was reaped already.
     enum class KeeperState : uint8_t
     {
@@ -168,6 +247,7 @@ class KeeperFixture
         Reaped,
     };
 
+    std::optional<uint64_t> _softDescriptorLimit; ///< @see HarnessSetup::softDescriptorLimit
     keeper::UniqueFd _relayListener; ///< For HarnessStart::Relays: where the daemon hands its channel over.
     keeper::UniqueFd _relay;         ///< Its connection: closing it lets the daemon end.
     keeper::UniqueFd _channel;       ///< The channel it handed over, until taken.

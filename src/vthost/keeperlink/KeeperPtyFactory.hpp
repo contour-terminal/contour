@@ -21,7 +21,7 @@ class KeeperLink;
 class KeeperPtyFactory
 {
   public:
-    /// Takes over the link's Exited handler (KeeperLink::onExited()): the factory and the link know each
+    /// Takes over the link's child events (KeeperLink::attachChildren()): the factory and the link know each
     /// other once this returns (cyclic wiring, this one call).
     /// @param link The keeper's link (not owned; outlives this and every child made).
     /// @param placement Places each program before it runs; never null.
@@ -37,6 +37,11 @@ class KeeperPtyFactory
     [[nodiscard]] std::unique_ptr<KeeperChild> make(vtpty::PageSize pageSize,
                                                     vtpty::Process::ExecInfo exec,
                                                     vtpty::SandboxEscape sandbox) const;
+
+    /// @param kept A child the keeper held while no daemon object did.
+    /// @param pty The terminal it runs on, adopted.
+    /// @return The device, bound to the child; its exit is heard from here on.
+    [[nodiscard]] std::unique_ptr<KeeperChild> adopt(KeptChild kept, std::unique_ptr<vtpty::Pty> pty) const;
 
   private:
     KeeperLink& _link;

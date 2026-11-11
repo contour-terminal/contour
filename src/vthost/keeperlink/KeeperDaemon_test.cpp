@@ -108,7 +108,8 @@ struct DaemonBehindKeeper
         keeperEnd.emplace(UniqueFd { ends[1] });
         // The keeper speaks first; the daemon's handshake reads what it said.
         send(keeper::Hello {});
-        send(keeper::Launch { .continuity = keeper::LaunchContinuity::Fresh, .options = {} });
+        send(keeper::Launch {
+            .continuity = keeper::LaunchContinuity::Fresh, .options = {}, .originalDescriptorLimit = 0 });
         auto attachment = vthost::keeperlink::attachToKeeper(UniqueFd { ends[0] }, clock, 5s);
         REQUIRE(attachment.has_value());
         CHECK(attachment->continuity == keeper::LaunchContinuity::Fresh);
@@ -331,3 +332,21 @@ TEST_CASE("status reports the daemon and the keeper", "[keeper][daemon][afunix]"
     CHECK(std::cmp_equal(status->processId, f.daemonPid()));
     CHECK(vthost::testing::parentProcessOf(f.daemonPid()) == f.keeperPid());
 }
+
+#ifdef __linux__
+TEST_CASE("the keeper is not dumpable: no other process of the user's reads its descriptors",
+          "[keeper][daemon][afunix]")
+{
+    if (::getuid() == 0)
+        SKIP("root reads every process's descriptors");
+    auto f = KeeperFixture {};
+    // A process that is not dumpable has its /proc entries owned by root.
+    struct stat keeper {};
+    REQUIRE(::stat(std::format("/proc/{}/fd", f.keeperPid()).c_str(), &keeper) == 0);
+    CHECK(keeper.st_uid == 0);
+    // Its daemon, dumpable again by its exec, is the user's as any process is.
+    struct stat daemon {};
+    REQUIRE(::stat(std::format("/proc/{}/fd", f.daemonPid()).c_str(), &daemon) == 0);
+    CHECK(daemon.st_uid == ::getuid());
+}
+#endif

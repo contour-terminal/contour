@@ -833,9 +833,15 @@ struct RestartHarness
         REQUIRE(tab != nullptr);
         host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
         REQUIRE(tab->paneCount() == 2);
-        auto persistence = vthost::DaemonPersistence {
-            loop, *host, store, std::nullopt, config, wallClock, vthost::WriterThreading::Inline, sink()
-        };
+        auto persistence = vthost::DaemonPersistence { loop,
+                                                       *host,
+                                                       store,
+                                                       std::nullopt,
+                                                       config,
+                                                       wallClock,
+                                                       vthost::WriterThreading::Inline,
+                                                       sink(),
+                                                       vthost::PendingRestoreCopy::Kept };
         persistence.finalize(cause);
     }
 
@@ -846,9 +852,15 @@ struct RestartHarness
         auto const restoredFrom =
             restore.transform([](vthost::WorkspaceRestore const& restored) { return restored.source; });
         auto host = startHost(std::move(restore));
-        auto const persistence = vthost::DaemonPersistence {
-            loop, *host, store, restoredFrom, config, wallClock, vthost::WriterThreading::Inline, sink()
-        };
+        auto const persistence = vthost::DaemonPersistence { loop,
+                                                             *host,
+                                                             store,
+                                                             restoredFrom,
+                                                             config,
+                                                             wallClock,
+                                                             vthost::WriterThreading::Inline,
+                                                             sink(),
+                                                             vthost::PendingRestoreCopy::Kept };
         return vthost::captureWorkspace(*host, {}, std::chrono::sys_seconds {});
     }
 };
@@ -876,6 +888,37 @@ TEST_CASE("what one host keeps at shutdown, the next one restores", "[vthost][da
     CHECK(std::ranges::any_of(h.lines, [](std::string const& line) {
         return line.contains("restoring 1 workspace(s) from") && line.contains(RestartSnapshot);
     }));
+}
+
+TEST_CASE("a restart after a crash drops the stale .restored copy with its first write",
+          "[vthost][daemon][snapshot][keeper]")
+{
+    auto h = RestartHarness {};
+    h.runFirstDaemon(vthost::ShutdownCause::Signal);
+    // A start that moved the snapshot aside to restore it, and died before it wrote one.
+    auto const restored = std::string { RestartSnapshot } + ".restored";
+    REQUIRE(vthost::prepareRestore(h.store, h.config, h.sink(), h.wallClock).has_value());
+    REQUIRE(h.files.exists(restored));
+    REQUIRE_FALSE(h.files.exists(RestartSnapshot));
+
+    // Its keeper's next daemon reads it, leaving it, and writes its own workspace: the copy is stale then.
+    auto const peeked = vthost::peekRestore(h.store, h.config, h.sink(), h.wallClock);
+    REQUIRE(peeked.has_value());
+    CHECK(peeked->source == vthost::RestoreSource::PendingRestore);
+    CHECK(h.files.exists(restored));
+    auto host = h.startHost(std::nullopt);
+    auto persistence = vthost::DaemonPersistence { h.loop,
+                                                   *host,
+                                                   h.store,
+                                                   std::nullopt,
+                                                   h.config,
+                                                   h.wallClock,
+                                                   vthost::WriterThreading::Inline,
+                                                   h.sink(),
+                                                   vthost::PendingRestoreCopy::DroppedAfterFirstWrite };
+    persistence.writeNow();
+    CHECK(h.files.exists(RestartSnapshot));
+    CHECK_FALSE(h.files.exists(restored));
 }
 
 TEST_CASE("what one host discards at shutdown, the next one does not restore", "[vthost][daemon][snapshot]")

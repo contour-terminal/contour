@@ -1050,13 +1050,20 @@ namespace
     /// extensions the daemon's session host owns.
     struct DaemonExtensionResources
     {
+        /// @param childDescriptorLimit The descriptor limit each command runs under: the one the daemon's
+        ///        keeper started with; nullopt for the daemon's own.
+        explicit DaemonExtensionResources(std::optional<uint64_t> childDescriptorLimit):
+            capture { vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()),
+                      commandShutdown.get_token(),
+                      childDescriptorLimit }
+        {
+        }
+
         /// What the extensions' engines are created from. First: it outlives everything made from it, and
         /// only a reference to it travels with the services.
         std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
         core::async::StopSource commandShutdown;
-        vtpty::SystemCommandCapture capture {
-            vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()), commandShutdown.get_token()
-        };
+        vtpty::SystemCommandCapture capture;
         core::platform::SystemWallClock wallClock;
         vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
     };
@@ -1186,11 +1193,17 @@ namespace
         /// @param notices Where a Windows hand-over says where the daemon goes (the successor's launch and
         /// its
         ///        failure); unused elsewhere, where the process image is replaced in place.
-        explicit DaemonUpgradeResources([[maybe_unused]] std::ostream& notices):
+        /// @param childDescriptorLimit The descriptor limit the probe runs under: the one the daemon's keeper
+        ///        started with; nullopt for the daemon's own.
+        DaemonUpgradeResources([[maybe_unused]] std::ostream& notices,
+                               [[maybe_unused]] std::optional<uint64_t> childDescriptorLimit):
 #ifdef _WIN32
-            handoff { *launcher, *memory, {}, notices }
+            handoff { *launcher, *memory, {}, notices }, capture { probeShutdown.get_token() }
 #else
-            handoff { *replacer, *memory }
+            handoff { *replacer, *memory },
+            capture { vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()),
+                      probeShutdown.get_token(),
+                      childDescriptorLimit }
 #endif
         {
         }
@@ -1210,11 +1223,9 @@ namespace
 #ifdef _WIN32
         /// Runs the target itself: under cmd.exe a release build, which attaches to its parent's console,
         /// would answer to that console instead.
-        vtpty::ProgramCommandCapture capture { probeShutdown.get_token() };
+        vtpty::ProgramCommandCapture capture;
 #else
-        vtpty::SystemCommandCapture capture {
-            vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()), probeShutdown.get_token()
-        };
+        vtpty::SystemCommandCapture capture;
 #endif
         /// Where the probe waits for the target, so that the daemon's loop serves on meanwhile. Made before
         /// the daemon blocks SIGTERM for its sigwait thread, so it blocks every signal itself.
@@ -1276,6 +1287,19 @@ namespace
 
 namespace
 {
+    /// @param keeper The keeper a daemon runs behind; null for none.
+    /// @return The descriptor limit every program the daemon starts runs under: its keeper's original one;
+    ///         nullopt for the daemon's own.
+    [[nodiscard]] std::optional<uint64_t> childDescriptorLimitOf(
+        [[maybe_unused]] KeeperServeStart const* keeper)
+    {
+#ifndef _WIN32
+        if (keeper)
+            return keeper->attachment.childDescriptorLimit;
+#endif
+        return std::nullopt;
+    }
+
     /// @param keeper The keeper a daemon runs behind; null for none.
     /// @return How the daemon process starts: as its keeper's Launch says, else afresh.
     [[nodiscard]] vthost::keeper::LaunchContinuity keeperContinuityOf(KeeperServeStart const* keeper) noexcept
@@ -1489,7 +1513,7 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
 #ifdef CONTOUR_EXTENSIONS
     // The extensions' modules and configuration are resolved here, on the daemon's side, as its sessions'
     // shells are; they run in the daemon, where each session's terminal is.
-    auto extensionServices = DaemonExtensionResources {};
+    auto extensionServices = DaemonExtensionResources { childDescriptorLimitOf(keeper) };
     auto const label = vthost::socketLabelOf(options.label).name;
     auto const& fileSystem = core::platform::NativeFileSystem::instance();
     config.extensions = daemonExtensionsOf(
@@ -1603,7 +1627,8 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     if (images)
         config.liveUpgrade.emplace(liveUpgradeServicesOf(
             **images,
-            upgradeResources.emplace(config.logFile.empty() ? discardedNotices : std::cerr),
+            upgradeResources.emplace(config.logFile.empty() ? discardedNotices : std::cerr,
+                                     childDescriptorLimitOf(keeper)),
             commandLine(),
             resolved.configFile,
             daemonProfile,

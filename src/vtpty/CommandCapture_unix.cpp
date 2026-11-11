@@ -13,6 +13,7 @@
 #include <csignal>
 #include <cstddef>
 #include <expected>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -304,7 +305,12 @@ std::expected<std::string, CommandCaptureError> SystemCommandCapture::run(std::s
         return std::unexpected(CommandCaptureError { CommandCaptureError::Kind::Cancelled, {} });
     auto const deadline = Clock::now() + timeout;
 
-    auto const spawned = spawnShell(_shell, std::string { command });
+    // The limit is the shell's to set, in the child: this process's own stays as it is. On a line of its own,
+    // so that the command is parsed exactly as it would be without it -- a leading `#`, a `||` -- and runs
+    // whether or not the limit could be set.
+    auto const commandLine = _descriptorLimit ? std::format("ulimit -S -n {}\n{}", *_descriptorLimit, command)
+                                              : std::string { command };
+    auto const spawned = spawnShell(_shell, commandLine);
     if (!spawned)
         return spawnFailed(spawned.error());
 

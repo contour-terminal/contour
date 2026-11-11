@@ -349,6 +349,7 @@ class FakeBudget final: public DescriptorBudget
 {
   public:
     std::size_t free = 1000;
+    uint64_t original = 1024;
 
     mutable int asked = 0; ///< How often available() was asked.
 
@@ -357,6 +358,7 @@ class FakeBudget final: public DescriptorBudget
         ++asked;
         return free;
     }
+    [[nodiscard]] uint64_t originalSoftLimit() const override { return original; }
 };
 
 class FakeLabelLock final: public LabelLock
@@ -956,11 +958,15 @@ TEST_CASE("a crashed daemon is relaunched with Recovered", "[keeper]")
         auto const& first = h.launcher.channel(0);
         CHECK(std::holds_alternative<Hello>(first.sent.at(0).message));
         CHECK(std::get<Launch>(first.sent.at(1).message)
-              == Launch { .continuity = LaunchContinuity::Fresh, .options = launchOptions() });
+              == Launch { .continuity = LaunchContinuity::Fresh,
+                          .options = launchOptions(),
+                          .originalDescriptorLimit = 1024 });
         auto const& second = h.launcher.channel(1);
         CHECK(std::holds_alternative<Hello>(second.sent.at(0).message));
         CHECK(std::get<Launch>(second.sent.at(1).message)
-              == Launch { .continuity = LaunchContinuity::Recovered, .options = launchOptions() });
+              == Launch { .continuity = LaunchContinuity::Recovered,
+                          .options = launchOptions(),
+                          .originalDescriptorLimit = 1024 });
     }));
     h.run();
 }
@@ -1497,10 +1503,32 @@ TEST_CASE("a second Hello from the daemon is answered with a Launch for its new 
         auto const launches = h.launcher.channel(0).all<Launch>();
         REQUIRE(launches.size() == 2);
         CHECK(std::get<Launch>(launches.back()->message)
-              == Launch { .continuity = LaunchContinuity::HandedOver, .options = launchOptions() });
+              == Launch { .continuity = LaunchContinuity::HandedOver,
+                          .options = launchOptions(),
+                          .originalDescriptorLimit = 1024 });
         CHECK(h.launcher.channel(0).all<Hello>().size() == 2);
         CHECK(h.launcher.images.size() == 1); // the same process: nothing was launched
         CHECK(h.signaller.sent.empty());
+    }));
+    h.run();
+}
+
+TEST_CASE("a new image of a live upgrade is told again of every held session that ended", "[keeper]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}), spawnOf(1, child) }));
+    h.events.then(deliver({ endOf(FirstShell, Killed) }));
+    h.events.then(check([&] { CHECK(h.launcher.channel(0).all<Exited>().size() == 1); }));
+    // The exec in place: the new image says Hello on the same channel.
+    h.events.then(deliver({ frameOf(Hello {}) }));
+    h.events.then(check([&] {
+        auto const& sent = h.launcher.channel(0).sent;
+        auto const exits = h.launcher.channel(0).all<Exited>();
+        REQUIRE(exits.size() == 2);
+        CHECK(std::get<Exited>(exits.back()->message) == Exited { .session = 1, .status = Killed });
+        // After its Launch, which it reads first.
+        CHECK(std::holds_alternative<Launch>(sent[sent.size() - 2].message));
     }));
     h.run();
 }

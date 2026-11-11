@@ -105,7 +105,7 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     std::chrono::milliseconds spawnReplyBound;
     /// The spawns given up on whose answer has not come: a late Spawned for one is released.
     std::set<uint64_t> abandoned;
-    std::function<void(keeper::KeeperSessionId, vtpty::ExitStatus)> exited;
+    ChildEvents children; ///< @see KeeperLink::attachChildren
 
     std::mutex queueLock;
     std::deque<Outgoing> queue; ///< Guarded by queueLock; sent from the loop thread only.
@@ -288,7 +288,12 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
         // No answer comes any more: nothing is left to release.
         abandoned.clear();
         loop.post([weak = weak_from_this()] {
-            if (auto const self = weak.lock(); self && self->link == Link::Lost && self->onLost)
+            auto const self = weak.lock();
+            if (!self || self->link != Link::Lost)
+                return;
+            if (self->children.orphaned)
+                self->children.orphaned();
+            if (self->onLost)
                 self->onLost();
         });
     }
@@ -404,8 +409,8 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
 
     void handle(keeper::Exited const& message) const
     {
-        if (exited)
-            exited(keeper::KeeperSessionId { message.session }, message.status.toExitStatus());
+        if (children.exited)
+            children.exited(keeper::KeeperSessionId { message.session }, message.status.toExitStatus());
     }
 
     static void handle(keeper::Unsupported const& message)
@@ -445,7 +450,7 @@ KeeperLink::~KeeperLink()
         std::ignore = state.flushUntil(state.loop.clock().now() + FinalFlushBound);
     state.link = Link::Closing;
     state.onLost = {};
-    state.exited = {};
+    state.children = {};
     // The flows still parked on the socket are woken to unwind; the socket closes with the last of them.
     state.loop.notifyHandleClosing(state.channel.handle(), core::net::FdWakePolicy::Cancel);
 #ifdef CONTOUR_KEEPER_KQUEUE
@@ -530,9 +535,9 @@ void KeeperLink::post(keeper::Message const& message, std::vector<int> const& fd
     _state->post(message, fds);
 }
 
-void KeeperLink::onExited(std::function<void(keeper::KeeperSessionId, vtpty::ExitStatus)> handler)
+void KeeperLink::attachChildren(ChildEvents events)
 {
-    _state->exited = std::move(handler);
+    _state->children = std::move(events);
 }
 
 int KeeperLink::channelHandle() const noexcept

@@ -345,11 +345,12 @@ Tab* SessionModel::insertTab(Workspace& workspace, int requestedIndex, std::uniq
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
     _events.tabAboutToBeAdded(workspaceId, index);
     workspace.insertTabAt(index, std::move(tab));
-    _events.tabAdded(workspaceId, tabId, index);
-
-    // A new tab is a genuine activation: remember the outgoing active slot as the previous tab.
+    // A new tab is a genuine activation: the outgoing active slot, which the insertion has already shifted,
+    // becomes the previous tab. Both are settled before any event, so that an observer reading the workspace
+    // from inside tabAdded() finds its indices in range.
     workspace._previousActiveTabIndex = workspace._activeTabIndex;
     workspace._activeTabIndex = index;
+    _events.tabAdded(workspaceId, tabId, index);
     _events.activeTabChanged(workspaceId, tabId, index);
 
     return workspace._tabs[static_cast<size_t>(index)].get();
@@ -367,7 +368,8 @@ void SessionModel::closeTabAt(Workspace& workspace, int index, std::function<voi
     if (beforeErase)
         beforeErase();
     workspace._tabs.erase(workspace._tabs.begin() + index);
-    _events.tabClosed(workspace.id(), tabId, index);
+    // The indices are settled before tabClosed(), so that an observer reading the workspace from inside it
+    // finds them in range.
 
     // Translate/invalidate the "previous active tab" slot the same way as the active slot below: it must
     // never dangle at a wrong tab. If the closed tab WAS the previous one, there is no valid previous
@@ -382,6 +384,7 @@ void SessionModel::closeTabAt(Workspace& workspace, int index, std::function<voi
     {
         workspace._activeTabIndex = -1;
         workspace._previousActiveTabIndex = -1;
+        _events.tabClosed(workspace.id(), tabId, index);
         return;
     }
 
@@ -398,6 +401,7 @@ void SessionModel::closeTabAt(Workspace& workspace, int index, std::function<voi
     newActive = std::max(newActive, 0);
 
     workspace._activeTabIndex = newActive;
+    _events.tabClosed(workspace.id(), tabId, index);
     if (newActive != previousActiveIndex || index == previousActiveIndex)
         _events.activeTabChanged(
             workspace.id(), workspace._tabs[static_cast<size_t>(newActive)]->id(), newActive);

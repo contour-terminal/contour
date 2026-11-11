@@ -197,6 +197,9 @@ class DescriptorBudget
 
     /// @return The descriptors this process may still open before its limit.
     [[nodiscard]] virtual std::size_t available() const = 0;
+
+    /// @return The soft descriptor limit this process started with, before it raised its own.
+    [[nodiscard]] virtual uint64_t originalSoftLimit() const = 0;
 };
 
 /// The ports the keeper runs on.

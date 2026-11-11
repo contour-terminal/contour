@@ -307,6 +307,11 @@ if(NOT WIN32)
         keeperlink/KeeperLink.hpp
         keeperlink/KeeperPtyFactory.cpp
         keeperlink/KeeperPtyFactory.hpp
+        keeperlink/Recovery.cpp
+        keeperlink/Recovery.hpp
+        keeperlink/Structure.cpp
+        keeperlink/Structure.hpp
+        keeperlink/StructurePushPolicy.hpp
     )
 endif()
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.
@@ -490,7 +495,8 @@ if(VTHOST_TESTING)
         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
         target_link_libraries(vthost_keeper_harness PUBLIC vthost)
         target_sources(vthost_test PRIVATE
-            keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp)
+            keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp keeperlink/KeeperLink_test.cpp
+            keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.

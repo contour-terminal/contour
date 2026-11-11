@@ -197,9 +197,13 @@ TEST_CASE("an Exited arriving during a spawn is handled after it, not inside", "
     };
     auto where = Where::Outside;
     auto exits = std::vector<std::pair<keeper::KeeperSessionId, Where>> {};
-    h.link->onExited([&](keeper::KeeperSessionId session, vtpty::ExitStatus status) {
-        CHECK(std::get<vtpty::NormalExit>(status).exitCode == 3);
-        exits.emplace_back(session, where);
+    h.link->attachChildren(vthost::keeperlink::ChildEvents {
+        .exited =
+            [&](keeper::KeeperSessionId session, vtpty::ExitStatus status) {
+                CHECK(std::get<vtpty::NormalExit>(status).exitCode == 3);
+                exits.emplace_back(session, where);
+            },
+        .orphaned = {},
     });
 
     auto reply = std::optional<std::expected<vthost::keeperlink::SpawnReply, keeper::SpawnError>> {};
@@ -312,6 +316,19 @@ TEST_CASE("a keeper that closes its end is reported lost once", "[keeper][keeper
     auto const spawned = h.link->spawn(keeper::Spawn {}, {});
     REQUIRE_FALSE(spawned.has_value());
     CHECK(spawned.error() == keeper::SpawnError::Unknown);
+}
+
+TEST_CASE("a lost keeper orphans the children before the loss is reported", "[keeper][keeperlink]")
+{
+    auto h = LinkHarness {};
+    auto order = std::vector<std::string> {};
+    h.link->attachChildren(vthost::keeperlink::ChildEvents {
+        .exited = {},
+        .orphaned = [&] { order.emplace_back(h.losses == 0 ? "orphaned" : "orphaned after the loss"); },
+    });
+    h.keeperEnd.channel = KeeperChannel { UniqueFd {} };
+    REQUIRE(turnUntil(h.loop, [&] { return h.losses > 0; }));
+    CHECK(order == std::vector<std::string> { "orphaned" });
 }
 
 TEST_CASE("a spawn the keeper answers after it was given up on is released at once", "[keeper][keeperlink]")
@@ -483,7 +500,10 @@ TEST_CASE("an Exited read together with a spawn's answer is handled without more
     } };
 
     auto exits = std::vector<keeper::KeeperSessionId> {};
-    h.link->onExited([&](keeper::KeeperSessionId session, vtpty::ExitStatus) { exits.push_back(session); });
+    h.link->attachChildren(vthost::keeperlink::ChildEvents {
+        .exited = [&](keeper::KeeperSessionId session, vtpty::ExitStatus) { exits.push_back(session); },
+        .orphaned = {},
+    });
     auto reply = std::optional<std::expected<vthost::keeperlink::SpawnReply, keeper::SpawnError>> {};
     h.loop.post([&] { reply = h.link->spawn(keeper::Spawn {}, {}); });
     REQUIRE(turnUntil(h.loop, [&] { return reply.has_value(); }));

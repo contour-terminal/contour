@@ -141,12 +141,14 @@ WorkspacePersistence::WorkspacePersistence(core::net::EventLoop& loop,
                                            SessionHost& host,
                                            SnapshotWriter& writer,
                                            WorkspacePersistenceConfig config,
-                                           core::platform::IWallClock const& wallClock):
+                                           core::platform::IWallClock const& wallClock,
+                                           PendingRestoreCopy pendingCopy):
     _loop { loop },
     _host { host },
     _writer { writer },
     _config { std::move(config) },
     _wallClock { wallClock },
+    _pendingCopy { pendingCopy },
     _gate { std::make_shared<Gate>(Gate { .self = this }) },
     _modelSubscription { host, *this, &SessionHost::subscribe, &SessionHost::unsubscribe },
     _streamSubscription { host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream }
@@ -262,8 +264,10 @@ void WorkspacePersistence::writeSnapshot()
         CaptureOptions { .scrollback = _config.scrollback, .scrollbackRows = _config.scrollbackRows },
         std::chrono::floor<std::chrono::seconds>(_wallClock.now()));
     // A realized restore's kept copy goes with the first write that succeeds after it.
-    auto const after = _host.restoreOutcome() == RestoreOutcome::Realized ? AfterWrite::ConfirmRestored
-                                                                          : AfterWrite::Nothing;
+    auto const after = _host.restoreOutcome() == RestoreOutcome::Realized
+                               || _pendingCopy == PendingRestoreCopy::DroppedAfterFirstWrite
+                           ? AfterWrite::ConfirmRestored
+                           : AfterWrite::Nothing;
     _writer.submit(std::move(snapshot), after);
     _state.snapshot = SnapshotState::Clean;
 }
@@ -401,8 +405,10 @@ DaemonPersistence::DaemonPersistence(core::net::EventLoop& loop,
                                      WorkspacePersistenceConfig config,
                                      core::platform::IWallClock const& wallClock,
                                      WriterThreading threading,
-                                     DiagnosticSink const& report):
-    _writer { store, threading, report }, _persistence { loop, host, _writer, std::move(config), wallClock }
+                                     DiagnosticSink const& report,
+                                     PendingRestoreCopy pendingCopy):
+    _writer { store, threading, report },
+    _persistence { loop, host, _writer, std::move(config), wallClock, pendingCopy }
 {
     // Closed before the first write can confirm it: the writes only start with the first interval.
     if (!restoredFrom)
@@ -419,6 +425,34 @@ DaemonPersistence::DaemonPersistence(core::net::EventLoop& loop,
                    : std::format("workspace restore: no pane came back; {} is kept for the next start",
                                  pending));
 }
+
+namespace
+{
+    /// @return The restore @p loaded, a Restorable load of the file @p name, makes; logged through @p report.
+    [[nodiscard]] std::optional<WorkspaceRestore> restoreOfLoaded(LoadResult loaded,
+                                                                  std::string const& name,
+                                                                  WorkspacePersistenceConfig const& config,
+                                                                  DiagnosticSink const& report,
+                                                                  core::platform::WallClockRef wall)
+    {
+        if (loaded.droppedHistories > 0)
+            report(std::format(
+                "workspace restore: the history of {} pane(s) did not decode; they come back blank",
+                loaded.droppedHistories));
+        auto snapshot = *std::move(loaded.snapshot);
+        report(std::format(
+            "workspace restore: restoring {} workspace(s) from {}", snapshot.workspaces.size(), name));
+        auto const divider = RestoreDivider {
+            .sessionEndedAt = localTimeOf(snapshot.takenAt),
+            .today = std::chrono::floor<std::chrono::days>(
+                localTimeOf(std::chrono::floor<std::chrono::seconds>(wall.now()))),
+        };
+        return WorkspaceRestore { .snapshot = std::move(snapshot),
+                                  .rerunPrograms = config.rerunPrograms,
+                                  .divider = divider,
+                                  .source = loaded.source };
+    }
+} // namespace
 
 std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store,
                                                WorkspacePersistenceConfig const& config,
@@ -455,22 +489,29 @@ std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store
     if (auto const begun = store.beginRestore(loaded.source); !begun)
         report(std::format(
             "workspace restore: {} could not be kept aside while restoring: {}", name, begun.error().detail));
-    if (loaded.droppedHistories > 0)
-        report(
-            std::format("workspace restore: the history of {} pane(s) did not decode; they come back blank",
-                        loaded.droppedHistories));
-    auto snapshot = *std::move(loaded.snapshot);
-    report(std::format(
-        "workspace restore: restoring {} workspace(s) from {}", snapshot.workspaces.size(), name));
-    auto const divider = RestoreDivider {
-        .sessionEndedAt = localTimeOf(snapshot.takenAt),
-        .today = std::chrono::floor<std::chrono::days>(
-            localTimeOf(std::chrono::floor<std::chrono::seconds>(wall.now()))),
-    };
-    return WorkspaceRestore { .snapshot = std::move(snapshot),
-                              .rerunPrograms = config.rerunPrograms,
-                              .divider = divider,
-                              .source = loaded.source };
+    return restoreOfLoaded(std::move(loaded), name, config, report, wall);
+}
+
+std::optional<WorkspaceRestore> peekRestore(SessionSnapshotStore const& store,
+                                            WorkspacePersistenceConfig const& config,
+                                            DiagnosticSink const& report,
+                                            core::platform::WallClockRef wall)
+{
+    auto loaded = store.peek();
+    auto const name = core::pathToUtf8(store.path());
+    switch (loaded.verdict)
+    {
+        case LoadVerdict::Absent:
+        case LoadVerdict::Empty: return std::nullopt;
+        case LoadVerdict::SetAside:
+        case LoadVerdict::Unsupported:
+        case LoadVerdict::Unreadable:
+            report(std::format(
+                "workspace restore: {} is not read after a crash ({}); left as it is", name, loaded.detail));
+            return std::nullopt;
+        case LoadVerdict::Restorable: break;
+    }
+    return restoreOfLoaded(std::move(loaded), name, config, report, wall);
 }
 
 } // namespace vthost

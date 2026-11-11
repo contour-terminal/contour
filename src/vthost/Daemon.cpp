@@ -100,6 +100,8 @@
 
     #include <vthost/keeperlink/KeeperLink.hpp>
     #include <vthost/keeperlink/KeeperPtyFactory.hpp>
+    #include <vthost/keeperlink/Recovery.hpp>
+    #include <vthost/keeperlink/Structure.hpp>
 #endif
 
 namespace vthost
@@ -375,13 +377,15 @@ namespace
     }
 
     /// @param endpoint The endpoint's name ("control", "native", ...).
-    /// @return What the first client is told of an endpoint a daemon serves on without after an upgrade.
+    /// @return What the first client is told of an endpoint a daemon serves on without after it took over
+    ///         running sessions (a live upgrade, a restart after a crash).
     [[nodiscard]] std::string unservedEndpointNotice(std::string_view endpoint)
     {
-        return std::format(
-            "Contour could not serve its {} endpoint after the upgrade, and runs on without it; "
-            "the daemon's log says why",
-            endpoint);
+        return std::format("Contour could not serve its {} endpoint when the daemon took over its running "
+                           "sessions, and runs on "
+                           "without it; "
+                           "the daemon's log says why",
+                           endpoint);
     }
 
     /// Waits until the daemon is asked to end: what a daemon that took over hosted programs but serves no
@@ -516,13 +520,25 @@ namespace
     };
 
     /// @param config The daemon's configuration.
-    /// @param image The handover image it starts from; nullopt for a daemon started afresh.
-    /// @return The run it serves as: the image's, one upgrade further, or a fresh run of @p config's.
+    /// @param image The handover image it starts from, or the structure its keeper kept; nullopt for a daemon
+    ///        started afresh.
+    /// @param continuity How it started.
+    /// @return The run it serves as: the image's, one upgrade further; the structure's, as it was (a restart
+    ///         after a crash is no upgrade); or a fresh run of @p config's.
     [[nodiscard]] DaemonLineage lineageOf(DaemonConfig const& config,
-                                          std::optional<handover::HandoverImage> const& image)
+                                          std::optional<handover::HandoverImage> const& image,
+                                          StartContinuity continuity)
     {
-        if (!image)
+        if (!image || image->daemonInstance == 0)
             return DaemonLineage { .instance = config.instance, .upgradeGeneration = 0 };
+        switch (continuity)
+        {
+            case StartContinuity::Recovered:
+                return DaemonLineage { .instance = image->daemonInstance,
+                                       .upgradeGeneration = image->upgradeGeneration };
+            case StartContinuity::Fresh:
+            case StartContinuity::HandedOver: break;
+        }
         return DaemonLineage { .instance = image->daemonInstance,
                                .upgradeGeneration = image->upgradeGeneration + 1 };
     }
@@ -674,6 +690,59 @@ namespace
         return prepareRestore(*store, config, logPersistence, wall);
     }
 
+    /// What a restart after a crash takes from the snapshot, which it reads and leaves as it is.
+    struct RecoveredSnapshot
+    {
+        RecoveredSeeder seeder; ///< Seeds each recovered session; null for none.
+        PendingRestoreCopy pendingCopy = PendingRestoreCopy::Kept; ///< What becomes of a `.restored` it read.
+    };
+
+    /// @param continuity How the daemon started.
+    /// @param store The snapshot file, while persistence is on.
+    /// @param config How the daemon keeps its workspace.
+    /// @param wall The daemon's wall clock, which dates the divider.
+    /// @return For a restart after a crash, what seeds each recovered session from the snapshot, and whether
+    ///         the first write drops the `.restored` copy it read (left by a start that died before it wrote
+    ///         one); nothing for any other start, or without a snapshot.
+    [[nodiscard]] RecoveredSnapshot recoveredSnapshotOf(
+        [[maybe_unused]] StartContinuity continuity,
+        [[maybe_unused]] std::optional<SessionSnapshotStore> const& store,
+        [[maybe_unused]] WorkspacePersistenceConfig const& config,
+        [[maybe_unused]] core::platform::WallClockRef wall)
+    {
+#ifndef _WIN32
+        if (continuity == StartContinuity::Recovered && store)
+            if (auto peeked = peekRestore(*store, config, logPersistence, wall))
+            {
+                auto const pendingCopy = peeked->source == RestoreSource::PendingRestore
+                                             ? PendingRestoreCopy::DroppedAfterFirstWrite
+                                             : PendingRestoreCopy::Kept;
+                return RecoveredSnapshot { .seeder = keeperlink::snapshotSeederOf(std::move(*peeked)),
+                                           .pendingCopy = pendingCopy };
+            }
+#endif
+        return {};
+    }
+
+#ifndef _WIN32
+    /// @param sink Where the structure goes; null behind no keeper.
+    /// @param identities The TLS identities the daemon made up for its listeners, by listener name.
+    /// @return Them, as the structure its keeper keeps names them: by listener, without a handle; none behind
+    ///         no keeper, so that nothing but an upgrade that hands them on keeps the private keys.
+    [[nodiscard]] std::vector<handover::InheritedListener> keptIdentitiesOf(
+        keeperlink::StructureSink const* sink,
+        std::map<std::string, handover::TlsIdentity, std::less<>> const& identities)
+    {
+        auto listeners = std::vector<handover::InheritedListener> {};
+        if (sink == nullptr)
+            return listeners;
+        for (auto const& [name, identity]: identities)
+            listeners.push_back(
+                handover::InheritedListener { .name = name, .handle = {}, .tlsIdentity = identity });
+        return listeners;
+    }
+#endif
+
     class BoundPersistence;
 
     /// What a daemon does before its listeners close, in order: the workspace's last snapshot, the keeper's
@@ -733,7 +802,8 @@ namespace
                          SessionSnapshotStore const& store,
                          std::optional<RestoreSource> restoredFrom,
                          WorkspacePersistenceConfig const& config,
-                         core::platform::IWallClock const& wallClock):
+                         core::platform::IWallClock const& wallClock,
+                         PendingRestoreCopy pendingCopy):
             _persistence(loop,
                          host,
                          store,
@@ -741,7 +811,8 @@ namespace
                          config,
                          wallClock,
                          WriterThreading::Background,
-                         logPersistence),
+                         logPersistence,
+                         pendingCopy),
             _sequence { sequence }
         {
             _sequence._persistence = &_persistence;
@@ -786,26 +857,6 @@ namespace
     }
 
 #ifndef _WIN32
-    /// @param inventory What the keeper kept for a Recovered start (keeperlink::KeeperAttachment::inventory).
-    /// @return The listeners in it, taken out of it, to serve on as a handover's are served on.
-    [[nodiscard]] std::vector<handover::InheritedListener> keptListenersOf(
-        std::vector<keeperlink::ReceivedMessage>& inventory)
-    {
-        auto listeners = std::vector<handover::InheritedListener> {};
-        for (auto& received: inventory)
-        {
-            if (!received.message || received.fds.size() != 1)
-                continue;
-            if (auto const* listener = std::get_if<keeper::InventoryListener>(&*received.message))
-                listeners.push_back(handover::InheritedListener {
-                    .name = listener->name,
-                    .handle = vtpty::CrossingHandle::of(received.fds.front().release()),
-                    .tlsIdentity = std::nullopt,
-                });
-        }
-        return listeners;
-    }
-
     /// Tells @p link every KeeperHeartbeatInterval that the loop thread is alive, until the loop stops.
     /// @param loop The daemon's loop (not owned; outlives the flow).
     /// @param link The keeper's link (not owned; outlives the flow).
@@ -902,7 +953,8 @@ namespace
             };
         }
 
-        /// Starts the link on @p loop. Called once.
+        /// Starts the link on @p loop, and for a Recovered start rebuilds what the keeper kept
+        /// (keeperlink::imageFromInventory()). Called once.
         /// @param loop The daemon's loop (not owned; outlives this).
         /// @param onLost Called on the loop when the keeper is gone.
         void link([[maybe_unused]] core::net::EventLoop& loop, [[maybe_unused]] std::function<void()> onLost)
@@ -911,7 +963,14 @@ namespace
             if (!_attachment)
                 return;
             if (_attachment->continuity == keeper::LaunchContinuity::Recovered)
-                _kept = keptListenersOf(_attachment->inventory);
+            {
+                _recovery = keeperlink::imageFromInventory(_attachment->inventory, *_memory);
+                for (auto const& problem: _recovery->problems)
+                    errorLog()("recovery: {}{}",
+                               keeperlink::describe(problem.error),
+                               problem.session != 0 ? std::format(" (keeper session {})", problem.session)
+                                                    : std::string {});
+            }
             _link.emplace(loop, std::move(_attachment->channel), _attachment->version, std::move(onLost));
             _attachment->inventory.clear();
             // Alive from here on, not only once it serves: a start is judged by its heartbeats once the first
@@ -934,21 +993,68 @@ namespace
 
         /// @param placement Moves each hosted shell into its own resource domain.
         /// @return What hosted shells run on: spawned through the keeper behind one, by this daemon
-        /// otherwise.
-        ///         Called once: the keeper's factory takes over the link's Exited handler.
+        ///         otherwise. Called once: the keeper's factory takes over the link's Exited handler.
         [[nodiscard]] ShellDevices shellDevices(std::shared_ptr<vtpty::ProcessPlacement> placement)
         {
 #ifndef _WIN32
             if (_link)
-                return
-                    [factory = std::make_shared<keeperlink::KeeperPtyFactory>(*_link, std::move(placement))](
-                        vtbackend::PageSize pageSize,
-                        vtpty::Process::ExecInfo exec,
-                        SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
-                        return factory->make(pageSize, std::move(exec), sandbox);
-                    };
+            {
+                _placement = placement;
+                _factory = std::make_shared<keeperlink::KeeperPtyFactory>(*_link, std::move(placement));
+                return [factory = _factory](vtbackend::PageSize pageSize,
+                                            vtpty::Process::ExecInfo exec,
+                                            SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
+                    return factory->make(pageSize, std::move(exec), sandbox);
+                };
+            }
 #endif
             return ownShellDevices(std::move(placement));
+        }
+
+        /// @return The image a Recovered start serves from (keeperlink::Recovery::image); nullopt for any
+        ///         other start.
+        [[nodiscard]] std::optional<handover::HandoverImage> takeRecoveredImage()
+        {
+#ifndef _WIN32
+            if (_recovery)
+                return std::exchange(_recovery->image, {});
+#endif
+            return std::nullopt;
+        }
+
+        /// @return What binds each session a handover image or a recovery names as a keeper's child to its
+        ///         child again (SessionHostConfig::adoptChild); null behind no keeper. After shellDevices().
+        [[nodiscard]] KeeperChildAdopter childAdopter()
+        {
+#ifndef _WIN32
+            if (_factory)
+                return [this](handover::HandoverSession const& session, std::unique_ptr<vtpty::Pty> pty) {
+                    return adoptChild(session, std::move(pty));
+                };
+#endif
+            return {};
+        }
+
+        /// Releases every session the keeper kept that the host did not adopt: nothing of this daemon holds
+        /// it, so the keeper hangs it up. After the host is built.
+        void releaseUnadopted()
+        {
+#ifndef _WIN32
+            if (!_recovery || !_link)
+                return;
+            auto released = std::exchange(_recovery->unbound, {});
+            for (auto const& [session, child]: _recovery->children)
+                released.push_back(keeper::KeeperSessionId { session });
+            _recovery->children.clear();
+            for (auto const session: released)
+                _link->post(keeper::Release {
+                    .session = std::to_underlying(session),
+                    .graceMs = static_cast<uint32_t>(
+                        std::chrono::milliseconds { vtpty::HangupGrace::Default }.count()) });
+            if (!released.empty())
+                errorLog()("recovery: {} session(s) the keeper kept could not be served; released",
+                           released.size());
+#endif
         }
 
         /// @return What a live upgrade's exec keeps across beside the image's handles: the keeper's channel.
@@ -959,14 +1065,6 @@ namespace
                 return { vtpty::CrossingHandle::of(_link->channelHandle()) };
 #endif
             return {};
-        }
-
-        /// @return The listeners the keeper kept for a restart after a crash, to serve on as a handover's
-        /// are;
-        ///         none for any other start.
-        [[nodiscard]] std::vector<handover::InheritedListener> takeKeptListeners()
-        {
-            return std::exchange(_kept, {});
         }
 
         /// Turns @p loop until @p flow is done.
@@ -1026,11 +1124,64 @@ namespace
 #endif
         }
 
-      private:
-        std::optional<keeperlink::KeeperAttachment> _attachment;
-        std::vector<handover::InheritedListener> _kept;
 #ifndef _WIN32
+        /// @return Where the structure goes: to the keeper, as a sealed memory object; null behind none.
+        [[nodiscard]] keeperlink::StructureSink* structureSink() noexcept
+        {
+            if (!_link)
+                return nullptr;
+            if (!_sink)
+                _sink.emplace(*_link, *_memory);
+            return &*_sink;
+        }
+#endif
+
+      private:
+#ifndef _WIN32
+        /// Binds @p session, which a handover image or a recovery names as a keeper's child, to its child.
+        [[nodiscard]] std::unique_ptr<vtpty::Pty> adoptChild(handover::HandoverSession const& session,
+                                                             std::unique_ptr<vtpty::Pty> pty)
+        {
+            auto recovered = std::optional<keeperlink::RecoveredChild> {};
+            if (_recovery)
+                if (auto found = _recovery->children.extract(session.keeperSession))
+                    recovered = std::move(found.mapped());
+            // A live upgrade's: the same daemon process, whose link hears the child's exit from here on.
+            auto kept = keeperlink::KeptChild { .session = keeper::KeeperSessionId { session.keeperSession },
+                                                .pid = session.child.pid,
+                                                .exited = std::nullopt,
+                                                .settle = {} };
+            if (recovered)
+                kept = std::move(recovered->kept);
+            auto const pid = kept.pid;
+            auto child = _factory->adopt(std::move(kept), std::move(pty));
+            if (!recovered)
+                return child;
+            // A recovered terminal is fresh: its program is asked to draw it again.
+            keeperlink::nudgeRedraw(*child);
+            // A child the dead daemon never placed waits on its gate still: placed now, then released.
+            if (recovered->gate.isOpen())
+            {
+                daemonLog()("recovery: keeper session {} was never placed; placing it now",
+                            session.keeperSession);
+                _placement->placeThenRelease(vtpty::ParkedChild { static_cast<int>(pid),
+                                                                  std::move(recovered->processHandle),
+                                                                  std::move(recovered->gate),
+                                                                  vtpty::ProcessRole::Session });
+                _link->post(keeper::Placed { .session = session.keeperSession });
+            }
+            return child;
+        }
+#endif
+
+        std::optional<keeperlink::KeeperAttachment> _attachment;
+#ifndef _WIN32
+        std::unique_ptr<handover::HandoverMemory> _memory = handover::makeNativeHandoverMemory();
+        std::optional<keeperlink::Recovery> _recovery;
         std::optional<keeperlink::KeeperLink> _link;
+        std::shared_ptr<vtpty::ProcessPlacement> _placement;
+        std::shared_ptr<keeperlink::KeeperPtyFactory> _factory;
+        std::optional<keeperlink::KeeperStructureSink> _sink;
 #endif
     };
 
@@ -1450,6 +1601,10 @@ int runDaemon(DaemonConfig const& config,
     auto sequence = ShutdownSequence { config.beforeShutdown, daemonKeeper.announcer() };
     auto funnel = ShutdownFunnel { loop, servers, [&sequence](ShutdownCause cause) { sequence.run(cause); } };
     daemonKeeper.link(loop, [&funnel] { funnel.request(ShutdownCause::KeeperLost); });
+    // A restart after a crash serves from what its keeper kept, as a handed-over daemon serves from its
+    // image.
+    if (continuity == StartContinuity::Recovered)
+        image = daemonKeeper.takeRecoveredImage();
 
     // Armed before the host, for two reasons. The watch blocks SIGINT/SIGTERM on this thread, and only
     // threads started afterwards inherit that mask: the host starts a pump thread per session of the
@@ -1463,8 +1618,8 @@ int runDaemon(DaemonConfig const& config,
     // What a previous image of this daemon handed over is consumed as it is taken over, part by part, and
     // kept nowhere beside: its listening sockets first, served on rather than bound again, which a client
     // reconnecting finds without a gap; the rest by the host.
-    auto inherited =
-        InheritedListeners { image ? std::exchange(image->listeners, {}) : daemonKeeper.takeKeptListeners() };
+    auto inherited = InheritedListeners { image ? std::exchange(image->listeners, {})
+                                                : std::vector<handover::InheritedListener> {} };
     // What the daemon could not start as configured, for the first client to be told. Only a daemon that took
     // over from a handover ever serves on so: ending would hang up every program it adopted.
     auto degradations = config.degradations;
@@ -1483,8 +1638,11 @@ int runDaemon(DaemonConfig const& config,
     auto restore = image ? std::nullopt : restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
-    // The same run of the daemon goes on across a live upgrade, one upgrade further.
-    auto const lineage = lineageOf(config, image);
+    // A restart after a crash reads the snapshot and changes nothing of it, so that no crash loop sets it
+    // aside: only for the history of the sessions it recovers, which no checkpoint carries yet.
+    auto recovery = recoveredSnapshotOf(continuity, store, config.persistence, wallClock);
+    // The same run of the daemon goes on across a live upgrade, one upgrade further, and across a crash.
+    auto const lineage = lineageOf(config, image, continuity);
 
     // The workspaces' git state: looked up by a `git` this daemon starts on a thread of its own, so a slow
     // repository stalls the sidebar's branch and nothing else. Declared before the host, so the host goes
@@ -1517,8 +1675,14 @@ int runDaemon(DaemonConfig const& config,
                                : ProfilePtyFactory {},
             .instance = lineage.instance,
             .restore = std::move(restore),
-            .handover = std::exchange(image, std::nullopt) }
+            .handover = std::exchange(image, std::nullopt),
+            .adoptChild = daemonKeeper.childAdopter(),
+            .seedRecovered = std::move(recovery.seeder) }
     };
+    // The host restored or recovered every session, the longest part of a start: a milestone.
+    daemonKeeper.beat();
+    // What the keeper kept that no session took is let go.
+    daemonKeeper.releaseUnadopted();
     if (auto const outcome = host.handoverOutcome(); !outcome)
         errorLog()("the handover was taken over in part (error {})", std::to_underlying(outcome.error()));
     // Every endpoint below that cannot be served is skipped, and said so; the host keeps what is to be told.
@@ -1536,7 +1700,8 @@ int runDaemon(DaemonConfig const& config,
     // Before the upgrade hooks, which write the workspace through it.
     auto persistence = std::optional<BoundPersistence> {};
     if (store)
-        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
+        persistence.emplace(
+            sequence, loop, host, *store, restoredFrom, config.persistence, wallClock, recovery.pendingCopy);
     // The live upgrade's side of the daemon: the connections that are not the native protocol's (tmux control
     // mode, imsg, tmux-compat), which it closes outright, and the hooks that tell, write and close. Declared
     // before the runtime that holds the hooks and the drain that unwinds the tracked connections.
@@ -1709,9 +1874,16 @@ int runDaemon(DaemonConfig const& config,
 
     inherited.closeUnclaimed();
 
+#ifndef _WIN32
+    // The identities the daemon made up travel in the structure its keeper keeps, so that a restart after a
+    // crash presents the very same certificate.
+    auto structureExtras = keptIdentitiesOf(daemonKeeper.structureSink(), tlsIdentities);
+#endif
+
     // Every listener is bound: each crosses an upgrade under its name, with the identity the daemon made up
-    // for it. Kept only by an upgrade, which hands it on; otherwise nothing keeps a private key past this
-    // point.
+    // for it. Kept here only by an upgrade, which hands it on; beside that, only the keeper's structure keeps
+    // it (StructureExtras, and the keeper's copy, which no other process can read: the keeper is not
+    // dumpable).
     if (!config.liveUpgrade)
         tlsIdentities.clear();
     else
@@ -1733,8 +1905,20 @@ int runDaemon(DaemonConfig const& config,
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
 #endif
-    // Every listener is bound: the keeper keeps a duplicate of each, then hears that the daemon serves, and
-    // from now on that it is alive.
+    // Every listener is bound: the keeper keeps the structure, and keeps it current from now on, before any
+    // client can see an id; then a duplicate of each listener, then hears that the daemon serves, and from
+    // now on that it is alive.
+#ifndef _WIN32
+    auto structure = std::optional<keeperlink::StructurePusher> {};
+    if (auto* const sink = daemonKeeper.structureSink())
+        structure.emplace(loop,
+                          host,
+                          *sink,
+                          keeperlink::StructureExtras { .daemonInstance = lineage.instance,
+                                                        .release = config.releaseVersion,
+                                                        .upgradeGeneration = lineage.upgradeGeneration,
+                                                        .listeners = std::move(structureExtras) });
+#endif
     daemonKeeper.startKeeping(config, servers, socketPaths);
     if (servers.empty())
     {
