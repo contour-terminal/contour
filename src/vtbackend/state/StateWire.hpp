@@ -512,6 +512,15 @@ struct StateEnumWire<vtbackend::ProgramState>
 };
 
 template <>
+struct StateEnumWire<vtbackend::ProgramStatusOrigin>
+{
+    static constexpr auto Values = std::array {
+        vtbackend::ProgramStatusOrigin::Program,
+        vtbackend::ProgramStatusOrigin::Integration,
+    };
+};
+
+template <>
 struct StateEnumWire<vtbackend::ProgressState>
 {
     static constexpr auto Values = std::array {

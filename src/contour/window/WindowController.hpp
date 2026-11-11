@@ -1385,17 +1385,17 @@ class WindowController:
     [[nodiscard]] std::optional<vtworkspace::TabId> tabIdAtRow(int row) const noexcept;
     /// The strip's label for list-model row @p row, through the model's own TitleRole.
     [[nodiscard]] std::string titleAtRow(int row) const;
-    /// The program-status badge @p row's tab shows, from the records of all its panes, each read under its
+    /// The program-status badge @p tab shows, from the records of all its panes, each read under its
     /// terminal's lock.
-    [[nodiscard]] ProgramStatusBadge programStatusBadge(vtworkspace::Tab const& tab, int row) const;
-    /// programStatusBadge(), computed once until the row or the tab in front changes (@ref _badges).
-    [[nodiscard]] ProgramStatusBadge cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const;
-    /// The badge @p row's tab shows: its program status against its panes' unseen output and finished
+    [[nodiscard]] ProgramStatusBadge programStatusBadge(vtworkspace::Tab const& tab) const;
+    /// programStatusBadge(), computed once until the row changes or another tab comes in front, which marks
+    /// its panes' records seen (@ref _badges).
+    [[nodiscard]] ProgramStatusBadge cachedProgramStatusBadge(vtworkspace::Tab const& tab) const;
+    /// The badge @p tab shows: its program status against its panes' unseen output and finished
     /// commands (the manager's TabAttention), resolved by resolveTabBadge().
     /// @param tab The tab.
-    /// @param row Its row, which says whether it is in front.
     /// @return The badge, with a Working one's progress.
-    [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab, int row) const;
+    [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab) const;
     /// @return Whether any pane of @p tab shows the lock.
     [[nodiscard]] SecureIndicator tabSecureIndicator(vtworkspace::Tab const& tab) const;
     /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref

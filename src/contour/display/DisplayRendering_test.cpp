@@ -2869,7 +2869,7 @@ TEST_CASE("the probe driver measures echo through a real frame", "[contour][disp
     auto written = std::string {};
     auto writtenLock = std::mutex {};
     auto echo = latency::EchoState {};
-    h.pty->setWriteSink([&](std::string_view data) {
+    h.pty->setWriteSink([&](std::string_view data, vtpty::InputKind /*kind*/) {
         for (auto const byte: data)
             if (auto const reply = latency::echoReply(echo, byte); !reply.bytes.empty())
                 h.pty->feed(reply.bytes);

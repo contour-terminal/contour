@@ -937,6 +937,95 @@ TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
     CHECK(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).back().records.empty());
 }
 
+TEST_CASE("ControlService.reportStatus.writesIntegrationRecord", "[vthost][control][programstatus]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    std::ignore = subscribe(h);
+
+    auto const reported = callSync<vtcontrol::EmptyReply>(
+        h.service,
+        h.context,
+        vtcontrol::ReportStatusRequest { .pane = h.paneId(session),
+                                         .integration = "claude-code",
+                                         .state = "blocked",
+                                         .kind = "permission",
+                                         .title = "Claude",
+                                         .message = "Run\x1b]52;c;ZXZpbA==\x07 it?" });
+    REQUIRE(reported.has_value());
+    h.drain();
+    auto const events = delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink);
+    REQUIRE(events.size() == 1);
+    REQUIRE(events.back().records.size() == 1);
+    auto const& record = events.back().records.front();
+    CHECK(record.id == "claude-code");
+    CHECK(record.origin == "integration");
+    CHECK(record.state == vtcontrol::ProgramState::Blocked);
+    CHECK(record.kind == vtcontrol::BlockedKind::Permission);
+    CHECK(record.message == "Run]52;c;ZXZpbA== it?");
+    CHECK(record.generation != 0);
+    CHECK_FALSE(record.since.empty());
+}
+
+TEST_CASE("ControlService.reportStatus.rejectsBadIntegrationId", "[vthost][control][programstatus]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    auto const report = [&](vtcontrol::ReportStatusRequest request) {
+        request.pane = h.paneId(session);
+        return callSync<vtcontrol::EmptyReply>(h.service, h.context, request);
+    };
+    auto const bad = report({ .integration = "Claude Code", .state = "working" });
+    REQUIRE_FALSE(bad.has_value());
+    CHECK(bad.error().code == ControlErrorCode::BadRequest);
+    CHECK_FALSE(report({ .integration = "", .state = "working" }).has_value());
+    CHECK_FALSE(report({ .integration = std::string(33, 'a'), .state = "working" }).has_value());
+    CHECK_FALSE(report({ .integration = "agent", .state = "napping" }).has_value());
+    CHECK_FALSE(report({ .integration = "agent", .state = "working", .kind = "question" }).has_value());
+    CHECK_FALSE(report({ .integration = "agent", .state = "blocked", .kind = "nope" }).has_value());
+    CHECK(h.terminal(session).programStatus().records().empty());
+    CHECK(report({ .integration = "agent", .state = "blocked", .kind = "question" }).has_value());
+}
+
+TEST_CASE("ControlService.clearStatus.removesOnlyThatIntegration", "[vthost][control][programstatus]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.terminal(session).writeToScreen("\033]7501;state=working:app=make\033\\");
+    for (auto const* integration: { "claude-code", "codex" })
+        REQUIRE(callSync<vtcontrol::EmptyReply>(h.service,
+                                                h.context,
+                                                vtcontrol::ReportStatusRequest { .pane = h.paneId(session),
+                                                                                 .integration = integration,
+                                                                                 .state = "working" })
+                    .has_value());
+    REQUIRE(h.terminal(session).programStatus().records().size() == 3);
+    // Each integration speaks for itself, not for the shell's root record and its app.
+    auto const& set = h.terminal(session).programStatus();
+    CHECK(set.appOf(*set.find("claude-code")) == "claude-code");
+    CHECK(set.appOf(*set.find("codex")) == "codex");
+
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service,
+                h.context,
+                vtcontrol::ClearStatusRequest { .pane = h.paneId(session), .integration = "claude-code" })
+                .has_value());
+    auto const& records = h.terminal(session).programStatus().records();
+    REQUIRE(records.size() == 2);
+    CHECK(h.terminal(session).programStatus().find("claude-code") == nullptr);
+    CHECK(h.terminal(session).programStatus().find("codex") != nullptr);
+    CHECK(h.terminal(session).programStatus().find("") != nullptr); // the OSC 7501 root record survives
+
+    // An id only the program's record holds is not the integration's to clear.
+    h.terminal(session).writeToScreen("\033]7501;state=working:id=owned\033\\");
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service,
+                h.context,
+                vtcontrol::ClearStatusRequest { .pane = h.paneId(session), .integration = "owned" })
+                .has_value());
+    CHECK(h.terminal(session).programStatus().find("owned") != nullptr);
+}
+
 TEST_CASE("program status needs screen, in its event as in ls", "[vthost][control][programstatus][grants]")
 {
     // A record names the program and what it is doing, as a command line does: `read` lists the pane, not it.
@@ -1451,7 +1540,8 @@ TEST_CASE("workspace.switch errors: no window, several windows, both targets", "
         CHECK(second.asked.empty());
 
         // The one that typed last is the one asked.
-        h.host.writeInputFrom(session, "x", { .endpoint = "native", .index = 2 });
+        h.host.writeInputFrom(
+            session, "x", { .endpoint = "native", .index = 2 }, vthost::proto::InputKind::Keyboard);
         answer.reset();
         callSwitch(h, { .toLabel = "admin" }, answer);
         CHECK(first.asked.empty());

@@ -234,7 +234,10 @@ class ScreenMirror
     /// (Terminal::replaceProgramStatus), dropping each record whose state this build does not know. The
     /// caller holds the terminal lock.
     /// @param records The host's whole set, least recently updated first.
-    void syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records);
+    /// @param timing  Whether they carry the host's timing; without it the terminal stamps them itself, so
+    ///                that a Done from an older daemon still reads as unseen.
+    void syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records,
+                           proto::StatusTimingBlock timing);
 
     /// Brings the mirror's INPUT-encoding state in line with the server's: the mirrored DEC modes
     /// (each an independent boolean) and then the resolved mouse protocol, coordinate encoding and

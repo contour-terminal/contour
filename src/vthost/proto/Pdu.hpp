@@ -359,11 +359,23 @@ struct ServerHello
     bool operator==(ServerHello const&) const = default;
 };
 
-/// Client keyboard/paste bytes for one session's PTY.
+/// What the bytes of an Input carry (Capability::InputKinds).
+enum class InputKind : uint8_t
+{
+    Other =
+        0,    ///< Nothing the user typed: a reply, a focus or mouse report; also all a peer without it sends.
+    Keyboard, ///< The user's key events or paste are among them.
+};
+
+/// Client input bytes for one session's PTY: keys and paste, but also the replies, focus and mouse reports
+/// its terminal sends.
 struct Input
 {
     uint64_t session = 0;
     std::vector<std::byte> data;
+    /// Trails the data only when not Other, which is also what a missing byte decodes as; a client sets it
+    /// only toward a daemon sharing Capability::InputKinds.
+    InputKind kind = InputKind::Other;
     bool operator==(Input const&) const = default;
 };
 
@@ -1042,7 +1054,22 @@ struct WireProgramStatusRecord
     std::string title = {};            ///< Decoded UTF-8.
     std::string message = {};          ///< Decoded UTF-8.
 
+    /// The fields below travel only in a ProgramStatus whose `timing` is Included; otherwise they decode as
+    /// their defaults.
+    uint8_t origin = 0;  ///< vtbackend::ProgramStatusOrigin; one this build does not know reads as Program.
+    int64_t sinceNs = 0; ///< When the record last changed state or kind: host wall clock, Unix nanoseconds.
+    uint64_t generation = 0; ///< The host's change counter value for the record.
+
     bool operator==(WireProgramStatusRecord const&) const = default;
+};
+
+/// Whether a ProgramStatus carries each record's origin, `since` and generation.
+enum class StatusTimingBlock : uint8_t
+{
+    Omitted = 0, ///< No block: the peer does not share Capability::ProgramStatusTiming.
+    /// The records' origin, `since` and generation follow the records, led by their count -- the record
+    /// count again -- so that a block for no records still says it is there.
+    Included,
 };
 
 /// Server→client push (Capability::ProgramStatus): a session's whole set of program-status records, least
@@ -1053,6 +1080,9 @@ struct ProgramStatus
 {
     uint64_t session = 0;                              ///< The session the records belong to.
     std::vector<WireProgramStatusRecord> records = {}; ///< The whole set.
+    /// Whether the trailing timing block follows the records (Capability::ProgramStatusTiming). Only then are
+    /// the records' `origin`, `sinceNs` and `generation` encoded; the decoder sets it by what it finds.
+    StatusTimingBlock timing = StatusTimingBlock::Omitted;
     bool operator==(ProgramStatus const&) const = default;
 };
 

@@ -51,6 +51,9 @@ interface types {
         app: string,
         title: string,
         message: string,
+        origin: string,
+        since: string,
+        generation: u32,
     }
 
     record pane-info {
@@ -201,6 +204,21 @@ interface types {
         label: string,
     }
 
+    record report-status-request {
+        pane: string,
+        integration: string,
+        state: string,
+        kind: string,
+        title: string,
+        message: string,
+        progress: option<u8>,
+    }
+
+    record clear-status-request {
+        pane: string,
+        integration: string,
+    }
+
     record block-list-request {
         pane: string,
         limit: u32,
@@ -288,6 +306,8 @@ interface control {
         close-pane-request,
         close-tab-request,
         set-label-request,
+        report-status-request,
+        clear-status-request,
         block-list-request,
         block-list-reply,
         block-read-request,
@@ -333,6 +353,14 @@ interface control {
     /// Give a workspace, tab or pane a label to address it by; an empty label clears it.
     /// Needs `write`.
     object-set-label: func(request: set-label-request) -> result<_, control-error>;
+
+    /// Report what a pane's program is doing, as an integration; an agent's hook uses it to show its state.
+    /// Needs `input`.
+    pane-report-status: func(request: report-status-request) -> result<_, control-error>;
+
+    /// Remove the status an integration reported for a pane.
+    /// Needs `input`.
+    pane-clear-status: func(request: clear-status-request) -> result<_, control-error>;
 
     /// List a pane's recent command blocks, newest first.
     /// Needs `screen`.

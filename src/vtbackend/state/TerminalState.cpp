@@ -485,6 +485,7 @@ TerminalState Terminal::captureState() const
         .progress = _progress,
         .programStatus = std::vector<ProgramStatusRecord>(_programStatus.records().begin(),
                                                           _programStatus.records().end()),
+        .programStatusLastGeneration = _programStatus.nextGeneration() - 1,
         .pointerShapes = _pointerShapes,
         .isPointerShapeBaseSetByApplication = _pointerShapeBaseSetByApplication,
         .userVars = _userVars,
@@ -810,7 +811,9 @@ void Terminal::commitRestore(TerminalState const& state,
     _kittyClipboardWriteOpen = state.session.isKittyClipboardWriteOpen;
     _currentWorkingDirectory = state.session.currentWorkingDirectory;
     _progress = state.session.progress;
-    std::ignore = _programStatus.replaceAll(state.session.programStatus);
+    std::ignore = _programStatus.replaceAll(
+        state.session.programStatus, ProgramStatusTiming::Carried, std::chrono::system_clock::time_point {});
+    _programStatus.restoreNextGeneration(state.session.programStatusLastGeneration + 1);
     _pointerShapes = state.session.pointerShapes;
     _pointerShapeBaseSetByApplication = state.session.isPointerShapeBaseSetByApplication;
     _userVars = state.session.userVars;

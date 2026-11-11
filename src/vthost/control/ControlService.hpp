@@ -106,6 +106,8 @@ class ControlService final:
     void handle(vtcontrol::CallContext& context, vtcontrol::CloseTabRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SwitchWorkspaceRequest const& request, vtcontrol::Completion<vtcontrol::SwitchWorkspaceReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::SetLabelRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ReportStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
+    void handle(vtcontrol::CallContext& context, vtcontrol::ClearStatusRequest const& request, vtcontrol::Completion<vtcontrol::EmptyReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::BlockListRequest const& request, vtcontrol::Completion<vtcontrol::BlockListReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::BlockReadRequest const& request, vtcontrol::Completion<vtcontrol::BlockReadReply> done) override;
     void handle(vtcontrol::CallContext& context, vtcontrol::WaitRequest const& request, vtcontrol::Completion<vtcontrol::WaitReply> done) override;

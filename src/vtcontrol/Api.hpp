@@ -193,6 +193,7 @@ enum class ProgramStatusReason : uint8_t
     ProcessExit,
     Reset,
     Mirror,
+    UserInput,
 };
 
 template <>
@@ -204,6 +205,7 @@ struct EnumTable<ProgramStatusReason>
         EnumName { ProgramStatusReason::ProcessExit, "processExit" },
         EnumName { ProgramStatusReason::Reset, "reset" },
         EnumName { ProgramStatusReason::Mirror, "mirror" },
+        EnumName { ProgramStatusReason::UserInput, "userInput" },
     };
 };
 
@@ -241,6 +243,10 @@ struct ProgramStatusInfo
     std::string app {};                      ///< The program's name.
     std::string title {};                    ///< A short title.
     std::string message {};                  ///< A longer message.
+    std::string origin {}; ///< Who reported it: `program` (OSC 7501) or `integration` (`pane.reportStatus`).
+    std::string
+        since {}; ///< RFC 3339 UTC with milliseconds: when it last changed state or kind; empty when unset.
+    uint32_t generation = 0; ///< Raised whenever the record is new or its state or kind changes; saturates.
 };
 
 /// A pane: one hosted shell.
@@ -500,6 +506,30 @@ struct SetLabelRequest
 
     std::string object {}; ///< `<kind>:<target>`, e.g. `pane:logs`.
     std::string label {};  ///< The new label; empty clears it.
+};
+
+/// `pane.reportStatus` request: an integration (a coding agent's hook, say) states what a pane's program is
+/// doing. The record is the integration's own, apart from the program's OSC 7501 records.
+struct ReportStatusRequest
+{
+    using ApiRecordTag = void;
+
+    std::string pane {};                ///< Target pane; empty = caller's pane.
+    std::string integration {};         ///< Integration id: [a-z0-9-]{1,32}; becomes the record id.
+    std::string state {};               ///< idle | working | done | blocked | error
+    std::string kind {};                ///< none | permission | question | auth (blocked only); empty = none.
+    std::string title {};               ///< Optional.
+    std::string message {};             ///< Optional reason line; sanitized server-side.
+    std::optional<uint8_t> progress {}; ///< Percent done, 0..100, for the states that take one.
+};
+
+/// `pane.clearStatus` request: removes the integration's own record.
+struct ClearStatusRequest
+{
+    using ApiRecordTag = void;
+
+    std::string pane {};        ///< Target pane; empty = caller's pane.
+    std::string integration {}; ///< Integration id whose record to remove.
 };
 
 /// `block.list` request.

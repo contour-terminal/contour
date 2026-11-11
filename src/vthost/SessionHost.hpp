@@ -1320,12 +1320,18 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param bytes The input, as the client encoded it.
     void writeInput(vtworkspace::SessionId session, std::string_view bytes);
 
-    /// writeInput() for input a connected client typed: also remembers @p from as the session's last typist
-    /// (@see lastInputFrom), which is how a switch finds the window its user is looking at.
+    /// writeInput() for input a connected client sent: also remembers @p from as the session's last typist
+    /// (@see lastInputFrom), which is how a switch finds the window its user is looking at. Input the user
+    /// typed also answers whatever an integration's status was waiting on.
     /// @param session The session the input is for; an unknown one drops it.
     /// @param bytes The input, as the client encoded it.
     /// @param from The connection the input arrived on.
-    void writeInputFrom(vtworkspace::SessionId session, std::string_view bytes, ConnectionId const& from);
+    /// @param kind What the client says @p bytes carry: only Keyboard answers an integration, never a focus
+    ///             or mouse report a window sends as it is switched to.
+    void writeInputFrom(vtworkspace::SessionId session,
+                        std::string_view bytes,
+                        ConnectionId const& from,
+                        proto::InputKind kind);
 
     /// @param session The session asked about.
     /// @return The command line a restart stopped in @p session, held until its next command starts; empty
@@ -2251,7 +2257,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// writeInput() and writeInputFrom(): records @p from, if any, as the session's typist.
     void writeInputAs(vtworkspace::SessionId session,
                       std::string_view bytes,
-                      std::optional<ConnectionId> from);
+                      std::optional<ConnectionId> from,
+                      proto::InputKind kind);
     /// The client whose launch took every workspace; null while none is attached. @see claimPrimaryViewer
     SessionStreamEvents const* _primaryViewer = nullptr;
     /// What serves the extensions' control calls. @see attachExtensionControl

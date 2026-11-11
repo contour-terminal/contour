@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/UntrustedText.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
 #include <vtbackend/vt/ProgramStatus.hpp>
 
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -36,11 +38,11 @@ enum class BadgeKind : uint8_t
     Error,    ///< `✕`: failed.
 };
 
-/// Whether a tab is the one the user is looking at.
-enum class TabFocus : uint8_t
+/// Whether the user has seen what a status record reports.
+enum class StatusSeen : uint8_t
 {
-    Background = 0, ///< Another tab, or another view, is in front.
-    Foreground,     ///< This tab is the window's active one.
+    Unseen = 0, ///< The record is newer than the last one the user saw.
+    Seen,       ///< The user has seen this record, or a later one.
 };
 
 /// The badge a tab shows: its kind, the progress of a Working one, and the tooltip text.
@@ -59,8 +61,8 @@ inline constexpr std::size_t MaxBadgeTextLength = 120;
 /// When a badge kind shows.
 enum class BadgeVisibility : uint8_t
 {
-    Always = 0,     ///< In every tab: it is still happening, or it waits for the user.
-    BackgroundOnly, ///< Only in a tab the user is not looking at: what it reports is already on screen.
+    Always = 0,  ///< In every tab: it is still happening, or it waits for the user.
+    WhileUnseen, ///< Only until the user has seen the record that reports it (its generation).
 };
 
 /// How one program state reads on the tab strip. A state with no row shows nothing (Idle).
@@ -78,44 +80,50 @@ inline constexpr auto BadgeRows = std::array {
                .visibility = BadgeVisibility::Always },
     BadgeRow { .state = vtbackend::ProgramState::Error,
                .kind = BadgeKind::Error,
-               .visibility = BadgeVisibility::BackgroundOnly },
+               .visibility = BadgeVisibility::WhileUnseen },
     BadgeRow { .state = vtbackend::ProgramState::Working,
                .kind = BadgeKind::Working,
                .visibility = BadgeVisibility::Always },
     BadgeRow { .state = vtbackend::ProgramState::Done,
                .kind = BadgeKind::Done,
-               .visibility = BadgeVisibility::BackgroundOnly },
+               .visibility = BadgeVisibility::WhileUnseen },
 };
 
-/// A range of code points that is never shown, inclusive.
-struct CodepointRange
+/// Whether the user has seen @p record.
+/// @param record The record.
+/// @param seenGeneration The newest generation the user has seen (TabAttention); 0 when none.
+/// @return Seen when the record's generation is not newer than @p seenGeneration.
+[[nodiscard]] constexpr StatusSeen statusSeenBy(vtbackend::ProgramStatusRecord const& record,
+                                                uint64_t seenGeneration) noexcept
 {
-    char32_t first; ///< The first code point of the range.
-    char32_t last;  ///< The last.
-};
+    return record.generation > seenGeneration ? StatusSeen::Unseen : StatusSeen::Seen;
+}
 
-/// What disarmInvisibleFormatting() removes: zero-width characters, bidi embeddings, overrides and
-/// isolates, invisible operators and the byte-order mark, which could reorder or hide what the badge
-/// says; and the C0 and C1 controls, which the decoder already refuses but a peer could still send.
-inline constexpr auto InvisibleFormatting = std::array {
-    CodepointRange { .first = 0x0000, .last = 0x001F }, CodepointRange { .first = 0x007F, .last = 0x009F },
-    CodepointRange { .first = 0x200B, .last = 0x200F }, CodepointRange { .first = 0x202A, .last = 0x202E },
-    CodepointRange { .first = 0x2060, .last = 0x2064 }, CodepointRange { .first = 0x2066, .last = 0x2069 },
-    CodepointRange { .first = 0xFEFF, .last = 0xFEFF },
-};
+/// A seen-generation that has seen every record: what a view in front of the user passes.
+inline constexpr uint64_t AllRecordsSeen = std::numeric_limits<uint64_t>::max();
 
-/// Removes every character of @ref InvisibleFormatting from @p text.
+/// Makes a record's text fit for a badge, as the daemon's sanitizer does from the same table
+/// (vtbackend::UntrustedTextTreatments): drops the controls and the invisible and bidi formatting characters,
+/// which could reorder or hide what the badge says, and folds line breaks by the same
+/// vtbackend::UntrustedTextFilter: one space between two shown characters, none at either end. A peer could
+/// still send what the daemon would have dropped, which is why the GUI filters again.
 /// @param text UTF-8 text a program sent.
-/// @return The text without them.
+/// @return The text, filtered.
 [[nodiscard]] inline std::string disarmInvisibleFormatting(std::string_view text)
 {
-    auto codepoints = unicode::convert_to<char32_t>(text);
-    std::erase_if(codepoints, [](char32_t codepoint) {
-        return std::ranges::any_of(InvisibleFormatting, [codepoint](CodepointRange const& range) {
-            return codepoint >= range.first && codepoint <= range.last;
-        });
-    });
-    return unicode::convert_to<char>(std::u32string_view { codepoints });
+    auto const codepoints = unicode::convert_to<char32_t>(text);
+    auto kept = std::u32string {};
+    kept.reserve(codepoints.size());
+    auto filter = vtbackend::UntrustedTextFilter {};
+    for (auto const codepoint: codepoints)
+    {
+        auto const shown = filter.next(vtbackend::treatmentOf(codepoint));
+        if (shown == vtbackend::ShownAs::AfterSpace)
+            kept.push_back(U' ');
+        if (shown != vtbackend::ShownAs::Nothing)
+            kept.push_back(codepoint);
+    }
+    return unicode::convert_to<char>(std::u32string_view { kept });
 }
 
 /// @p text cut to @p maxLength characters, its last one an ellipsis when it was cut.
@@ -149,20 +157,22 @@ inline constexpr auto BadgeTextSources = std::array {
 /// recently updated wins.
 /// @param records A tab's records, least recently updated first, each with its app resolved as
 ///        vtbackend::ProgramStatusSet::appOf() does (@see resolvedRecords).
-/// @param focus Whether the tab is in front.
+/// @param seenGeneration The newest generation the user has seen: a BadgeVisibility::WhileUnseen row (Done,
+///        Error) shows only when the record that wins it is newer. Blocked and Working ignore it.
 /// @return The badge; BadgeKind::None when nothing shows.
 [[nodiscard]] inline ProgramStatusBadge badgeFor(std::span<vtbackend::ProgramStatusRecord const> records,
-                                                 TabFocus focus)
+                                                 uint64_t seenGeneration)
 {
     auto const newestFirst = records | std::views::reverse;
     for (auto const& row: BadgeRows)
     {
-        if (row.visibility == BadgeVisibility::BackgroundOnly && focus == TabFocus::Foreground)
-            continue;
         auto const found = std::ranges::find(newestFirst, row.state, &vtbackend::ProgramStatusRecord::state);
         if (found == newestFirst.end())
             continue;
         auto const& record = *found;
+        if (row.visibility == BadgeVisibility::WhileUnseen
+            && statusSeenBy(record, seenGeneration) == StatusSeen::Seen)
+            continue;
         return ProgramStatusBadge {
             .kind = row.kind,
             .progress = row.kind == BadgeKind::Working ? record.progress : std::nullopt,
@@ -193,13 +203,17 @@ inline constexpr auto BadgeTextSources = std::array {
 /// read under its lock; empty when the session has none or is gone.
 using PaneProgramStatus = std::function<std::vector<vtbackend::ProgramStatusRecord>(vtworkspace::SessionId)>;
 
-/// The badge of @p tab, whose records are those of all its panes' terminals.
+/// What one pane's session has been seen up to: the newest record generation its user has seen.
+using PaneSeenGeneration = std::function<uint64_t(vtworkspace::SessionId)>;
+
+/// The badge of @p tab, whose records are those of all its panes' terminals. Generations count per terminal,
+/// so each pane's seen records are dropped by its own seen generation before the panes' records are pooled.
 /// @param tab The tab.
-/// @param focus Whether the tab is in front.
 /// @param paneRecords Reads one pane's records.
+/// @param paneSeen Reads the generation one pane's session has seen up to.
 [[nodiscard]] inline ProgramStatusBadge badgeForTab(vtworkspace::Tab const& tab,
-                                                    TabFocus focus,
-                                                    PaneProgramStatus const& paneRecords)
+                                                    PaneProgramStatus const& paneRecords,
+                                                    PaneSeenGeneration const& paneSeen)
 {
     auto records = std::vector<vtbackend::ProgramStatusRecord> {};
     if (auto* root = tab.rootPane())
@@ -207,19 +221,26 @@ using PaneProgramStatus = std::function<std::vector<vtbackend::ProgramStatusReco
             if (!pane.isLeaf())
                 return;
             auto paneOwn = paneRecords(pane.session());
+            auto const seen = paneSeen(pane.session());
+            std::erase_if(paneOwn, [&](vtbackend::ProgramStatusRecord const& record) {
+                auto const row = std::ranges::find(BadgeRows, record.state, &BadgeRow::state);
+                return row != BadgeRows.end() && row->visibility == BadgeVisibility::WhileUnseen
+                       && statusSeenBy(record, seen) == StatusSeen::Seen;
+            });
             records.insert(records.end(),
                            std::make_move_iterator(paneOwn.begin()),
                            std::make_move_iterator(paneOwn.end()));
         });
-    return badgeFor(records, focus);
+    return badgeFor(records, 0);
 }
 
 /// The badges of a window's tabs, each computed once until it is dropped. A badge costs one terminal lock
 /// per pane, and the strip asks for it once per role (kind, text, progress) of every row it repaints; with
 /// this, a repaint of T tabs of P panes takes T*P locks rather than three times that.
 ///
-/// The owner drops a tab's badge whenever its row changes and every badge when which tab is in front
-/// changes, as a badge depends on that too. Not thread-safe: the GUI thread's alone.
+/// The owner drops a tab's badge whenever its row changes, and every badge when which tab is in front
+/// changes: that is when a pane's records become seen, and a seen Done or Error no longer shows. Not
+/// thread-safe: the GUI thread's alone.
 class TabBadgeCache
 {
   public:

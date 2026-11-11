@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <ranges>
 #include <span>
@@ -200,6 +201,31 @@ TEST_CASE("captureState is deterministic", "[StateRoundTrip]")
     auto const decoded = decodeTerminalState(first);
     REQUIRE(decoded.has_value());
     CHECK(encodeTerminalState(*decoded) == first);
+}
+
+TEST_CASE("StateRoundTrip.programStatus.keepsOriginSinceGeneration", "[StateRoundTrip]")
+{
+    auto const setup = workloadSetup();
+    auto source = setup.makeTerminal();
+    auto record = ProgramStatusRecord {};
+    record.id = "agent";
+    record.state = ProgramState::Blocked;
+    record.kind = BlockedKind::Permission;
+    record.origin = ProgramStatusOrigin::Integration;
+    record.since = std::chrono::system_clock::time_point { std::chrono::seconds(1'700'000'000) };
+    record.generation = 3;
+    source->terminal.replaceProgramStatus({ record }, vtbackend::ProgramStatusTiming::Carried);
+    // Spend a generation on a record that is then gone: the counter stands at 5, one above the 4 that the
+    // remaining record implies, so only the carried counter can say so.
+    source->writeToScreen("\033]7501;state=working:id=tmp\033\\\033]7501;state=clear:id=tmp\033\\");
+    REQUIRE(source->terminal.programStatus().nextGeneration() == 5);
+
+    auto const target = handedOver(*source, setup);
+    REQUIRE(target.has_value());
+    auto const& restored = (*target)->terminal.programStatus();
+    REQUIRE(restored.records().size() == 1);
+    CHECK(restored.records().front() == record);
+    CHECK(restored.nextGeneration() == 5);
 }
 
 TEST_CASE("decodeTerminalState refuses a damaged stream", "[StateRoundTrip]")

@@ -60,7 +60,9 @@ Surface::Surface(SurfaceConfig config, SurfaceServices services):
     _terminal { _events,
                 services.environment,
                 services.fileSystem,
-                replyChannel(config.pageSize, [this](std::string_view reply) { appendReply(reply); }),
+                replyChannel(
+                    config.pageSize,
+                    [this](std::string_view reply, vtpty::InputKind /*kind*/) { appendReply(reply); }),
                 surfaceSettings(config),
                 std::nullopt,
                 services.clocks,

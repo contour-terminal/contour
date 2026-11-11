@@ -38,6 +38,11 @@ TEST_CASE("the program-status enum bridges cannot drift", "[vthost][control][pro
     CHECK(bridgesInStep(control::ProgramStateBridge));
     CHECK(bridgesInStep(control::BlockedKindBridge));
     CHECK(bridgesInStep(control::ProgramStatusReasonBridge));
+    // And against vtbackend's side too: a reason added there and not here would report as `report`.
+    STATIC_CHECK(control::ProgramStatusReasonBridge.size() == vtbackend::ProgramStatusReasonCount);
+    CHECK(vtcontrol::nameOf(
+              control::toApi(control::ProgramStatusReasonBridge, vtbackend::ProgramStatusReason::UserInput))
+          == "userInput");
     // vtbackend's spelling of each state is the API's: a script reads what the program sent.
     for (auto const& row: vtbackend::ProgramStateNames)
         CHECK(vtcontrol::nameOf(control::toApi(control::ProgramStateBridge, row.value)) == row.name);
@@ -58,6 +63,13 @@ TEST_CASE("ProgramStatus PDU round-trips and decodes totally", "[vthost][proto][
         .message = "Apply?",
     };
     CHECK(control::fromWire(control::toWire(record)) == record);
+
+    // Origin, `since` and generation travel too.
+    auto timed = record;
+    timed.origin = vtbackend::ProgramStatusOrigin::Integration;
+    timed.since = vthost::fromWireTime(1'700'000'000'000'000'000);
+    timed.generation = 9;
+    CHECK(control::fromWire(control::toWire(timed)) == timed);
 
     auto absent = record;
     absent.progress = std::nullopt;
@@ -100,14 +112,16 @@ TEST_CASE("the control API lists a record with its inherited app", "[vthost][con
                                                              .progress = {},
                                                              .app = "deploy",
                                                              .title = {},
-                                                             .message = {} });
+                                                             .message = {} },
+                            {});
     std::ignore = set.apply(vtbackend::ProgramStatusRecord { .id = "eu",
                                                              .state = vtbackend::ProgramState::Error,
                                                              .kind = {},
                                                              .progress = {},
                                                              .app = {},
                                                              .title = {},
-                                                             .message = "failed" });
+                                                             .message = "failed" },
+                            {});
     auto const listed = control::toApi(set);
     REQUIRE(listed.size() == 2);
     CHECK(listed[1].id == "eu");

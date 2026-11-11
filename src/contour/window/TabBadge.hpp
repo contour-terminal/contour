@@ -47,7 +47,10 @@ enum class FinishedBlockBadge : uint8_t
     Failed,
 };
 
-/// The badge kinds a tab can show.
+/// The badge kinds a tab can show. The enumerators keep their order (TabBadgeLooks is indexed by them); what
+/// decides between them is TabBadgeRules, most urgent first: Blocked, Bell, Error, Done, Working, Output.
+/// Bell sits directly under Blocked as it is an explicit request for attention. Done and Error show only
+/// until the user has seen them (BadgeVisibility::WhileUnseen).
 enum class TabBadgeKind : uint8_t
 {
     None = 0, ///< No badge.
@@ -98,14 +101,11 @@ inline constexpr auto TabBadgeRules = std::array {
                    FinishedBlockBadge::None,
                    TabActivity::None,
                    BellMark::None },
+    TabBadgeRule {
+        TabBadgeKind::Bell, BadgeKind::None, FinishedBlockBadge::None, TabActivity::None, BellMark::Rang },
     TabBadgeRule { TabBadgeKind::Error,
                    BadgeKind::Error,
                    FinishedBlockBadge::Failed,
-                   TabActivity::None,
-                   BellMark::None },
-    TabBadgeRule { TabBadgeKind::Working,
-                   BadgeKind::Working,
-                   FinishedBlockBadge::None,
                    TabActivity::None,
                    BellMark::None },
     TabBadgeRule { TabBadgeKind::Done,
@@ -113,8 +113,11 @@ inline constexpr auto TabBadgeRules = std::array {
                    FinishedBlockBadge::Succeeded,
                    TabActivity::None,
                    BellMark::None },
-    TabBadgeRule {
-        TabBadgeKind::Bell, BadgeKind::None, FinishedBlockBadge::None, TabActivity::None, BellMark::Rang },
+    TabBadgeRule { TabBadgeKind::Working,
+                   BadgeKind::Working,
+                   FinishedBlockBadge::None,
+                   TabActivity::None,
+                   BellMark::None },
     TabBadgeRule { TabBadgeKind::Output,
                    BadgeKind::None,
                    FinishedBlockBadge::None,
@@ -170,13 +173,13 @@ struct PaneStatusBadge
 };
 
 /// The badge one pane's own records earn, decided as a tab's is (badgeFor(), then resolveTabBadge()) but
-/// in front: a visible header is on screen, so what shows only out of sight (Done, Error) stays the tab's.
+/// in front: a visible header is on screen, so what shows only until seen (Done, Error) stays the tab's.
 /// @param records The pane's resolved records (resolvedRecords()), least recently updated first.
 /// @return The pane's badge and its text.
 [[nodiscard]] inline PaneStatusBadge paneStatusBadgeOf(
     std::span<vtbackend::ProgramStatusRecord const> records)
 {
-    auto program = badgeFor(records, TabFocus::Foreground);
+    auto program = badgeFor(records, AllRecordsSeen);
     auto const kind = resolveTabBadge({ .programStatus = program.kind }).kind;
     return { .kind = kind, .text = kind == TabBadgeKind::None ? std::string {} : std::move(program.text) };
 }

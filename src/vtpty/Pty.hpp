@@ -104,6 +104,13 @@ enum class ReadOrigin : std::uint8_t
     Replay,   ///< A mirror refilled the pane with what its program wrote before: not news.
 };
 
+/// What the bytes a terminal writes to its device carry, as far as the terminal knows.
+enum class InputKind : std::uint8_t
+{
+    Other = 0, ///< Nothing the user typed: replies, focus and mouse reports.
+    Keyboard,  ///< The user's key events, paste or raw input sent by a user's action are among them.
+};
+
 class Pty
 {
   public:
@@ -170,6 +177,17 @@ class Pty
     /// @returns Number of bytes written or -1 on error. Less than asked, with `errno` EINTR, where
     ///          interruptWrites() had the write stop rather than wait for the other end to read.
     [[nodiscard]] virtual int write(std::string_view buf) = 0;
+
+    /// write(), told what the bytes carry. A device with no use for that (every one with a real process on
+    /// the other end) drops it; one that forwards input to a peer (vtpty::ChannelPty) passes it on.
+    /// @param buf  Buffer of data to be written.
+    /// @param kind What @p buf carries.
+    /// @returns As write().
+    [[nodiscard]] virtual int writeInput(std::string_view buf, InputKind kind)
+    {
+        std::ignore = kind;
+        return write(buf);
+    }
 
     /// Returns the line ending convention for paste payloads.
     [[nodiscard]] virtual PasteLineEndings pasteLineEndings() const noexcept

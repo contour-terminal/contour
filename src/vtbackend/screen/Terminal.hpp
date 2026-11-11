@@ -1986,6 +1986,10 @@ class Terminal: public IStatusLinePublishTarget
     /// This is what xterm does with its deferred area. @see Terminal::flushInput().
     void echoLocally(std::string_view bytes);
 
+    /// Drops the first @p count bytes of the pending input, and forgets they were typed once none is left.
+    /// Under _inputMutex. @see _pendingInputKind
+    void consumeInput(int count);
+
     /// Parses the local echo that echoLocally() deferred while the parser was running.
     ///
     /// Requires _stateMutex to be held and the parser to not be running on this thread.
@@ -3773,20 +3777,43 @@ class Terminal: public IStatusLinePublishTarget
     /// @param report The decoded report.
     void applyProgramStatus(ProgramStatusReport const& report);
 
-    /// The terminal's process exited: drops its working and blocked records, as the spec says, and keeps
-    /// done, error and idle.
+    /// The terminal's process exited: drops its working and blocked records, as the spec says, and every
+    /// integration record, and keeps the program's done, error and idle.
     ///
     /// Takes the lock. Called by the owner of the PTY when it sees the process end, strictly before it
     /// announces the close -- never for a close it asked for, which ends the terminal and its records with
     /// it.
     void markProcessExited();
 
+    /// The user typed: every blocked integration record becomes working again.
+    ///
+    /// Takes the lock. Uses the terminal's wall clock and announces the change.
+    /// @return What changed; empty when no integration record was blocked.
+    ProgramStatusChange noteUserInputForProgramStatus();
+
+    /// An integration's report (the control API's `pane.reportStatus`): sets @p record as the integration's
+    /// own, whatever origin it names, stamped with the terminal's wall clock.
+    ///
+    /// Takes the lock and announces the change.
+    /// @param record The record to set.
+    /// @return What changed.
+    ProgramStatusChange applyIntegrationStatus(ProgramStatusRecord record);
+
+    /// Removes the integration's own record @p id names (a program's record of the same id stays).
+    ///
+    /// Takes the lock and announces the change.
+    /// @param id The record's id.
+    /// @return What changed; empty when no integration record has that id.
+    ProgramStatusChange clearIntegrationStatus(std::string_view id);
+
     /// The mirror seam: replaces every record with a daemon host's, as setProgress() takes the host's
     /// progress indicator.
     ///
     /// Does NOT take the lock: the caller holds it, as a mirror applying a host's frame does.
     /// @param records The host's records, least recently updated first.
-    void replaceProgramStatus(std::vector<ProgramStatusRecord> records);
+    /// @param timing  Whether they carry the host's `since` and generation; Absent ones are stamped on this
+    ///                terminal's clock (@see ProgramStatusSet::replaceAll).
+    void replaceProgramStatus(std::vector<ProgramStatusRecord> records, ProgramStatusTiming timing);
 
     /// @return The progress indicator state, WITHOUT taking the lock. Parser thread only; the GUI
     ///         thread must use resolvedProgress().
@@ -5937,6 +5964,9 @@ class Terminal: public IStatusLinePublishTarget
     uint64_t _instructionCounter = 0;
 
     InputGenerator _inputGenerator {};
+    /// Keyboard while the bytes _inputGenerator holds include a key event, a paste or a user's raw input,
+    /// Other once they are all sent: what flushInput() tells the device they carry. Under _inputMutex.
+    vtpty::InputKind _pendingInputKind = vtpty::InputKind::Other;
 
     ViCommands _viCommands;
     ViInputHandler _inputHandler;

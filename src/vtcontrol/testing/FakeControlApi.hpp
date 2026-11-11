@@ -60,6 +60,8 @@ struct FakeControlApi final: public ControlApi
     void handle(CallContext& /*context*/, CloseTabRequest const& request, Completion<EmptyReply> done) override { lastCloseTab = request; if (closeTabFailure) done(std::unexpected(*closeTabFailure)); else done(EmptyReply {}); }
     void handle(CallContext& /*context*/, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) override { lastSwitchWorkspace = request; if (switchWorkspaceFailure) done(std::unexpected(*switchWorkspaceFailure)); else done(switchWorkspaceReply); }
     void handle(CallContext& /*context*/, SetLabelRequest const& request, Completion<EmptyReply> done) override { lastSetLabel = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, ReportStatusRequest const& request, Completion<EmptyReply> done) override { lastReportStatus = request; done(EmptyReply {}); }
+    void handle(CallContext& /*context*/, ClearStatusRequest const& request, Completion<EmptyReply> done) override { lastClearStatus = request; done(EmptyReply {}); }
     void handle(CallContext& /*context*/, BlockListRequest const& request, Completion<BlockListReply> done) override { lastBlockList = request; done(blockListReply); }
     void handle(CallContext& /*context*/, BlockReadRequest const& request, Completion<BlockReadReply> done) override { lastBlockRead = request; done(blockReadReply); }
     void handle(CallContext& /*context*/, WaitRequest const& request, Completion<WaitReply> done) override { lastWait = request; done(waitReply); }
@@ -94,6 +96,8 @@ struct FakeControlApi final: public ControlApi
     std::optional<CreateTabRequest> lastCreateTab;
     std::optional<SplitRequest> lastSplit;
     std::optional<SendRequest> lastSend;
+    std::optional<ReportStatusRequest> lastReportStatus;
+    std::optional<ClearStatusRequest> lastClearStatus;
     std::optional<CaptureRequest> lastCapture;
     std::optional<ClosePaneRequest> lastClosePane;
     std::optional<CloseTabRequest> lastCloseTab;

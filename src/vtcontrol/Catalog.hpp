@@ -319,6 +319,23 @@ inline constexpr auto Methods = std::tuple {
         R"({"object":"pane:logs","label":"tail"})",
         R"({})",
     },
+    Method<ReportStatusRequest, EmptyReply> {
+        "pane.reportStatus",
+        "Report what a pane's program is doing, as an integration; an agent's hook uses it to show its "
+        "state.",
+        Permission::Input,
+        Exposure::Everywhere,
+        R"({"pane":"build","integration":"claude-code","state":"blocked","kind":"permission","message":"Run rm -rf?"})",
+        R"({})",
+    },
+    Method<ClearStatusRequest, EmptyReply> {
+        "pane.clearStatus",
+        "Remove the status an integration reported for a pane.",
+        Permission::Input,
+        Exposure::Everywhere,
+        R"({"pane":"build","integration":"claude-code"})",
+        R"({})",
+    },
     Method<BlockListRequest, BlockListReply> {
         "block.list",
         "List a pane's recent command blocks, newest first.",
