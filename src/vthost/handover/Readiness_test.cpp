@@ -85,6 +85,31 @@ class GatedCapture final: public vtpty::CommandCapture
     std::binary_semaphore _released { 0 };
 };
 
+/// A command capture whose target answers only after a cold start: a freshly staged image, which the OS
+/// checks file by file as it is first loaded. A run it is not given long enough for times out, as the native
+/// one does.
+class ColdStartCapture final: public vtpty::CommandCapture
+{
+  public:
+    ColdStartCapture(std::chrono::milliseconds coldStart, std::string answer):
+        _coldStart { coldStart }, _answer { std::move(answer) }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::string, vtpty::CommandCaptureError> run(
+        std::string_view /*command*/, std::chrono::milliseconds timeout, core::async::StopToken) override
+    {
+        if (timeout < _coldStart)
+            return std::unexpected(vtpty::CommandCaptureError {
+                .kind = vtpty::CommandCaptureError::Kind::TimedOut, .cause = {} });
+        return _answer;
+    }
+
+  private:
+    std::chrono::milliseconds _coldStart;
+    std::string _answer;
+};
+
 /// A loop and a worker, which the native probe is awaited on and runs its command on.
 struct ProbeLoop
 {
@@ -260,6 +285,26 @@ TEST_CASE("the readiness probe asks the target's query mode and reads its answer
     REQUIRE(capture.commands.size() == 1);
     CHECK(capture.commands.front() == readinessCommand(query));
     CHECK(capture.timeouts.front() == 1234ms);
+}
+
+TEST_CASE("the readiness probe waits out a freshly staged image's cold start", "[vthost][handover][upgrade]")
+{
+    // The slowest a first run may take and still be waited for by default: lowering the default below a
+    // measured cold start fails the build (MeasuredColdStart), and this keeps the probe honouring it.
+    auto const coldStart = DefaultReadinessTimeout - 1s;
+    auto loop = ProbeLoop {};
+    auto capture = ColdStartCapture { coldStart, encodeReadiness(currentFormats("0.9.1")) };
+    auto probe = CommandReadinessProbe { capture, loop.worker };
+    auto const answer = loop.ask(probe, { .executable = "/x/contour" });
+    REQUIRE(answer.has_value());
+    CHECK(answer->release == "0.9.1");
+    // A measured cold start, which the 5 s bound this replaced refused.
+    auto measured = ColdStartCapture { MeasuredColdStart, encodeReadiness(currentFormats("0.9.1")) };
+    auto defaulted = CommandReadinessProbe { measured, loop.worker };
+    CHECK(loop.ask(defaulted, { .executable = "/x/contour" }).has_value());
+    auto hasty = CommandReadinessProbe { measured, loop.worker, 5000ms };
+    CHECK(loop.ask(hasty, { .executable = "/x/contour" })
+          == std::unexpected(UpgradeRefusal::TargetUnresponsive));
 }
 
 TEST_CASE("the readiness probe names the configuration only when there is one", "[vthost][handover][upgrade]")

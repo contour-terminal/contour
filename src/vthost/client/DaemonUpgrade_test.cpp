@@ -18,6 +18,7 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/client/DaemonUpgrade.hpp>
+#include <vthost/handover/Readiness.hpp>
 #include <vthost/proto/Negotiation.hpp>
 
 namespace
@@ -154,6 +155,14 @@ struct Upgrade
     FakeBinarySource binary;
 };
 } // namespace
+
+TEST_CASE("an upgrade request outwaits the daemon's readiness probe", "[vthost][client][upgrade]")
+{
+    // The daemon answers only once the probe did, and captured every session after it: a client that gave up
+    // first would report a failure for an upgrade that goes on.
+    using namespace std::chrono_literals;
+    STATIC_REQUIRE(vthost::client::DefaultUpgradeTimeout >= vthost::handover::DefaultReadinessTimeout + 10s);
+}
 
 TEST_CASE("upgradeDaemon sends the staged image id", "[vthost][client][upgrade]")
 {
