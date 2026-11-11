@@ -195,8 +195,9 @@ class RemoteController
     /// Blocks the calling (GUI) thread until the handshake completes, fails, or the budget runs out.
     /// The budget counts from startConnecting(), not from this call: it waits for what remains of it,
     /// so the time the caller spent between the two is already spent -- but never less than
-    /// `MinimumConnectAwait` (or the whole budget, if that is shorter). On expiry it stops and returns
-    /// `connectTimeoutMessage()`; a non-ready close returns the recorded failure or
+    /// `MinimumConnectAwait` (or the whole budget, if that is shorter). All of it, the floor included, is
+    /// measured on the controller's clock, however far each wait in between oversleeps. On expiry it stops
+    /// and returns `connectTimeoutMessage()`; a non-ready close returns the recorded failure or
     /// `connectClosedMessage()`. Starts the connect first if startConnecting() has not.
     ///
     /// With an AttachBudget that has no connect bound, the connect phase is not timed here at all -- the
@@ -258,7 +259,7 @@ class RemoteController
     [[nodiscard]] bool isWindingDown() const;
 
   protected:
-    /// @param clock What awaitConnected() measures the budget spent since startConnecting() on.
+    /// @param clock What awaitConnected() measures its budget on, from startConnecting() to the deadline.
     ///        Borrowed: it must outlive the controller.
     /// @param detachBound How long a stop lets a detached client end its connection in order before it
     ///        cancels the loop.

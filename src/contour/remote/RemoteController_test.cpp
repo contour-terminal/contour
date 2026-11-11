@@ -396,6 +396,49 @@ class ConnectingController final: public contour::remote::RemoteController
     } };
 }
 
+/// A clock that moves forward by a fixed step on every read, as time passes for a caller that keeps looking
+/// at it: a wait bounded on it ends after a number of reads, however long the scheduler lets each of them
+/// take.
+///
+/// Contract: every now() advances it, so it suits a scenario with a single reader only -- one where the code
+/// under test is the only thing that calls now(), and how far the clock moved is a count of that code's own
+/// looks. A RemoteController's clock is read only on the thread that drives it (startConnecting(),
+/// awaitConnected(), pollConnected()) and by noteTransportReturned(), which ConnectingController never calls;
+/// its reactor's event loop runs on a clock of its own. That makes how far this clock moved during a wait the
+/// part of the budget the wait counted, with no wall time in it, which is what the tests below assert on: a
+/// loaded machine stretches how long the wait takes, not how much of the budget it spends.
+class SteppingClock final: public core::platform::IClock
+{
+  public:
+    /// @param step How far each now() moves the clock on.
+    explicit SteppingClock(std::chrono::milliseconds step) noexcept: _step(step) {}
+
+    /// @return The instant before this read; the clock then moves on by the step.
+    [[nodiscard]] core::platform::SteadyTimePoint now() const noexcept override
+    {
+        return core::platform::SteadyTimePoint { core::platform::SteadyDuration {
+            _ticks.fetch_add(core::platform::SteadyDuration { _step }.count(), std::memory_order_relaxed) } };
+    }
+
+    /// @return The current instant, without moving the clock on.
+    [[nodiscard]] core::platform::SteadyTimePoint peek() const noexcept
+    {
+        return core::platform::SteadyTimePoint { core::platform::SteadyDuration {
+            _ticks.load(std::memory_order_relaxed) } };
+    }
+
+    /// Moves the clock on by @p duration, as time spent elsewhere would.
+    /// @param duration How far to move it.
+    void advance(core::platform::SteadyDuration duration) noexcept
+    {
+        _ticks.fetch_add(duration.count(), std::memory_order_relaxed);
+    }
+
+  private:
+    std::chrono::milliseconds _step;
+    mutable std::atomic<core::platform::SteadyDuration::rep> _ticks { 0 };
+};
+
 } // namespace
 
 namespace
@@ -556,22 +599,40 @@ TEST_CASE("awaitConnected past its budget fails with the timeout message and sto
 
 TEST_CASE("awaitConnected counts its budget from startConnecting", "[remote][mux][controller]")
 {
-    auto clock = core::platform::ManualClock {};
+    // Measured on the controller's own clock, not the wall: every read moves it on, so how far it moved while
+    // awaitConnected() ran is how much of the budget the wait counted, whatever the scheduler did meanwhile.
+    auto clock = SteppingClock { 100ms };
     auto controller = ConnectingController { clock };
     controller.startConnecting();
     constexpr auto Budget = std::chrono::milliseconds { 5s };
     clock.advance(Budget); // booting the GUI took the whole budget
 
-    auto const started = std::chrono::steady_clock::now();
+    auto const started = clock.peek();
     auto const connected = controller.awaitConnected(Budget);
-    auto const took = std::chrono::steady_clock::now() - started;
+    auto const took = clock.peek() - started;
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "timed out");
     CHECK(controller.stopped());
     CHECK(took >= contour::remote::MinimumConnectAwait); // the floor, not zero
-    // And not a fresh budget, which would take all of it. Measured against the budget itself, not a
-    // tighter bound: the 3 s between the floor and it are what a loaded CI runner may need (4.7 s seen).
-    CHECK(took < Budget);
+    CHECK(took < Budget);                                // and not a fresh budget, which would take all of it
+}
+
+TEST_CASE("an attach that settled while the last wait overslept succeeds although the deadline has passed",
+          "[remote][mux][controller]")
+{
+    // An hour per look: by the first look inside awaitConnected() the deadline has passed, as it would after
+    // a slice that a loaded machine let oversleep, while the connection came up meanwhile.
+    auto clock = SteppingClock { 1h };
+    auto release = std::atomic<bool> { true };
+    auto controller = ConnectingController { clock, &release };
+    controller.startConnecting();
+    while (!controller.isConnected())
+        std::this_thread::sleep_for(1ms);
+
+    auto const connected = controller.awaitConnected(5s);
+    CHECK(connected.has_value());
+    CHECK(controller.isConnected());
+    CHECK_FALSE(controller.stopped());
 }
 
 TEST_CASE("a connect that comes up within the floor succeeds although the budget is spent",
