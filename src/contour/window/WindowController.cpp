@@ -2090,7 +2090,23 @@ void WindowController::focusDisplay(display::TerminalDisplay* display)
     // focus/close for that window to this controller (ownsOSWindow). (bindWindow() normally already did
     // this at spawn; this covers displays re-homed across windows.)
     if (display != nullptr && display->window() != nullptr)
-        _osWindow = display->window();
+        adoptOsWindow(display->window());
+}
+
+void WindowController::adoptOsWindow(QQuickWindow* window)
+{
+    _osWindow = window;
+    connect(window, &QObject::destroyed, this, &WindowController::dropWindowHelpers, Qt::UniqueConnection);
+}
+
+void WindowController::dropWindowHelpers()
+{
+    // Any window adopted, not only the current one: a helper may have been built from a window this
+    // controller adopted before, and is of no use to another. By now the shadow is normally gone already,
+    // dropped as the platform window was (QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed).
+    _windowShadow.reset();
+    _resizeGrid.reset();
+    _appliedTitleBand.reset();
 }
 
 // {{{ Window-geometry authority
@@ -2099,7 +2115,7 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
     if (osWindow == nullptr)
         return;
 
-    _osWindow = osWindow;
+    adoptOsWindow(osWindow);
     _manager.bindTaskbarWindow(_windowId, *osWindow);
 
     _resizeGrid = platform::makeWindowResizeGrid(
@@ -2233,7 +2249,7 @@ void WindowController::refreshCaptionAttachment()
 {
     QWindow* const wanted =
         _osWindow != nullptr && framePolicy().shadow == platform::FrameShadowStrategy::NativeFrameKept
-            ? _osWindow
+            ? _osWindow.data()
             : nullptr;
     if (_captionWindow.data() == wanted)
         return;
@@ -2796,8 +2812,8 @@ QQuickWindow* WindowController::osWindowFor(session::DisplaySurface& requester) 
 {
     auto* requesterWindow = requester.window();
     if (_osWindow == nullptr && requesterWindow != nullptr)
-        _osWindow = requesterWindow;
-    return requesterWindow != nullptr ? requesterWindow : _osWindow;
+        adoptOsWindow(requesterWindow);
+    return requesterWindow != nullptr ? requesterWindow : _osWindow.data();
 }
 
 void WindowController::setChromeHeight(int height)

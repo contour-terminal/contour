@@ -47,6 +47,7 @@
 #include <QtCore/QVariant>
 #include <QtGui/QColor>
 #include <QtQml/qqmlregistration.h>
+#include <QtQuick/QQuickWindow>
 
 #include <array>
 #include <chrono>
@@ -1471,6 +1472,18 @@ class WindowController:
     /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
     void refreshWindowShadow();
 
+    /// Makes @p window this controller's OS window (_osWindow), and drops the helpers built from it once it
+    /// is destroyed (@see dropWindowHelpers).
+    /// @param window The window adopted; not null.
+    void adoptOsWindow(QQuickWindow* window);
+
+    /// Drops the helpers built from an OS window this controller adopted, once that window is destroyed: the
+    /// shadow and the resize grid reach the window they were made for, and a caller after the window's end
+    /// -- a daemon link released in the application's teardown, which re-reads the title band -- must find
+    /// none rather than one that reaches freed memory. The shadow is built again from the next window on its
+    /// next refresh, the resize grid by the next bindWindow().
+    void dropWindowHelpers();
+
     /// QWindow::visibilityChanged handler.
     ///
     /// Every way the window changes presentation ends in this signal — our own setWindowMaximized
@@ -1688,8 +1701,11 @@ class WindowController:
 
     display::TerminalDisplay* _activeDisplay = nullptr;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.
-    // Lets the manager route a focus/close to the controller that owns a given display's window.
-    QQuickWindow* _osWindow = nullptr;
+    // Lets the manager route a focus/close to the controller that owns a given display's window. A QPointer:
+    // the QML engine destroys the window before the controller, and a daemon link released after that (the
+    // application's teardown stops its links once the windows are gone) still re-reads the title band. Set
+    // by adoptOsWindow() only, which drops what was built from it as it goes (dropWindowHelpers()).
+    QPointer<QQuickWindow> _osWindow;
 
     // Guards closeWindow() against re-entry: closeWindow() closes _osWindow, whose QML `onClosing`
     // calls closeWindow() again — the flag makes that second call a no-op so teardown runs exactly once,

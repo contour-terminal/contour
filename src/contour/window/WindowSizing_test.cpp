@@ -37,6 +37,7 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include <QtTest/QSignalSpy>
@@ -97,6 +98,29 @@ TEST_CASE("bindWindow(nullptr) and displayless showInitial are safe no-ops", "[c
     REQUIRE_FALSE(window.isVisible());
     controller->showInitial();
     CHECK(window.isVisible());
+}
+
+TEST_CASE("a controller outliving its window reads no destroyed window", "[contour][sizing]")
+{
+    TestApp app;
+    ScopedController controller { app.manager() };
+    // Held in an optional so that destroying the window leaves its storage alive: the controller is then
+    // asked about an address that still names storage, which it compares and never reads.
+    std::optional<QQuickWindow> window;
+    auto* const bound = &window.emplace();
+    controller->bindWindow(bound);
+    REQUIRE(controller->ownsOSWindow(bound));
+    auto const windowedRadius = controller->windowCornerRadius();
+
+    // The QML engine destroys the windows first; the daemon links the application's teardown stops after
+    // that still tell the controller its host binding changed, which re-reads the title band.
+    window.reset();
+    // Forgotten with what was built from it, so nothing reaches it. A raw pointer would still hold this
+    // address, so the check fails without the fix even where no sanitizer watches the read.
+    CHECK_FALSE(controller->ownsOSWindow(bound));
+    controller->notifyHostBindingChanged();
+
+    CHECK(controller->windowCornerRadius() == windowedRadius);
 }
 
 TEST_CASE("first window restores its location and saves normal moves", "[contour][sizing][window-position]")

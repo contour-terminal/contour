@@ -636,57 +636,53 @@ TEST_CASE("DaemonLink: links of one daemon keep one launch role while they recon
           "[attach][link][handover][reconnect]")
 {
     using Fallback = contour::remote::NativeController::ResumeFallback;
-    // The daemon lets one connection in after its restart. A link that holds no launch role dies of the
-    // lost workspace it meets then, which leaves nothing to compare; so the run goes again, with a fresh
-    // daemon, until the one let in is the launch's holder -- a chance of one in three each.
-    auto compared = false;
-    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 25))
-    {
-        auto daemon = DaemonFixture {};
-        std::ignore = seedWorkspaces(daemon, 3);
-        auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
-        auto const boot = contour::test::ScopedController { rig.app.manager() };
-        REQUIRE(rig.link->awaitAttached(10s).has_value());
-        REQUIRE(waitUntil([&] { return rig.host.outcomes.size() == 2; }));
-        REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 3; }));
-        auto const holders = [&] {
-            return std::ranges::count_if(
-                rig.host.links(), [](auto* link) { return link->resumeFallback() == Fallback::Launch; });
-        };
-        auto const links = rig.host.links();
-        auto const holder = std::ranges::find_if(
-            links, [](auto* link) { return link->resumeFallback() == Fallback::Launch; });
-        REQUIRE(holder != links.end());
-        REQUIRE(holders() == 1);
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 3);
+    auto rig = LinkRig { daemon.endpoint(), {}, {}, launch() };
+    // The daemon lets one connection in after its restart, and the one to compare is the launch's holder.
+    // Every link loses its connection at the same moment and retries on the same schedule, so which of them
+    // reaches the new run first is decided by which heard of its loss first -- most often not the holder:
+    // left to that race, it got in about one attempt in six. So the hand-over links wait out a reconnect far
+    // longer than the test runs, and the holder's is the connection let in.
+    rig.host.adjustHandOver = [](contour::remote::DaemonLinkConfig& config) {
+        config.controller.backoff = { .first = 60s, .ceiling = 60s };
+    };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(rig.link->awaitAttached(10s).has_value());
+    REQUIRE(waitUntil([&] { return rig.host.outcomes.size() == 2; }));
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 3; }));
+    auto const holders = [&] {
+        return std::ranges::count_if(rig.host.links(),
+                                     [](auto* link) { return link->resumeFallback() == Fallback::Launch; });
+    };
+    // The launch's own link: the only one not slowed above.
+    REQUIRE(rig.link->resumeFallback() == Fallback::Launch);
+    REQUIRE(holders() == 1);
 
-        daemon.refuseConnections();
-        auto const letIn = std::make_shared<int>(0);
-        daemon.onDaemon([&daemon, letIn] {
-            ++daemon.instance;
-            daemon.host = daemon.makeHost();
-            auto serve = vthost::makeNativeHandler(daemon.loop, *daemon.host, daemon.services);
-            daemon.native = [serve = std::move(serve), letIn](vthost::ConnectionId id,
-                                                              std::unique_ptr<core::net::ISocket> socket) {
-                return serveFirstOnly(serve, letIn, std::move(id), std::move(socket));
-            };
-            return 0;
-        });
-        REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 1; }));
-        auto const newRun = [&](contour::remote::DaemonLink* link) {
-            return link->liveController() != nullptr
-                   && link->liveController()->daemonInstance() == std::optional<uint64_t> { daemon.instance };
+    daemon.refuseConnections();
+    auto const letIn = std::make_shared<int>(0);
+    daemon.onDaemon([&daemon, letIn] {
+        ++daemon.instance;
+        daemon.host = daemon.makeHost();
+        auto serve = vthost::makeNativeHandler(daemon.loop, *daemon.host, daemon.services);
+        daemon.native = [serve = std::move(serve), letIn](vthost::ConnectionId id,
+                                                          std::unique_ptr<core::net::ISocket> socket) {
+            return serveFirstOnly(serve, letIn, std::move(id), std::move(socket));
         };
-        REQUIRE(waitUntil([&] { return std::ranges::any_of(rig.host.links(), newRun); }));
-        if (!newRun(*holder))
-            continue;
-        compared = true;
+        return 0;
+    });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 1; }));
+    auto const newRun = [&](contour::remote::DaemonLink* link) {
+        return link->liveController() != nullptr
+               && link->liveController()->daemonInstance() == std::optional<uint64_t> { daemon.instance };
+    };
+    REQUIRE(waitUntil([&] { return newRun(rig.link.get()); }));
+    // The rest still hold the old run.
+    REQUIRE(std::ranges::count_if(rig.host.links(), newRun) == 1);
 
-        // The application judges the roles as a link starts or ends.
-        contour::remote::passOnLaunchResume(rig.host.links());
-        CHECK(holders() == 1);
-        break;
-    }
-    CHECK(compared);
+    // The application judges the roles as a link starts or ends.
+    contour::remote::passOnLaunchResume(rig.host.links());
+    CHECK(holders() == 1);
 }
 
 TEST_CASE("DaemonLink: --workspace shows that workspace only", "[attach][link][handover]")
