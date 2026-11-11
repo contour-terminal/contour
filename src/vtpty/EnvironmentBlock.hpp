@@ -40,9 +40,7 @@ inline constexpr auto PlatformEnvironmentNames =
     EnvironmentNames names);
 
 /// Builds a Windows child's environment as "NAME=VALUE" entries: buildEnvironmentBlock() with names compared
-/// as Windows compares them, and three rules of its own.
-/// - TERM, if configured, is not passed on: a console program has no use for it, and some -- git diff --
-///   misread it.
+/// as Windows compares them, and two rules of its own.
 /// - A configured PATH goes ahead of the inherited one rather than in its place.
 /// - A configured empty value removes the variable, as setting none would.
 /// @param inherited The parent's entries ("NAME=VALUE"), the "=C:" ones that say each drive's directory

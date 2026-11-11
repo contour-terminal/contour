@@ -29,14 +29,15 @@ enum class SettingsValueType : uint8_t
     Double,
     String,
     Enum,
-    FontFamily, ///< A font family name, picked from the installed monospace families.
-    Color,      ///< A colour, "#rrggbb"; empty where the setting may have none.
-    Shortcut,   ///< A key chord, shown as the platform spells it; empty where there is none.
+    FontFamily,  ///< A font family name, picked from the installed monospace families.
+    Color,       ///< A colour, "#rrggbb"; empty where the setting may have none.
+    Shortcut,    ///< A key chord, shown as the platform spells it; empty where there is none.
+    Environment, ///< A profile's environment variable names and values.
 };
 
 /// How many value types there are.
 inline constexpr std::size_t SettingsValueTypeCount =
-    static_cast<std::size_t>(SettingsValueType::Shortcut) + 1;
+    static_cast<std::size_t>(SettingsValueType::Environment) + 1;
 
 /// Whether a value type is written to settings.yml as a scalar or as a mapping or sequence.
 enum class SettingsValueShape : uint8_t
@@ -55,6 +56,7 @@ inline constexpr auto SettingsValueTypeShapes = std::array<SettingsValueShape, S
     SettingsValueShape::Scalar,     // FontFamily
     SettingsValueShape::Scalar,     // Color
     SettingsValueShape::Collection, // Shortcut
+    SettingsValueShape::Collection, // Environment
 };
 
 /// @param type A row's value type.
@@ -67,7 +69,7 @@ inline constexpr auto SettingsValueTypeShapes = std::array<SettingsValueShape, S
 /// The token a row's `type` carries for each value type, in enumerator order. The first five are the
 /// spellings the page has always switched on.
 inline constexpr auto SettingsValueTypeTokens = std::array<std::string_view, SettingsValueTypeCount> {
-    "bool", "int", "double", "string", "enum", "fontFamily", "color", "shortcut",
+    "bool", "int", "double", "string", "enum", "fontFamily", "color", "shortcut", "environment",
 };
 
 /// The token a row's `type` carries for @p type.
@@ -102,18 +104,20 @@ enum class SettingsControl : uint8_t
     FontPicker,
     ColorWell,
     Shortcut,
-    Readout,   ///< Shows the value, read-only: what the page derives rather than takes.
-    PathField, ///< A file's path, typed or chosen with "Choose…".
+    Readout,     ///< Shows the value, read-only: what the page derives rather than takes.
+    PathField,   ///< A file's path, typed or chosen with "Choose…".
+    Environment, ///< A profile's editable name/value map.
 };
 
 /// How many controls there are.
-inline constexpr std::size_t SettingsControlCount = static_cast<std::size_t>(SettingsControl::PathField) + 1;
+inline constexpr std::size_t SettingsControlCount =
+    static_cast<std::size_t>(SettingsControl::Environment) + 1;
 
 /// The token a row's `controlName` carries for each control, in enumerator order: the names the page
 /// chooses a kit control by.
 inline constexpr auto SettingsControlTokens = std::array<std::string_view, SettingsControlCount> {
     "switch",     "segmented", "popUp",    "stepper", "slider",    "textField",
-    "fontPicker", "colorWell", "shortcut", "readout", "pathField",
+    "fontPicker", "colorWell", "shortcut", "readout", "pathField", "environment",
 };
 
 /// The token a row's `controlName` carries for @p control.
@@ -230,6 +234,7 @@ namespace detail
         case SettingsValueType::FontFamily: return SettingsControl::FontPicker;
         case SettingsValueType::Color: return SettingsControl::ColorWell;
         case SettingsValueType::Shortcut: return SettingsControl::Shortcut;
+        case SettingsValueType::Environment: return SettingsControl::Environment;
     }
     return SettingsControl::TextField;
 }
@@ -238,13 +243,13 @@ namespace detail
 struct SettingsControlRule
 {
     SettingsControl control = SettingsControl::Switch; ///< The control.
-    std::uint8_t accepts = 0;                          ///< One bit per SettingsValueType it edits.
+    std::uint16_t accepts = 0;                         ///< One bit per SettingsValueType it edits.
 };
 
 /// The bit @p type takes in SettingsControlRule::accepts.
-[[nodiscard]] constexpr std::uint8_t valueTypeBit(SettingsValueType type) noexcept
+[[nodiscard]] constexpr std::uint16_t valueTypeBit(SettingsValueType type) noexcept
 {
-    return static_cast<std::uint8_t>(1U << static_cast<unsigned>(type));
+    return static_cast<std::uint16_t>(1U << static_cast<unsigned>(type));
 }
 
 /// Which types each control edits, one row per control in enumerator order.
@@ -274,6 +279,8 @@ inline constexpr auto SettingsControlRules = std::array {
                           .accepts = valueTypeBit(SettingsValueType::String) },
     SettingsControlRule { .control = SettingsControl::PathField,
                           .accepts = valueTypeBit(SettingsValueType::String) },
+    SettingsControlRule { .control = SettingsControl::Environment,
+                          .accepts = valueTypeBit(SettingsValueType::Environment) },
 };
 
 static_assert(SettingsControlRules.size() == SettingsControlCount, "one rule per SettingsControl");

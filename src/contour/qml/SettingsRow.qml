@@ -52,6 +52,7 @@ Item {
     readonly property bool _hasHelp: root._data.help !== undefined && root._data.help.length > 0
     readonly property bool _separateCards: chromeStyle.settingsTraits.rows === chromeStyle.settingsTraits.separateCards
     readonly property string _controlName: root._data.controlName !== undefined ? root._data.controlName : "textField"
+    readonly property bool _stacked: root._controlName === "environment"
 
     /// @return @p base at @p pixels, or as it is where @p pixels is 0 (the chrome font's own size).
     function typed(base, pixels) {
@@ -72,8 +73,10 @@ Item {
     objectName: "settingsRow:" + root._data.key
     // A control taller than the row (a colour well with its readout beneath) makes the row taller, so it
     // never spills into the next one.
-    implicitHeight: Math.max(root._hasHelp ? chromeStyle.settings.rowWithHelp : chromeStyle.settings.row,
-                             texts.implicitHeight + root._textInset, control.implicitHeight + root._textInset)
+    implicitHeight: root._stacked
+                    ? texts.implicitHeight + control.implicitHeight + chromeStyle.space.s4 + root._textInset
+                    : Math.max(root._hasHelp ? chromeStyle.settings.rowWithHelp : chromeStyle.settings.row,
+                               texts.implicitHeight + root._textInset, control.implicitHeight + root._textInset)
     implicitWidth: texts.implicitWidth + root._sidePadding
 
     // The card of a row, where each row is its own; a grouped list draws one behind all its rows.
@@ -95,11 +98,15 @@ Item {
         color: chromeStyle.colors.settingsSeparator
     }
 
-    RowLayout {
+    GridLayout {
         anchors.fill: parent
         anchors.leftMargin: chromeStyle.settings.rowPadding
         anchors.rightMargin: chromeStyle.settings.rowPadding
-        spacing: chromeStyle.space.s6
+        anchors.topMargin: root._stacked ? root._textInset / 2 : 0
+        anchors.bottomMargin: root._stacked ? root._textInset / 2 : 0
+        columns: root._stacked ? 1 : 3
+        columnSpacing: chromeStyle.space.s6
+        rowSpacing: chromeStyle.space.s4
 
         ColumnLayout {
             id: texts
@@ -163,9 +170,10 @@ Item {
         Loader {
             id: control
             Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+            Layout.fillWidth: root._stacked
             // The label column gives way before the control does: a control squeezed below its own width
             // cuts its text off.
-            Layout.minimumWidth: control.implicitWidth
+            Layout.minimumWidth: root._stacked ? 0 : control.implicitWidth
             sourceComponent: {
                 switch (root._controlName) {
                 case "switch": return switchControl;
@@ -178,6 +186,7 @@ Item {
                 case "shortcut": return shortcutControl;
                 case "readout": return readoutControl;
                 case "pathField": return pathFieldControl;
+                case "environment": return environmentControl;
                 default: return textControl;
                 }
             }
@@ -336,6 +345,152 @@ Item {
                     const typed = entry.text;
                     entry.text = Qt.binding(() => root._data.value === undefined ? "" : String(root._data.value));
                     root.commit(typed);
+                }
+            }
+        }
+    }
+
+    Component {
+        id: environmentControl
+        ColumnLayout {
+            id: editor
+            enabled: root.editable
+            spacing: chromeStyle.space.s2
+            Accessible.role: Accessible.Grouping
+            Accessible.name: root._data.label
+            Accessible.description: root._data.help
+            property string editingName: ""
+            readonly property var variables: root._data.value
+            readonly property bool nameCollision: conflictsWith(editingName, nameInput.text.trim())
+
+            function comparableName(name) {
+                return root._data.environmentNamesIgnoreCase === true
+                    ? name.replace(/[a-z]/g, letter => letter.toUpperCase()) : name;
+            }
+
+            function conflictsWith(oldName, newName) {
+                const key = editor.comparableName(newName);
+                return newName.length > 0 && Object.keys(editor.variables).some(
+                    name => name !== oldName && editor.comparableName(name) === key);
+            }
+
+            function update(oldName, newName, value) {
+                if (editor.conflictsWith(oldName, newName))
+                    return;
+                const next = Object.create(null);
+                for (const name of Object.keys(editor.variables))
+                    if (name !== oldName)
+                        next[name] = editor.variables[name];
+                if (newName.length > 0)
+                    next[newName] = value;
+                editor.editingName = "";
+                nameInput.clear();
+                valueInput.clear();
+                root.commit(next);
+            }
+
+            Repeater {
+                model: Object.keys(editor.variables)
+                delegate: RowLayout {
+                    required property string modelData
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.preferredWidth: editor.width / 4
+                        Layout.minimumWidth: 0
+                        text: modelData
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        color: chromeStyle.colors.controlText
+                    }
+                    Label {
+                        objectName: "settingsEnvironmentReadout:" + modelData
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: editor.variables[modelData].replace(/\r\n|\r|\n/g, " ↵ ")
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        color: chromeStyle.colors.controlText
+                    }
+                    Button {
+                        objectName: "settingsEnvironmentEdit:" + modelData
+                        text: qsTr("Edit")
+                        flat: true
+                        Accessible.name: qsTr("Edit %1").arg(modelData)
+                        onClicked: {
+                            editor.editingName = modelData;
+                            nameInput.text = modelData;
+                            valueInput.text = editor.variables[modelData];
+                            valueInput.forceActiveFocus();
+                        }
+                    }
+                    Button {
+                        text: qsTr("Remove")
+                        flat: true
+                        Accessible.name: qsTr("Remove %1").arg(modelData)
+                        onClicked: editor.update(modelData, "", "")
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.editable
+                spacing: chromeStyle.space.s3
+
+                TextField {
+                    id: nameInput
+                    objectName: "settingsEnvironmentName"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: 1
+                    placeholderText: qsTr("Name, e.g. TERM")
+                    Accessible.name: qsTr("Variable name")
+                }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: 1
+                    Layout.preferredHeight: nameInput.implicitHeight
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+                    clip: true
+                    TextArea {
+                        id: valueInput
+                        objectName: "settingsEnvironmentValue"
+                        placeholderText: qsTr("Value")
+                        Accessible.name: qsTr("Variable value")
+                        selectByMouse: true
+                        wrapMode: TextEdit.NoWrap
+                    }
+                }
+            }
+            Label {
+                objectName: "settingsEnvironmentCollision"
+                Layout.fillWidth: true
+                visible: root.editable && editor.nameCollision
+                text: qsTr("A variable with this name already exists.")
+                font: chromeStyle.type.footnote
+                color: chromeStyle.statusInk(chromeStyle.statusDanger)
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                visible: root.editable
+                Button {
+                    text: qsTr("Cancel")
+                    visible: editor.editingName.length > 0
+                    onClicked: {
+                        editor.editingName = "";
+                        nameInput.clear();
+                        valueInput.clear();
+                    }
+                }
+                Button {
+                    objectName: "settingsEnvironmentApply"
+                    text: editor.editingName.length > 0 ? qsTr("Save variable") : qsTr("Add variable")
+                    enabled: nameInput.text.trim().length > 0 && !nameInput.text.includes("=")
+                             && !editor.nameCollision
+                    onClicked: editor.update(editor.editingName, nameInput.text.trim(), valueInput.text)
                 }
             }
         }

@@ -564,6 +564,11 @@ bool SshSession::requestPty()
         fail("Failed to request PTY. {}", libssl2ErrorString(rc));
         return false;
     }
+    sshLog()("Requested SSH PTY with TERM=\"{}\"", core::escape(term.data(), term.data() + term.size()));
+    if (term.empty())
+        logInfoWithInject(
+            "No terminal type was sent. Set ssh_default_term or the profile's environment.TERM if the "
+            "remote prompt redraws incorrectly.");
     setState(State::SetEnv);
     _walkIndex = 0;
     return true;
@@ -571,30 +576,18 @@ bool SshSession::requestPty()
 
 bool SshSession::setEnv()
 {
-    int i = 0;
-    for (auto const& [name, value]: _config.env)
+    for (auto const& [name, value]: _config.env | std::views::drop(_walkIndex))
     {
-        // Skip already set environment variables
-        if (i < _walkIndex)
+        if (name != "TERM") // Already sent in the PTY request.
         {
-            ++i;
-            continue;
+            int const rc = libssh2_channel_setenv_ex(
+                _p->sshChannel, name.data(), name.size(), value.data(), value.size());
+            if (rc == LIBSSH2_ERROR_EAGAIN)
+                return false;
+            if (rc != LIBSSH2_ERROR_NONE)
+                logError("Failed to set SSH environment variable \"{}\". {}", name, libssl2ErrorString(rc));
         }
-
-        if (name == "TERM")
-            continue; // passed later via requestPty()
-
-        int const rc =
-            libssh2_channel_setenv_ex(_p->sshChannel, name.data(), name.size(), value.data(), value.size());
-        if (rc == LIBSSH2_ERROR_EAGAIN)
-        {
-            _walkIndex = i; // remember where we left off
-            return false;
-        }
-        if (rc != LIBSSH2_ERROR_NONE)
-        {
-            logError("Failed to set SSH environment variable \"{}\". {}", name, libssl2ErrorString(rc));
-        }
+        ++_walkIndex;
     }
     setState(State::StartShell);
     return true;

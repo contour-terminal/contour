@@ -575,6 +575,47 @@ TEST_CASE("SettingsController: a reset applies at once and shows the value in ef
     CHECK_FALSE(row.value("overridden").toBool());
 }
 
+TEST_CASE("SettingsController: SSH terminal default saves and resets without overriding profile TERM",
+          "[settings]")
+{
+    auto fx = Fixture(R"(
+default_profile: main
+ssh_default_term: vt100
+profiles:
+    main:
+        ssh:
+            host: example.com
+    override:
+        environment:
+            TERM: contour
+)");
+    fx.commitGlobal("ssh_default_term", "xterm-256color");
+    CHECK(fx.cfg.findProfile("main")->ssh.value().env.at("TERM") == "xterm-256color");
+    CHECK(fx.cfg.findProfile("override")->ssh.value().env.at("TERM") == "contour");
+    fx.resetGlobal("ssh_default_term");
+    CHECK(fx.cfg.findProfile("main")->ssh.value().env.at("TERM") == "vt100");
+}
+
+TEST_CASE("SettingsController: profile environment edits persist and invalid names are refused", "[settings]")
+{
+    auto fx = Fixture("default_profile: main\n");
+    fx.openSideProfile("work");
+    auto const invalid = QVariantMap { { "NOT=VALID", "value" } };
+    CHECK_FALSE(fx.controller->setProfileField("environment", invalid).has_value());
+    auto const variables = QVariantMap { { "TERM", "vt100" }, { "EMPTY", "" }, { "VALUE", "a\nb" } };
+    REQUIRE(fx.controller->setProfileField("environment", variables).has_value());
+    fx.fire();
+    auto const* profile = fx.cfg.findProfile("work");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->configuredEnvironment.at("TERM") == "vt100");
+    CHECK(profile->configuredEnvironment.at("EMPTY").empty());
+    CHECK(profile->configuredEnvironment.at("VALUE") == "a\nb");
+    REQUIRE(fx.controller->setProfileField("environment", QVariantMap {}).has_value());
+    fx.fire();
+    REQUIRE(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile("work")->configuredEnvironment.empty());
+}
+
 TEST_CASE(
     "SettingsController: a profile or scheme added this session can be renamed and deleted before it is "
     "written",

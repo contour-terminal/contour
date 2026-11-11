@@ -42,6 +42,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
+#include <QtQml/QJSValue>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -2139,6 +2140,66 @@ TEST_CASE("a row shows what is wrong with its value under it", "[contour][gui][q
                                    { "value", "code {file}" } });
     CHECK_FALSE(problem->isVisible());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the environment editor commits a variable without changing other entries",
+          "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto const rows = SettingsRowFactory {};
+    auto const row = rows.make({ { "key", "environment" },
+                                 { "controlName", "environment" },
+                                 { "value", QVariantMap { { "KEEP", "value" } } } });
+    auto* name = row->findChild<QObject*>("settingsEnvironmentName");
+    auto* value = row->findChild<QObject*>("settingsEnvironmentValue");
+    auto* apply = row->findChild<QObject*>("settingsEnvironmentApply");
+    REQUIRE(name != nullptr);
+    REQUIRE(value != nullptr);
+    REQUIRE(apply != nullptr);
+    QSignalSpy const commits(row.get(), SIGNAL(committed(QString, QVariant)));
+    name->setProperty("text", "TERM");
+    value->setProperty("text", "vt100");
+    REQUIRE(QMetaObject::invokeMethod(apply, "clicked"));
+    REQUIRE(commits.size() == 1);
+    auto const emitted = commits.at(0).at(1);
+    auto const variables = emitted.metaType() == QMetaType::fromType<QJSValue>()
+                               ? emitted.value<QJSValue>().toVariant().toMap()
+                               : emitted.toMap();
+    CHECK(variables.value("TERM").toString() == "vt100");
+    CHECK(variables.value("KEEP").toString() == "value");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the environment editor refuses a rename to an existing variable", "[contour][gui][qml][settings]")
+{
+    auto const rows = SettingsRowFactory {};
+    auto const row =
+        rows.make({ { "key", "environment" },
+                    { "controlName", "environment" },
+                    { "environmentNamesIgnoreCase", true },
+                    { "value", QVariantMap { { "TERM", "vt100" }, { "COLORTERM", "truecolor" } } } });
+    auto* edit = findDescendant(*row, [](QQuickItem const& item) {
+        return item.objectName() == "settingsEnvironmentEdit:COLORTERM";
+    });
+    auto* name = row->findChild<QObject*>("settingsEnvironmentName");
+    auto* apply = row->findChild<QQuickItem*>("settingsEnvironmentApply");
+    auto* collision = row->findChild<QQuickItem*>("settingsEnvironmentCollision");
+    REQUIRE(edit != nullptr);
+    REQUIRE(name != nullptr);
+    REQUIRE(apply != nullptr);
+    REQUIRE(collision != nullptr);
+    QSignalSpy const commits(row.get(), SIGNAL(committed(QString, QVariant)));
+    REQUIRE(QMetaObject::invokeMethod(edit, "clicked"));
+    CHECK(name->property("text").toString() == "COLORTERM");
+    name->setProperty("text", "term");
+    CHECK(collision->isVisible());
+    CHECK_FALSE(apply->isEnabled());
+    REQUIRE(QMetaObject::invokeMethod(apply, "clicked"));
+    CHECK(commits.isEmpty());
+    name->setProperty("text", "COLOR_HINT");
+    CHECK_FALSE(collision->isVisible());
+    REQUIRE(QMetaObject::invokeMethod(apply, "clicked"));
+    CHECK(commits.size() == 1);
 }
 
 TEST_CASE("a row's text field follows its value once an edit is committed", "[contour][gui][qml][settings]")
