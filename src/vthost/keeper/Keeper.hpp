@@ -109,6 +109,23 @@ class Keeper
         Greeted,     ///< It said Hello: another Hello is a new image, exec'd in place.
     };
 
+    /// Whether the keeper writes to the daemon now, or holds what it would write back.
+    enum class Writes : uint8_t
+    {
+        Sent = 0, ///< Frames go to the daemon as they are made.
+        /// The daemon announced an exec (Exec, answered ExecNoted): frames are held back until its new
+        /// image's Hello or ExecAborted, so that none is half-read by the image the exec ends.
+        HeldBack,
+    };
+
+    /// The image a daemon announced it is about to exec (Exec), held until that image says Hello: an exec
+    /// that fails leaves the daemon on its old image, and the keeper restarting the image it ran.
+    struct ExecTarget
+    {
+        std::filesystem::path executable;
+        std::unique_ptr<HeldImage> held;
+    };
+
     struct Daemon
     {
         int pid = 0;
@@ -128,7 +145,10 @@ class Keeper
         std::optional<core::platform::SteadyTimePoint>
             drainUntil; ///< Judged by then if the close never comes.
         Greeting greeting = Greeting::Awaited;
-        uint32_t channelVersion = 0; ///< Negotiated from its current image's Hello; 0 before one.
+        uint32_t channelVersion = 0;          ///< Negotiated from its current image's Hello; 0 before one.
+        std::optional<ExecTarget> execTarget; ///< Announced by Exec; committed by the new image's Hello.
+        Writes writes = Writes::Sent;
+        std::vector<Message> heldBack; ///< What is held back while Writes::HeldBack, in order.
     };
 
     /// A session spawnSession() started.
@@ -199,12 +219,19 @@ class Keeper
     void handle(Adopt const& message, std::vector<UniqueFd>& fds);
     void handle(Shutdown const& message, std::vector<UniqueFd>& fds);
     void handle(Signal const& message, std::vector<UniqueFd>& fds);
+    void handle(Exec const& message, std::vector<UniqueFd>& fds);
+    void handle(ExecAborted const& message, std::vector<UniqueFd>& fds);
+    /// Sends what was held back while the daemon execs, in order, and sends as frames are made again.
+    void releaseHeldBack();
     void handle(auto const& /*message*/, std::vector<UniqueFd>& /*fds*/) {}
 
     KeeperPorts _ports;
     std::unique_ptr<LabelLock> _labelLock;
     CrashRestartPolicy _policy;
-    std::filesystem::path _daemonImage;
+    std::filesystem::path _daemonImage; ///< The committed image: what a crashed daemon is restarted from.
+    /// The hold on @ref _daemonImage once a live upgrade moved it there; null for the image the keeper was
+    /// started with, which the keeper process's own lease holds.
+    std::unique_ptr<HeldImage> _daemonImageHold;
     std::vector<uint8_t> _launchOptions;
 
     SessionTable _sessions;

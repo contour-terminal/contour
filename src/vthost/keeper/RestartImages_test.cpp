@@ -55,7 +55,8 @@ TEST_CASE("the restart image is not pruned while the keeper holds it", "[keeper]
     REQUIRE(committed->has_value());
     auto const committedExecutable = (*committed)->executable;
 
-    auto images = std::optional<vthost::keeper::StoreRestartImages> { std::in_place, keeperStore.store };
+    auto images =
+        std::optional<vthost::keeper::StoreRestartImages> { std::in_place, keeperStore.store, fs::path {} };
     CHECK(images->pick(committedExecutable) == committedExecutable); // nothing newer yet
 
     // A newer release is staged by a client of it, which lets its lease go once its daemon serves.
@@ -108,10 +109,61 @@ TEST_CASE("a pick never waits for a prune's claim on the newer image", "[keeper]
         newerStore.store.leaseFileOf(newerStore.store.imageDirectoryOf(newerExecutable))) };
     REQUIRE(*claim != nullptr);
 
-    auto images = vthost::keeper::StoreRestartImages { keeperStore.store };
+    auto images = vthost::keeper::StoreRestartImages { keeperStore.store, fs::path {} };
     auto picked = std::async(std::launch::async, [&] { return images.pick(committed->executable); });
     auto const answered = picked.wait_for(30s) == std::future_status::ready;
     claim.reset(); // lets a pick that blocked carry on, so the test ends either way
     REQUIRE(answered);
     CHECK(picked.get() == committed->executable); // busy: skipped, the committed image restarts
+}
+
+TEST_CASE("the image a daemon execs is held for its restart, and nothing else is", "[keeper][image]")
+{
+    auto const temp = core::testing::ScopedTempDir { "contour-exec-image" };
+    auto const appImage = temp.path() / "Contour.AppImage";
+    std::ofstream { appImage } << "ELF";
+
+    auto keeperStore = Store { temp.path(), appImage, "0.8.1" };
+    auto newerStore = Store { temp.path(), appImage, "0.9.0" };
+    auto const newerExecutable = [&] {
+        auto const staged = newerStore.store.stage();
+        REQUIRE(staged.has_value());
+        return staged->executable;
+    }();
+    auto images = vthost::keeper::StoreRestartImages { keeperStore.store, fs::path {} };
+
+    auto held = std::optional { images.hold(newerExecutable) };
+    REQUIRE(held->has_value());
+    // Held, the image survives a prune by yet another release; let go, it does not.
+    auto pruner = Store { temp.path(), appImage, "1.0.0" };
+    CHECK(pruner.store.prune() == 0);
+    CHECK(fs::exists(newerExecutable));
+    held.reset();
+    CHECK(pruner.store.prune() == 1);
+
+    CHECK(images.hold(appImage) == std::unexpected { vthost::keeper::RestartImageRefusal::NotAnImage });
+    CHECK(images.hold("/bin/sh") == std::unexpected { vthost::keeper::RestartImageRefusal::NotAnImage });
+}
+
+TEST_CASE("an install that runs in place holds its installed executable alone", "[keeper][image]")
+{
+    auto files = core::platform::NativeFileSystem {};
+    auto leases = vthost::makeNativeImageLeases();
+    auto links = vthost::makeNativeSymbolicLinks();
+    auto const temp = core::testing::ScopedTempDir { "contour-exec-in-place" };
+    auto store = vthost::DaemonImageStore { vthost::DaemonImageStoreConfig {
+                                                .imagesRoot = temp.path() / "bin",
+                                                .releaseVersion = "0.8.1",
+                                                .inputs = { .platform = vthost::HostPlatform::Linux,
+                                                            .executable = "/usr/bin/contour",
+                                                            .appImage = std::nullopt },
+                                                .processId = 1 },
+                                            files,
+                                            *leases,
+                                            *links };
+    REQUIRE(store.layout() == vthost::StagingLayout::InPlace);
+    auto images = vthost::keeper::StoreRestartImages { store, "/usr/bin/contour" };
+    CHECK(images.hold("/usr/bin/contour").has_value());
+    CHECK(images.hold("/usr/bin/../bin/contour").has_value());
+    CHECK(images.hold("/tmp/contour") == std::unexpected { vthost::keeper::RestartImageRefusal::NotAnImage });
 }

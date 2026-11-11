@@ -5,6 +5,7 @@
 #include <chrono>
 #include <expected>
 #include <ranges>
+#include <set>
 #include <utility>
 #include <variant>
 
@@ -102,6 +103,9 @@ Keeper::Launched Keeper::launchDaemon(LaunchContinuity continuity)
         .drainUntil = std::nullopt,
         .greeting = Greeting::Awaited,
         .channelVersion = 0,
+        .execTarget = std::nullopt,
+        .writes = Writes::Sent,
+        .heldBack = {},
     };
     _ports.events.watchChannel(*_daemon->channel, _daemon->generation);
     // The keeper reaps the daemon itself, after its last signal: until then its zombie holds the pid.
@@ -368,8 +372,32 @@ void Keeper::dropChannel()
 
 void Keeper::send(Message const& message, std::vector<int> fds)
 {
-    if (_daemon && _daemon->channel)
-        _daemon->channel->send(Frame { .body = encode(message), .fds = std::move(fds) });
+    if (!_daemon || !_daemon->channel)
+        return;
+    if (_daemon->writes == Writes::HeldBack)
+    {
+        // Nothing that carries descriptors is made for a daemon that execs: it takes on nothing new
+        // (takesIntake()), and only a new image asks for the inventory.
+        if (!fds.empty())
+        {
+            errorLog()("a message with descriptors for the daemon (pid {}), which execs, is dropped",
+                       _daemon->pid);
+            return;
+        }
+        _daemon->heldBack.push_back(message);
+        return;
+    }
+    _daemon->channel->send(Frame { .body = encode(message), .fds = std::move(fds) });
+}
+
+void Keeper::releaseHeldBack()
+{
+    if (!_daemon)
+        return;
+    _daemon->writes = Writes::Sent;
+    for (auto const& message: std::exchange(_daemon->heldBack, {}))
+        if (_daemon->channel)
+            _daemon->channel->send(Frame { .body = encode(message), .fds = {} });
 }
 
 bool Keeper::hasEnded() const noexcept
@@ -379,7 +407,7 @@ bool Keeper::hasEnded() const noexcept
 
 bool Keeper::takesIntake() const noexcept
 {
-    if (_ending || !_daemon || _daemon->exited)
+    if (_ending || !_daemon || _daemon->exited || _daemon->writes == Writes::HeldBack)
         return false;
     switch (_daemon->state)
     {
@@ -510,15 +538,34 @@ void Keeper::handle(Hello const& message, std::vector<UniqueFd>& /*fds*/)
     // The same process speaks again: a live upgrade exec'd a new image in place, which kept the channel and
     // is owed a Launch of its own. It takes the sessions over from the handover, not from an inventory.
     keeperLog()("the daemon (pid {}) runs a new image; it carries on from its handover", _daemon->pid);
+    // Its Launch goes first, then the exits told again, then what was held back while it exec'd.
+    auto heldBack = std::exchange(_daemon->heldBack, {});
+    _daemon->writes = Writes::Sent;
+    // The exec happened: a crash restarts the image it announced from now on, and the hold moves to it.
+    if (auto target = std::exchange(_daemon->execTarget, std::nullopt))
+    {
+        keeperLog()("a crashed daemon is restarted from {} from now on", target->executable.string());
+        _daemonImage = std::move(target->executable);
+        _daemonImageHold = std::move(target->held);
+    }
+    // Its silence is measured from its start, as a new image restores before it beats again.
+    _daemon->lastHeartbeat = now();
     send(Hello {});
     send(Launch { .continuity = LaunchContinuity::HandedOver,
                   .options = _launchOptions,
                   .originalDescriptorLimit = _ports.budget.originalSoftLimit() });
     // An exit the previous image may have heard and not acted on is the new image's to hear: the handover
-    // image carries no status, so the sessions that ended and are still held are told again.
+    // image carries no status, so the sessions that ended and are still held are told again -- except those
+    // whose Exited is held back, which the release below tells once.
+    auto const heldExits = std::ranges::to<std::set>(
+        heldBack
+        | std::views::filter([](Message const& held) { return std::holds_alternative<Exited>(held); })
+        | std::views::transform([](Message const& held) { return std::get<Exited>(held).session; }));
     for (auto const& entry: _sessions.inventory())
-        if (entry.message.exited)
+        if (entry.message.exited && !heldExits.contains(entry.message.session))
             send(Exited { .session = entry.message.session, .status = *entry.message.exited });
+    _daemon->heldBack = std::move(heldBack);
+    releaseHeldBack();
 }
 
 void Keeper::handle(Listener const& message, std::vector<UniqueFd>& fds)
@@ -692,6 +739,44 @@ void Keeper::handle(Shutdown const& /*message*/, std::vector<UniqueFd>& /*fds*/)
     earliest(_daemon->killAt, now() + _policy.config().daemonExitBound);
     // The daemon closes its own listeners once it hears this: by then nothing of this keeper holds the label.
     send(ShutdownNoted {});
+}
+
+void Keeper::handle(Exec const& message, std::vector<UniqueFd>& /*fds*/)
+{
+    if (!_daemon || _ending)
+        return;
+    // An Exec while another is pending supersedes it: the earlier exec did not happen.
+    releaseHeldBack();
+    // Answered after every frame sent before, which the channel finishes in order, and nothing after it until
+    // the new image's Hello or ExecAborted: the image the exec ends has half-read none of them.
+    send(ExecNoted {});
+    _daemon->writes = Writes::HeldBack;
+    // Only an image of the store, or the installed executable of an install that runs in place: never a path
+    // a daemon names that nothing guards, which the keeper would restart from for as long as it keeps.
+    auto const executable = std::filesystem::path { message.executablePath };
+    auto held = _ports.images.hold(executable);
+    if (!held)
+    {
+        _daemon->execTarget.reset();
+        errorLog()(
+            "the daemon (pid {}) is about to run {}, which a crash will not restart: {}; a crash restarts "
+            "{}",
+            _daemon->pid,
+            message.executablePath,
+            describe(held.error()),
+            _daemonImage.string());
+        return;
+    }
+    _daemon->execTarget = ExecTarget { .executable = executable, .held = *std::move(held) };
+}
+
+void Keeper::handle(ExecAborted const& /*message*/, std::vector<UniqueFd>& /*fds*/)
+{
+    if (!_daemon)
+        return;
+    // The old image serves on: it is told what was held back, and a crash restarts the image it runs.
+    _daemon->execTarget.reset();
+    releaseHeldBack();
 }
 
 void Keeper::handle(Signal const& message, std::vector<UniqueFd>& /*fds*/)

@@ -316,6 +316,8 @@ if(NOT WIN32)
         keeperlink/Structure.cpp
         keeperlink/Structure.hpp
         keeperlink/StructurePushPolicy.hpp
+        keeperlink/UpgradeKeeperLink.cpp
+        keeperlink/UpgradeKeeperLink.hpp
     )
 endif()
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.

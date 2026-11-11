@@ -46,9 +46,10 @@ trap 'rm -rf "$OUT"' EXIT
 # service backend on this platform at all. Swept for the code path, not held to an outcome.
 "$CONTOUR" daemon-service status > /dev/null 2>&1 || true
 # What a daemon asks of a new release before it upgrades onto it live: one line of strict JSON, answered in an
-# empty environment, as the readiness probe runs it.
+# empty environment, as the readiness probe runs it -- with the PTY keeper channel it speaks, which a daemon
+# behind a keeper requires of its target.
 env -i PATH=/usr/bin:/bin "$CONTOUR" daemon handover-info > "$OUT/handover-info.txt"
-grep -Eqx '\{"release":"[^"]+","handoverFormats":\[[0-9]+,[0-9]+\],"terminalStateFormats":\[[0-9]+,[0-9]+\]\}' \
+grep -Eqx '\{"release":"[^"]+","handoverFormats":\[[0-9]+,[0-9]+\],"terminalStateFormats":\[[0-9]+,[0-9]+\],"keeperChannelVersion":[0-9]+\}' \
     "$OUT/handover-info.txt" \
     || { echo "error: 'daemon handover-info' printed: $(cat "$OUT/handover-info.txt")" >&2; exit 1; }
 [ "$(wc -l < "$OUT/handover-info.txt")" -eq 1 ] \

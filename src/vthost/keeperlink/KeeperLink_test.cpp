@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/ChildProcess.hpp>
+
 #include <core/codec/Stream.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -157,14 +159,17 @@ struct LinkHarness
     std::optional<KeeperLink> link;
 
     /// @param spawnReplyBound How long a spawn waits for the keeper's answer.
-    explicit LinkHarness(std::chrono::milliseconds spawnReplyBound = vthost::keeperlink::SpawnReplyBound)
+    /// @param heartbeatInterval How often a wait for an answer beats.
+    explicit LinkHarness(std::chrono::milliseconds spawnReplyBound = vthost::keeperlink::SpawnReplyBound,
+                         std::chrono::milliseconds heartbeatInterval = vthost::KeeperHeartbeatInterval)
     {
         link.emplace(
             loop,
             KeeperChannel { std::move(ends.daemon) },
             keeper::ChannelVersion,
             [this] { ++losses; },
-            spawnReplyBound);
+            spawnReplyBound,
+            heartbeatInterval);
     }
 };
 
@@ -411,6 +416,26 @@ TEST_CASE("a spawn the keeper answers after it was given up on is released at on
     CHECK_FALSE(h.link->lost());
 }
 
+TEST_CASE("a spawn that waits for the keeper beats for the loop it holds", "[keeper][keeperlink]")
+{
+    // A keeper restarts a daemon whose heartbeats stop for its timeout, which may be as short as
+    // keeper::MinHeartbeatTimeout: a spawn that held the loop longer, silent, would be taken for a hang.
+    auto h = LinkHarness { 300ms, 40ms };
+    REQUIRE_FALSE(h.link->spawn(keeper::Spawn {}, {}).has_value());
+    CHECK(std::holds_alternative<keeper::Spawn>(*h.keeperEnd.receive().message));
+    auto beats = 0;
+    while (true)
+    {
+        auto const received = h.keeperEnd.channel.receive(h.keeperEnd.clock, h.keeperEnd.clock.now() + 100ms);
+        if (!received)
+            break;
+        REQUIRE(std::holds_alternative<keeper::Heartbeat>(*received->message));
+        ++beats;
+    }
+    CHECK(beats >= 3);
+    CHECK_FALSE(h.link->lost());
+}
+
 TEST_CASE("a late SpawnFailed for a spawn given up on forgets it", "[keeper][keeperlink]")
 {
     auto h = LinkHarness { 100ms };
@@ -584,4 +609,211 @@ TEST_CASE("a descriptor that is no keeper's channel is refused before anything i
     CHECK(attached.error() == vthost::keeperlink::AttachError::NotAChannel);
     auto byte = char {};
     CHECK(::read(pipe.reader.get(), &byte, 1) == 0); // the write end is closed, and nothing is in the pipe
+}
+
+namespace
+{
+/// Frames large enough that a few fill any socket buffer, so that one is cut short by a full socket.
+constexpr auto BulkFrames = 48;
+
+/// @return A frame of about 128 KiB that carries no descriptor.
+[[nodiscard]] keeper::Message bulkFrame(int index)
+{
+    return keeper::Listener { .name = std::string(std::size_t { 128 } * 1024,
+                                                  static_cast<char>('a' + (index % 26))),
+                              .tlsIdentity = std::nullopt,
+                              .path = std::to_string(index) };
+}
+
+/// Reads frames off the keeper's end on a thread of its own until an Exec, which it records.
+/// Whether the keeper the test plays takes note of an Exec.
+enum class Noting : uint8_t
+{
+    Silent = 0, ///< It reads the Exec and says nothing: a keeper stuck, or one that knows no ExecNoted.
+    Notes,      ///< It answers ExecNoted, as the keeper does.
+};
+
+struct ExecReader
+{
+    explicit ExecReader(KeeperEnd& end, Noting noting = Noting::Notes): _end { end }, _noting { noting } {}
+    ExecReader(ExecReader const&) = delete;
+    ExecReader& operator=(ExecReader const&) = delete;
+    ExecReader(ExecReader&&) = delete;
+    ExecReader& operator=(ExecReader&&) = delete;
+    ~ExecReader() { join(); }
+
+    void start()
+    {
+        _thread = std::thread { [this] {
+            while (auto message = _end.tryReceive())
+            {
+                if (auto const* exec = std::get_if<keeper::Exec>(&*message->message))
+                {
+                    execPath = exec->executablePath;
+                    if (_noting == Noting::Notes)
+                        _end.trySend(keeper::ExecNoted {});
+                    break;
+                }
+                if (auto const* listener = std::get_if<keeper::Listener>(&*message->message))
+                    paths.push_back(listener->path);
+            }
+            done.store(true);
+        } };
+    }
+
+    void join()
+    {
+        if (_thread.joinable())
+            _thread.join();
+    }
+
+    std::vector<std::string> paths; ///< Of each bulk frame read whole, in order.
+    std::string execPath;           ///< The Exec's path; empty for none.
+    std::atomic<bool> done { false };
+
+  private:
+    KeeperEnd& _end;
+    Noting _noting;
+    std::thread _thread;
+};
+
+/// @return The paths the bulk frames carry, in order.
+[[nodiscard]] std::vector<std::string> bulkPaths()
+{
+    return std::ranges::to<std::vector>(
+        std::views::iota(0, BulkFrames)
+        | std::views::transform([](int index) { return std::to_string(index); }));
+}
+} // namespace
+
+TEST_CASE("a live upgrade's exec is announced only once every queued frame went whole",
+          "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    for (auto const index: std::views::iota(0, BulkFrames))
+        h.link->post(bulkFrame(index));
+    auto reader = ExecReader { h.keeperEnd };
+    reader.start();
+
+    auto const announced = h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour", 10s);
+    REQUIRE(announced.has_value());
+    // Everything up to the Exec reached the keeper whole and in order: the new image's channel starts on a
+    // frame boundary, with nothing of the old image's left to finish.
+    reader.join();
+    CHECK(reader.paths == bulkPaths());
+    CHECK(reader.execPath == "/state/bin/0.9.0-bbbbbbbb/contour");
+}
+
+TEST_CASE("an exec the keeper does not read for in time is refused, and the frame cut short goes on whole",
+          "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    for (auto const index: std::views::iota(0, BulkFrames))
+        h.link->post(bulkFrame(index));
+
+    // The keeper reads nothing: the socket fills, a frame is cut short, and the bound passes.
+    auto const announced = h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour", 200ms);
+    REQUIRE_FALSE(announced.has_value());
+    CHECK(announced.error() == vthost::keeperlink::ChannelError::TimedOut);
+    CHECK_FALSE(h.link->lost());
+
+    // The daemon serves on: once the keeper reads again, the rest follows, every frame whole.
+    auto reader = ExecReader { h.keeperEnd, Noting::Silent };
+    reader.start();
+    REQUIRE(turnUntil(h.loop, [&] { return reader.done.load(); }));
+    reader.join();
+    CHECK(reader.paths == bulkPaths());
+}
+
+TEST_CASE("an exec announced to a keeper that is gone is refused", "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    h.keeperEnd.channel = KeeperChannel { UniqueFd {} };
+    REQUIRE(turnUntil(h.loop, [&] { return h.link->lost(); }));
+    CHECK_FALSE(h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour").has_value());
+}
+
+TEST_CASE("a keeper frame part-sent as the daemon announces its exec reaches the new image whole",
+          "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    auto exits = std::vector<uint64_t> {};
+    h.link->attachChildren(vthost::keeperlink::ChildEvents {
+        .exited = [&](keeper::KeeperSessionId session,
+                      vtpty::ExitStatus) { exits.push_back(std::to_underlying(session)); },
+        .orphaned = [] {},
+    });
+    // The keeper wrote half of an Exited when the daemon decided to exec: it sits in the read buffer.
+    auto const exited = vthost::keeperlink::frameBytesOf(
+        keeper::Exited { .session = 7, .status = { .kind = keeper::ExitKind::Normal, .value = 0 } }, 0);
+    auto const half = exited.size() / 2;
+    REQUIRE(::send(h.keeperEnd.channel.handle(), exited.data(), half, NoSigPipe)
+            == static_cast<ssize_t>(half));
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5))
+        std::ignore = h.loop.runOnce(10ms);
+
+    // The keeper finishes the frame it began, then takes note, as it does on Exec.
+    auto keeperSide = std::thread { [&] {
+        while (auto message = h.keeperEnd.tryReceive())
+            if (std::holds_alternative<keeper::Exec>(*message->message))
+                break;
+        std::ignore =
+            ::send(h.keeperEnd.channel.handle(), exited.data() + half, exited.size() - half, NoSigPipe);
+        h.keeperEnd.trySend(keeper::ExecNoted {});
+    } };
+    auto const announced = h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour", 5s);
+    keeperSide.join();
+    REQUIRE(announced.has_value());
+    // Read whole and handled by the image that execs, before the exec: nothing of it is left behind.
+    CHECK(exits == std::vector<uint64_t> { 7 });
+
+    // The new image inherits the channel on a frame boundary: what the keeper sends it next is read whole.
+    auto inherited = KeeperChannel { UniqueFd { ::fcntl(h.link->channelHandle(), F_DUPFD_CLOEXEC, 0) } };
+    h.keeperEnd.send(keeper::Hello {});
+    auto const clock = core::platform::SteadyClock {};
+    auto const received = inherited.receive(clock, clock.now() + 5s);
+    REQUIRE(received.has_value());
+    REQUIRE(received->message.has_value());
+    CHECK(std::holds_alternative<keeper::Hello>(*received->message));
+}
+
+TEST_CASE("an exec the keeper takes no note of is called off", "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    auto reader = ExecReader { h.keeperEnd, Noting::Silent };
+    reader.start();
+    auto const announced = h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour", 300ms);
+    reader.join();
+    REQUIRE_FALSE(announced.has_value());
+    CHECK(announced.error() == vthost::keeperlink::ChannelError::TimedOut);
+    CHECK(reader.execPath == "/state/bin/0.9.0-bbbbbbbb/contour");
+    // The keeper is told the exec did not happen, so that it sends what it held back.
+    std::ignore = h.loop.runOnce(10ms);
+    auto const aborted = h.keeperEnd.receive();
+    CHECK(std::holds_alternative<keeper::ExecAborted>(*aborted.message));
+    CHECK_FALSE(h.link->lost());
+}
+
+TEST_CASE("what the daemon answers to the keeper's last frames before the exec goes before the exec",
+          "[keeper][keeperlink][upgrade]")
+{
+    auto h = LinkHarness {};
+    // The keeper sends a message this daemon does not know, then takes note of the exec: the answer, an
+    // Unsupported posted by the handler, must be on the wire whole before announceExec() returns.
+    auto keeperSide = std::thread { [&] {
+        while (auto message = h.keeperEnd.tryReceive())
+            if (std::holds_alternative<keeper::Exec>(*message->message))
+                break;
+        auto const unknown =
+            keeper::encodeFrame(keeper::Frame { .body = { 0xA0, 0x1F }, .fds = {} }); // tag 4000
+        std::ignore = ::send(h.keeperEnd.channel.handle(), unknown.data(), unknown.size(), NoSigPipe);
+        h.keeperEnd.trySend(keeper::ExecNoted {});
+    } };
+    auto const announced = h.link->announceExec("/state/bin/0.9.0-bbbbbbbb/contour", 5s);
+    keeperSide.join();
+    REQUIRE(announced.has_value());
+    // Read without turning the loop again: it was sent before announceExec() returned.
+    auto const answer = h.keeperEnd.receive();
+    REQUIRE(std::holds_alternative<keeper::Unsupported>(*answer.message));
+    CHECK(std::get<keeper::Unsupported>(*answer.message).tag == 4000);
 }

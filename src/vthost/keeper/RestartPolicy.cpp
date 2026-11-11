@@ -43,8 +43,7 @@ RestartDecision CrashRestartPolicy::onExit(DaemonExitKind kind, core::platform::
     switch (kind)
     {
         case DaemonExitKind::FailedToStart: return { .action = RestartAction::ExitWithStatus };
-        case DaemonExitKind::ShutDown:
-        case DaemonExitKind::HandedOff: return { .action = RestartAction::ExitClean };
+        case DaemonExitKind::ShutDown: return { .action = RestartAction::ExitClean };
         case DaemonExitKind::Crashed:
         case DaemonExitKind::Hung: break;
     }

@@ -44,6 +44,10 @@ enum class UpgradeRefusal : uint8_t
     ForeignConsoleHost,
     /// The new release reports it cannot adopt the pseudoconsoles this daemon hosts.
     TargetCannotAdoptTerminals,
+    /// The daemon runs behind a PTY keeper, and the new release, which predates the keeper, cannot.
+    TargetCannotServeKeeper,
+    /// The PTY keeper did not take what the daemon had to tell it before the exec, in time.
+    KeeperUnreachable,
 };
 
 /// The new image could not take over after everything was stopped -- the exec failed (POSIX), or the
@@ -107,6 +111,13 @@ inline constexpr auto UpgradeRefusalRows = std::array {
     UpgradeRefusalRow { UpgradeRefusal::TargetCannotAdoptTerminals,
                         "targetCannotAdoptTerminals",
                         "the new release cannot take over this daemon's terminals" },
+    UpgradeRefusalRow {
+        UpgradeRefusal::TargetCannotServeKeeper,
+        "targetCannotServeKeeper",
+        "the new release cannot run behind the PTY keeper that holds this daemon's programs" },
+    UpgradeRefusalRow { UpgradeRefusal::KeeperUnreachable,
+                        "keeperUnreachable",
+                        "the PTY keeper that holds this daemon's programs could not be told of the upgrade" },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, UpgradeRefusalRows.size()),

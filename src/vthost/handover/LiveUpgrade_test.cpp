@@ -28,6 +28,7 @@
     #include <optional>
     #include <ranges>
     #include <set>
+    #include <stdexcept>
     #include <string>
     #include <string_view>
     #include <tuple>
@@ -47,11 +48,18 @@
     #include <vthost/handover/HandoverToken.hpp>
     #include <vthost/handover/LiveUpgrade.hpp>
     #include <vthost/handover/Readiness.hpp>
+    #include <vthost/keeper/Messages.hpp>
+    #include <vthost/keeperlink/KeeperChannel.hpp>
+    #include <vthost/keeperlink/KeeperChild.hpp>
+    #include <vthost/keeperlink/KeeperLink.hpp>
+    #include <vthost/keeperlink/KeeperPtyFactory.hpp>
+    #include <vthost/keeperlink/UpgradeKeeperLink.hpp>
     #include <vthost/testing/FakeHandoverMemory.hpp>
     #include <vthost/testing/FakeImageLeases.hpp>
     #include <vthost/testing/FakeProcessImageReplacer.hpp>
     #include <vthost/testing/FakeReadinessProbe.hpp>
     #include <vthost/testing/HandoverTesting.hpp>
+    #include <vthost/testing/KeeperFixture.hpp>
     #include <vthost/testing/LiveUpgradeTesting.hpp>
     #include <vthost/testing/StagingFileSystem.hpp>
     #include <vthost/testing/TestHelpers.hpp>
@@ -146,7 +154,342 @@ struct Upgrade: vthost::testing::UpgradeBench
     ExecHandoff handoff { replacer, memory };
 };
 
+/// A daemon about to be upgraded behind a real PTY keeper, which the test plays the daemon of: every session
+/// it spawns is the keeper's child, and the orchestrator tells the keeper through the daemon's link.
+struct KeeperUpgrade
+{
+    KeeperUpgrade()
+    {
+        link.emplace(u.live->loop,
+                     keeperlink::KeeperChannel { keeper.takeChannel() },
+                     vthost::keeper::ChannelVersion,
+                     [] {});
+        link->post(keeper::Serving { .hungRestart = keeper::HungRestart::Off, .heartbeatTimeoutMs = 30'000 });
+        factory.emplace(*link, std::make_shared<vtpty::NoPlacement>());
+        upgradeKeeper.emplace(*link);
+        u.keeper = &*upgradeKeeper;
+    }
+    KeeperUpgrade(KeeperUpgrade const&) = delete;
+    KeeperUpgrade& operator=(KeeperUpgrade const&) = delete;
+    KeeperUpgrade(KeeperUpgrade&&) = delete;
+    KeeperUpgrade& operator=(KeeperUpgrade&&) = delete;
+
+    ~KeeperUpgrade()
+    {
+        // The sessions first, while the factory they run on is still there; then a clean end, so that the
+        // keeper restarts nothing; the link goes before the loop it runs on.
+        if (u.live)
+        {
+            for (auto const id: u.live->host.sessionIds())
+                u.live->host.closeSession(id);
+            std::ignore = u.live->eventually([this] { return u.live->host.sessionCount() == 0; });
+        }
+        link->post(keeper::Shutdown {});
+        upgradeKeeper.reset();
+        factory.reset();
+        link.reset();
+    }
+
+    /// @return The orchestrator, its configuration naming the keeper's channel to cross the exec, as the
+    ///         daemon's does (DaemonKeeper::crossing()).
+    [[nodiscard]] LiveUpgrade orchestrator()
+    {
+        auto config = Upgrade::config();
+        config.alsoCrossing = { vtpty::CrossingHandle::of(link->channelHandle()) };
+        return u.orchestrator(std::move(config));
+    }
+
+    /// Waits for the keeper to log @p text.
+    /// @return Whether it did within ten seconds.
+    [[nodiscard]] bool keeperLogs(std::string_view text) const
+    {
+        auto const deadline = std::chrono::steady_clock::now() + 10s;
+        while (!keeper.log().contains(text))
+        {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(10ms);
+        }
+        return true;
+    }
+
+    vthost::testing::KeeperFixture keeper { vthost::testing::HarnessStart::Relays };
+    std::optional<keeperlink::KeeperLink> link;
+    std::optional<keeperlink::KeeperPtyFactory> factory;
+    std::optional<keeperlink::UpgradeKeeperLink> upgradeKeeper;
+    Upgrade u { [this](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+        return factory->make(size,
+                             vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript }),
+                             vtpty::SandboxEscape::Contained);
+    } };
+};
+
+/// The host a new image builds from a handover image, on the old one's loop: each keeper child bound to its
+/// child again, as DaemonKeeper::adoptChild() binds it.
+struct AdoptingHost
+{
+    AdoptingHost(core::net::EventLoop& loop,
+                 keeperlink::KeeperPtyFactory const& factory,
+                 HandoverImage image):
+        host { loop,
+               [](vtpty::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                   return catDevice(size);
+               },
+               vtbackend::Settings {},
+               core::defaultEnvironment(),
+               SessionHostConfig {
+                   .pumping = SessionPumping::Threaded,
+                   .handover = std::move(image),
+                   .adoptChild =
+                       [&factory](HandoverSession const& session, std::unique_ptr<vtpty::Pty> pty) {
+                           return factory.adopt(
+                               keeperlink::KeptChild { .session =
+                                                           keeper::KeeperSessionId { session.keeperSession },
+                                                       .pid = session.child.pid,
+                                                       .exited = std::nullopt,
+                                                       .settle = {} },
+                               std::move(pty));
+                       } } },
+        drain { loop }
+    {
+    }
+
+    SessionHost host;
+    LoopDrain drain;
+};
+
+/// The keeper a daemon runs behind, as a test sets its answers.
+class ScriptedKeeper final: public UpgradeKeeper
+{
+  public:
+    [[nodiscard]] std::expected<void, UpgradeRefusal> admits(ReadinessReport const& /*target*/) const override
+    {
+        return {};
+    }
+    [[nodiscard]] std::expected<void, UpgradeRefusal> announceExec(
+        std::filesystem::path const& executable) override
+    {
+        announced.push_back(executable);
+        return announceAnswer;
+    }
+    void abortExec() override { ++aborted; }
+
+    std::expected<void, UpgradeRefusal> announceAnswer {};
+    std::vector<std::filesystem::path> announced;
+    int aborted = 0; ///< How many times an exec was called off after it was announced.
+};
+
 } // namespace
+
+TEST_CASE("a live upgrade under a keeper keeps every keeper child", "[vthost][handover][upgrade][keeper]")
+{
+    auto k = KeeperUpgrade {};
+    auto& u = k.u;
+    INFO(k.keeper.log());
+    u.live->spawnTwo();
+    auto const ids = u.live->host.sessionIds();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    auto children = std::map<uint64_t, int64_t> {};
+    for (auto const id: ids)
+        children.emplace(id.value, childOf(u.live->host, id));
+
+    auto next = std::optional<AdoptingHost> {};
+    u.replacer.onReplace = [&] {
+        auto decoded = readHandover(u.memory, handoverFdOf(u.replacer.replacements.back().second));
+        REQUIRE(decoded.has_value());
+        // Each session crosses as the keeper's child, by the keeper's name for it.
+        REQUIRE(decoded->sessions.size() == 2);
+        for (auto const& session: decoded->sessions)
+        {
+            CHECK(session.device == SessionDevice::KeeperChild);
+            CHECK(session.keeperSession != 0);
+            CHECK(session.child.pid == children.at(session.id.value));
+        }
+        // The keeper's channel crosses the exec, and the keeper heard of it before.
+        CHECK(u.memory.kept.contains(vtpty::CrossingHandle::of(k.link->channelHandle())));
+        // The keeper heard of the exec before it happened. The fixture's keeper has no image store, so what
+        // it logs is that it will not restart the target; the line says the Exec reached it all the same.
+        CHECK(k.keeperLogs(
+            std::format("is about to run {}, which a crash will not restart", u.target.string())));
+        // The exec: the new image says Hello on the same channel, and binds every keeper child again.
+        releaseForAdoption(u.live->host);
+        k.link->post(keeper::Hello {});
+        next.emplace(u.live->loop, *k.factory, *std::move(decoded));
+        throw ImageReplaced {};
+    };
+    auto upgrade = k.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }), ImageReplaced);
+
+    // The keeper launched the new image as handed over, in the same process: nothing was restarted.
+    CHECK(k.keeperLogs("runs a new image; it carries on from its handover"));
+    CHECK(k.keeper.launches().size() == 1);
+    REQUIRE(next.has_value());
+    REQUIRE(next->host.sessionIds() == ids);
+    for (auto const id: ids)
+    {
+        CHECK(childOf(next->host, id) == children.at(id.value));
+        CHECK(::kill(static_cast<pid_t>(children.at(id.value)), 0) == 0);
+        next->host.writeInput(id, "after-upgrade");
+    }
+    auto const pageOf = [&](SessionId id) {
+        auto& terminal = next->host.hostedSession(id)->terminal();
+        auto const _ = std::lock_guard { terminal };
+        return terminal.primaryScreen().renderMainPageText();
+    };
+    REQUIRE(u.live->eventually([&] {
+        return std::ranges::all_of(ids, [&](SessionId id) { return pageOf(id).contains("after-upgrade"); });
+    }));
+
+    // The new image's host ends its sessions on the loop it shares with the old one before it goes.
+    for (auto const id: ids)
+        next->host.closeSession(id);
+    REQUIRE(u.live->eventually([&] { return next->host.sessionCount() == 0; }));
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 10))
+        std::ignore = u.live->loop.runOnce(10ms);
+    next.reset();
+}
+
+TEST_CASE("a failed exec under a keeper resumes the old daemon and the keeper notices nothing",
+          "[vthost][handover][upgrade][keeper]")
+{
+    auto k = KeeperUpgrade {};
+    auto& u = k.u;
+    INFO(k.keeper.log());
+    u.live->spawnTwo();
+    auto const ids = u.live->host.sessionIds();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+
+    auto upgrade = k.orchestrator();
+    auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(std::holds_alternative<ExecFailure>(result.error()));
+
+    // The daemon serves on, through the very same keeper: no new image said Hello, nothing was restarted.
+    u.checkResumed(ids);
+    CHECK_FALSE(k.link->lost());
+    REQUIRE(u.live->host.createTab() != nullptr);
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    CHECK(u.live->host.sessionCount() == 3);
+    CHECK(k.keeper.launches().size() == 1);
+    CHECK_FALSE(k.keeper.log().contains("runs a new image"));
+}
+
+TEST_CASE("an exception after the keeper was told of the exec leaves the keeper sending again",
+          "[vthost][handover][upgrade][keeper]")
+{
+    auto k = KeeperUpgrade {};
+    auto& u = k.u;
+    INFO(k.keeper.log());
+    u.live->spawnTwo();
+    auto const ids = u.live->host.sessionIds();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+
+    // The handoff throws once the keeper took note of the exec.
+    u.replacer.onReplace = [] {
+        throw std::runtime_error { "the handoff broke" };
+    };
+    auto upgrade = k.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
+                      std::runtime_error);
+
+    // The keeper was told the exec is off: it answers again, so a spawn through it is accepted, and the
+    // sessions are back.
+    u.checkResumed(ids);
+    CHECK_FALSE(k.link->lost());
+    REQUIRE(u.live->host.createTab() != nullptr);
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    CHECK(u.live->host.sessionCount() == 3);
+    CHECK(k.keeper.launches().size() == 1);
+}
+
+TEST_CASE("an exception after the exec was announced calls it off with the keeper",
+          "[vthost][handover][upgrade]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    auto keeper = ScriptedKeeper {};
+    u.keeper = &keeper;
+    u.replacer.onReplace = [] {
+        throw std::runtime_error { "the handoff broke" };
+    };
+    auto upgrade = u.orchestrator();
+    REQUIRE_THROWS_AS(std::ignore = u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
+                      std::runtime_error);
+    CHECK(keeper.announced == std::vector { u.target });
+    CHECK(keeper.aborted == 1);
+}
+
+TEST_CASE("a target that predates the keeper is refused before anything stops, behind a keeper alone",
+          "[vthost][handover][upgrade][keeper]")
+{
+    SECTION("behind a keeper")
+    {
+        auto k = KeeperUpgrade {};
+        auto& u = k.u;
+        u.live->spawnTwo();
+        REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+        u.probe.answer->keeperChannelVersion.reset();
+        auto upgrade = k.orchestrator();
+        CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
+                          UpgradeRefusal::TargetCannotServeKeeper));
+        CHECK(u.hooks.events.empty());
+        CHECK(u.replacer.replacements.empty());
+        CHECK_FALSE(k.keeper.log().contains("is about to run"));
+    }
+
+    SECTION("behind none")
+    {
+        auto u = Upgrade {};
+        u.probe.answer->keeperChannelVersion.reset();
+        auto upgrade = u.orchestrator();
+        auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+        CHECK_FALSE(refusedWith(result, UpgradeRefusal::TargetCannotServeKeeper));
+        CHECK(u.replacer.replacements.size() == 1);
+    }
+}
+
+TEST_CASE("an exec the keeper could not be told of is refused, and everything resumed",
+          "[vthost][handover][upgrade]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    auto const ids = u.live->host.sessionIds();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    auto keeper = ScriptedKeeper {};
+    keeper.announceAnswer = std::unexpected(UpgradeRefusal::KeeperUnreachable);
+    u.keeper = &keeper;
+
+    auto upgrade = u.orchestrator();
+    CHECK(refusedWith(u.run(upgrade, UpgradeTarget { .imageId = u.imageId }),
+                      UpgradeRefusal::KeeperUnreachable));
+    // Told last, once everything was captured, and nothing exec'd after it said no.
+    CHECK(keeper.announced == std::vector { u.target });
+    CHECK(u.hooks.events == std::vector<std::string> { "announce 0.9.1", "snapshot", "close" });
+    CHECK(u.replacer.replacements.empty());
+    CHECK(u.leases.heldCount() == 0);
+    CHECK(u.acceptor->admission() == Admission::Accepting);
+    u.checkResumed(ids);
+}
+
+TEST_CASE("an exec that fails after the keeper was told of it is called off with the keeper",
+          "[vthost][handover][upgrade]")
+{
+    auto u = Upgrade {};
+    u.live->spawnTwo();
+    auto const ids = u.live->host.sessionIds();
+    REQUIRE(u.live->eventually([&] { return u.allShow("ready"); }));
+    auto keeper = ScriptedKeeper {};
+    u.keeper = &keeper;
+
+    auto upgrade = u.orchestrator();
+    auto const result = u.run(upgrade, UpgradeTarget { .imageId = u.imageId });
+    REQUIRE_FALSE(result.has_value());
+    CHECK(std::holds_alternative<ExecFailure>(result.error()));
+    CHECK(keeper.announced == std::vector { u.target });
+    CHECK(keeper.aborted == 1);
+    u.checkResumed(ids);
+}
 
 TEST_CASE("live upgrade keeps every child alive and the same pid", "[vthost][handover][upgrade][threading]")
 {
@@ -824,8 +1167,8 @@ TEST_CASE("a daemon running in place upgrades to its installed executable",
     };
     auto config = Upgrade::config();
     config.installedExecutable = "/usr/bin/contour";
-    auto upgrade = LiveUpgrade { u.live->loop, u.live->host, packaged,      u.leases,         u.handoff,
-                                 u.probe,      u.hooks,      u.listeners(), std::move(config) };
+    auto upgrade = LiveUpgrade { u.live->loop, u.live->host, packaged,  u.leases,      u.handoff,
+                                 u.probe,      u.hooks,      *u.keeper, u.listeners(), std::move(config) };
     auto image = std::optional<HandoverImage> {};
     u.replacer.onReplace = [&] {
         auto decoded = readHandover(u.memory, handoverFdOf(u.replacer.replacements.back().second));

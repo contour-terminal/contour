@@ -32,11 +32,10 @@ enum class DaemonExitKind : uint8_t
     Crashed,           ///< It ended on its own, unannounced.
     Hung,              ///< The keeper killed it for silence.
     ShutDown,          ///< It was asked to, or announced that it would.
-    HandedOff,         ///< It handed its sessions to a successor (live upgrade).
 };
 
 /// @param state The state the daemon process ended in.
-/// @return How it ended. HandedOff is not decided here: only a live upgrade knows it.
+/// @return How it ended. A live upgrade ends no daemon process: it execs a new image in the same one.
 [[nodiscard]] DaemonExitKind classifyExit(DaemonEndState state) noexcept;
 
 /// The numbers of the crash-loop policy. They are tuning; the table the policy decides by is the contract.

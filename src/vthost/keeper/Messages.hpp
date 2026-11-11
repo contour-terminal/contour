@@ -413,7 +413,8 @@ struct Shutdown
     [[nodiscard]] bool operator==(Shutdown const&) const = default;
 };
 
-/// Daemon to keeper: the daemon is about to exec this image.
+/// Daemon to keeper: the daemon is about to exec this image in a live upgrade. The keeper answers ExecNoted and
+/// sends nothing more to the daemon until its new image's Hello, or ExecAborted.
 struct Exec
 {
     /// How many descriptors this message carries at most.
@@ -504,6 +505,27 @@ struct ShutdownNoted
     void visitFields(this auto& /*self*/, auto& /*visitor*/) {}
     [[nodiscard]] bool operator==(ShutdownNoted const&) const = default;
 };
+
+/// Keeper to daemon: the answer to Exec. Every frame the keeper sent before it went whole, and the keeper sends
+/// nothing more until the new image's Hello (or ExecAborted), so once the daemon has read this its read side
+/// ends on a frame boundary: the exec loses nothing the keeper wrote, and the new image starts on a frame.
+struct ExecNoted
+{
+    /// How many descriptors this message carries at most.
+    static constexpr std::size_t MaxDescriptors = 0;
+    void visitFields(this auto& /*self*/, auto& /*visitor*/) {}
+    [[nodiscard]] bool operator==(ExecNoted const&) const = default;
+};
+
+/// Daemon to keeper: the exec an Exec announced did not happen (it failed, or the upgrade was rolled back
+/// before it). The keeper sends what it held back since, and forgets the image the Exec named.
+struct ExecAborted
+{
+    /// How many descriptors this message carries at most.
+    static constexpr std::size_t MaxDescriptors = 0;
+    void visitFields(this auto& /*self*/, auto& /*visitor*/) {}
+    [[nodiscard]] bool operator==(ExecAborted const&) const = default;
+};
 // clang-format on
 
 /// Every message of the channel, in the order of the wire table: a message's tag is its index + 1.
@@ -529,7 +551,9 @@ using Message = std::variant<Hello,
                              InventorySession,
                              InventoryEnd,
                              Signal,
-                             ShutdownNoted>;
+                             ShutdownNoted,
+                             ExecNoted,
+                             ExecAborted>;
 
 namespace detail
 {

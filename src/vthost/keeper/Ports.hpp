@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include <vthost/keeper/Frame.hpp>
@@ -202,11 +203,47 @@ class DescriptorBudget
     [[nodiscard]] virtual uint64_t originalSoftLimit() const = 0;
 };
 
+/// An image the keeper holds while it would restart a daemon from it; no prune removes it meanwhile.
+class HeldImage
+{
+  public:
+    virtual ~HeldImage() = default;
+};
+
+/// Why an image a daemon is about to exec cannot become the one the keeper restarts it from.
+enum class RestartImageRefusal : uint8_t
+{
+    /// It is no executable of a complete image of the store, nor, for an install that runs in place, its
+    /// installed executable.
+    NotAnImage = 0,
+    Unavailable, ///< It could not be leased: a prune is removing it, or removed it.
+};
+
+/// @param refusal Why an image was refused.
+/// @return The reason, as a sentence fragment for the log.
+[[nodiscard]] constexpr std::string_view describe(RestartImageRefusal refusal) noexcept
+{
+    switch (refusal)
+    {
+        case RestartImageRefusal::NotAnImage: return "it is no image of the daemon's image store";
+        case RestartImageRefusal::Unavailable: return "its image cannot be leased";
+    }
+    return "it cannot be held";
+}
+
 /// The images a crashed daemon is restarted from, and the lease that keeps the one picked from being pruned.
 class RestartImages
 {
   public:
     virtual ~RestartImages() = default;
+
+    /// Holds @p executable, which the daemon is about to exec in a live upgrade, as an image a crashed daemon
+    /// may be restarted from: only an image of the store (or, for an install that runs in place, its
+    /// installed executable), never any other path a daemon names.
+    /// @param executable The executable the daemon names in its Exec.
+    /// @return It, held for as long as the result lives; or why it cannot be.
+    [[nodiscard]] virtual std::expected<std::unique_ptr<HeldImage>, RestartImageRefusal> hold(
+        std::filesystem::path const& executable) = 0;
 
     /// Picks the image to restart a crashed daemon from: the newest complete image no older than
     /// @p committed, never an older one. A newer image picked stays leased until the next pick, or until

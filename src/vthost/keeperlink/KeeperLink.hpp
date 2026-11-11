@@ -6,10 +6,12 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <vector>
 
+#include <vthost/KeeperSettings.hpp>
 #include <vthost/keeper/Messages.hpp>
 #include <vthost/keeper/UniqueFd.hpp>
 #include <vthost/keeperlink/KeeperChannel.hpp>
@@ -31,6 +33,10 @@ inline constexpr std::chrono::seconds FinalFlushBound { 1 };
 /// How long announceShutdown() waits for the keeper to take note: the keeper answers at once, so this is
 /// reached only by a keeper that does not know ShutdownNoted, or that is stuck.
 inline constexpr std::chrono::seconds ShutdownNoteBound { 2 };
+
+/// How long announceExec() waits for the keeper to take what is queued for it, and to take note, before a
+/// live upgrade's exec.
+inline constexpr std::chrono::seconds ExecFlushBound { 2 };
 
 /// What spawn() hands back: the keeper's Spawned, and the child's process handle (its pidfd) if it sent one.
 struct SpawnReply
@@ -70,11 +76,13 @@ class KeeperLink
     /// @param channelVersion The channel version the handshake negotiated (KeeperAttachment::version).
     /// @param onLost Called once, on the loop, when the keeper's end is gone or the channel broke.
     /// @param spawnReplyBound How long spawn() waits for the keeper's answer.
+    /// @param heartbeatInterval How often a wait for the keeper's answer tells it the daemon is alive.
     KeeperLink(core::net::EventLoop& loop,
                KeeperChannel channel,
                uint32_t channelVersion,
                std::function<void()> onLost,
-               std::chrono::milliseconds spawnReplyBound = SpawnReplyBound);
+               std::chrono::milliseconds spawnReplyBound = SpawnReplyBound,
+               std::chrono::milliseconds heartbeatInterval = KeeperHeartbeatInterval);
     KeeperLink(KeeperLink const&) = delete;
     KeeperLink& operator=(KeeperLink const&) = delete;
     KeeperLink(KeeperLink&&) = delete;
@@ -89,6 +97,12 @@ class KeeperLink
     /// and are not the answer are queued, and dispatched after this returns, never inside it. A spawn given
     /// up on (the bound passed) that the keeper answers later is released at once: its Spawned is answered
     /// with Release{session, 0}, so that the keeper does not keep a child no daemon object holds.
+    ///
+    /// It blocks the loop for the round trip, at most the spawn reply bound: its caller is
+    /// vtpty::Pty::start(), which SessionHost's session creation calls synchronously and every model
+    /// operation that creates a pane needs the answer of (vtworkspace's seeder returns whether the pane
+    /// exists). While it waits it beats for the loop (heartbeatInterval), whose own heartbeat flow cannot
+    /// run, so that a keeper never takes the wait for a hung daemon.
     /// @param request What to spawn; its `request` number is assigned here.
     /// @param fds The descriptors the Spawn carries; they stay the caller's.
     /// @return The answer; or why there is none (SpawnError::Unknown for a lost link or a late keeper).
@@ -99,10 +113,29 @@ class KeeperLink
     /// keeper has let go of the label and of its copies of the listeners, so that once the daemon closes its
     /// own, a new instance starts at once -- `contour daemon stop` followed by `contour daemon` finds the
     /// label free. Loop thread. Every frame queued before goes first; the frames that arrive meanwhile are
-    /// queued and dispatched after this returns, as for spawn().
+    /// queued and dispatched after this returns, and it beats while it waits, as spawn() does.
     /// @param cause The ShutdownCause, as the channel carries it.
     /// @param bound How long to wait for the note; a keeper that sends none is waited for that long.
     void announceShutdown(uint8_t cause, std::chrono::milliseconds bound = ShutdownNoteBound);
+
+    /// Tells the keeper the daemon is about to exec @p executable in a live upgrade, and waits until it took
+    /// note (ExecNoted): every frame queued before went whole, every frame the keeper sent before was read
+    /// and handled here, and the keeper holds back what it would send until the new image's Hello. The new
+    /// image, which inherits the channel, then starts on a frame boundary both ways. Loop thread, right
+    /// before the exec: a frame posted from another thread after this returns is only queued, and the exec
+    /// drops it whole, never cut. Only a Release or a Signal can come that way, and neither is needed: the
+    /// session's master crosses the exec either way. What arrives before the note is handled here.
+    /// @param executable The binary the daemon execs.
+    /// @param bound How long the keeper may take.
+    /// @return Nothing once the keeper took note; ChannelError::TimedOut when it did not in time,
+    ///         ChannelError::Closed or Broken when the link is gone or a frame was left half-read. Then the
+    ///         exec is called off with ExecAborted, and what is still queued goes on as the daemon serves on.
+    [[nodiscard]] std::expected<void, ChannelError> announceExec(
+        std::filesystem::path const& executable, std::chrono::milliseconds bound = ExecFlushBound);
+
+    /// Tells the keeper the exec announceExec() announced did not happen (ExecAborted): it sends what it held
+    /// back, and keeps restarting the image this daemon runs. Loop thread.
+    void abortExec();
 
     /// Ends the link's sending unless announceShutdown() ran: what is queued is dropped, and nothing posted
     /// after it is sent. An end the daemon did not announce is a crash to the keeper, which keeps every

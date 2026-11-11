@@ -42,8 +42,7 @@ enum class KeeperPresence : uint8_t
 
 /// @param presence Whether the daemon runs behind a PTY keeper.
 /// @return Who removes the socket files of the listeners the daemon took over: its keeper, which does at
-/// every
-///         ending under the label lock; for a daemon behind none, each listener as it closes.
+///         every ending under the label lock; for a daemon behind none, each listener as it closes.
 [[nodiscard]] constexpr SocketFileRemoval socketFileRemovalFor(KeeperPresence presence) noexcept
 {
     return presence == KeeperPresence::Behind ? SocketFileRemoval::LeftToKeeper : SocketFileRemoval::OnClose;

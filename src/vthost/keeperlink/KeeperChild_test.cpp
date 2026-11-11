@@ -5,6 +5,7 @@
 
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -29,10 +30,14 @@
 #include <variant>
 #include <vector>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <vthost/LoopDrain.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/handover/HandoverImage.hpp>
+#include <vthost/keeperlink/KeeperAttachment.hpp>
 #include <vthost/keeperlink/KeeperChannel.hpp>
 #include <vthost/keeperlink/KeeperChild.hpp>
 #include <vthost/keeperlink/KeeperLink.hpp>
@@ -583,4 +588,79 @@ TEST_CASE("a session waiting for its exit status that is closed on request ends 
     CHECK(ends.ends == std::vector { vthost::SessionEnd::Requested });
     CHECK(upgraded.host.sessionCount() == 0);
     upgraded.host.unsubscribeStream(&ends);
+}
+
+TEST_CASE(
+    "a new image that cannot take its handover over recovers every program and listener from the keeper",
+    "[keeper][keeperlink][upgrade]")
+{
+    auto fixture = KeeperFixture { HarnessStart::Relays };
+    INFO(fixture.log());
+    auto const backend = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *backend };
+    auto channel = fixture.takeChannel();
+    // What the exec keeps across: the new image's end of the very same channel.
+    auto kept = keeper::UniqueFd { ::fcntl(channel.get(), F_DUPFD_CLOEXEC, 0) };
+    REQUIRE(kept.isOpen());
+    // A listener stand-in: the keeper keeps whatever descriptor it is handed.
+    auto listenerEnds = std::array { -1, -1 };
+    REQUIRE(::pipe(listenerEnds.data()) == 0);
+    auto const listenerReader = keeper::UniqueFd { listenerEnds[0] };
+    auto const listenerWriter = keeper::UniqueFd { listenerEnds[1] };
+    for (auto const fd: listenerEnds)
+        REQUIRE(::fcntl(fd, F_SETFD, FD_CLOEXEC) == 0);
+    auto pid = int64_t { 0 };
+    {
+        // The old image: it serves, deposits a listener and runs a program through the keeper.
+        auto link = std::optional<KeeperLink> {
+            std::in_place, loop, KeeperChannel { std::move(channel) }, keeper::ChannelVersion, [] {}
+        };
+        link->post(keeper::Serving { .hungRestart = keeper::HungRestart::Off, .heartbeatTimeoutMs = 30'000 });
+        link->post(keeper::Listener { .name = "control", .tlsIdentity = std::nullopt, .path = "/run/c" },
+                   { listenerReader.get() });
+        auto factory =
+            std::optional<KeeperPtyFactory> { std::in_place, *link, std::make_shared<vtpty::NoPlacement>() };
+        auto child = factory->make(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) },
+                                   vtpty::testing::execInfo("sleep", { "300" }),
+                                   vtpty::SandboxEscape::Contained);
+        REQUIRE(child->start().has_value());
+        pid = child->pid();
+        // The exec: nothing of the old image releases the program.
+        REQUIRE(child->releaseHandover().has_value());
+        child.reset();
+        factory.reset();
+        link.reset();
+    }
+
+    // The new image says Hello on the channel, is launched as handed over, and finds its image unreadable.
+    auto const clock = core::platform::SteadyClock {};
+    auto attachment = vthost::keeperlink::attachToKeeper(std::move(kept), clock, 10s);
+    REQUIRE(attachment.has_value());
+    REQUIRE(attachment->continuity == keeper::LaunchContinuity::HandedOver);
+    CHECK(attachment->inventory.empty());
+
+    REQUIRE(vthost::keeperlink::recoverFromKeeper(*attachment, clock, 10s).has_value());
+    CHECK(attachment->continuity == keeper::LaunchContinuity::Recovered);
+    REQUIRE_FALSE(attachment->inventory.empty());
+    auto const& begin = std::get<keeper::InventoryBegin>(*attachment->inventory.front().message);
+    CHECK(begin.listenerCount == 1);
+    CHECK(begin.sessionCount == 1);
+    auto sessions = std::vector<keeper::InventorySession> {};
+    auto listeners = std::vector<std::string> {};
+    for (auto const& received: attachment->inventory)
+    {
+        if (auto const* session = std::get_if<keeper::InventorySession>(&*received.message))
+            sessions.push_back(*session);
+        if (auto const* held = std::get_if<keeper::InventoryListener>(&*received.message))
+            listeners.push_back(held->name);
+    }
+    REQUIRE(sessions.size() == 1);
+    CHECK(sessions.front().pid == pid);
+    CHECK(listeners == std::vector<std::string> { "control" });
+    CHECK(std::holds_alternative<keeper::InventoryEnd>(*attachment->inventory.back().message));
+    CHECK(exists(pid));                    // held throughout
+    CHECK(fixture.launches().size() == 1); // recovered in the same process: nothing restarted
+
+    // A clean end, so that the keeper restarts nothing.
+    REQUIRE(attachment->channel.sendNow(keeper::Shutdown {}, {}, clock, clock.now() + 5s).has_value());
 }

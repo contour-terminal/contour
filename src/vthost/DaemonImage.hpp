@@ -270,6 +270,13 @@ struct StagedImage
     std::string imageId = {};
 };
 
+/// Why an executable could not be leased as an image of a store (DaemonImageStore::leaseImageOf()).
+enum class ImageLeaseError : uint8_t
+{
+    NotAnImage = 0, ///< It is no executable of a complete image of the store, or the store stages nothing.
+    Busy,           ///< A prune holds the image, or removed it before the lease was taken.
+};
+
 /// What a DaemonImageStore stages, and where.
 struct DaemonImageStoreConfig
 {
@@ -355,6 +362,15 @@ class DaemonImageStore
     ///                  executable (whose release is this store's, DaemonImageStoreConfig::releaseVersion).
     /// @return The newer image, its lease held; nullopt when none is newer, or this layout stages nothing.
     [[nodiscard]] std::optional<StagedImage> leaseNewerImage(std::filesystem::path const& committed);
+
+    /// Leases the complete image whose executable @p executable is: what a daemon about to exec it hands its
+    /// keeper, which restarts it from that image from then on. As leaseNewerImage() does, the lease is never
+    /// waited for, and the image is looked at again once it is held.
+    /// @param executable An absolute path.
+    /// @return The image, its lease held; NotAnImage when @p executable is no executable of a complete
+    ///         image of this store; Busy when a prune holds the image, or removed it meanwhile.
+    [[nodiscard]] std::expected<StagedImage, ImageLeaseError> leaseImageOf(
+        std::filesystem::path const& executable);
 
     /// @param imageDir An image directory.
     /// @return Its lease file, `<imageDir>.lease`.

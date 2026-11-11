@@ -86,6 +86,52 @@ class UpgradeHooks
     virtual void abortClients() = 0;
 };
 
+/// The PTY keeper a daemon runs behind, as its live upgrade sees it. An interface, because the keeper's
+/// link belongs to the daemon's runtime, which wires it; a daemon behind none upgrades with NoUpgradeKeeper.
+class UpgradeKeeper
+{
+  public:
+    UpgradeKeeper() = default;
+    UpgradeKeeper(UpgradeKeeper const&) = delete;
+    UpgradeKeeper(UpgradeKeeper&&) = delete;
+    UpgradeKeeper& operator=(UpgradeKeeper const&) = delete;
+    UpgradeKeeper& operator=(UpgradeKeeper&&) = delete;
+    virtual ~UpgradeKeeper() = default;
+
+    /// @param target What the target binary reports.
+    /// @return Nothing when @p target can run behind this keeper (checkServesKeeper()), or there is none;
+    ///         TargetCannotServeKeeper otherwise.
+    [[nodiscard]] virtual std::expected<void, UpgradeRefusal> admits(ReadinessReport const& target) const = 0;
+
+    /// Tells the keeper the daemon is about to exec @p executable, and sends it everything queued for it,
+    /// waiting a bounded time: no frame the exec would cut in half reaches the new image's channel. Loop
+    /// thread; right before the exec, once nothing else is left to fail.
+    /// @param executable The binary the daemon execs.
+    /// @return Nothing once all of it went; KeeperUnreachable otherwise, and the upgrade is rolled back.
+    [[nodiscard]] virtual std::expected<void, UpgradeRefusal> announceExec(
+        std::filesystem::path const& executable) = 0;
+
+    /// Tells the keeper the exec announceExec() announced did not happen, and the daemon serves on its old
+    /// image. Loop thread; whatever ends the upgrade after the announcement but the exec itself.
+    virtual void abortExec() = 0;
+};
+
+/// The keeper of a daemon behind none: it admits every target and is told nothing.
+class NoUpgradeKeeper final: public UpgradeKeeper
+{
+  public:
+    [[nodiscard]] std::expected<void, UpgradeRefusal> admits(ReadinessReport const& /*target*/) const override
+    {
+        return {};
+    }
+    [[nodiscard]] std::expected<void, UpgradeRefusal> announceExec(
+        std::filesystem::path const& /*executable*/) override
+    {
+        return {};
+    }
+    void abortExec() override {}
+};
+
 /// How a live upgrade runs.
 struct LiveUpgradeConfig
 {
@@ -148,7 +194,8 @@ enum class UpgradeState : uint8_t
 ///  3. probe the target, off the loop (ReadinessProbe; TargetUnresponsive, FormatUnreadable, and
 ///     ConfigUnreadable for a target that cannot load the daemon's configuration or resolve its profile,
 ///     when the daemon itself loaded it: RunningConfig; TargetCannotAdoptTerminals for a target that says it
-///     cannot adopt pseudoconsoles, when a session runs on one);
+///     cannot adopt pseudoconsoles, when a session runs on one; TargetCannotServeKeeper for a target that
+///     cannot run behind the PTY keeper the daemon runs behind: UpgradeKeeper::admits());
 ///  4. refuse a session that could not cross (UnsupportedSession, ForeignConsoleHost, InFlightTailTooLarge;
 ///     checkCapturable());
 ///  5. announce the upgrade, write the workspace snapshot, hold every listener, close every client;
@@ -156,8 +203,10 @@ enum class UpgradeState : uint8_t
 ///     pumps' events are handled, then capture (captureHandover(), the one quiesce that captures each
 ///     terminal); a session still starting is waited for and tried again
 ///     (SessionStarting once the tries are spent), a host that does not settle in time is QuiesceTimedOut;
-///  7. encode the image, refused when it outgrew what the new image reads (ImageTooLarge), and hand it over
-///     (ImageHandoff::handOver()).
+///  7. encode the image, refused when it outgrew what the new image reads (ImageTooLarge), tell the PTY
+///     keeper which image comes next and wait for its note (UpgradeKeeper::announceExec();
+///     KeeperUnreachable), and hand it over (ImageHandoff::handOver()), calling the exec off with the keeper
+///     if that fails or throws (UpgradeKeeper::abortExec()).
 ///
 /// Whatever ends run() from step 5 on but a handoff that succeeded -- a refusal, the handoff's failure, an
 /// exception -- is rolled back once, by one guard: every session resumed with what was handed to it
@@ -173,6 +222,7 @@ class LiveUpgrade
     /// @param handoff What hands the image over to the target. Not owned.
     /// @param probe What asks the target whether it can take over. Not owned.
     /// @param hooks The daemon's clients and snapshot. Not owned.
+    /// @param keeper The PTY keeper the daemon runs behind; a NoUpgradeKeeper for none. Not owned.
     /// @param listeners Every listener the daemon serves on; each crosses under its name. Not owned.
     /// @param config How the upgrade runs.
     LiveUpgrade(core::net::EventLoop& loop,
@@ -182,6 +232,7 @@ class LiveUpgrade
                 ImageHandoff& handoff,
                 ReadinessProbe& probe,
                 UpgradeHooks& hooks,
+                UpgradeKeeper& keeper,
                 std::span<ConnectionAcceptor* const> listeners,
                 LiveUpgradeConfig config);
 
@@ -239,6 +290,7 @@ class LiveUpgrade
     ImageHandoff& _handoff;
     ReadinessProbe& _probe;
     UpgradeHooks& _hooks;
+    UpgradeKeeper& _keeper;
     std::vector<ConnectionAcceptor*> _listeners;
     LiveUpgradeConfig _config;
     UpgradeState _state = UpgradeState::Idle;

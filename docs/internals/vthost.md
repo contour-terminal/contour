@@ -1771,6 +1771,20 @@ The new image decodes the handover, rebuilds the sessions over the inherited des
 same daemon: the handover carries `daemonInstance` and the whole `vtworkspace` id space, so
 `NativeController::adoptReconnect` keeps every pane binding.
 
+**Behind a PTY keeper.** The keeper's channel crosses the `exec` too (`LiveUpgradeConfig::alsoCrossing`), and
+the orchestrator talks to the keeper through `handover::UpgradeKeeper`. A target whose readiness report names
+no `keeperChannelVersion` predates the keeper and is refused before anything stops (`TargetCannotServeKeeper`).
+Right before the `exec` the daemon sends `Exec{executablePath}` after everything it had queued, and waits, at
+most `keeperlink::ExecFlushBound`, for the keeper's `ExecNoted`: the keeper answers after finishing any frame it
+had begun, and sends nothing more until the new image's `Hello` (or `ExecAborted`), so both directions of the
+channel stand on a frame boundary when the old image goes. No `ExecNoted` in time refuses the upgrade
+(`KeeperUnreachable`) and rolls it back; an `exec` that fails sends `ExecAborted`, and the keeper sends what it
+held back. The keeper holds the announced image (an image of the store, or an in-place install's executable)
+and makes it the image a crash restarts from only once the new image's `Hello` arrives; that `Hello` is
+answered `Launch{HandedOver}`, the exits told again, then what was held back. A new image that cannot read its
+handover closes everything the old one left and recovers from the keeper's inventory, as a restart after a
+crash does (`keeperlink::recoverFromKeeper()`).
+
 **Refusals are a table.** `handover::UpgradeRefusalRows` holds the enumerator and the sentence the user is
 told, in enumerator order (a `static_assert` holds the order, and the wire carries `refusal + 1`);
 `handover::ExecFailureText` is the one outcome that is no refusal. Every surface that reports a failure goes

@@ -103,6 +103,7 @@
     #include <vthost/keeperlink/KeeperPtyFactory.hpp>
     #include <vthost/keeperlink/Recovery.hpp>
     #include <vthost/keeperlink/Structure.hpp>
+    #include <vthost/keeperlink/UpgradeKeeperLink.hpp>
 #endif
 
 namespace vthost
@@ -989,6 +990,7 @@ namespace
                                                     : std::string {});
             }
             _link.emplace(loop, std::move(_attachment->channel), _attachment->version, std::move(onLost));
+            _upgradeLink.emplace(*_link);
             _attachment->inventory.clear();
             // Alive from here on, not only once it serves: a start is judged by its heartbeats once the first
             // came, so that one restoring at length is not taken for hung. The loop beats once it turns; the
@@ -1113,6 +1115,17 @@ namespace
             return {};
         }
 
+        /// @return What a live upgrade asks of the keeper: its link, after link(), behind one; a keeper that
+        ///         admits every target and needs no word of an exec otherwise.
+        [[nodiscard]] handover::UpgradeKeeper& upgradeKeeper() noexcept
+        {
+#ifndef _WIN32
+            if (_upgradeLink)
+                return *_upgradeLink;
+#endif
+            return _noUpgradeKeeper;
+        }
+
         /// Turns @p loop until @p flow is done.
         ///
         /// Behind a keeper, an exception that escapes a turn ends the process at once (std::abort()), as any
@@ -1221,10 +1234,12 @@ namespace
 #endif
 
         std::optional<keeperlink::KeeperAttachment> _attachment;
+        handover::NoUpgradeKeeper _noUpgradeKeeper;
 #ifndef _WIN32
         std::unique_ptr<handover::HandoverMemory> _memory = handover::makeNativeHandoverMemory();
         std::optional<keeperlink::Recovery> _recovery;
         std::optional<keeperlink::KeeperLink> _link;
+        std::optional<keeperlink::UpgradeKeeperLink> _upgradeLink; ///< The link, as a live upgrade sees it.
         std::shared_ptr<vtpty::ProcessPlacement> _placement;
         std::shared_ptr<keeperlink::KeeperPtyFactory> _factory;
         std::optional<keeperlink::KeeperStructureSink> _sink;
@@ -1945,6 +1960,7 @@ int runDaemon(DaemonConfig const& config,
             config.liveUpgrade->handoff,
             config.liveUpgrade->probe,
             upgradeHooks,
+            daemonKeeper.upgradeKeeper(),
             servers,
             liveUpgradeConfigOf(
                 config, *config.liveUpgrade, lineage, std::move(tlsIdentities), daemonKeeper.crossing()));

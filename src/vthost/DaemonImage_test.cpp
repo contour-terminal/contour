@@ -996,3 +996,51 @@ TEST_CASE("an install that runs in place restarts from its installed executable"
     writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
     CHECK_FALSE(store.leaseNewerImage("/usr/bin/contour").has_value());
 }
+
+TEST_CASE("an image a daemon is about to exec is leased by its executable", "[vthost][image][upgrade]")
+{
+    auto files = StagingFileSystem {};
+    std::ignore = files.writeFile(AppImagePath, AppImageContent);
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { appImageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
+    writeImage(files, "0.7.0-aaaaaaaa", "0.7.0"); // older: a downgrade's target is an image all the same
+
+    auto const leased = store.leaseImageOf("/state/bin/0.9.0-bbbbbbbb/Contour.AppImage");
+    REQUIRE(leased.has_value());
+    CHECK(leased->imageId == "0.9.0-bbbbbbbb");
+    CHECK(leases.holds("/state/bin/0.9.0-bbbbbbbb.lease") == 1);
+    CHECK(store.leaseImageOf("/state/bin/0.7.0-aaaaaaaa/Contour.AppImage").has_value());
+
+    // Anything but an image's own executable is none.
+    for (auto const* const path: { "/usr/bin/contour",
+                                   "/state/bin/0.9.0-bbbbbbbb/other",
+                                   "/state/bin/0.9.0-bbbbbbbb",
+                                   "/state/bin/../bin/0.9.0-bbbbbbbb/../../etc/passwd" })
+    {
+        CAPTURE(path);
+        CHECK(store.leaseImageOf(path) == std::unexpected { vthost::ImageLeaseError::NotAnImage });
+    }
+    std::ignore = files.writeFile("/state/bin/1.0.0-cccccccc/Contour.AppImage", "INCOMPLETE");
+    CHECK(store.leaseImageOf("/state/bin/1.0.0-cccccccc/Contour.AppImage")
+          == std::unexpected { vthost::ImageLeaseError::NotAnImage });
+
+    // One a prune holds is not waited for.
+    leases.markBusy("/state/bin/0.7.0-aaaaaaaa.lease");
+    CHECK(store.leaseImageOf("/state/bin/0.7.0-aaaaaaaa/Contour.AppImage")
+          == std::unexpected { vthost::ImageLeaseError::Busy });
+}
+
+TEST_CASE("a store that stages nothing leases no image by its executable", "[vthost][image][upgrade]")
+{
+    auto files = StagingFileSystem {};
+    auto leases = FakeImageLeases {};
+    auto const links = FakeSymbolicLinks {};
+    auto store =
+        vthost::DaemonImageStore { linuxPackageStoreConfig("/state/bin", "0.8.1"), files, leases, links };
+    writeImage(files, "0.9.0-bbbbbbbb", "0.9.0");
+    CHECK(store.leaseImageOf("/state/bin/0.9.0-bbbbbbbb/Contour.AppImage")
+          == std::unexpected { vthost::ImageLeaseError::NotAnImage });
+}

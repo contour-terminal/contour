@@ -1268,6 +1268,50 @@ namespace
         };
     }
 
+    /// Where a daemon, or the keeper it runs behind, runs from, once settled (settleDaemonImage()).
+    struct RunningImage
+    {
+        /// This process's image store; null where the running executable cannot be located.
+        std::unique_ptr<vthost::NativeDaemonImages> images;
+        /// Held for as long as it runs; null for one that runs in place.
+        std::unique_ptr<vthost::ImageLease> lease;
+        /// What it runs from: the staged copy, the launched image, or argv[0] where neither is known.
+        std::filesystem::path executable;
+    };
+
+    /// Locates this process's image and settles it: a per-version copy wherever an upgrade would disturb
+    /// the installed binary. Any failure is logged and it runs in place.
+    /// @param env This process's environment.
+    /// @param inheritedLease The lease a previous daemon held on this image; none for none.
+    /// @param request Whether it may move onto a staged image.
+    /// @param commandLine This process's argv.
+    /// @return Where it runs from, and what it holds while it does.
+    [[nodiscard]] RunningImage settleRunningImage(core::Environment const& env,
+                                                  vtpty::CrossingHandle inheritedLease,
+                                                  vthost::RelocationRequest request,
+                                                  std::vector<std::string> const& commandLine)
+    {
+        auto images = vthost::NativeDaemonImages::ofThisProcess(
+            env, core::platform::NativeFileSystem::instance(), CONTOUR_VERSION_STRING, inheritedLease);
+        if (!images)
+        {
+            errorLog()("cannot locate the running executable ({}); running in place",
+                       images.error().message());
+            return RunningImage {
+                .images = nullptr,
+                .lease = nullptr,
+                .executable = std::filesystem::absolute(
+                    core::pathFromUtf8(commandLine.front()).value_or(std::filesystem::path {}))
+            };
+        }
+        auto lease = settleDaemonImage(**images, request, commandLine);
+        auto executable = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
+                              .value_or(vthost::launchedImage((*images)->inputs()));
+        return RunningImage { .images = *std::move(images),
+                              .lease = std::move(lease),
+                              .executable = std::move(executable) };
+    }
+
     /// @return Whether `--in-place` refuses a move onto a staged image.
     [[nodiscard]] vthost::RelocationRequest relocationRequestOf(bool inPlace) noexcept
     {
@@ -1324,17 +1368,22 @@ namespace
 
     /// Takes over what the previous daemon handed over in a live upgrade, if anything.
     /// @param token The `--handover` option's value; empty where this daemon starts afresh.
-    /// @param alsoKeep Descriptors kept open beside the image's: the keeper's channel, for a daemon behind
-    /// one.
-    /// @return The image handed over, nullopt to start afresh, or TakeoverFailure::EndWithoutServing where
-    ///         this process must end without serving anything.
+    /// @param keeper The keeper a daemon runs behind; null for none. Its channel is kept open beside the
+    ///        image's descriptors; and a handover that cannot be read leaves nothing else open, for the
+    ///        keeper holds it all: the daemon recovers from what the keeper keeps instead, as a restart after
+    ///        a crash does (keeperlink::recoverFromKeeper()), which turns @p keeper's attachment Recovered.
+    /// @return The image handed over, nullopt to start afresh (or, behind a keeper, to recover), or
+    ///         TakeoverFailure::EndWithoutServing where this process must end without serving anything.
     [[nodiscard]] std::expected<std::optional<vthost::handover::HandoverImage>,
                                 vthost::handover::TakeoverFailure>
-    receiveHandover(std::string const& token, std::vector<int> alsoKeep)
+    receiveHandover(std::string const& token, KeeperServeStart* keeper)
     {
-        auto received = vthost::handover::makeNativeImageReceiver(
-                            *vthost::handover::makeNativeHandoverMemory(), std::move(alsoKeep))
-                            ->takeOver(token);
+        auto received =
+            vthost::handover::makeNativeImageReceiver(*vthost::handover::makeNativeHandoverMemory(),
+                                                      keptAcrossExec(keeper),
+                                                      keeper ? vthost::handover::Leftovers::Closed
+                                                             : vthost::handover::Leftovers::KeptOpen)
+                ->takeOver(token);
         if (received)
             return received;
         switch (received.error())
@@ -1342,6 +1391,19 @@ namespace
             case vthost::handover::TakeoverFailure::StartAfresh: break;
             case vthost::handover::TakeoverFailure::EndWithoutServing: return received;
         }
+#ifndef _WIN32
+        // Starting afresh, it would find the keeper holding its listeners: it recovers instead, and a keeper
+        // that cannot be asked restarts it as a crash.
+        if (keeper && !token.empty())
+            if (auto const recovered = vthost::keeperlink::recoverFromKeeper(
+                    keeper->attachment, core::platform::SteadyClock {}, vthost::keeperlink::AttachBound);
+                !recovered)
+            {
+                errorLog()("cannot recover from the keeper: {}",
+                           vthost::keeperlink::describe(recovered.error()));
+                return std::unexpected(vthost::handover::TakeoverFailure::EndWithoutServing);
+            }
+#endif
         return std::optional<vthost::handover::HandoverImage> {};
     }
 } // namespace
@@ -1409,7 +1471,7 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     // live upgrade. On POSIX, what is open now and the image does not name was leaked across the exec, and is
     // closed; on Windows, a successor takes over only once its predecessor committed, and ends without
     // serving anything where it may not.
-    auto received = receiveHandover(handoverToken, keptAcrossExec(keeper));
+    auto received = receiveHandover(handoverToken, keeper);
     if (!received)
         return EXIT_FAILURE;
     auto handover = std::move(*received);
@@ -1587,33 +1649,18 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     if (auto logFile = options.logFile; logFile != "-")
         config.logFile = core::pathFromUtf8(logFile).value_or(std::filesystem::path {});
 
-    // Where it runs from: a per-version copy wherever an upgrade would disturb the installed binary.
-    // Held until runDaemon returns.
-    auto runningLease = std::unique_ptr<vthost::ImageLease> {};
-    // On Windows, the lease the previous daemon held on this image, taken over as this one's own; on POSIX it
-    // crosses the exec, and is adopted by its descriptor.
-    auto images = vthost::NativeDaemonImages::ofThisProcess(processEnvironment(),
-                                                            core::platform::NativeFileSystem::instance(),
-                                                            CONTOUR_VERSION_STRING,
-                                                            leaseOf(handover));
     // What the daemon's status states of it: its user's request alone, not the handover-combined one below.
     config.relocationRequest = relocationRequestOf(options.inPlace == OptionFlag::Given);
-    if (images)
-    {
-        // A daemon behind a keeper never moves: the keeper settled the image it started it from.
-        runningLease = settleDaemonImage(
-            **images,
-            relocationRequestOf(options.inPlace == OptionFlag::Given || keeper != nullptr, handover),
-            commandLine());
-        config.executablePath = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
-                                    .value_or(vthost::launchedImage((*images)->inputs()));
-    }
-    else
-    {
-        errorLog()("cannot locate the running executable ({}); running in place", images.error().message());
-        config.executablePath = std::filesystem::absolute(
-            core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
-    }
+    // Where it runs from, held until runDaemon returns. On Windows, the lease the previous daemon held on
+    // this image is taken over as this one's own; on POSIX it crosses the exec, and is adopted by its
+    // descriptor. A daemon behind a keeper never moves: the keeper settled the image it started it from.
+    auto running = settleRunningImage(
+        processEnvironment(),
+        leaseOf(handover),
+        relocationRequestOf(options.inPlace == OptionFlag::Given || keeper != nullptr, handover),
+        commandLine());
+    auto const& images = running.images;
+    config.executablePath = running.executable;
 
     // A daemon that could not start as configured (only a handed-over one gets this far) serves on defaults.
     config.degradations = failures.take();
@@ -1627,7 +1674,7 @@ int ContourApp::serveDaemon(DaemonVerbOptions const& options,
     auto discardedNotices = std::ostream { nullptr };
     if (images)
         config.liveUpgrade.emplace(liveUpgradeServicesOf(
-            **images,
+            *images,
             upgradeResources.emplace(config.logFile.empty() ? discardedNotices : std::cerr,
                                      childDescriptorLimitOf(keeper)),
             commandLine(),
@@ -1687,29 +1734,20 @@ int ContourApp::keeperAction(DaemonVerbOptions const& options)
 
     // The keeper runs from the per-version copy wherever an upgrade would disturb the installed binary, and
     // starts the daemon from it; it holds the lease for as long as it keeps.
-    auto lease = std::unique_ptr<vthost::ImageLease> {};
-    auto daemonImage = std::filesystem::path {};
+    auto running = settleRunningImage(processEnvironment(),
+                                      vtpty::CrossingHandle {},
+                                      relocationRequestOf(options.inPlace == OptionFlag::Given),
+                                      commandLine());
     // A crashed daemon restarts from the newest image of the store, which the keeper leases while it would.
     auto restartImages = std::unique_ptr<vthost::keeper::RestartImages> {};
-    auto images = vthost::NativeDaemonImages::ofThisProcess(processEnvironment(),
-                                                            core::platform::NativeFileSystem::instance(),
-                                                            CONTOUR_VERSION_STRING,
-                                                            vtpty::CrossingHandle {});
-    if (images)
-    {
-        lease = settleDaemonImage(
-            **images, relocationRequestOf(options.inPlace == OptionFlag::Given), commandLine());
-        daemonImage = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
-                          .value_or(vthost::launchedImage((*images)->inputs()));
-        restartImages = std::make_unique<vthost::keeper::StoreRestartImages>((*images)->store());
-    }
-    else
-    {
-        errorLog()("cannot locate the running executable ({}); running in place", images.error().message());
-        daemonImage = std::filesystem::absolute(
-            core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
-    }
-    return runKeeperVerb(KeeperVerbInputs { .daemonImage = std::move(daemonImage),
+    if (auto const& images = running.images)
+        // A live upgrade of an install that runs in place execs the installed executable, as the daemon's own
+        // upgrade resolves an empty target (liveUpgradeServicesOf()).
+        restartImages = std::make_unique<vthost::keeper::StoreRestartImages>(
+            images->store(),
+            images->store().layout() == vthost::StagingLayout::InPlace ? images->inputs().executable
+                                                                       : std::filesystem::path {});
+    return runKeeperVerb(KeeperVerbInputs { .daemonImage = std::move(running.executable),
                                             .launch = launch,
                                             .environment = processEnvironmentEntries(),
                                             .policy = hostConfig->daemon.value().keeper.restartPolicy,

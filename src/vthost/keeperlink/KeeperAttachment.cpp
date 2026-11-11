@@ -42,6 +42,38 @@ namespace
 
     /// This daemon's channel version.
     constexpr auto OwnVersion = keeper::ChannelVersion;
+
+    /// Asks the keeper for the inventory (Adopt) and reads it to its end into @p attachment. What comes
+    /// before the inventory goes to @p early, for the link.
+    /// @return Nothing once read; or why the channel failed.
+    [[nodiscard]] std::expected<void, AttachError> readInventory(KeeperAttachment& attachment,
+                                                                 core::platform::IClock const& clock,
+                                                                 core::platform::SteadyTimePoint deadline,
+                                                                 std::vector<ReceivedMessage>& early)
+    {
+        if (auto const asked = attachment.channel.sendNow(keeper::Adopt {}, {}, clock, deadline); !asked)
+            return std::unexpected { attachErrorOf(asked.error()) };
+        auto begun = false;
+        while (true)
+        {
+            auto received = attachment.channel.receive(clock, deadline);
+            if (!received)
+                return std::unexpected { attachErrorOf(received.error()) };
+            auto const isBegin =
+                received->message && std::holds_alternative<keeper::InventoryBegin>(*received->message);
+            auto const isEnd =
+                received->message && std::holds_alternative<keeper::InventoryEnd>(*received->message);
+            begun = begun || isBegin;
+            if (!begun)
+            {
+                early.push_back(std::move(*received));
+                continue;
+            }
+            attachment.inventory.push_back(std::move(*received));
+            if (isEnd)
+                return {};
+        }
+    }
 } // namespace
 
 std::string_view describe(AttachError error) noexcept
@@ -103,33 +135,26 @@ std::expected<KeeperAttachment, AttachError> attachToKeeper(keeper::UniqueFd soc
                            .inventory = {} };
 
     if (attachment.continuity == keeper::LaunchContinuity::Recovered)
-    {
-        if (auto const asked = attachment.channel.sendNow(keeper::Adopt {}, {}, clock, deadline); !asked)
-            return std::unexpected { attachErrorOf(asked.error()) };
-        auto begun = false;
-        while (true)
-        {
-            auto received = attachment.channel.receive(clock, deadline);
-            if (!received)
-                return std::unexpected { attachErrorOf(received.error()) };
-            auto const isBegin =
-                received->message && std::holds_alternative<keeper::InventoryBegin>(*received->message);
-            auto const isEnd =
-                received->message && std::holds_alternative<keeper::InventoryEnd>(*received->message);
-            begun = begun || isBegin;
-            if (!begun)
-            {
-                early.push_back(std::move(*received));
-                continue;
-            }
-            attachment.inventory.push_back(std::move(*received));
-            if (isEnd)
-                break;
-        }
-    }
+        if (auto const read = readInventory(attachment, clock, deadline, early); !read)
+            return std::unexpected { read.error() };
 
     attachment.channel.putBack(std::move(early));
     return attachment;
+}
+
+std::expected<void, AttachError> recoverFromKeeper(KeeperAttachment& attachment,
+                                                   core::platform::IClock const& clock,
+                                                   std::chrono::milliseconds bound)
+{
+    auto const deadline = clock.now() + bound;
+    // What is ready already -- the exits the keeper told the new image again at its Hello -- goes first,
+    // after the inventory, as it would have.
+    auto early = attachment.channel.takeReady();
+    if (auto const read = readInventory(attachment, clock, deadline, early); !read)
+        return read;
+    attachment.continuity = keeper::LaunchContinuity::Recovered;
+    attachment.channel.putBack(std::move(early));
+    return {};
 }
 
 } // namespace vthost::keeperlink

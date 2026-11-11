@@ -10,8 +10,14 @@
 #include <array>
 #include <chrono>
 #include <deque>
+#include <expected>
+#include <filesystem>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <optional>
+#include <ranges>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -367,12 +373,38 @@ class FakeRestartImages final: public RestartImages
   public:
     std::optional<std::filesystem::path> newer; ///< What a pick returns from now on; none for the committed.
     std::vector<std::filesystem::path> picks;   ///< The committed image each pick was asked about.
+    std::set<std::filesystem::path> images;     ///< The paths hold() takes for images.
+    std::shared_ptr<int> heldCount = std::make_shared<int>(0); ///< How many holds are alive.
 
     [[nodiscard]] std::filesystem::path pick(std::filesystem::path const& committed) override
     {
         picks.push_back(committed);
         return newer.value_or(committed);
     }
+
+    [[nodiscard]] std::expected<std::unique_ptr<HeldImage>, RestartImageRefusal> hold(
+        std::filesystem::path const& executable) override
+    {
+        if (!images.contains(executable))
+            return std::unexpected { RestartImageRefusal::NotAnImage };
+        return std::make_unique<CountedHold>(heldCount);
+    }
+
+  private:
+    /// Counts itself alive in the count it is given.
+    class CountedHold final: public HeldImage
+    {
+      public:
+        explicit CountedHold(std::shared_ptr<int> count): _count { std::move(count) } { ++*_count; }
+        CountedHold(CountedHold const&) = delete;
+        CountedHold& operator=(CountedHold const&) = delete;
+        CountedHold(CountedHold&&) = delete;
+        CountedHold& operator=(CountedHold&&) = delete;
+        ~CountedHold() override { --*_count; }
+
+      private:
+        std::shared_ptr<int> _count;
+    };
 };
 
 class FakeSocketFiles final: public SocketFiles
@@ -1929,6 +1961,169 @@ TEST_CASE("a live upgrade's new image that shortens the heartbeat timeout is hel
     h.events.then(h.after(2s));
     h.events.then(check([&] {
         CHECK(h.signaller.to(FirstDaemon) == std::vector { KeeperSignal::Abort, KeeperSignal::Continue });
+    }));
+    h.run();
+}
+
+TEST_CASE("after an upgrade a crash restarts the new image", "[keeper][upgrade]")
+{
+    auto const upgraded = std::filesystem::path { "/state/bin/0.9.0-bbbbbbbb/contour" };
+    auto h = Harness {};
+    h.images.images = { upgraded };
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}) }));
+    // The daemon is about to exec the new image, which then says Hello on the same channel.
+    h.events.then(deliver({ frameOf(Exec { .executablePath = upgraded.string() }) }));
+    h.events.then(
+        check([&] { CHECK(*h.images.heldCount == 1); }, { frameOf(Hello {}), frameOf(Serving {}) }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] {
+        CHECK(h.launcher.images == std::vector { daemonImage(), upgraded });
+        CHECK(h.images.picks == std::vector { upgraded }); // nothing older than it is ever picked
+        CHECK(*h.images.heldCount == 1);                   // held for as long as it would be restarted
+    }));
+    h.run();
+    CHECK(*h.images.heldCount == 0);
+}
+
+TEST_CASE("an exec that never happened leaves the keeper restarting the image it ran", "[keeper][upgrade]")
+{
+    auto const upgraded = std::filesystem::path { "/state/bin/0.9.0-bbbbbbbb/contour" };
+    auto h = Harness {};
+    h.images.images = { upgraded };
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}) }));
+    // The exec failed: the old image serves on, and never says Hello again.
+    h.events.then(deliver({ frameOf(Exec { .executablePath = upgraded.string() }), frameOf(Heartbeat {}) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).all<Launch>().size() == 1);
+        CHECK(h.signaller.sent.empty());
+    }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] {
+        CHECK(h.launcher.images == std::vector { daemonImage(), daemonImage() });
+        CHECK(*h.images.heldCount == 0); // the announced image is let go with the process that announced it
+    }));
+    h.run();
+}
+
+TEST_CASE("an Exec of anything but an image is refused, and the image the keeper ran is kept",
+          "[keeper][upgrade]")
+{
+    auto h = Harness {};
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}) }));
+    h.events.then(deliver({ frameOf(Exec { .executablePath = "/tmp/evil" }), frameOf(Hello {}) }));
+    h.events.then(check([&] {
+        // The upgrade itself goes on: the new image is launched as handed over all the same.
+        auto const launches = h.launcher.channel(0).all<Launch>();
+        REQUIRE(launches.size() == 2);
+        CHECK(std::get<Launch>(launches.back()->message).continuity == LaunchContinuity::HandedOver);
+    }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] { CHECK(h.launcher.images == std::vector { daemonImage(), daemonImage() }); }));
+    h.run();
+}
+
+TEST_CASE("frames for a daemon that execs are held back until its new image says Hello", "[keeper][upgrade]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto second = makePipe();
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}), spawnOf(1, child) }));
+    h.events.then(deliver({ frameOf(Exec { .executablePath = "/state/bin/0.9.0-bbbbbbbb/contour" }) }));
+    // The shell ends while the daemon execs; a spawn it asks for meanwhile is refused.
+    h.events.then(deliver({ endOf(FirstShell, Killed), spawnOf(2, second) }));
+    h.events.then(check([&] {
+        auto const& sent = h.launcher.channel(0).sent;
+        // ExecNoted is the last thing the image that execs reads: nothing after it until the new image.
+        REQUIRE_FALSE(sent.empty());
+        CHECK(std::holds_alternative<ExecNoted>(sent.back().message));
+        CHECK(h.launcher.channel(0).all<Exited>().empty());
+        CHECK(h.spawner.requests.size() == 1);
+    }));
+    h.events.then(deliver({ frameOf(Hello {}) }));
+    h.events.then(check([&] {
+        auto const& sent = h.launcher.channel(0).sent;
+        auto const launch = std::ranges::find_if(sent, [](auto const& entry) {
+            return std::holds_alternative<Launch>(entry.message)
+                   && std::get<Launch>(entry.message).continuity == LaunchContinuity::HandedOver;
+        });
+        REQUIRE(launch != sent.end());
+        // After the new image's Launch, in order, what was held back -- the exit as it happened and the
+        // refused spawn's answer. The exit is told once: the Hello's retelling leaves out an exit held back.
+        auto const kinds = std::ranges::to<std::vector>(
+            std::ranges::subrange(std::next(launch), sent.end())
+            | std::views::transform([](auto const& entry) { return entry.message.index(); }));
+        CHECK(kinds
+              == std::vector<std::size_t> { Message { Exited {} }.index(),
+                                            Message { SpawnFailed {} }.index() });
+        CHECK(h.launcher.channel(0).only<Exited>() == Exited { .session = 1, .status = Killed });
+        CHECK(std::get<SpawnFailed>(sent.back().message)
+              == SpawnFailed { .request = 2, .error = SpawnError::ShuttingDown });
+    }));
+    h.run();
+}
+
+TEST_CASE("an aborted exec releases what was held back and forgets the image", "[keeper][upgrade]")
+{
+    auto const upgraded = std::filesystem::path { "/state/bin/0.9.0-bbbbbbbb/contour" };
+    auto h = Harness {};
+    h.images.images = { upgraded };
+    auto child = makePipe();
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}), spawnOf(1, child) }));
+    h.events.then(
+        deliver({ frameOf(Exec { .executablePath = upgraded.string() }), endOf(FirstShell, Killed) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).all<Exited>().empty());
+        CHECK(*h.images.heldCount == 1);
+    }));
+    h.events.then(deliver({ frameOf(ExecAborted {}) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).only<Exited>() == Exited { .session = 1, .status = Killed });
+        CHECK(*h.images.heldCount == 0);
+    }));
+    // The old image serves on; a Hello it never sends cannot commit the image, so a crash restarts its own.
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] { CHECK(h.launcher.images == std::vector { daemonImage(), daemonImage() }); }));
+    h.run();
+}
+
+TEST_CASE("an Exec refused after an accepted one leaves nothing for the Hello to commit", "[keeper][upgrade]")
+{
+    auto const upgraded = std::filesystem::path { "/state/bin/0.9.0-bbbbbbbb/contour" };
+    auto h = Harness {};
+    h.images.images = { upgraded };
+    h.events.then(deliver({ frameOf(Hello {}), frameOf(Serving {}) }));
+    h.events.then(deliver({ frameOf(Exec { .executablePath = upgraded.string() }) }));
+    h.events.then(check([&] { CHECK(*h.images.heldCount == 1); }));
+    // Another Exec names something that is no image: the first target must not survive it.
+    h.events.then(deliver({ frameOf(Exec { .executablePath = "/tmp/evil" }), frameOf(Hello {}) }));
+    h.events.then(check([&] { CHECK(*h.images.heldCount == 0); }));
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(check([&] { CHECK(h.launcher.images == std::vector { daemonImage(), daemonImage() }); }));
+    h.run();
+}
+
+TEST_CASE("a daemon that crashes while frames are held back leaves none of them to its successor",
+          "[keeper][upgrade]")
+{
+    auto h = Harness {};
+    auto child = makePipe();
+    auto master = makePipe();
+    h.events.then(deliver({ frameOf(Hello {}),
+                            frameOf(Serving {}),
+                            spawnOf(1, child, { { KeptDescriptor::Master, &master } }) }));
+    h.events.then(deliver({ frameOf(Exec { .executablePath = "/state/bin/0.9.0-bbbbbbbb/contour" }),
+                            endOf(FirstShell, Killed) }));
+    // The exec never finished: the process died before its new image said Hello.
+    h.events.then(deliver(ended(FirstDaemon, Segfault)));
+    h.events.then(deliver({ frameOf(Adopt {}) }));
+    h.events.then(check([&] {
+        CHECK(h.launcher.channel(0).all<Exited>().empty());
+        auto const& recovered = h.launcher.channel(1);
+        // Nothing held back for the dead daemon reaches its successor; the exit is in the inventory.
+        CHECK(recovered.all<Exited>().empty());
+        CHECK(recovered.all<ExecNoted>().empty());
+        CHECK(recovered.only<InventorySession>().exited == Killed);
+        CHECK(std::get<Launch>(recovered.sent.at(1).message).continuity == LaunchContinuity::Recovered);
     }));
     h.run();
 }

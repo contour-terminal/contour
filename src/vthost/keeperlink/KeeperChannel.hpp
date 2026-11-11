@@ -79,6 +79,13 @@ class KeeperChannel
     /// @param messages Messages taken from this channel, in their order.
     void putBack(std::vector<ReceivedMessage> messages);
 
+    /// @return Whether everything read off the socket was handed out as whole messages: none waits, and no
+    ///         frame was begun and not finished. What a live upgrade's exec, which drops all of it, requires.
+    [[nodiscard]] bool isAtFrameBoundary() const noexcept
+    {
+        return _ready.empty() && _assembler.pendingBytes() == 0;
+    }
+
     /// Sends what of @p bytes the socket takes now, with @p fds on the first byte. Never blocks.
     /// @param bytes The bytes.
     /// @param fds Descriptors to send with them; they stay the caller's. At most keeper::MaxFdsPerFrame.

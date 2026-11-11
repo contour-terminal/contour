@@ -171,11 +171,10 @@ TEST_CASE("a retry that stays up clears the given-up state", "[keeper][restart]"
     CHECK(policy.onExit(DaemonExitKind::Crashed, at(500'000ms)).action == RestartAction::RestartNow);
 }
 
-TEST_CASE("a clean end or a hand-off is never restarted", "[keeper][restart]")
+TEST_CASE("a clean end is never restarted", "[keeper][restart]")
 {
     auto policy = CrashRestartPolicy { {} };
     CHECK(policy.onExit(DaemonExitKind::ShutDown, at(0ms)).action == RestartAction::ExitClean);
-    CHECK(policy.onExit(DaemonExitKind::HandedOff, at(0ms)).action == RestartAction::ExitClean);
 }
 
 TEST_CASE("a stale grace timer after the policy recovered is ignored", "[keeper][restart]")

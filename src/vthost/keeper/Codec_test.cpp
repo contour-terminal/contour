@@ -52,6 +52,8 @@ std::vector<Message> samples()
         InventoryEnd {},
         Signal { .session = 42, .signal = ChildSignal::Kill },
         ShutdownNoted {},
+        ExecNoted {},
+        ExecAborted {},
     };
 }
 
@@ -176,7 +178,10 @@ TEST_CASE("peekTag reads the tag of a body, known or not", "[keeper][codec]")
 {
     CHECK(peekTag(encode(Hello {})) == 1);
     CHECK(peekTag(encode(Signal {})) == 21);
-    CHECK(peekTag(encode(ShutdownNoted {})) == std::variant_size_v<Message>);
+    CHECK(peekTag(encode(ShutdownNoted {})) == 22);
+    CHECK(peekTag(encode(ExecNoted {})) == 23);
+    CHECK(peekTag(encode(ExecAborted {})) == std::variant_size_v<Message>);
+    CHECK(peekTag(encode(ExecAborted {})) == 24);
     auto writer = core::codec::Writer {};
     writer.varint(4000);
     auto const unknown = std::move(writer).take();

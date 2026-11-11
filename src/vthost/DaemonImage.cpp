@@ -535,4 +535,25 @@ std::optional<StagedImage> DaemonImageStore::leaseNewerImage(fs::path const& com
     return std::nullopt;
 }
 
+std::expected<StagedImage, ImageLeaseError> DaemonImageStore::leaseImageOf(fs::path const& executable)
+{
+    auto const imageDir = imageDirectoryOf(executable);
+    if (imageDir.empty())
+        return std::unexpected { ImageLeaseError::NotAnImage };
+    // By its name, as a live upgrade's target is found: it must be the very executable of a complete image.
+    auto const imageId = core::pathToUtf8(imageDir.filename());
+    auto const isOwnExecutable = [&] {
+        auto const found = executableOfImage(imageId);
+        return found && found->lexically_normal() == executable.lexically_normal();
+    };
+    if (!isOwnExecutable())
+        return std::unexpected { ImageLeaseError::NotAnImage };
+    // Leased first, then looked at again: a prune that removed it before the lease was taken leaves no
+    // completion marker behind.
+    auto lease = _leases.tryHold(leaseFileOf(imageDir));
+    if (!lease || !isOwnExecutable())
+        return std::unexpected { ImageLeaseError::Busy };
+    return imageAt(imageDir, std::move(lease));
+}
+
 } // namespace vthost

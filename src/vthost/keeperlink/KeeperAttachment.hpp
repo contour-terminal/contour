@@ -64,4 +64,18 @@ enum class AttachError : uint8_t
                                                                           core::platform::IClock const& clock,
                                                                           std::chrono::milliseconds bound);
 
+/// Turns a handed-over start that has nothing to take over into a Recovered one: the new image of a live
+/// upgrade that could not read the image it was handed. It recovers from what the keeper keeps, as a restart
+/// after a crash does -- every listener, every program, the structure -- rather than starting afresh, which
+/// would find the keeper holding its listeners and serve none of its programs: crash recovery and upgrade
+/// converge. Asks for the inventory (Adopt) and reads it to its end, synchronously, before anything else of
+/// the daemon runs.
+/// @param attachment The attachment, past the handshake; its inventory is read into it, and it is Recovered.
+/// @param clock The clock @p bound is measured on.
+/// @param bound How long the keeper may take.
+/// @return Nothing once the inventory is read; or why it could not be.
+[[nodiscard]] std::expected<void, AttachError> recoverFromKeeper(KeeperAttachment& attachment,
+                                                                 core::platform::IClock const& clock,
+                                                                 std::chrono::milliseconds bound);
+
 } // namespace vthost::keeperlink

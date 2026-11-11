@@ -49,6 +49,9 @@ struct ReadinessReport
     /// Whether it adopts pseudoconsoles; nullopt where it does not say (a release that predates the field, or
     /// a platform without pseudoconsoles), which never refuses an upgrade.
     std::optional<PseudoconsoleAdoption> pseudoconsoleAdoption {};
+    /// The newest PTY keeper channel version it speaks as a keeper's daemon (`contour daemon keeper-serve`);
+    /// nullopt for a release that predates the keeper, or a platform without one: it cannot serve behind one.
+    std::optional<uint32_t> keeperChannelVersion {};
 
     bool operator==(ReadinessReport const&) const = default;
 };
@@ -66,6 +69,7 @@ namespace detail
         std::optional<std::string> configProblem {};     ///< ReadinessReport::configProblem; absent if none.
         /// ReadinessReport::pseudoconsoleAdoption, a wire boundary and so a bool; absent if unknown.
         std::optional<bool> adoptsPseudoconsoles {};
+        std::optional<uint32_t> keeperChannelVersion {}; ///< ReadinessReport::keeperChannelVersion.
     };
 } // namespace detail
 
@@ -86,15 +90,16 @@ namespace detail
 /// @param release The release this build reports.
 /// @param pseudoconsoles Whether this build adopts pseudoconsoles (reportedAdoption()); nullopt where it says
 ///        nothing of them.
-/// @return What this build says of itself: the formats it reads (HandoverImage.hpp, StateCodec.hpp), and
-///         @p pseudoconsoles.
+/// @return What this build says of itself: the formats it reads (HandoverImage.hpp, StateCodec.hpp),
+///         @p pseudoconsoles, and on POSIX the PTY keeper channel version it speaks.
 [[nodiscard]] ReadinessReport ownReadiness(std::string release,
                                            std::optional<PseudoconsoleAdoption> pseudoconsoles);
 
 /// @param report A report.
 /// @return It as one line of strict JSON, no line break:
 ///         `{"release":"…","handoverFormats":[min,max],"terminalStateFormats":[min,max]}`, with
-///         `"configProblem":"…"` and `"adoptsPseudoconsoles":true|false` added where the report has them.
+///         `"configProblem":"…"`, `"adoptsPseudoconsoles":true|false` and `"keeperChannelVersion":N` added
+///         where the report has them.
 [[nodiscard]] std::string encodeReadiness(ReadinessReport const& report);
 
 /// Reads what encodeReadiness() wrote, of this or a later release: a key it does not know is skipped, one it
@@ -111,6 +116,12 @@ namespace detail
 /// @return Nothing unless it reports it cannot adopt pseudoconsoles, then TargetCannotAdoptTerminals. For a
 ///         daemon that hosts one: a daemon that hosts none has nothing to hand over to it.
 [[nodiscard]] std::expected<void, UpgradeRefusal> checkAdoptsPseudoconsoles(ReadinessReport const& target);
+
+/// @param target What the target binary reports.
+/// @return Nothing when it can run behind a PTY keeper; TargetCannotServeKeeper otherwise. For a daemon that
+///         runs behind one: the exec'd image of a release that predates the keeper refuses to serve it, and
+///         every program the keeper holds would be lost.
+[[nodiscard]] std::expected<void, UpgradeRefusal> checkServesKeeper(ReadinessReport const& target);
 
 /// @param target What the target binary reports.
 /// @return Nothing when it can run as the daemon's configuration says; ConfigUnreadable otherwise.

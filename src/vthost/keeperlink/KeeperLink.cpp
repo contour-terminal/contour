@@ -97,12 +97,14 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
           KeeperChannel channelValue,
           uint32_t version,
           std::function<void()> lostHandler,
-          std::chrono::milliseconds replyBound):
+          std::chrono::milliseconds replyBound,
+          std::chrono::milliseconds beatInterval):
         loop { loopRef },
         channel { std::move(channelValue) },
         channelVersion { version },
         onLost { std::move(lostHandler) },
-        spawnReplyBound { replyBound }
+        spawnReplyBound { replyBound },
+        heartbeatInterval { beatInterval }
     {
     }
 
@@ -111,6 +113,7 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     uint32_t channelVersion; ///< As the handshake negotiated it.
     std::function<void()> onLost;
     std::chrono::milliseconds spawnReplyBound;
+    std::chrono::milliseconds heartbeatInterval; ///< How often a wait for an answer beats.
     /// The spawns given up on whose answer has not come: a late Spawned for one is released.
     std::set<uint64_t> abandoned;
     ChildEvents children; ///< @see KeeperLink::attachChildren
@@ -406,7 +409,8 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
     }
 
     /// Waits until @p deadline for the first message @p matches says is the answer. Loop thread. What arrives
-    /// meanwhile and is not it is queued, and dispatched after this returns, never inside it.
+    /// meanwhile and is not it is queued, and dispatched after this returns, never inside it. Beats every
+    /// heartbeatInterval meanwhile: the loop, held here, runs no flow that would.
     /// @return The answer; or ChannelError::TimedOut at the deadline, or why the channel broke.
     template <typename Matches>
     [[nodiscard]] std::expected<ReceivedMessage, ChannelError> awaitAnswer(
@@ -415,9 +419,16 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
         dispatch = Dispatch::Held;
         auto answer =
             std::expected<ReceivedMessage, ChannelError> { std::unexpected { ChannelError::TimedOut } };
+        auto nextBeat = loop.clock().now() + heartbeatInterval;
         while (true)
         {
-            auto received = channel.receive(loop.clock(), deadline);
+            auto received = channel.receive(loop.clock(), std::min(deadline, nextBeat));
+            if (!received && received.error() == ChannelError::TimedOut && loop.clock().now() < deadline)
+            {
+                beat();
+                nextBeat = loop.clock().now() + heartbeatInterval;
+                continue;
+            }
             if (!received)
             {
                 answer = std::unexpected { received.error() };
@@ -441,6 +452,14 @@ struct KeeperLink::State: std::enable_shared_from_this<State>
                     self->dispatchInbox();
             });
         return answer;
+    }
+
+    /// Tells the keeper the daemon is alive, from a wait that holds the loop. What the socket does not take
+    /// now goes once the loop runs again, as anything queued does.
+    void beat()
+    {
+        if (enqueue(keeper::Heartbeat {}, {}) == QueueOutcome::Queued)
+            flush();
     }
 
     void handle(ReceivedMessage& received)
@@ -492,9 +511,10 @@ KeeperLink::KeeperLink(core::net::EventLoop& loop,
                        KeeperChannel channel,
                        uint32_t channelVersion,
                        std::function<void()> onLost,
-                       std::chrono::milliseconds spawnReplyBound):
+                       std::chrono::milliseconds spawnReplyBound,
+                       std::chrono::milliseconds heartbeatInterval):
     _state { std::make_shared<State>(
-        loop, std::move(channel), channelVersion, std::move(onLost), spawnReplyBound) }
+        loop, std::move(channel), channelVersion, std::move(onLost), spawnReplyBound, heartbeatInterval) }
 {
     loop.spawn(State::readLoop(_state));
 #ifdef CONTOUR_KEEPER_KQUEUE
@@ -588,6 +608,70 @@ void KeeperLink::announceShutdown(uint8_t cause, std::chrono::milliseconds bound
         errorLog()("the keeper did not take note of the shutdown within {} ms; a new instance may find the "
                    "label still held for a moment",
                    bound.count());
+}
+
+std::expected<void, ChannelError> KeeperLink::announceExec(std::filesystem::path const& executable,
+                                                           std::chrono::milliseconds bound)
+{
+    auto& state = *_state;
+    // What the queue holds goes nowhere once the keeper is gone: flushNow() would drop it and call it sent.
+    auto const reachable = [&]() -> std::expected<void, ChannelError> {
+        if (state.link != Link::Open)
+            return std::unexpected { ChannelError::Broken };
+        if (state.writeSide == WriteSide::Closed)
+            return std::unexpected { ChannelError::Closed };
+        return {};
+    };
+    if (auto const open = reachable(); !open)
+        return open;
+    auto const deadline = state.loop.clock().now() + bound;
+    if (state.enqueue(keeper::Exec { .executablePath = executable.string() }, {}) == QueueOutcome::Dropped)
+        return std::unexpected { ChannelError::Broken };
+    // Called off: what is still queued, the Exec included, goes on as the daemon serves on, and ExecAborted
+    // after it tells the keeper to send what it held back.
+    auto const callOff = [&](ChannelError error) -> std::expected<void, ChannelError> {
+        abortExec();
+        return std::unexpected { error };
+    };
+    if (auto const flushed = state.flushUntil(deadline); !flushed)
+        return callOff(flushed.error());
+    if (auto const open = reachable(); !open)
+        return open;
+    auto const noted = state.awaitAnswer(deadline, [](keeper::Message const& message) {
+        return std::holds_alternative<keeper::ExecNoted>(message);
+    });
+    if (!noted)
+    {
+        if (noted.error() != ChannelError::TimedOut)
+            state.lose();
+        return callOff(noted.error());
+    }
+    // What came before the note is this image's to handle, now: the exec would drop it.
+    state.dispatchInbox();
+    // What a handler posted (a Release, an Unsupported) goes whole too, or the exec is called off. Once this
+    // drained, nothing is half-sent: only this thread sends, and it sends no more.
+    auto const drained = state.flushUntil(deadline);
+    if (auto const open = reachable(); !open)
+        return open;
+    if (!drained)
+    {
+        errorLog()(
+            "the keeper did not take what the daemon sent before the exec in time; the exec is called off");
+        return callOff(drained.error());
+    }
+    // The keeper sends nothing after the note, so nothing may be left half-read.
+    if (!state.inbox.empty() || !state.channel.isAtFrameBoundary())
+    {
+        errorLog()("the keeper's channel holds a message begun but not read whole at the exec; the exec is "
+                   "called off");
+        return callOff(ChannelError::Broken);
+    }
+    return {};
+}
+
+void KeeperLink::abortExec()
+{
+    _state->post(keeper::ExecAborted {}, {});
 }
 
 void KeeperLink::seal()

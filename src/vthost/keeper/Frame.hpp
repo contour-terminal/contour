@@ -58,6 +58,10 @@ class FrameAssembler
     /// @return Why the stream is broken, if it is; no frame comes out after that.
     [[nodiscard]] std::optional<FrameError> error() const noexcept { return _error; }
 
+    /// @return How many bytes were fed that no frame handed out yet: a frame begun but not complete.
+    ///         Zero on a frame boundary.
+    [[nodiscard]] std::size_t pendingBytes() const noexcept { return _buffer.size(); }
+
     /// @return The descriptors fed but not handed out in a frame, for the caller to close.
     [[nodiscard]] std::vector<int> takePendingFds();
 

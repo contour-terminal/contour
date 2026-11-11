@@ -27,6 +27,7 @@
 #include <vtcontrol/Json.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/handover/HandoverImage.hpp>
+#include <vthost/keeper/Messages.hpp>
 
 namespace vthost::handover
 {
@@ -60,6 +61,13 @@ namespace
         return adopts ? PseudoconsoleAdoption::Able : PseudoconsoleAdoption::Unable;
     }
 
+    /// The PTY keeper channel version this build speaks as a keeper's daemon; none where there is no keeper.
+#ifdef _WIN32
+    constexpr auto OwnKeeperChannelVersion = std::optional<uint32_t> {};
+#else
+    constexpr auto OwnKeeperChannelVersion = std::optional { keeper::Hello {}.version };
+#endif
+
 #ifndef _WIN32
     /// @return @p text as one word of the POSIX shell, whatever it holds.
     [[nodiscard]] std::string shellQuoted(std::string_view text)
@@ -87,6 +95,7 @@ ReadinessReport ownReadiness(std::string release, std::optional<PseudoconsoleAdo
                                   vtbackend::TerminalStateFormatVersion },
         .configProblem = std::nullopt,
         .pseudoconsoleAdoption = pseudoconsoles,
+        .keeperChannelVersion = OwnKeeperChannelVersion,
     };
 }
 
@@ -98,6 +107,7 @@ std::string encodeReadiness(ReadinessReport const& report)
         .terminalStateFormats = { report.terminalStateFormats.first, report.terminalStateFormats.second },
         .configProblem = report.configProblem,
         .adoptsPseudoconsoles = report.pseudoconsoleAdoption.transform(adoptsOf),
+        .keeperChannelVersion = report.keeperChannelVersion,
     });
 }
 
@@ -113,6 +123,7 @@ std::optional<ReadinessReport> decodeReadiness(std::string_view text)
         .terminalStateFormats = { wire.terminalStateFormats[0], wire.terminalStateFormats[1] },
         .configProblem = std::move(wire.configProblem),
         .pseudoconsoleAdoption = wire.adoptsPseudoconsoles.transform(adoptionOf),
+        .keeperChannelVersion = wire.keeperChannelVersion,
     };
 }
 
@@ -128,6 +139,14 @@ std::expected<void, UpgradeRefusal> checkAdoptsPseudoconsoles(ReadinessReport co
 {
     if (target.pseudoconsoleAdoption == PseudoconsoleAdoption::Unable)
         return std::unexpected(UpgradeRefusal::TargetCannotAdoptTerminals);
+    return {};
+}
+
+std::expected<void, UpgradeRefusal> checkServesKeeper(ReadinessReport const& target)
+{
+    // Any version will do: both sides of the channel speak the older one's (keeper::negotiate()).
+    if (!target.keeperChannelVersion)
+        return std::unexpected(UpgradeRefusal::TargetCannotServeKeeper);
     return {};
 }
 
