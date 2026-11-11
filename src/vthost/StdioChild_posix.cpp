@@ -11,11 +11,13 @@
     #include <sys/socket.h>
     #include <sys/wait.h>
 
+    #include <algorithm>
     #include <array>
     #include <cerrno>
     #include <csignal>
     #include <format>
     #include <initializer_list>
+    #include <string_view>
     #include <system_error>
     #include <thread>
     #include <utility>
@@ -129,49 +131,76 @@ namespace
 
         void terminate() noexcept override
         {
-            if (_exitCode)
+            if (_isReaped)
                 return;
-            ::kill(_pid, SIGTERM);
-            if (awaitExit(std::chrono::steady_clock::now() + TerminateGrace))
-                return;
-            ::kill(_pid, SIGKILL);
-            auto status = 0;
-            // Waited for until reaped: a signal that interrupts the wait would leave it a zombie.
-            while (::waitpid(_pid, &status, 0) < 0)
-                if (errno != EINTR)
-                    return;
-            _exitCode = exitCodeOf(status);
+            // The whole group: ssh's own children (a ProxyJump's hop is a ProxyCommand child that asks the
+            // askpass endpoint itself) do not end with it, and must not outlive the attempt.
+            if (!_exitCode)
+            {
+                ::kill(-_pid, SIGTERM);
+                (void) awaitExit(std::chrono::steady_clock::now() + TerminateGrace);
+            }
+            // Swept before the leader is reaped: until then its zombie keeps the group id from being
+            // reused, so this reaches only our group, and also a member that outlived an exited leader.
+            ::kill(-_pid, SIGKILL);
+            reap();
         }
 
       private:
-        /// Reaps the child if it ended by @p deadline, looking at it with a backing-off poll.
-        /// @return Whether it has ended.
+        /// Looks at whether the child ended by @p deadline, with a backing-off poll, without reaping it: a
+        /// zombie leader keeps its process group id reserved.
+        /// @return Whether it has ended; its exit code is then known.
         [[nodiscard]] bool awaitExit(std::chrono::steady_clock::time_point deadline) noexcept
         {
             auto pause = std::chrono::milliseconds { 1 };
             while (!_exitCode)
             {
-                auto status = 0;
-                auto const reaped = ::waitpid(_pid, &status, WNOHANG);
-                if (reaped == _pid)
-                    _exitCode = exitCodeOf(status);
-                // Reaped by someone else (a SIGCHLD handler): it ended, and its status is lost.
-                else if (reaped < 0 && errno != EINTR)
-                    _exitCode = ExitStatusLost;
-                else if (std::chrono::steady_clock::now() >= deadline)
-                    return false;
-                else
+                auto info = siginfo_t {};
+                if (::waitid(P_PID, static_cast<id_t>(_pid), &info, WEXITED | WNOHANG | WNOWAIT) < 0)
                 {
-                    std::this_thread::sleep_for(pause);
-                    pause = std::min(pause * 2, std::chrono::milliseconds { 50 });
+                    // Reaped by someone else (a SIGCHLD handler): it ended, and its status is lost.
+                    if (errno == ECHILD)
+                    {
+                        _exitCode = ExitStatusLost;
+                        _isReaped = true;
+                        break;
+                    }
                 }
+                else if (info.si_pid == _pid)
+                {
+                    _exitCode = info.si_code == CLD_EXITED ? info.si_status : 128 + info.si_status;
+                    break;
+                }
+                if (std::chrono::steady_clock::now() >= deadline)
+                    return false;
+                std::this_thread::sleep_for(pause);
+                pause = std::min(pause * 2, std::chrono::milliseconds { 50 });
             }
             return true;
         }
 
+        /// Reaps the leader, waiting for it until it is: a signal that interrupts the wait would leave a
+        /// zombie.
+        void reap() noexcept
+        {
+            auto status = 0;
+            while (::waitpid(_pid, &status, 0) < 0)
+                if (errno != EINTR)
+                {
+                    if (!_exitCode)
+                        _exitCode = ExitStatusLost;
+                    _isReaped = true;
+                    return;
+                }
+            if (!_exitCode)
+                _exitCode = exitCodeOf(status);
+            _isReaped = true;
+        }
+
         pid_t _pid;
         std::shared_ptr<StderrTail> _tail;
-        std::optional<int> _exitCode;
+        std::optional<int> _exitCode; ///< Set once the child is seen to have ended.
+        bool _isReaped = false;       ///< Whether waitpid() collected it, which ends its group id's hold.
     };
 
     class PosixStdioSpawner final: public IStdioSpawner
@@ -180,11 +209,17 @@ namespace
         explicit PosixStdioSpawner(vtpty::ProgramSearch search): _search { std::move(search) } {}
 
         [[nodiscard]] std::expected<SpawnedStdioChild, StdioSpawnError> spawn(
-            core::net::EventLoop& loop, std::span<std::string const> argv) override
+            core::net::EventLoop& loop,
+            std::span<std::string const> argv,
+            SpawnEnvironment const& environment) override
         {
             if (argv.empty())
                 return std::unexpected { StdioSpawnError { .kind = SpawnFailure::SystemError,
                                                            .message = "no program to start" } };
+            if (auto const bad = invalidEnvironmentName(environment))
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError,
+                    .message = std::format("'{}' cannot name an environment variable", *bad) } };
             auto const image = vtpty::findProgram(argv.front(), _search);
             if (!image)
                 return std::unexpected { StdioSpawnError {
@@ -208,7 +243,8 @@ namespace
                     return std::unexpected { systemError("fcntl", error) };
 
             auto pid = pid_t { -1 };
-            if (auto const spawned = spawnWithStdio(*image, argv, farEnd.get(), errorWrite.get(), pid);
+            if (auto const spawned =
+                    spawnWithStdio(*image, argv, environment, farEnd.get(), errorWrite.get(), pid);
                 spawned != 0)
                 return std::unexpected { systemError(std::format("cannot start {}", *image), spawned) };
 
@@ -227,12 +263,23 @@ namespace
         }
 
       private:
+        /// @return This process's environment as `NAME=VALUE` entries, @p environment applied on top.
+        [[nodiscard]] static std::vector<std::string> mergedEnvironment(SpawnEnvironment const& environment)
+        {
+            auto inherited = std::vector<std::string> {};
+            for (auto const* entry = environ; entry != nullptr && *entry != nullptr; ++entry)
+                inherited.emplace_back(*entry);
+            return mergeEnvironment<char>(
+                inherited, environment.set, NameComparison::CaseSensitive, EntryOrder::AsFound);
+        }
+
         /// posix_spawn()s @p image with @p stdio as its stdin and stdout and @p stderrFd as its stderr.
         /// No fork in this multi-threaded process, so there is no window in which a child may only call
         /// async-signal-safe functions.
         /// @return 0, or the error number the spawn failed with.
         [[nodiscard]] static int spawnWithStdio(std::string const& image,
                                                 std::span<std::string const> arguments,
+                                                SpawnEnvironment const& environment,
                                                 int stdio,
                                                 int stderrFd,
                                                 pid_t& pid)
@@ -244,6 +291,13 @@ namespace
                 argv.push_back(argument.data());
             argv.push_back(nullptr);
 
+            auto entries = mergedEnvironment(environment);
+            auto envp = std::vector<char*> {};
+            envp.reserve(entries.size() + 1);
+            for (auto& entry: entries)
+                envp.push_back(entry.data());
+            envp.push_back(nullptr);
+
             auto actions = vtpty::SpawnFileActions::create();
             if (!actions)
                 return actions.error().value();
@@ -252,6 +306,15 @@ namespace
                 return attributes.error().value();
             if (auto const reset = vtpty::resetSignals(*attributes); !reset)
                 return reset.error().value();
+            // The child leads a process group of its own, which terminate() ends as a whole.
+            auto flags = short {};
+            ::posix_spawnattr_getflags(attributes->get(), &flags);
+            if (auto const error = ::posix_spawnattr_setflags(
+                    attributes->get(), static_cast<short>(flags | POSIX_SPAWN_SETPGROUP));
+                error != 0)
+                return error;
+            if (auto const error = ::posix_spawnattr_setpgroup(attributes->get(), 0); error != 0)
+                return error;
 
             // dup2 clears close-on-exec on the copy only: the originals still close at exec.
             ::posix_spawn_file_actions_adddup2(actions->get(), stdio, STDIN_FILENO);
@@ -259,7 +322,7 @@ namespace
             ::posix_spawn_file_actions_adddup2(actions->get(), stderrFd, STDERR_FILENO);
 
             return ::posix_spawn(
-                &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), environ);
+                &pid, image.c_str(), actions->get(), attributes->get(), argv.data(), envp.data());
         }
 
         vtpty::ProgramSearch _search;

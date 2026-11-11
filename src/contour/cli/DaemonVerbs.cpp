@@ -364,6 +364,7 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
                 return ExitStatus::Failed;
             case ControlErrorCode::Refused:
             case ControlErrorCode::Timeout:
+            case ControlErrorCode::LoginNeeded:
             case ControlErrorCode::Transport: break;
         }
         report(error, err);

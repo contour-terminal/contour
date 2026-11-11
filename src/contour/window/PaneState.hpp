@@ -40,7 +40,7 @@ inline constexpr size_t PaneStateCount = static_cast<size_t>(PaneState::Ended) +
 [[nodiscard]] constexpr PaneState paneStateOf(session::EndReason end,
                                               vthost::client::ConnectionState connection) noexcept
 {
-    auto const seeking = hostChipStateOf(connection) == HostChipState::Reconnecting;
+    auto const seeking = isSeekingConnection(hostChipStateOf(connection));
     // The one end the connection undoes: the shell still runs in the daemon, and Reconnect takes it back. Any
     // other end is over whatever the connection does.
     if (end == session::EndReason::Disconnected && seeking)

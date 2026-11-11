@@ -17,6 +17,8 @@
     #include <contour/cli/ContourApp.hpp>
 #endif
 
+#include <contour/askpass/AskpassClient.hpp>
+
 #include <vtpty/SpawnTrampoline.hpp>
 
 #include <core/Environment.hpp>
@@ -29,6 +31,7 @@
 #include <format>
 #include <optional>
 #include <print>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -276,6 +279,12 @@ int main(int argc, char const* argv[])
     // This is the process's composition root, and the environment is the one ambient resource
     // everything below reads: the app takes it here, once, and hands it on to what it builds.
     auto& environment = core::defaultEnvironment();
+
+    // ssh runs this program as its SSH_ASKPASS helper with the prompt as the only argument, which no verb
+    // parser may see, and the helper needs none of the application: answer, and be done.
+    if (auto const exitCode = contour::askpass::runAskpassIfRequested(
+            environment, std::span<char const* const> { argv, static_cast<std::size_t>(argc) }))
+        return *exitCode;
 
 #ifdef CONTOUR_FRONTEND_GUI
     qInstallMessageHandler(qtCustomMessageOutput);

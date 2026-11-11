@@ -6,9 +6,14 @@
     #include <core/WideString.hpp>
     #include <core/net/Sockets.hpp>
 
+    #include <algorithm>
     #include <array>
+    #include <cwchar>
+    #include <cwctype>
     #include <format>
     #include <initializer_list>
+    #include <optional>
+    #include <string>
     #include <string_view>
     #include <system_error>
     #include <thread>
@@ -157,8 +162,10 @@ namespace
     class Win32StdioChild final: public IStdioChild
     {
       public:
-        Win32StdioChild(vtpty::UniqueHandle process, std::shared_ptr<StderrTail> tail):
-            _process { std::move(process) }, _tail { std::move(tail) }
+        Win32StdioChild(vtpty::UniqueHandle process,
+                        vtpty::UniqueHandle job,
+                        std::shared_ptr<StderrTail> tail):
+            _process { std::move(process) }, _job { std::move(job) }, _tail { std::move(tail) }
         {
         }
         ~Win32StdioChild() override { terminate(); }
@@ -184,14 +191,45 @@ namespace
         {
             if (WaitForSingleObject(_process.get(), 0) == WAIT_OBJECT_0)
                 return;
+            // The whole job: ssh's own children (a ProxyJump's hop asks the askpass endpoint itself) end
+            // with it. Closing the job's handle, in the destructor, ends whatever is left.
+            if (_job.valid())
+                TerminateJobObject(_job.get(), 1);
             TerminateProcess(_process.get(), 1);
             WaitForSingleObject(_process.get(), INFINITE);
         }
 
       private:
         vtpty::UniqueHandle _process;
+        vtpty::UniqueHandle _job; ///< Kills every process in it when closed; may be invalid.
         std::shared_ptr<StderrTail> _tail;
     };
+
+    /// @return This process's environment with @p environment applied on top, as the block CreateProcessW
+    ///         takes: `NAME=VALUE` entries sorted case-insensitively by name, each NUL-terminated, and the
+    ///         whole ended by one more NUL; nullopt when a name or value is no UTF-8.
+    [[nodiscard]] std::optional<std::wstring> mergedEnvironmentBlock(SpawnEnvironment const& environment)
+    {
+        auto overrides = std::vector<std::pair<std::wstring, std::wstring>> {};
+        for (auto const& [name, value]: environment.set)
+        {
+            auto wideName = core::toUtf16(name);
+            auto wideValue = core::toUtf16(value);
+            if (!wideName || !wideValue)
+                return std::nullopt;
+            overrides.emplace_back(*std::move(wideName), *std::move(wideValue));
+        }
+        auto inherited = std::vector<std::wstring> {};
+        if (auto* const strings = GetEnvironmentStringsW(); strings != nullptr)
+        {
+            for (auto const* entry = strings; *entry != L'\0'; entry += std::wcslen(entry) + 1)
+                inherited.emplace_back(entry);
+            FreeEnvironmentStringsW(strings);
+        }
+        auto const merged = mergeEnvironment<wchar_t>(
+            inherited, overrides, NameComparison::CaseInsensitive, EntryOrder::SortedByName);
+        return environmentBlock<wchar_t>(merged);
+    }
 
     class Win32StdioSpawner final: public IStdioSpawner
     {
@@ -199,11 +237,17 @@ namespace
         explicit Win32StdioSpawner(vtpty::ProgramSearch search): _search { std::move(search) } {}
 
         [[nodiscard]] std::expected<SpawnedStdioChild, StdioSpawnError> spawn(
-            core::net::EventLoop& loop, std::span<std::string const> argv) override
+            core::net::EventLoop& loop,
+            std::span<std::string const> argv,
+            SpawnEnvironment const& environment) override
         {
             if (argv.empty())
                 return std::unexpected { StdioSpawnError { .kind = SpawnFailure::SystemError,
                                                            .message = "no program to start" } };
+            if (auto const bad = invalidEnvironmentName(environment))
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError,
+                    .message = std::format("'{}' cannot name an environment variable", *bad) } };
             auto const image = vtpty::findProgram(argv.front(), _search);
             if (!image)
                 return std::unexpected { StdioSpawnError {
@@ -232,6 +276,12 @@ namespace
             if (!commandLine || !program)
                 return std::unexpected { StdioSpawnError {
                     .kind = SpawnFailure::SystemError, .message = "the command line is not valid UTF-8" } };
+            // Nothing to set: the child inherits the parent's environment as it is.
+            auto block = environment.set.empty() ? std::optional<std::wstring> {}
+                                                 : mergedEnvironmentBlock(environment);
+            if (!environment.set.empty() && !block)
+                return std::unexpected { StdioSpawnError {
+                    .kind = SpawnFailure::SystemError, .message = "the environment is not valid UTF-8" } };
             auto startup = STARTUPINFOW {};
             startup.cb = sizeof(startup);
             startup.dwFlags = STARTF_USESTDHANDLES;
@@ -245,15 +295,37 @@ namespace
                                 nullptr,
                                 nullptr,
                                 TRUE,
-                                CREATE_NO_WINDOW,
-                                nullptr,
+                                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+                                block ? block->data() : nullptr,
                                 nullptr,
                                 &startup,
                                 &info))
                 return std::unexpected { systemError(std::format("cannot start {}", *image),
                                                      GetLastError()) };
-            CloseHandle(info.hThread);
             auto process = vtpty::UniqueHandle { info.hProcess };
+            // A job that kills its processes when closed, so that no child of ssh outlives the attempt. The
+            // child runs only once it is in it; without a job it runs as it always did.
+            auto job = vtpty::UniqueHandle { CreateJobObjectW(nullptr, nullptr) };
+            if (job.valid())
+            {
+                auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if (!SetInformationJobObject(
+                        job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))
+                    || !AssignProcessToJobObject(job.get(), process.get()))
+                    job.reset();
+            }
+            auto const resumed = ResumeThread(info.hThread);
+            auto const resumeError = GetLastError();
+            CloseHandle(info.hThread);
+            if (resumed == static_cast<DWORD>(-1))
+            {
+                // Still suspended, and never to run: ended with everything in its job.
+                if (job.valid())
+                    TerminateJobObject(job.get(), 1);
+                TerminateProcess(process.get(), 1);
+                return std::unexpected { systemError(std::format("cannot start {}", *image), resumeError) };
+            }
             // The child holds its own copies now; the parent's would keep its streams from ever ending.
             stdinRead.reset();
             stdoutWrite.reset();
@@ -261,7 +333,8 @@ namespace
 
             auto tail = std::make_shared<StderrTail>(StderrTailLimit);
             drainInto(std::move(stderrRead), tail);
-            auto child = std::make_unique<Win32StdioChild>(std::move(process), std::move(tail));
+            auto child =
+                std::make_unique<Win32StdioChild>(std::move(process), std::move(job), std::move(tail));
 
             auto pair = makeLoopbackPair();
             if (!pair)

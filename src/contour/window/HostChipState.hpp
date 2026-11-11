@@ -25,10 +25,12 @@ enum class HostChipState : uint8_t
     Connected = 0, ///< The daemon is reachable.
     Reconnecting,  ///< A connection is being (re)established.
     Disconnected,  ///< Nothing is retried.
+    /// A reconnect is held until a window of the user's is exposed: it may ask them something.
+    NeedsAttention,
 };
 
 /// Number of @c HostChipState enumerators, derived from the last one.
-inline constexpr size_t HostChipStateCount = static_cast<size_t>(HostChipState::Disconnected) + 1;
+inline constexpr size_t HostChipStateCount = static_cast<size_t>(HostChipState::NeedsAttention) + 1;
 
 /// One row of the connection-to-chip table.
 struct HostChipRow
@@ -47,6 +49,7 @@ inline constexpr std::array<HostChipRow, vthost::client::ConnectionStateCount> H
     HostChipRow { vthost::client::ConnectionState::Stopped, HostChipState::Disconnected },
     // The same daemon comes back: on the chip, a reconnect like any other.
     HostChipRow { vthost::client::ConnectionState::Upgrading, HostChipState::Reconnecting },
+    HostChipRow { vthost::client::ConnectionState::NeedsAttention, HostChipState::NeedsAttention },
 };
 
 namespace detail
@@ -61,6 +64,13 @@ namespace detail
 } // namespace detail
 
 static_assert(detail::hostChipRowsInOrder(), "HostChipRows must list the connection states in order");
+
+/// @param state A chip state.
+/// @return Whether the connection is being sought again, whether or not it waits for the user first.
+[[nodiscard]] constexpr bool isSeekingConnection(HostChipState state) noexcept
+{
+    return state == HostChipState::Reconnecting || state == HostChipState::NeedsAttention;
+}
 
 /// Folds a connection state onto the chip's states.
 /// @param connection Where the supervised connection stands.
@@ -121,6 +131,10 @@ inline constexpr std::array<HostChipLook, HostChipStateCount> HostChipLooks {
         HostChipState::Reconnecting, config::StatusColorRole::Warning, "Reconnecting…", "reconnecting" },
     HostChipLook {
         HostChipState::Disconnected, config::StatusColorRole::Danger, "Disconnected", "disconnected" },
+    HostChipLook { HostChipState::NeedsAttention,
+                   config::StatusColorRole::Warning,
+                   "Reconnecting needs your attention",
+                   "reconnecting, needs your attention" },
 };
 
 namespace detail

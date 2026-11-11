@@ -1174,7 +1174,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Whether the chip would say Reconnecting.
     [[nodiscard]] bool isReconnecting() const noexcept
     {
-        return window::hostChipStateOf(_hostConnection) == window::HostChipState::Reconnecting;
+        return window::isSeekingConnection(window::hostChipStateOf(_hostConnection));
     }
 
     /// What this pane shows over and around its terminal. GUI thread only (see _end).

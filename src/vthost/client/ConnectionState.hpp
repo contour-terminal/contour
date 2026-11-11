@@ -18,15 +18,21 @@ enum class ConnectionState : uint8_t
     Connecting = 0,   ///< The first connect is under way.
     Connected = 1,    ///< The daemon accepted the handshake.
     Reconnecting = 2, ///< A connection that was up is lost, and a new one is being sought.
-    Failed = 3,       ///< The first connect failed; nothing is retried, the caller decides what follows.
-    Refused = 4,      ///< A reconnect met a refusal or a permanent transport error; nothing is retried.
-    Stopped = 5,      ///< stop() ended it, or the attempt was cancelled.
+    /// The first connect failed, or the user dismissed a login prompt of it; nothing is retried, the caller
+    /// decides what follows.
+    Failed = 3,
+    Refused = 4, ///< A reconnect met a refusal or a permanent transport error; nothing is retried.
+    Stopped = 5, ///< stop() ended it.
     /// The daemon announced it replaces itself in place (DaemonUpgrading) and closed the connection: the same
     /// daemon is waited for, and none is started meanwhile (ClientSupervisor's UpgradeHold).
     Upgrading = 6,
+    /// The reconnect goes on, but a prompt it raised waits for a window of the user's to be exposed; the
+    /// controller sets this itself (NativeController::setUserAttention), the supervisor never emits it.
+    NeedsAttention = 7,
 };
 
 /// Number of @c ConnectionState enumerators, derived from the last one; tables indexed by state pin to it.
-inline constexpr std::size_t ConnectionStateCount = static_cast<std::size_t>(ConnectionState::Upgrading) + 1;
+inline constexpr std::size_t ConnectionStateCount =
+    static_cast<std::size_t>(ConnectionState::NeedsAttention) + 1;
 
 } // namespace vthost::client

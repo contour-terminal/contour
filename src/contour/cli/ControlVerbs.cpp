@@ -1189,14 +1189,18 @@ std::unique_ptr<ControlChannel> makeTransportChannel(std::shared_ptr<vthost::ITr
 
 vthost::client::SavedHostResolver makeSavedHostResolver(HostLookup lookup,
                                                         core::platform::FileSystem const& fileSystem,
-                                                        std::shared_ptr<vthost::IStdioSpawner> spawner)
+                                                        std::shared_ptr<vthost::IStdioSpawner> spawner,
+                                                        SshPrompting prompting)
 {
     return
-        [lookup = std::move(lookup), &fileSystem, spawner = std::move(spawner)](
+        [lookup = std::move(lookup),
+         &fileSystem,
+         spawner = std::move(spawner),
+         prompting = std::move(prompting)](
             std::string_view spec) -> std::expected<std::shared_ptr<vthost::ITransportFactory>, std::string> {
             return lookup(spec)
                 .and_then([&](config::HostEntry const& host) {
-                    return makeHostTransport(std::string { spec }, host, fileSystem, spawner);
+                    return makeHostTransport(std::string { spec }, host, fileSystem, spawner, prompting);
                 })
                 .transform([](HostTransport transport) { return std::move(transport.factory); })
                 .transform_error(

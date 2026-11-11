@@ -213,6 +213,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         bindings and ptys kept meanwhile. Safe from any thread.
     [[nodiscard]] vthost::client::ConnectionState connectionState() const;
 
+    /// Whether a prompt of this controller's attach waits for the user to be looking at a window.
+    enum class UserAttention : uint8_t
+    {
+        NotNeeded = 0,
+        Needed, ///< The connection says it needs attention (vthost::client::ConnectionState::NeedsAttention).
+    };
+
+    /// Says whether a prompt of this attach is held until its window is on screen. While it is, a connection
+    /// that is being sought again reports NeedsAttention; the reconnect itself goes on, as it never waits for
+    /// anyone. GUI thread.
+    /// @param attention Whether a prompt waits.
+    void setUserAttention(UserAttention attention);
+
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
@@ -604,6 +617,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// connectionState() changed (fires on the reactor thread; connect queued).
     void connectionStateChanged();
+    /// The attach has something new for whoever polls it (RemoteController::pollConnected): the connection
+    /// phase settled, or the transport returned its connection. Fires on the reactor thread; connect queued.
+    void attachProgressed();
 
     /// A pty this controller made was destroyed, whether or not it still bound its remote session (fires on
     /// whichever thread destroyed it; connect queued). @see bindsPanes
@@ -686,6 +702,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The reactor's whole lifetime: connect, serve, notify. Takes the loop
     /// by pointer (coroutine reference parameters can dangle).
     [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override;
+
+    /// Tells whoever polls the attach that there is something new to look at (attachProgressed()).
+    void notePhaseChange() override { emit attachProgressed(); }
 
     // RemoteController hooks: the attach-specific half of the shared connect lifecycle.
     [[nodiscard]] bool detachOnReactor() override
@@ -1022,6 +1041,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// goes through it, so nothing is written to a connection still in its handshake, or to none.
     /// Reactor-owned; set and cleared under _mutex.
     vthost::client::NativeClient* _client = nullptr;
+    UserAttention _userAttention = UserAttention::NotNeeded; ///< Under _mutex.
+    /// What the connection was before it said NeedsAttention; under _mutex.
+    vthost::client::ConnectionState _stateUnderAttention = vthost::client::ConnectionState::Reconnecting;
     vthost::client::ConnectionState _connection =
         vthost::client::ConnectionState::Connecting; ///< Under _mutex.
     /// Which run of the daemon the last accepted connection reached; 0 for unknown. Under _mutex.
@@ -1086,21 +1108,16 @@ class NativeController final: public QObject, public contour::session::SessionFa
     core::platform::PowerSubscription _powerSubscription;
 };
 
-/// Waits for @p live to connect within @p budget, and gives it up when it does not.
-///
-/// A controller given up on is stopped and cut off from @p owner, then handed to @p abandoned rather than
-/// destroyed: the daemon start its transport began may still be under way -- a first start copies this
-/// version's image -- and destroying the transport waits for that start to end (UnixTransportFactory's
-/// destructor), which would hold the caller back all that while. The caller keeps @p abandoned until it ends.
-/// @param live The controller whose connect is awaited; null once it is given up.
-/// @param abandoned Receives @p live when it is given up.
-/// @param budget @see RemoteController::awaitConnected.
-/// @param owner Every connection from @p live to this object is cut when @p live is given up.
-/// @return Why the connect failed, when it did.
-[[nodiscard]] std::expected<void, std::string> awaitConnectedOrAbandon(
-    std::unique_ptr<NativeController>& live,
-    std::unique_ptr<NativeController>& abandoned,
-    std::chrono::milliseconds budget,
-    QObject const* owner);
+/// Gives @p live up when its connect failed: stops it, cuts its connections to @p owner and hands it to
+/// @p abandoned rather than destroying it: the daemon start its transport began may still be under way -- a
+/// first start copies this version's image -- and destroying the transport waits for that start to end
+/// (UnixTransportFactory's destructor), which would hold the caller back all that while. The caller keeps
+/// @p abandoned until it ends.
+/// @param live The controller to give up; null afterwards.
+/// @param abandoned Receives it.
+/// @param owner Every connection from @p live to this object is cut.
+void abandonConnect(std::unique_ptr<NativeController>& live,
+                    std::unique_ptr<NativeController>& abandoned,
+                    QObject const* owner);
 
 } // namespace contour::remote

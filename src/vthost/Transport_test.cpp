@@ -62,6 +62,7 @@ TEST_CASE("only unreachable and protocol errors are retried", "[vthost][transpor
     // A daemon that went away comes back (C2): an absent one is retried too.
     static_assert(retryOf(TransportErrorKind::DaemonAbsent) == TransportRetry::Transient);
     static_assert(retryOf(TransportErrorKind::Misconfigured) == TransportRetry::Permanent);
+    static_assert(retryOf(TransportErrorKind::HostKeyChanged) == TransportRetry::Permanent);
 }
 
 TEST_CASE("a connection releases its lifetime only after its socket", "[vthost][transport]")

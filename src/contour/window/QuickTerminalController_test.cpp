@@ -67,6 +67,7 @@ struct Fixture
     int offScreens = 0;
     std::vector<HotkeyChord> menuOwned {};
     std::vector<ScreenRect> others {};
+    bool isReady = true; ///< What the host answers to "may a press show it".
     std::unique_ptr<QuickTerminalController> controller;
 
     explicit Fixture(QuickTerminalConfig config = { .hotkey = ControlGrave },
@@ -92,7 +93,8 @@ struct Fixture
                 .isMenuOwned =
                     [this](HotkeyChord const& chord) { return std::ranges::contains(menuOwned, chord); },
                 .cornerRadius = [] { return CornerRadius; },
-                .placement = placement },
+                .placement = placement,
+                .isReady = [this] { return isReady; } },
             config,
             motion);
     }
@@ -136,6 +138,21 @@ TEST_CASE("QuickTerminalController.theHotkeyCreatesOneWindowAtTheTop", "[quickte
     CHECK(fixture.windows.size() == 1);
 
     fixture.hotkey.press();
+    CHECK(fixture.controller->state() == QuickTerminalState::Showing);
+    CHECK(fixture.windows.size() == 1);
+}
+
+TEST_CASE("QuickTerminalController.aPressIsIgnoredWhileTheHostIsNotReady", "[quickterminal][controller]")
+{
+    auto fixture = Fixture {};
+    // The launch still waits for its attach.
+    fixture.isReady = false;
+    fixture.hotkey.press("early");
+    CHECK(fixture.controller->state() == QuickTerminalState::Absent);
+    CHECK(fixture.windows.empty());
+
+    fixture.isReady = true;
+    fixture.hotkey.press("later");
     CHECK(fixture.controller->state() == QuickTerminalState::Showing);
     CHECK(fixture.windows.size() == 1);
 }

@@ -70,6 +70,7 @@
 #include <expected>
 #include <span>
 
+#include <vthost/Askpass.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -79,6 +80,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/StdioChild.hpp>
+#include <vthost/StdioPreamble.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
@@ -5785,7 +5787,9 @@ class SilentStdioSpawner final: public vthost::IStdioSpawner
 {
   public:
     [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
-        core::net::EventLoop& loop, std::span<std::string const> /*argv*/) override
+        core::net::EventLoop& loop,
+        std::span<std::string const> /*argv*/,
+        vthost::SpawnEnvironment const& /*environment*/) override
     {
         auto pair = core::net::testing::makeSocketPair(loop);
         if (!pair)
@@ -5796,7 +5800,111 @@ class SilentStdioSpawner final: public vthost::IStdioSpawner
                                                std::make_unique<SilentStdioChild>(std::move(pair->second)) };
     }
 };
+
+/// An `ssh -V` that has ended and printed the banner of a modern OpenSSH.
+class BannerStdioChild final: public vthost::IStdioChild
+{
+  public:
+    [[nodiscard]] std::string stderrTail() const override { return "OpenSSH_9.6p1, OpenSSL 3.0.13\n"; }
+    [[nodiscard]] std::optional<int> exitCode(std::chrono::milliseconds /*wait*/) override { return 0; }
+    void terminate() noexcept override {}
+};
+
+/// Sends the stdio preamble, then says nothing and keeps the connection open: a remote that is wedged in
+/// the handshake.
+core::async::Task<void> preambleThenSilence(std::unique_ptr<core::net::ISocket> remote)
+{
+    auto const preamble = std::string { vthost::StdioPreambleReady };
+    std::ignore = co_await remote->write(std::as_bytes(std::span { preamble }));
+    auto buffer = std::vector<std::byte>(256);
+    while (true)
+    {
+        auto const read = co_await remote->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+    }
+}
+
+/// Answers `ssh -V` with a modern banner, and any other ssh with the preamble followed by silence.
+class WedgedAfterPreambleSpawner final: public vthost::IStdioSpawner
+{
+  public:
+    [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
+        core::net::EventLoop& loop,
+        std::span<std::string const> argv,
+        vthost::SpawnEnvironment const& /*environment*/) override
+    {
+        auto pair = core::net::testing::makeSocketPair(loop);
+        if (!pair)
+            return std::unexpected { vthost::StdioSpawnError { .kind = vthost::SpawnFailure::SystemError,
+                                                               .message = "no socket pair" } };
+        if (std::ranges::contains(argv, std::string { "-V" }))
+            return vthost::SpawnedStdioChild { .transport = std::move(pair->first),
+                                               .process = std::make_unique<BannerStdioChild>() };
+        loop.spawn(preambleThenSilence(std::move(pair->second)));
+        return vthost::SpawnedStdioChild { .transport = std::move(pair->first),
+                                           .process = std::make_unique<BannerStdioChild>() };
+    }
+};
+
+/// A session with no prompt ever open.
+class QuietAskpassSession final: public vthost::IAskpassSession
+{
+  public:
+    [[nodiscard]] vthost::SpawnEnvironment environment() const override { return {}; }
+    [[nodiscard]] bool wasCancelled() const noexcept override { return false; }
+    void onCancelled(std::function<void()> /*wake*/) override {}
+    [[nodiscard]] std::chrono::milliseconds promptTime() const noexcept override
+    {
+        return std::chrono::milliseconds { 0 };
+    }
+};
+
+class QuietAskpassBroker final: public vthost::IAskpassBroker
+{
+  public:
+    [[nodiscard]] std::expected<std::unique_ptr<vthost::IAskpassSession>, std::string> open(
+        vthost::SshTarget const& /*target*/) override
+    {
+        return std::make_unique<QuietAskpassSession>();
+    }
+};
 } // namespace
+
+TEST_CASE("with prompts answered there is no connect clock, but a wedged handshake is failed",
+          "[attach][controller][hosts]")
+{
+    // The attach has no outer bound for the connect (the transport's own deadline pauses for prompts); what
+    // follows the preamble keeps one, from the moment the transport returned its connection.
+    auto constexpr HandshakeBound = std::chrono::milliseconds { 2500 };
+    static_assert(HandshakeBound > contour::remote::MinimumConnectAwait);
+    auto timeline = TestTimeline {};
+    auto controller = contour::remote::NativeController { contour::remote::NativeController::Config {
+        .transport = std::make_shared<vthost::SshTransportFactory>(
+            vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
+            std::make_shared<WedgedAfterPreambleSpawner>(),
+            std::make_shared<QuietAskpassBroker>(),
+            vthost::SshConnectTimeout,
+            std::make_shared<vthost::SshVersionProbe>()),
+        .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
+                                                .workspaces = {} },
+        .profileName = std::string {},
+        .workingDirectory = {},
+        .attachSettings = std::nullopt,
+        .sessionSettings = {},
+        .colorPreference = {},
+        .clock = core::platform::defaultSteadyClock(),
+        .timeline = timeline.timeline,
+        .powerMonitor = nullptr,
+    } };
+    auto const started = std::chrono::steady_clock::now();
+    auto const connected = controller.connectAndWait(vthost::AttachBudget::promptsOpen(HandshakeBound));
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(took >= HandshakeBound - std::chrono::milliseconds { 200 });
+    CHECK(took < std::chrono::seconds { 15 });
+    controller.stop();
+}
 
 TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as an attach timeout",
           "[attach][controller][hosts]")
@@ -5810,7 +5918,9 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         .transport = std::make_shared<vthost::SshTransportFactory>(
             vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
             std::make_shared<SilentStdioSpawner>(),
-            TransportBound),
+            nullptr,
+            TransportBound,
+            std::make_shared<vthost::SshVersionProbe>()),
         .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWorkspaces,
                                                 .workspaces = {} },
         .profileName = std::string {},
@@ -5822,7 +5932,8 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         .timeline = timeline.timeline,
         .powerMonitor = nullptr,
     } };
-    auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
+    auto const connected = controller.connectAndWait(
+        contour::cli::sshAttachBudget(TransportBound, contour::cli::SshPrompts::Batch));
     REQUIRE_FALSE(connected.has_value());
     CHECK(connected.error() == "ssh://me@homepc did not answer within 3 seconds");
     controller.stop();
@@ -6111,7 +6222,15 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
     // only this test ends, so the call must not be what the test hangs on.
     auto const began = std::chrono::steady_clock::now();
     auto call = std::async(std::launch::async, [&] {
-        return contour::remote::awaitConnectedOrAbandon(live, abandoned, 50ms, &owner);
+        auto polled = live->pollConnected(50ms);
+        while (!polled)
+        {
+            std::this_thread::sleep_for(5ms);
+            polled = live->pollConnected(50ms);
+        }
+        if (!*polled)
+            contour::remote::abandonConnect(live, abandoned, &owner);
+        return *polled;
     });
     auto const returned = call.wait_for(5s) == std::future_status::ready;
     if (!returned)
@@ -6130,4 +6249,98 @@ TEST_CASE("an attach given up on is kept, not destroyed, while its daemon start 
     CHECK(destroyed.wait_for(300ms) == std::future_status::timeout);
     gate->release();
     CHECK(destroyed.wait_for(10s) == std::future_status::ready);
+}
+
+namespace
+{
+
+/// A transport that may prompt, as an ssh one does: every connect() is a prompt that could open, counted.
+class PromptingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit PromptingTransport(std::shared_ptr<vthost::ITransportFactory> inner): _inner(std::move(inner)) {}
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& loop) override
+    {
+        ++_connects;
+        return _inner->connect(loop);
+    }
+
+    [[nodiscard]] std::string describe() const override { return _inner->describe(); }
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override { return _inner->peerTrust(); }
+
+    /// @return How many connections were asked for, each a prompt that could have opened.
+    [[nodiscard]] int connects() const noexcept { return _connects; }
+
+  private:
+    std::shared_ptr<vthost::ITransportFactory> _inner;
+    std::atomic<int> _connects { 0 };
+};
+
+} // namespace
+
+// A reconnect never waits for a window: an agent-key or batch host reconnects in the background, as it always
+// did. Only a prompt waits, for the window that would show it (the router holds it).
+TEST_CASE("a reconnect of a transport that may prompt goes on whether or not any window is looking",
+          "[attach][controller][reconnect][askpass]")
+{
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto config =
+        controllerConfig(daemon.endpoint(), timeline, { .backoff = { .first = 1ms, .ceiling = 4ms } });
+    auto const transport = std::make_shared<PromptingTransport>(std::move(config.transport));
+    config.transport = transport;
+    auto const controllerOwned = std::make_unique<contour::remote::NativeController>(std::move(config));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(transport->connects() == 1);
+
+    daemon.dropConnections();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(transport->connects() == 2);
+    CHECK(log.count(ConnectionState::NeedsAttention) == 0);
+
+    controller.stop();
+}
+
+TEST_CASE("a connection whose prompt is held says it needs attention, and says no more once it is shown",
+          "[attach][controller][reconnect][askpass]")
+{
+    using vthost::client::ConnectionState;
+    using UserAttention = contour::remote::NativeController::UserAttention;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("asleep");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    // Not while connected: nothing is being sought.
+    controller.setUserAttention(UserAttention::Needed);
+    CHECK(controller.connectionState() == ConnectionState::Connected);
+    controller.setUserAttention(UserAttention::NotNeeded);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    // The prompt of the reconnect waits for its window to be on screen.
+    controller.setUserAttention(UserAttention::Needed);
+    CHECK(controller.connectionState() == ConnectionState::NeedsAttention);
+    // The reactor says Reconnecting again as it retries: the connection keeps saying what the user must do.
+    CHECK_FALSE(
+        waitUntil([&] { return controller.connectionState() != ConnectionState::NeedsAttention; }, 100));
+
+    // Shown: the connection is being sought, as before.
+    controller.setUserAttention(UserAttention::NotNeeded);
+    CHECK(controller.connectionState() == ConnectionState::Reconnecting);
+
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+
+    controller.stop();
 }

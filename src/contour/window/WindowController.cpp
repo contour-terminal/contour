@@ -27,6 +27,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/PromptHost.hpp>
 #include <contour/window/QtString.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
@@ -88,6 +89,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    WindowRole role):
     _manager { manager },
     _windowId { windowId },
+    // Ssh's prompts for the attaches this window starts are shown here, as soon as the window exists.
+    _promptHost { std::make_unique<PromptHost>(manager.app().askpassRouter(), windowId.value) },
     _role { role },
     _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
@@ -158,6 +161,11 @@ NoticeAnnouncerFactory qtNoticeAnnouncer()
     return [](std::function<QObject*()> anchor) -> std::unique_ptr<platform::Announcer> {
         return std::make_unique<platform::QtAnnouncer>(std::move(anchor));
     };
+}
+
+QObject* WindowController::promptHost() const noexcept
+{
+    return _promptHost.get();
 }
 
 WindowController::~WindowController()
@@ -2323,11 +2331,13 @@ void WindowController::onWindowVisibilityChanged()
     // The window's presentation is READ from it (@see platform::presentationFor) rather than
     // mirrored into a member here, so this handler only has to say "look again".
     refreshWindowShadow();
+    _manager.app().refreshWindowAttention();
 }
 
 void WindowController::onWindowStateChanged()
 {
     _manager.windowStateChanged(_windowId);
+    _manager.app().refreshWindowAttention();
     // Full screen rests the band elsewhere, and moves the traffic lights into AppKit's revealed strip.
     refreshTitleBand();
     emit nativeControlsInsetChanged();
@@ -2976,6 +2986,11 @@ void WindowController::minimizeWindow()
 bool WindowController::isMinimized() const noexcept
 {
     return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowMinimized);
+}
+
+bool WindowController::isExposed() const noexcept
+{
+    return _osWindow != nullptr && _osWindow->isVisible() && !isMinimized();
 }
 
 QScreen* WindowController::screen() const noexcept

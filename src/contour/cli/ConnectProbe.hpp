@@ -16,6 +16,8 @@
 #include <optional>
 #include <string>
 
+#include <vthost/AttachBudget.hpp>
+
 namespace vthost
 {
 class DaemonSpawner;
@@ -48,16 +50,17 @@ namespace contour::cli
                                                 DaemonCounter const& sessions);
 
 /// Whether a host answers: connects, handshakes and asks for its status. A daemon that is too old to
-/// answer a status is reachable all the same.
+/// answer a status is reachable all the same, and so is a host whose login asks for an answer (a password, a
+/// host key) that a check, which never prompts, cannot give: attaching asks the user once.
 /// @param port Daemon control over the host's transport.
-/// @return Nothing when it answers, or the transport's own classified words (host key, authentication,
-///         contour missing, unreachable): what Attach to Host shows too.
+/// @return Nothing when it answers, or the transport's own classified words (contour missing, unreachable):
+///         what Attach to Host shows too.
 [[nodiscard]] std::expected<void, std::string> checkHostReachable(vthost::client::DaemonControlPort& port);
 
 /// @param transport How to reach the host.
 /// @param timeout How long the check may take.
 /// @return Daemon control over @p transport, for checkHostReachable().
 [[nodiscard]] std::unique_ptr<vthost::client::DaemonControlPort> makeHostControl(
-    std::shared_ptr<vthost::ITransportFactory> transport, std::chrono::milliseconds timeout);
+    std::shared_ptr<vthost::ITransportFactory> transport, vthost::AttachBudget timeout);
 
 } // namespace contour::cli

@@ -196,7 +196,9 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::reconnect()
         switch (outcome.ending)
         {
             case Ending::TransportFailed:
-                if (outcome.error.kind == TransportErrorKind::Cancelled)
+                // Cancelled by stop() ends quietly; one the transport reports on its own is the user's -- a
+                // login prompt dismissed -- and is said, not retried.
+                if (outcome.error.kind == TransportErrorKind::Cancelled && _stop.stop_requested())
                     co_return Outcome {};
                 if (retryOf(outcome.error.kind) == TransportRetry::Permanent)
                     co_return outcome;
@@ -223,10 +225,9 @@ core::async::Task<void> ClientSupervisor::run()
     if (!acceptedThenLost(outcome.ending))
     {
         // The first connect is not retried: the caller decides what to fall back to.
-        auto const cancelled = outcome.ending == Ending::Stopped
-                               || (outcome.ending == Ending::TransportFailed
-                                   && outcome.error.kind == TransportErrorKind::Cancelled);
-        if (cancelled)
+        // A Cancelled the transport reports without stop() is the user's: a login prompt dismissed. It is
+        // said (Failed), not folded into the quiet end of a stop().
+        if (outcome.ending == Ending::Stopped)
             enter(ConnectionState::Stopped);
         else
             enter(ConnectionState::Failed, outcome.error.message);

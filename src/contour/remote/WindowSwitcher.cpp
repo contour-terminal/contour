@@ -123,7 +123,7 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         done(std::unexpected(std::string { "a switch of this window is under way" }));
         return;
     }
-    auto destination = destinationOf(*own, target);
+    auto destination = destinationOf(*own, target, window);
     auto request = Request {
         .window = window,
         .target = std::move(target),
@@ -157,7 +157,8 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
 }
 
 WindowSwitcher::Destination WindowSwitcher::destinationOf(DaemonLink& own,
-                                                          session::SwitchTarget const& target)
+                                                          session::SwitchTarget const& target,
+                                                          vtworkspace::WorkspaceId window)
 {
     auto const named = daemonAddressOf(target);
     auto const sameDaemon = target.kind == vthost::proto::SwitchDaemonKind::Same || named == own.address()
@@ -167,7 +168,9 @@ WindowSwitcher::Destination WindowSwitcher::destinationOf(DaemonLink& own,
         return Destination { .sameDaemon = sameDaemon,
                              .address = own.address(),
                              .config = own.siblingConfig() };
-    return Destination { .sameDaemon = sameDaemon, .address = named, .config = _host.linkConfigFor(named) };
+    return Destination { .sameDaemon = sameDaemon,
+                         .address = named,
+                         .config = _host.linkConfigFor(named, window) };
 }
 
 void WindowSwitcher::listWorkspaces(vtworkspace::WorkspaceId window,
@@ -180,7 +183,7 @@ void WindowSwitcher::listWorkspaces(vtworkspace::WorkspaceId window,
         done(std::unexpected(std::string { "this window has no daemon behind it" }));
         return;
     }
-    auto destination = destinationOf(*own, daemon);
+    auto destination = destinationOf(*own, daemon, window);
     if (!destination.config)
     {
         done(std::unexpected(destination.config.error()));

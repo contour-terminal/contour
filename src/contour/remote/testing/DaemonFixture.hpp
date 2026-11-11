@@ -5,6 +5,7 @@
 // on its own event loop, serving TLS on loopback, with MockPty sessions. Shared by NativeController_test and
 // DaemonLink_test; test support only, linked into no shipped binary.
 
+#include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/NativeController.hpp>
 
 #include <vtbackend/screen/Settings.hpp>
@@ -787,6 +788,21 @@ inline void drainGuiEvents()
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCoreApplication::processEvents();
+}
+
+/// Looks at @p link's attach as the launch does -- without waiting -- until it settled.
+/// @param link The link whose attach was started by its constructor.
+/// @param budget How long the attach may take.
+/// @return Nothing once attached; why not otherwise.
+[[nodiscard]] inline std::expected<void, std::string> pollUntilAttached(contour::remote::DaemonLink& link,
+                                                                        vthost::AttachBudget budget)
+{
+    while (true)
+    {
+        if (auto const settled = link.pollAttached(budget))
+            return *settled;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 2 });
+    }
 }
 
 } // namespace contour::remote::testing
