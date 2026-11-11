@@ -2,16 +2,23 @@
 #include <vtpty/SshSession.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <crispy/BufferObject.hpp>
+
 #include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cerrno>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <string_view>
 #include <system_error>
+#include <tuple>
+#include <utility>
 
 namespace
 {
@@ -24,6 +31,65 @@ void writeFile(std::filesystem::path const& path, std::string_view contents)
 }
 
 } // namespace
+
+TEST_CASE("SSH reader wakeup interrupts the socket wait", "[ssh][threading]")
+{
+    auto session = vtpty::SshSession { {}, {} };
+    auto waiting = std::promise<void> {};
+    auto entered = waiting.get_future();
+    auto reader = std::async(std::launch::async, [&] {
+        waiting.set_value();
+        return session.waitForSocket(std::chrono::seconds { 2 });
+    });
+    entered.wait();
+    session.wakeupReader();
+    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    CHECK(reader.get() > 0);
+}
+
+TEST_CASE("SSH reader wakeup interrupts the pre-login wait", "[ssh][threading]")
+{
+    auto session = vtpty::SshSession { {}, {} };
+    auto reader = std::async(std::launch::async, [&] {
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        auto const result = session.read(*storage, std::chrono::seconds { 2 }, 4096);
+        return std::pair { result.has_value(), errno };
+    });
+    session.wakeupReader();
+    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    auto const [hasResult, error] = reader.get();
+    CHECK_FALSE(hasResult);
+    CHECK(error == EINTR);
+}
+
+TEST_CASE("SSH reader wakeups coalesce and are consumed once", "[ssh]")
+{
+    auto session = vtpty::SshSession { {}, {} };
+    auto buffers = crispy::BufferObjectPool<char> { 4096 };
+    auto storage = buffers.allocateBufferObject();
+    session.wakeupReader();
+    session.wakeupReader();
+    CHECK(session.waitForSocket(std::chrono::milliseconds { 0 }) > 0);
+    CHECK_FALSE(session.read(*storage, std::chrono::milliseconds { 0 }, 4096).has_value());
+    CHECK(errno == EINTR);
+    CHECK(session.waitForSocket(std::chrono::milliseconds { 0 }) == 0);
+    CHECK_FALSE(session.read(*storage, std::chrono::milliseconds { 0 }, 4096).has_value());
+    CHECK(errno == EAGAIN);
+}
+
+TEST_CASE("closing an SSH session wakes the pre-login reader", "[ssh][threading]")
+{
+    auto session = vtpty::SshSession { {}, {} };
+    auto reader = std::async(std::launch::async, [&] {
+        auto buffers = crispy::BufferObjectPool<char> { 4096 };
+        auto storage = buffers.allocateBufferObject();
+        return session.read(*storage, std::chrono::seconds { 2 }, 4096).has_value();
+    });
+    session.close();
+    CHECK(reader.wait_for(std::chrono::milliseconds { 500 }) == std::future_status::ready);
+    CHECK_FALSE(reader.get());
+}
 
 TEST_CASE("readSshKeyFiles reads a key pair under a directory beyond ASCII", "[ssh]")
 {
