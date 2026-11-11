@@ -26,15 +26,20 @@
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/SystemPipe.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <expected>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <utility>
 
 #include <libssh2.h>
@@ -42,12 +47,12 @@
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
-    #include <sys/select.h>
     #include <sys/socket.h>
     #include <sys/types.h>
 
     #include <fcntl.h>
     #include <netdb.h>
+    #include <poll.h>
     #include <termios.h>
     #include <unistd.h>
 
@@ -462,6 +467,8 @@ struct SshSession::Private
     LIBSSH2_AGENT* sshAgent = nullptr;
 
     SocketHandle sshSocket;
+    std::unique_ptr<core::platform::SystemPipe> readerWakeup;
+    bool isReaderWoken = false; // Guarded by _injectMutex, including draining the wakeup channel.
 };
 
 SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallback hostkeyRequestCallback):
@@ -470,6 +477,11 @@ SshSession::SshSession(SshHostConfig config, SshHostkeyVerificationRequestCallba
     _ptySlave { std::make_unique<SshPtySlave>() },
     _p { new Private(), [](Private* p) { delete p; } }
 {
+    auto wakeup = core::platform::createSystemPipe();
+    if (!wakeup)
+        throw std::runtime_error("Could not create SSH reader wakeup channel");
+    _p->readerWakeup = std::move(*wakeup);
+
     // Once per process, not once per session. libssh2_init() is not itself thread-safe, and two tabs
     // opening an SSH session at the same time called it concurrently; it also registered a fresh
     // atexit() handler each time, against an implementation only required to accept 32 of them.
@@ -511,10 +523,6 @@ SshSession::~SshSession()
         libssh2_session_free(_p->sshSession);
         _p->sshSession = nullptr;
     }
-
-#ifdef _WIN32
-    WSACleanup();
-#endif
 }
 
 void SshSession::setState(State nextState)
@@ -877,6 +885,7 @@ void SshSession::close()
     auto const _ = std::lock_guard { _mutex };
 
     setState(State::Closed);
+    wakeupReader();
 
     if (_p->sshChannel)
     {
@@ -907,7 +916,8 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
     {
         auto injectLock = std::unique_lock { _injectMutex };
         auto const readable = [this]() {
-            return _state == State::Operational || !_injectedRead.empty();
+            return _state == State::Operational || !_injectedRead.empty() || _p->isReaderWoken
+                   || _state == State::Closed || _state == State::Failure;
         };
         // Bounded by the timeout like any other read: the terminal reads ahead with a zero timeout while
         // the render thread holds its state, and must not park here -- before it has parsed the password
@@ -923,6 +933,25 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
         else
             _injectCV.wait(injectLock, readable);
 
+        if (_p->isReaderWoken)
+        {
+            _p->isReaderWoken = false;
+            auto bytes = std::array<char, 256> {};
+            while (true)
+            {
+                auto const drained = _p->readerWakeup->read(bytes.data(), bytes.size());
+#ifndef _WIN32
+                // SystemPipe reports an interrupted recv as an empty result.
+                if (drained && drained->empty() && errno == EINTR)
+                    continue;
+#endif
+                if (!drained || drained->empty() || drained->isEndOfStream())
+                    break;
+            }
+            errno = EINTR;
+            return std::nullopt;
+        }
+
         if (!_injectedRead.empty())
         {
             auto const nread = std::min(size, _injectedRead.size());
@@ -930,6 +959,12 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
             _injectedRead.erase(0, nread);
             return ReadResult { .data = std::string_view { storage.hotEnd(), nread },
                                 .fromStdoutFastPipe = false };
+        }
+
+        if (_state == State::Closed || _state == State::Failure)
+        {
+            errno = EPIPE;
+            return std::nullopt;
         }
 
         if (_state == State::AuthenticatePasswordWaitForInput)
@@ -989,11 +1024,24 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
 
 void SshSession::wakeupReader()
 {
-    // TODO: implement
-    //
-    // wakeupReader() is invoked in TerminalSession's destructor (we could as well just call forceClose()
-    // there, which would first wake-up a potential read()-call, if necessary.
-    // And it's called in Terminal twice, where I am currently not sure that we even still need these calls.
+    {
+        auto const lock = std::lock_guard { _injectMutex };
+        if (!_p->isReaderWoken)
+        {
+            auto written = _p->readerWakeup->write("\0", 1);
+#ifndef _WIN32
+            while (!written && errno == EINTR)
+                written = _p->readerWakeup->write("\0", 1);
+#else
+            while (!written && WSAGetLastError() == WSAEINTR)
+                written = _p->readerWakeup->write("\0", 1);
+#endif
+            _p->isReaderWoken = written && *written == 1;
+            if (!_p->isReaderWoken)
+                logError("Failed to signal the SSH reader wakeup channel.");
+        }
+    }
+    _injectCV.notify_all();
 }
 
 void SshSession::handlePreAuthenticationPasswordInput(std::string_view buf, State next)
@@ -1226,15 +1274,7 @@ void SshSession::fail(std::string reason)
 
 bool SshSession::connect(std::string_view host, int port)
 {
-#ifdef _WIN32
-    WSADATA wsaData {};
-    if (auto const wsaStartupCode = WSAStartup(MAKEWORD(2, 2), &wsaData); wsaStartupCode != 0)
-    {
-        fail("WSAStartup failed with error: {}", wsaStartupCode);
-        return false;
-    }
-#endif
-
+    // createSystemPipe() initialized the process-wide Winsock lifetime before any socket was made.
     // The reason the LAST address refused, for the message written once every one of them has. It
     // outlives the try block because that is where the message is written.
     auto lastConnectDetail = std::string {};
@@ -1426,22 +1466,32 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 {
     // Called only after a libssh2 call returned EAGAIN, and deliberately WITHOUT _mutex held: this is
     // where the reader thread spends its idle time, and blocking here under the lock would make every
-    // keystroke wait for the remote to speak. Only the direction query needs the lock. @see _mutex.
-    auto const dir = [&]() {
+    // keystroke wait for the remote to speak. Snapshot the direction and socket under the lock.
+    auto const [dir, socket] = [&]() {
         auto const _ = std::lock_guard { _mutex };
         assert(_p->sshSession);
-        return libssh2_session_block_directions(_p->sshSession);
+        auto const socket = _p->sshSocket.isOpen() ? std::optional { _p->sshSocket.get() } : std::nullopt;
+        return std::pair { libssh2_session_block_directions(_p->sshSession), socket };
     }();
 
-    auto fd = fd_set {};
-    FD_ZERO(&fd);
-    FD_SET(_p->sshSocket, &fd);
-
-    // libssh2 tells us which way it is blocked; waiting on the other one would just spin.
-    auto* readfd = (dir & LIBSSH2_SESSION_BLOCK_INBOUND) != 0 ? &fd : nullptr;
-    auto* writefd = (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND) != 0 ? &fd : nullptr;
-    if (readfd == nullptr && writefd == nullptr)
-        readfd = &fd; // libssh2 reported neither; inbound is the sane default for a shell session.
+    auto const wakeupSocket = static_cast<SocketHandle::native_handle_type>(
+        core::platform::nativeHandleToNumber(_p->readerWakeup->readFd()));
+    auto const waitForInput = (dir & LIBSSH2_SESSION_BLOCK_INBOUND) != 0 || dir == 0;
+    auto const waitForOutput = (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND) != 0;
+#ifdef _WIN32
+    auto readers = fd_set {};
+    auto writers = fd_set {};
+    FD_ZERO(&readers);
+    FD_ZERO(&writers);
+    FD_SET(wakeupSocket, &readers);
+    // Always watch the wakeup channel, even when libssh2 is waiting for outbound capacity.
+    if (socket)
+    {
+        if (waitForInput)
+            FD_SET(*socket, &readers);
+        if (waitForOutput)
+            FD_SET(*socket, &writers);
+    }
 
     auto tv = timeval {};
     if (timeout)
@@ -1450,8 +1500,15 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
         tv.tv_usec = static_cast<decltype(tv.tv_usec)>((timeout->count() % 1000) * 1000);
     }
 
-    // TODO: also watch for break signal, so we can abort waiting for socket
-    return ::select(static_cast<int>(_p->sshSocket + 1), readfd, writefd, nullptr, timeout ? &tv : nullptr);
+    return ::select(0, &readers, &writers, nullptr, timeout ? &tv : nullptr);
+#else
+    auto const events = static_cast<short>((waitForInput ? POLLIN : 0) | (waitForOutput ? POLLOUT : 0));
+    auto fds = std::array { pollfd { wakeupSocket, POLLIN, 0 }, pollfd { socket.value_or(-1), events, 0 } };
+    auto const timeoutMs = timeout ? static_cast<int>(std::clamp<std::chrono::milliseconds::rep>(
+                                         timeout->count(), 0, std::numeric_limits<int>::max()))
+                                   : -1;
+    return ::poll(fds.data(), fds.size(), timeoutMs);
+#endif
 }
 
 void SshSession::authenticateWithPrivateKey()
