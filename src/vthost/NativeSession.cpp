@@ -540,7 +540,13 @@ void NativeSession::pushProgramStatus(SessionId session, ProgramStatusPush when)
     auto* const terminal = _host.terminal(session);
     if (terminal == nullptr)
         return;
-    auto pdu = proto::ProgramStatus { .session = session.value, .records = {} };
+    auto pdu = proto::ProgramStatus {
+        .session = session.value,
+        .records = {},
+        .timing = _negotiated && _negotiated->shared.contains(proto::Capability::ProgramStatusTiming)
+                      ? proto::StatusTimingBlock::Included
+                      : proto::StatusTimingBlock::Omitted,
+    };
     {
         auto const guard = std::lock_guard { std::as_const(*terminal) };
         for (auto const& record: terminal->programStatus().records())
@@ -1800,7 +1806,8 @@ void NativeSession::handleInput(proto::Input const& input)
     _host.writeInputFrom(
         SessionId { input.session },
         std::string_view { reinterpret_cast<char const*>(input.data.data()), input.data.size() },
-        _id);
+        _id,
+        input.kind);
     pauseReadingIfBackedUp(SessionId { input.session });
     // The program may answer the keys by turning echo back on without printing a byte: read it again at the
     // next flush, which the session's pump has written the keys by.

@@ -12,9 +12,11 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 
 #include <vtcontrol/ObjectRef.hpp>
 #include <vtcontrol/Uuid.hpp>
@@ -68,6 +70,13 @@ namespace vthost
           vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Workspace, workspace }) },
     };
 }
+
+/// Every variable a daemon hands the shells it hosts: hostedShellEnvironment()'s and paneEnvironment()'s.
+/// A shell spawned anywhere else must not inherit them -- the in-process GUI's, started from a daemon's
+/// pane, would otherwise have its agents report their status into that pane of the outer daemon.
+inline constexpr auto HostedShellVariables = std::array<std::string_view, 5> {
+    "CONTOUR_MUX", "CONTOUR_DAEMON", "CONTOUR_PANE", "CONTOUR_TAB", "CONTOUR_WORKSPACE",
+};
 
 /// What a spawn's command override is, against the daemon's configured shell.
 enum class ShellOverride : uint8_t

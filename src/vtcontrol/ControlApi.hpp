@@ -106,6 +106,8 @@ class ControlApi
     virtual void handle(CallContext& context, CloseTabRequest const& request, Completion<EmptyReply> done) = 0;
     virtual void handle(CallContext& context, SwitchWorkspaceRequest const& request, Completion<SwitchWorkspaceReply> done) = 0;
     virtual void handle(CallContext& context, SetLabelRequest const& request, Completion<EmptyReply> done) = 0;
+    virtual void handle(CallContext& context, ReportStatusRequest const& request, Completion<EmptyReply> done) = 0;
+    virtual void handle(CallContext& context, ClearStatusRequest const& request, Completion<EmptyReply> done) = 0;
     virtual void handle(CallContext& context, BlockListRequest const& request, Completion<BlockListReply> done) = 0;
     virtual void handle(CallContext& context, BlockReadRequest const& request, Completion<BlockReadReply> done) = 0;
     virtual void handle(CallContext& context, WaitRequest const& request, Completion<WaitReply> done) = 0;

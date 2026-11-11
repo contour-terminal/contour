@@ -188,6 +188,9 @@ struct RemoteScreen
     /// arrived -- or replayed afresh -- catches up from it. Held to vtbackend::MaxProgramStatusRecords, the
     /// newest kept, for the peer chooses what it sends.
     std::vector<proto::WireProgramStatusRecord> programStatus;
+    /// Whether that ProgramStatus carried the host's timing block, as only a host sharing
+    /// Capability::ProgramStatusTiming does.
+    proto::StatusTimingBlock programStatusTiming = proto::StatusTimingBlock::Omitted;
 
     /// Whether a chunked snapshot is still arriving: set by a piece that opens or continues a
     /// run, cleared by the one that completes it.
@@ -421,8 +424,12 @@ class NativeClient final
     /// single attach-style call after construction a supervisor makes, before run().
     void setHandshakeHandler(HandshakeHandler handler) { _onHandshake = std::move(handler); }
 
-    /// Sends keyboard/paste bytes to @p session's PTY.
-    void sendInput(uint64_t session, std::string_view bytes);
+    /// Sends input bytes to @p session's PTY.
+    /// @param session The session they are for.
+    /// @param bytes   The bytes, as the terminal encoded them.
+    /// @param kind    What they carry. Sent only to a daemon sharing Capability::InputKinds; to any other
+    ///                every Input is Other.
+    void sendInput(uint64_t session, std::string_view bytes, proto::InputKind kind);
 
     /// Proposes the CLIENT AREA size — the whole content area the layout is rendered into, not any
     /// one pane. The server projects the pane tree into it and answers with fresh snapshots.

@@ -1025,13 +1025,13 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         // forgotten.
         window->activateTab(0);
         window->activateTab(1);
-        REQUIRE(manager.tabAttention().of(background->modelSessionId())
-                == contour::window::SessionAttention {});
+        REQUIRE(manager.tabAttention().of(background->modelSessionId()).activity
+                == contour::window::TabActivity::None);
 
         // The program-status path alone, as Step 2's pane properties call it.
         manager.refreshTabBadgeForSession(background->modelSessionId());
-        CHECK(manager.tabAttention().of(background->modelSessionId())
-              == contour::window::SessionAttention {});
+        CHECK(manager.tabAttention().of(background->modelSessionId()).activity
+              == contour::window::TabActivity::None);
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
     }
 
@@ -1099,6 +1099,45 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         manager.removeSession(*background);
         CHECK(manager.tabAttention().of(id) == contour::window::SessionAttention {});
     }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("badge.doneOnVisibleTabIsSeenAtOnce", "[manager][tabbadge][badge][tabs]")
+{
+    using contour::window::TabBadgeKind;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    window->createNewTab();
+    REQUIRE(window->activeTabIndex() == 1);
+    auto* const background = sessionAtRow(manager, *window, 0);
+    auto* const active = sessionAtRow(manager, *window, 1);
+    REQUIRE(background != nullptr);
+    REQUIRE(active != nullptr);
+    drainPosted();
+
+    constexpr auto DoneStatus = std::string_view { "\033]7501;state=done\033\\" };
+    constexpr auto ErrorStatus = std::string_view { "\033]7501;state=error\033\\" };
+
+    // Visible when it arrives: noted seen in the same refresh, so the active tab never shows it.
+    active->terminal().writeToScreen(DoneStatus);
+    drainPosted();
+    CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    CHECK(manager.tabAttention().of(active->modelSessionId()).seenStatusGeneration > 0);
+
+    // Out of sight it shows until the tab is seen, and stays gone once it is sent back.
+    background->terminal().writeToScreen(ErrorStatus);
+    drainPosted();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::Error);
+    window->activateTab(0);
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+    window->activateTab(1);
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
 
     contour::test::closeAllTabs(*window);
 }

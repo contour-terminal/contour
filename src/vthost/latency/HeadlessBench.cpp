@@ -282,7 +282,7 @@ namespace
                 &loop,
                 [&] {
                     if (auto const key = probe.takeDueKey(KeyboardFocus::Present); key && sessionOf())
-                        client.sendInput(*sessionOf(), oneByte(*key));
+                        client.sendInput(*sessionOf(), oneByte(*key), proto::InputKind::Keyboard);
                     return isSettled(probe.phase());
                 },
                 KeyPoll);
@@ -313,7 +313,7 @@ namespace
         }
         // The child ends on it, which ends its session.
         if (auto const session = sessionOf())
-            client.sendInput(*session, oneByte(QuitByte));
+            client.sendInput(*session, oneByte(QuitByte), proto::InputKind::Keyboard);
         co_await loop.delay(QuitFlushGrace);
         client.detach();
     }

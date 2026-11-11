@@ -24,6 +24,7 @@
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
+#include <vthost/control/StatusText.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -711,6 +712,101 @@ void ControlService::handle(vtcontrol::CallContext& context,
             _host.writeInput(target.session, request.text);
         return vtcontrol::SendReply {};
     }));
+}
+
+namespace
+{
+    /// The longest integration id.
+    constexpr auto MaxIntegrationIdLength = std::size_t { 32 };
+
+    /// @return Whether @p id is an integration id: [a-z0-9-]{1,32}.
+    [[nodiscard]] bool isIntegrationId(std::string_view id) noexcept
+    {
+        return !id.empty() && id.size() <= MaxIntegrationIdLength && std::ranges::all_of(id, [](char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+        });
+    }
+
+    [[nodiscard]] ControlError badStatusRequest(std::string message)
+    {
+        return ControlError { .code = ControlErrorCode::BadRequest,
+                              .message = std::move(message),
+                              .candidates = {} };
+    }
+
+    /// @return Nothing when @p id is an integration id; else BadRequest saying what one is.
+    [[nodiscard]] std::expected<void, ControlError> checkIntegrationId(std::string_view id)
+    {
+        if (isIntegrationId(id))
+            return {};
+        return std::unexpected(badStatusRequest("'integration' must match [a-z0-9-]{1,32}"));
+    }
+
+    /// @return The record @p request asks for, or BadRequest naming what is wrong with it.
+    [[nodiscard]] std::expected<vtbackend::ProgramStatusRecord, ControlError> integrationRecordOf(
+        vtcontrol::ReportStatusRequest const& request)
+    {
+        if (auto checked = checkIntegrationId(request.integration); !checked)
+            return std::unexpected(std::move(checked.error()));
+        auto const state = vtcontrol::enumFromName<vtcontrol::ProgramState>(request.state);
+        if (!state)
+            return std::unexpected(badStatusRequest(std::format("unknown state '{}'", request.state)));
+        auto const kind = request.kind.empty()
+                              ? std::optional { vtcontrol::BlockedKind::None }
+                              : vtcontrol::enumFromName<vtcontrol::BlockedKind>(request.kind);
+        if (!kind)
+            return std::unexpected(badStatusRequest(std::format("unknown kind '{}'", request.kind)));
+        if (*kind != vtcontrol::BlockedKind::None && *state != vtcontrol::ProgramState::Blocked)
+            return std::unexpected(badStatusRequest("'kind' is for the blocked state only"));
+        if (request.progress && *request.progress > 100)
+            return std::unexpected(badStatusRequest("'progress' must be 0..100"));
+        auto record = vtbackend::ProgramStatusRecord {
+            .id = request.integration,
+            .state = fromApi(ProgramStateBridge, *state),
+            .kind = fromApi(BlockedKindBridge, *kind),
+            .progress = std::nullopt,
+            // Its own app, the integration: an empty one would inherit the root record's (OSC 7501's) app,
+            // so a shell's "vim" would name the agent.
+            .app = request.integration,
+            .title = sanitizeStatusText(request.title),
+            .message = sanitizeStatusText(request.message),
+            .origin = vtbackend::ProgramStatusOrigin::Integration,
+        };
+        if (vtbackend::takesProgress(record.state))
+            record.progress = request.progress;
+        return record;
+    }
+} // namespace
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::ReportStatusRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(resolvePane(context, request.pane).and_then([&](PaneTarget const& pane) {
+        return integrationRecordOf(request).and_then(
+            [&](vtbackend::ProgramStatusRecord record) -> std::expected<vtcontrol::EmptyReply, ControlError> {
+                auto* const terminal = _host.terminal(pane.session);
+                if (terminal == nullptr)
+                    return std::unexpected(notFound("the pane has no terminal"));
+                std::ignore = terminal->applyIntegrationStatus(std::move(record));
+                return vtcontrol::EmptyReply {};
+            });
+    }));
+}
+
+void ControlService::handle(vtcontrol::CallContext& context,
+                            vtcontrol::ClearStatusRequest const& request,
+                            vtcontrol::Completion<vtcontrol::EmptyReply> done)
+{
+    done(checkIntegrationId(request.integration)
+             .and_then([&] { return resolvePane(context, request.pane); })
+             .and_then([&](PaneTarget const& pane) -> std::expected<vtcontrol::EmptyReply, ControlError> {
+                 auto* const terminal = _host.terminal(pane.session);
+                 if (terminal == nullptr)
+                     return std::unexpected(notFound("the pane has no terminal"));
+                 std::ignore = terminal->clearIntegrationStatus(request.integration);
+                 return vtcontrol::EmptyReply {};
+             }));
 }
 
 void ControlService::handle(vtcontrol::CallContext& context,

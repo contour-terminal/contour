@@ -75,5 +75,6 @@ TEST_CASE("API enums are spelled by their tables", "[vtcontrol][api]")
 {
     CHECK(vtcontrol::nameOf(vtcontrol::SendWait::CommandFinished) == "commandFinished");
     CHECK(vtcontrol::nameOf(vtcontrol::ProgramStatusReason::ProcessExit) == "processExit");
+    CHECK(vtcontrol::nameOf(vtcontrol::ProgramStatusReason::UserInput) == "userInput");
     CHECK(vtcontrol::enumFromName<vtcontrol::BlockState>("superseded") == vtcontrol::BlockState::Superseded);
 }

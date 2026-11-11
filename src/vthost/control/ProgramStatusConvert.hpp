@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,6 +16,8 @@
 #include <vector>
 
 #include <vtcontrol/Api.hpp>
+#include <vthost/TimeWire.hpp>
+#include <vthost/control/PaneText.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost::control
@@ -57,6 +61,7 @@ inline constexpr auto ProgramStatusReasonBridge = std::array {
     EnumBridge { vtbackend::ProgramStatusReason::ProcessExit, vtcontrol::ProgramStatusReason::ProcessExit },
     EnumBridge { vtbackend::ProgramStatusReason::Reset, vtcontrol::ProgramStatusReason::Reset },
     EnumBridge { vtbackend::ProgramStatusReason::Mirror, vtcontrol::ProgramStatusReason::Mirror },
+    EnumBridge { vtbackend::ProgramStatusReason::UserInput, vtcontrol::ProgramStatusReason::UserInput },
 };
 
 /// @return The vtcontrol enumerator @p value is, by @p bridge.
@@ -66,6 +71,15 @@ template <typename Backend, typename Api, std::size_t N>
 {
     auto const row = std::ranges::find(bridge, value, &EnumBridge<Backend, Api>::backend);
     return row != bridge.end() ? row->api : bridge.front().api;
+}
+
+/// @return The vtbackend enumerator @p value is, by @p bridge.
+template <typename Backend, typename Api, std::size_t N>
+[[nodiscard]] constexpr Backend fromApi(std::array<EnumBridge<Backend, Api>, N> const& bridge,
+                                        Api value) noexcept
+{
+    auto const row = std::ranges::find(bridge, value, &EnumBridge<Backend, Api>::api);
+    return row != bridge.end() ? row->backend : bridge.front().backend;
 }
 
 /// @return The vtbackend enumerator whose wire byte is @p wire, or nothing when this build knows none.
@@ -95,6 +109,13 @@ template <typename Backend, typename Api, std::size_t N>
         .app = std::string { inheritedApp },
         .title = record.title,
         .message = record.message,
+        .origin =
+            std::string { vtbackend::ProgramStatusOriginNames.at(std::to_underlying(record.origin)).name },
+        .since = record.since == std::chrono::system_clock::time_point {} ? std::string {}
+                                                                          : formatTimestamp(record.since),
+        // The control vocabulary has no 64-bit integer (the extension ABI flattens everything to i32).
+        .generation = static_cast<uint32_t>(
+            std::min<uint64_t>(record.generation, std::numeric_limits<uint32_t>::max())),
     };
 }
 
@@ -121,6 +142,9 @@ template <typename Backend, typename Api, std::size_t N>
         .app = record.app,
         .title = record.title,
         .message = record.message,
+        .origin = std::to_underlying(record.origin),
+        .sinceNs = toWireTime(record.since),
+        .generation = record.generation,
     };
 }
 
@@ -144,6 +168,12 @@ template <typename Backend, typename Api, std::size_t N>
         .app = wire.app,
         .title = wire.title,
         .message = wire.message,
+        // A newer host's origin is none this build knows: the program's own is the safe reading.
+        .origin = wire.origin == std::to_underlying(vtbackend::ProgramStatusOrigin::Integration)
+                      ? vtbackend::ProgramStatusOrigin::Integration
+                      : vtbackend::ProgramStatusOrigin::Program,
+        .since = fromWireTime(wire.sinceNs),
+        .generation = wire.generation,
     };
     if (*state == vtbackend::ProgramState::Blocked)
         record.kind = fromWireByte(BlockedKindBridge, wire.kind).value_or(vtbackend::BlockedKind::None);

@@ -1901,20 +1901,33 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
 
 void SessionHost::writeInput(SessionId session, std::string_view bytes)
 {
-    writeInputAs(session, bytes, std::nullopt);
+    writeInputAs(session, bytes, std::nullopt, proto::InputKind::Other);
 }
 
-void SessionHost::writeInputFrom(SessionId session, std::string_view bytes, ConnectionId const& from)
+void SessionHost::writeInputFrom(SessionId session,
+                                 std::string_view bytes,
+                                 ConnectionId const& from,
+                                 proto::InputKind kind)
 {
-    writeInputAs(session, bytes, from);
+    writeInputAs(session, bytes, from, kind);
 }
 
-void SessionHost::writeInputAs(SessionId session, std::string_view bytes, std::optional<ConnectionId> from)
+void SessionHost::writeInputAs(SessionId session,
+                               std::string_view bytes,
+                               std::optional<ConnectionId> from,
+                               proto::InputKind kind)
 {
     if (auto const it = _sessions.find(session.value); it != _sessions.end())
     {
+        // A client's user typing answers whatever an integration was waiting on. The control API's own input
+        // does not, nor does what a window sends by itself -- the focus report as it is switched to, a mouse
+        // report -- which is why the client says which is which.
+        auto const answersIntegration = from.has_value() && kind == proto::InputKind::Keyboard;
         _lastInput.insert_or_assign(session.value,
                                     LastInput { .at = _loop.clock().now(), .from = std::move(from) });
+        if (answersIntegration)
+            if (auto* const terminal = this->terminal(session))
+                std::ignore = terminal->noteUserInputForProgramStatus();
         it->second->writeInput(bytes);
     }
 }

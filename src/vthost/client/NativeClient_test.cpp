@@ -12,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -119,10 +120,11 @@ struct EndToEndHarness
         pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
     std::unique_ptr<NativeSession> server = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first));
+    NativeClient::HandshakeOptions options {};
     std::unique_ptr<NativeClient> client =
         std::make_unique<NativeClient>(loop,
                                        std::move(pair.second),
-                                       NativeClient::HandshakeOptions {},
+                                       options,
                                        vtbackend::CommandBlockStoreLimits {},
                                        NativeClient::UpdateHandler {},
                                        NativeClient::ImageHandler {},
@@ -152,7 +154,7 @@ Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
     CHECK(h->client->screens().at(sessionId.value).viewportText().contains("second line"));
 
     // 3. Input flows back into the pane's PTY.
-    h->client->sendInput(sessionId.value, "ls\r");
+    h->client->sendInput(sessionId.value, "ls\r", proto::InputKind::Keyboard);
     auto& tapped = dynamic_cast<vthost::TappingPty&>(h->host.terminal(sessionId)->device());
     auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
     co_await core::net::testing::waitUntil(&h->loop, [&] { return !mock.stdinBuffer().empty(); });
@@ -193,6 +195,61 @@ TEST_CASE("attach mirrors, updates, inputs and resizes end to end", "[vthost][at
     // The scenario ran to completion (no REQUIRE in it aborted the drive): the mirror carries the
     // per-pane width step 5 reported, not the client area step 4 proposed.
     CHECK(h.client->screens().at(sessionId.value).columns == 70);
+}
+
+namespace
+{
+
+/// Has the client type "y" into a pane whose integration waits on the user.
+/// @param answered Set to whether that answered it.
+Task<void> typeIntoBlockedPane(EndToEndHarness* h, vtworkspace::SessionId sessionId, bool* answered)
+{
+    co_await core::net::testing::waitUntil(&h->loop, [&] { return !h->client->screens().empty(); });
+    REQUIRE(h->client->connected());
+    auto* const terminal = h->host.terminal(sessionId);
+    std::ignore = terminal->applyIntegrationStatus(vtbackend::ProgramStatusRecord {
+        .id = "claude-code",
+        .state = vtbackend::ProgramState::Blocked,
+        .kind = vtbackend::BlockedKind::Permission,
+        .progress = std::nullopt,
+        .app = {},
+        .title = {},
+        .message = {},
+    });
+    h->client->sendInput(sessionId.value, "y", proto::InputKind::Keyboard);
+    auto& tapped = dynamic_cast<vthost::TappingPty&>(terminal->device());
+    auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
+    co_await core::net::testing::waitUntil(&h->loop, [&] { return !mock.stdinBuffer().empty(); });
+    {
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
+        *answered = terminal->programStatus().find("claude-code")->state == vtbackend::ProgramState::Working;
+    }
+    h->client->detach();
+}
+
+/// Runs the daemon, the client and typeIntoBlockedPane() until all three are done.
+Task<void> driveTyping(EndToEndHarness* h, vtworkspace::SessionId sessionId, bool* answered)
+{
+    co_await core::async::whenAll(
+        h->server->run(), h->client->run(), typeIntoBlockedPane(h, sessionId, answered));
+}
+
+} // namespace
+
+TEST_CASE("NativeClient.typedInputAnswersAnIntegrationOnlyWithInputKinds", "[vthost][attach][programstatus]")
+{
+    // A client that says which of its input was typed answers; one that predates saying so never does, as its
+    // focus and mouse reports would otherwise answer too.
+    for (auto const& [offered, answers]:
+         { std::pair { proto::CapabilitySet::of({ proto::Capability::InputKinds }), true },
+           std::pair { proto::CapabilitySet {}, false } })
+    {
+        auto h = EndToEndHarness { .options = { .capabilities = offered } };
+        auto const sessionId = newSession(h.host);
+        auto answered = false;
+        h.loop.blockOn(driveTyping(&h, sessionId, &answered));
+        CHECK(answered == answers);
+    }
 }
 
 TEST_CASE("RemoteScreen renders blank rows and trims trailing space", "[vthost][attach]")

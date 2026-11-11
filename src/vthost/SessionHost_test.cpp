@@ -756,6 +756,57 @@ TEST_CASE("the last pane's session exit closes the whole tab", "[vthost][host]")
     CHECK(h.recorder.saw("tabClosed"));
 }
 
+TEST_CASE("SessionHost.clientTypingUnblocksIntegrationStatus", "[vthost][host][programstatus]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source, clock };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto const session = vthost::testing::newSession(host);
+    auto* const terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    auto const block = [&] {
+        std::ignore = terminal->applyIntegrationStatus(vtbackend::ProgramStatusRecord {
+            .id = "claude-code",
+            .state = vtbackend::ProgramState::Blocked,
+            .kind = vtbackend::BlockedKind::Permission,
+            .progress = std::nullopt,
+            .app = {},
+            .title = {},
+            .message = {},
+        });
+    };
+    auto const stateOfAgent = [&] {
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
+        return terminal->programStatus().find("claude-code")->state;
+    };
+
+    block();
+    REQUIRE(stateOfAgent() == vtbackend::ProgramState::Blocked);
+
+    // The control API's own input (pane.send) is not a person answering.
+    host.writeInput(session, "echo hi\n");
+    CHECK(stateOfAgent() == vtbackend::ProgramState::Blocked);
+
+    auto const client = vthost::ConnectionId { .endpoint = "native", .index = 1 };
+
+    // Nor is what a window sends by itself: the focus report as its tab is switched to, a mouse report.
+    host.writeInputFrom(session, "\x1b[I", client, vthost::proto::InputKind::Other);
+    CHECK(stateOfAgent() == vtbackend::ProgramState::Blocked);
+    host.writeInputFrom(session, "\x1b[<0;1;1M", client, vthost::proto::InputKind::Other);
+    CHECK(stateOfAgent() == vtbackend::ProgramState::Blocked);
+
+    // A client's user typing is.
+    host.writeInputFrom(session, "y", client, vthost::proto::InputKind::Keyboard);
+    CHECK(stateOfAgent() == vtbackend::ProgramState::Working);
+}
+
 TEST_CASE("writeInput stamps the session's last input on the loop clock", "[vthost][host][flush]")
 {
     auto clock =
@@ -5554,9 +5605,9 @@ TEST_CASE("the host remembers which connection typed last", "[vthost][host][swit
     CHECK_FALSE(h.host.lastInputFrom(session).has_value());
     CHECK_FALSE(h.host.lastTypistIn(workspace).has_value());
 
-    h.host.writeInputFrom(session, "a", a);
+    h.host.writeInputFrom(session, "a", a, vthost::proto::InputKind::Keyboard);
     CHECK(h.host.lastInputFrom(session) == a);
-    h.host.writeInputFrom(session, "b", b);
+    h.host.writeInputFrom(session, "b", b, vthost::proto::InputKind::Keyboard);
     CHECK(h.host.lastInputFrom(session) == b);
     CHECK(h.host.lastTypistIn(workspace) == b);
 

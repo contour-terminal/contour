@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <initializer_list>
@@ -30,11 +31,11 @@
 #include <vthost/client/ScreenMirror.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 
+using contour::window::AllRecordsSeen;
 using contour::window::badgeFor;
 using contour::window::BadgeKind;
 using contour::window::disarmInvisibleFormatting;
 using contour::window::ProgramStatusBadge;
-using contour::window::TabFocus;
 using vtbackend::ProgramState;
 using vtbackend::ProgramStatusRecord;
 
@@ -50,7 +51,8 @@ ProgramStatusRecord recordOf(ProgramState state, std::string message = {}, std::
                                  .progress = std::nullopt,
                                  .app = "app",
                                  .title = std::move(title),
-                                 .message = std::move(message) };
+                                 .message = std::move(message),
+                                 .generation = 1 };
 }
 
 /// @p codepoints as UTF-8.
@@ -62,7 +64,7 @@ std::string utf8(std::initializer_list<char32_t> codepoints)
 /// The badge @p records earn in a background tab.
 ProgramStatusBadge background(std::vector<ProgramStatusRecord> const& records)
 {
-    return badgeFor(records, TabFocus::Background);
+    return badgeFor(records, 0);
 }
 
 } // namespace
@@ -78,19 +80,44 @@ TEST_CASE("badgeFor picks the most urgent record", "[contour][window][programsta
 
     CHECK(background({ recordOf(ProgramState::Idle) }).kind == BadgeKind::None);
     CHECK(background({}).kind == BadgeKind::None);
-    CHECK(badgeFor(std::vector { recordOf(ProgramState::Done) }, TabFocus::Foreground).kind
-          == BadgeKind::None);
+    CHECK(badgeFor(std::vector { recordOf(ProgramState::Done) }, AllRecordsSeen).kind == BadgeKind::None);
     CHECK(background({ recordOf(ProgramState::Done) }).kind == BadgeKind::Done);
     CHECK(background({ recordOf(ProgramState::Error), recordOf(ProgramState::Working) }).kind
           == BadgeKind::Error);
 
     // In front, a failure is already on screen; what still runs shows.
     CHECK(badgeFor(std::vector { recordOf(ProgramState::Error), recordOf(ProgramState::Working) },
-                   TabFocus::Foreground)
+                   AllRecordsSeen)
               .kind
           == BadgeKind::Working);
-    CHECK(badgeFor(std::vector { recordOf(ProgramState::Blocked) }, TabFocus::Foreground).kind
+    CHECK(badgeFor(std::vector { recordOf(ProgramState::Blocked) }, AllRecordsSeen).kind
           == BadgeKind::Blocked);
+}
+
+TEST_CASE("badgeFor.doneOnlyWhileUnseen", "[contour][window][programstatus]")
+{
+    auto done = recordOf(ProgramState::Done);
+    done.generation = 5;
+    auto error = recordOf(ProgramState::Error);
+    error.generation = 5;
+    CHECK(badgeFor(std::vector { done }, 4).kind == BadgeKind::Done);
+    CHECK(badgeFor(std::vector { done }, 5).kind == BadgeKind::None);
+    CHECK(badgeFor(std::vector { error }, 4).kind == BadgeKind::Error);
+    CHECK(badgeFor(std::vector { error }, 5).kind == BadgeKind::None);
+    // A seen failure no longer hides what still runs, nor shadows a newer one.
+    auto working = recordOf(ProgramState::Working);
+    CHECK(badgeFor(std::vector { error, working }, 5).kind == BadgeKind::Working);
+}
+
+TEST_CASE("badgeFor.blockedIgnoresSeen", "[contour][window][programstatus]")
+{
+    auto blocked = recordOf(ProgramState::Blocked);
+    blocked.generation = 3;
+    auto working = recordOf(ProgramState::Working);
+    working.generation = 3;
+    CHECK(badgeFor(std::vector { blocked }, 3).kind == BadgeKind::Blocked);
+    CHECK(badgeFor(std::vector { blocked }, AllRecordsSeen).kind == BadgeKind::Blocked);
+    CHECK(badgeFor(std::vector { working }, AllRecordsSeen).kind == BadgeKind::Working);
 }
 
 TEST_CASE("badgeFor shows the newest record's progress and text", "[contour][window][programstatus]")
@@ -123,6 +150,12 @@ TEST_CASE("badge text is disarmed", "[contour][window][programstatus]")
     auto const kept = utf8({ U'c', U'a', U'f', 0x00E9, U' ', 0x2192, U' ', U'o', U'k' });
     CHECK(disarmInvisibleFormatting(kept) == kept);
     CHECK(disarmInvisibleFormatting("a\x1b[31mb") == "a[31mb");
+    // The same table as the daemon's: what it lacked before -- the Arabic letter mark, line separators, tag
+    // characters, prepended concatenation marks, Hangul fillers -- and line breaks shown as one space.
+    CHECK(disarmInvisibleFormatting(utf8({ U'a', 0x061C, 0x0600, 0x3164, 0xFFA0, 0xE0041, U'b' })) == "ab");
+    CHECK(disarmInvisibleFormatting(utf8({ U'a', U'\r', U'\n', 0x2028, U'b' })) == "a b");
+    CHECK(disarmInvisibleFormatting("a\nb") == "a b");
+    CHECK(disarmInvisibleFormatting("\r\ndone it\n") == "done it"); // no space at either end
     CHECK(background({ recordOf(ProgramState::Blocked, "rm -rf " + utf8({ 0x202E }) + "/ ?") }).text
           == "rm -rf / ?");
 
@@ -180,14 +213,16 @@ TEST_CASE("a tab's badge pools its panes' records, each with its own pane's app"
                                                     .progress = {},
                                                     .app = "deploy",
                                                     .title = {},
-                                                    .message = {} });
+                                                    .message = {} },
+                              {});
     std::ignore = first.apply(ProgramStatusRecord { .id = "eu",
                                                     .state = ProgramState::Working,
                                                     .kind = {},
                                                     .progress = {},
                                                     .app = {},
                                                     .title = {},
-                                                    .message = {} });
+                                                    .message = {} },
+                              {});
     auto const resolved = contour::window::resolvedRecords(first);
     REQUIRE(resolved.size() == 2);
     CHECK(resolved.back().app == "deploy");
@@ -201,6 +236,14 @@ namespace
 /// GUI's default (daemon) mode does: the badge must reach the tab strip that way too.
 struct DaemonMirror
 {
+    /// @param offered What the client offers; by default program status without its timing, as a daemon
+    ///        that predates it shares.
+    explicit DaemonMirror(vthost::proto::CapabilitySet offered =
+                              vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ProgramStatus })):
+        offered { std::move(offered) }
+    {
+    }
+
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
     core::net::EventLoop loop { *source };
     vthost::SessionHost host { loop,
@@ -223,12 +266,11 @@ struct DaemonMirror
                                  vtbackend::TerminalClocks::system(),
                                  vtbackend::randomSemanticBlockTokens() };
     vthost::client::ScreenMirror populator { mirror, vthost::DaemonMachine::Same };
+    vthost::proto::CapabilitySet offered;
     vthost::client::NativeClient client {
         loop,
         std::move(pair.second),
-        // What the GUI offers for program status (remote/NativeController.cpp).
-        vthost::client::NativeClient::HandshakeOptions {
-            .capabilities = vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ProgramStatus }) },
+        vthost::client::NativeClient::HandshakeOptions { .capabilities = offered },
         vtbackend::CommandBlockStoreLimits {},
         [this](vthost::client::RemoteScreen const& screen, vthost::proto::Delta const& delta) {
             populator.apply(screen, delta);
@@ -243,10 +285,21 @@ struct DaemonMirror
     };
 
     /// The badge the mirror's records earn in a background tab.
-    ProgramStatusBadge mirroredBadge()
+    /// @param seen The newest generation the user has seen.
+    ProgramStatusBadge mirroredBadge(uint64_t seen = 0)
     {
         auto const _ = std::lock_guard { mirror };
-        return badgeFor(contour::window::resolvedRecords(mirror.programStatus()), TabFocus::Background);
+        return badgeFor(contour::window::resolvedRecords(mirror.programStatus()), seen);
+    }
+
+    /// @return The newest generation among the mirror's records: what a look at the tab sees.
+    uint64_t newestGeneration()
+    {
+        auto const _ = std::lock_guard { mirror };
+        auto newest = uint64_t { 0 };
+        for (auto const& record: mirror.programStatus().records())
+            newest = std::max(newest, record.generation);
+        return newest;
     }
 };
 
@@ -289,4 +342,41 @@ TEST_CASE("a daemon-backed mirror shows the hosted pane's badge", "[contour][win
     }(&h, session);
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("a done the user has seen stays seen when the daemon sends it again",
+          "[contour][window][programstatus]")
+{
+    using vthost::proto::Capability;
+    using vthost::proto::CapabilitySet;
+    // Against a daemon that carries the generations and one that predates them: either way a Done keeps the
+    // generation it had, so the set coming again -- as it does whenever any record changes -- does not show
+    // it anew.
+    for (auto const& offered:
+         { CapabilitySet::of({ Capability::ProgramStatus }),
+           CapabilitySet::of({ Capability::ProgramStatus, Capability::ProgramStatusTiming }) })
+    {
+        auto h = DaemonMirror { offered };
+        auto const session = vthost::testing::newSession(h.host);
+
+        auto scenario = [](DaemonMirror* h, vtworkspace::SessionId session) -> core::async::Task<void> {
+            h->host.terminal(session)->writeToScreen("\033]7501;state=done:app=cargo\033\\");
+            h->server->sessionScreenUpdated(session);
+            co_await waitUntil(&h->loop, [h] { return h->mirroredBadge().kind == BadgeKind::Done; });
+            CHECK(h->mirroredBadge().kind == BadgeKind::Done); // unseen: shown, also from an older daemon
+            auto const seen = h->newestGeneration();
+            CHECK(h->mirroredBadge(seen).kind == BadgeKind::None);
+
+            h->host.terminal(session)->writeToScreen("\033]7501;state=working:id=other\033\\");
+            h->server->sessionScreenUpdated(session);
+            co_await waitUntil(&h->loop,
+                               [h, seen] { return h->mirroredBadge(seen).kind != BadgeKind::None; });
+            // Done outranks Working: had the repeated Done read as news, it would be the badge.
+            CHECK(h->mirroredBadge(seen).kind == BadgeKind::Working);
+
+            h->client.detach();
+        }(&h, session);
+
+        h.loop.blockOn(drive(&h, std::move(scenario)));
+    }
 }

@@ -147,6 +147,11 @@ void ChannelPty::wakeupReader()
 
 int ChannelPty::write(std::string_view data)
 {
+    return writeInput(data, InputKind::Other);
+}
+
+int ChannelPty::writeInput(std::string_view data, InputKind kind)
+{
     auto sink = WriteSink {};
     {
         auto const lock = std::lock_guard { _mutex };
@@ -158,7 +163,7 @@ int ChannelPty::write(std::string_view data)
     // Invoked outside the lock: the sink typically marshals onto an event
     // loop, and holding the pty lock across foreign code invites deadlocks.
     if (sink)
-        sink(data);
+        sink(data, kind);
     return static_cast<int>(data.size());
 }
 

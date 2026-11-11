@@ -121,6 +121,7 @@ void RemoteScreen::apply(proto::ProgramStatus const& status)
     auto const& records = status.records;
     auto const kept = std::min(records.size(), vtbackend::MaxProgramStatusRecords);
     programStatus.assign(records.end() - static_cast<std::ptrdiff_t>(kept), records.end());
+    programStatusTiming = status.timing;
 }
 
 void RemoteScreen::apply(proto::SoftFontState const& fonts)
@@ -551,9 +552,13 @@ uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
     return serial;
 }
 
-void NativeClient::sendInput(uint64_t session, std::string_view bytes)
+void NativeClient::sendInput(uint64_t session, std::string_view bytes, proto::InputKind kind)
 {
-    auto input = proto::Input { .session = session, .data = {} };
+    auto input = proto::Input {
+        .session = session,
+        .data = {},
+        .kind = shares(proto::Capability::InputKinds) ? kind : proto::InputKind::Other,
+    };
     auto const* src = reinterpret_cast<std::byte const*>(bytes.data());
     input.data.assign(src, src + bytes.size());
     send(proto::DecodedPdu { input });

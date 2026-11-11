@@ -622,7 +622,7 @@ void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, Repl
         syncCommandBlocks(screen, blockSync);
         // Not grid state, but a replay re-asserts everything: after a reconnect the set the old connection
         // left may be one the host has since emptied.
-        syncProgramStatus(screen.programStatus);
+        syncProgramStatus(screen.programStatus, screen.programStatusTiming);
         syncSoftFonts(screen.softFonts, screen.softFontGeneration);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
@@ -1079,14 +1079,24 @@ void ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageId)
     _terminal->screenUpdated();
 }
 
-void ScreenMirror::syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records)
+void ScreenMirror::syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records,
+                                     proto::StatusTimingBlock timing)
 {
     auto converted = std::vector<vtbackend::ProgramStatusRecord> {};
     converted.reserve(records.size());
     for (auto const& wire: records)
         if (auto record = control::fromWire(wire))
+        {
+            // The host's clock read `since`; this terminal reads it by the offset the last state measured.
+            // A host that does not share the timing capability sent none: the terminal stamps those.
+            if (wire.sinceNs != 0)
+                record->since = _terminal->onThisClock(record->since);
             converted.push_back(std::move(*record));
-    _terminal->replaceProgramStatus(std::move(converted));
+        }
+    _terminal->replaceProgramStatus(std::move(converted),
+                                    timing == proto::StatusTimingBlock::Included
+                                        ? vtbackend::ProgramStatusTiming::Carried
+                                        : vtbackend::ProgramStatusTiming::Absent);
 }
 
 void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
@@ -1121,7 +1131,7 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                    },
                    [this](proto::ProgramStatus const& status) {
                        auto const guard = std::lock_guard { *_terminal };
-                       syncProgramStatus(status.records);
+                       syncProgramStatus(status.records, status.timing);
                    },
                    // The device's, not the grid's: the frontend that owns the pane's device stores it there
                    // (contour's NativeController, on its ChannelPty), and the session reads it from there.

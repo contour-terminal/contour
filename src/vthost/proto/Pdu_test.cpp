@@ -2393,10 +2393,51 @@ TEST_CASE("ProgramStatus PDU round-trips", "[vthost][proto][programstatus]")
     CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { pdu }, 1)).has_value());
 }
 
+TEST_CASE("Pdu.ProgramStatus.timingRoundTripsWithCapability", "[vthost][proto][programstatus]")
+{
+    auto const pdu =
+        ProgramStatus { .session = 4,
+                        .records = { WireProgramStatusRecord { .id = "claude-code",
+                                                               .state = 3,
+                                                               .kind = 1,
+                                                               .origin = 1,
+                                                               .sinceNs = 1'700'000'000'000'000'000,
+                                                               .generation = 9 },
+                                     WireProgramStatusRecord { .id = "build", .generation = 2 } },
+                        .timing = StatusTimingBlock::Included };
+    auto const back = roundTrip(DecodedPdu { pdu });
+    CHECK(back == DecodedPdu { pdu });
+    auto const& status = std::get<ProgramStatus>(back);
+    CHECK(status.records.at(0).origin == 1);
+    CHECK(status.records.at(0).sinceNs == 1'700'000'000'000'000'000);
+    CHECK(status.records.at(0).generation == 9);
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { pdu }, 1)).has_value());
+}
+
+TEST_CASE("Pdu.ProgramStatus.timingOmittedWithoutCapability", "[vthost][proto][programstatus]")
+{
+    // The sender holds the block back from a peer that does not share the capability; whatever the records
+    // carry in memory, none of it travels.
+    auto const pdu =
+        ProgramStatus { .session = 4,
+                        .records = { WireProgramStatusRecord {
+                            .id = "claude-code", .state = 3, .origin = 1, .sinceNs = 5, .generation = 9 } },
+                        .timing = StatusTimingBlock::Omitted };
+    auto const back = roundTrip(DecodedPdu { pdu });
+    auto const& status = std::get<ProgramStatus>(back);
+    CHECK(status.timing == StatusTimingBlock::Omitted);
+    REQUIRE(status.records.size() == 1);
+    CHECK(status.records.front().origin == 0);
+    CHECK(status.records.front().sinceNs == 0);
+    CHECK(status.records.front().generation == 0);
+    CHECK(status.records.front().id == "claude-code");
+}
+
 TEST_CASE("the ProgramStatus tag and capability are pinned", "[vthost][proto][programstatus]")
 {
     STATIC_CHECK(std::to_underlying(PduType::ProgramStatus) == 33);
     STATIC_CHECK(std::to_underlying(Capability::ProgramStatus) == 10);
+    STATIC_CHECK(std::to_underlying(Capability::ProgramStatusTiming) == 26);
     CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
         return row.capability == Capability::ProgramStatus && row.name == "program-status";
     }));
@@ -2674,4 +2715,39 @@ TEST_CASE("an out-of-range soft-glyph cell entry is malformed", "[vthost][pdu][s
     CHECK_FALSE(accepted(0, 0x20)); // a cell never shows the space of the set
     CHECK_FALSE(accepted(0, 0x7F));
     CHECK_FALSE(accepted(0, 0));
+}
+
+TEST_CASE("Pdu.ProgramStatus.timingBlockForNoRecordsSurvives", "[vthost][proto][programstatus]")
+{
+    // The block leads with its own count, so an empty one still says the peer shares the capability.
+    auto const pdu = ProgramStatus { .session = 4, .records = {}, .timing = StatusTimingBlock::Included };
+    CHECK(roundTrip(DecodedPdu { pdu }) == DecodedPdu { pdu });
+    CHECK(roundTrip(DecodedPdu { ProgramStatus { .session = 4 } })
+          == DecodedPdu { ProgramStatus { .session = 4 } });
+}
+
+TEST_CASE("Pdu.Input.kindRoundTripsWithAndWithoutCapability", "[vthost][proto][input]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::InputKinds) == 27);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::InputKinds && row.name == "input-kinds";
+    }));
+
+    auto const other = Input { .session = 7, .data = bytes("\x1b[I"), .kind = InputKind::Other };
+    auto const typed = Input { .session = 7, .data = bytes("ls\r"), .kind = InputKind::Keyboard };
+    CHECK(roundTrip(DecodedPdu { other }) == DecodedPdu { other });
+    CHECK(roundTrip(DecodedPdu { typed }) == DecodedPdu { typed });
+
+    // Without the capability a client sends Other, whose bytes are what an older client sends: no kind byte.
+    auto const legacy = bodyOf(DecodedPdu { other });
+    CHECK(bodyOf(DecodedPdu { typed }).size()
+          == bodyOf(DecodedPdu { Input { .session = 7, .data = bytes("ls\r") } }).size() + 1);
+    CHECK(legacy == bodyOf(DecodedPdu { Input { .session = 7, .data = bytes("\x1b[I") } }));
+
+    // A kind a newer peer knows and this end does not reads as Other.
+    auto body = bodyOf(DecodedPdu { typed });
+    body.back() = std::byte { 0x7F };
+    auto const decoded = decodePdu(frameOf(PduType::Input, body));
+    REQUIRE(decoded.has_value());
+    CHECK(std::get<Input>(decoded->pdu).kind == InputKind::Other);
 }

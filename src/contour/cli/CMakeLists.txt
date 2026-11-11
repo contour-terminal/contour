@@ -38,6 +38,9 @@ add_custom_command(
 # The generated header is listed as a source so that building this target runs the custom command
 # that produces it; nothing compiles it on its own.
 add_library(contour_cli STATIC
+    AgentHookConfig.cpp AgentHookConfig.hpp
+    AgentIntegrations.cpp AgentIntegrations.hpp
+    AgentReport.cpp AgentReport.hpp
     AgentSkill.cpp AgentSkill.hpp
     BackgroundExecutor.cpp BackgroundExecutor.hpp
     CaptureScreen.cpp CaptureScreen.hpp

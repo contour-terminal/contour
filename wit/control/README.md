@@ -58,21 +58,23 @@ The prompt names each permission by what it lets the extension do:
 
 Each verb needs one of them, and some requests a second:
 
-| Verb               | Permission | Also needs                       |
-| ------------------ | ---------- | -------------------------------- |
-| `daemon-info`      | `read`     |                                  |
-| `workspace-list`   | `read`     |                                  |
-| `tab-create`       | `write`    | `input`, for running a command   |
-| `pane-split`       | `write`    | `input`, for running a command   |
-| `pane-send`        | `input`    |                                  |
-| `pane-capture`     | `screen`   |                                  |
-| `pane-close`       | `write`    |                                  |
-| `tab-close`        | `write`    |                                  |
-| `object-set-label` | `write`    |                                  |
-| `block-list`       | `screen`   |                                  |
-| `block-read`       | `screen`   |                                  |
-| `api-list`         | `read`     |                                  |
-| `api-describe`     | `read`     |                                  |
+| Verb                 | Permission | Also needs                       |
+| -------------------- | ---------- | -------------------------------- |
+| `daemon-info`        | `read`     |                                  |
+| `workspace-list`     | `read`     |                                  |
+| `tab-create`         | `write`    | `input`, for running a command   |
+| `pane-split`         | `write`    | `input`, for running a command   |
+| `pane-send`          | `input`    |                                  |
+| `pane-capture`       | `screen`   |                                  |
+| `pane-close`         | `write`    |                                  |
+| `tab-close`          | `write`    |                                  |
+| `object-set-label`   | `write`    |                                  |
+| `pane-report-status` | `input`    |                                  |
+| `pane-clear-status`  | `input`    |                                  |
+| `block-list`         | `screen`   |                                  |
+| `block-read`         | `screen`   |                                  |
+| `api-list`           | `read`     |                                  |
+| `api-describe`       | `read`     |                                  |
 
 Each func's doc comment in `world.wit` says the same.
 

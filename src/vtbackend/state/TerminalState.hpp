@@ -114,6 +114,9 @@ namespace detail
         visitor(5, record.app);
         visitor(6, record.title);
         visitor(7, record.message);
+        visitor(8, record.origin);
+        visitor(9, record.since);
+        visitor(10, record.generation);
     }
 
     template <typename Visitor, typename T>
@@ -461,8 +464,9 @@ struct SessionState
     FileUrl currentWorkingDirectory {};                ///< OSC 7.
     Progress progress {};                              ///< OSC 9;4.
     std::vector<ProgramStatusRecord> programStatus {}; ///< OSC 7501, least recently updated first.
-    std::vector<std::string> pointerShapes {};         ///< OSC 22 stack, innermost last.
-    bool isPointerShapeBaseSetByApplication = false;   ///< Whether its bottom entry is the application's.
+    uint64_t programStatusLastGeneration = 0;  ///< The last program-status generation handed out; 0 for none.
+    std::vector<std::string> pointerShapes {}; ///< OSC 22 stack, innermost last.
+    bool isPointerShapeBaseSetByApplication = false; ///< Whether its bottom entry is the application's.
     std::vector<std::pair<std::string, std::string>> userVars {}; ///< OSC 1337 SetUserVar, first set first.
     uint64_t instructionCounter = 0;                              ///< Instructions parsed so far.
     std::chrono::system_clock::time_point sessionEpoch {};        ///< What rows' birth stamps count from.
@@ -489,6 +493,7 @@ struct SessionState
         visitor(11, self.hostClockOffset);
         visitor(12, self.userInputLock);
         visitor(13, self.synchronizedOutputFor);
+        visitor(14, self.programStatusLastGeneration);
     }
 };
 

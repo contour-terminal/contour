@@ -2316,8 +2316,25 @@ void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId se
 {
     // The records changed: the pane's own status may have, as well as the tab's.
     if (auto* s = sessionForId(session))
+    {
         refreshPaneProgramStatus(*s);
+        // A report landing in a session the user is looking at is seen as it arrives: its tab never shows
+        // Done or Error for it.
+        if (sessionVisibility(*s) != platform::SessionVisibility::Hidden)
+            std::ignore = _attention.noteSeen(session, statusGenerationOf(*s));
+    }
     refreshTabBadgeOf(session);
+}
+
+uint64_t TerminalSessionManager::statusGenerationOf(TerminalSession const& session)
+{
+    // The lock the parser thread holds while it changes the records.
+    auto const& terminal = session.terminal();
+    auto const _ = std::lock_guard { terminal };
+    auto const generations = terminal.programStatus().records()
+                             | std::views::transform(&vtbackend::ProgramStatusRecord::generation);
+    return std::ranges::fold_left(
+        generations, uint64_t { 0 }, [](uint64_t a, uint64_t b) { return std::max(a, b); });
 }
 
 void TerminalSessionManager::refreshTabBadgeOf(vtworkspace::SessionId session)
@@ -2453,7 +2470,8 @@ void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WorkspaceId wi
         tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             auto const* s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr;
             if (s != nullptr && sessionVisibility(*s) != platform::SessionVisibility::Hidden
-                && _attention.noteSeen(pane.session()) == window::AttentionChange::Changed)
+                && _attention.noteSeen(pane.session(), statusGenerationOf(*s))
+                       == window::AttentionChange::Changed)
                 changed = window::AttentionChange::Changed;
         });
         if (changed == window::AttentionChange::Changed)

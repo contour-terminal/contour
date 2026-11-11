@@ -1981,15 +1981,22 @@ Handled Terminal::sendKeyEvent(Key key,
     {
         if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
         {
-            core::locked(_inputMutex, [&] { _inputGenerator.generateRaw(*udkStr); });
+            core::locked(_inputMutex, [&] {
+                _inputGenerator.generateRaw(*udkStr);
+                _pendingInputKind = vtpty::InputKind::Keyboard;
+            });
             flushInput();
             scrollToBottomOnInput();
             return Handled { true };
         }
     }
 
-    bool const success =
-        core::locked(_inputMutex, [&] { return _inputGenerator.generate(key, modifiers, eventType); });
+    bool const success = core::locked(_inputMutex, [&] {
+        auto const generated = _inputGenerator.generate(key, modifiers, eventType);
+        if (generated)
+            _pendingInputKind = vtpty::InputKind::Keyboard;
+        return generated;
+    });
     if (success)
     {
         flushInput();
@@ -2034,8 +2041,12 @@ Handled Terminal::sendCharEvent(char32_t ch,
         }))
         return Handled { true };
 
-    auto const success = core::locked(
-        _inputMutex, [&] { return _inputGenerator.generate(ch, keyIdentity, modifiers, eventType); });
+    auto const success = core::locked(_inputMutex, [&] {
+        auto const generated = _inputGenerator.generate(ch, keyIdentity, modifiers, eventType);
+        if (generated)
+            _pendingInputKind = vtpty::InputKind::Keyboard;
+        return generated;
+    });
     if (success)
     {
         flushInput();
@@ -2581,6 +2592,7 @@ void Terminal::sendPaste(string_view text)
         }
         else
             _inputGenerator.generatePaste(text);
+        _pendingInputKind = vtpty::InputKind::Keyboard;
     });
     flushInput();
 }
@@ -2606,7 +2618,10 @@ void Terminal::sendRawInput(string_view text)
         return;
 
     inputLog()("Sending raw input to stdin: {}", core::escape(text));
-    core::locked(_inputMutex, [&] { _inputGenerator.generateRaw(text); });
+    core::locked(_inputMutex, [&] {
+        _inputGenerator.generateRaw(text);
+        _pendingInputKind = vtpty::InputKind::Keyboard;
+    });
     flushInput();
 }
 
@@ -2660,12 +2675,16 @@ void Terminal::flushInput()
         // Own the bytes: peek() returns a view into InputGenerator::_pendingSequence, which another thread
         // appends to -- and reallocates -- as soon as _inputMutex is free, and the local echo parses these
         // bytes, where a query among them replies and appends to it too. @see echoLocally().
-        input = core::locked(_inputMutex, [&] { return std::string(_inputGenerator.peek()); });
+        auto kind = vtpty::InputKind::Other;
+        input = core::locked(_inputMutex, [&] {
+            kind = _pendingInputKind;
+            return std::string(_inputGenerator.peek());
+        });
         if (input.empty())
             return;
 
         // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-        rv = _pty->write(input);
+        rv = _pty->writeInput(input, kind);
         auto const error = errno;
         if (rv <= 0)
         {
@@ -2675,12 +2694,12 @@ void Terminal::flushInput()
             // self-repost into an unbounded loop that logs one error per iteration. That is the
             // "Failed to write to SSH channel" flood a broken SSH session used to produce.
             if (rv < 0 && error != EAGAIN && error != EINTR)
-                core::locked(_inputMutex, [&] { _inputGenerator.consume(static_cast<int>(input.size())); });
+                core::locked(_inputMutex, [&] { consumeInput(static_cast<int>(input.size())); });
             return;
         }
 
         // Only this flush consumes, and others only append, so the head it wrote is still the head.
-        core::locked(_inputMutex, [&] { _inputGenerator.consume(rv); });
+        core::locked(_inputMutex, [&] { consumeInput(rv); });
     }
 
     // SRM, reset: the terminal echoes everything it sends. This is the "local echo" a host that does not
@@ -2694,6 +2713,14 @@ void Terminal::flushInput()
     // whose flush would re-send anything still pending here.
     if (!isModeEnabled(AnsiMode::SendReceive))
         echoLocally(std::string_view(input).substr(0, static_cast<size_t>(rv)));
+}
+
+void Terminal::consumeInput(int count)
+{
+    _inputGenerator.consume(count);
+    // A partial write leaves the rest marked as it was: conservative, it may still hold what was typed.
+    if (_inputGenerator.peek().empty())
+        _pendingInputKind = vtpty::InputKind::Other;
 }
 
 void Terminal::echoLocally(std::string_view bytes)
@@ -6863,7 +6890,7 @@ void Terminal::applyProgramStatus(ProgramStatusReport const& report)
         [this](auto const& value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, ProgramStatusRecord>)
-                announceProgramStatus(_programStatus.apply(value));
+                announceProgramStatus(_programStatus.apply(value, wallTimeNow()));
             else if constexpr (std::is_same_v<T, ProgramStatusClear>)
                 announceProgramStatus(_programStatus.clear(value.id));
             else
@@ -6878,10 +6905,35 @@ void Terminal::markProcessExited()
     announceProgramStatus(_programStatus.processExited());
 }
 
-void Terminal::replaceProgramStatus(std::vector<ProgramStatusRecord> records)
+ProgramStatusChange Terminal::noteUserInputForProgramStatus()
+{
+    auto const _ = std::lock_guard { *this };
+    auto change = _programStatus.noteUserInput(wallTimeNow());
+    announceProgramStatus(change);
+    return change;
+}
+
+ProgramStatusChange Terminal::applyIntegrationStatus(ProgramStatusRecord record)
+{
+    record.origin = ProgramStatusOrigin::Integration;
+    auto const _ = std::lock_guard { *this };
+    auto change = _programStatus.apply(std::move(record), wallTimeNow());
+    announceProgramStatus(change);
+    return change;
+}
+
+ProgramStatusChange Terminal::clearIntegrationStatus(std::string_view id)
+{
+    auto const _ = std::lock_guard { *this };
+    auto change = _programStatus.clearIntegration(id);
+    announceProgramStatus(change);
+    return change;
+}
+
+void Terminal::replaceProgramStatus(std::vector<ProgramStatusRecord> records, ProgramStatusTiming timing)
 {
     // Lock-free: the mirror applying a host's frame holds _stateMutex, as it does for setProgress().
-    announceProgramStatus(_programStatus.replaceAll(std::move(records)));
+    announceProgramStatus(_programStatus.replaceAll(std::move(records), timing, wallTimeNow()));
 }
 
 void Terminal::announceProgramStatus(ProgramStatusChange const& change)

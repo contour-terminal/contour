@@ -5161,6 +5161,75 @@ TEST_CASE("a client whose clock is behind the host's reads a row's time as it re
     CHECK(m.terminal->lineBirthTime(grid.lineAt(vtbackend::LineOffset(1))) == record->commandStartedAt);
 }
 
+TEST_CASE("ScreenMirror.programStatus.resyncKeepsGeneration", "[vthost][mirror][programstatus]")
+{
+    // The host's clock reads 40 s ahead of the client's: the record's `since` moves onto the client's clock
+    // by that offset, and a repeated push of the same record changes neither it nor the generation.
+    auto const hostInstant = vthost::fromWireTime(vthost::testing::PromptedAt);
+    auto steadyClock = core::platform::ManualClock {};
+    auto wallClock = core::platform::ManualWallClock { hostInstant };
+    auto m = BlockMirror { vthost::DaemonMachine::Other,
+                           {},
+                           vtbackend::TerminalClocks { .steady = steadyClock,
+                                                       .wall = wallClock,
+                                                       .localTime = &vtbackend::systemLocalTime } };
+    auto state = stateWith({});
+    state.hostTime = vthost::toWireTime(hostInstant + 40s);
+    m.snapshot(std::move(state));
+
+    auto const push = proto::ProgramStatus {
+        .session = 1,
+        .records = { proto::WireProgramStatusRecord { .id = "claude-code",
+                                                      .state = 3,
+                                                      .kind = 1,
+                                                      .origin = 1,
+                                                      .sinceNs = vthost::testing::PromptedAt,
+                                                      .generation = 9 } },
+        .timing = proto::StatusTimingBlock::Included,
+    };
+    auto const check = [&] {
+        auto const guard = std::lock_guard { *m.terminal };
+        auto const* const record = m.terminal->programStatus().find("claude-code");
+        REQUIRE(record != nullptr);
+        CHECK(record->origin == vtbackend::ProgramStatusOrigin::Integration);
+        CHECK(record->generation == 9);
+        CHECK(record->since == hostInstant - 40s);
+    };
+    m.mirror->applyEvent(proto::SessionEventPdu { push });
+    check();
+    m.mirror->applyEvent(proto::SessionEventPdu { push }); // the replay
+    check();
+}
+
+TEST_CASE("ScreenMirror.programStatus.olderHostGetsLocalGenerations", "[vthost][mirror][programstatus]")
+{
+    // A daemon that does not share the timing capability sends no generation. Taken as zero, every Done
+    // would read as seen by every view and vanish; the mirror stamps its own instead.
+    auto m = BlockMirror {};
+    m.snapshot(stateWith({}));
+    auto const pushOf = [](uint8_t state) {
+        return proto::ProgramStatus {
+            .session = 1,
+            .records = { proto::WireProgramStatusRecord { .id = "claude-code", .state = state } },
+            .timing = proto::StatusTimingBlock::Omitted,
+        };
+    };
+    auto const generation = [&] {
+        auto const guard = std::lock_guard { *m.terminal };
+        auto const* const record = m.terminal->programStatus().find("claude-code");
+        REQUIRE(record != nullptr);
+        return record->generation;
+    };
+
+    m.mirror->applyEvent(proto::SessionEventPdu { pushOf(1) }); // working
+    auto const working = generation();
+    CHECK(working != 0);
+    m.mirror->applyEvent(proto::SessionEventPdu { pushOf(1) }); // the same again: no new generation
+    CHECK(generation() == working);
+    m.mirror->applyEvent(proto::SessionEventPdu { pushOf(2) }); // done: newer than what was seen
+    CHECK(generation() > working);
+}
+
 TEST_CASE("a client on the daemon's own machine leaves the host's instants as they are",
           "[vthost][mirror][blocks]")
 {
