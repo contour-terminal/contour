@@ -255,7 +255,9 @@ TEST_CASE("a lost keeper shuts the daemon down with KeeperLost", "[keeper][daemo
     d.keeperEnd.reset();
     CHECK(d.awaitEnd() == EXIT_SUCCESS);
     CHECK(d.causes == std::vector { vthost::ShutdownCause::KeeperLost });
-    CHECK_FALSE(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
+    // Left to the keeper, even one that is gone: a stale file is replaced by the next start, while a file the
+    // daemon removed as it closed could have been another daemon's, bound at the path meanwhile.
+    CHECK(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
 }
 
 TEST_CASE("a daemon that shuts down tells its keeper first", "[keeper][daemon][afunix]")
@@ -279,7 +281,7 @@ TEST_CASE("a daemon that shuts down tells its keeper first", "[keeper][daemon][a
     d.send(keeper::ShutdownNoted {});
     CHECK(d.awaitEnd() == EXIT_SUCCESS);
     CHECK(d.causes == std::vector { vthost::ShutdownCause::Signal });
-    CHECK_FALSE(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
+    CHECK(fs::exists(vthost::nativeSocketPath(d.config.socketPath))); // the keeper removes it
 }
 
 TEST_CASE("a daemon whose keeper takes no note of its shutdown ends after the bound",
@@ -291,7 +293,7 @@ TEST_CASE("a daemon whose keeper takes no note of its shutdown ends after the bo
     d.signals->fire();
     CHECK(d.awaitEnd() == EXIT_SUCCESS);
     CHECK(std::chrono::steady_clock::now() - started >= vthost::keeperlink::ShutdownNoteBound);
-    CHECK_FALSE(fs::exists(vthost::nativeSocketPath(d.config.socketPath)));
+    CHECK(fs::exists(vthost::nativeSocketPath(d.config.socketPath))); // the keeper removes it
 }
 
 TEST_CASE("contour daemon serves through a keeper and the daemon is its child", "[keeper][daemon][afunix]")

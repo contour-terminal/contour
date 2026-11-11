@@ -148,6 +148,8 @@ add_library(vthost STATIC
     ShutdownFunnel.hpp
     ShutdownSignals.cpp
     ShutdownSignals.hpp
+    SocketFileListener.cpp
+    SocketFileListener.hpp
     StartContinuity.hpp
     SocketPath.hpp
     SpawnEnvironment.hpp
@@ -403,6 +405,7 @@ if(VTHOST_TESTING)
         ServiceControl_systemd_test.cpp
         Linger_test.cpp
         ServiceControl_test.cpp
+        SocketFileListener_test.cpp
         SocketPath_test.cpp
         SshTransport_test.cpp
         StatePath_test.cpp

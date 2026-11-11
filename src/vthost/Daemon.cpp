@@ -84,6 +84,7 @@
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/ShutdownFunnel.hpp>
 #include <vthost/ShutdownSignals.hpp>
+#include <vthost/SocketFileListener.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/WorkspacePersistence.hpp>
 #include <vthost/control/ControlService.hpp>
@@ -353,10 +354,14 @@ namespace
     /// Binds a unix listener at @p path, or prints the error and yields the process
     /// exit code the caller should return. Collapses the bind/report/return block
     /// every daemon endpoint otherwise repeats verbatim.
+    /// @param removal Who removes the socket file: a daemon behind a keeper leaves it to the keeper
+    ///        (listenUnixLeavingFile()), so that its close never removes the file of a daemon that bound the
+    ///        path after it stopped.
     [[nodiscard]] std::expected<std::unique_ptr<core::net::IListener>, int> bindDaemonEndpoint(
-        core::net::EventLoop& loop, std::string const& path)
+        core::net::EventLoop& loop, std::string const& path, SocketFileRemoval removal)
     {
-        auto listener = core::net::listenUnix(loop, path);
+        auto listener = removal == SocketFileRemoval::LeftToKeeper ? listenUnixLeavingFile(loop, path)
+                                                                   : core::net::listenUnix(loop, path);
         if (!listener)
         {
             // Naming the path matters: all four unix endpoints funnel through here, so a bare
@@ -500,16 +505,19 @@ namespace
     }
 
     /// Serves @p path on the listener inherited as @p name, else binds it.
+    /// @param removal Who removes the socket file of an inherited listener once it no longer serves.
     /// @return The listener, or the exit code a bind failure ends the daemon with.
     [[nodiscard]] std::expected<std::unique_ptr<core::net::IListener>, int> adoptOrBindEndpoint(
         core::net::EventLoop& loop,
         InheritedListeners& inherited,
         std::string_view name,
-        std::string const& path)
+        std::string const& path,
+        SocketFileRemoval removal)
     {
+        // An adopted listener knows no path: without the decorator, no stop would remove its socket file.
         if (auto adopted = inherited.take(loop, name))
-            return std::move(*adopted);
-        return bindDaemonEndpoint(loop, path);
+            return std::make_unique<SocketFileListener>(std::move(*adopted), path, removal);
+        return bindDaemonEndpoint(loop, path, removal);
     }
 
     /// Which run of the daemon this is, and how many live upgrades it has seen: what an upgrade carries on.
@@ -930,6 +938,13 @@ namespace
         [[nodiscard]] keeper::LaunchContinuity continuity() const noexcept
         {
             return _attachment ? _attachment->continuity : keeper::LaunchContinuity::Fresh;
+        }
+
+        /// @return Who removes the socket files of the listeners this daemon took over
+        ///         (socketFileRemovalFor()).
+        [[nodiscard]] SocketFileRemoval socketFileRemoval() const noexcept
+        {
+            return socketFileRemovalFor(_attachment ? KeeperPresence::Behind : KeeperPresence::None);
         }
 
         /// @return The keeper's process id; 0 for none.
@@ -1657,7 +1672,8 @@ int runDaemon(DaemonConfig const& config,
 
     // The control socket is bound before the snapshot is touched: a second daemon on the same label fails
     // here, rather than after moving aside the file the serving one keeps writing.
-    auto listener = adoptOrBindEndpoint(loop, inherited, "control", core::pathToUtf8(config.socketPath));
+    auto listener = adoptOrBindEndpoint(
+        loop, inherited, "control", core::pathToUtf8(config.socketPath), daemonKeeper.socketFileRemoval());
     if (!listener && continuity == StartContinuity::Fresh)
         return listener.error();
     if (!listener)
@@ -1792,7 +1808,7 @@ int runDaemon(DaemonConfig const& config,
                                    std::string_view name,
                                    std::string const& path,
                                    auto const& makeHandler) -> std::expected<void, int> {
-        auto bound = adoptOrBindEndpoint(loop, inherited, name, path);
+        auto bound = adoptOrBindEndpoint(loop, inherited, name, path, daemonKeeper.socketFileRemoval());
         if (!bound)
         {
             if (continuity == StartContinuity::Fresh)
