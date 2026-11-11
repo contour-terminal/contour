@@ -7,6 +7,6 @@ set -ex
 # that GCC's libstdc++ (GLIBCXX_3.4.34 and later), which comes from the same toolchain PPA the leg installs
 # its compiler from.
 
-sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+sudo "$(dirname "$0")/add-ppa.sh" ppa:ubuntu-toolchain-r/test
 sudo "$(dirname "$0")/apt-update.sh"
 sudo apt install -y libstdc++6
