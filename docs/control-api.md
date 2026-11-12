@@ -184,6 +184,15 @@ fail: the one focused last is asked.
 selects it; `hidden`: none does), `clients` (how many windows select it) and `native` (the daemon's own id for
 it, in decimal, which a window selects it by).
 
+It also says what a switcher shows of a workspace on another daemon. `git` is the workspace's repository, where
+its active pane's directory is: `branch` (the branch or ref name, or a detached HEAD's short object id), `kind`
+(`branch`, `detached` or `otherRef`), and `ahead` and `behind` its upstream where it has one. The daemon looks it
+up whenever the pane's directory changes or a command finishes, and every 30 seconds, whether or not a window is
+attached; `git` is absent outside a repository and until the pane's directory is known. Each pane's
+`lastFinished` is its newest finished command block (as `block.list` reports one: the command, its exit code,
+when it started and how long it ran), absent until a command has finished; it needs `screen`, as `programStatus`
+does.
+
 ## Waiting
 
 `contour wait` and `contour send --wait` exit with the finished command's own status, clamped to 0..255. A
@@ -240,8 +249,8 @@ or one that was superseded, exits 1 with a note on standard error.
 ## Permissions
 
 A daemon's TCP tokens carry grants (`contour daemon --access-file`): `read` for listing, `screen` for
-capturing, reading blocks and program status (`pane.programStatusChanged`, and the `programStatus` of
-`contour ls --json`), `input` for typing, and `write` for changing the workspace. A call outside the
+capturing, reading blocks and program status (`pane.programStatusChanged`, and the `programStatus` and
+`lastFinished` of `contour ls --json`), `input` for typing, and `write` for changing the workspace. A call outside the
 token's grants is refused as forbidden (exit status 1). The daemon's socket grants everything to its owner.
 `daemon.info` reports the connection's own grants in its `grants` array (by name, in the order above), so a
 client can tell what it may call before it tries.

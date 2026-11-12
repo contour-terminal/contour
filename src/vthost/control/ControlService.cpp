@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/control/ControlService.hpp>
 
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <core/Overloaded.hpp>
@@ -22,6 +23,7 @@
 #include <vtcontrol/ObjectRef.hpp>
 #include <vthost/NodeMove.hpp>
 #include <vthost/ViewRouting.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/control/PaneText.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
@@ -65,6 +67,19 @@ namespace
     constexpr auto ProgramStatusPermission =
         std::get<vtcontrol::EventRow<vtcontrol::ProgramStatusChangedEvent>>(vtcontrol::EventCatalog)
             .permission;
+
+    /// @param kind What a git HEAD names, as the host looked it up.
+    /// @return The same, as the API names it.
+    [[nodiscard]] constexpr vtcontrol::GitHeadKind gitHeadKindOf(vtbackend::GitHeadKind kind) noexcept
+    {
+        switch (kind)
+        {
+            case vtbackend::GitHeadKind::Branch: return vtcontrol::GitHeadKind::Branch;
+            case vtbackend::GitHeadKind::Detached: return vtcontrol::GitHeadKind::Detached;
+            case vtbackend::GitHeadKind::OtherRef: return vtcontrol::GitHeadKind::OtherRef;
+        }
+        return vtcontrol::GitHeadKind::Branch;
+    }
 
     [[nodiscard]] ControlError notFound(std::string message)
     {
@@ -349,7 +364,13 @@ vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session,
         info.size = vtcontrol::Size { .columns = unbox<uint32_t>(size.columns),
                                       .lines = unbox<uint32_t>(size.lines) };
         if (grants.contains(ProgramStatusPermission))
+        {
             info.programStatus = toApi(terminal->programStatus());
+            // How the last command ended says what the program status says: what ran, and how it went.
+            auto const& blocks = terminal->commandBlocks();
+            if (auto const* last = blocks.lastFinished())
+                info.lastFinished = blockInfoOf(uuid, *last, blocks.idEpoch());
+        }
     }
     return info;
 }
@@ -368,6 +389,11 @@ vtcontrol::WorkspaceInfo ControlService::workspaceInfoOf(vtworkspace::Workspace 
     info.native = std::to_string(workspace.id().value);
     info.visibility = std::string { nameOf(_host.visibility(workspace.id().value)) };
     info.clients = static_cast<uint32_t>(_host.clientsShowing(workspace.id().value).size());
+    if (auto const git = _host.gitInfoOf(workspace.id()))
+        info.git = vtcontrol::WorkspaceGitInfo { .branch = git->branch,
+                                                 .kind = gitHeadKindOf(git->kind),
+                                                 .ahead = git->ahead,
+                                                 .behind = git->behind };
 
     auto const titleOf = [&](SessionId session) -> std::string {
         auto const* terminal = _host.terminal(session);

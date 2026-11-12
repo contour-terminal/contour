@@ -37,9 +37,9 @@ program has something to say, a second line with the reason.
 - **Git.** A workspace row shows the branch of its active pane's repository, with `↑` and `↓` once an
   upstream exists. A directory outside a repository, a detached `HEAD` and a branch without an upstream
   show only what is known. The daemon refreshes it when the active pane changes directory, when the active
-  tab or pane changes, when a command finishes (OSC 133;D) and every 30 seconds while a window follows the
-  daemon. A window without a daemon refreshes on the same events but has no 30-second timer. The probe
-  never blocks the daemon or the window.
+  tab or pane changes, when a command finishes (OSC 133;D) and every 30 seconds, whether or not a window is
+  attached, so another daemon's switcher rows show it too. A window without a daemon refreshes on the same
+  events but has no 30-second timer. The probe never blocks the daemon or the window.
 - **Current tab.** The tab this window displays is marked as selected, as the platform marks it: on macOS in
   the accent while the keyboard is in the sidebar and in a quiet grey while it is elsewhere, as a source
   list's selection is; on Linux a neutral fill, focused or not, with the accent focus ring on the row the

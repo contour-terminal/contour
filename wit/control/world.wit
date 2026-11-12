@@ -56,6 +56,25 @@ interface types {
         generation: u32,
     }
 
+    enum block-state {
+        prompting,
+        running,
+        finished,
+        superseded,
+    }
+
+    record block-info {
+        id: string,
+        pane: string,
+        state: block-state,
+        command: option<string>,
+        exit-code: option<s32>,
+        cwd: option<string>,
+        prompt-at: option<string>,
+        started-at: option<string>,
+        duration-ms: option<u32>,
+    }
+
     record pane-info {
         id: string,
         label: string,
@@ -64,6 +83,7 @@ interface types {
         is-active: bool,
         size: size,
         program-status: list<program-status-info>,
+        last-finished: option<block-info>,
     }
 
     record tab-info {
@@ -75,6 +95,19 @@ interface types {
         panes: list<pane-info>,
     }
 
+    enum git-head-kind {
+        branch,
+        detached,
+        other-ref,
+    }
+
+    record workspace-git-info {
+        branch: string,
+        kind: git-head-kind,
+        ahead: option<u32>,
+        behind: option<u32>,
+    }
+
     record workspace-info {
         id: string,
         label: string,
@@ -83,6 +116,7 @@ interface types {
         visibility: string,
         clients: u32,
         tabs: list<tab-info>,
+        git: option<workspace-git-info>,
     }
 
     record list-reply {
@@ -143,25 +177,6 @@ interface types {
         pane: string,
         text: string,
         wait: send-wait,
-    }
-
-    enum block-state {
-        prompting,
-        running,
-        finished,
-        superseded,
-    }
-
-    record block-info {
-        id: string,
-        pane: string,
-        state: block-state,
-        command: option<string>,
-        exit-code: option<s32>,
-        cwd: option<string>,
-        prompt-at: option<string>,
-        started-at: option<string>,
-        duration-ms: option<u32>,
     }
 
     record send-reply {

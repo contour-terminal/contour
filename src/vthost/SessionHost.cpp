@@ -1383,12 +1383,10 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         return;
     _attachedClients.push_back(client);
     settleRaiseRole();
-    // A window that follows shows the sidebar: bring it up to date now, and keep it so.
+    // A window that follows shows the sidebar: bring it up to date now. The poll is armed by the refresh,
+    // once a workspace's directory is known, follower or not.
     if (client->followsDaemon())
-    {
         refreshAllWorkspaceGit();
-        armWorkspaceGitPoll();
-    }
 }
 
 void SessionHost::noteClientDetached(SessionStreamEvents const* client)
@@ -1398,8 +1396,6 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client)
         return;
     _focusSerials.erase(client);
     settleRaiseRole();
-    if (followerCount() == 0)
-        _workspaceGitPoll.reset();
     // A switch asked of a window that is gone will never be answered.
     auto const gone = client->connectionId();
     auto abandoned = std::vector<uint32_t> {};
@@ -2670,7 +2666,7 @@ std::optional<GitInfo> SessionHost::gitInfoOf(WorkspaceId workspace) const
 
 void SessionHost::refreshWorkspaceGit(WorkspaceId workspace)
 {
-    if (!_workspaceGit || followerCount() == 0)
+    if (!_workspaceGit)
         return;
     auto const* found = _model.workspace(workspace);
     auto const* tab = found ? found->activeTab() : nullptr;
@@ -2678,7 +2674,12 @@ void SessionHost::refreshWorkspaceGit(WorkspaceId workspace)
     if (pane == nullptr)
         return;
     if (auto directory = workingDirectoryOf(pane->session()))
+    {
         _workspaceGit->refresh(workspace, *std::move(directory));
+        // A workspace whose directory is known is looked up again on the poll from now on, window or not:
+        // workspace.list states it to every client, and another daemon's switcher shows it.
+        armWorkspaceGitPoll();
+    }
 }
 
 void SessionHost::refreshAllWorkspaceGit()
@@ -2701,15 +2702,9 @@ void SessionHost::refreshWorkspaceGitOf(SessionId session)
     }
 }
 
-std::size_t SessionHost::followerCount() const
-{
-    return static_cast<std::size_t>(std::ranges::count_if(
-        _attachedClients, [](SessionStreamEvents const* client) { return client->followsDaemon(); }));
-}
-
 void SessionHost::armWorkspaceGitPoll()
 {
-    if (!_workspaceGit || pollsWorkspaceGit() || followerCount() == 0)
+    if (!_workspaceGit || pollsWorkspaceGit() || _model.workspaceCount() == 0)
         return;
     _workspaceGitPoll.reset();
     _workspaceGitPoll.emplace(_loop, _loop.clock().now() + WorkspaceGitPollInterval, &pollWorkspaceGit, this);

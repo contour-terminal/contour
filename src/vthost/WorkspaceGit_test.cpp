@@ -9,6 +9,7 @@
 #include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 #include <core/testing/Environment.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,6 +20,8 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -33,6 +36,14 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/WorkspaceGit.hpp>
 #include <vthost/testing/FakeCommandRunner.hpp>
+
+#ifndef _WIN32
+    #include <vtpty/Process.hpp>
+    #include <vtpty/ProcessPlacement.hpp>
+    #include <vtpty/test/ProcessTesting.hpp>
+
+    #include <vthost/testing/HandoverTesting.hpp>
+#endif
 
 using vthost::GitInfo;
 using vthost::WorkspaceGitTracker;
@@ -450,7 +461,7 @@ struct FollowedHost
 };
 } // namespace
 
-TEST_CASE("nothing is probed while no window follows", "[vthost][git][host]")
+TEST_CASE("a workspace is looked up while no window follows", "[vthost][git][host]")
 {
     auto f = HostGitFixture {};
     auto const* tab = f.host.createTab();
@@ -458,10 +469,9 @@ TEST_CASE("nothing is probed while no window follows", "[vthost][git][host]")
     auto* terminal = f.host.terminal(tab->activePane()->session());
     REQUIRE(terminal != nullptr);
     terminal->writeToScreen("\033]7;file:///r/a\033\\");
-    f.turn();
-    f.host.refreshWorkspaceGit(f.host.workspaceId());
-    CHECK(f.executor.pending() == 0);
-    CHECK(f.probe.asked.empty());
+    f.settle();
+    CHECK(f.probe.asked == std::vector<std::filesystem::path> { "/r/a" });
+    CHECK(f.host.gitInfoOf(f.host.workspaceId()).has_value());
 }
 
 TEST_CASE("switching the active tab queues a probe", "[vthost][git][host]")
@@ -531,29 +541,34 @@ TEST_CASE("a workspace discarded while its probe runs is told of nobody", "[vtho
     CHECK_FALSE(h.f.host.gitInfoOf(otherId).has_value());
 }
 
-TEST_CASE("the 30 s timer runs only while a follower is attached", "[vthost][git][host]")
+TEST_CASE("the 30 s timer runs once a workspace's directory is known, follower or not", "[vthost][git][host]")
 {
     auto f = HostGitFixture {};
-    REQUIRE(f.host.createTab() != nullptr);
+    auto const* tab = f.host.createTab();
+    REQUIRE(tab != nullptr);
+    // Until a directory is known there is nothing to look up, and the timer stays off.
     CHECK_FALSE(f.host.pollsWorkspaceGit());
 
-    // A client that follows nothing keeps it off.
+    // A client that follows nothing, and one that follows, change nothing about it.
     auto plain = PlainClient {};
     f.host.noteClientAttached(&plain);
-    CHECK_FALSE(f.host.pollsWorkspaceGit());
-
     auto follower = FollowerClient {};
     f.host.noteClientAttached(&follower);
-    CHECK(f.host.pollsWorkspaceGit());
-
-    // It re-arms itself after each tick.
-    f.clock.advance(vthost::WorkspaceGitPollInterval + std::chrono::seconds { 1 });
-    f.turn();
-    CHECK(f.host.pollsWorkspaceGit());
-
-    // And ends with the last follower.
     f.host.noteClientDetached(&follower);
     CHECK_FALSE(f.host.pollsWorkspaceGit());
+
+    auto* terminal = f.host.terminal(tab->activePane()->session());
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen("\033]7;file:///r/a\033\\");
+    f.settle();
+    CHECK(f.host.pollsWorkspaceGit());
+
+    // It re-arms itself after each tick, and probes again.
+    f.probe.asked.clear();
+    f.clock.advance(vthost::WorkspaceGitPollInterval + std::chrono::seconds { 1 });
+    f.settle();
+    CHECK(f.host.pollsWorkspaceGit());
+    CHECK(f.probe.asked == std::vector<std::filesystem::path> { "/r/a" });
     f.host.noteClientDetached(&plain);
 }
 
@@ -593,3 +608,89 @@ TEST_CASE("a tick of the timer probes the active pane's directory and tells what
     f.host.noteClientDetached(&follower);
     f.host.unsubscribeStream(&recorder);
 }
+
+#ifndef _WIN32
+namespace
+{
+/// Holds every child it is handed between fork() and exec(), still in this process's directory, until it is
+/// let go.
+class ParkingPlacement final: public vtpty::ProcessPlacement
+{
+  public:
+    void placeThenRelease(vtpty::ParkedChild child) noexcept override
+    {
+        auto const _ = std::lock_guard { _mutex };
+        _parked.push_back(std::move(child));
+    }
+
+    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override { return std::nullopt; }
+
+    /// @return How many children it holds.
+    [[nodiscard]] std::size_t parked() const
+    {
+        auto const _ = std::lock_guard { _mutex };
+        return _parked.size();
+    }
+
+    /// Lets every child it holds go on to exec its program.
+    void releaseAll()
+    {
+        auto const _ = std::lock_guard { _mutex };
+        for (auto& child: _parked)
+            child.release();
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::vector<vtpty::ParkedChild> _parked;
+};
+
+/// Lets every child of a placement go as it goes out of scope. Declared after the host, so it runs first: the
+/// host's teardown waits for its children, which a parked one would keep it doing forever.
+class ReleaseOnExit
+{
+  public:
+    explicit ReleaseOnExit(ParkingPlacement& placement): _placement { placement } {}
+    ReleaseOnExit(ReleaseOnExit const&) = delete;
+    ReleaseOnExit& operator=(ReleaseOnExit const&) = delete;
+    ReleaseOnExit(ReleaseOnExit&&) = delete;
+    ReleaseOnExit& operator=(ReleaseOnExit&&) = delete;
+    ~ReleaseOnExit() { _placement.releaseAll(); }
+
+  private:
+    ParkingPlacement& _placement;
+};
+} // namespace
+
+TEST_CASE("a new shell's workspace is looked up where the shell starts and not where the daemon runs",
+          "[vthost][git][host][threading]")
+{
+    // The look-up the new tab starts comes while the shell's child is still between fork() and exec(), in the
+    // daemon's own directory: it must not name that one -- a daemon started from a repository would state
+    // that repository's branch for a workspace in another, until the next poll.
+    auto const directory = core::testing::ScopedTempDir { "contour-git" };
+    auto const start = std::filesystem::canonical(directory.path());
+    REQUIRE(start != std::filesystem::canonical(std::filesystem::current_path()));
+    auto probe = FakeProbe {};
+    auto executor = core::async::testing::ManualExecutor {};
+    auto placement = std::make_shared<ParkingPlacement>();
+    auto live = vthost::testing::LiveHost {
+        [&](vtpty::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+            auto exec = vtpty::testing::execInfo("/bin/sh", { "-c", vthost::testing::CatScript });
+            exec.workingDirectory = start;
+            return std::make_unique<vtpty::Process>(
+                exec, vtpty::createPty(size, std::nullopt), /*escapeSandbox=*/false, placement);
+        },
+        vthost::SessionHostConfig {
+            .workspaceGit = vthost::WorkspaceGitServices { .probe = probe, .executor = executor } }
+    };
+    auto const release = ReleaseOnExit { *placement };
+
+    REQUIRE(live.host.createTab() != nullptr);
+    REQUIRE(live.eventually([&] { return placement->parked() == 1; }));
+    live.host.refreshWorkspaceGit(live.host.workspaceId());
+    executor.drain();
+    REQUIRE_FALSE(probe.asked.empty());
+    CHECK(std::ranges::all_of(probe.asked, [&](auto const& asked) { return asked == start; }));
+}
+#endif

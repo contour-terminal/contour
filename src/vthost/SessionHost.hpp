@@ -1460,17 +1460,16 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         on display is due to advance.
     [[nodiscard]] bool ticksKittyAnimations(vtworkspace::SessionId session) const noexcept;
 
-    /// @return Whether the git state of the workspaces is looked up every WorkspaceGitPollInterval: only
-    ///         while a window follows the daemon, the one client showing it.
+    /// @return Whether the git state of the workspaces is looked up every WorkspaceGitPollInterval: once a
+    ///         workspace's directory is known, while the host holds one.
     [[nodiscard]] bool pollsWorkspaceGit() const noexcept
     {
         return _workspaceGitPoll.has_value() && !_workspaceGitPoll->settled();
     }
 
-    /// Looks the git state of @p workspace up again, for the directory of its active pane. Does nothing for a
-    /// host that tracks none, while no window follows the daemon (the one that shows it; a follower
-    /// attaching is brought up to date then), or for a pane whose directory is unknown. Public so tests can
-    /// name it.
+    /// Looks the git state of @p workspace up again, for the directory of its active pane, whether or not a
+    /// window follows the daemon (workspace.list states it to every client), and arms the poll. Does nothing
+    /// for a host that tracks none, or for a pane whose directory is unknown. Public so tests can name it.
     /// @param workspace The workspace.
     void refreshWorkspaceGit(vtworkspace::WorkspaceId workspace);
 
@@ -2057,14 +2056,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param session The session whose directory or command state just changed.
     void refreshWorkspaceGitOf(vtworkspace::SessionId session);
 
-    /// @return How many attached native clients follow the daemon (SessionStreamEvents::followsDaemon).
-    [[nodiscard]] std::size_t followerCount() const;
-
-    /// Arms the poll of the workspaces' git state, unless it is armed, tracked by nobody, or no window
-    /// follows.
+    /// Arms the poll of the workspaces' git state, unless it is armed, tracked by nobody, or the host holds
+    /// no workspace.
     void armWorkspaceGitPoll();
 
-    /// What the git poll does: looks every workspace up again, and re-arms while a window follows.
+    /// What the git poll does: looks every workspace up again, and re-arms while the host holds a workspace.
     /// @param host The SessionHost.
     static void pollWorkspaceGit(void* host);
 
@@ -2285,7 +2281,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Asks the hosted programs who runs in the foreground, once a second; armed only while a session runs
     /// extensions.
     std::optional<core::net::DeadlineTimer> _foregroundPoll;
-    /// Looks the workspaces' git state up every WorkspaceGitPollInterval, while a window follows the daemon.
+    /// Looks the workspaces' git state up every WorkspaceGitPollInterval, once a workspace's directory is
+    /// known.
     std::optional<core::net::DeadlineTimer> _workspaceGitPoll;
     /// Looks the workspaces' git state up off the loop thread; null when the host tracks none.
     std::unique_ptr<WorkspaceGitTracker> _workspaceGit;

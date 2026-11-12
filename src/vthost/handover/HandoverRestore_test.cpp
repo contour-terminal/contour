@@ -3,6 +3,8 @@
 
 #include <vtpty/test/HandleTesting.hpp>
 
+#include <core/async/testing/ManualExecutor.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -34,10 +36,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -46,6 +50,7 @@
 #include <vector>
 
 #include <vthost/SessionHost.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/handover/HandoverRestore.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/HandoverTesting.hpp>
@@ -523,6 +528,47 @@ TEST_CASE("a kitty animation playing as it is handed over keeps the daemon's fra
 
     // Armed by the restore alone: nothing the program sends from now re-arms it.
     CHECK(live->eventually([&] { return live->host.ticksKittyAnimations(id); }));
+}
+
+namespace
+{
+/// Answers every directory with a branch named after it, and records what it was asked.
+struct DirectoryNamingProbe final: IGitStatusProbe
+{
+    [[nodiscard]] std::optional<GitInfo> probe(std::filesystem::path const& cwd) const override
+    {
+        asked.push_back(cwd);
+        return GitInfo { .branch = cwd.filename().string() };
+    }
+
+    mutable std::vector<std::filesystem::path> asked;
+};
+} // namespace
+
+TEST_CASE("a restored daemon looks every workspace's git state up again and keeps polling it",
+          "[vthost][handover][threading][git]")
+{
+    // What git a workspace is on is looked up, not carried: the successor asks again for each one it takes
+    // over, at once, rather than waiting for a window, a new directory or a finished command that may never
+    // come -- and keeps asking on the poll, as a host whose workspaces were made in it does.
+    auto old = oneSession();
+    auto const workspace = old->host.workspaceId();
+    // The shell reports no directory (no OSC 7, whose restore would tell it anew): the process's own is the
+    // only one there is, and nothing about it changes across the upgrade.
+    auto const image = handOver(std::move(old));
+
+    auto probe = DirectoryNamingProbe {};
+    auto executor = core::async::testing::ManualExecutor {};
+    auto const live = takeOver(
+        image,
+        SessionHostConfig { .workspaceGit = WorkspaceGitServices { .probe = probe, .executor = executor } });
+
+    REQUIRE(live->eventually([&] {
+        executor.drain();
+        return live->host.gitInfoOf(workspace).has_value();
+    }));
+    CHECK(live->host.gitInfoOf(workspace)->branch == std::filesystem::current_path().filename().string());
+    CHECK(live->host.pollsWorkspaceGit());
 }
 
 namespace

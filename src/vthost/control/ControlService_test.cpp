@@ -3,6 +3,7 @@
 
 #include <vtpty/MockPty.hpp>
 
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <expected>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
@@ -30,6 +32,7 @@
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/WorkspaceGit.hpp>
 #include <vthost/control/ControlService.hpp>
 #include <vthost/testing/ControlHarness.hpp>
 #include <vthost/testing/TestHelpers.hpp>
@@ -1820,6 +1823,120 @@ void callSwitch(ControlHarness& h, vtcontrol::SwitchWorkspaceRequest const& requ
 }
 
 } // namespace
+
+namespace
+{
+/// Answers every git look-up with one state.
+struct FixedGitProbe final: vthost::IGitStatusProbe
+{
+    [[nodiscard]] std::optional<vthost::GitInfo> probe(std::filesystem::path const& /*cwd*/) const override
+    {
+        return answer;
+    }
+    vthost::GitInfo answer {};
+};
+
+/// Runs the git look-ups the host queued, and what their answers post, until none is left. The host's git
+/// poll is armed once a directory is known, so the loop has a timer parked: each turn is scripted to time out
+/// rather than drained until idle.
+void settleGit(ControlHarness& h, core::async::testing::ManualExecutor& executor)
+{
+    do
+    {
+        executor.drain();
+        h.source.pushTimeout();
+        std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
+    } while (executor.pending() > 0);
+}
+
+/// @return The one workspace workspace.list lists.
+[[nodiscard]] vtcontrol::WorkspaceInfo listedWorkspace(ControlHarness& h)
+{
+    auto list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    REQUIRE(list->workspaces.size() == 1);
+    return list->workspaces[0];
+}
+} // namespace
+
+TEST_CASE("workspace.list states a workspace's git and its panes' last finished command",
+          "[vthost][control][programstatus][git]")
+{
+    auto probe = FixedGitProbe {};
+    probe.answer = vthost::GitInfo {
+        .kind = vtbackend::GitHeadKind::Branch, .branch = "main", .ahead = 2, .behind = {}
+    };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto h = ControlHarness { vthost::WorkspaceGitServices { .probe = probe, .executor = executor } };
+    auto const session = h.openTab();
+    h.terminal(session).writeToScreen("\033]7;file:///r/a\033\\");
+    h.terminal(session).writeToScreen(commandCycle("make deploy", "", 1));
+    settleGit(h, executor);
+    REQUIRE(h.host.gitInfoOf(h.host.workspaceId()).has_value());
+    auto const listed = [&] {
+        return listedWorkspace(h);
+    };
+
+    SECTION("with screen: the git state and how the last command ended")
+    {
+        h.context.granted =
+            vtcontrol::ControlGrants::of({ vtcontrol::Permission::Read, vtcontrol::Permission::Screen });
+        auto const workspace = listed();
+        REQUIRE(workspace.git.has_value());
+        CHECK(workspace.git->branch == "main");
+        CHECK(workspace.git->kind == vtcontrol::GitHeadKind::Branch);
+        CHECK(workspace.git->ahead == 2);
+        CHECK_FALSE(workspace.git->behind.has_value());
+        auto const& last = workspace.tabs.at(0).panes.at(0).lastFinished;
+        REQUIRE(last.has_value());
+        CHECK(last->exitCode == 1);
+        CHECK(last->command == "make deploy");
+        CHECK(last->startedAt.has_value());
+        CHECK(last->durationMs.has_value());
+    }
+
+    SECTION("read alone: the git state, but no command")
+    {
+        h.context.granted = vtcontrol::ControlGrants::of({ vtcontrol::Permission::Read });
+        auto const workspace = listed();
+        CHECK(workspace.git.has_value());
+        CHECK_FALSE(workspace.tabs.at(0).panes.at(0).lastFinished.has_value());
+    }
+}
+
+TEST_CASE("workspace.list states the git state of a workspace no window follows", "[vthost][control][git]")
+{
+    auto probe = FixedGitProbe {};
+    probe.answer = vthost::GitInfo {
+        .kind = vtbackend::GitHeadKind::Branch, .branch = "main", .ahead = {}, .behind = {}
+    };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto h = ControlHarness { vthost::WorkspaceGitServices { .probe = probe, .executor = executor } };
+    auto const session = h.openTab();
+    h.terminal(session).writeToScreen("\033]7;file:///r/a\033\\");
+    settleGit(h, executor);
+    REQUIRE(listedWorkspace(h).git.has_value());
+    CHECK(listedWorkspace(h).git->branch == "main");
+
+    // The shell moves into another repository: with no window attached, the listing still follows it.
+    probe.answer.branch = "feat/auth";
+    h.terminal(session).writeToScreen("\033]7;file:///r/b\033\\");
+    settleGit(h, executor);
+    auto const moved = listedWorkspace(h);
+    REQUIRE(moved.git.has_value());
+    CHECK(moved.git->branch == "feat/auth");
+}
+
+TEST_CASE("workspace.list states no git where nothing is looked up", "[vthost][control][git]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.terminal(session).writeToScreen("\033]133;A\007$ ");
+    auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    CHECK_FALSE(list->workspaces.at(0).git.has_value());
+    CHECK_FALSE(list->workspaces.at(0).tabs.at(0).panes.at(0).lastFinished.has_value());
+}
 
 TEST_CASE("workspace.list reports a workspace's visibility, clients and native id",
           "[vthost][control][switch]")

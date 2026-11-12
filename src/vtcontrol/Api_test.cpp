@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
+
 #include <vtcontrol/Api.hpp>
 #include <vtcontrol/Json.hpp>
 
@@ -31,6 +33,53 @@ TEST_CASE("API replies round-trip through JSON", "[vtcontrol][api]")
     REQUIRE(back->workspaces.size() == 1);
     CHECK(back->workspaces[0].tabs[0].isActive);
     CHECK(back->workspaces[0].tabs[0].panes[0].size.columns == 80);
+}
+
+TEST_CASE("a workspace's git and a pane's last finished command round-trip through JSON", "[vtcontrol][api]")
+{
+    auto const reply = vtcontrol::ListReply {
+        .workspaces = { vtcontrol::WorkspaceInfo {
+            .id = "workspace:w",
+            .tabs = { vtcontrol::TabInfo {
+                .id = "tab:t",
+                .panes = { vtcontrol::PaneInfo {
+                    .id = "pane:p",
+                    .lastFinished = vtcontrol::BlockInfo { .id = "block:p/3",
+                                                           .pane = "pane:p",
+                                                           .state = vtcontrol::BlockState::Finished,
+                                                           .command = "make deploy",
+                                                           .exitCode = 1,
+                                                           .startedAt = "2026-11-12T10:00:00.000Z",
+                                                           .durationMs = 1500 } } } } },
+            .git = vtcontrol::WorkspaceGitInfo { .branch = "main",
+                                                 .kind = vtcontrol::GitHeadKind::Branch,
+                                                 .ahead = 2,
+                                                 .behind = std::nullopt } } }
+    };
+    auto const json = vtcontrol::encodeJson(reply);
+    CHECK(json.contains(R"("git":{"branch":"main","kind":"branch","ahead":2)"));
+    auto const back = vtcontrol::decodeJson<vtcontrol::ListReply>(json);
+    REQUIRE(back);
+    REQUIRE(back->workspaces.size() == 1);
+    auto const& workspace = back->workspaces[0];
+    REQUIRE(workspace.git.has_value());
+    CHECK(workspace.git->branch == "main");
+    CHECK(workspace.git->kind == vtcontrol::GitHeadKind::Branch);
+    CHECK(workspace.git->ahead == 2);
+    CHECK_FALSE(workspace.git->behind.has_value());
+    auto const& last = workspace.tabs[0].panes[0].lastFinished;
+    REQUIRE(last.has_value());
+    CHECK(last->command == "make deploy");
+    CHECK(last->exitCode == 1);
+    CHECK(last->durationMs == 1500);
+
+    // Both are absent from a daemon that has neither to say.
+    auto const bare = vtcontrol::decodeJson<vtcontrol::ListReply>(
+        R"({"workspaces":[{"id":"workspace:w","tabs":[{"id":"tab:t","panes":[{"id":"pane:p"}]}]}]})");
+    REQUIRE(bare);
+    CHECK_FALSE(bare->workspaces[0].git.has_value());
+    CHECK_FALSE(bare->workspaces[0].tabs[0].panes[0].lastFinished.has_value());
+    CHECK(vtcontrol::nameOf(vtcontrol::GitHeadKind::OtherRef) == "otherRef");
 }
 
 TEST_CASE("DaemonInfoReply round-trips grants", "[vtcontrol][api]")
