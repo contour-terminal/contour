@@ -8414,7 +8414,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // A cell holds at most one base codepoint plus its combining marks; sized generously so
             // no realistic grapheme cluster is truncated, and without allocating per cell.
             auto codepoints = std::array<char32_t, 16> {};
-            for (auto const row: std::views::iota(*top, *bottom + 1))
+            // Each corner is clamped to the page, but nothing puts them in order. A rectangle whose
+            // right edge lies left of its left one (or bottom above top) holds no cells, and is
+            // answered with the checksum of nothing, as xterm answers one its validRect() refuses.
+            auto const holdsCells = top <= bottom && left <= right;
+            for (auto const row: std::views::iota(*top, holdsCells ? *bottom + 1 : *top))
             {
                 for (auto const column: std::views::iota(*left, *right + 1))
                 {
