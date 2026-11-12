@@ -374,13 +374,13 @@ jobs:
           test -f "$RUNNER_TEMP/contour-headless/share/contour/extensions/$extension.wasm"
         done
     # The package files are found by glob and counted rather than named: CPack derives the file name
-    # (contour-daemon_<version>_<arch>.deb, and the debug-info package beside it), and a name guessed
-    # here would be a second place to keep in step with it. Exactly one of each, or the step says which.
+    # (contour-daemon_<version>_<arch>.deb), and a name guessed here would be a second place to keep in
+    # step with it. Exactly one, or the step says which.
     - name: "CPack: Creating DEB package"
       run: |
         set -eu
         # -G DEB: nothing on Linux sets CPACK_GENERATOR (the GUI job gets DEB from the gcc-release
-        # package preset), and without it cpack builds tarballs. It also writes the -dbgsym .ddeb.
+        # package preset), and without it cpack builds tarballs.
         cpack -G DEB -B build --config build/CPackConfig.cmake
         ls -la build
         pick() {
@@ -396,9 +396,7 @@ jobs:
           printf '%s\n' "$matches"
         }
         deb=$(pick 'contour-daemon*.deb' 'contour-daemon .deb')
-        ddeb=$(pick 'contour-daemon*.ddeb' 'contour-daemon debug-info .ddeb')
         mv -v "$deb" "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
-        mv -v "$ddeb" "contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.ddeb"
     - name: "Inspect the package"
       run: |
         set -eu
@@ -440,9 +438,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-        path: |
-          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
-          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
+        path: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
         if-no-files-found: error
         retention-days: 7
 
@@ -821,9 +817,9 @@ jobs:
         docker cp contour-rpm:/app/rpmbuild/RPMS/x86_64/. rpms/
         docker rm contour-rpm
         ls -la rpms
-    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm (and the
-    # -debuginfo/-debugsource beside each): the release tag is in the name because the dist tag of
-    # rawhide is not known in advance, and the VERSION_STRING because that is what the .deb carries.
+    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm: the release tag
+    # is in the name because the dist tag of rawhide is not known in advance, and the VERSION_STRING
+    # because that is what the .deb carries.
     - name: "Name the packages"
       run: |
         set -eux
@@ -834,8 +830,8 @@ jobs:
           stem="${base%%-"${VERSION}"-1.*}"
           mv -v "$rpm" "${stem}-${VERSION_STRING}-fedora${OS_VERSION}-x86_64.rpm"
         done
-        # Exactly the six packages: contour and contour-daemon, each with its debuginfo and debugsource.
-        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 6
+        # Exactly the two packages, contour and contour-daemon: the spec builds no debuginfo or debugsource.
+        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 2
         ls -la ./*.rpm
     # What the packages say about themselves, read inside a Fedora container (it has rpm; the Ubuntu
     # runner does not). The daemon must name no Qt and ship no desktop files; the GUI package must still
@@ -897,20 +893,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
-        path: |
-          contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        path: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package: contour-daemon"
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
-        path: |
-          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-daemon-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
-          contour-daemon-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        path: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
         if-no-files-found: error
         retention-days: 7
   # }}}
@@ -1458,24 +1448,6 @@ jobs:
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
-          retention-days: 7
-      # The debug symbols of the production build are not in the image; they are published beside it, so a
-      # crash report from a release can be symbolicated.
-      - name: "Collect the debug symbols"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
-        run: |
-          set -euo pipefail
-          cmake --install out/macos-package --component debug_symbols --prefix symbols
-          test -d symbols/contour.dSYM
-          ditto -c -k --keepParent symbols/contour.dSYM "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-      - name: "upload to artifact store (dSYM)"
-        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm-dSYM.zip"
-          if-no-files-found: error
-          compression-level: 0
           retention-days: 7
   # }}}
   # {{{ Windows
@@ -2028,26 +2000,6 @@ jobs:
           name: "msi-upgrade-check-logs"
           path: ${{ runner.temp }}/msi-*
           if-no-files-found: ignore
-          retention-days: 7
-      # The PDBs of the production build are not in the MSI or the zip; they are published beside them.
-      - name: "Collect the debug symbols"
-        if: github.event_name != 'pull_request'
-        shell: pwsh
-        run: |
-          cmake --install out/build/${{ env.CMAKE_PRESET }} --component debug_symbols --prefix symbols
-          if (-not (Test-Path symbols/contour.pdb)) {
-            Write-Host "::error::the debug_symbols component installed no contour.pdb"
-            exit 1
-          }
-          Compress-Archive -Path symbols/* -DestinationPath "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-      - name: "Uploading PDB zip to artifact store"
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-          path: "contour-${{ steps.set_vars.outputs.version }}-win64-pdb.zip"
-          if-no-files-found: error
-          compression-level: 0
           retention-days: 7
   # }}}
   # {{{ Ubuntu 24.04 CC matrix
@@ -2636,21 +2588,16 @@ jobs:
           OS_VERSION=${OS_OVERRIDE/./_}
           mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
-                "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          path: |
-            contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
-            contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
+          path: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
-          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
       - name: "Verify installation"
         run: |
           contour version

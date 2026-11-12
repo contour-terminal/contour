@@ -569,7 +569,6 @@ _NAMES = (
     "contour-0.9.0.9500-win64.msi",
     "contour-0.9.0.9500-win64-user.msi",
     "contour-0.9.0.9500-win64.zip",
-    "contour-0.9.0.9500-win64-pdb.zip",
     "contour-0.9.0.9500-ubuntu26.04-amd64.deb",
     "contour-0.9.0.9500-macos-arm64.dmg",
 )
