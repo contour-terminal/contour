@@ -107,9 +107,6 @@ jobs:
       group: ${{ ((vars.WINDOWS_SIGNER != '' && vars.WINDOWS_SIGNER != 'none') && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.WINDOWS_SIGNING_BUILDS == 'releases-and-master'))) && 'release-signing' || format('windows-{0}-{1}', github.run_id, github.run_attempt) }}
       cancel-in-progress: false
     env:
-      CCACHE_DEBUG: "1"
-      CCACHE_DEBUGDIR: D:\a\ccache-debug
-      CCACHE_LOGFILE: D:\a\ccache-debug\ccache.log
       CMAKE_PRESET: "msvc-release"
       VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
     steps:
@@ -239,7 +236,11 @@ jobs:
       - name: "Build"
         shell: pwsh
         run: |
-          cmake --build --preset ${{ env.CMAKE_PRESET }} --target vtparser crispy
+          New-Item -ItemType Directory -Force D:\a\ccache-debug | Out-Null
+          $env:CCACHE_DEBUG = "1"
+          $env:CCACHE_DEBUGDIR = "D:\a\ccache-debug"
+          $env:CCACHE_LOGFILE = "D:\a\ccache-debug\ccache.log"
+          cmake --build --preset ${{ env.CMAKE_PRESET }} --target vtparser crispy-core
       - name: "Show ccache statistics"
         if: ${{ !cancelled() }}
         shell: pwsh
