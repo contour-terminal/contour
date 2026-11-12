@@ -93,8 +93,6 @@ std::vector<std::string> buildWindowsEnvironment(std::span<std::string_view cons
     for (auto const& [name, value]: configured)
     {
         auto const comparable = comparableName(name, Names);
-        if (comparable == "TERM")
-            continue;
         if (value.empty())
             dropped.push_back(name);
         else if (comparable == "PATH" && inheritedPath)

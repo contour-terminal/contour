@@ -52,14 +52,16 @@ TEST_CASE("buildEnvironmentBlock: names compare as the platform compares them", 
           == std::vector<std::string> { "=C:=C:\\dir", "PATH=C:\\bin", "Path=C:\\Windows", "Temp=C:\\Temp" });
 }
 
-TEST_CASE("buildWindowsEnvironment: TERM stays out, PATH goes first, an empty value removes", "[process]")
+TEST_CASE("buildWindowsEnvironment: explicit TERM is passed, PATH goes first, an empty value removes",
+          "[process]")
 {
     auto const inherited = std::vector<std::string_view> { "Path=C:\\Windows", "Gone=1", "Kept=1" };
     auto const removed = std::vector<std::string> {};
     auto block = vtpty::buildWindowsEnvironment(
         inherited, { { "PATH", "C:\\bin" }, { "TERM", "contour" }, { "gone", "" }, { "New", "2" } }, removed);
     std::ranges::sort(block);
-    CHECK(block == std::vector<std::string> { "Kept=1", "New=2", "PATH=C:\\bin;C:\\Windows" });
+    CHECK(block
+          == std::vector<std::string> { "Kept=1", "New=2", "PATH=C:\\bin;C:\\Windows", "TERM=contour" });
 }
 
 TEST_CASE("environmentValue: a variable's value, its name compared as asked", "[process]")

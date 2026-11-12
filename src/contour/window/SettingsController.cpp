@@ -40,6 +40,7 @@
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>
+#include <QtQml/QJSValue>
 
 #include <algorithm>
 #include <array>
@@ -1078,6 +1079,10 @@ QVariantList SettingsController::profileFields() const
             row[QStringLiteral("label")] = descriptor.label;
             row[QStringLiteral("help")] = descriptor.help;
             row[QStringLiteral("value")] = descriptor.get(_draft);
+#ifdef _WIN32
+            if (descriptor.type == SettingsValueType::Environment)
+                row[QStringLiteral("environmentNamesIgnoreCase")] = _draft.ssh.value().hostname.empty();
+#endif
             row[QStringLiteral("problem")] =
                 descriptor.validate ? descriptor.validate(row[QStringLiteral("value")]) : QString {};
             row[QStringLiteral("options")] = descriptor.options;
@@ -1210,7 +1215,14 @@ std::expected<void, SettingsError> SettingsController::setProfileField(QString c
         for (auto const& descriptor: group.fields)
             if (descriptor.key == key)
             {
-                descriptor.set(_draft, value);
+                auto const edited = descriptor.type == SettingsValueType::Environment
+                                            && value.metaType() == QMetaType::fromType<QJSValue>()
+                                        ? value.value<QJSValue>().toVariant()
+                                        : value;
+                if (descriptor.type == SettingsValueType::Environment && descriptor.validate)
+                    if (auto const problem = descriptor.validate(edited); !problem.isEmpty())
+                        return refuse(SettingsErrorKind::InvalidValue, problem.toStdString());
+                descriptor.set(_draft, edited);
                 emit draftChanged();
                 return stageProfileDraft();
             }

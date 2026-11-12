@@ -43,6 +43,7 @@ namespace
     /// Every global setting settings.yml may override, as globalOverrides() hands them out. A section's
     /// row applies its loader by name, so a change to how that loader reads its leaves applies here too.
     constexpr auto GlobalOverrideTable = std::array {
+        scalar<&Config::sshDefaultTerm>("ssh_default_term"),
         scalar<&Config::wordDelimiters>("word_delimiters"),
         scalar<&Config::ptyReadBufferSize>("read_buffer_size"),
         scalar<&Config::ptyBufferObjectSize>("pty_buffer_size"),

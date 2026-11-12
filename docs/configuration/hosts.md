@@ -7,6 +7,33 @@ to set the far side up (including over Tailscale), is described in
 
 ## Configuration
 
+A profile's `ssh:` block instead opens a remote login shell through Contour's built-in SSH client; it
+does not require Contour on the server. Contour chooses the first nonempty value from the profile's
+`environment.TERM`, the top-level `ssh_default_term`, and the Contour process's `TERM` environment
+variable. If none is set, Windows uses `xterm-256color`. Other platforms send an empty terminal type.
+Choose a terminal type whose terminfo entry is installed on the server.
+
+In Settings, edit **Default SSH terminal type** under **General → Advanced** and **Environment
+variables** under the profile's **Shell** group. Settings can edit profiles it manages. For a
+profile defined in `contour.yml`, edit the file or duplicate the profile in Settings.
+
+```yaml
+ssh_default_term: xterm-256color
+profiles:
+  remote-shell:
+    ssh:
+      host: homepc
+      user: me
+    environment:
+      TERM: contour
+      COLORTERM: truecolor
+```
+
+The profile's `environment:` values go to the shell the profile opens. A local shell receives them
+directly. For built-in SSH, `TERM` travels in the PTY request. Other entries, such as `COLORTERM`,
+are sent as SSH environment requests and may require server permission (for example, OpenSSH's
+`AcceptEnv`). Review values in existing profiles before using them with a remote host.
+
 Hosts are configured under the top-level `hosts` entry, a map of host name to its settings.
 Listings are sorted by name.
 

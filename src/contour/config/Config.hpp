@@ -1010,6 +1010,8 @@ struct TerminalProfile
         .removedEnvironment = {},
     } }; // namespace contour::config
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
+    /// Variables written in this profile, before launch defaults or inheritance are applied.
+    vtpty::Process::Environment configuredEnvironment {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
     ConfigEntry<bool, documentation::CopyCommandPreserveMultiline> copyCommandPreserveMultiline { false };
@@ -1168,6 +1170,7 @@ struct Config
     std::filesystem::path configFile {};
     ConfigEntry<std::string, documentation::PlatformPlugin> platformPlugin { "auto" };
     ConfigEntry<RendererConfig, documentation::Renderer> renderer {};
+    ConfigEntry<std::string, documentation::SshDefaultTerm> sshDefaultTerm {};
     ConfigEntry<std::string, documentation::WordDelimiters> wordDelimiters {
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };

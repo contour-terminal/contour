@@ -107,6 +107,7 @@ struct Layouts {};
 struct Hosts {};
 struct DefaultLayout {};
 struct WordDelimiters {};
+struct SshDefaultTerm {};
 struct ExtendedWordDelimiters {};
 struct BypassMouseProtocolModifiers {};
 struct OnMouseSelection {};

@@ -7,6 +7,7 @@
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/HostUrl.hpp>
 #include <contour/config/ModifierNames.hpp>
+#include <contour/config/ProfileEnvironment.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
@@ -588,15 +589,8 @@ namespace
 
         return locations;
     }
-#endif
-
-    // Windows has no terminfo database to search, so the directory goes unread there.
-    string getDefaultTERM([[maybe_unused]] optional<fs::path> const& appTerminfoDir)
+    string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
     {
-#ifdef _WIN32
-        return "contour";
-#else
-
         if (Process::isFlatpak())
             return "contour";
 
@@ -620,8 +614,8 @@ namespace
             }
 
         return "vt100";
-#endif
     }
+#endif
 
 } // namespace
 
@@ -1587,6 +1581,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.profiles.value() = { { "main", TerminalProfile { .defaultsEdition = config.defaultsEdition } } };
     config.colorschemes.value() = { { "default", vtbackend::ColorPalette {} } };
     config.hosts.value().clear();
+    config.sshDefaultTerm = std::string {};
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
     config.hostOrigins.clear();
@@ -1613,6 +1608,24 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     recordMainConfigOrigins(config, yamlVisitor);
     adoptSwitchedEdition(config);
     mergeGuiManagedSideFiles(config, yamlVisitor);
+
+    // Resolve SSH TERM after settings.yml has applied its override to the global default.
+    auto terminalType = config.sshDefaultTerm.value();
+    if (terminalType.empty())
+        terminalType = environmentBytes("TERM", configEnvironment());
+#ifdef _WIN32
+    if (terminalType.empty())
+        terminalType = "xterm-256color";
+#endif
+    for (auto& profile: config.profiles.value() | std::views::values)
+    {
+        auto& ssh = profile.ssh.value();
+        if (ssh.hostname.empty())
+            continue;
+        auto& term = ssh.env["TERM"];
+        if (term.empty())
+            term = terminalType;
+    }
 
     compareEntries(config, logger);
 }
@@ -1857,6 +1870,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("default_layout", c.defaultLayoutName);
         loadFromEntry("renderer", c.renderer);
         loadFromEntry("word_delimiters", c.wordDelimiters);
+        loadFromEntry("ssh_default_term", c.sshDefaultTerm);
         loadFromEntry("extended_word_delimiters", c.extendedWordDelimiters);
         loadFromEntry("command_palette_recent_count", c.commandPaletteRecentCount);
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
@@ -2009,6 +2023,55 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     loadProfileBody(node[entry], where, entry);
 }
 
+namespace
+{
+    vtpty::Process::Environment loadProfileEnvironment(YAML::Node const& profile,
+                                                       std::string_view profileName)
+    {
+        auto values = vtpty::Process::Environment {};
+        auto const environment = profile["environment"];
+        if (!environment || environment.IsNull())
+            return values;
+        if (!environment.IsMap())
+        {
+            errorLog()("Ignoring environment in profile '{}'. Expected a map of names to values.",
+                       profileName);
+            return values;
+        }
+        for (auto const& variable: environment)
+        {
+            if (!variable.first.IsScalar() || !variable.second.IsScalar())
+            {
+                errorLog()("Ignoring environment entry in profile '{}'. Expected a scalar name and value.",
+                           profileName);
+                continue;
+            }
+            auto const& name = variable.first.Scalar();
+            auto const& value = variable.second.Scalar();
+            if (auto const problem = profileEnvironmentProblem(name, value); !problem.empty())
+                errorLog()("Ignoring environment entry in profile '{}'. {}", profileName, problem);
+            else
+                values.insert_or_assign(name, value);
+        }
+        return values;
+    }
+
+    void applyLocalEnvironment(vtpty::Process::Environment const& configured,
+                               vtpty::Process::Environment& effective)
+    {
+        for (auto const& [name, value]: configured)
+        {
+#ifdef _WIN32
+            auto const comparable = core::toUpper(name);
+            std::erase_if(effective,
+                          [&](auto const& entry) { return core::toUpper(entry.first) == comparable; });
+#endif
+            effective.insert_or_assign(name, value);
+        }
+    }
+
+} // namespace
+
 void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
                                        TerminalProfile& where,
                                        std::string_view profileName)
@@ -2024,6 +2087,12 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
             // load shell config if ssh is not provided
             loadFromEntry(child, "shell", where.shell);
         }
+        where.configuredEnvironment = loadProfileEnvironment(child, profileName);
+        if (!where.ssh.value().hostname.empty())
+            // Forwarded variables belong to this profile, even if it inherits the SSH host settings.
+            where.ssh.value().env = where.configuredEnvironment;
+        else
+            applyLocalEnvironment(where.configuredEnvironment, where.shell.value().env);
         // enforce some default shell setup
         defaultSettings(where.shell.value());
 
@@ -4445,8 +4514,9 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
     shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
     // {{{ Populate environment variables
+#ifndef _WIN32
     std::optional<fs::path> appTerminfoDir; // NOLINT(misc-const-correctness)
-#ifdef __APPLE__
+    #ifdef __APPLE__
     {
         char buf[1024];
         uint32_t len = sizeof(buf);
@@ -4460,7 +4530,7 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
             }
         }
     }
-#endif
+    #endif
 
     // force some default env
     if (!shell.env.contains("TERM"))
@@ -4468,6 +4538,7 @@ void YAMLConfigReader::defaultSettings(vtpty::Process::ExecInfo& shell)
         shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
         logger()("Defaulting TERM to {}.", shell.env["TERM"]);
     }
+#endif
 
     if (!shell.env.contains("COLORTERM"))
         shell.env["COLORTERM"] = "truecolor";
@@ -5548,6 +5619,38 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
     };
 
     Reflection::CallOnMembers(profile, completeOverload);
+    if constexpr (std::same_as<Writer, YAMLConfigWriter>)
+    {
+        auto const& ssh = profile.ssh.value();
+        if (!ssh.hostname.empty() || !profile.configuredEnvironment.empty())
+        {
+            auto yaml = YAML::Emitter {};
+            yaml << YAML::BeginMap;
+            if (!ssh.hostname.empty())
+            {
+                yaml << YAML::Key << "ssh" << YAML::Value << YAML::BeginMap << YAML::Key << "host"
+                     << YAML::Value << YAML::DoubleQuoted << ssh.hostname << YAML::Key << "port"
+                     << YAML::Value << ssh.port << YAML::Key << "user" << YAML::Value << YAML::DoubleQuoted
+                     << ssh.username << YAML::Key << "private_key" << YAML::Value << YAML::DoubleQuoted
+                     << core::pathToUtf8(ssh.privateKeyFile) << YAML::Key << "public_key" << YAML::Value
+                     << YAML::DoubleQuoted << core::pathToUtf8(ssh.publicKeyFile) << YAML::Key
+                     << "known_hosts" << YAML::Value << YAML::DoubleQuoted
+                     << core::pathToUtf8(ssh.knownHostsFile) << YAML::Key << "forward_agent" << YAML::Value
+                     << ssh.forwardAgent << YAML::EndMap;
+            }
+            if (!profile.configuredEnvironment.empty())
+            {
+                yaml << YAML::Key << "environment" << YAML::Value << YAML::BeginMap;
+                for (auto const& [name, value]: profile.configuredEnvironment)
+                    yaml << YAML::Key << YAML::DoubleQuoted << name << YAML::Value << YAML::DoubleQuoted
+                         << value;
+                yaml << YAML::EndMap;
+            }
+            yaml << YAML::EndMap;
+            doc.append(Writer::addOffset(std::string { yaml.c_str() } + '\n',
+                                         static_cast<size_t>(Writer::Offset::Levels) * Writer::OneOffset));
+        }
+    }
 }
 
 /// Serializes one profile's body as a bare top-level map for a `profiles/<name>.yml` GUI side file

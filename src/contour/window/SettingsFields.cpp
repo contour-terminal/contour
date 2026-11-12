@@ -3,6 +3,7 @@
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/HotkeyChord.hpp>
+#include <contour/config/ProfileEnvironment.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/window/SettingsFields.hpp>
 
@@ -29,6 +30,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <QtCore/QStringList>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
 #include <algorithm>
@@ -372,6 +374,35 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                     auto shell = p.shell.value();
                     shell.workingDirectory = workingDirectoryNamed(v.toString().toStdString());
                     p.shell = std::move(shell);
+                } },
+              { "environment",
+                "Environment variables",
+                "Variables for new sessions. Built-in SSH profiles send these to the remote host.",
+                SettingsValueType::Environment,
+                [](TerminalProfile const& profile) {
+                    auto values = QVariantMap {};
+                    for (auto const& [name, value]: profile.configuredEnvironment)
+                        values.insert(toQString(name), toQString(value));
+                    return QVariant(values);
+                },
+                [](TerminalProfile& profile, QVariant const& value) {
+                    profile.configuredEnvironment.clear();
+                    auto const values = value.toMap();
+                    for (auto entry = values.cbegin(); entry != values.cend(); ++entry)
+                        profile.configuredEnvironment.emplace(entry.key().toStdString(),
+                                                              entry.value().toString().toStdString());
+                },
+                {},
+                [](QVariant const& value) -> QString {
+                    if (value.metaType() != QMetaType::fromType<QVariantMap>())
+                        return QStringLiteral("Enter a map of environment variable names and values.");
+                    auto const values = value.toMap();
+                    for (auto entry = values.cbegin(); entry != values.cend(); ++entry)
+                        if (auto const problem = config::profileEnvironmentProblem(
+                                entry.key().toStdString(), entry.value().toString().toStdString());
+                            !problem.empty())
+                            return toQString(problem);
+                    return {};
                 } },
           } },
         { SettingsGroup::ProfileWindow,
@@ -1594,6 +1625,7 @@ namespace
         GlobalFieldGroupRow { .key = "connect_picker_on_start", .group = SettingsGroup::GeneralWindows },
         GlobalFieldGroupRow { .key = "remember_window_position", .group = SettingsGroup::GeneralWindows },
         GlobalFieldGroupRow { .key = "spawn_new_process", .group = SettingsGroup::GeneralWindows },
+        GlobalFieldGroupRow { .key = "ssh_default_term", .group = SettingsGroup::GeneralAdvanced },
         GlobalFieldGroupRow { .key = "tab_switch_on_horizontal_wheel",
                               .group = SettingsGroup::GeneralWindows },
         GlobalFieldGroupRow { .key = "quick_terminal.hotkey", .group = SettingsGroup::GeneralQuickTerminal },
@@ -1698,6 +1730,11 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 [](config::Config const& c) { return c.commandPaletteRecentCount.value(); },
                 0,
                 std::numeric_limits<int>::max()),
+            globalStringField("ssh_default_term",
+                              "Default SSH terminal type",
+                              "Used for built-in SSH profiles without a TERM override. Leave blank to use "
+                              "the process TERM and platform fallback.",
+                              [](config::Config const& c) { return c.sshDefaultTerm.value(); }),
             globalStringField("word_delimiters",
                               "Word delimiters",
                               "Characters that separate words when selecting by double-click.",

@@ -29,6 +29,7 @@
 #include <text_shaper/Font.hpp>
 
 #include <core/log/LogSink.hpp>
+#include <core/testing/EnvHelper.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -252,6 +253,230 @@ profiles:
     REQUIRE(env.contains("TERM_PROGRAM_VERSION"));
     CHECK(env.at("TERM_PROGRAM_VERSION") == CONTOUR_VERSION_STRING);
     CHECK_FALSE(env.at("TERM_PROGRAM_VERSION").empty());
+}
+
+TEST_CASE("Config: an SSH profile uses the client terminal type or an OpenSSH-style fallback", "[config]")
+{
+    auto const clientTerm = core::testing::ScopedEnv { "TERM", "vt100" };
+    auto expected = "vt100"sv;
+    SECTION("Unset TERM uses the platform fallback")
+    {
+        core::testing::unsetTestEnv("TERM");
+#ifdef _WIN32
+        expected = "xterm-256color"sv;
+#else
+        expected = ""sv;
+#endif
+    }
+    SECTION("Set TERM is inherited")
+    {
+    }
+    SECTION("Explicitly empty TERM uses the platform fallback")
+    {
+        core::testing::setTestEnv("TERM", "");
+#ifdef _WIN32
+        expected = "xterm-256color"sv;
+#else
+        expected = ""sv;
+#endif
+    }
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        ssh:
+            host: example.com
+            user: tester
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& ssh = profile->ssh.value();
+    CHECK(ssh.hostname == "example.com");
+    REQUIRE(ssh.env.contains("TERM"));
+    CHECK(ssh.env.at("TERM") == expected);
+}
+
+TEST_CASE("Config: SSH profile environment overrides the remote terminal type only", "[config]")
+{
+    auto const clientTerm = core::testing::ScopedEnv { "TERM", "vt100" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+ssh_default_term: contour
+profiles:
+    main:
+        ssh:
+            host: example.com
+        environment:
+            TERM: xterm-direct
+            SSH_TEST_VALUE: remote
+    other:
+        ssh:
+            host: other.example.com
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& remote = profile->ssh.value().env;
+    REQUIRE(remote.contains("TERM"));
+    CHECK(remote.at("TERM") == "xterm-direct");
+    REQUIRE(remote.contains("SSH_TEST_VALUE"));
+    CHECK(remote.at("SSH_TEST_VALUE") == "remote");
+    auto const& local = profile->shell.value().env;
+    CHECK_FALSE(local.contains("SSH_TEST_VALUE"));
+    CHECK_FALSE((local.contains("TERM") && local.at("TERM") == "xterm-direct"));
+    auto const* other = config.profile("other");
+    REQUIRE(other != nullptr);
+    auto const& otherRemote = other->ssh.value().env;
+    CHECK(otherRemote.at("TERM") == "contour");
+    CHECK_FALSE(otherRemote.contains("SSH_TEST_VALUE"));
+}
+
+TEST_CASE("Config: profile environment applies to a local shell", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+ssh_default_term: vt100
+profiles:
+    main:
+        environment:
+            TERM: xterm-direct
+            COLORTERM: truecolor
+            LOCAL_TEST_VALUE: local
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& local = profile->shell.value().env;
+    CHECK(local.at("TERM") == "xterm-direct");
+    CHECK(local.at("COLORTERM") == "truecolor");
+    CHECK(local.at("LOCAL_TEST_VALUE") == "local");
+    CHECK(profile->ssh.value().env.empty());
+}
+
+TEST_CASE("Config: invalid environment entries are skipped without losing valid variables", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        environment:
+            "CONTOUR_TEST=unexpected": value
+            "": empty-name
+            BAD_VALUE: "bad\0value"
+            KEEP: ""
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->configuredEnvironment == vtpty::Process::Environment { { "KEEP", "" } });
+    CHECK_FALSE(profile->shell.value().env.contains("CONTOUR_TEST=unexpected"));
+    CHECK_FALSE(profile->shell.value().env.contains("BAD_VALUE"));
+}
+
+TEST_CASE("Config: profile saves preserve explicit environment and its SSH destination", "[config]")
+{
+    QTemporaryDir dir;
+    auto const yaml = R"(
+default_profile: main
+ssh_default_term: vt100
+profiles:
+    main:
+        environment:
+            TERM: xterm-direct
+            EMPTY_VALUE: ""
+    remote:
+        ssh:
+            host: example.com
+            port: 2222
+            user: tester
+            forward_agent: true
+        environment:
+            REMOTE_VALUE: "first\nsecond"
+)"sv;
+    auto const before = loadFromYaml(dir, yaml);
+    auto const* local = before.profile("main");
+    auto const* remote = before.profile("remote");
+    REQUIRE(local != nullptr);
+    REQUIRE(remote != nullptr);
+    auto const savedLocal = contour::config::emitProfileYaml(*local);
+    auto const savedRemote = contour::config::emitProfileYaml(*remote);
+    auto const localEnvironment = YAML::Load(savedLocal)["environment"];
+    auto const remoteEnvironment = YAML::Load(savedRemote)["environment"];
+    CHECK(localEnvironment.size() == 2);
+    CHECK(localEnvironment["EMPTY_VALUE"].Scalar().empty());
+    CHECK(remoteEnvironment.size() == 1);
+    CHECK_FALSE(remoteEnvironment["TERM"]);
+    writeSideFile(dir, "profiles/main.yml", savedLocal);
+    writeSideFile(dir, "profiles/remote.yml", savedRemote);
+    auto const after = loadFromYaml(dir, yaml);
+    auto const* reloadedLocal = after.profile("main");
+    auto const* reloadedRemote = after.profile("remote");
+    REQUIRE(reloadedLocal != nullptr);
+    REQUIRE(reloadedRemote != nullptr);
+    CHECK(reloadedLocal->shell.value().env.at("TERM") == "xterm-direct");
+    auto const& ssh = reloadedRemote->ssh.value();
+    CHECK(ssh.hostname == "example.com");
+    CHECK(ssh.port == 2222);
+    CHECK(ssh.username == "tester");
+    CHECK(ssh.forwardAgent);
+    CHECK(ssh.env.at("TERM") == "vt100");
+    CHECK(ssh.env.at("REMOTE_VALUE") == "first\nsecond");
+    CHECK_FALSE(reloadedRemote->shell.value().env.contains("REMOTE_VALUE"));
+}
+
+#ifdef _WIN32
+TEST_CASE("Config: Windows profile environment overrides inherited names regardless of case", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        environment:
+            term: vt100
+    child:
+        environment:
+            TERM: xterm-256color
+)"sv);
+    auto const* child = config.profile("child");
+    REQUIRE(child != nullptr);
+    auto const& environment = child->shell.value().env;
+    CHECK_FALSE(environment.contains("term"));
+    CHECK(environment.at("TERM") == "xterm-256color");
+}
+#endif
+
+TEST_CASE("Config: SSH terminal defaults fall through blank YAML values", "[config]")
+{
+    auto const clientTerm = core::testing::ScopedEnv { "TERM", "vt100" };
+    QTemporaryDir dir;
+    auto yaml = std::string { R"(
+default_profile: main
+profiles:
+    main:
+        ssh:
+            host: example.com
+        environment:
+            TERM: ""
+)" };
+    auto expected = "vt100"sv;
+    SECTION("The SSH-wide default takes precedence over the process environment")
+    {
+        yaml += "ssh_default_term: contour\n";
+        expected = "contour"sv;
+    }
+    SECTION("A blank SSH-wide default falls through to the process environment")
+    {
+        yaml += "ssh_default_term: \"\"\n";
+    }
+    auto const config = loadFromYaml(dir, yaml);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& remote = profile->ssh.value().env;
+    REQUIRE(remote.contains("TERM"));
+    CHECK(remote.at("TERM") == expected);
 }
 
 TEST_CASE("Config: emulationSettings carries the profile's VT semantics", "[config]")

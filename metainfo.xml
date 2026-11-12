@@ -111,6 +111,8 @@
         <p>Contour is now daemon-first: a plain contour shows sessions a daemon hosts, starting it when none runs, so closing the window no longer ends your shells. Reopen Contour, or attach from another machine over ssh or TLS, and they are still there. Set <code>daemon: { mode: in_process }</code> to keep sessions in the window as before.</p>
         <p>Its window and Settings are redesigned to feel native on macOS, Windows 11 and Linux, with a Terminal style of their own, a command palette, command blocks, split panes with cards and a status line.</p>
         <ul>
+          <li>Adds a configurable terminal type for built-in SSH profiles and falls back to <code>xterm-256color</code> on Windows when no terminal type is set (#2315)</li>
+          <li>Restores per-profile environment variables for local shells and built-in SSH sessions, with a Settings editor that shows each variable's name and value (#2315)</li>
           <li>Fixes built-in SSH profiles ignoring keystrokes after a successful login when the connection is idle (#2286)</li>
           <li>Fixes connecting to a daemon on a busy machine waiting past its connect timeout before reporting that it timed out, and reporting a connection that came up at the last moment as timed out</li>
           <li>Fixes memory corruption and crashes that program output could cause: a kitty graphics image whose declared size overflows (#2294), a character printed in insert mode right of the right margin (#2295), ICH and DECIC under origin mode with a left margin (#2296), DECCRA copying from a page of another size after a resize (#2297) and DECRQCRA for a rectangle whose corners are reversed (#2298)</li>

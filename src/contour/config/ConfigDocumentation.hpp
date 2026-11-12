@@ -39,6 +39,10 @@ constexpr StringLiteral ShellConfig {
     "{comment} A leading ~ is expanded to the user's home directory.\n"
     "{comment} Default value is the user's home directory.\n"
     "initial_working_directory: {}\n"
+    "{comment} Environment variables for the shell this profile opens, including built-in SSH.\n"
+    "{comment} environment:\n"
+    "{comment}     TERM: contour\n"
+    "{comment}     COLORTERM: truecolor\n"
     "\n"
 };
 
@@ -2397,6 +2401,9 @@ constexpr StringLiteral ShellWeb {
     "arguments to the shell executable. These arguments will be passed to the shell when it is started "
     "inside the terminal.\n"
     "\n"
+    ":octicons-horizontal-rule-16: ==environment== Variables for the shell the profile opens. A local "
+    "profile passes them to its child process. A built-in SSH profile sends them to its remote host.\n"
+    "\n"
 };
 
 constexpr StringLiteral EscapeSandboxWeb {
@@ -2448,9 +2455,12 @@ constexpr StringLiteral SshHostConfigWeb {
     "auth agent should be requested to be forwarded. Note: this is currently not working due to an issue "
     "related to the underlying library being used, but is hopefully resolved soon.\n"
     "\n"
-    "Note, custom environment variables may be passed as well, when connecting to an SSH server using this "
-    "builtin-feature. Mind,\n"
-    "that the SSH server is not required to accept all environment variables.\n"
+    "For SSH profiles, TERM from the profile's `environment` is sent with the PTY request. "
+    "If blank or omitted, it uses the top-level "
+    "`ssh_default_term`, then the client environment. If both are empty, Windows uses "
+    "`xterm-256color` and other platforms send an empty terminal type. Choose a TERM "
+    "value whose terminfo entry is installed on the server. Other variables are sent as SSH environment "
+    "requests and may be rejected by the server.\n"
     "\n"
     "If an OpenSSH server is used, have a look at the `AcceptEnv` configuration setting in the "
     "`sshd_config`\n"
@@ -4111,6 +4121,14 @@ template <>
 struct Text<DefaultLayout>: DocumentationEntry<DefaultLayoutConfig, DefaultLayoutWeb>
 {
 };
+template <>
+struct Text<SshDefaultTerm>:
+    DocumentationEntry<
+        "{comment} Default terminal type for built-in SSH profiles.\nssh_default_term: \"{}\"\n\n",
+        "Default terminal type for built-in SSH profiles. A profile's TERM takes precedence.\n">
+{
+};
+
 template <>
 struct Text<WordDelimiters>: DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>
 {
