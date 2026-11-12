@@ -265,6 +265,7 @@ set(_header_files
     window/SidebarTree.hpp
     window/SwitcherStatus.hpp
     window/SwitcherRows.hpp
+    window/SwitcherKeys.hpp
     window/TabBarDropPolicy.hpp
     window/TabBarHitValue.hpp
     window/NodeDrag.hpp
@@ -1773,6 +1774,7 @@ if(CONTOUR_TESTING)
         window/SwitcherStatus_test.cpp
         window/SwitcherRows.cpp
         window/SwitcherRows_test.cpp
+        window/SwitcherKeys_test.cpp
         window/SidebarDropPolicy_test.cpp
         window/SidebarSelection_test.cpp
         window/CloseDialogTable_test.cpp
