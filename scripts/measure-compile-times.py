@@ -6,7 +6,7 @@ compiler launcher, and aggregates the Clang trace files into DIR/report.md: tota
 into frontend and backend, a per-module table, the slowest TUs, the headers with the highest summed
 inclusive parse time, and the most expensive template instantiations.
 
-    measure-compile-times.py --build-dir out/clang-release [--jobs N] [--out DIR] [--filter REGEX]
+    measure-compile-times.py --build-dir out/clang-profile [--jobs N] [--out DIR] [--filter REGEX]
     measure-compile-times.py --aggregate-only TRACEDIR [--out DIR]
     measure-compile-times.py --self-test
 

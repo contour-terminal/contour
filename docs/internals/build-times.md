@@ -5,10 +5,14 @@ How long Contour takes to compile, measured the same way every time so a change 
 ## Method
 
 ```sh
-cmake --build out/clang-release          # compile_commands.json and generated sources must be current
-python3 scripts/measure-compile-times.py --build-dir out/clang-release --jobs 16 --out build-times-out
+cmake --preset clang-profile              # RelWithDebInfo, the flags the baselines below were measured with
+cmake --build out/clang-profile          # compile_commands.json and generated sources must be current
+python3 scripts/measure-compile-times.py --build-dir out/clang-profile --jobs 16 --out build-times-out
 python3 scripts/measure-compile-times.py --aggregate-only build-times-out/traces --out build-times-out
 ```
+
+`clang-profile` has the flags `clang-release` had until CI and the packages moved to `Release`, so the baselines below stay
+comparable with new measurements.
 
 The script runs every `.cpp` command of `compile_commands.json` directly (any `ccache`/`sccache`/`pace-cc`
 launcher is dropped) with `-ftime-trace`, and writes `report.md`: total CPU seconds split into frontend and
@@ -27,7 +31,7 @@ Caveats:
 
 ## Baseline
 
-`out/clang-release` (Clang 22, RelWithDebInfo), master at 4de2e780a, 16 jobs, 32-core machine:
+`out/clang-profile` (Clang 22, RelWithDebInfo), master at 4de2e780a, 16 jobs, 32-core machine:
 1212 TUs, 4511 CPU-s in total (5m19s wall), of which frontend 3136 s and backend 1300 s.
 
 | Module | TUs | CPU-s | Frontend s | Backend s |
@@ -167,11 +171,12 @@ On 2026-11-11 a pull request took about two hours again. `ccache -s` from pull-r
 ### Sizes
 
 Measured with ccache 4.9.1 (the version the Ubuntu 24.04 runner installs), compression on, a clean
-`RelWithDebInfo` build of the whole tree into an empty cache:
+`RelWithDebInfo` build of the whole tree into an empty cache (before CI and the packages moved to `Release`; the rows
+are re-measured from the first `master` run after that):
 
 | Tree | Compiles cached | Cache size |
 |---|---:|---:|
-| Clang 22, `clang-release` | 1289 | 0.50 GB (497 MB on disk) |
+| Clang 22, `clang-profile` | 1289 | 0.50 GB (497 MB on disk) |
 | GCC 16.2, `gcc-release` | 780 of ~1290 before a `-Werror=bidi-chars` stop in `ExtensionConsent_test.cpp` | 0.53 GB, about 0.9 GB extrapolated to the full tree |
 
 The brief expected 2-3 GB; the real figure is a fifth of that, because ccache compresses and

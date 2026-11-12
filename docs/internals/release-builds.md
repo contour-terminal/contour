@@ -62,7 +62,7 @@ A configuration that would not be the shipped one stops at configure time. The f
 the configure, before CPM and FetchContent fetch their dependencies (the vcpkg presets install their ports even earlier,
 in `project()`):
 
-- a build type other than `RelWithDebInfo` (the packages are `RelWithDebInfo` builds, and so are the binaries CI tests);
+- a build type other than `Release` (the packages are `Release` builds, and so are the binaries CI tests);
 - `CONTOUR_SANITIZE` other than `OFF`;
 - coverage (`CONTOUR_CODE_COVERAGE_ENABLED`).
 
@@ -74,19 +74,14 @@ GCC or Clang on Linux, and AppleClang or Clang on macOS.
 
 Multi-config generators and `clang-cl` are not refused by a message of their own. `clang-cl` fails the toolchain test.
 A multi-config generator is caught by the build-type test only while `CMAKE_BUILD_TYPE` is unset; with it set to
-`RelWithDebInfo` the other configurations get the flags too, so use a single-config generator.
+`Release` the other configurations get the flags too, so use a single-config generator.
 
 ## Debug symbols
 
-The Windows, macOS and Ubuntu packages carry no symbols of their own; the symbols are published beside them, as the
-install component `debug_symbols` (excluded from every package):
-
-- Windows: `contour-<version>-win64-pdb.zip`, the full PDB of `contour.exe`;
-- macOS: `contour-<version>-macOS-arm-dSYM.zip`, made by `dsymutil` from the binary and the objects ThinLTO kept;
-- Linux: the `-dbgsym` `.ddeb` of the Ubuntu package and Fedora's `-debuginfo` RPM, as before.
-
-Every package build uploads them as artifacts and the release attaches them. The AppImage keeps its debug information
-inside the image for now.
+No package comes with debug symbols, and none is published separately: there is no `-dbgsym` `.ddeb`, no Fedora
+`-debuginfo` or `-debugsource` RPM, no Windows PDB zip and no macOS dSYM zip, and the AppImage carries no debug
+information either. To debug or profile an optimized build, configure the `clang-profile` preset (`RelWithDebInfo`,
+without the production flags).
 
 ## What `check_production_build` asserts
 
@@ -95,12 +90,14 @@ AppImage, which has none, runs it as a CI step), and its self-test, `check_produ
 everywhere. It reads the build's `compile_commands.json` and the linked
 binary:
 
-- every first-party translation unit carries each flag of the manifest `production-build.json` and none of the flags the
-  production build replaces (`/Ob1`); no third-party translation unit carries one;
-- the binary has the properties the flags are for: Control Flow Guard, CET compatibility, ASLR and a PDB reference on
-  Windows; a PIE with RELRO, immediate binding, the stack protector and debug information on Linux; the same UUIDs in the
-  binary and its dSYM, and a dSYM of real size, on macOS;
-- the generated `CPackConfig.cmake` does not list `debug_symbols`, so no package carries the symbols.
+- every first-party translation unit carries each flag of the manifest `production-build.json`; no third-party
+  translation unit carries one;
+- the binary has the properties the flags are for: Control Flow Guard, CET compatibility and ASLR on Windows; a PIE with
+  RELRO, immediate binding and the stack protector on Linux.
+
+macOS has no binary row: its only ones were about the dSYM, which no build produces any more, and no hardening property of
+a Mach-O binary is checked instead, so on macOS the compile database is all there is. The check does not probe a Mach-O
+binary, and `dwarfdump` is no longer required.
 
 It proves the compile flags and the binary's properties. It does not prove that a link-only flag (`/OPT:REF`, `/OPT:ICF`,
 `-Wl,--as-needed`, `-Wl,-dead_strip`) reached the linker, because link options are not in the compile database.
@@ -123,7 +120,8 @@ libraries were built with `-fPIC` (see above); with `-fPIE` it is within a perce
 
 ### CI measurements
 
-Measured on GitHub's runners on 2026-11-07, from workflow run 42372326441 of pull request #2250, with the packaging
+Measured on GitHub's runners on 2026-11-07, while the packages were still `RelWithDebInfo` builds that published their
+symbols, from workflow run 42372326441 of pull request #2250, with the packaging
 steps switched on for the pull request. The base is the `master` run 42334939141 (commit 130538887). Read the job
 times with their compiler-cache state in mind: `master`'s jobs ran with warm caches (37 to 80 % ccache hits), while
 every job of the pull request ran with 0 to 1 % hits, except macOS in the second attempt (9.5 %). The pull request's
@@ -155,19 +153,16 @@ Package sizes, in bytes:
 | Windows ZIP | 74,626,984 | 70,376,812 |
 | Ubuntu 26.04 `contour` `.deb` | 12,035,200 | 10,445,624 |
 | `usr/bin/contour` in that `.deb` | 31,000,816 | 26,620,608 |
-| its `-dbgsym` `.ddeb` | 226,788,580 | 157,962,918 |
 | AppImage | 275,728,888 | 215,968,248 |
 | macOS `.dmg` | 92,881,315 | 93,040,172 |
-| Windows `-win64-pdb.zip` (new) | | 46,449,056 (the PDB is 167,931,904) |
-| macOS `-macOS-arm-dSYM.zip` (new) | | 79,747,096 (the DWARF file is 357,874,439) |
 
 On macOS the same tree built twice in the job, with and without the production flags, with `bench-headless`
 (`-DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON` for both): the `contour` binary went from 37,356,296 to 36,267,192 bytes (-2.9 %),
-and `bench-headless throughput`, three alternating rounds on the shared runner, was between -2.6 % and +14.2 % per workload over the two attempts (best of the rounds of each). The one value below -2 % (ascii on the primary screen in the second attempt) was +4.6 % in the first, so it is runner noise. In the second attempt, the link of `contour` took 312 s with the production flags against 2 s without (the production figure includes extracting the dSYM).
+and `bench-headless throughput`, three alternating rounds on the shared runner, was between -2.6 % and +14.2 % per workload over the two attempts (best of the rounds of each). The one value below -2 % (ascii on the primary screen in the second attempt) was +4.6 % in the first, so it is runner noise. In the second attempt, the link of `contour` took 312 s with the production flags against 2 s without (the production figure included extracting the dSYM, which is gone).
 
-The `check_production_build` test passed on every platform, and the symbol archives were collected on Windows and macOS.
+The `check_production_build` test passed on every platform.
 
 ## Measuring with the packages' flags
 
-Configure any tree with `-DCONTOUR_PRODUCTION_BUILD=ON` and a `RelWithDebInfo` build type. Expect a slower link and
+Configure any tree with `-DCONTOUR_PRODUCTION_BUILD=ON` and a `Release` build type. Expect a slower link and
 faster code; `bench-headless` is the tool for the throughput comparison.
