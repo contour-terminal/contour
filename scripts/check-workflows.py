@@ -72,7 +72,8 @@ REQUIRED_CONTEXTS = frozenset(
         "tests matrix",
         "Check C++ style",
         "Check editorconfig",
-        # PR-only by design (its full-tree sibling, "Check clang-tidy", is skipped on pull requests).
+        # PR-only by design (its full-tree sibling, "Check clang-tidy", lives in clang-tidy.yml, which no
+        # pull request triggers).
         "Check clang-tidy (diff)",
         # Lives in changelog.yml; every workflow file is checked, so it is covered too.
         "Check Changelog Action",
@@ -111,6 +112,10 @@ RELEASE_WRITERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"softprops/action-gh-release"),
     re.compile(r"\bgh\s+api\b[^\n]*releases"),
 )
+
+# The action whose jobs save a compiler cache, and the script that deletes the generations they supersede.
+CCACHE_ACTION = "hendrikmuhs/ccache-action"
+PRUNE_SCRIPT = "prune-cache-generations.py"
 
 # What lets a job run although a job it needs was skipped.
 _RUNS_DESPITE_SKIPPED_NEEDS = re.compile(r"\b(always|!cancelled)\(\)")
@@ -222,6 +227,37 @@ def check_release_writers(jobs: dict[str, Any]) -> list[str]:
     return findings
 
 
+def check_llvm_versions(versions: dict[str, str]) -> list[str]:
+    """Returns a finding when the workflow files that set a workflow-level `LLVM_VERSION` disagree.
+    `versions` maps each such file's name to its value; a file that does not set it is absent."""
+    if len(set(versions.values())) <= 1:
+        return []
+    listed = ", ".join(f"{name} has {value!r}" for name, value in sorted(versions.items()))
+    return [f"LLVM_VERSION differs between workflow files ({listed}); it is one toolchain, so set one value"]
+
+
+def check_prune_covers_savers(jobs: dict[str, Any]) -> list[str]:
+    """Returns the findings for the jobs of one workflow that save a compiler cache without the job that
+    prunes the superseded generations waiting for them (see scripts/prune-cache-generations.py)."""
+
+    def has_step(job: dict[str, Any], field: str, text: str) -> bool:
+        return any(text in str(step.get(field, "")) for step in job.get("steps", []))
+
+    savers = sorted(job_id for job_id, job in jobs.items() if has_step(job, "uses", CCACHE_ACTION))
+    if not savers:
+        return []
+    pruners = [job for job in jobs.values() if has_step(job, "run", PRUNE_SCRIPT)]
+    if not pruners:
+        return [f"{', '.join(savers)}: save a compiler cache, but no job runs {PRUNE_SCRIPT}"]
+    awaited = {need for job in pruners for need in _needs(job)}
+    return [
+        f"{job_id}: saves a compiler cache, but the job running {PRUNE_SCRIPT} does not `needs:` it, so its "
+        "superseded generation would stay until the next build"
+        for job_id in savers
+        if job_id not in awaited
+    ]
+
+
 def _load_yaml() -> Any:
     try:
         import yaml  # PyYAML; optional, see check_workflow_files
@@ -245,7 +281,7 @@ def _without_yaml(require: bool) -> int:
         return 1
     # actionlint is the gate that must not be bypassed; this rule is a second layer, so by default
     # it skips rather than failing.
-    print("YAML rules (required contexts, release writers): PyYAML not installed; skipped.")
+    print("YAML rules (required contexts, release writers, cache prune, LLVM_VERSION): PyYAML not installed; skipped.")
     return 0
 
 
@@ -254,11 +290,20 @@ def check_workflow_files(workflows: list[Any]) -> int:
     if yaml is None:
         return _without_yaml(require=bool(os.environ.get(REQUIRE_YAML_ENV)))
     findings: list[str] = []
+    llvm_versions: dict[str, str] = {}
     for path in workflows:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         jobs = document.get("jobs", {})
-        for finding in [*check_required_contexts(jobs), *check_release_writers(jobs)]:
+        for finding in [
+            *check_required_contexts(jobs),
+            *check_release_writers(jobs),
+            *check_prune_covers_savers(jobs),
+        ]:
             findings.append(f"{path.name}: {finding}")
+        llvm_version = (document.get("env") or {}).get("LLVM_VERSION")
+        if llvm_version is not None:
+            llvm_versions[path.name] = str(llvm_version)
+    findings += check_llvm_versions(llvm_versions)
     for finding in findings:
         print(f"check-workflows: {finding}", file=sys.stderr)
     return 1 if findings else 0
@@ -328,6 +373,23 @@ _FIXTURE_SOFTPROPS = {
 _FIXTURE_TAG_REQUIRED = {"windows": {"name": "Windows", "if": RELEASE_TAG_CONDITION, "steps": []}}
 
 
+_CCACHE_STEP = {"uses": "hendrikmuhs/ccache-action@v1.2", "with": {"key": "k"}}
+_PRUNE_STEP = {"run": "python3 scripts/prune-cache-generations.py --repo r --ref refs/heads/master"}
+_FIXTURE_PRUNE_COVERS = {
+    "windows": {"steps": [_CCACHE_STEP]},
+    "linux": {"steps": [_CCACHE_STEP]},
+    "lint": {"steps": []},
+    "prune": {"needs": ["windows", "linux"], "steps": [_PRUNE_STEP]},
+}
+_FIXTURE_PRUNE_MISSES = {
+    "windows": {"steps": [_CCACHE_STEP]},
+    "linux": {"steps": [_CCACHE_STEP]},
+    "prune": {"needs": "windows", "steps": [_PRUNE_STEP]},
+}
+_FIXTURE_SAVERS_UNPRUNED = {"windows": {"steps": [_CCACHE_STEP]}, "linux": {"steps": [_CCACHE_STEP]}}
+_FIXTURE_NO_SAVERS = {"lint": {"steps": [{"run": "true"}]}}
+
+
 def self_test() -> int:
     cases = (
         ("success-only gate over a PR-skipped need fires", check_required_contexts, _FIXTURE_BROKEN, 2),
@@ -359,6 +421,24 @@ def self_test() -> int:
         ("a release-tag condition among && conjuncts passes", check_release_writers, _FIXTURE_CONJUNCT_WRITER, 0),
         ("an ungated gh api releases step fires", check_release_writers, _FIXTURE_API_WRITER, 1),
         ("an ungated job-level uses fires", check_release_writers, _FIXTURE_REUSABLE_WRITER, 1),
+        ("a prune job needing every cache-saving job passes", check_prune_covers_savers, _FIXTURE_PRUNE_COVERS, 0),
+        ("a cache-saving job the prune does not wait for fires", check_prune_covers_savers, _FIXTURE_PRUNE_MISSES, 1),
+        ("cache-saving jobs without a prune job fire", check_prune_covers_savers, _FIXTURE_SAVERS_UNPRUNED, 1),
+        ("a workflow that saves no compiler cache passes", check_prune_covers_savers, _FIXTURE_NO_SAVERS, 0),
+        ("one workflow setting LLVM_VERSION passes", check_llvm_versions, {"build.yml": "22"}, 0),
+        (
+            "two workflows agreeing on LLVM_VERSION pass",
+            check_llvm_versions,
+            {"build.yml": "22", "clang-tidy.yml": "22"},
+            0,
+        ),
+        (
+            "two workflows disagreeing on LLVM_VERSION fire",
+            check_llvm_versions,
+            {"build.yml": "22", "clang-tidy.yml": "21"},
+            1,
+        ),
+        ("no workflow setting LLVM_VERSION passes", check_llvm_versions, {}, 0),
     )
     failures = []
     for description, rule, fixture, expected in cases:

@@ -265,6 +265,10 @@ if(CONTOUR_TESTING)
         # releases), tested against inline fixtures; it needs neither the network nor actionlint.
         contour_add_lint_gate(check_workflows_selftest check-workflows.py --self-test)
 
+        # Which compiler-cache generations the prune after a master build deletes (the newest of each key
+        # stays, nothing but a ccache entry is touched), against inline fixtures; no network.
+        contour_add_lint_gate(prune_cache_generations_selftest prune-cache-generations.py --self-test)
+
         # The Windows installer's WiX patch file fails only at `cpack` time on a Windows runner, after a
         # full build; the rule CPack enforces (each fragment Id once) is checked here on every platform.
         contour_add_lint_gate(check_wix_patch check-wix-patch.py)

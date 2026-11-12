@@ -1725,7 +1725,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             .sizePolicy = *sizePolicy,
         };
         locality = window::DaemonLocality::Local;
-        address = remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Label, .name = label };
+        address = remote::launchDaemonAddress(controlPath, vthost::labelSocketDirectory());
         _launchControlPath = controlPath;
         _restartDaemon = [this, label, controlPath, daemonOptions] {
             return restartLocalDaemon(label, controlPath, daemonOptions);
@@ -4079,10 +4079,8 @@ std::shared_ptr<cli::IDaemonDiscovery> ContourGuiApp::localDaemonDiscovery()
     if (!_localDaemonDiscovery)
     {
         _daemonSpawner = vthost::makeNativeDaemonSpawner();
-        _localDaemonDiscovery =
-            cli::makeLocalDaemonDiscovery(vthost::labelSocketPath(vthost::DefaultSocketLabel).parent_path(),
-                                          *_daemonSpawner,
-                                          cli::nativeWorkspaceCounter());
+        _localDaemonDiscovery = cli::makeLocalDaemonDiscovery(
+            vthost::labelSocketDirectory(), *_daemonSpawner, cli::nativeWorkspaceCounter());
     }
     return _localDaemonDiscovery;
 }

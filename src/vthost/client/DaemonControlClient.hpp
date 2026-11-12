@@ -160,8 +160,8 @@ inline constexpr auto DefaultStopTimeout = std::chrono::milliseconds { 15'000 };
 
 /// The control timeout of a port that upgrades the daemon. The daemon answers once the new image passed its
 /// readiness probe (handover::DefaultReadinessTimeout) and every session was captured, which a session still
-/// starting retries for up to a second.
-inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 15'000 };
+/// starting retries for up to a second: the probe's bound, and 10 s besides.
+inline constexpr auto DefaultUpgradeTimeout = std::chrono::milliseconds { 30'000 };
 
 /// Daemon control over a real transport, owning the loop it runs on.
 /// @param transport How to reach the daemon. A probe passes one that never starts a daemon (a

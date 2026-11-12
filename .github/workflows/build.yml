@@ -31,8 +31,11 @@ on:
       - 'maintenance/**'
 
 concurrency:
-  group: build-${{ github.ref }}
-  # A master run is never cancelled by the next push: it is the one that saves the compiler cache.
+  # A master run has a group of its own: it is never cancelled and never waits behind the previous
+  # push's run, because it is the one that saves the compiler caches every pull request restores.
+  # (One group for all of master queued each run behind the last, and a third push cancelled the one
+  # still pending -- so a merge's caches arrived hours late or not at all.)
+  group: build-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
@@ -43,8 +46,9 @@ env:
   # Set at workflow level so it covers every job here that runs `ctest` -- the Linux matrix and
   # packaging jobs and the Windows and macOS jobs, all through `ctest -j`.
   CHECK_WORKFLOWS_REQUIRE_TOOL: 1
-  # Single source of truth for the LLVM/Clang toolchain version used across this workflow
-  # (clang-format, clang-tidy and the Clang build matrix). Bump this one value to upgrade.
+  # The LLVM/Clang toolchain version used across this workflow (clang-format, clang-tidy and the Clang
+  # build matrix). clang-tidy.yml holds the one other copy; scripts/check-workflows.py fails when the
+  # two differ, so an upgrade bumps both.
   LLVM_VERSION: "22"
   # How every ccache in this workflow keys an object, so that a hit does not depend on where or when
   # the object was built. BASEDIR makes paths under the checkout relative, NOHASHDIR keeps the
@@ -63,7 +67,8 @@ env:
 # leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
 # the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
 # pushes, in the merge queue and on release tags, through `if: github.event_name != 'pull_request'`.
-# That includes FreeBSD and the full-tree clang-tidy, which nothing exempts a release tag from. The
+# That includes FreeBSD, which nothing exempts a release tag from. The full-tree clang-tidy runs on the
+# same events but in a workflow of its own (clang-tidy.yml), so that its hours do not hold this one. The
 # static build (`github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')`) runs on
 # master and release tags and never in the merge queue. The release-only jobs use
 # `startsWith(github.ref, 'refs/tags/v')`. The daemon packages: the Debian one
@@ -132,100 +137,6 @@ jobs:
     # runs as the `core-cpp-vendored-copy` ctest; here it runs on every push, with no build.
     - name: "Check the vendored core-cpp copy is verbatim"
       run: cmake -DMODE=check -DDEST=vendor/core-cpp -P vendor/core-cpp/cmake/CoreCppVendor.cmake
-
-  # The whole tree, on every push to master and every merge-queue run. Pull requests run
-  # check_clang_tidy_diff below instead: the same checks on the lines the PR changed, without
-  # compiling the tree.
-  check_clang_tidy:
-    name: "Check clang-tidy"
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    steps:
-    - uses: actions/checkout@v4
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1.2
-      with:
-        key: "ccache-ubuntu2404-clang-tidy"
-        max-size: 700M
-        save: ${{ github.ref == 'refs/heads/master' }}
-        evict-old-files: job
-    - name: "update APT database"
-      run: sudo ./scripts/apt-update.sh
-    - name: Installing xmllint for ci-set-vars
-      run: sudo apt -qy install libxml2-utils
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: sudo env QTVER=6 ./scripts/install-deps.sh
-    - name: "Post-fix embedded dependency permissions."
-      run: sudo find _deps/sources -exec chown $UID {} \;
-    # Ubuntu 24.04's distro Qt (6.4.2) lacks the Qt6::GuiPrivate CMake package the RHI renderer needs;
-    # install a modern Qt6 over it (see the build matrix job for the same rationale).
-    #
-    # Pinned to 6.11.1 rather than tracking 6.11.*: 6.11.2's Linux AARCH64 qttools archive is
-    # corrupt where it is published, so unpacking it dies with
-    # `zipfile.BadZipFile: Bad offset for central directory` and takes the whole install with it.
-    # Every arm64 job started failing the moment 6.11.2 appeared, while yesterday's runs on 6.11.1
-    # were green and today's x86_64 runs on 6.11.2 still are -- only the AARCH64 archive is bad.
-    # Raise this once a later 6.11 publishes an archive that unpacks. See the retry below for why
-    # re-running does not help here.
-    #
-    # Attempted twice all the same: aqtinstall pulls each archive from whichever mirror
-    # download.qt.io redirects it to, so a mirror that serves a truncated file is a verdict on the
-    # mirror, not on the commit under test, and re-resolving the redirect usually lands elsewhere.
-    # It buys nothing against a corrupt *upstream* archive -- both attempts fetched the bad qttools
-    # from two different mirrors -- which is what the pin above is for. Only a repeated failure
-    # fails the job.
-    - name: "Install Qt (GuiPrivate-capable)"
-      id: install_qt
-      continue-on-error: true
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
-    - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
-      if: steps.install_qt.outcome == 'failure'
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: "6.11.1"
-        modules: qtmultimedia qt5compat qtshadertools qtspeech
-    - name: Install clang
-      run: |
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh ${LLVM_VERSION}
-        sudo apt-get install clang-tidy-${LLVM_VERSION}
-    # Catches stale/misspelled option keys and removed config directives in seconds,
-    # rather than letting them silently no-op through a full tidy build.
-    - name: "Verify clang-tidy configuration"
-      run: CLANG_TIDY=clang-tidy-${LLVM_VERSION} ./scripts/check-clang-tidy-config.sh
-    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
-    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
-    - name: "install Rust (wasm32-wasip1)"
-      run: ./scripts/install-rust-wasm.sh
-    # The Unicode database libunicode downloads from unicode.org at configure time, kept between runs: a
-    # unicode.org outage used to fail the configure step of every job at once.
-    - name: "Unicode database"
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-      with:
-        path: _ucd
-        key: ucd-${{ hashFiles('_deps/sources/libunicode-*/CMakeLists.txt') }}
-    - name: "cmake"
-      run: |
-        cmake \
-              --preset clang-debug \
-              -B build \
-              -G Ninja \
-              -D CONTOUR_WAYLAND=OFF \
-              -D LIBUNICODE_UCD_BASE_DIR="$PWD/_ucd" \
-              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
-              -D ENABLE_TIDY=ON \
-              -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
-    - name: "build"
-      run: cmake --build build
 
   # clang-tidy on the lines a pull request changed, and nothing else. scripts/tidy-diff-plan.py maps
   # each changed line to a translation unit (a changed header goes through one TU that includes it)
@@ -348,7 +259,10 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
+    # 24.04 only: the 26.04 leg never runs on a pull request, so nothing but master would restore its
+    # cache, and the quota is kept for the keys pull requests need (docs/internals/build-times.md).
     - name: ccache
+      if: ${{ matrix.os_version == '24.04' }}
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: "ccache-ubuntu${{ matrix.os_version }}-headless"
@@ -607,6 +521,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
+    # The ccache action installs ccache with apt; a stale package index fails that (exit 100).
+    - name: "update APT database"
+      if: runner.os == 'Linux'
+      run: sudo ./scripts/apt-update.sh
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -662,6 +580,33 @@ jobs:
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
     - name: "build"
       run: cmake --build build
+
+  # One generation per compiler-cache key. The ccache action saves a new entry per master run and
+  # deletes none; two generations of the largest keys overflow the cache quota, and GitHub then evicts
+  # whatever was read least recently -- some other job's cache. Once the jobs that save one are done,
+  # every ccache key keeps its newest entry and loses the rest. scripts/check-workflows.py fails if a
+  # job that saves a cache is missing from `needs`. See docs/internals/build-times.md.
+  prune_compiler_caches:
+    name: "Prune superseded compiler caches"
+    # Whatever the jobs concluded with: a failed job saved its cache too, and pruning is idempotent.
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    needs:
+      - build_no_extensions
+      - macOSArm
+      - package_daemon_for_Ubuntu
+      - package_for_AppImage
+      - ubuntu_2404_cc_matrix
+      - windows
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: "delete every ccache key's older generations"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prune-cache-generations.py --repo "${GITHUB_REPOSITORY}" --ref refs/heads/master
 
   # The macOS half of the same guard. A .app bundle, macdeployqt and a signed .dmg all serve a
   # window; a GUI-less build has none, so it must install a plain bin/contour like any other Unix
@@ -1166,7 +1111,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ccache-macosArm-r1
-          max-size: 800M
+          max-size: 1500M
           save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: Install Qt
@@ -1566,7 +1511,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: ccache-windows-msvc-release
-          max-size: 1500M
+          max-size: 2700M
           save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: setup environment
@@ -2121,11 +2066,19 @@ jobs:
         with:
           path: out/.tools
           key: lint-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/check-workflows.py', 'scripts/check-spelling.py') }}
+      # Only the leg a pull request builds, Clang on x86. The other three run on master alone, so no pull
+      # request would restore their caches, and at 0.6 to 1.2 GB each they would push a key that pull
+      # requests do need out of the quota (docs/internals/build-times.md, "Sizes").
+      # The ccache action installs ccache with apt; a stale package index fails that (exit 100).
+      - name: "update APT database"
+        if: runner.os == 'Linux'
+        run: sudo ./scripts/apt-update.sh
       - name: ccache
+        if: ${{ matrix.runner == 'ubuntu-24.04' && !startsWith(matrix.compiler, 'GCC') }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: "ccache-${{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
-          max-size: ${{ startsWith(matrix.compiler, 'GCC') && '1200M' || '700M' }}
+          max-size: 900M
           save: ${{ github.ref == 'refs/heads/master' }}
           evict-old-files: job
       - name: "update APT database"
@@ -2235,7 +2188,7 @@ jobs:
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo ./scripts/add-ppa.sh ppa:ubuntu-toolchain-r/test
           sudo ./scripts/apt-update.sh
           sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
@@ -2513,7 +2466,7 @@ jobs:
           modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install GCC
         run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo ./scripts/add-ppa.sh ppa:ubuntu-toolchain-r/test
           sudo ./scripts/apt-update.sh
           sudo apt install -y g++-15
       # Qt's text-to-speech plugin links libspeechd, which linuxdeploy must find to bundle it.
@@ -2597,13 +2550,9 @@ jobs:
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: "ccache-ubuntu-${{ matrix.os_version }}"
-          max-size: 1200M
-          save: ${{ github.ref == 'refs/heads/master' }}
-          evict-old-files: job
+      # No compiler cache: this job runs on master alone, so no pull request would restore it, and its
+      # 1.3 GB would push a key that pull requests do need out of the quota
+      # (docs/internals/build-times.md, "Sizes").
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."

@@ -11,6 +11,24 @@
 namespace contour::remote
 {
 
+namespace
+{
+    /// When an attach bound runs out: @p bound counted from @p since, but never less than MinimumConnectAwait
+    /// (or the whole bound, if that is shorter) from @p firstLook, so a caller that only got to look once
+    /// most of the bound was spent still gets the floor.
+    /// @param bound How long the attach may take.
+    /// @param since When the bound started to run.
+    /// @param firstLook When the caller first looked at the attach.
+    /// @return The deadline.
+    [[nodiscard]] core::platform::SteadyTimePoint attachBoundDeadline(
+        std::chrono::milliseconds bound,
+        core::platform::SteadyTimePoint since,
+        core::platform::SteadyTimePoint firstLook)
+    {
+        return std::max(since + bound, firstLook + std::min(bound, MinimumConnectAwait));
+    }
+} // namespace
+
 MuxConnectOutcome awaitMuxConnect(std::mutex& mutex,
                                   std::condition_variable& cv,
                                   MuxConnectPhase const& phase,
@@ -148,38 +166,42 @@ std::expected<void, std::string> RemoteController::awaitConnected(vthost::Attach
         auto const lock = std::lock_guard { _mutex };
         return _transportReturnedAt;
     };
-    // What remains of @p bound, counted from @p since, but never less than MinimumConnectAwait (or the whole
-    // bound, if that is shorter).
-    auto const remainingOf = [this](std::chrono::milliseconds bound, core::platform::SteadyTimePoint since) {
-        return std::max(std::min(bound, MinimumConnectAwait),
-                        std::chrono::ceil<std::chrono::milliseconds>(bound - (_clock.now() - since)));
-    };
 
-    // The connect phase. Without a bound of its own it is waited for in slices, to see the transport return.
-    auto remaining =
-        budget.connect ? std::optional { remainingOf(*budget.connect, *_connectStartedAt) } : std::nullopt;
-    while (!returnedAt())
+    // The connect bound, where there is one, bounds the whole attach; without one the handshake bound does,
+    // from when the transport returned -- recomputed whenever that changes -- which is waited for in slices
+    // so that its return is seen. The time left is read off the clock at every slice rather than counted down
+    // by the slices: a wait oversleeps its timeout on a loaded machine, and counting would add every
+    // overshoot to the budget.
+    auto deadline =
+        budget.connect
+            ? std::optional { attachBoundDeadline(*budget.connect, *_connectStartedAt, _clock.now()) }
+            : std::nullopt;
+    auto handshakeFrom = std::optional<core::platform::SteadyTimePoint> {};
+    while (true)
     {
-        auto const slice = remaining ? std::min(*remaining, vthost::TransportReturnPollInterval)
-                                     : vthost::TransportReturnPollInterval;
+        if (!budget.connect)
+        {
+            if (auto const at = returnedAt(); at != handshakeFrom)
+            {
+                handshakeFrom = at;
+                deadline = at ? std::optional { attachBoundDeadline(budget.handshake, *at, _clock.now()) }
+                              : std::nullopt;
+            }
+        }
+        auto slice = vthost::TransportReturnPollInterval;
+        if (deadline)
+        {
+            auto const left = std::chrono::ceil<std::chrono::milliseconds>(*deadline - _clock.now());
+            // Past the deadline, one last look without waiting: an attach that settled while the last slice
+            // overslept has settled, and is not to be stopped for the scheduler's delay.
+            slice = std::clamp(left, std::chrono::milliseconds::zero(), slice);
+        }
         auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, slice);
         if (!outcome.timedOut)
             return settled(outcome);
-        if (remaining)
-        {
-            *remaining -= slice;
-            if (*remaining <= std::chrono::milliseconds::zero())
-                return timedOut();
-        }
+        if (slice == std::chrono::milliseconds::zero())
+            return timedOut();
     }
-
-    // The handshake phase: the connect bound, where there is one, still bounds the whole attach.
-    auto const left = budget.connect ? remaining.value_or(MinimumConnectAwait)
-                                     : remainingOf(budget.handshake, *returnedAt());
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, left);
-    if (outcome.timedOut)
-        return timedOut();
-    return settled(outcome);
 }
 
 std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(vthost::AttachBudget budget)
@@ -196,8 +218,7 @@ std::optional<core::platform::SteadyTimePoint> RemoteController::attachDeadline(
     // returned, from the later of that and the first look: a handshake that stalls fails once the bound has
     // passed, whatever number of looks it took.
     if (budget.connect)
-        return std::max(*_connectStartedAt + *budget.connect,
-                        *_pollStartedAt + std::min(*budget.connect, MinimumConnectAwait));
+        return attachBoundDeadline(*budget.connect, *_connectStartedAt, *_pollStartedAt);
     if (returnedAt)
         return std::max(*returnedAt, *_pollStartedAt) + budget.handshake;
     return std::nullopt;

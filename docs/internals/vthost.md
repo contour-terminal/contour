@@ -1699,7 +1699,12 @@ outcome that is not known (below).
 
 **Sequence.** (1) Lease the image and run its readiness probe, `contour daemon handover-info`, in an empty
 environment: the release, the handover and terminal-state formats it reads, and whether it loads the
-daemon's configuration and profile. Nothing is stopped before this passes. (2) Announce `DaemonUpgrading`
+daemon's configuration and profile. Nothing is stopped before this passes. It is the first run of a freshly
+staged image, which the OS checks file by file as it loads it -- on Windows, antivirus scans the executable and
+every DLL it imports before `main()` -- so its bound (`DefaultReadinessTimeout`, 20 s) is sized for that cold
+start rather than for the ~50 ms the answer costs. Only the requester waits on it: the probe runs on a worker
+of its own before any listener is held or client closed; meanwhile only the image's lease and the refusal of a
+second upgrade hold. (2) Announce `DaemonUpgrading`
 to clients that negotiated `Capability::LiveUpgrade`, write the final workspace snapshot (the safety net),
 hold the listeners' accepting and close every connection; the requester is answered just before that
 (`onStarted`). (3) Quiesce each session's pump
