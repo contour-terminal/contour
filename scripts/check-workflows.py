@@ -18,11 +18,14 @@ It is Python rather than a shell script so that it runs on Windows too, alongsid
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
+from collections.abc import Iterator
 from typing import Any
 
+from lib.compiler_caches import saves_compiler_cache
 from lib.toolcache import REPO_ROOT, ToolSpec, download_self_test, resolve, run
 
 # The pinned version. The bash script this replaces ran actionlint's own installer, which always
@@ -113,9 +116,37 @@ RELEASE_WRITERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bgh\s+api\b[^\n]*releases"),
 )
 
-# The action whose jobs save a compiler cache, and the script that deletes the generations they supersede.
-CCACHE_ACTION = "hendrikmuhs/ccache-action"
+# The script that deletes the generations the compiler-cache savers supersede. Which steps save one is
+# the family table of scripts/lib/compiler_caches.py.
 PRUNE_SCRIPT = "prune-cache-generations.py"
+
+PRESET_DIR = REPO_ROOT / "cmake" / "presets"
+
+# The hidden configure preset that turns CONTOUR_PRODUCTION_BUILD on; a preset inheriting it builds what ships.
+PRODUCTION_BASE_PRESET = "production"
+
+# Text in a job that means it builds the production configuration without naming a production preset:
+# the option itself, and the scripts that set it. Data, so that another such script is one more row.
+PRODUCTION_MARKERS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bCONTOUR_PRODUCTION_BUILD(:BOOL)?=ON\b"),
+    # Configures with -DCONTOUR_PRODUCTION_BUILD=ON itself, out of this rule's sight but for this row.
+    re.compile(r"\bscripts/build-appimage\.sh\b"),
+)
+
+# A `--preset` argument of cmake, ctest or cpack, and the preset it names.
+_PRESET_ARGUMENT = re.compile(r"--preset[\s=]+[\"']?(?P<name>[\w.-]+)")
+
+# The jobs that build the production configuration on pull requests anyway, each with the reason. Every
+# other such job must not run on a pull request: its link-time optimization costs a pull request the
+# better part of an hour per platform, and the plain configuration tests the same code
+# (docs/internals/build-times.md, "Why pull requests build the plain configuration").
+PRODUCTION_ON_PULL_REQUESTS: dict[str, str] = {
+    # The only job that builds the GUI-less configuration, so it cannot wait for master; about 10 minutes.
+    "package_daemon_for_Ubuntu": "the only GUI-less build",
+    # Short, and Linux. Its production flag is set inside scripts/build-appimage.sh, not in the workflow,
+    # which is why that script is a row of PRODUCTION_MARKERS.
+    "package_for_AppImage": "the AppImage build, a short Linux job",
+}
 
 # What lets a job run although a job it needs was skipped.
 _RUNS_DESPITE_SKIPPED_NEEDS = re.compile(r"\b(always|!cancelled)\(\)")
@@ -270,13 +301,12 @@ def check_prune_covers_savers(jobs: dict[str, Any]) -> list[str]:
     """Returns the findings for the jobs of one workflow that save a compiler cache without the job that
     prunes the superseded generations waiting for them (see scripts/prune-cache-generations.py)."""
 
-    def has_step(job: dict[str, Any], field: str, text: str) -> bool:
-        return any(text in str(step.get(field, "")) for step in job.get("steps", []))
-
-    savers = sorted(job_id for job_id, job in jobs.items() if has_step(job, "uses", CCACHE_ACTION))
+    savers = sorted(
+        job_id for job_id, job in jobs.items() if any(saves_compiler_cache(step) for step in job.get("steps", []))
+    )
     if not savers:
         return []
-    pruners = [job for job in jobs.values() if has_step(job, "run", PRUNE_SCRIPT)]
+    pruners = [job for job in jobs.values() if any(PRUNE_SCRIPT in str(step.get("run", "")) for step in job.get("steps", []))]
     if not pruners:
         return [f"{', '.join(savers)}: save a compiler cache, but no job runs {PRUNE_SCRIPT}"]
     awaited = {need for job in pruners for need in _needs(job)}
@@ -286,6 +316,82 @@ def check_prune_covers_savers(jobs: dict[str, Any]) -> list[str]:
         for job_id in savers
         if job_id not in awaited
     ]
+
+
+def production_presets(documents: Any) -> frozenset[str]:
+    """Returns the names of the presets that build the production configuration: the configure presets
+    that inherit PRODUCTION_BASE_PRESET (directly or through another), and the build, test and package
+    presets made from one of those. `documents` are the parsed preset files."""
+    inherits: dict[str, list[str]] = {}
+    derived: list[tuple[str, str]] = []
+    for document in documents:
+        for preset in document.get("configurePresets", []):
+            parents = preset.get("inherits", [])
+            inherits[preset["name"]] = [parents] if isinstance(parents, str) else list(parents)
+        for kind in ("buildPresets", "testPresets", "packagePresets"):
+            derived += [(preset["name"], preset.get("configurePreset", "")) for preset in document.get(kind, [])]
+
+    def is_production(name: str, seen: frozenset[str] = frozenset()) -> bool:
+        parents = inherits.get(name, [])
+        return PRODUCTION_BASE_PRESET in parents or any(
+            is_production(parent, seen | {name}) for parent in parents if parent not in seen
+        )
+
+    configure = {name for name in inherits if name != PRODUCTION_BASE_PRESET and is_production(name)}
+    return frozenset(configure | {name for name, configure_preset in derived if configure_preset in configure})
+
+
+def _scalars(node: Any) -> Iterator[str]:
+    """Every scalar value of a parsed YAML node, as text: `run`, `env` and `with` values alike."""
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from _scalars(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _scalars(value)
+    elif node is not None:
+        yield str(node)
+
+
+def _builds_production(job: dict[str, Any], presets: frozenset[str]) -> bool:
+    """Whether a job builds the production configuration: a `--preset` naming one of `presets`, a value
+    that is one of them (an `env` variable a step expands, an action's input), or a PRODUCTION_MARKERS row."""
+    for text in _scalars(job):
+        if text.strip() in presets or any(marker.search(text) for marker in PRODUCTION_MARKERS):
+            return True
+        if any(match["name"] in presets for match in _PRESET_ARGUMENT.finditer(text)):
+            return True
+    return False
+
+
+def check_production_off_pull_requests(jobs: dict[str, Any], presets: frozenset[str]) -> list[str]:
+    """Returns the findings for the jobs of one workflow that build the production configuration on pull
+    requests without a row in PRODUCTION_ON_PULL_REQUESTS, and for the rows of that table that name a job of
+    this workflow which no longer needs one. `presets` are the production presets (production_presets())."""
+    skipped = _pr_skipped_jobs(jobs)
+    findings: list[str] = []
+    for job_id, job in jobs.items():
+        on_pull_requests = job_id not in skipped
+        production = _builds_production(job, presets)
+        excepted = job_id in PRODUCTION_ON_PULL_REQUESTS
+        if production and on_pull_requests and not excepted:
+            findings.append(
+                f"{job_id}: builds the production configuration on pull requests; gate it with "
+                "`if: github.event_name != 'pull_request'` and give pull requests a plain-preset job, "
+                "or add it to PRODUCTION_ON_PULL_REQUESTS with the reason"
+            )
+        elif excepted and not (production and on_pull_requests):
+            findings.append(
+                f"{job_id}: listed in PRODUCTION_ON_PULL_REQUESTS ({PRODUCTION_ON_PULL_REQUESTS[job_id]}), but it "
+                "no longer builds the production configuration on pull requests; remove the row"
+            )
+    return findings
+
+
+def _load_production_presets() -> frozenset[str]:
+    return production_presets(
+        json.loads(path.read_text(encoding="utf-8")) for path in sorted(PRESET_DIR.glob("*.json"))
+    )
 
 
 def _load_yaml() -> Any:
@@ -311,7 +417,10 @@ def _without_yaml(require: bool) -> int:
         return 1
     # actionlint is the gate that must not be bypassed; this rule is a second layer, so by default
     # it skips rather than failing.
-    print("YAML rules (required contexts, release writers, cache prune, LLVM_VERSION): PyYAML not installed; skipped.")
+    print(
+        "YAML rules (required contexts, release writers, cache prune, master-only queues, production builds, "
+        "LLVM_VERSION): PyYAML not installed; skipped."
+    )
     return 0
 
 
@@ -321,6 +430,7 @@ def check_workflow_files(workflows: list[Any]) -> int:
         return _without_yaml(require=bool(os.environ.get(REQUIRE_YAML_ENV)))
     findings: list[str] = []
     llvm_versions: dict[str, str] = {}
+    presets = _load_production_presets()
     for path in workflows:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         jobs = document.get("jobs", {})
@@ -329,6 +439,7 @@ def check_workflow_files(workflows: list[Any]) -> int:
             *check_release_writers(jobs),
             *check_prune_covers_savers(jobs),
             *check_master_only_jobs_queue(jobs),
+            *check_production_off_pull_requests(jobs, presets),
         ]:
             findings.append(f"{path.name}: {finding}")
         llvm_version = (document.get("env") or {}).get("LLVM_VERSION")
@@ -419,6 +530,71 @@ _FIXTURE_PRUNE_MISSES = {
 }
 _FIXTURE_SAVERS_UNPRUNED = {"windows": {"steps": [_CCACHE_STEP]}, "linux": {"steps": [_CCACHE_STEP]}}
 _FIXTURE_NO_SAVERS = {"lint": {"steps": [{"run": "true"}]}}
+_PACE_SAVE_STEP = {"uses": "actions/cache/save@v4", "with": {"path": "store", "key": "pace-store-windows-1-1"}}
+_FIXTURE_PRUNE_COVERS_PACE = {
+    "windows": {"steps": [_PACE_SAVE_STEP]},
+    "prune": {"needs": ["windows"], "steps": [_PRUNE_STEP]},
+}
+_FIXTURE_PRUNE_MISSES_PACE = {
+    "windows": {"steps": [_PACE_SAVE_STEP]},
+    "macos": {"steps": [_CCACHE_STEP]},
+    "prune": {"needs": ["macos"], "steps": [_PRUNE_STEP]},
+}
+_FIXTURE_OTHER_CACHE_SAVE = {
+    "lint": {"steps": [{"uses": "actions/cache/save@v4", "with": {"path": "x", "key": "lint-tools-1"}}]}
+}
+
+
+# What the presets of cmake/presets/ say, reduced to the fields production_presets() reads.
+_PRESET_DOCUMENTS = (
+    {
+        "configurePresets": [
+            {"name": "contour-common", "hidden": True},
+            {"name": "production", "hidden": True},
+            {"name": "windows-common", "hidden": True, "inherits": "contour-common"},
+            {"name": "msvc-release", "inherits": ["windows-common", "production"]},
+            {"name": "msvc-ci", "inherits": ["windows-common"]},
+            {"name": "derived-package", "inherits": "msvc-release"},
+        ],
+        "buildPresets": [{"name": "msvc-release", "configurePreset": "msvc-release"}],
+        "packagePresets": [{"name": "msvc-release-user", "configurePreset": "msvc-release"}],
+        "testPresets": [{"name": "msvc-ci", "configurePreset": "msvc-ci"}],
+    },
+)
+_PRODUCTION = frozenset({"msvc-release", "macos-package", "gcc-release"})
+
+
+def _production_findings(jobs: dict[str, Any]) -> list[str]:
+    return check_production_off_pull_requests(jobs, _PRODUCTION)
+
+
+_FIXTURE_PRODUCTION_ON_PRS = {"windows": {"steps": [{"run": "cmake --preset msvc-release"}]}}
+_FIXTURE_PRODUCTION_PRESET_IN_ENV = {
+    "windows": {"env": {"CMAKE_PRESET": "msvc-release"}, "steps": [{"run": "cmake --preset ${{ env.CMAKE_PRESET }}"}]}
+}
+_FIXTURE_PRODUCTION_PRESET_AS_INPUT = {
+    "macos": {"steps": [{"uses": "./.github/actions/macos-tests", "with": {"preset": "macos-package"}}]}
+}
+_FIXTURE_PRODUCTION_FLAG_ON_PRS = {
+    "daemon": {"steps": [{"run": "cmake --preset clang-release -D CONTOUR_PRODUCTION_BUILD=ON"}]}
+}
+_FIXTURE_PRODUCTION_SCRIPT_ON_PRS = {"appimage_copy": {"steps": [{"run": "./scripts/build-appimage.sh"}]}}
+_FIXTURE_PRODUCTION_GATED = {
+    "windows_package": {**_SKIPPED_ON_PRS, "steps": [{"run": "cmake --build --preset=msvc-release"}]},
+    "upload": {"needs": "windows_package", "steps": [{"run": "cmake --preset gcc-release"}]},
+}
+_FIXTURE_PLAIN_ON_PRS = {
+    "windows": {"env": {"CMAKE_PRESET": "msvc-ci"}, "steps": [{"run": "cmake --preset msvc-ci"}]},
+    "linux": {"steps": [{"run": "cmake --preset clang-release -DCONTOUR_PRODUCTION_BUILD=OFF"}]},
+}
+_FIXTURE_PRODUCTION_EXCEPTIONS = {
+    "package_daemon_for_Ubuntu": {"steps": [{"run": "cmake --preset clang-release -D CONTOUR_PRODUCTION_BUILD=ON"}]},
+    "package_for_AppImage": {"steps": [{"run": "./scripts/build-appimage.sh"}]},
+}
+_FIXTURE_PRODUCTION_EXCEPTION_STALE = {
+    "package_daemon_for_Ubuntu": {"steps": [{"run": "cmake --preset clang-release"}]},
+    "package_for_AppImage": {**_SKIPPED_ON_PRS, "steps": [{"run": "./scripts/build-appimage.sh"}]},
+}
 
 
 _QUEUED = {"group": "${{ github.ref }}-freebsd", "cancel-in-progress": False}
@@ -482,6 +658,44 @@ def self_test() -> int:
         ("a cache-saving job the prune does not wait for fires", check_prune_covers_savers, _FIXTURE_PRUNE_MISSES, 1),
         ("cache-saving jobs without a prune job fire", check_prune_covers_savers, _FIXTURE_SAVERS_UNPRUNED, 1),
         ("a workflow that saves no compiler cache passes", check_prune_covers_savers, _FIXTURE_NO_SAVERS, 0),
+        ("a prune job needing the Pace store's saver passes", check_prune_covers_savers, _FIXTURE_PRUNE_COVERS_PACE, 0),
+        (
+            "a Pace store saver the prune does not wait for fires",
+            check_prune_covers_savers,
+            _FIXTURE_PRUNE_MISSES_PACE,
+            1,
+        ),
+        ("a cache/save of another key is no compiler cache", check_prune_covers_savers, _FIXTURE_OTHER_CACHE_SAVE, 0),
+        ("a production preset on pull requests fires", _production_findings, _FIXTURE_PRODUCTION_ON_PRS, 1),
+        (
+            "a production preset named in env on pull requests fires",
+            _production_findings,
+            _FIXTURE_PRODUCTION_PRESET_IN_ENV,
+            1,
+        ),
+        (
+            "a production preset passed to an action on pull requests fires",
+            _production_findings,
+            _FIXTURE_PRODUCTION_PRESET_AS_INPUT,
+            1,
+        ),
+        ("CONTOUR_PRODUCTION_BUILD=ON on pull requests fires", _production_findings, _FIXTURE_PRODUCTION_FLAG_ON_PRS, 1),
+        ("a script that builds production on pull requests fires", _production_findings, _FIXTURE_PRODUCTION_SCRIPT_ON_PRS, 1),
+        ("production builds gated off pull requests pass", _production_findings, _FIXTURE_PRODUCTION_GATED, 0),
+        ("plain builds on pull requests pass", _production_findings, _FIXTURE_PLAIN_ON_PRS, 0),
+        ("the documented exceptions pass on pull requests", _production_findings, _FIXTURE_PRODUCTION_EXCEPTIONS, 0),
+        (
+            "an exception that no longer builds production, or no longer runs on pull requests, fires",
+            _production_findings,
+            _FIXTURE_PRODUCTION_EXCEPTION_STALE,
+            2,
+        ),
+        (
+            "production presets are those inheriting `production`, and the presets built on them",
+            lambda documents: sorted(production_presets(documents) ^ {"msvc-release", "derived-package", "msvc-release-user"}),
+            _PRESET_DOCUMENTS,
+            0,
+        ),
         ("master-only jobs queueing per ref, job and leg pass", check_master_only_jobs_queue, _FIXTURE_MASTER_ONLY_QUEUED, 0),
         ("a master-only job without a concurrency group fires", check_master_only_jobs_queue, _FIXTURE_MASTER_ONLY_UNQUEUED, 1),
         (

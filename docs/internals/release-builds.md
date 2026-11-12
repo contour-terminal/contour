@@ -13,10 +13,19 @@ Contour's own code only. One CMake option, `CONTOUR_PRODUCTION_BUILD` (default `
 | `contour-daemon` `.deb` and the AppImage | `-DCONTOUR_PRODUCTION_BUILD=ON` in their build steps |
 | Fedora RPMs | not set: `rpmbuild` exports Fedora's hardened flags and LTO before `%build`, and CMake takes them from the environment, so setting the option as well would apply them twice. The CI log of the RPM build shows `-flto=auto`, `-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fcf-protection` and the `redhat-hardened-cc1` spec on its compile lines, and `-Wl,-z,relro`, `-Wl,-z,now`, `-Wl,--as-needed` and the `redhat-hardened-ld` spec on its link lines. |
 
-CI's tests run on these binaries, so the optimized and hardened build is the one that is tested. The developer presets
-(`clang-release`, `clang-asan`, ...) keep their fast incremental builds. `gcc-release` carries the option because it
-is the preset the `.deb` is built with; developers who want a fast release build use `clang-release`. Anyone can turn
-the option on anywhere, for example to measure with the packages' flags:
+CI's tests run on these binaries, so the optimized and hardened build is the one that is tested -- on `master` pushes, in
+the merge queue and on release tags, where the package jobs (`windows_package`, `macos_package`, the Ubuntu packaging)
+build, test and package them. A pull request builds and tests the plain configuration on Windows and macOS instead,
+`msvc-ci` and `macos-ci`: the same presets without `production`, which spares it the link-time optimization of every
+test executable (see [build times](build-times.md#why-pull-requests-build-the-plain-configuration)). A defect that only
+the production flags expose is therefore found on `master`, after the merge; a release tag runs the package jobs, so the
+suite still passes on the shipped binaries before a release is drafted. The `contour-daemon` `.deb` and the AppImage
+build with the flags on pull requests too: `scripts/check-workflows.py` lists them as the only exceptions and fails on
+any other job that builds the production configuration on a pull request.
+
+The developer presets (`clang-release`, `clang-asan`, ...) keep their fast incremental builds. `gcc-release` carries the
+option because it is the preset the `.deb` is built with; developers who want a fast release build use `clang-release`.
+Anyone can turn the option on anywhere, for example to measure with the packages' flags:
 
 ```sh
 cmake --preset clang-release -DCONTOUR_PRODUCTION_BUILD=ON
