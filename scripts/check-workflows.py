@@ -122,13 +122,16 @@ PRUNE_SCRIPT = "prune-cache-generations.py"
 
 PRESET_DIR = REPO_ROOT / "cmake" / "presets"
 
-# The hidden configure preset that turns CONTOUR_PRODUCTION_BUILD on; a preset inheriting it builds what ships.
-PRODUCTION_BASE_PRESET = "production"
+# The CMake option that selects the production configuration, and the values CMake reads as true (compared
+# case-insensitively; CMake also takes Y and a non-zero number, which nobody here writes).
+PRODUCTION_OPTION = "CONTOUR_PRODUCTION_BUILD"
+CMAKE_TRUE = ("ON", "TRUE", "YES", "1")
 
 # Text in a job that means it builds the production configuration without naming a production preset:
-# the option itself, and the scripts that set it. Data, so that another such script is one more row.
+# the option itself, set true (`-D X=ON`, `-DX=ON`, `-DX:BOOL=true`, ...), and the scripts that set it. Data,
+# so that another such script is one more row.
 PRODUCTION_MARKERS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bCONTOUR_PRODUCTION_BUILD(:BOOL)?=ON\b"),
+    re.compile(rf"(?:\b|-D){PRODUCTION_OPTION}(?::BOOL)?=(?:{'|'.join(CMAKE_TRUE)})\b", re.IGNORECASE),
     # Configures with -DCONTOUR_PRODUCTION_BUILD=ON itself, out of this rule's sight but for this row.
     re.compile(r"\bscripts/build-appimage\.sh\b"),
 )
@@ -319,26 +322,39 @@ def check_prune_covers_savers(jobs: dict[str, Any]) -> list[str]:
 
 
 def production_presets(documents: Any) -> frozenset[str]:
-    """Returns the names of the presets that build the production configuration: the configure presets
-    that inherit PRODUCTION_BASE_PRESET (directly or through another), and the build, test and package
-    presets made from one of those. `documents` are the parsed preset files."""
-    inherits: dict[str, list[str]] = {}
-    derived: list[tuple[str, str]] = []
-    for document in documents:
-        for preset in document.get("configurePresets", []):
-            parents = preset.get("inherits", [])
-            inherits[preset["name"]] = [parents] if isinstance(parents, str) else list(parents)
-        for kind in ("buildPresets", "testPresets", "packagePresets"):
-            derived += [(preset["name"], preset.get("configurePreset", "")) for preset in document.get(kind, [])]
+    """Returns the names of the presets that build the production configuration: the visible configure
+    presets whose PRODUCTION_OPTION resolves to true -- their own `cacheVariables`, else the first parent in
+    `inherits` that sets it, as CMake resolves it -- and the build, test and package presets made from one
+    of those. `documents` are the parsed preset files."""
+    documents = list(documents)
+    configure_presets = {
+        preset["name"]: preset for document in documents for preset in document.get("configurePresets", [])
+    }
 
-    def is_production(name: str, seen: frozenset[str] = frozenset()) -> bool:
-        parents = inherits.get(name, [])
-        return PRODUCTION_BASE_PRESET in parents or any(
-            is_production(parent, seen | {name}) for parent in parents if parent not in seen
-        )
+    def option(name: str, seen: frozenset[str] = frozenset()) -> str | None:
+        preset = configure_presets.get(name, {})
+        value = preset.get("cacheVariables", {}).get(PRODUCTION_OPTION)
+        if value is not None:
+            return str(value.get("value", "") if isinstance(value, dict) else value)
+        parents = preset.get("inherits", [])
+        for parent in [parents] if isinstance(parents, str) else parents:
+            inherited = option(parent, seen | {name}) if parent not in seen else None
+            if inherited is not None:
+                return inherited
+        return None
 
-    configure = {name for name in inherits if name != PRODUCTION_BASE_PRESET and is_production(name)}
-    return frozenset(configure | {name for name, configure_preset in derived if configure_preset in configure})
+    configure = {
+        name
+        for name, preset in configure_presets.items()
+        if not preset.get("hidden") and (option(name) or "").upper() in CMAKE_TRUE
+    }
+    derived = (
+        preset
+        for document in documents
+        for kind in ("buildPresets", "testPresets", "packagePresets")
+        for preset in document.get(kind, [])
+    )
+    return frozenset(configure | {preset["name"] for preset in derived if preset.get("configurePreset") in configure})
 
 
 def _scalars(node: Any) -> Iterator[str]:
@@ -550,11 +566,20 @@ _PRESET_DOCUMENTS = (
     {
         "configurePresets": [
             {"name": "contour-common", "hidden": True},
-            {"name": "production", "hidden": True},
+            {"name": "production", "hidden": True, "cacheVariables": {"CONTOUR_PRODUCTION_BUILD": "ON"}},
             {"name": "windows-common", "hidden": True, "inherits": "contour-common"},
             {"name": "msvc-release", "inherits": ["windows-common", "production"]},
             {"name": "msvc-ci", "inherits": ["windows-common"]},
             {"name": "derived-package", "inherits": "msvc-release"},
+            # The option set by a preset itself, in either spelling CMake accepts, and turned off again.
+            {"name": "flagged", "inherits": "windows-common", "cacheVariables": {"CONTOUR_PRODUCTION_BUILD": "true"}},
+            {
+                "name": "flagged-typed",
+                "cacheVariables": {"CONTOUR_PRODUCTION_BUILD": {"type": "BOOL", "value": "1"}},
+            },
+            {"name": "opted-out", "inherits": "msvc-release", "cacheVariables": {"CONTOUR_PRODUCTION_BUILD": "OFF"}},
+            # The first parent that says anything wins, as in CMake.
+            {"name": "plain-first", "inherits": ["opted-out", "msvc-release"]},
         ],
         "buildPresets": [{"name": "msvc-release", "configurePreset": "msvc-release"}],
         "packagePresets": [{"name": "msvc-release-user", "configurePreset": "msvc-release"}],
@@ -574,6 +599,17 @@ _FIXTURE_PRODUCTION_PRESET_IN_ENV = {
 }
 _FIXTURE_PRODUCTION_PRESET_AS_INPUT = {
     "macos": {"steps": [{"uses": "./.github/actions/macos-tests", "with": {"preset": "macos-package"}}]}
+}
+_FIXTURE_PRODUCTION_FLAG_SPELLINGS = {
+    "no_space": {"steps": [{"run": "cmake --preset clang-release -DCONTOUR_PRODUCTION_BUILD=ON"}]},
+    "typed": {"steps": [{"run": "cmake -B build -D CONTOUR_PRODUCTION_BUILD:BOOL=ON"}]},
+    "numeric": {"steps": [{"run": "cmake -B build -DCONTOUR_PRODUCTION_BUILD=1"}]},
+    "lowercase": {"steps": [{"run": "cmake -B build -DCONTOUR_PRODUCTION_BUILD=true"}]},
+}
+_FIXTURE_PRODUCTION_FLAG_OFF_SPELLINGS = {
+    "off": {"steps": [{"run": "cmake -B build -DCONTOUR_PRODUCTION_BUILD:BOOL=OFF -DX=1"}]},
+    "zero": {"steps": [{"run": "cmake -B build -DCONTOUR_PRODUCTION_BUILD=0"}]},
+    "prefix": {"steps": [{"run": "cmake -B build -DMY_CONTOUR_PRODUCTION_BUILD=ON -DCONTOUR_PRODUCTION_BUILD=ONE"}]},
 }
 _FIXTURE_PRODUCTION_FLAG_ON_PRS = {
     "daemon": {"steps": [{"run": "cmake --preset clang-release -D CONTOUR_PRODUCTION_BUILD=ON"}]}
@@ -680,6 +716,18 @@ def self_test() -> int:
             1,
         ),
         ("CONTOUR_PRODUCTION_BUILD=ON on pull requests fires", _production_findings, _FIXTURE_PRODUCTION_FLAG_ON_PRS, 1),
+        (
+            "CONTOUR_PRODUCTION_BUILD set true without a space, typed, as 1 or lowercase fires",
+            _production_findings,
+            _FIXTURE_PRODUCTION_FLAG_SPELLINGS,
+            4,
+        ),
+        (
+            "CONTOUR_PRODUCTION_BUILD set false, or a longer name, passes",
+            _production_findings,
+            _FIXTURE_PRODUCTION_FLAG_OFF_SPELLINGS,
+            0,
+        ),
         ("a script that builds production on pull requests fires", _production_findings, _FIXTURE_PRODUCTION_SCRIPT_ON_PRS, 1),
         ("production builds gated off pull requests pass", _production_findings, _FIXTURE_PRODUCTION_GATED, 0),
         ("plain builds on pull requests pass", _production_findings, _FIXTURE_PLAIN_ON_PRS, 0),
@@ -691,8 +739,12 @@ def self_test() -> int:
             2,
         ),
         (
-            "production presets are those inheriting `production`, and the presets built on them",
-            lambda documents: sorted(production_presets(documents) ^ {"msvc-release", "derived-package", "msvc-release-user"}),
+            "production presets set CONTOUR_PRODUCTION_BUILD on, themselves or by inheritance, and the presets built on them",
+            lambda documents: sorted(
+                # A one-shot iterator, as the preset files are read.
+                production_presets(iter(documents))
+                ^ {"msvc-release", "derived-package", "msvc-release-user", "flagged", "flagged-typed"}
+            ),
             _PRESET_DOCUMENTS,
             0,
         ),
