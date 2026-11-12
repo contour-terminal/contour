@@ -1037,6 +1037,41 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     CHECK("Hello  World" == trimmedTextScreenshot(mc));
 }
 
+TEST_CASE("Terminal.XTPUSHCOLORS.withoutAParameterPushes", "[terminal]")
+{
+    // Without a parameter the palette goes on top of the stack, as in xterm (xtermPushColors stores
+    // at `used` and increments it). Storing it over the topmost entry instead loses the outer palette
+    // of a nested push/pop pair: a program started from one that already pushed.
+    using namespace vtbackend;
+
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto& vt = mc.terminal;
+
+    vt.colorPalette().palette[1] = 0x101010_rgb;
+    auto const outer = vt.colorPalette();
+    mc.writeToScreen("\033[#P");
+
+    vt.colorPalette().palette[1] = 0x202020_rgb;
+    auto const inner = vt.colorPalette();
+    mc.writeToScreen("\033[#P");
+    REQUIRE(vt.savedColorPalettes().size() == 2);
+
+    vt.colorPalette().palette[1] = 0x303030_rgb;
+
+    mc.writeToScreen("\033[#Q");
+    CHECK(vt.colorPalette().palette == inner.palette);
+    mc.writeToScreen("\033[#Q");
+    CHECK(vt.colorPalette().palette == outer.palette);
+    CHECK(vt.savedColorPalettes().empty());
+
+    SECTION("a full stack takes no more")
+    {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 12))
+            mc.writeToScreen("\033[#P");
+        CHECK(vt.savedColorPalettes().size() == 10);
+    }
+}
+
 TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 {
     using namespace vtbackend;

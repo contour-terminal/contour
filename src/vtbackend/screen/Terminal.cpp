@@ -9941,12 +9941,11 @@ void Terminal::pushColorPalette(size_t slot)
     if (slot > MaxColorPaletteSaveStackSize)
         return;
 
-    auto const index = [&](size_t slot) {
-        if (slot == MagicStackTopId)
-            return _savedColorPalettes.empty() ? 0 : _savedColorPalettes.size() - 1;
-        else
-            return slot - 1;
-    }(slot);
+    // Without a slot the palette goes on top of the stack -- a push, as in xterm, whose
+    // xtermPushColors() stores at `used` and then increments it. A full stack takes no more.
+    auto const index = slot == MagicStackTopId ? _savedColorPalettes.size() : slot - 1;
+    if (index >= MaxColorPaletteSaveStackSize)
+        return;
 
     if (index >= _savedColorPalettes.size())
         _savedColorPalettes.resize(index + 1);
