@@ -100,8 +100,8 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // Kitty checks (mods & SHIFT) rather than exact equality, allowing Alt+Shift+Tab etc.
     if (modifiers.contains(Modifier::Shift) && characterEvent == 0x09)
     {
-        auto const hasAlt = modifiers.contains(Modifier::Alt);
-        append(hasAlt ? "\x1b\x1b[Z" : "\x1b[Z");
+        append(altPrefix(modifiers));
+        append("\x1b[Z");
         return true;
     }
 
@@ -130,8 +130,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
         auto const mapped = ctrlMappedKey(characterEvent);
         if (mapped.has_value())
         {
-            if (effectiveMods.contains(Modifier::Alt))
-                append('\x1b');
+            append(altPrefix(effectiveMods));
             append(*mapped);
             return true;
         }
@@ -140,8 +139,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     // No effective modifiers or Alt-only: send the character (with optional ESC prefix for Alt).
     if (effectiveMods.none() || effectiveMods == Modifier::Alt)
     {
-        if (effectiveMods.contains(Modifier::Alt))
-            append('\x1b');
+        append(altPrefix(effectiveMods));
         if (characterEvent < 0x7F)
             append(static_cast<char>(characterEvent));
         else
@@ -175,7 +173,7 @@ std::string StandardKeyboardInputGenerator::select(Modifiers chord, FunctionKeyM
     if (chord && !mapping.mods.empty())
         return core::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(chord));
 
-    auto const prefix = chord.contains(Modifier::Alt) ? "\033" : ""s;
+    auto const prefix = std::string { altPrefix(chord) };
 
     if (applicationCursorKeys() && !mapping.appCursor.empty())
         return prefix + std::string(mapping.appCursor);
@@ -238,8 +236,8 @@ bool StandardKeyboardInputGenerator::generateKey(Key key,
         case Key::Escape:
         {
             // Alt+Escape sends ESC ESC (Kitty: prefix = mods & ALT ? "\x1b" : "").
-            auto const hasAlt = chord.contains(Modifier::Alt);
-            append(hasAlt ? "\033\033" : "\033");
+            append(altPrefix(chord));
+            append("\033");
             break;
         }
         // LNM (ANSI mode 20): with New Line mode set, Return sends CR LF rather than CR alone.
@@ -247,16 +245,8 @@ bool StandardKeyboardInputGenerator::generateKey(Key key,
         case Key::Tab:
         {
             // Explicit Tab/Backtab handling with Alt prefix support.
-            if (chord.contains(Modifier::Shift))
-            {
-                auto const hasAlt = chord.contains(Modifier::Alt);
-                append(hasAlt ? "\x1b\x1b[Z" : "\x1b[Z");
-            }
-            else
-            {
-                auto const hasAlt = chord.contains(Modifier::Alt);
-                append(hasAlt ? "\x1b\t" : "\t");
-            }
+            append(altPrefix(chord));
+            append(chord.contains(Modifier::Shift) ? "\x1b[Z" : "\t");
             break;
         }
         case Key::Backspace:

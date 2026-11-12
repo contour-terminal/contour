@@ -784,6 +784,67 @@ TEST_CASE("DECRSPS", "[screen]")
     }
 }
 
+TEST_CASE("MetaSendsEscape and AltSendsEscape", "[screen]")
+{
+    auto const altPressed = KeyboardModifiers { Modifier::Alt };
+    auto const sent = [&](MockTerm<vtpty::MockPty>& mock, auto&& press) {
+        // A key goes to the PTY, which is where it is read back from.
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        press();
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    SECTION("both are set from power-on, and Alt sends ESC")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRQM(1036));
+        CHECK(e(mock.terminal.peekInput()) == e("\033[?1036;1$y"));
+        mock.terminal.flushInput();
+        mock.writeToScreen(DECRQM(1039));
+        CHECK(e(mock.terminal.peekInput()) == e("\033[?1039;1$y"));
+        mock.terminal.flushInput();
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+
+    SECTION("either one keeps Alt sending ESC")
+    {
+        for (auto const mode: { 1036, 1039 })
+        {
+            INFO(mode);
+            auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+            mock.writeToScreen(DECRM(mode));
+            CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+        }
+    }
+
+    SECTION("with both reset, Alt sends the key as if it were not held")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRM(1036));
+        mock.writeToScreen(DECRM(1039));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("a"));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('c', Modifiers { Modifier::Alt } | Modifier::Control); }))
+              == e("\x03"));
+        CHECK(e(sent(mock, [&] { mock.sendKeyEvent(Key::Escape, altPressed); })) == e("\033"));
+        CHECK(e(sent(mock, [&] { mock.sendKeyEvent(Key::Tab, altPressed); })) == e("\t"));
+
+        // Setting either one back brings the ESC back.
+        mock.writeToScreen(DECSM(1039));
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+
+    SECTION("a full reset sets both again")
+    {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+        mock.writeToScreen(DECRM(1036));
+        mock.writeToScreen(DECRM(1039));
+        mock.writeToScreen("\033c");
+        CHECK(e(sent(mock, [&] { mock.sendCharEvent('a', altPressed); })) == e("\033a"));
+    }
+}
+
 TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.

@@ -832,6 +832,12 @@ void Terminal::commitRestore(TerminalState const& state,
     {
         auto const lock = std::scoped_lock { _inputMutex };
         succeeded(_inputGenerator.restoreState(state.input));
+        // The keyboard state is where the Alt modes are kept: a state from a build before them records
+        // neither in the mode register, yet its Alt sent ESC, and its keyboard state reads as both set.
+        _modes.set(DECMode::MetaSendsEscape,
+                   _inputGenerator.isAltEscapeModeEnabled(AltEscapeMode::MetaSendsEscape));
+        _modes.set(DECMode::AltSendsEscape,
+                   _inputGenerator.isAltEscapeModeEnabled(AltEscapeMode::AltSendsEscape));
     }
 
     auto const& shell = state.shell;
